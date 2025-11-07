@@ -209,6 +209,7 @@ public class ElementNames {
     public static final String hp_cellSpan = "hp:cellSpan";
     public static final String hp_cellSz = "hp:cellSz";
     public static final String hp_cellMargin = "hp:cellMargin";
+    public static final String hp_label = "hp:label";
 
     // 수식 개체
     public static final String hp_equation = "hp:equation";

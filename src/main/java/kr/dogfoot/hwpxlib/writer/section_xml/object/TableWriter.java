@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.commonstrings.ElementNames;
 import kr.dogfoot.hwpxlib.object.common.HWPXObject;
 import kr.dogfoot.hwpxlib.object.common.baseobject.LeftRightTopBottom;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Label;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.writer.common.ElementWriterManager;
 import kr.dogfoot.hwpxlib.writer.common.ElementWriterSort;
@@ -56,6 +57,10 @@ public class TableWriter extends ShapeObjectWriter {
             writeChild(ElementWriterSort.ParameterListCore, table.parameterSet());
         }
 
+        if (table.label() != null) {
+            label(table.label());
+        }
+
         xsb().closeElement();
         releaseMe();
     }
@@ -79,5 +84,22 @@ public class TableWriter extends ShapeObjectWriter {
                 super.childInSwitch(child);
                 break;
         }
+    }
+
+    private void label(Label label) {
+        xsb()
+                .openElement(ElementNames.hp_label)
+                .attribute(AttributeNames.topmargin, label.topMargin())
+                .attribute(AttributeNames.leftmargin, label.leftMargin())
+                .attribute(AttributeNames.boxwidth, label.boxWidth())
+                .attribute(AttributeNames.boxlength, label.boxLength())
+                .attribute(AttributeNames.boxmarginhor, label.boxMarginHor())
+                .attribute(AttributeNames.boxmarginver, label.boxMarginHor())
+                .attribute(AttributeNames.labelcols, label.labelCols())
+                .attribute(AttributeNames.labelrows, label.labelRows())
+                .attribute(AttributeNames.landscape, label.landscape())
+                .attribute(AttributeNames.pagewidth, label.pageWidth())
+                .attribute(AttributeNames.pageheight, label.pageHeight())
+                .closeElement();
     }
 }

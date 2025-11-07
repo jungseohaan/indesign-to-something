@@ -174,6 +174,7 @@ public enum ElementReaderSort {
     Tc(ElementReaderType.Controls),
     CellAddr(ElementReaderType.Controls),
     CellSpan(ElementReaderType.Controls),
+    Label(ElementReaderType.Controls),
     Equation(ElementReaderType.Controls),
     Chart(ElementReaderType.Controls),
     Flip(ElementReaderType.Controls),

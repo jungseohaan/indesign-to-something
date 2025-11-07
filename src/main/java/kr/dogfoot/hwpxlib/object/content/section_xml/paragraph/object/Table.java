@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.object.common.baseobject.LeftRightTopBottom;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.TablePageBreak;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.shapeobject.ShapeObject;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.CellZone;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Label;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.ParameterSet;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 
@@ -59,6 +60,7 @@ public class Table extends ShapeObject<Table> {
      * 라벨 쪽의 표를 위한 정보
      */
     private ParameterSet parameterSet;
+    private Label label;
 
     public Table() {
         trList = new ArrayList<Tr>();
@@ -244,6 +246,18 @@ public class Table extends ShapeObject<Table> {
         parameterSet = null;
     }
 
+    public Label label() {
+        return label;
+    }
+
+    public void createLabel() {
+        label = new Label();
+    }
+
+    public void removeLabel() {
+        label = null;
+    }
+
     @Override
     public Table clone() {
         Table cloned = new Table();
@@ -283,6 +297,12 @@ public class Table extends ShapeObject<Table> {
             parameterSet = from.parameterSet.clone();
         } else {
             parameterSet = null;
+        }
+
+        if (from.label != null) {
+            label = from.label.clone();
+        } else {
+            label = null;
         }
 
         super.copyFrom(from);

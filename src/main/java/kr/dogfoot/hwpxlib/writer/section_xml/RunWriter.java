@@ -4,8 +4,10 @@ import kr.dogfoot.hwpxlib.commonstrings.AttributeNames;
 import kr.dogfoot.hwpxlib.commonstrings.ElementNames;
 import kr.dogfoot.hwpxlib.object.common.HWPXObject;
 import kr.dogfoot.hwpxlib.object.common.ObjectType;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.MarkpenBeginForRun;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.RunItem;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.t.MarkpenBegin;
 import kr.dogfoot.hwpxlib.writer.common.ElementWriter;
 import kr.dogfoot.hwpxlib.writer.common.ElementWriterManager;
 import kr.dogfoot.hwpxlib.writer.common.ElementWriterSort;
@@ -123,6 +125,9 @@ public class RunWriter extends ElementWriter {
             case hp_video:
                 writeChild(ElementWriterSort.Video, runItem);
                 break;
+            case hp_markpenBegin:
+                markpenBegin((MarkpenBeginForRun) runItem);
+                break;
         }
     }
 
@@ -136,5 +141,12 @@ public class RunWriter extends ElementWriter {
                 eachRunItem((RunItem) child);
             }
         }
+    }
+
+    private void markpenBegin(MarkpenBeginForRun markpenBeginForRun) {
+        xsb()
+                .openElement(ElementNames.hp_markpenBegin)
+                .attribute(AttributeNames.beginColor, markpenBeginForRun.beginColor())
+                .closeElement();
     }
 }

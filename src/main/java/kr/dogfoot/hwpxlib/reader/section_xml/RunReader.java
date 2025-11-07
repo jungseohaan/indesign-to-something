@@ -13,6 +13,7 @@ import kr.dogfoot.hwpxlib.reader.section_xml.ctrl.CtrlReader;
 import kr.dogfoot.hwpxlib.reader.section_xml.object.*;
 import kr.dogfoot.hwpxlib.reader.section_xml.object.formobject.ButtonCoreReader;
 import kr.dogfoot.hwpxlib.reader.section_xml.secpr.SecPrReader;
+import kr.dogfoot.hwpxlib.reader.section_xml.t.MarkpenBeginReader;
 import kr.dogfoot.hwpxlib.reader.section_xml.t.TReader;
 import org.xml.sax.Attributes;
 
@@ -57,7 +58,6 @@ public class RunReader extends ElementReader {
             case ElementNames.hp_tbl:
                 tbl(run.addNewTable(), name, attrs);
                 break;
-
             case ElementNames.hp_pic:
                 pic(run.addNewPicture(), name, attrs);
                 break;
@@ -73,7 +73,6 @@ public class RunReader extends ElementReader {
             case ElementNames.hp_chart:
                 chart(run.addNewChart(), name, attrs);
                 break;
-
             case ElementNames.hp_line:
                 line(run.addNewLine(), name, attrs);
                 break;
@@ -128,7 +127,10 @@ public class RunReader extends ElementReader {
             case ElementNames.hp_video:
                 video(run.addNewVideo(), name, attrs);
                 break;
-        }
+            case ElementNames.hp_markpenBegin:
+                markpenBegin(run.addNewMarkpenBegin(), name, attrs);
+                break;
+         }
     }
 
     @Override
@@ -170,7 +172,6 @@ public class RunReader extends ElementReader {
                 Chart chart = new Chart();
                 chart(chart, name, attrs);
                 return chart;
-
             case ElementNames.hp_line:
                 Line line = new Line();
                 line(line, name, attrs);
@@ -243,6 +244,10 @@ public class RunReader extends ElementReader {
                 Video video = new Video();
                 video(video, name, attrs);
                 return video;
+            case ElementNames.hp_markpenBegin:
+                MarkpenBeginForRun markpenBeginForRun = new MarkpenBeginForRun();
+                markpenBegin(markpenBeginForRun, name, attrs);
+                return markpenBeginForRun;
         }
         return null;
     }
@@ -434,6 +439,13 @@ public class RunReader extends ElementReader {
     private void video(Video video, String name, Attributes attrs) {
         ((VideoReader) xmlFileReader().setCurrentElementReader(ElementReaderSort.Video))
                 .video(video);
+
+        xmlFileReader().startElement(name, attrs);
+    }
+
+    private void markpenBegin(MarkpenBeginForRun markpenBeginForRun, String name, Attributes attrs) {
+        ((MarkpenBeginReader) xmlFileReader().setCurrentElementReader(ElementReaderSort.MarkpenBegin))
+                .markpenBeginForRun(markpenBeginForRun);
 
         xmlFileReader().startElement(name, attrs);
     }

@@ -431,6 +431,8 @@ public class ElementReaderFactory {
                 return new CellAddrReader();
             case CellSpan:
                 return new CellSpanReader();
+            case Label:
+                return new LabelReader();
             case Equation:
                 return new EquationReader();
             case Chart:

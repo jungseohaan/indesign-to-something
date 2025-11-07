@@ -440,4 +440,15 @@ public class AttributeNames {
     public static final String charPrCnt = "charPrCnt";
     public static final String xml_space = "xml:space";
     public static final String space = "space";
+    public static final String topmargin = "topmargin";
+    public static final String leftmargin = "leftmargin";
+    public static final String boxwidth = "boxwidth";
+    public static final String boxlength = "boxlength";
+    public static final String boxmarginhor = "boxmarginhor";
+    public static final String boxmarginver = "boxmarginver";
+    public static final String labelcols = "labelcols";
+    public static final String labelrows = "labelrows";
+    public static final String pagewidth = "pagewidth";
+    public static final String pageheight = "pageheight";
+
 }

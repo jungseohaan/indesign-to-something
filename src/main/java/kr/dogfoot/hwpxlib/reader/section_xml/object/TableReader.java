@@ -11,11 +11,13 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.TablePageBreak;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.shapeobject.ShapeObject;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.CellZone;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Label;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.ParameterSet;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.reader.common.ElementReaderSort;
 import kr.dogfoot.hwpxlib.reader.section_xml.object.shapeobject.ShapeObjectReader;
 import kr.dogfoot.hwpxlib.reader.section_xml.object.table.CellzoneListReader;
+import kr.dogfoot.hwpxlib.reader.section_xml.object.table.LabelReader;
 import kr.dogfoot.hwpxlib.reader.section_xml.object.table.TrReader;
 import kr.dogfoot.hwpxlib.reader.util.ValueConvertor;
 import org.xml.sax.Attributes;
@@ -85,6 +87,10 @@ public class TableReader extends ShapeObjectReader {
                 table.createParameterSet();
                 parameterList(table.parameterSet(), name, attrs);
                 break;
+            case ElementNames.hp_label:
+                table.createLabel();
+                label(table.label(), name, attrs);
+                break;
             default:
                 super.childElement(name, attrs);
                 break;
@@ -124,6 +130,13 @@ public class TableReader extends ShapeObjectReader {
     private void tr(Tr tr, String name, Attributes attrs) {
         ((TrReader) xmlFileReader().setCurrentElementReader(ElementReaderSort.Tr))
                 .tr(tr);
+
+        xmlFileReader().startElement(name, attrs);
+    }
+
+    private void label(Label label, String name, Attributes attrs) {
+        ((LabelReader) xmlFileReader().setCurrentElementReader(ElementReaderSort.Label))
+                .label(label);
 
         xmlFileReader().startElement(name, attrs);
     }

@@ -214,6 +214,7 @@ public enum ObjectType {
     hp_cellSpan,
     hp_cellSz,
     hp_cellMargin,
+    hp_label,
 
     // 수식 개체
     hp_equation,

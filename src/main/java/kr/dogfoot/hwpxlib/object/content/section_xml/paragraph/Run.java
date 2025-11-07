@@ -250,6 +250,12 @@ public class Run extends SwitchableObject {
         return chart;
     }
 
+    public MarkpenBeginForRun addNewMarkpenBegin() {
+        MarkpenBeginForRun markpenBegin = new MarkpenBeginForRun();
+        itemList.add(markpenBegin);
+        return markpenBegin;
+    }
+
     public void insertRunItem(RunItem runItem, int position) {
         itemList.add(position, runItem);
     }
