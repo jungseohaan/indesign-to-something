@@ -137,9 +137,19 @@ public class XMLStringBuilder {
                 .append(name)
                 .append(Equal)
                 .append(DoubleQuote)
-                .append(value)
+                .append(escapeXmlAttr(value))
                 .append(DoubleQuote);
         return this;
+    }
+
+    public String escapeXmlAttr(String s) {
+        if (s == null) return "";
+        // 반드시 & 먼저!
+        return s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
     }
 
     public XMLStringBuilder attribute(String name, Integer value) {
