@@ -39,7 +39,18 @@ build/
 .DS_Store
 
 ### Large binary files ###
-*.hwpx
 *.png
 *.psd
 *.ai
+
+### Large hwpx files (over 1MB) ###
+testFile/tool/idml_converted_from_json.hwpx
+testFile/tool/idml_converted_p8_20.hwpx
+testFile/tool/idml_facade_json_output.hwpx
+testFile/tool/idml_fontsize_test.hwpx
+testFile/tool/idml_p8_10.hwpx
+testFile/tool/idml_sample_p8_14.hwpx
+testFile/tool/idml_test_72dpi.hwpx
+testFile/tool/idml_test_page8.hwpx
+testFile/tool/idml_tracking_test.hwpx
+testFile/tool/sample_image_list.hwpx

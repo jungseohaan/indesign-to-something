@@ -624,9 +624,9 @@ public class IntermediateToHwpxConverter {
         int equationCount = 0;
         if (frame.paragraphs() == null) return 0;
 
-        // PAPER 기준 좌표: 음수 좌표는 페이지 밖이므로 0으로 클리핑
-        long x = Math.max(0, frame.x());
-        long y = Math.max(0, frame.y());
+        // PAPER 기준 좌표: 음수 좌표는 bleed 영역(페이지 밖)을 의미하며 유효함
+        long x = frame.x();
+        long y = frame.y();
         long w = frame.width();
         long h = frame.height();
 
@@ -1073,9 +1073,9 @@ public class IntermediateToHwpxConverter {
             long displayW = frame.width();
             long displayH = frame.height();
 
-            // PAPER 기준 좌표: 음수 좌표는 용지 바깥이므로 0으로 클리핑
-            long posX = Math.max(0, frame.x());
-            long posY = Math.max(0, frame.y());
+            // PAPER 기준 좌표: 음수 좌표는 bleed 영역(용지 바깥)을 의미하며 유효함
+            long posX = frame.x();
+            long posY = frame.y();
 
             Picture pic = anchorRun.addNewPicture();
             String picId = nextShapeId();
