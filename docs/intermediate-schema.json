@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jungseohaan/indesign-to-something/intermediate-schema.json",
+  "title": "IDML Intermediate Document Schema",
+  "description": "IDML에서 추출한 중간 표현 포맷 스키마. IDML → Intermediate → HWPX 변환의 중간 단계.",
+  "type": "object",
+  "required": ["version", "sourceFormat", "layout", "pages"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "스키마 버전",
+      "default": "1.0"
+    },
+    "sourceFormat": {
+      "type": "string",
+      "description": "원본 포맷",
+      "enum": ["IDML", "INDD"]
+    },
+    "sourceFile": {
+      "type": "string",
+      "description": "원본 파일 경로"
+    },
+    "layout": {
+      "$ref": "#/$defs/DocumentLayout"
+    },
+    "fonts": {
+      "type": "array",
+      "description": "문서에 사용된 폰트 정의 목록",
+      "items": {
+        "$ref": "#/$defs/FontDef"
+      }
+    },
+    "paragraphStyles": {
+      "type": "array",
+      "description": "문단 스타일 정의 목록",
+      "items": {
+        "$ref": "#/$defs/StyleDef"
+      }
+    },
+    "characterStyles": {
+      "type": "array",
+      "description": "문자 스타일 정의 목록",
+      "items": {
+        "$ref": "#/$defs/StyleDef"
+      }
+    },
+    "pages": {
+      "type": "array",
+      "description": "페이지 목록",
+      "items": {
+        "$ref": "#/$defs/Page"
+      }
+    }
+  },
+  "$defs": {
+    "DocumentLayout": {
+      "type": "object",
+      "description": "페이지 기본 레이아웃 (단위: HWPUNIT, 1 HWPUNIT = 1/7200 inch)",
+      "required": ["defaultPageWidth", "defaultPageHeight"],
+      "properties": {
+        "defaultPageWidth": {
+          "type": "integer",
+          "description": "기본 페이지 너비 (HWPUNIT)"
+        },
+        "defaultPageHeight": {
+          "type": "integer",
+          "description": "기본 페이지 높이 (HWPUNIT)"
+        },
+        "marginTop": {
+          "type": "integer",
+          "description": "상단 여백 (HWPUNIT)"
+        },
+        "marginBottom": {
+          "type": "integer",
+          "description": "하단 여백 (HWPUNIT)"
+        },
+        "marginLeft": {
+          "type": "integer",
+          "description": "좌측 여백 (HWPUNIT)"
+        },
+        "marginRight": {
+          "type": "integer",
+          "description": "우측 여백 (HWPUNIT)"
+        }
+      }
+    },
+    "FontDef": {
+      "type": "object",
+      "description": "폰트 정의",
+      "required": ["id", "familyName"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "폰트 고유 ID"
+        },
+        "familyName": {
+          "type": "string",
+          "description": "폰트 패밀리명"
+        },
+        "styleName": {
+          "type": "string",
+          "description": "폰트 스타일명 (Regular, Bold, Italic 등)"
+        },
+        "fontType": {
+          "type": "string",
+          "description": "폰트 타입",
+          "enum": ["OTF", "TTF", "CFF", "Type1"]
+        },
+        "hwpxMappedName": {
+          "type": "string",
+          "description": "HWPX에서 사용할 매핑된 폰트명"
+        }
+      }
+    },
+    "StyleDef": {
+      "type": "object",
+      "description": "스타일 정의 (문단 또는 문자)",
+      "required": ["id", "name", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "스타일 고유 ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "스타일 이름"
+        },
+        "type": {
+          "type": "string",
+          "description": "스타일 타입",
+          "enum": ["paragraph", "character"]
+        },
+        "basedOn": {
+          "type": "string",
+          "description": "상속 받는 부모 스타일 ID"
+        },
+        "fontFamily": {
+          "type": "string",
+          "description": "폰트 패밀리"
+        },
+        "fontSizeHwpunits": {
+          "type": "integer",
+          "description": "폰트 크기 (HWPUNIT, 1pt = 100 HWPUNIT)"
+        },
+        "textColor": {
+          "type": "string",
+          "description": "텍스트 색상 (HEX, 예: #000000)"
+        },
+        "bold": {
+          "type": "boolean",
+          "description": "굵게"
+        },
+        "italic": {
+          "type": "boolean",
+          "description": "기울임"
+        },
+        "alignment": {
+          "type": "string",
+          "description": "정렬",
+          "enum": ["left", "center", "right", "justify"]
+        },
+        "firstLineIndent": {
+          "type": "integer",
+          "description": "첫 줄 들여쓰기 (HWPUNIT)"
+        },
+        "leftMargin": {
+          "type": "integer",
+          "description": "좌측 여백 (HWPUNIT)"
+        },
+        "rightMargin": {
+          "type": "integer",
+          "description": "우측 여백 (HWPUNIT)"
+        },
+        "spaceBefore": {
+          "type": "integer",
+          "description": "문단 앞 간격 (HWPUNIT)"
+        },
+        "spaceAfter": {
+          "type": "integer",
+          "description": "문단 뒤 간격 (HWPUNIT)"
+        },
+        "lineSpacingPercent": {
+          "type": "integer",
+          "description": "행간 비율 (%)"
+        },
+        "lineSpacingType": {
+          "type": "string",
+          "description": "행간 타입",
+          "enum": ["percent", "fixed"]
+        },
+        "letterSpacing": {
+          "type": "integer",
+          "description": "자간 (-50 ~ 50 범위)"
+        }
+      }
+    },
+    "Page": {
+      "type": "object",
+      "description": "페이지",
+      "required": ["pageNumber", "pageWidth", "pageHeight"],
+      "properties": {
+        "pageNumber": {
+          "type": "integer",
+          "description": "페이지 번호 (1부터 시작)"
+        },
+        "pageWidth": {
+          "type": "integer",
+          "description": "페이지 너비 (HWPUNIT)"
+        },
+        "pageHeight": {
+          "type": "integer",
+          "description": "페이지 높이 (HWPUNIT)"
+        },
+        "frames": {
+          "type": "array",
+          "description": "프레임 목록",
+          "items": {
+            "$ref": "#/$defs/Frame"
+          }
+        }
+      }
+    },
+    "Frame": {
+      "type": "object",
+      "description": "프레임 (텍스트 또는 이미지)",
+      "required": ["frameId", "frameType", "x", "y", "width", "height"],
+      "properties": {
+        "frameId": {
+          "type": "string",
+          "description": "프레임 고유 ID"
+        },
+        "frameType": {
+          "type": "string",
+          "description": "프레임 타입",
+          "enum": ["text", "image"]
+        },
+        "x": {
+          "type": "integer",
+          "description": "X 좌표 (HWPUNIT, 페이지 좌상단 기준)"
+        },
+        "y": {
+          "type": "integer",
+          "description": "Y 좌표 (HWPUNIT, 페이지 좌상단 기준)"
+        },
+        "width": {
+          "type": "integer",
+          "description": "너비 (HWPUNIT)"
+        },
+        "height": {
+          "type": "integer",
+          "description": "높이 (HWPUNIT)"
+        },
+        "zOrder": {
+          "type": "integer",
+          "description": "Z-순서 (레이어 순서)"
+        },
+        "paragraphs": {
+          "type": "array",
+          "description": "문단 목록 (frameType이 text인 경우)",
+          "items": {
+            "$ref": "#/$defs/Paragraph"
+          }
+        },
+        "image": {
+          "$ref": "#/$defs/Image",
+          "description": "이미지 정보 (frameType이 image인 경우)"
+        }
+      }
+    },
+    "Paragraph": {
+      "type": "object",
+      "description": "문단",
+      "properties": {
+        "paragraphStyleRef": {
+          "type": "string",
+          "description": "적용된 문단 스타일 ID"
+        },
+        "contentItems": {
+          "type": "array",
+          "description": "콘텐츠 항목 목록 (텍스트 런 또는 수식)",
+          "items": {
+            "$ref": "#/$defs/ContentItem"
+          }
+        }
+      }
+    },
+    "ContentItem": {
+      "type": "object",
+      "description": "콘텐츠 항목 (텍스트 런 또는 수식 중 하나)",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["textRun"],
+          "properties": {
+            "textRun": {
+              "$ref": "#/$defs/TextRun"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["equation"],
+          "properties": {
+            "equation": {
+              "$ref": "#/$defs/Equation"
+            }
+          }
+        }
+      ]
+    },
+    "TextRun": {
+      "type": "object",
+      "description": "텍스트 런 (동일 서식의 텍스트 조각)",
+      "required": ["text"],
+      "properties": {
+        "characterStyleRef": {
+          "type": "string",
+          "description": "적용된 문자 스타일 ID"
+        },
+        "text": {
+          "type": "string",
+          "description": "텍스트 내용"
+        },
+        "bold": {
+          "type": "boolean",
+          "description": "굵게 (로컬 오버라이드)"
+        },
+        "italic": {
+          "type": "boolean",
+          "description": "기울임 (로컬 오버라이드)"
+        },
+        "fontSizeHwpunits": {
+          "type": "integer",
+          "description": "폰트 크기 (로컬 오버라이드, HWPUNIT)"
+        },
+        "textColor": {
+          "type": "string",
+          "description": "텍스트 색상 (로컬 오버라이드, HEX)"
+        },
+        "fontFamily": {
+          "type": "string",
+          "description": "폰트 패밀리 (로컬 오버라이드)"
+        }
+      }
+    },
+    "Equation": {
+      "type": "object",
+      "description": "수식",
+      "required": ["hwpScript"],
+      "properties": {
+        "hwpScript": {
+          "type": "string",
+          "description": "HWP 수식 스크립트"
+        },
+        "sourceType": {
+          "type": "string",
+          "description": "원본 수식 타입",
+          "enum": ["NP_FONT", "MATHML", "LATEX"]
+        }
+      }
+    },
+    "Image": {
+      "type": "object",
+      "description": "이미지",
+      "required": ["imageId"],
+      "properties": {
+        "imageId": {
+          "type": "string",
+          "description": "이미지 고유 ID"
+        },
+        "originalPath": {
+          "type": "string",
+          "description": "원본 이미지 경로"
+        },
+        "format": {
+          "type": "string",
+          "description": "이미지 포맷",
+          "enum": ["png", "jpeg", "jpg", "gif", "tiff", "bmp", "eps", "pdf"]
+        },
+        "pixelWidth": {
+          "type": "integer",
+          "description": "이미지 픽셀 너비"
+        },
+        "pixelHeight": {
+          "type": "integer",
+          "description": "이미지 픽셀 높이"
+        },
+        "displayWidth": {
+          "type": "integer",
+          "description": "표시 너비 (HWPUNIT)"
+        },
+        "displayHeight": {
+          "type": "integer",
+          "description": "표시 높이 (HWPUNIT)"
+        },
+        "base64Data": {
+          "type": "string",
+          "description": "Base64 인코딩된 이미지 데이터"
+        }
+      }
+    }
+  }
+}

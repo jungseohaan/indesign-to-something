@@ -1,140 +1,187 @@
+# InDesign to Something
 
-# hwpxlib
+Adobe InDesign(IDML)을 HWPX(한글) 및 기타 형식으로 변환하는 Java 라이브러리입니다.
 
-한글과 컴퓨터(한컴)에서 만든 워드프로세서 "한글"의 hwpx 파일에 대한 라이브러리입니다.<br>
-이 라이브러리는 hwpx 파일을 읽고 쓸 수 있는 java 라이브러리 입니다.
+## 개요
 
-개인적인 취미 생활 또는 사회기여 활동 목적으로 시작한 hwplib, hwpxlib 프로젝트가 이 라이브러리를 기반으로 하는 상용 제품이 개발하여 판매하고 있습니다.
-이 라이브러리의 저작권은 저 개인에게 있으므로, 라이브러리 사용, 버그 수정요청, 약간의 질문 등은 Apache-2.0 license에 의해 앞으로도 자유롭게 할 수 있습니다.
-그 외에 많은 시간을 초래할 수 있는 기술지원 요청이나 유지보수 계약등은 제 메일로 상의해 주셨으면 합니다. <br>
+```
+┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
+│   IDML      │ ──> │   Intermediate   │ ──> │    HWPX      │
+│  (InDesign) │     │     (JSON)       │     │   (한글)     │
+└─────────────┘     └──────────────────┘     └──────────────┘
+```
 
-* 사용한 라이브러리나 문서 
-	- 한글과컴퓨터에서 공개한 'OWPML' 문서 ( http://www.hancom.com/etc/hwpDownload.do?gnb0=269&gnb1=271&gnb0=101&gnb1=140 ) <br>
-	  ( “본 제품은 한글과컴퓨터의 HWP 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다." )
+InDesign IDML 파일을 중간 표현(Intermediate JSON)으로 파싱한 후, HWPX 형식으로 변환합니다.
 
-* hwpxlib가 java7에서 실행되기 위해... java 상위 버전의 기능을 사용해야만 하는 기능들은 hwpxlib_ext 라이브러리에 추가하기로 하였습니다.
+## 주요 기능
 
-* 확장 기능리스트
-	- 암호화된 hwpx 파일 읽고 쓰기
+### IDML → HWPX 변환
+- **텍스트 프레임**: 텍스트, 문단, 문자 스타일 변환
+- **이미지 프레임**: 이미지 추출 및 삽입
+- **수식 변환**: NP 폰트 기반 수식 → HWP 수식 스크립트
+- **페이지 필터링**: 특정 페이지 범위만 변환
+- **레이어 필터링**: 숨겨진 레이어, 편집 지시(조판지시서) 프레임 자동 제외
 
-* 도구 기능리스트
-	- IDML → HWPX 변환 (IDMLToHwpxConverter) : Adobe InDesign의 IDML 파일을 HWPX 형식으로 변환
-	- 수식 변환 (LatexToHwpConverter, MathMLToHwpConverter) : LaTeX 및 MathML 수식을 HWP 수식 스크립트로 변환
-	- 이미지 삽입 (ImageInserter) : HWPX 문서에 이미지를 등록하고 삽입
+### 수식 변환
+- LaTeX → HWP 수식 스크립트
+- MathML → HWP 수식 스크립트
+- NP 폰트 글리프 → HWP 수식 스크립트
 
-* 메이븐 레파지토리 설정
-    ```{.xml}
-    <dependency>
-        <groupId>kr.dogfoot</groupId>
-        <artifactId>hwpxlib</artifactId>
-    </dependency>
-    ```
-* hwp 파일에 대한 라이브러리는 https://github.com/neolord0/hwplib 을 참조해 주세요.
-* hwp파일을 hwpx파일로 변환하는 라이브러리는 https://github.com/neolord0/hwp2hwpx 을 참조해 주세요.
-* hwpxlib의 확장 라이브러리는 https://github.com/neolord0/hwpxlib_ext 을 참조해 주세요.
+### 유틸리티
+- 이미지 삽입 (ImageInserter)
+- 텍스트 추출 (TextExtractor)
+- 빈 HWPX 파일 생성 (BlankFileMaker)
+- 객체 검색 (ObjectFinder)
 
-2026.02.02
-=========================================================================================
-* IDML → HWPX 변환 도구 추가 (IDMLToHwpxConverter)
-	- IDML 문서의 페이지, 텍스트, 이미지, 스타일을 HWPX로 변환
-	- 페이지 범위 필터링, 수식 변환, 이미지 삽입 지원
-	- 숨겨진 레이어 및 편집 지시(조판지시서) 프레임 자동 필터링
-	- 디자인 변형 중복 프레임 제거
-* 수식 변환 도구 추가 (LatexToHwpConverter, MathMLToHwpConverter)
-	- LaTeX 수식을 HWP 수식 스크립트로 변환
-	- MathML (Presentation MathML) 수식을 HWP 수식 스크립트로 변환
-* 이미지 삽입 도구 추가 (ImageInserter)
-	- HWPX 문서에 이미지 등록 및 삽입 유틸리티
+## 설치
 
-2025.11.14
-=========================================================================================
-* 1.0.8 버전 Maven 레파지토리에 업로드
+### Maven
 
-2025.11.07
-=========================================================================================
-* 이슈23: run 태그 아래에 markpenBegin 태그가 나타날 때 처리, tbl 태그 아래의 label 태그가 나타날 때 처리.
+```xml
+<dependency>
+    <groupId>kr.dogfoot</groupId>
+    <artifactId>hwpxlib</artifactId>
+    <version>1.0.8</version>
+</dependency>
+```
 
-2025.08.08
-=========================================================================================
-* 파일 읽기 시, MasterPageFile과 MasterPage 객체를 혼용하는 문제 해결 
+### Gradle
 
-2025.05.23
-=========================================================================================
-* pull request #21 : TrackChageConfig에 configItemSet 객체 추가..
+```groovy
+implementation 'kr.dogfoot:hwpxlib:1.0.8'
+```
 
-2025.05.19
-=========================================================================================
-* pull request #20 : SAXParser에 namsSpaceAware값을 true로 설정, POI에 추가된 SAXParser에서 namespace를 인식하지 못하는 문제 해결 
-* 소스 정리 
-* 1.0.6 버전 Maven 레파지토리에 업로드
+## 사용법
 
-2025.03.10
-=========================================================================================
-* 1.0.5 버전 Maven 레파지토리에 업로드
+### IDML → HWPX 변환
 
-2025.02.14
-=========================================================================================
-* 이슈19 : XMLStringBuilder.text() 함수에 & 문자 처리 추가
- 
-2024.09.19
-=========================================================================================
-* 이슈17 : SAX 파서 사용시, XML text에 특수문자가 포함되어 있을 때 오류 발생하는 문제 해결
+```java
+import kr.dogfoot.hwpxlib.tool.idmlconverter.IDMLToHwpxConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertResult;
 
-2024.06.26
-=========================================================================================
-* manifest.xml 파일이 없을 떄 처리
+// 기본 변환
+ConvertResult result = IDMLToHwpxConverter.convert("input.idml", "output.hwpx");
 
-2024.03.22
-=========================================================================================
-* 객체의 removeAll??() 함수 추가
+// 옵션 설정
+ConvertOptions options = new ConvertOptions()
+    .startPage(1)
+    .endPage(10)
+    .includeImages(true)
+    .convertEquations(true);
 
-2024.03.21
-=========================================================================================
-* 메이븐 레파지토리 1.0.3 버전으로 업데이트
+ConvertResult result = IDMLToHwpxConverter.convert("input.idml", "output.hwpx", options);
+```
 
-2024.03.05
-=========================================================================================
-* 이슈9 : 색인 정보가 저장된 파일 읽을 때 오류 수정
+### 중간 표현(Intermediate) JSON 활용
 
-2023.9.12
-=========================================================================================
-* 이슈7: LineWidth.MM_0_7의 인덱스를 7 ==> 9로 변경
-* Bullet에서 paraHeadList => paraHead 로 변경
-* ValuesByLanguage set()함수 변경 
-* LineType1에 THICK 값 추가 
-* JDK 1.7 버전으로 변경
-* write시 null 에러 수정..
+```java
+import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.*;
 
-2023.8.18
-=========================================================================================
-* 이슈 6: connectLine 안에 <hp:controlPoints>가 포함된 파일을 읽을 떄 오류나는 문제 해결,
-* text 안에 < > 있을 때 &lt; &gt;로 변환
+// IDML → Intermediate JSON
+IntermediateDocument doc = IDMLToHwpxConverter.toIntermediate("input.idml");
+String json = JsonSerializer.toJson(doc);
 
-2023.8.9
-=========================================================================================
-* 이슈 5: shapeObject 안에 <hp:parameterset>가 포함된 파일을 읽을 떄 오류나는 문제 해결, 
-* UnsignedIntegerParam 추가..
-  
-2023.7.28
-=========================================================================================
-* 이슈 4: <hh:head> 안에 <hh:metaTag>가 포함된 파일을 읽을 떄 오류나는 문제 해결 
-* 한 노드에 <switchObject> 노드가 여러 개 포함될 때 처리...
+// Intermediate JSON → HWPX
+IntermediateDocument doc = JsonDeserializer.fromJson(json);
+IDMLToHwpxConverter.fromIntermediate(doc, "output.hwpx");
+```
 
-2023.5.3
-=========================================================================================
-* 객체 찾기 기능(ObjectFinder) 추가 (사용법은 테스트 코드 참조)
-* 빈 파일 생성 기능(BlankFileMaker) 추가 (사용법은 테스트 코드 참조)
-* 텍스트 추출 기능(TextExtractor) 추가 (사용법은 테스트 코드 참조)
+### 수식 변환
 
-2023.4.26
-=========================================================================================
-* 이슈 3: Chart가 포함된 파일을 읽을 때 오류나는 문제 해결
+```java
+import kr.dogfoot.hwpxlib.tool.equationconverter.*;
 
-2023.4.13
-=========================================================================================
-* 이슈 1: settings.xml 의 configitemset 부분이 구버전과 다른 문제 해결
+// LaTeX → HWP Script
+String hwpScript = LatexToHwpConverter.convert("\\frac{a}{b} + \\sqrt{c}");
+// 결과: "{a} over {b} + sqrt {c}"
 
+// MathML → HWP Script
+String hwpScript = MathMLToHwpConverter.convert(mathmlString);
+```
 
-2023.3.13
-=========================================================================================
-* 라이브러리 최초 공걔
+### 이미지 삽입
+
+```java
+import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
+
+HWPXFile hwpx = HWPXReader.read("document.hwpx");
+ImageInserter inserter = new ImageInserter(hwpx);
+
+// 이미지 등록 및 삽입
+inserter.insertImage("image.png", x, y, width, height);
+
+HWPXWriter.write(hwpx, "output.hwpx");
+```
+
+## 중간 표현(Intermediate) 스키마
+
+IDML 문서를 JSON으로 표현한 중간 포맷입니다. 자세한 내용은 [docs/intermediate-schema.md](docs/intermediate-schema.md)를 참조하세요.
+
+```json
+{
+  "version": "1.0",
+  "sourceFormat": "IDML",
+  "layout": { "defaultPageWidth": 1512000, "defaultPageHeight": 2139120 },
+  "fonts": [...],
+  "paragraphStyles": [...],
+  "characterStyles": [...],
+  "pages": [
+    {
+      "pageNumber": 1,
+      "frames": [
+        {
+          "frameType": "text",
+          "x": 216000, "y": 252000,
+          "paragraphs": [...]
+        }
+      ]
+    }
+  ]
+}
+```
+
+## 단위
+
+- **HWPUNIT**: 1/7200 inch (HWP/HWPX 내부 단위)
+  - 1pt = 100 HWPUNIT
+  - 1mm ≈ 283.46 HWPUNIT
+  - 1inch = 7200 HWPUNIT
+
+## 프로젝트 구조
+
+```
+src/main/java/kr/dogfoot/hwpxlib/
+├── reader/          # HWPX 파일 읽기
+├── writer/          # HWPX 파일 쓰기
+├── object/          # HWPX 객체 모델
+└── tool/
+    ├── idmlconverter/       # IDML → HWPX 변환
+    │   ├── idml/            # IDML 문서 모델
+    │   ├── intermediate/    # 중간 표현 모델
+    │   └── converter/       # 변환기
+    ├── equationconverter/   # 수식 변환
+    └── imageinserter/       # 이미지 삽입
+```
+
+## 관련 프로젝트
+
+이 프로젝트는 [hwpxlib](https://github.com/neolord0/hwpxlib)를 기반으로 합니다.
+
+- [hwplib](https://github.com/neolord0/hwplib) - HWP 파일 라이브러리
+- [hwpxlib](https://github.com/neolord0/hwpxlib) - HWPX 파일 라이브러리 (원본)
+- [hwp2hwpx](https://github.com/neolord0/hwp2hwpx) - HWP → HWPX 변환
+- [hwpxlib_ext](https://github.com/neolord0/hwpxlib_ext) - hwpxlib 확장 (암호화 등)
+
+## 참고 문서
+
+- [OWPML 문서](http://www.hancom.com/etc/hwpDownload.do?gnb0=269&gnb1=271&gnb0=101&gnb1=140) - 한글과컴퓨터 공개 문서
+- [IDML 스펙](https://www.adobe.com/devnet/indesign/documentation.html) - Adobe InDesign IDML 문서
+
+## 라이선스
+
+Apache-2.0 License
+
+---
+
+*"본 제품은 한글과컴퓨터의 HWP 문서 파일(.hwp) 공개 문서를 참고하여 개발하였습니다."*
