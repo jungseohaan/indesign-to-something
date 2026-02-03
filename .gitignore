@@ -37,3 +37,9 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Large binary files ###
+*.hwpx
+*.png
+*.psd
+*.ai

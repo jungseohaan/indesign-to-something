@@ -83,8 +83,8 @@ public class NPFontGlyphMap {
         // NP_YP/NP_YB 특수 글리프 매핑
         Map<String, String> ypMap = new HashMap<String, String>();
         ypMap.put("E", "inf");    // ∞ (무한대) - subscript context에서
-        ypMap.put("9", "{");      // { (중괄호 열기)
-        ypMap.put("0", "}");      // } (중괄호 닫기)
+        ypMap.put("9", "left lbrace ");   // { (중괄호 열기 - HWP 수식 표시용)
+        ypMap.put("0", " right rbrace");  // } (중괄호 닫기 - HWP 수식 표시용)
         ypMap.put("y", "cdots");  // ⋯ (말줄임표)
         GLYPH_MAP.put("NP_YP", ypMap);
         GLYPH_MAP.put("NP_YB", ypMap);

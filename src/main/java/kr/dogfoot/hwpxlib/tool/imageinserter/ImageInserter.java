@@ -206,7 +206,7 @@ public class ImageInserter {
      * @return [width, height]
      * @throws IOException 이미지 읽기 실패
      */
-    static int[] detectPixelSize(byte[] imageData) throws IOException {
+    public static int[] detectPixelSize(byte[] imageData) throws IOException {
         BufferedImage img = ImageIO.read(new ByteArrayInputStream(imageData));
         if (img == null) {
             throw new IOException("Cannot read image data. Unsupported image format.");

@@ -34,7 +34,7 @@ public class IDMLEquationExtractor {
 
             for (int i = 0; i < paraRanges.getLength(); i++) {
                 Element paraRange = (Element) paraRanges.item(i);
-                extractEquationsFromParagraph(paraRange, equations);
+                extractEquationsFromParagraph(paraRange, equations, i);
             }
         } catch (Exception e) {
             // Skip unparseable files
@@ -45,7 +45,7 @@ public class IDMLEquationExtractor {
     /**
      * 하나의 ParagraphStyleRange에서 수식 영역을 식별하고 추출한다.
      */
-    private void extractEquationsFromParagraph(Element paraRange, List<ExtractedEquation> equations) {
+    private void extractEquationsFromParagraph(Element paraRange, List<ExtractedEquation> equations, int paraIndex) {
         List<Element> charRanges = getChildElements(paraRange, "CharacterStyleRange");
         if (charRanges.isEmpty()) return;
 
@@ -115,48 +115,14 @@ public class IDMLEquationExtractor {
                     }
                 }
             } else {
-                // 일반 텍스트 - 수식 중이면 경계 텍스트인지 확인
-                String contentText = getContentText(charRange);
-                if (inEquation && contentText != null) {
-                    String trimmed = contentText.trim();
-                    // 다음 charRange가 NP 폰트인지 확인 (lookahead)
-                    boolean nextIsNP = false;
-                    if (i + 1 < charRanges.size()) {
-                        String nextStyle = charRanges.get(i + 1).getAttribute("AppliedCharacterStyle");
-                        nextIsNP = NPFontGlyphMap.extractNPFontName(nextStyle) != null;
+                // 일반 텍스트 (NP 폰트도 TextFrame도 아닌 런)
+                // → 수식 그룹이 진행 중이면 종료
+                if (inEquation) {
+                    if (!currentGroup.isEmpty()) {
+                        equationGroups.add(currentGroup);
                     }
-                    // 수식 사이의 연결 텍스트 (=, +, -, 숫자, 변수 등)
-                    if (isInlineEquationText(trimmed, charRange) || nextIsNP) {
-                        boolean isSubscript = "Subscript".equals(position);
-                        boolean isSuperscript = "Superscript".equals(position);
-                        currentGroup.add(new EquationToken(
-                                EquationToken.Type.PLAIN_MATH, trimmed, null, null,
-                                isSubscript, isSuperscript));
-                    } else {
-                        // 수식 종료
-                        if (!currentGroup.isEmpty()) {
-                            equationGroups.add(currentGroup);
-                        }
-                        inEquation = false;
-                        currentGroup = new ArrayList<EquationToken>();
-                    }
-                } else if (!inEquation && contentText != null) {
-                    // 수식 시작 전 - 다음이 NP 폰트이고 현재 텍스트가 짧은 수학 텍스트면 수식 시작
-                    String trimmed = contentText.trim();
-                    boolean nextIsNP = false;
-                    if (i + 1 < charRanges.size()) {
-                        String nextStyle = charRanges.get(i + 1).getAttribute("AppliedCharacterStyle");
-                        nextIsNP = NPFontGlyphMap.extractNPFontName(nextStyle) != null;
-                    }
-                    if (nextIsNP && isShortMathText(trimmed)) {
-                        inEquation = true;
-                        currentGroup = new ArrayList<EquationToken>();
-                        boolean isSubscript = "Subscript".equals(position);
-                        boolean isSuperscript = "Superscript".equals(position);
-                        currentGroup.add(new EquationToken(
-                                EquationToken.Type.PLAIN_MATH, trimmed, null, null,
-                                isSubscript, isSuperscript));
-                    }
+                    inEquation = false;
+                    currentGroup = new ArrayList<EquationToken>();
                 }
             }
         }
@@ -178,7 +144,7 @@ public class IDMLEquationExtractor {
                 // 단순 연산 기호만 있는 것은 건너뛰기
                 if (trimmed.matches("[<>=+\\-*/.,!?%]+")) continue;
                 String paraStyle = paraRange.getAttribute("AppliedParagraphStyle");
-                equations.add(new ExtractedEquation(hwpScript, paraStyle));
+                equations.add(new ExtractedEquation(hwpScript, paraStyle, paraIndex));
             }
         }
     }
@@ -325,7 +291,8 @@ public class IDMLEquationExtractor {
                     break;
                 }
                 case PLAIN_MATH: {
-                    String text = token.text;
+                    // PLAIN_MATH는 더 이상 생성되지 않지만, 하위 호환을 위해 유지
+                    String text = convertBracketsForDisplay(token.text);
                     if (token.isSubscript) {
                         appendSubscript(sb, text);
                     } else if (token.isSuperscript) {
@@ -347,6 +314,29 @@ public class IDMLEquationExtractor {
 
     private void appendSuperscript(StringBuilder sb, String text) {
         sb.append(" ^{").append(text).append("}");
+    }
+
+    /**
+     * PLAIN_MATH 토큰의 괄호를 HWP 수식 표시용으로 변환한다.
+     * - {} → left lbrace / right rbrace (중괄호는 HWP에서 그룹핑 문법이므로 표시되지 않음)
+     * - () → left ( / right ) (소괄호도 크기 자동 조절을 위해 변환)
+     * - [] → left [ / right ]
+     */
+    private String convertBracketsForDisplay(String text) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '{': sb.append("left lbrace "); break;
+                case '}': sb.append(" right rbrace"); break;
+                case '(': sb.append("left ( "); break;
+                case ')': sb.append(" right )"); break;
+                case '[': sb.append("left [ "); break;
+                case ']': sb.append(" right ]"); break;
+                default: sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -437,6 +427,7 @@ public class IDMLEquationExtractor {
                                 processedText = NPFontGlyphMap.mapGlyph(npFont, text);
                             }
                         } else {
+                            processedText = convertBracketsForDisplay(processedText);
                             if ("Subscript".equals(position)) {
                                 processedText = " _{" + processedText + "}";
                             } else if ("Superscript".equals(position)) {
@@ -531,30 +522,6 @@ public class IDMLEquationExtractor {
         }
     }
 
-    /**
-     * 인라인 수식 텍스트인지 판단한다.
-     * (수식과 수식 사이의 연결 텍스트)
-     */
-    private boolean isInlineEquationText(String text, Element charRange) {
-        if (text.isEmpty()) return false;
-        // 한글이 포함되면 일반 텍스트
-        for (char c : text.toCharArray()) {
-            if (c >= '\uAC00' && c <= '\uD7A3') return false; // 한글
-            if (c >= '\u3131' && c <= '\u318E') return false; // 자음/모음
-        }
-        // 수학 기호, 숫자, 영문자, 공백, 연산자면 수식 텍스트로 취급
-        return text.matches("[a-zA-Z0-9+\\-*/=(){}\\[\\]<>^_., \\t]+");
-    }
-
-    /**
-     * 짧은 수학 텍스트인지 확인 (수식 시작 전 변수명 등)
-     */
-    private boolean isShortMathText(String text) {
-        if (text.isEmpty()) return false;
-        // 짧은 영문/숫자/기호만 (변수명, 숫자, 수학기호)
-        return text.length() <= 5 && text.matches("[a-zA-Z0-9+\\-*/=(){}\\[\\]<>^_., ]+");
-    }
-
     // --- XML 유틸리티 ---
 
     private Document parseXML(File file) throws Exception {
@@ -596,10 +563,12 @@ public class IDMLEquationExtractor {
     public static class ExtractedEquation {
         public final String hwpScript;
         public final String paragraphStyle;
+        public final int paragraphIndex;
 
-        public ExtractedEquation(String hwpScript, String paragraphStyle) {
+        public ExtractedEquation(String hwpScript, String paragraphStyle, int paragraphIndex) {
             this.hwpScript = hwpScript;
             this.paragraphStyle = paragraphStyle;
+            this.paragraphIndex = paragraphIndex;
         }
 
         @Override

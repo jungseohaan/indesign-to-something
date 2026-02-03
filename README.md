@@ -16,7 +16,12 @@
 
 * 확장 기능리스트
 	- 암호화된 hwpx 파일 읽고 쓰기
-      
+
+* 도구 기능리스트
+	- IDML → HWPX 변환 (IDMLToHwpxConverter) : Adobe InDesign의 IDML 파일을 HWPX 형식으로 변환
+	- 수식 변환 (LatexToHwpConverter, MathMLToHwpConverter) : LaTeX 및 MathML 수식을 HWP 수식 스크립트로 변환
+	- 이미지 삽입 (ImageInserter) : HWPX 문서에 이미지를 등록하고 삽입
+
 * 메이븐 레파지토리 설정
     ```{.xml}
     <dependency>
@@ -27,6 +32,19 @@
 * hwp 파일에 대한 라이브러리는 https://github.com/neolord0/hwplib 을 참조해 주세요.
 * hwp파일을 hwpx파일로 변환하는 라이브러리는 https://github.com/neolord0/hwp2hwpx 을 참조해 주세요.
 * hwpxlib의 확장 라이브러리는 https://github.com/neolord0/hwpxlib_ext 을 참조해 주세요.
+
+2026.02.02
+=========================================================================================
+* IDML → HWPX 변환 도구 추가 (IDMLToHwpxConverter)
+	- IDML 문서의 페이지, 텍스트, 이미지, 스타일을 HWPX로 변환
+	- 페이지 범위 필터링, 수식 변환, 이미지 삽입 지원
+	- 숨겨진 레이어 및 편집 지시(조판지시서) 프레임 자동 필터링
+	- 디자인 변형 중복 프레임 제거
+* 수식 변환 도구 추가 (LatexToHwpConverter, MathMLToHwpConverter)
+	- LaTeX 수식을 HWP 수식 스크립트로 변환
+	- MathML (Presentation MathML) 수식을 HWP 수식 스크립트로 변환
+* 이미지 삽입 도구 추가 (ImageInserter)
+	- HWPX 문서에 이미지 등록 및 삽입 유틸리티
 
 2025.11.14
 =========================================================================================

@@ -121,10 +121,10 @@ public class DesignFileConverter {
     // ── 변환 ──
 
     /**
-     * 디자인 파일 (PSD, AI)을 PNG byte[]로 변환한다.
+     * 디자인 파일 (PSD, AI, TIFF)을 PNG byte[]로 변환한다.
      * 파일 확장자로부터 형식을 자동 감지한다.
      *
-     * @param inputFile PSD 또는 AI 파일
+     * @param inputFile PSD, AI 또는 TIFF 파일
      * @return PNG 이미지 데이터
      * @throws IOException 변환 실패, 외부 도구 미설치, 또는 지원하지 않는 형식
      */
@@ -135,10 +135,39 @@ public class DesignFileConverter {
                 return convertPsdToPng(inputFile);
             case "ai":
                 return convertAiToPng(inputFile);
+            case "tiff":
+            case "tif":
+                return convertTiffToPng(inputFile);
             default:
                 throw new IOException(
                         "Unsupported design file format: ." + ext
-                                + " (supported: .psd, .ai)");
+                                + " (supported: .psd, .ai, .tiff)");
+        }
+    }
+
+    /**
+     * 디자인 파일을 지정 DPI로 PNG byte[]로 변환한다.
+     * AI 파일의 경우 지정 DPI로 래스터화하고, PSD/TIFF는 DPI 무관하게 변환한다.
+     *
+     * @param inputFile PSD, AI 또는 TIFF 파일
+     * @param dpi       AI 래스터화 해상도
+     * @return PNG 이미지 데이터
+     * @throws IOException 변환 실패, 외부 도구 미설치, 또는 지원하지 않는 형식
+     */
+    public static byte[] convertToPng(File inputFile, int dpi) throws IOException {
+        String ext = getExtension(inputFile).toLowerCase();
+        switch (ext) {
+            case "psd":
+                return convertPsdToPng(inputFile);
+            case "ai":
+                return convertAiToPng(inputFile, dpi);
+            case "tiff":
+            case "tif":
+                return convertTiffToPng(inputFile);
+            default:
+                throw new IOException(
+                        "Unsupported design file format: ." + ext
+                                + " (supported: .psd, .ai, .tiff)");
         }
     }
 
@@ -238,10 +267,53 @@ public class DesignFileConverter {
         }
     }
 
+    /**
+     * TIFF 파일을 PNG로 변환한다.
+     * ImageMagick을 사용하며, 멀티페이지 TIFF의 경우 첫 페이지만 변환한다.
+     *
+     * @param tiffFile TIFF 파일
+     * @return PNG 이미지 데이터
+     * @throws IOException ImageMagick 미설치 또는 변환 실패
+     */
+    public static byte[] convertTiffToPng(File tiffFile) throws IOException {
+        if (!tiffFile.exists()) {
+            throw new IOException("TIFF file not found: " + tiffFile.getAbsolutePath());
+        }
+
+        // Java 네이티브 시도 (Java 9+ 또는 TIFF ImageIO 플러그인이 있는 경우)
+        byte[] javaNative = tryJavaNativeToPng(tiffFile);
+        if (javaNative != null) return javaNative;
+
+        // ImageMagick 폴백
+        if (!isImageMagickAvailable()) {
+            throw new IOException(
+                    "TIFF conversion requires Java 9+ or ImageMagick. "
+                            + "(macOS: brew install imagemagick, "
+                            + "Linux: apt install imagemagick)");
+        }
+
+        File tempPng = File.createTempFile("hwpxlib_tiff_", ".png");
+        tempPng.deleteOnExit();
+
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    imageMagickCommand,
+                    tiffFile.getAbsolutePath() + "[0]",
+                    "-flatten",
+                    tempPng.getAbsolutePath()
+            );
+            executeProcess(pb, "TIFF to PNG conversion");
+
+            return Files.readAllBytes(tempPng.toPath());
+        } finally {
+            tempPng.delete();
+        }
+    }
+
     // ── ImageInserter 연동 ──
 
     /**
-     * 디자인 파일 (PSD, AI)을 PNG로 변환한 후, HWPX 문서에 인라인 이미지로 삽입한다.
+     * 디자인 파일 (PSD, AI, TIFF)을 PNG로 변환한 후, HWPX 문서에 인라인 이미지로 삽입한다.
      * 파일 확장자로부터 형식을 자동 감지한다.
      *
      * @param hwpxFile      대상 HWPX 파일
@@ -317,6 +389,28 @@ public class DesignFileConverter {
         byte[] pngData = convertAiToPng(aiFile, dpi);
         return ImageInserter.insertInlineFromBytes(
                 hwpxFile, run, pngData, "png", displayWidth, displayHeight);
+    }
+
+    // ── Java 네이티브 변환 ──
+
+    /**
+     * Java의 ImageIO를 사용하여 이미지를 PNG로 변환을 시도한다.
+     * Java 9+에서는 TIFF를 지원하며, ImageIO 플러그인이 있으면 다른 형식도 지원할 수 있다.
+     *
+     * @param imageFile 변환할 이미지 파일
+     * @return PNG 데이터 또는 null (Java가 형식을 지원하지 않는 경우)
+     */
+    private static byte[] tryJavaNativeToPng(File imageFile) {
+        try {
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(imageFile);
+            if (img == null) return null;
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            if (!javax.imageio.ImageIO.write(img, "png", baos)) return null;
+            return baos.toByteArray();
+        } catch (Exception e) {
+            // Java가 이 형식을 읽을 수 없음 → 외부 도구 폴백
+            return null;
+        }
     }
 
     // ── 내부 헬퍼 ──
