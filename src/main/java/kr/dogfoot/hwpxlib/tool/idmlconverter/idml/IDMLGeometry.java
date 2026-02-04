@@ -84,6 +84,14 @@ public class IDMLGeometry {
     /**
      * 프레임이 특정 페이지에 속하는지 판별.
      * 프레임의 중심점이 페이지 영역 안에 있는지 확인.
+     *
+     * 경계 처리: 왼쪽/위 경계는 제외(>), 오른쪽/아래 경계는 포함(<=)
+     * → 경계에 있는 객체는 왼쪽/위 페이지(낮은 페이지 번호)에 배정됨
+     *
+     * IDML 스프레드 좌표계:
+     * - 왼쪽 페이지 (Page 4): x 범위 (-210, 0]
+     * - 오른쪽 페이지 (Page 5): x 범위 (0, 210]
+     * - 경계 x=0의 객체 → Page 4에 배정 (0 <= 0 true, 0 > 0 false)
      */
     public static boolean isFrameOnPage(
             double[] frameBounds, double[] frameTransform,
@@ -105,7 +113,9 @@ public class IDMLGeometry {
         double pageMinY = Math.min(pageTopLeft[1], pageBottomRight[1]);
         double pageMaxY = Math.max(pageTopLeft[1], pageBottomRight[1]);
 
-        return frameCenter[0] >= pageMinX && frameCenter[0] <= pageMaxX
-                && frameCenter[1] >= pageMinY && frameCenter[1] <= pageMaxY;
+        // 왼쪽/위 경계 제외(>), 오른쪽/아래 경계 포함(<=)
+        // → 경계에 있는 객체는 왼쪽 페이지(낮은 페이지 번호)로 배정
+        return frameCenter[0] > pageMinX && frameCenter[0] <= pageMaxX
+                && frameCenter[1] > pageMinY && frameCenter[1] <= pageMaxY;
     }
 }

@@ -106,9 +106,7 @@ public class IntermediateToHwpxConverter {
         // 3. 스타일 등록
         registerStyles();
 
-        // 4. 페이지별로 별도 section 파일 생성
-        //    HWPX에서 floating 객체(이미지, 텍스트박스)는 PAPER 기준 절대 좌표를 사용하므로,
-        //    각 페이지를 별도 section으로 분리해야 이미지가 해당 페이지에 정확히 배치된다.
+        // 4. 스프레드/페이지별로 별도 section 파일 생성
         int pagesConverted = 0;
         int framesConverted = 0;
         int equationsConverted = 0;
@@ -118,65 +116,102 @@ public class IntermediateToHwpxConverter {
         SectionXMLFile section0 = hwpxFile.sectionXMLFileList().get(0);
         section0.removeAllParas();
 
-        int pageIndex = 0;
-        for (IntermediatePage page : doc.pages()) {
-            SectionXMLFile section;
-            if (pageIndex == 0) {
-                // 첫 페이지는 기존 section0 사용
-                section = section0;
-            } else {
-                // 이후 페이지는 새 section 생성
-                section = hwpxFile.sectionXMLFileList().addNew();
-
-                // manifest에 section 등록
-                hwpxFile.contentHPFFile().manifest().addNew()
-                        .idAnd("section" + pageIndex)
-                        .hrefAnd("Contents/section" + pageIndex + ".xml")
-                        .mediaType("application/xml");
-
-                // spine에 section 등록
-                hwpxFile.contentHPFFile().spine().addNew()
-                        .idref("section" + pageIndex);
-            }
-
-            // SecPr 단락 생성 (페이지 속성)
-            addSectionBreakPara(section, page, true);
-
-            // 각 floating 객체를 별도 단락에 배치
-            for (IntermediateFrame frame : page.frames()) {
-                if ("text".equals(frame.frameType())) {
-                    Para framePara = createFloatingObjectPara(section);
-                    Run frameRun = framePara.runs().iterator().next();
-                    int eqCount = convertTextFrame(frameRun, frame);
-                    equationsConverted += eqCount;
-                    framesConverted++;
-                    addLineSegArray(framePara);
-                } else if ("image".equals(frame.frameType())) {
-                    Para framePara = createFloatingObjectPara(section);
-                    Run frameRun = framePara.runs().iterator().next();
-                    boolean ok = convertImageFrame(frameRun, frame);
-                    if (ok) imagesConverted++;
-                    framesConverted++;
-                    addLineSegArray(framePara);
+        if (doc.useSpreadMode() && doc.spreads() != null && !doc.spreads().isEmpty()) {
+            // === 스프레드 모드: 각 스프레드를 하나의 section으로 변환 ===
+            int spreadIndex = 0;
+            for (IntermediateSpread spread : doc.spreads()) {
+                SectionXMLFile section;
+                if (spreadIndex == 0) {
+                    section = section0;
+                } else {
+                    section = hwpxFile.sectionXMLFileList().addNew();
+                    hwpxFile.contentHPFFile().manifest().addNew()
+                            .idAnd("section" + spreadIndex)
+                            .hrefAnd("Contents/section" + spreadIndex + ".xml")
+                            .mediaType("application/xml");
+                    hwpxFile.contentHPFFile().spine().addNew()
+                            .idref("section" + spreadIndex);
                 }
-            }
 
-            // 빈 section 방지
-            if (section.countOfPara() == 0) {
-                Para emptyPara = section.addNewPara();
-                emptyPara.idAnd(nextParaId())
-                        .paraPrIDRefAnd("3")
-                        .styleIDRefAnd("0")
-                        .pageBreakAnd(false)
-                        .columnBreakAnd(false)
-                        .merged(false);
-                Run emptyRun = emptyPara.addNewRun();
-                emptyRun.charPrIDRef("0");
-                emptyRun.addNewT();
-            }
+                // 스프레드 크기로 SecPr 생성 - 모든 floating 객체를 이 단락에 추가
+                Para secPrPara = addSectionBreakParaForSpreadWithReturn(section, spread);
 
-            pagesConverted++;
-            pageIndex++;
+                // 프레임을 z-order 순서대로 정렬 (낮은 것부터 → 나중에 추가된 것이 위에 표시됨)
+                List<IntermediateFrame> sortedFrames = new ArrayList<>(spread.frames());
+                sortedFrames.sort((a, b) -> Integer.compare(a.zOrder(), b.zOrder()));
+
+                // 모든 프레임을 SecPr 단락의 새 Run에 추가 (단일 단락 = 페이지 오버플로우 방지)
+                for (IntermediateFrame frame : sortedFrames) {
+                    Run frameRun = secPrPara.addNewRun();
+                    frameRun.charPrIDRef("0");
+
+                    if ("text".equals(frame.frameType())) {
+                        int eqCount = convertTextFrame(frameRun, frame);
+                        equationsConverted += eqCount;
+                        framesConverted++;
+                    } else if ("image".equals(frame.frameType())) {
+                        boolean ok = convertImageFrame(frameRun, frame);
+                        if (ok) imagesConverted++;
+                        framesConverted++;
+                    }
+                }
+
+                // 빈 section 방지 - SecPr 단락이 이미 있으므로 필요 없음
+
+                pagesConverted++;
+                spreadIndex++;
+            }
+        } else {
+            // === 페이지 모드: 각 페이지를 별도 section으로 변환 ===
+            int pageIndex = 0;
+            for (IntermediatePage page : doc.pages()) {
+                SectionXMLFile section;
+                if (pageIndex == 0) {
+                    section = section0;
+                } else {
+                    section = hwpxFile.sectionXMLFileList().addNew();
+                    hwpxFile.contentHPFFile().manifest().addNew()
+                            .idAnd("section" + pageIndex)
+                            .hrefAnd("Contents/section" + pageIndex + ".xml")
+                            .mediaType("application/xml");
+                    hwpxFile.contentHPFFile().spine().addNew()
+                            .idref("section" + pageIndex);
+                }
+
+                // SecPr 단락 생성 (페이지 속성)
+                addSectionBreakPara(section, page, true);
+
+                // 프레임을 z-order 순서대로 정렬 (낮은 것부터 → 나중에 추가된 것이 위에 표시됨)
+                List<IntermediateFrame> sortedFrames = new ArrayList<>(page.frames());
+                sortedFrames.sort((a, b) -> Integer.compare(a.zOrder(), b.zOrder()));
+
+                // 각 floating 객체를 별도 단락에 배치
+                for (IntermediateFrame frame : sortedFrames) {
+                    if ("text".equals(frame.frameType())) {
+                        Para framePara = createFloatingObjectPara(section);
+                        Run frameRun = framePara.runs().iterator().next();
+                        int eqCount = convertTextFrame(frameRun, frame);
+                        equationsConverted += eqCount;
+                        framesConverted++;
+                        addMinimalLineSegArray(framePara);  // 최소 높이로 페이지 오버플로우 방지
+                    } else if ("image".equals(frame.frameType())) {
+                        Para framePara = createFloatingObjectPara(section);
+                        Run frameRun = framePara.runs().iterator().next();
+                        boolean ok = convertImageFrame(frameRun, frame);
+                        if (ok) imagesConverted++;
+                        framesConverted++;
+                        addMinimalLineSegArray(framePara);  // 최소 높이로 페이지 오버플로우 방지
+                    }
+                }
+
+                // 빈 section 방지
+                if (section.countOfPara() == 0) {
+                    addEmptyPara(section);
+                }
+
+                pagesConverted++;
+                pageIndex++;
+            }
         }
 
         // header.xml의 secCnt를 섹션 개수로 업데이트
@@ -587,6 +622,228 @@ public class IntermediateToHwpxConverter {
         pbf.offset().leftAnd(1417L).rightAnd(1417L).topAnd(1417L).bottom(1417L);
     }
 
+    /**
+     * 스프레드용 SecPr 단락 생성.
+     */
+    private void addSectionBreakParaForSpread(SectionXMLFile section, IntermediateSpread spread, boolean isFirst) {
+        Para para = section.addNewPara();
+        para.idAnd(nextParaId())
+                .paraPrIDRefAnd("3")
+                .styleIDRefAnd("0")
+                .pageBreakAnd(false)
+                .columnBreakAnd(false)
+                .merged(false);
+
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+
+        run.createSecPr();
+        SecPr secPr = run.secPr();
+        secPr.idAnd("")
+                .textDirectionAnd(TextDirection.HORIZONTAL)
+                .spaceColumnsAnd(1134)
+                .tabStopAnd(8000)
+                .tabStopValAnd(4000)
+                .tabStopUnitAnd(kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.ValueUnit1.HWPUNIT)
+                .outlineShapeIDRefAnd("1")
+                .memoShapeIDRefAnd("0")
+                .textVerticalWidthHeadAnd(false);
+
+        secPr.createGrid();
+        secPr.grid().lineGridAnd(0).charGridAnd(0).wonggojiFormat(false);
+
+        secPr.createStartNum();
+        secPr.startNum().pageStartsOnAnd(PageStartON.BOTH)
+                .pageAnd(0).picAnd(0).tblAnd(0).equation(0);
+
+        secPr.createVisibility();
+        secPr.visibility()
+                .hideFirstHeaderAnd(false).hideFirstFooterAnd(false)
+                .hideFirstMasterPageAnd(false)
+                .borderAnd(VisibilityOption.SHOW_ALL).fillAnd(VisibilityOption.SHOW_ALL)
+                .hideFirstPageNumAnd(false).hideFirstEmptyLineAnd(false).showLineNumber(false);
+
+        secPr.createLineNumberShape();
+        secPr.lineNumberShape()
+                .restartTypeAnd(LineNumberRestartType.Unknown)
+                .countByAnd(0).distanceAnd(0).startNumber(0);
+
+        // 스프레드 크기
+        secPr.createPagePr();
+        secPr.pagePr()
+                .landscapeAnd(PageDirection.WIDELY)
+                .widthAnd((int) spread.spreadWidth())
+                .heightAnd((int) spread.spreadHeight())
+                .gutterType(GutterMethod.LEFT_ONLY);
+
+        // 마진 (스프레드에서는 0 또는 최소값)
+        secPr.pagePr().createMargin();
+        secPr.pagePr().margin()
+                .headerAnd(1417).footerAnd(1417).gutterAnd(0)
+                .leftAnd(1417).rightAnd(1417)
+                .topAnd(1417).bottom(1417);
+
+        secPr.createFootNotePr();
+        secPr.footNotePr().createAutoNumFormat();
+        secPr.footNotePr().autoNumFormat()
+                .typeAnd(NumberType2.DIGIT).userCharAnd("").prefixCharAnd("").suffixCharAnd(")").supscript(false);
+        secPr.footNotePr().createNoteLine();
+        secPr.footNotePr().noteLine().lengthAnd(-1)
+                .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
+        secPr.footNotePr().createNoteSpacing();
+        secPr.footNotePr().noteSpacing().betweenNotesAnd(283).belowLineAnd(567).aboveLine(850);
+        secPr.footNotePr().createNumbering();
+        secPr.footNotePr().numbering().typeAnd(FootNoteNumberingType.CONTINUOUS).newNum(1);
+        secPr.footNotePr().createPlacement();
+        secPr.footNotePr().placement().placeAnd(FootNotePlace.EACH_COLUMN).beneathText(false);
+
+        secPr.createEndNotePr();
+        secPr.endNotePr().createAutoNumFormat();
+        secPr.endNotePr().autoNumFormat()
+                .typeAnd(NumberType2.DIGIT).userCharAnd("").prefixCharAnd("").suffixCharAnd(")").supscript(false);
+        secPr.endNotePr().createNoteLine();
+        secPr.endNotePr().noteLine().lengthAnd(14692344)
+                .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
+        secPr.endNotePr().createNoteSpacing();
+        secPr.endNotePr().noteSpacing().betweenNotesAnd(0).belowLineAnd(567).aboveLine(850);
+        secPr.endNotePr().createNumbering();
+        secPr.endNotePr().numbering().typeAnd(EndNoteNumberingType.CONTINUOUS).newNum(1);
+        secPr.endNotePr().createPlacement();
+        secPr.endNotePr().placement().placeAnd(EndNotePlace.END_OF_DOCUMENT).beneathText(false);
+
+        addPageBorderFills(secPr);
+
+        // ColPr
+        Ctrl ctrl = run.addNewCtrl();
+        ctrl.addNewColPr()
+                .idAnd("").typeAnd(MultiColumnType.NEWSPAPER)
+                .layoutAnd(ColumnDirection.LEFT)
+                .colCountAnd(1).sameSzAnd(true).sameGap(0);
+
+        run.addNewT();
+        addLineSegArray(para);
+    }
+
+    /**
+     * 스프레드용 SecPr 단락 생성 (Para 반환).
+     * 모든 floating 객체를 이 단락에 추가하여 페이지 오버플로우를 방지한다.
+     */
+    private Para addSectionBreakParaForSpreadWithReturn(SectionXMLFile section, IntermediateSpread spread) {
+        Para para = section.addNewPara();
+        para.idAnd(nextParaId())
+                .paraPrIDRefAnd("3")
+                .styleIDRefAnd("0")
+                .pageBreakAnd(false)
+                .columnBreakAnd(false)
+                .merged(false);
+
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+
+        run.createSecPr();
+        SecPr secPr = run.secPr();
+        secPr.idAnd("")
+                .textDirectionAnd(TextDirection.HORIZONTAL)
+                .spaceColumnsAnd(1134)
+                .tabStopAnd(8000)
+                .tabStopValAnd(4000)
+                .tabStopUnitAnd(kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.ValueUnit1.HWPUNIT)
+                .outlineShapeIDRefAnd("1")
+                .memoShapeIDRefAnd("0")
+                .textVerticalWidthHeadAnd(false);
+
+        secPr.createGrid();
+        secPr.grid().lineGridAnd(0).charGridAnd(0).wonggojiFormat(false);
+
+        secPr.createStartNum();
+        secPr.startNum().pageStartsOnAnd(PageStartON.BOTH)
+                .pageAnd(0).picAnd(0).tblAnd(0).equation(0);
+
+        secPr.createVisibility();
+        secPr.visibility()
+                .hideFirstHeaderAnd(false).hideFirstFooterAnd(false)
+                .hideFirstMasterPageAnd(false)
+                .borderAnd(VisibilityOption.SHOW_ALL).fillAnd(VisibilityOption.SHOW_ALL)
+                .hideFirstPageNumAnd(false).hideFirstEmptyLineAnd(false).showLineNumber(false);
+
+        secPr.createLineNumberShape();
+        secPr.lineNumberShape()
+                .restartTypeAnd(LineNumberRestartType.Unknown)
+                .countByAnd(0).distanceAnd(0).startNumber(0);
+
+        // 스프레드 크기
+        secPr.createPagePr();
+        secPr.pagePr()
+                .landscapeAnd(PageDirection.WIDELY)
+                .widthAnd((int) spread.spreadWidth())
+                .heightAnd((int) spread.spreadHeight())
+                .gutterType(GutterMethod.LEFT_ONLY);
+
+        // 마진 (스프레드에서는 0 또는 최소값)
+        secPr.pagePr().createMargin();
+        secPr.pagePr().margin()
+                .headerAnd(1417).footerAnd(1417).gutterAnd(0)
+                .leftAnd(1417).rightAnd(1417)
+                .topAnd(1417).bottom(1417);
+
+        secPr.createFootNotePr();
+        secPr.footNotePr().createAutoNumFormat();
+        secPr.footNotePr().autoNumFormat()
+                .typeAnd(NumberType2.DIGIT).userCharAnd("").prefixCharAnd("").suffixCharAnd(")").supscript(false);
+        secPr.footNotePr().createNoteLine();
+        secPr.footNotePr().noteLine().lengthAnd(-1)
+                .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
+        secPr.footNotePr().createNoteSpacing();
+        secPr.footNotePr().noteSpacing().betweenNotesAnd(283).belowLineAnd(567).aboveLine(850);
+        secPr.footNotePr().createNumbering();
+        secPr.footNotePr().numbering().typeAnd(FootNoteNumberingType.CONTINUOUS).newNum(1);
+        secPr.footNotePr().createPlacement();
+        secPr.footNotePr().placement().placeAnd(FootNotePlace.EACH_COLUMN).beneathText(false);
+
+        secPr.createEndNotePr();
+        secPr.endNotePr().createAutoNumFormat();
+        secPr.endNotePr().autoNumFormat()
+                .typeAnd(NumberType2.DIGIT).userCharAnd("").prefixCharAnd("").suffixCharAnd(")").supscript(false);
+        secPr.endNotePr().createNoteLine();
+        secPr.endNotePr().noteLine().lengthAnd(14692344)
+                .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
+        secPr.endNotePr().createNoteSpacing();
+        secPr.endNotePr().noteSpacing().betweenNotesAnd(0).belowLineAnd(567).aboveLine(850);
+        secPr.endNotePr().createNumbering();
+        secPr.endNotePr().numbering().typeAnd(EndNoteNumberingType.CONTINUOUS).newNum(1);
+        secPr.endNotePr().createPlacement();
+        secPr.endNotePr().placement().placeAnd(EndNotePlace.END_OF_DOCUMENT).beneathText(false);
+
+        addPageBorderFills(secPr);
+
+        // ColPr
+        Ctrl ctrl = run.addNewCtrl();
+        ctrl.addNewColPr()
+                .idAnd("").typeAnd(MultiColumnType.NEWSPAPER)
+                .layoutAnd(ColumnDirection.LEFT)
+                .colCountAnd(1).sameSzAnd(true).sameGap(0);
+
+        run.addNewT();
+        addLineSegArray(para);
+
+        return para;
+    }
+
+    /**
+     * 빈 단락 추가 (section이 빈 경우 방지).
+     */
+    private void addEmptyPara(SectionXMLFile section) {
+        Para emptyPara = section.addNewPara();
+        emptyPara.idAnd(nextParaId())
+                .paraPrIDRefAnd("3")
+                .styleIDRefAnd("0")
+                .pageBreakAnd(false)
+                .columnBreakAnd(false)
+                .merged(false);
+        Run emptyRun = emptyPara.addNewRun();
+        emptyRun.charPrIDRef("0");
+        emptyRun.addNewT();
+    }
 
     /**
      * floating 객체 하나를 담을 단락을 생성한다.
@@ -615,6 +872,20 @@ public class IntermediateToHwpxConverter {
         LineSeg lineSeg = para.lineSegArray().addNew();
         lineSeg.textposAnd(0).vertposAnd(0).vertsizeAnd(1000)
                 .textheightAnd(1000).baselineAnd(850).spacingAnd(600)
+                .horzposAnd(0).horzsizeAnd(42520).flagsAnd(393216);
+    }
+
+    /**
+     * Floating 객체 단락에 최소 높이 linesegarray를 추가한다.
+     * floating 객체는 절대 위치로 배치되므로 단락 자체는 높이가 거의 없어야 한다.
+     * 그렇지 않으면 많은 floating 객체가 페이지 오버플로우를 일으킨다.
+     */
+    private void addMinimalLineSegArray(Para para) {
+        para.createLineSegArray();
+        LineSeg lineSeg = para.lineSegArray().addNew();
+        // vertsize와 textheight를 최소값(1)으로 설정하여 단락 높이를 거의 0으로 만듦
+        lineSeg.textposAnd(0).vertposAnd(0).vertsizeAnd(1)
+                .textheightAnd(1).baselineAnd(0).spacingAnd(0)
                 .horzposAnd(0).horzsizeAnd(42520).flagsAnd(393216);
     }
 

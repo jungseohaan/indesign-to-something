@@ -49,4 +49,13 @@ public class IntermediateDocument {
 
     public List<IntermediatePage> pages() { return pages; }
     public void addPage(IntermediatePage page) { pages.add(page); }
+
+    // 스프레드 모드 관련 (현재 미구현, 컴파일용 스텁)
+    private boolean useSpreadMode;
+    private List<IntermediateSpread> spreads = new ArrayList<IntermediateSpread>();
+
+    public boolean useSpreadMode() { return useSpreadMode; }
+    public void useSpreadMode(boolean v) { this.useSpreadMode = v; }
+    public List<IntermediateSpread> spreads() { return spreads; }
+    public void addSpread(IntermediateSpread spread) { spreads.add(spread); }
 }

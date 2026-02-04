@@ -365,6 +365,19 @@ public class IDMLLoader {
                 IDMLImageFrame imageFrame = tryParseImageFrame(elem);
                 if (imageFrame != null) {
                     spread.addImageFrame(imageFrame);
+                } else {
+                    // 이미지가 없으면 순수 벡터 도형으로 파싱
+                    IDMLVectorShape vectorShape = tryParseVectorShape(elem);
+                    if (vectorShape != null) {
+                        spread.addVectorShape(vectorShape);
+                    }
+                }
+            } else if ("GraphicLine".equals(elem.getTagName())) {
+                // 그래픽 라인도 벡터 도형으로 처리
+                IDMLVectorShape vectorShape = tryParseVectorShape(elem);
+                if (vectorShape != null) {
+                    vectorShape.shapeType(IDMLVectorShape.ShapeType.GRAPHIC_LINE);
+                    spread.addVectorShape(vectorShape);
                 }
             } else if ("Group".equals(elem.getTagName())) {
                 double[] groupTransform = IDMLGeometry.parseTransform(
@@ -445,6 +458,25 @@ public class IDMLLoader {
                 shapeElem.getAttribute("ItemTransform")));
         frame.appliedObjectStyle(getAttrOrNull(shapeElem, "AppliedObjectStyle"));
 
+        // 이미지의 ItemTransform (클리핑을 위한 이미지 위치/스케일)
+        String imgTransformStr = imageElem.getAttribute("ItemTransform");
+        if (imgTransformStr != null && !imgTransformStr.isEmpty()) {
+            frame.imageTransform(IDMLGeometry.parseTransform(imgTransformStr));
+        }
+
+        // GraphicBounds (원본 이미지 크기)
+        Element imgProps = getFirstChildElement(imageElem, "Properties");
+        if (imgProps != null) {
+            Element graphicBoundsElem = getFirstChildElement(imgProps, "GraphicBounds");
+            if (graphicBoundsElem != null) {
+                double left = parseDoubleAttrDef(graphicBoundsElem, "Left", 0);
+                double top = parseDoubleAttrDef(graphicBoundsElem, "Top", 0);
+                double right = parseDoubleAttrDef(graphicBoundsElem, "Right", 0);
+                double bottom = parseDoubleAttrDef(graphicBoundsElem, "Bottom", 0);
+                frame.graphicBounds(new double[]{left, top, right, bottom});
+            }
+        }
+
         if (!links.isEmpty()) {
             Element link = links.get(0);
             frame.linkResourceURI(getAttrOrNull(link, "LinkResourceURI"));
@@ -453,6 +485,129 @@ public class IDMLLoader {
         }
 
         return frame;
+    }
+
+    /**
+     * Rectangle/Polygon/Oval/GraphicLine을 벡터 도형으로 파싱한다.
+     */
+    private static IDMLVectorShape tryParseVectorShape(Element shapeElem) {
+        IDMLVectorShape shape = new IDMLVectorShape();
+        shape.selfId(shapeElem.getAttribute("Self"));
+        shape.geometricBounds(resolveGeometricBounds(shapeElem));
+        shape.itemTransform(IDMLGeometry.parseTransform(
+                shapeElem.getAttribute("ItemTransform")));
+
+        // 도형 타입 설정
+        String tagName = shapeElem.getTagName();
+        if ("Rectangle".equals(tagName)) {
+            shape.shapeType(IDMLVectorShape.ShapeType.RECTANGLE);
+        } else if ("Polygon".equals(tagName)) {
+            shape.shapeType(IDMLVectorShape.ShapeType.POLYGON);
+        } else if ("Oval".equals(tagName)) {
+            shape.shapeType(IDMLVectorShape.ShapeType.OVAL);
+        } else if ("GraphicLine".equals(tagName)) {
+            shape.shapeType(IDMLVectorShape.ShapeType.GRAPHIC_LINE);
+        }
+
+        // 스타일 속성
+        shape.fillColor(getAttrOrNull(shapeElem, "FillColor"));
+        shape.strokeColor(getAttrOrNull(shapeElem, "StrokeColor"));
+        shape.strokeWeight(parseDoubleAttrDef(shapeElem, "StrokeWeight", 1.0));
+        shape.cornerRadius(parseDoubleAttrDef(shapeElem, "CornerRadius", 0));
+
+        // 라인 스타일 속성
+        String startCap = getAttrOrNull(shapeElem, "LeftLineEnd");
+        String endCap = getAttrOrNull(shapeElem, "RightLineEnd");
+        String lineJoin = getAttrOrNull(shapeElem, "StrokeCornerAdjustment");
+
+        // PathPoint 파싱 (Properties/PathGeometry/GeometryPathType/PathPointArray)
+        Element props = getFirstChildElement(shapeElem, "Properties");
+        if (props != null) {
+            Element pathGeom = getFirstChildElement(props, "PathGeometry");
+            if (pathGeom != null) {
+                List<Element> pathTypes = getChildElements(pathGeom, "GeometryPathType");
+                for (Element pathType : pathTypes) {
+                    boolean isOpen = "true".equalsIgnoreCase(pathType.getAttribute("PathOpen"));
+
+                    if (pathTypes.size() > 1) {
+                        // 복합 경로 (여러 SubPath)
+                        IDMLVectorShape.SubPath subPath = shape.startNewSubPath(isOpen);
+                        parsePathPoints(pathType, subPath);
+                    } else {
+                        // 단일 경로
+                        shape.pathOpen(isOpen);
+                        parsePathPointsToShape(pathType, shape);
+                    }
+                }
+            }
+        }
+
+        return shape;
+    }
+
+    /**
+     * PathPointArray를 SubPath에 파싱한다.
+     */
+    private static void parsePathPoints(Element pathType, IDMLVectorShape.SubPath subPath) {
+        Element pointArray = getFirstChildElement(pathType, "PathPointArray");
+        if (pointArray == null) return;
+
+        List<Element> points = getChildElements(pointArray, "PathPointType");
+        for (Element pt : points) {
+            double[] anchor = parsePointAttr(pt, "Anchor");
+            double[] left = parsePointAttr(pt, "LeftDirection");
+            double[] right = parsePointAttr(pt, "RightDirection");
+
+            if (anchor != null) {
+                double lx = (left != null) ? left[0] : anchor[0];
+                double ly = (left != null) ? left[1] : anchor[1];
+                double rx = (right != null) ? right[0] : anchor[0];
+                double ry = (right != null) ? right[1] : anchor[1];
+
+                subPath.addPoint(new IDMLVectorShape.PathPoint(
+                        anchor[0], anchor[1], lx, ly, rx, ry));
+            }
+        }
+    }
+
+    /**
+     * PathPointArray를 shape에 직접 파싱한다 (단일 경로).
+     */
+    private static void parsePathPointsToShape(Element pathType, IDMLVectorShape shape) {
+        Element pointArray = getFirstChildElement(pathType, "PathPointArray");
+        if (pointArray == null) return;
+
+        List<Element> points = getChildElements(pointArray, "PathPointType");
+        for (Element pt : points) {
+            double[] anchor = parsePointAttr(pt, "Anchor");
+            double[] left = parsePointAttr(pt, "LeftDirection");
+            double[] right = parsePointAttr(pt, "RightDirection");
+
+            if (anchor != null) {
+                double lx = (left != null) ? left[0] : anchor[0];
+                double ly = (left != null) ? left[1] : anchor[1];
+                double rx = (right != null) ? right[0] : anchor[0];
+                double ry = (right != null) ? right[1] : anchor[1];
+
+                shape.addPathPoint(new IDMLVectorShape.PathPoint(
+                        anchor[0], anchor[1], lx, ly, rx, ry));
+            }
+        }
+    }
+
+    /**
+     * "x y" 형식의 포인트 속성을 파싱한다.
+     */
+    private static double[] parsePointAttr(Element elem, String attrName) {
+        String val = elem.getAttribute(attrName);
+        if (val == null || val.isEmpty()) return null;
+        String[] parts = val.trim().split("\\s+");
+        if (parts.length < 2) return null;
+        try {
+            return new double[]{ Double.parseDouble(parts[0]), Double.parseDouble(parts[1]) };
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
@@ -499,6 +654,23 @@ public class IDMLLoader {
                     imageFrame.itemTransform(CoordinateConverter.combineTransforms(
                             accumulatedTransform, imageFrame.itemTransform()));
                     spread.addImageFrame(imageFrame);
+                } else {
+                    // 순수 벡터 도형으로 파싱
+                    IDMLVectorShape vectorShape = tryParseVectorShape(elem);
+                    if (vectorShape != null) {
+                        vectorShape.itemTransform(CoordinateConverter.combineTransforms(
+                                accumulatedTransform, vectorShape.itemTransform()));
+                        spread.addVectorShape(vectorShape);
+                    }
+                }
+            } else if ("GraphicLine".equals(elem.getTagName())) {
+                // 그래픽 라인도 벡터 도형으로 처리
+                IDMLVectorShape vectorShape = tryParseVectorShape(elem);
+                if (vectorShape != null) {
+                    vectorShape.shapeType(IDMLVectorShape.ShapeType.GRAPHIC_LINE);
+                    vectorShape.itemTransform(CoordinateConverter.combineTransforms(
+                            accumulatedTransform, vectorShape.itemTransform()));
+                    spread.addVectorShape(vectorShape);
                 }
             } else if ("Group".equals(elem.getTagName())) {
                 // 중첩 Group: 누적 변환에 현재 Group 변환을 결합
@@ -756,6 +928,14 @@ public class IDMLLoader {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(false);
         factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+
+        // JDK XML 파서 속성 제한 해제 (IDML ParagraphStyle에 200개 이상 속성이 있을 수 있음)
+        try {
+            factory.setAttribute("jdk.xml.elementAttributeLimit", "0");
+        } catch (IllegalArgumentException e) {
+            // JDK 버전에 따라 지원되지 않을 수 있음 - 무시
+        }
+
         DocumentBuilder builder = factory.newDocumentBuilder();
         return builder.parse(file);
     }

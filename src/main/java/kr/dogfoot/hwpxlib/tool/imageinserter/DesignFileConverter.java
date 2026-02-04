@@ -135,13 +135,17 @@ public class DesignFileConverter {
                 return convertPsdToPng(inputFile);
             case "ai":
                 return convertAiToPng(inputFile);
+            case "pdf":
+                return convertPdfToPng(inputFile);
+            case "eps":
+                return convertEpsToPng(inputFile);
             case "tiff":
             case "tif":
                 return convertTiffToPng(inputFile);
             default:
                 throw new IOException(
                         "Unsupported design file format: ." + ext
-                                + " (supported: .psd, .ai, .tiff)");
+                                + " (supported: .psd, .ai, .pdf, .eps, .tiff)");
         }
     }
 
@@ -161,13 +165,17 @@ public class DesignFileConverter {
                 return convertPsdToPng(inputFile);
             case "ai":
                 return convertAiToPng(inputFile, dpi);
+            case "pdf":
+                return convertPdfToPng(inputFile, dpi);
+            case "eps":
+                return convertEpsToPng(inputFile, dpi);
             case "tiff":
             case "tif":
                 return convertTiffToPng(inputFile);
             default:
                 throw new IOException(
                         "Unsupported design file format: ." + ext
-                                + " (supported: .psd, .ai, .tiff)");
+                                + " (supported: .psd, .ai, .pdf, .eps, .tiff)");
         }
     }
 
@@ -195,11 +203,14 @@ public class DesignFileConverter {
         tempPng.deleteOnExit();
 
         try {
+            // 투명 PNG 생성: -background none으로 투명 배경 유지
             ProcessBuilder pb = new ProcessBuilder(
                     imageMagickCommand,
                     psdFile.getAbsolutePath() + "[0]",
-                    "-flatten",
-                    tempPng.getAbsolutePath()
+                    "-background", "none",
+                    "-colorspace", "sRGB",
+                    "-depth", "8",
+                    "PNG32:" + tempPng.getAbsolutePath()  // 32비트 RGBA PNG
             );
             executeProcess(pb, "PSD to PNG conversion");
 
@@ -249,17 +260,140 @@ public class DesignFileConverter {
         tempPng.deleteOnExit();
 
         try {
+            // 투명 PNG 생성: pngalpha 디바이스 사용 (32비트 RGBA)
             ProcessBuilder pb = new ProcessBuilder(
                     "gs",
                     "-dNOPAUSE",
                     "-dBATCH",
                     "-dSAFER",
-                    "-sDEVICE=png16m",
+                    "-sDEVICE=pngalpha",
                     "-r" + dpi,
                     "-sOutputFile=" + tempPng.getAbsolutePath(),
                     aiFile.getAbsolutePath()
             );
             executeProcess(pb, "AI to PNG conversion");
+
+            return Files.readAllBytes(tempPng.toPath());
+        } finally {
+            tempPng.delete();
+        }
+    }
+
+    /**
+     * PDF 파일을 PNG로 변환한다.
+     * Ghostscript을 사용하며 기본 300 DPI로 래스터화한다.
+     *
+     * @param pdfFile PDF 파일
+     * @return PNG 이미지 데이터
+     * @throws IOException Ghostscript 미설치 또는 변환 실패
+     */
+    public static byte[] convertPdfToPng(File pdfFile) throws IOException {
+        return convertPdfToPng(pdfFile, DEFAULT_AI_DPI);
+    }
+
+    /**
+     * PDF 파일을 지정 DPI로 PNG로 변환한다.
+     * Ghostscript을 사용하여 벡터 이미지를 래스터화한다.
+     * 멀티페이지 PDF의 경우 첫 페이지만 변환한다.
+     *
+     * @param pdfFile PDF 파일
+     * @param dpi     래스터화 해상도 (예: 72, 150, 300)
+     * @return PNG 이미지 데이터
+     * @throws IOException Ghostscript 미설치 또는 변환 실패
+     */
+    public static byte[] convertPdfToPng(File pdfFile, int dpi) throws IOException {
+        if (!pdfFile.exists()) {
+            throw new IOException("PDF file not found: " + pdfFile.getAbsolutePath());
+        }
+        if (dpi <= 0) {
+            throw new IllegalArgumentException("DPI must be positive: " + dpi);
+        }
+        if (!isGhostscriptAvailable()) {
+            throw new IOException(
+                    "Ghostscript is not installed. "
+                            + "Install it to convert PDF files. "
+                            + "(macOS: brew install ghostscript, "
+                            + "Linux: apt install ghostscript)");
+        }
+
+        File tempPng = File.createTempFile("hwpxlib_pdf_", ".png");
+        tempPng.deleteOnExit();
+
+        try {
+            // 투명 PNG 생성: pngalpha 디바이스 사용 (32비트 RGBA)
+            ProcessBuilder pb = new ProcessBuilder(
+                    "gs",
+                    "-dNOPAUSE",
+                    "-dBATCH",
+                    "-dSAFER",
+                    "-dFirstPage=1",
+                    "-dLastPage=1",
+                    "-sDEVICE=pngalpha",
+                    "-r" + dpi,
+                    "-sOutputFile=" + tempPng.getAbsolutePath(),
+                    pdfFile.getAbsolutePath()
+            );
+            executeProcess(pb, "PDF to PNG conversion");
+
+            return Files.readAllBytes(tempPng.toPath());
+        } finally {
+            tempPng.delete();
+        }
+    }
+
+    /**
+     * EPS (Encapsulated PostScript) 파일을 PNG로 변환한다.
+     * Ghostscript을 사용하며 기본 300 DPI로 래스터화한다.
+     *
+     * @param epsFile EPS 파일
+     * @return PNG 이미지 데이터
+     * @throws IOException Ghostscript 미설치 또는 변환 실패
+     */
+    public static byte[] convertEpsToPng(File epsFile) throws IOException {
+        return convertEpsToPng(epsFile, DEFAULT_AI_DPI);
+    }
+
+    /**
+     * EPS 파일을 지정 DPI로 PNG로 변환한다.
+     * Ghostscript을 사용하여 벡터 이미지를 래스터화한다.
+     *
+     * @param epsFile EPS 파일
+     * @param dpi     래스터화 해상도 (예: 72, 150, 300)
+     * @return PNG 이미지 데이터
+     * @throws IOException Ghostscript 미설치 또는 변환 실패
+     */
+    public static byte[] convertEpsToPng(File epsFile, int dpi) throws IOException {
+        if (!epsFile.exists()) {
+            throw new IOException("EPS file not found: " + epsFile.getAbsolutePath());
+        }
+        if (dpi <= 0) {
+            throw new IllegalArgumentException("DPI must be positive: " + dpi);
+        }
+        if (!isGhostscriptAvailable()) {
+            throw new IOException(
+                    "Ghostscript is not installed. "
+                            + "Install it to convert EPS files. "
+                            + "(macOS: brew install ghostscript, "
+                            + "Linux: apt install ghostscript)");
+        }
+
+        File tempPng = File.createTempFile("hwpxlib_eps_", ".png");
+        tempPng.deleteOnExit();
+
+        try {
+            // 투명 PNG 생성: pngalpha 디바이스 사용 (32비트 RGBA)
+            ProcessBuilder pb = new ProcessBuilder(
+                    "gs",
+                    "-dNOPAUSE",
+                    "-dBATCH",
+                    "-dSAFER",
+                    "-dEPSCrop",
+                    "-sDEVICE=pngalpha",
+                    "-r" + dpi,
+                    "-sOutputFile=" + tempPng.getAbsolutePath(),
+                    epsFile.getAbsolutePath()
+            );
+            executeProcess(pb, "EPS to PNG conversion");
 
             return Files.readAllBytes(tempPng.toPath());
         } finally {
@@ -296,11 +430,12 @@ public class DesignFileConverter {
         tempPng.deleteOnExit();
 
         try {
+            // 투명 PNG 생성: -background none으로 투명 배경 유지
             ProcessBuilder pb = new ProcessBuilder(
                     imageMagickCommand,
                     tiffFile.getAbsolutePath() + "[0]",
-                    "-flatten",
-                    tempPng.getAbsolutePath()
+                    "-background", "none",
+                    "PNG32:" + tempPng.getAbsolutePath()  // 32비트 RGBA PNG
             );
             executeProcess(pb, "TIFF to PNG conversion");
 

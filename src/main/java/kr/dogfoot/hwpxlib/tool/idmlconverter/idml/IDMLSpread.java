@@ -11,11 +11,13 @@ public class IDMLSpread {
     private List<IDMLPage> pages;
     private List<IDMLTextFrame> textFrames;
     private List<IDMLImageFrame> imageFrames;
+    private List<IDMLVectorShape> vectorShapes;
 
     public IDMLSpread() {
         this.pages = new ArrayList<IDMLPage>();
         this.textFrames = new ArrayList<IDMLTextFrame>();
         this.imageFrames = new ArrayList<IDMLImageFrame>();
+        this.vectorShapes = new ArrayList<IDMLVectorShape>();
     }
 
     public String selfId() { return selfId; }
@@ -29,6 +31,9 @@ public class IDMLSpread {
 
     public List<IDMLImageFrame> imageFrames() { return imageFrames; }
     public void addImageFrame(IDMLImageFrame frame) { imageFrames.add(frame); }
+
+    public List<IDMLVectorShape> vectorShapes() { return vectorShapes; }
+    public void addVectorShape(IDMLVectorShape shape) { vectorShapes.add(shape); }
 
     /**
      * 특정 페이지에 속한 텍스트 프레임 목록.
@@ -60,6 +65,24 @@ public class IDMLSpread {
                         frame.geometricBounds(), frame.itemTransform(),
                         page.geometricBounds(), page.itemTransform())) {
                     result.add(frame);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 특정 페이지에 속한 벡터 도형 목록.
+     */
+    public List<IDMLVectorShape> getVectorShapesOnPage(IDMLPage page) {
+        List<IDMLVectorShape> result = new ArrayList<IDMLVectorShape>();
+        for (IDMLVectorShape shape : vectorShapes) {
+            if (shape.geometricBounds() != null && shape.itemTransform() != null
+                    && page.geometricBounds() != null && page.itemTransform() != null) {
+                if (IDMLGeometry.isFrameOnPage(
+                        shape.geometricBounds(), shape.itemTransform(),
+                        page.geometricBounds(), page.itemTransform())) {
+                    result.add(shape);
                 }
             }
         }

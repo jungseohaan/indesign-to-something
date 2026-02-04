@@ -8,6 +8,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.*;
 import kr.dogfoot.hwpxlib.tool.imageinserter.DesignFileConverter;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -15,6 +20,7 @@ import java.net.URLDecoder;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.Base64;
+import javax.imageio.ImageIO;
 
 /**
  * IDML 문서(IDMLDocument)를 중간 포맷(IntermediateDocument)으로 변환한다.
@@ -128,10 +134,18 @@ public class IDMLToIntermediateConverter {
             }
         }
 
-        // 5. 페이지별 변환
+        // 5. 스프레드/페이지 변환
         Set<String> processedStories = new HashSet<String>();
         int zOrderCounter = 0;
 
+        if (options.spreadBasedConversion()) {
+            // === 스프레드 모드: 각 스프레드를 하나의 큰 페이지로 변환 ===
+            doc.useSpreadMode(true);
+            convertSpreads(doc, processedStories);
+            return doc;
+        }
+
+        // === 페이지 모드: 각 페이지를 개별적으로 변환 ===
         for (IDMLSpread spread : idmlDoc.spreads()) {
             for (IDMLPage page : spread.pages()) {
                 if (!pageFilter.shouldInclude(page.pageNumber())) {
@@ -147,7 +161,43 @@ public class IDMLToIntermediateConverter {
                 List<IDMLTextFrame> textFrames = spread.getTextFramesOnPage(page);
                 List<IDMLImageFrame> imageFrames = spread.getImageFramesOnPage(page);
 
-                // 이미지 프레임을 먼저 변환 (낮은 zOrder → 텍스트 뒤에 배치)
+                // 벡터 도형을 PNG로 렌더링하여 이미지 프레임으로 변환 (가장 낮은 zOrder)
+                if (options.includeImages()) {
+                    List<IDMLVectorShape> vectorShapes = spread.getVectorShapesOnPage(page);
+                    IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, 300);  // 300 DPI
+
+                    for (IDMLVectorShape shape : vectorShapes) {
+                        try {
+                            IDMLPageRenderer.RenderResult result = renderer.renderVectorToPng(shape, page);
+                            if (result != null && result.pngData() != null && result.pngData().length > 0) {
+                                IntermediateFrame iFrame = new IntermediateFrame();
+                                iFrame.frameId("vector_" + shape.selfId());
+                                iFrame.frameType("image");
+                                iFrame.x(Math.round(result.x() * 100));  // points to HWPUNIT
+                                iFrame.y(Math.round(result.y() * 100));
+                                iFrame.width(Math.round(result.width() * 100));
+                                iFrame.height(Math.round(result.height() * 100));
+                                iFrame.zOrder(zOrderCounter++);
+
+                                IntermediateImage iImage = new IntermediateImage();
+                                iImage.imageId("vec_" + shape.selfId());
+                                iImage.format("png");
+                                iImage.base64Data(Base64.getEncoder().encodeToString(result.pngData()));
+                                iImage.pixelWidth(result.pixelWidth());
+                                iImage.pixelHeight(result.pixelHeight());
+                                iImage.displayWidth(Math.round(result.width() * 100));
+                                iImage.displayHeight(Math.round(result.height() * 100));
+                                iFrame.image(iImage);
+
+                                iPage.addFrame(iFrame);
+                            }
+                        } catch (IOException e) {
+                            warnings.add("Vector shape render failed: " + shape.selfId() + " - " + e.getMessage());
+                        }
+                    }
+                }
+
+                // 이미지 프레임을 변환 (벡터 뒤, 텍스트 앞)
                 if (options.includeImages()) {
                     Collections.sort(imageFrames, new ImageFramePositionComparator(page));
 
@@ -219,6 +269,245 @@ public class IDMLToIntermediateConverter {
         }
 
         return doc;
+    }
+
+    /**
+     * 스프레드 모드 변환: 각 스프레드를 하나의 IntermediateSpread로 변환한다.
+     */
+    private void convertSpreads(IntermediateDocument doc, Set<String> processedStories) {
+        int zOrderCounter = 0;
+        IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, 300);
+
+        for (IDMLSpread spread : idmlDoc.spreads()) {
+            List<IDMLPage> pages = spread.pages();
+            if (pages.isEmpty()) continue;
+
+            // 이 스프레드에 포함된 페이지 중 변환 대상이 있는지 확인
+            boolean hasTargetPage = false;
+            for (IDMLPage page : pages) {
+                if (pageFilter.shouldInclude(page.pageNumber())) {
+                    hasTargetPage = true;
+                    break;
+                }
+            }
+            if (!hasTargetPage) continue;
+
+            IntermediateSpread iSpread = new IntermediateSpread();
+            iSpread.spreadId(spread.selfId());
+
+            // 스프레드 크기 계산 (모든 페이지를 포함하는 영역)
+            double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+            double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+
+            for (IDMLPage page : pages) {
+                double[] bounds = page.geometricBounds();
+                double[] transform = page.itemTransform();
+                if (bounds == null || transform == null) continue;
+
+                double[] topLeft = IDMLGeometry.absoluteTopLeft(bounds, transform);
+                double pageW = IDMLGeometry.width(bounds);
+                double pageH = IDMLGeometry.height(bounds);
+
+                minX = Math.min(minX, topLeft[0]);
+                minY = Math.min(minY, topLeft[1]);
+                maxX = Math.max(maxX, topLeft[0] + pageW);
+                maxY = Math.max(maxY, topLeft[1] + pageH);
+            }
+
+            double spreadW = maxX - minX;
+            double spreadH = maxY - minY;
+            iSpread.spreadWidth(CoordinateConverter.pointsToHwpunits(spreadW));
+            iSpread.spreadHeight(CoordinateConverter.pointsToHwpunits(spreadH));
+
+            // 페이지 정보 추가
+            for (IDMLPage page : pages) {
+                double[] bounds = page.geometricBounds();
+                double[] transform = page.itemTransform();
+                if (bounds == null || transform == null) continue;
+
+                double[] topLeft = IDMLGeometry.absoluteTopLeft(bounds, transform);
+                double pageW = IDMLGeometry.width(bounds);
+                double pageH = IDMLGeometry.height(bounds);
+
+                IntermediatePageInfo pageInfo = new IntermediatePageInfo();
+                pageInfo.pageNumber(page.pageNumber());
+                pageInfo.offsetX(CoordinateConverter.pointsToHwpunits(topLeft[0] - minX));
+                pageInfo.offsetY(CoordinateConverter.pointsToHwpunits(topLeft[1] - minY));
+                pageInfo.pageWidth(CoordinateConverter.pointsToHwpunits(pageW));
+                pageInfo.pageHeight(CoordinateConverter.pointsToHwpunits(pageH));
+                iSpread.addPageInfo(pageInfo);
+            }
+
+            // 벡터 도형을 PNG로 렌더링
+            if (options.includeImages()) {
+                for (IDMLVectorShape shape : spread.vectorShapes()) {
+                    // 어느 페이지에 속하는지 확인
+                    IDMLPage targetPage = findPageForShape(shape, pages);
+                    if (targetPage == null) continue;
+
+                    try {
+                        IDMLPageRenderer.RenderResult result = renderer.renderVectorToPng(shape, targetPage);
+                        if (result != null && result.pngData() != null && result.pngData().length > 0) {
+                            // 페이지 상대 좌표 → 스프레드 상대 좌표
+                            double[] pageTopLeft = getPageTopLeft(targetPage, minX, minY);
+
+                            IntermediateFrame iFrame = new IntermediateFrame();
+                            iFrame.frameId("vector_" + shape.selfId());
+                            iFrame.frameType("image");
+                            iFrame.x(CoordinateConverter.pointsToHwpunits(result.x() + pageTopLeft[0]));
+                            iFrame.y(CoordinateConverter.pointsToHwpunits(result.y() + pageTopLeft[1]));
+                            iFrame.width(CoordinateConverter.pointsToHwpunits(result.width()));
+                            iFrame.height(CoordinateConverter.pointsToHwpunits(result.height()));
+                            iFrame.zOrder(zOrderCounter++);
+
+                            IntermediateImage iImage = new IntermediateImage();
+                            iImage.imageId("vec_" + shape.selfId());
+                            iImage.format("png");
+                            iImage.base64Data(Base64.getEncoder().encodeToString(result.pngData()));
+                            iImage.pixelWidth(result.pixelWidth());
+                            iImage.pixelHeight(result.pixelHeight());
+                            iImage.displayWidth(CoordinateConverter.pointsToHwpunits(result.width()));
+                            iImage.displayHeight(CoordinateConverter.pointsToHwpunits(result.height()));
+                            iFrame.image(iImage);
+
+                            iSpread.addFrame(iFrame);
+                        }
+                    } catch (IOException e) {
+                        warnings.add("Vector shape render failed: " + shape.selfId() + " - " + e.getMessage());
+                    }
+                }
+
+                // 이미지 프레임 변환
+                for (IDMLImageFrame imgFrame : spread.imageFrames()) {
+                    IDMLPage targetPage = findPageForImageFrame(imgFrame, pages);
+                    if (targetPage == null) continue;
+
+                    double[] pageTopLeft = getPageTopLeft(targetPage, minX, minY);
+                    IntermediateFrame iFrame = convertImageFrameForSpread(imgFrame, targetPage, pageTopLeft, zOrderCounter++);
+                    if (iFrame != null) {
+                        iSpread.addFrame(iFrame);
+                    }
+                }
+            }
+
+            // 텍스트 프레임 변환
+            for (IDMLTextFrame tf : spread.textFrames()) {
+                if (tf.isEditorialNote()) continue;
+                if (tf.previousTextFrame() != null && !tf.previousTextFrame().isEmpty()
+                        && !"n".equals(tf.previousTextFrame())) continue;
+
+                String storyId = tf.parentStoryId();
+                if (storyId == null || processedStories.contains(storyId)) continue;
+                processedStories.add(storyId);
+
+                IDMLStory story = idmlDoc.getStory(storyId);
+                if (story == null || story.isEmpty()) continue;
+
+                IDMLPage targetPage = findPageForTextFrame(tf, pages);
+                if (targetPage == null) continue;
+
+                double[] pageTopLeft = getPageTopLeft(targetPage, minX, minY);
+                IntermediateFrame iFrame = convertTextFrameForSpread(tf, story, targetPage, pageTopLeft, zOrderCounter++);
+                if (iFrame != null) {
+                    iSpread.addFrame(iFrame);
+                }
+            }
+
+            doc.addSpread(iSpread);
+        }
+    }
+
+    private IDMLPage findPageForShape(IDMLVectorShape shape, List<IDMLPage> pages) {
+        double[] bounds = shape.geometricBounds();
+        double[] transform = shape.itemTransform();
+        if (bounds == null || transform == null) return null;
+
+        double[] shapePos = IDMLGeometry.absoluteTopLeft(bounds, transform);
+        return findPageContaining(shapePos[0], shapePos[1], pages);
+    }
+
+    private IDMLPage findPageForImageFrame(IDMLImageFrame frame, List<IDMLPage> pages) {
+        double[] bounds = frame.geometricBounds();
+        double[] transform = frame.itemTransform();
+        if (bounds == null || transform == null) return null;
+
+        double[] pos = IDMLGeometry.absoluteTopLeft(bounds, transform);
+        return findPageContaining(pos[0], pos[1], pages);
+    }
+
+    private IDMLPage findPageForTextFrame(IDMLTextFrame frame, List<IDMLPage> pages) {
+        double[] bounds = frame.geometricBounds();
+        double[] transform = frame.itemTransform();
+        if (bounds == null || transform == null) return null;
+
+        double[] pos = IDMLGeometry.absoluteTopLeft(bounds, transform);
+        return findPageContaining(pos[0], pos[1], pages);
+    }
+
+    private IDMLPage findPageContaining(double x, double y, List<IDMLPage> pages) {
+        for (IDMLPage page : pages) {
+            double[] bounds = page.geometricBounds();
+            double[] transform = page.itemTransform();
+            if (bounds == null || transform == null) continue;
+
+            double[] topLeft = IDMLGeometry.absoluteTopLeft(bounds, transform);
+            double pageW = IDMLGeometry.width(bounds);
+            double pageH = IDMLGeometry.height(bounds);
+
+            if (x >= topLeft[0] && x <= topLeft[0] + pageW &&
+                y >= topLeft[1] && y <= topLeft[1] + pageH) {
+                return page;
+            }
+        }
+        // 가장 가까운 페이지 반환
+        return pages.isEmpty() ? null : pages.get(0);
+    }
+
+    private double[] getPageTopLeft(IDMLPage page, double spreadMinX, double spreadMinY) {
+        double[] bounds = page.geometricBounds();
+        double[] transform = page.itemTransform();
+        double[] topLeft = IDMLGeometry.absoluteTopLeft(bounds, transform);
+        return new double[]{ topLeft[0] - spreadMinX, topLeft[1] - spreadMinY };
+    }
+
+    private IntermediateFrame convertImageFrameForSpread(IDMLImageFrame imgFrame, IDMLPage page,
+                                                          double[] pageTopLeft, int zOrder) {
+        IntermediateFrame iFrame = convertImageFrame(imgFrame, page, zOrder);
+        if (iFrame != null) {
+            // 페이지 상대 좌표를 스프레드 상대 좌표로 변환
+            iFrame.x(iFrame.x() + CoordinateConverter.pointsToHwpunits(pageTopLeft[0]));
+            iFrame.y(iFrame.y() + CoordinateConverter.pointsToHwpunits(pageTopLeft[1]));
+        }
+        return iFrame;
+    }
+
+    private IntermediateFrame convertTextFrameForSpread(IDMLTextFrame tf, IDMLStory story,
+                                                         IDMLPage page, double[] pageTopLeft, int zOrder) {
+        IntermediateFrame iFrame = new IntermediateFrame();
+        iFrame.frameId("frame_" + tf.selfId());
+        iFrame.frameType("text");
+
+        // 프레임 좌표 계산 (페이지 상대 → 스프레드 상대)
+        setFramePosition(iFrame, tf.geometricBounds(), tf.itemTransform(),
+                page.geometricBounds(), page.itemTransform());
+        iFrame.x(iFrame.x() + CoordinateConverter.pointsToHwpunits(pageTopLeft[0]));
+        iFrame.y(iFrame.y() + CoordinateConverter.pointsToHwpunits(pageTopLeft[1]));
+        iFrame.zOrder(zOrder);
+
+        // Story 내용 변환 (수식 없이 텍스트만)
+        for (IDMLParagraph para : story.paragraphs()) {
+            IntermediateParagraph iPara = new IntermediateParagraph();
+
+            String paraStyleRef = para.appliedParagraphStyle();
+            if (paraStyleRef != null && paraStyleRefToId.containsKey(paraStyleRef)) {
+                iPara.paragraphStyleRef(paraStyleRefToId.get(paraStyleRef));
+            }
+
+            convertTextRuns(para, iPara);
+            iFrame.addParagraph(iPara);
+        }
+
+        return iFrame;
     }
 
     /**
@@ -645,10 +934,12 @@ public class IDMLToIntermediateConverter {
             String outputFormat = format;
 
             if (isDesignFormat(format)) {
-                // PSD, AI, TIFF → PNG 변환
-                if ("ai".equals(format)) {
-                    imageData = DesignFileConverter.convertAiToPng(imageFile, options.imageDpi());
+                // PSD, AI, PDF, EPS, TIFF → PNG 변환
+                if ("ai".equals(format) || "pdf".equals(format) || "eps".equals(format)) {
+                    // 벡터 포맷은 DPI 지정 필요
+                    imageData = DesignFileConverter.convertToPng(imageFile, options.imageDpi());
                 } else {
+                    // 래스터 포맷 (PSD, TIFF)
                     imageData = DesignFileConverter.convertToPng(imageFile);
                 }
                 outputFormat = "png";
@@ -657,45 +948,19 @@ public class IDMLToIntermediateConverter {
                 imageData = Files.readAllBytes(imageFile.toPath());
             }
 
-            // 픽셀 크기 감지
-            int originalWidth, originalHeight;
-            try {
-                int[] pixelSize = ImageInserter.detectPixelSize(imageData);
-                originalWidth = pixelSize[0];
-                originalHeight = pixelSize[1];
-            } catch (IOException e) {
-                // displayDimension 기반 폴백 (300 DPI 가정)
-                originalWidth = (int)(iImage.displayWidth() / 24);  // 7200/300 = 24
-                originalHeight = (int)(iImage.displayHeight() / 24);
-            }
-
-            // 목표 DPI에 맞게 리사이즈 (displayWidth/Height는 HWPUNIT = 1/7200 inch)
-            // 목표 픽셀 크기 = display크기(inch) * DPI = display크기(HWPUNIT) / 7200 * DPI
-            int targetDpi = options.imageDpi();
-            int targetWidth = (int) Math.round(iImage.displayWidth() * targetDpi / 7200.0);
-            int targetHeight = (int) Math.round(iImage.displayHeight() * targetDpi / 7200.0);
-
-            // 최소 크기 보장
-            targetWidth = Math.max(10, targetWidth);
-            targetHeight = Math.max(10, targetHeight);
-
-            // 원본보다 크게 확대하지 않음 (품질 저하 방지)
-            if (targetWidth > originalWidth || targetHeight > originalHeight) {
-                targetWidth = originalWidth;
-                targetHeight = originalHeight;
-            }
-
-            // 리사이즈 필요 여부 확인 (20% 이상 차이가 나면 리사이즈)
-            boolean needsResize = originalWidth > targetWidth * 1.2 || originalHeight > targetHeight * 1.2;
-
-            if (needsResize) {
-                imageData = resizeImage(imageData, targetWidth, targetHeight);
-                iImage.pixelWidth(targetWidth);
-                iImage.pixelHeight(targetHeight);
-                outputFormat = "png";  // 리사이즈 후 PNG로 저장
+            // 클리핑이 필요한 경우 (imageTransform이 있으면 이미지가 프레임 내에서 변환됨)
+            double[] imageTransform = imgFrame.imageTransform();
+            double[] frameBounds = imgFrame.geometricBounds();
+            if (imageTransform != null && frameBounds != null) {
+                imageData = applyImageClipping(imageData, imgFrame, iImage);
+                outputFormat = "png";
             } else {
-                iImage.pixelWidth(originalWidth);
-                iImage.pixelHeight(originalHeight);
+                // 클리핑 없음 - 기존 로직 (리사이즈만)
+                byte[] originalData = imageData;
+                imageData = processImageWithoutClipping(imageData, iImage);
+                if (imageData != originalData) {
+                    outputFormat = "png";  // 리사이즈된 경우 PNG로 변환됨
+                }
             }
 
             // base64 인코딩
@@ -709,6 +974,170 @@ public class IDMLToIntermediateConverter {
             // 변환 실패 시에도 placeholder 생성
             createPlaceholderImage(iImage, imageFile.getName());
         }
+    }
+
+    /**
+     * 클리핑 없이 이미지를 처리한다 (리사이즈만).
+     */
+    private byte[] processImageWithoutClipping(byte[] imageData, IntermediateImage iImage) throws IOException {
+        // 픽셀 크기 감지
+        int originalWidth, originalHeight;
+        try {
+            int[] pixelSize = ImageInserter.detectPixelSize(imageData);
+            originalWidth = pixelSize[0];
+            originalHeight = pixelSize[1];
+        } catch (IOException e) {
+            // displayDimension 기반 폴백 (300 DPI 가정)
+            originalWidth = (int)(iImage.displayWidth() / 24);  // 7200/300 = 24
+            originalHeight = (int)(iImage.displayHeight() / 24);
+        }
+
+        // 목표 DPI에 맞게 리사이즈 (displayWidth/Height는 HWPUNIT = 1/7200 inch)
+        int targetDpi = options.imageDpi();
+        int targetWidth = (int) Math.round(iImage.displayWidth() * targetDpi / 7200.0);
+        int targetHeight = (int) Math.round(iImage.displayHeight() * targetDpi / 7200.0);
+
+        // 최소 크기 보장
+        targetWidth = Math.max(10, targetWidth);
+        targetHeight = Math.max(10, targetHeight);
+
+        // 원본보다 크게 확대하지 않음 (품질 저하 방지)
+        if (targetWidth > originalWidth || targetHeight > originalHeight) {
+            targetWidth = originalWidth;
+            targetHeight = originalHeight;
+        }
+
+        // 리사이즈 필요 여부 확인 (20% 이상 차이가 나면 리사이즈)
+        boolean needsResize = originalWidth > targetWidth * 1.2 || originalHeight > targetHeight * 1.2;
+
+        if (needsResize) {
+            byte[] resizedData = resizeImage(imageData, targetWidth, targetHeight);
+            iImage.pixelWidth(targetWidth);
+            iImage.pixelHeight(targetHeight);
+            return resizedData;
+        } else {
+            iImage.pixelWidth(originalWidth);
+            iImage.pixelHeight(originalHeight);
+            return imageData;
+        }
+    }
+
+    /**
+     * 이미지 클리핑을 적용한다.
+     * IDML의 imageTransform과 graphicBounds를 사용하여 프레임에 맞게 이미지를 자른다.
+     */
+    private byte[] applyImageClipping(byte[] imageData, IDMLImageFrame imgFrame,
+                                       IntermediateImage iImage) throws IOException {
+        BufferedImage srcImage = ImageIO.read(new ByteArrayInputStream(imageData));
+        if (srcImage == null) {
+            warnings.add("Failed to decode image for clipping");
+            return imageData;
+        }
+
+        double[] frameBounds = imgFrame.geometricBounds();  // [top, left, bottom, right]
+        double[] imageTransform = imgFrame.imageTransform(); // [a, b, c, d, tx, ty]
+        double[] graphicBounds = imgFrame.graphicBounds();   // [left, top, right, bottom]
+
+        // 이미지 변환 정보
+        double imgScaleX = imageTransform[0];
+        double imgScaleY = imageTransform[3];
+        double imgTx = imageTransform[4];
+        double imgTy = imageTransform[5];
+
+        // graphicBounds = 원본 이미지의 좌표계 범위 (points 단위)
+        double gLeft = 0, gTop = 0, gRight = srcImage.getWidth(), gBottom = srcImage.getHeight();
+        if (graphicBounds != null && graphicBounds.length >= 4) {
+            gLeft = graphicBounds[0];
+            gTop = graphicBounds[1];
+            gRight = graphicBounds[2];
+            gBottom = graphicBounds[3];
+        }
+
+        // 스케일 절대값 (음수 = 뒤집기)
+        double absScaleX = Math.abs(imgScaleX);
+        double absScaleY = Math.abs(imgScaleY);
+        if (absScaleX < 0.001) absScaleX = 1.0;
+        if (absScaleY < 0.001) absScaleY = 1.0;
+
+        // 그래픽 좌표 (points) → 소스 픽셀 변환 스케일
+        double graphicW = gRight - gLeft;
+        double graphicH = gBottom - gTop;
+        double pointsToPixelX = (graphicW > 0) ? srcImage.getWidth() / graphicW : 1.0;
+        double pointsToPixelY = (graphicH > 0) ? srcImage.getHeight() / graphicH : 1.0;
+
+        // 프레임 로컬 좌표
+        double frameLeft = frameBounds[1];
+        double frameTop = frameBounds[0];
+        double frameRight = frameBounds[3];
+        double frameBottom = frameBounds[2];
+        double frameW = frameRight - frameLeft;
+        double frameH = frameBottom - frameTop;
+
+        // 프레임 좌표 → 그래픽 좌표 변환
+        // graphic_pos = (frame_local_pos - imgTx) / imgScale + gLeft
+        double graphicLeft = (frameLeft - imgTx) / imgScaleX + gLeft;
+        double graphicTop = (frameTop - imgTy) / imgScaleY + gTop;
+        double graphicRight = (frameRight - imgTx) / imgScaleX + gLeft;
+        double graphicBottom = (frameBottom - imgTy) / imgScaleY + gTop;
+
+        // 그래픽 좌표를 소스 픽셀 좌표로 변환
+        double srcLeft = (graphicLeft - gLeft) * pointsToPixelX;
+        double srcTop = (graphicTop - gTop) * pointsToPixelY;
+        double srcRight = (graphicRight - gLeft) * pointsToPixelX;
+        double srcBottom = (graphicBottom - gTop) * pointsToPixelY;
+
+        // 소스 이미지 범위로 클리핑
+        int srcX1 = Math.max(0, (int) Math.floor(Math.min(srcLeft, srcRight)));
+        int srcY1 = Math.max(0, (int) Math.floor(Math.min(srcTop, srcBottom)));
+        int srcX2 = Math.min(srcImage.getWidth(), (int) Math.ceil(Math.max(srcLeft, srcRight)));
+        int srcY2 = Math.min(srcImage.getHeight(), (int) Math.ceil(Math.max(srcTop, srcBottom)));
+
+        // 유효한 영역이 있는지 확인
+        if (srcX1 >= srcX2 || srcY1 >= srcY2) {
+            warnings.add("Image clipping resulted in empty area");
+            return imageData;
+        }
+
+        // 출력 이미지 크기 계산
+        int targetDpi = options.imageDpi();
+        int pixelWidth = (int) Math.ceil(frameW * targetDpi / 72.0);
+        int pixelHeight = (int) Math.ceil(frameH * targetDpi / 72.0);
+        pixelWidth = Math.max(10, pixelWidth);
+        pixelHeight = Math.max(10, pixelHeight);
+
+        // 투명 PNG 생성
+        BufferedImage clippedImage = new BufferedImage(pixelWidth, pixelHeight, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = clippedImage.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+
+        // 이미지 반전 처리
+        int actualSrcX1 = srcX1, actualSrcX2 = srcX2;
+        int actualSrcY1 = srcY1, actualSrcY2 = srcY2;
+        if (imgScaleX < 0) {
+            actualSrcX1 = srcImage.getWidth() - srcX2;
+            actualSrcX2 = srcImage.getWidth() - srcX1;
+        }
+        if (imgScaleY < 0) {
+            actualSrcY1 = srcImage.getHeight() - srcY2;
+            actualSrcY2 = srcImage.getHeight() - srcY1;
+        }
+
+        // 이미지 그리기 (클리핑된 영역을 출력 이미지 전체에 맞춤)
+        g.drawImage(srcImage,
+                0, 0, pixelWidth, pixelHeight,
+                actualSrcX1, actualSrcY1, actualSrcX2, actualSrcY2, null);
+
+        g.dispose();
+
+        // PNG 인코딩
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(clippedImage, "png", baos);
+
+        iImage.pixelWidth(pixelWidth);
+        iImage.pixelHeight(pixelHeight);
+
+        return baos.toByteArray();
     }
 
     /**
@@ -825,6 +1254,8 @@ public class IDMLToIntermediateConverter {
         switch (format.toLowerCase()) {
             case "psd":
             case "ai":
+            case "pdf":
+            case "eps":
             case "tiff":
             case "tif":
                 return true;

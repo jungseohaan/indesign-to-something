@@ -12,6 +12,9 @@ public class ConvertOptions {
     private String imageOutputDir;
     private int imageDpi;
     private String linksDirectory;
+    private boolean singlePagePerSpread;
+    private boolean mergeAllPages;
+    private boolean spreadBasedConversion;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -22,6 +25,9 @@ public class ConvertOptions {
         this.imageOutputDir = null;
         this.imageDpi = 72;
         this.linksDirectory = null;
+        this.singlePagePerSpread = false;
+        this.mergeAllPages = false;
+        this.spreadBasedConversion = false;
     }
 
     public static ConvertOptions defaults() {
@@ -102,6 +108,50 @@ public class ConvertOptions {
 
     public ConvertOptions linksDirectory(String linksDirectory) {
         this.linksDirectory = linksDirectory;
+        return this;
+    }
+
+    /**
+     * 스프레드 단위로 하나의 페이지로 합칠지 여부.
+     * true이면 facing pages(양면 페이지)를 하나의 페이지로 합친다.
+     * 이 옵션을 사용하면 스프레드의 모든 프레임이 첫 번째 페이지에 배치된다.
+     */
+    public boolean singlePagePerSpread() {
+        return singlePagePerSpread;
+    }
+
+    public ConvertOptions singlePagePerSpread(boolean singlePagePerSpread) {
+        this.singlePagePerSpread = singlePagePerSpread;
+        return this;
+    }
+
+    /**
+     * 모든 페이지를 하나의 페이지로 합칠지 여부.
+     * true이면 선택된 페이지 범위 전체를 하나의 페이지로 합친다.
+     * 스프레드 경계와 관계없이 모든 프레임이 첫 번째 페이지에 배치된다.
+     */
+    public boolean mergeAllPages() {
+        return mergeAllPages;
+    }
+
+    public ConvertOptions mergeAllPages(boolean mergeAllPages) {
+        this.mergeAllPages = mergeAllPages;
+        return this;
+    }
+
+    /**
+     * 스프레드 기반 변환 모드.
+     * true이면 IDML 스프레드를 HWPX 페이지로 1:1 매핑한다.
+     * 스프레드의 전체 크기가 HWPX 용지 크기가 되고,
+     * 모든 프레임은 스프레드 좌표계로 변환된다.
+     * 페이지 경계 판정이 불필요하며, 경계에 걸친 객체도 자연스럽게 처리된다.
+     */
+    public boolean spreadBasedConversion() {
+        return spreadBasedConversion;
+    }
+
+    public ConvertOptions spreadBasedConversion(boolean spreadBasedConversion) {
+        this.spreadBasedConversion = spreadBasedConversion;
         return this;
     }
 }
