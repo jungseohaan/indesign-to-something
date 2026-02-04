@@ -136,9 +136,11 @@ public class IntermediateToHwpxConverter {
                 // 스프레드 크기로 SecPr 생성 - 모든 floating 객체를 이 단락에 추가
                 Para secPrPara = addSectionBreakParaForSpreadWithReturn(section, spread);
 
-                // 프레임을 z-order 순서대로 정렬 (낮은 것부터 → 나중에 추가된 것이 위에 표시됨)
+                // 프레임을 콘텐츠 카테고리 순서대로 정렬:
+                // 배경 이미지 → 디자인 포맷 이미지 → 벡터 그래픽 → 일반 이미지 → 텍스트
+                // 같은 카테고리 내에서는 z-order 순서로 정렬
                 List<IntermediateFrame> sortedFrames = new ArrayList<>(spread.frames());
-                sortedFrames.sort((a, b) -> Integer.compare(a.zOrder(), b.zOrder()));
+                sortedFrames.sort((a, b) -> Integer.compare(a.exportOrder(), b.exportOrder()));
 
                 // 모든 프레임을 SecPr 단락의 새 Run에 추가 (단일 단락 = 페이지 오버플로우 방지)
                 for (IntermediateFrame frame : sortedFrames) {
@@ -181,9 +183,10 @@ public class IntermediateToHwpxConverter {
                 // SecPr 단락 생성 (페이지 속성)
                 addSectionBreakPara(section, page, true);
 
-                // 프레임을 z-order 순서대로 정렬 (낮은 것부터 → 나중에 추가된 것이 위에 표시됨)
+                // 프레임을 콘텐츠 카테고리 순서대로 정렬:
+                // 배경 이미지 → 디자인 포맷 이미지 → 벡터 그래픽 → 일반 이미지 → 텍스트
                 List<IntermediateFrame> sortedFrames = new ArrayList<>(page.frames());
-                sortedFrames.sort((a, b) -> Integer.compare(a.zOrder(), b.zOrder()));
+                sortedFrames.sort((a, b) -> Integer.compare(a.exportOrder(), b.exportOrder()));
 
                 // 각 floating 객체를 별도 단락에 배치
                 for (IntermediateFrame frame : sortedFrames) {

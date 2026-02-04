@@ -725,6 +725,15 @@ public class IDMLToIntermediateConverter {
         setFramePosition(iFrame, imgFrame.geometricBounds(), imgFrame.itemTransform(),
                 page.geometricBounds(), page.itemTransform());
 
+        // 배경 이미지 판별: 페이지 면적의 80% 이상을 차지하면 배경으로 간주
+        long pageWidth = page.widthHwpunits();
+        long pageHeight = page.heightHwpunits();
+        long pageArea = pageWidth * pageHeight;
+        long frameArea = iFrame.width() * iFrame.height();
+        if (pageArea > 0 && frameArea >= pageArea * 0.8) {
+            iFrame.isBackgroundImage(true);
+        }
+
         IntermediateImage iImage = new IntermediateImage();
         iImage.imageId("img_" + imgFrame.selfId());
         iImage.originalPath(imgFrame.linkResourceURI());
