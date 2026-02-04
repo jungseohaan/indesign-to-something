@@ -12,6 +12,8 @@ public class IDMLTextFrame {
     private String previousTextFrame;
     private String nextTextFrame;
     private int columnCount;
+    private double columnGutter;      // 컬럼 간 간격 (points)
+    private double[] insetSpacing;    // 내부 여백 [top, left, bottom, right] (points)
     private String fillColor;
 
     public String selfId() { return selfId; }
@@ -37,6 +39,12 @@ public class IDMLTextFrame {
 
     public int columnCount() { return columnCount; }
     public void columnCount(int v) { this.columnCount = v; }
+
+    public double columnGutter() { return columnGutter; }
+    public void columnGutter(double v) { this.columnGutter = v; }
+
+    public double[] insetSpacing() { return insetSpacing; }
+    public void insetSpacing(double[] v) { this.insetSpacing = v; }
 
     public String fillColor() { return fillColor; }
     public void fillColor(String v) { this.fillColor = v; }

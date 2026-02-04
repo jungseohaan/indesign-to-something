@@ -63,6 +63,23 @@ public class StyleMapper {
             style.letterSpacing(trackingToLetterSpacing(idmlStyle.tracking()));
         }
 
+        // Word Spacing (DesiredWordSpacing 사용)
+        if (idmlStyle.desiredWordSpacing() != null) {
+            style.wordSpacingPercent((int) Math.round(idmlStyle.desiredWordSpacing()));
+        }
+
+        // Tab Stops
+        if (idmlStyle.tabStops() != null && !idmlStyle.tabStops().isEmpty()) {
+            for (IDMLStyleDef.TabStop idmlTab : idmlStyle.tabStops()) {
+                if (idmlTab.position() != null) {
+                    long posHwpunits = CoordinateConverter.pointsToHwpunits(idmlTab.position());
+                    String alignment = mapTabAlignment(idmlTab.alignment());
+                    style.addTabStop(new IntermediateStyleDef.TabStop(
+                            posHwpunits, alignment, idmlTab.leader()));
+                }
+            }
+        }
+
         return style;
     }
 
@@ -183,6 +200,20 @@ public class StyleMapper {
             return r >= 240 && g >= 240 && b >= 240;
         } catch (NumberFormatException e) {
             return false;
+        }
+    }
+
+    /**
+     * IDML tab alignment → intermediate alignment string.
+     */
+    private static String mapTabAlignment(String idmlAlignment) {
+        if (idmlAlignment == null) return "left";
+        switch (idmlAlignment) {
+            case "LeftAlign": return "left";
+            case "CenterAlign": return "center";
+            case "RightAlign": return "right";
+            case "CharacterAlign": return "decimal";
+            default: return "left";
         }
     }
 

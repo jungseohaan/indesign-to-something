@@ -25,6 +25,39 @@ public class IDMLStyleDef {
     private Double horizontalScale;
     private Double tracking;
 
+    // 어절 간격 (Word Spacing)
+    private Double desiredWordSpacing;    // 기본값 100%
+    private Double minimumWordSpacing;
+    private Double maximumWordSpacing;
+
+    // 탭 정지점 목록
+    private java.util.List<TabStop> tabStops;
+
+    /**
+     * 탭 정지점 정보.
+     */
+    public static class TabStop {
+        private Double position;   // 탭 위치 (points)
+        private String alignment;  // "LeftAlign", "CenterAlign", "RightAlign", "CharacterAlign"
+        private String leader;     // 탭 리더 문자
+
+        public TabStop() {}
+        public TabStop(Double position, String alignment, String leader) {
+            this.position = position;
+            this.alignment = alignment;
+            this.leader = leader;
+        }
+
+        public Double position() { return position; }
+        public void position(Double v) { this.position = v; }
+
+        public String alignment() { return alignment; }
+        public void alignment(String v) { this.alignment = v; }
+
+        public String leader() { return leader; }
+        public void leader(String v) { this.leader = v; }
+    }
+
     public String selfRef() { return selfRef; }
     public void selfRef(String v) { this.selfRef = v; }
 
@@ -84,6 +117,25 @@ public class IDMLStyleDef {
 
     public Double tracking() { return tracking; }
     public void tracking(Double v) { this.tracking = v; }
+
+    public Double desiredWordSpacing() { return desiredWordSpacing; }
+    public void desiredWordSpacing(Double v) { this.desiredWordSpacing = v; }
+
+    public Double minimumWordSpacing() { return minimumWordSpacing; }
+    public void minimumWordSpacing(Double v) { this.minimumWordSpacing = v; }
+
+    public Double maximumWordSpacing() { return maximumWordSpacing; }
+    public void maximumWordSpacing(Double v) { this.maximumWordSpacing = v; }
+
+    public java.util.List<TabStop> tabStops() { return tabStops; }
+    public void tabStops(java.util.List<TabStop> v) { this.tabStops = v; }
+
+    public void addTabStop(TabStop ts) {
+        if (this.tabStops == null) {
+            this.tabStops = new java.util.ArrayList<>();
+        }
+        this.tabStops.add(ts);
+    }
 
     /**
      * selfRef에서 간단한 이름 추출.

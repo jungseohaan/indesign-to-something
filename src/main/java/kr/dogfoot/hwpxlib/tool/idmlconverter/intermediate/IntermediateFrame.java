@@ -32,6 +32,15 @@ public class IntermediateFrame {
     private long height;
     private int zOrder;
     private boolean isBackgroundImage;  // 배경 이미지 여부
+
+    // 텍스트 프레임 컬럼 정보
+    private int columnCount = 1;        // 컬럼 수
+    private long columnGutter;          // 컬럼 간격 (HWPUNIT)
+    private long insetTop;              // 내부 여백 상단 (HWPUNIT)
+    private long insetLeft;             // 내부 여백 좌측 (HWPUNIT)
+    private long insetBottom;           // 내부 여백 하단 (HWPUNIT)
+    private long insetRight;            // 내부 여백 우측 (HWPUNIT)
+
     private List<IntermediateParagraph> paragraphs;
     private IntermediateImage image;
 
@@ -62,6 +71,24 @@ public class IntermediateFrame {
 
     public boolean isBackgroundImage() { return isBackgroundImage; }
     public void isBackgroundImage(boolean v) { this.isBackgroundImage = v; }
+
+    public int columnCount() { return columnCount; }
+    public void columnCount(int v) { this.columnCount = v; }
+
+    public long columnGutter() { return columnGutter; }
+    public void columnGutter(long v) { this.columnGutter = v; }
+
+    public long insetTop() { return insetTop; }
+    public void insetTop(long v) { this.insetTop = v; }
+
+    public long insetLeft() { return insetLeft; }
+    public void insetLeft(long v) { this.insetLeft = v; }
+
+    public long insetBottom() { return insetBottom; }
+    public void insetBottom(long v) { this.insetBottom = v; }
+
+    public long insetRight() { return insetRight; }
+    public void insetRight(long v) { this.insetRight = v; }
 
     public List<IntermediateParagraph> paragraphs() { return paragraphs; }
     public void addParagraph(IntermediateParagraph para) { paragraphs.add(para); }

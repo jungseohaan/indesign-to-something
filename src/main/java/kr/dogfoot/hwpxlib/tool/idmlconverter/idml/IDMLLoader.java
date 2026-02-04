@@ -279,6 +279,31 @@ public class IDMLLoader {
             def.italic(lower.contains("italic") || lower.contains("oblique"));
         }
 
+        // Word Spacing (DesiredWordSpacing, MinimumWordSpacing, MaximumWordSpacing)
+        def.desiredWordSpacing(parseDoubleAttr(styleElem, "DesiredWordSpacing"));
+        def.minimumWordSpacing(parseDoubleAttr(styleElem, "MinimumWordSpacing"));
+        def.maximumWordSpacing(parseDoubleAttr(styleElem, "MaximumWordSpacing"));
+
+        // AutoLeading (퍼센트 값)
+        def.autoLeading(parseDoubleAttr(styleElem, "AutoLeading"));
+
+        // TabList (탭 정지점 목록)
+        Element props2 = getFirstChildElement(styleElem, "Properties");
+        if (props2 != null) {
+            Element tabList = getFirstChildElement(props2, "TabList");
+            if (tabList != null) {
+                List<Element> listItems = getChildElements(tabList, "ListItem");
+                for (Element item : listItems) {
+                    Double position = parseDoubleAttr(item, "Position");
+                    String alignment = getAttrOrNull(item, "Alignment");
+                    String leader = getAttrOrNull(item, "Leader");
+                    if (position != null) {
+                        def.addTabStop(new IDMLStyleDef.TabStop(position, alignment, leader));
+                    }
+                }
+            }
+        }
+
         return def;
     }
 
@@ -428,10 +453,18 @@ public class IDMLLoader {
         frame.previousTextFrame(getAttrOrNull(frameElem, "PreviousTextFrame"));
         frame.nextTextFrame(getAttrOrNull(frameElem, "NextTextFrame"));
 
-        // TextFramePreference에서 columnCount
+        // TextFramePreference에서 컬럼 정보 파싱
         Element tfPref = getFirstChildElement(frameElem, "TextFramePreference");
         if (tfPref != null) {
             frame.columnCount(parseIntAttr(tfPref, "TextColumnCount", 1));
+            frame.columnGutter(parseDoubleAttrDef(tfPref, "TextColumnGutter", 12.0));
+
+            // InsetSpacing (단일 값 또는 4면 개별 값)
+            String insetStr = tfPref.getAttribute("InsetSpacing");
+            if (insetStr != null && !insetStr.isEmpty()) {
+                double inset = Double.parseDouble(insetStr);
+                frame.insetSpacing(new double[]{inset, inset, inset, inset});
+            }
         }
 
         return frame;

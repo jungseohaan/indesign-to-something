@@ -11,6 +11,7 @@ public class ConvertOptions {
     private boolean includeStyles;
     private String imageOutputDir;
     private int imageDpi;
+    private int vectorDpi;
     private String linksDirectory;
     private boolean singlePagePerSpread;
     private boolean mergeAllPages;
@@ -24,6 +25,7 @@ public class ConvertOptions {
         this.includeStyles = true;
         this.imageOutputDir = null;
         this.imageDpi = 72;
+        this.vectorDpi = 300;
         this.linksDirectory = null;
         this.singlePagePerSpread = false;
         this.mergeAllPages = false;
@@ -94,6 +96,20 @@ public class ConvertOptions {
 
     public ConvertOptions imageDpi(int imageDpi) {
         this.imageDpi = imageDpi;
+        return this;
+    }
+
+    /**
+     * 벡터 그래픽 렌더링 DPI.
+     * IDML의 벡터 도형을 PNG로 래스터화할 때 사용하는 해상도.
+     * 기본값: 300
+     */
+    public int vectorDpi() {
+        return vectorDpi;
+    }
+
+    public ConvertOptions vectorDpi(int vectorDpi) {
+        this.vectorDpi = vectorDpi;
         return this;
     }
 

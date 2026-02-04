@@ -164,7 +164,7 @@ public class IDMLToIntermediateConverter {
                 // 벡터 도형을 PNG로 렌더링하여 이미지 프레임으로 변환 (가장 낮은 zOrder)
                 if (options.includeImages()) {
                     List<IDMLVectorShape> vectorShapes = spread.getVectorShapesOnPage(page);
-                    IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, 300);  // 300 DPI
+                    IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, options.vectorDpi());
 
                     for (IDMLVectorShape shape : vectorShapes) {
                         try {
@@ -256,6 +256,9 @@ public class IDMLToIntermediateConverter {
                             page.geometricBounds(), page.itemTransform());
                     iFrame.zOrder(zOrderCounter++);
 
+                    // 컬럼 정보 설정
+                    setColumnInfo(iFrame, tf);
+
                     // Story 내용 변환
                     Map<String, List<IDMLEquationExtractor.ExtractedEquation>> storyEquations =
                             extractStoryEquations(equationExtractor, storyId);
@@ -276,7 +279,7 @@ public class IDMLToIntermediateConverter {
      */
     private void convertSpreads(IntermediateDocument doc, Set<String> processedStories) {
         int zOrderCounter = 0;
-        IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, 300);
+        IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, options.vectorDpi());
 
         for (IDMLSpread spread : idmlDoc.spreads()) {
             List<IDMLPage> pages = spread.pages();
@@ -494,6 +497,9 @@ public class IDMLToIntermediateConverter {
         iFrame.y(iFrame.y() + CoordinateConverter.pointsToHwpunits(pageTopLeft[1]));
         iFrame.zOrder(zOrder);
 
+        // 컬럼 정보 설정
+        setColumnInfo(iFrame, tf);
+
         // Story 내용 변환 (수식 없이 텍스트만)
         for (IDMLParagraph para : story.paragraphs()) {
             IntermediateParagraph iPara = new IntermediateParagraph();
@@ -557,6 +563,25 @@ public class IDMLToIntermediateConverter {
         iFrame.y(CoordinateConverter.pointsToHwpunits(relPos[1]));
         iFrame.width(CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(frameBounds)));
         iFrame.height(CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(frameBounds)));
+    }
+
+    /**
+     * 텍스트 프레임의 컬럼 정보를 설정한다.
+     */
+    private void setColumnInfo(IntermediateFrame iFrame, IDMLTextFrame tf) {
+        iFrame.columnCount(tf.columnCount() > 0 ? tf.columnCount() : 1);
+
+        if (tf.columnCount() > 1) {
+            iFrame.columnGutter(CoordinateConverter.pointsToHwpunits(tf.columnGutter()));
+        }
+
+        if (tf.insetSpacing() != null) {
+            double[] inset = tf.insetSpacing();
+            iFrame.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
+            iFrame.insetLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
+            iFrame.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
+            iFrame.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
+        }
     }
 
     /**

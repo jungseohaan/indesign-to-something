@@ -4,12 +4,6 @@ import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.object.common.ObjectList;
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.CharPr;
-import kr.dogfoot.hwpxlib.object.content.header_xml.references.Fontface;
-import kr.dogfoot.hwpxlib.object.content.header_xml.references.ParaPr;
-import kr.dogfoot.hwpxlib.object.content.header_xml.references.Style;
-import kr.dogfoot.hwpxlib.object.content.header_xml.references.fontface.Font;
-import kr.dogfoot.hwpxlib.object.content.header_xml.references.parapr.LineSpacing;
-import kr.dogfoot.hwpxlib.object.content.header_xml.references.parapr.ParaMargin;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.ParaListCore;
@@ -21,12 +15,17 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Equation;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.secpr.SecPr;
 import kr.dogfoot.hwpxlib.tool.blankfilemaker.BlankFileMaker;
 import kr.dogfoot.hwpxlib.tool.equationconverter.EquationBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertException;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertResult;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.*;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
@@ -68,42 +67,27 @@ public class IntermediateToHwpxConverter {
     private final ConvertResult result;
     private HWPXFile hwpxFile;
 
-    // 스타일 ID → HWPX 내부 인덱스 매핑
-    private final Map<String, String> fontNameToId;
-    private final Map<String, String> paraStyleIdToParaPrId;
-    private final Map<String, String> paraStyleIdToStyleId;
-    private final Map<String, String> charStyleIdToCharPrId;
-    private final Map<String, IntermediateStyleDef> paraStyleIdToStyleDef;
-    private final Map<String, IntermediateStyleDef> charStyleIdToStyleDef;
-
-    private int nextCharPrIndex;
-    private int nextParaPrIndex;
-    private int nextStyleIndex;
+    // 폰트 및 스타일 레지스트리
+    private FontRegistry fontRegistry;
+    private StyleRegistry styleRegistry;
 
     private IntermediateToHwpxConverter(IntermediateDocument doc) {
         this.doc = doc;
         this.result = new ConvertResult();
-        this.fontNameToId = new LinkedHashMap<String, String>();
-        this.paraStyleIdToParaPrId = new LinkedHashMap<String, String>();
-        this.paraStyleIdToStyleId = new LinkedHashMap<String, String>();
-        this.charStyleIdToCharPrId = new LinkedHashMap<String, String>();
-        this.paraStyleIdToStyleDef = new LinkedHashMap<String, IntermediateStyleDef>();
-        this.charStyleIdToStyleDef = new LinkedHashMap<String, IntermediateStyleDef>();
     }
 
     private ConvertResult doConvert() throws ConvertException {
         // 1. BlankFileMaker로 기본 구조 생성
         hwpxFile = BlankFileMaker.make();
 
-        // 기존 기본 스타일 인덱스 파악
-        nextCharPrIndex = hwpxFile.headerXMLFile().refList().charProperties().count();
-        nextParaPrIndex = hwpxFile.headerXMLFile().refList().paraProperties().count();
-        nextStyleIndex = hwpxFile.headerXMLFile().refList().styles().count();
+        // 2. 레지스트리 초기화
+        fontRegistry = new FontRegistry(hwpxFile);
+        styleRegistry = new StyleRegistry(hwpxFile, fontRegistry);
 
-        // 2. 폰트 등록
-        registerFonts();
+        // 3. 폰트 등록
+        fontRegistry.registerFonts(doc);
 
-        // 3. 스타일 등록
+        // 4. 스타일 등록
         registerStyles();
 
         // 4. 스프레드/페이지별로 별도 section 파일 생성
@@ -225,60 +209,9 @@ public class IntermediateToHwpxConverter {
         result.framesConverted(framesConverted);
         result.equationsConverted(equationsConverted);
         result.imagesConverted(imagesConverted);
-        result.stylesConverted(paraStyleIdToParaPrId.size() + charStyleIdToCharPrId.size());
+        result.stylesConverted(styleRegistry.totalStyleCount());
 
         return result;
-    }
-
-    // ── 폰트 등록 ──
-
-    private void registerFonts() {
-        if (doc.fonts() == null || doc.fonts().isEmpty()) return;
-
-        // 폰트 이름 → ID 매핑 구축
-        // BlankFileMaker에서 이미 "함초롬돋움"=0, "함초롬바탕"=1 등록됨
-        fontNameToId.put("함초롬돋움", "0");
-        fontNameToId.put("함초롬바탕", "1");
-
-        int nextFontId = 2;
-        Set<String> registeredFonts = new HashSet<String>();
-        registeredFonts.add("함초롬돋움");
-        registeredFonts.add("함초롬바탕");
-
-        for (IntermediateFontDef fontDef : doc.fonts()) {
-            String hwpxName = fontDef.hwpxMappedName();
-            if (hwpxName == null) hwpxName = FontMapper.DEFAULT_HWPX_FONT;
-
-            if (!registeredFonts.contains(hwpxName)) {
-                String fontId = String.valueOf(nextFontId);
-                // 각 언어 Fontface에 폰트 추가
-                addFontToAllLanguages(hwpxName, fontId);
-                fontNameToId.put(hwpxName, fontId);
-                registeredFonts.add(hwpxName);
-                nextFontId++;
-            }
-        }
-    }
-
-    private void addFontToAllLanguages(String fontName, String fontId) {
-        for (Fontface face : hwpxFile.headerXMLFile().refList().fontfaces().fontfaces()) {
-            Font font = face.addNewFont();
-            font.idAnd(fontId)
-                    .faceAnd(fontName)
-                    .typeAnd(FontType.TTF)
-                    .isEmbeddedAnd(false);
-            font.createTypeInfo();
-            font.typeInfo()
-                    .familyTypeAnd(FontFamilyType.FCAT_GOTHIC)
-                    .weightAnd(8)
-                    .proportionAnd(4)
-                    .contrastAnd(0)
-                    .strokeVariationAnd(1)
-                    .armStyleAnd(true)
-                    .letterformAnd(true)
-                    .midlineAnd(1)
-                    .xHeight(1);
-        }
     }
 
     // ── 스타일 등록 ──
@@ -287,204 +220,15 @@ public class IntermediateToHwpxConverter {
         // 단락 스타일
         if (doc.paragraphStyles() != null) {
             for (IntermediateStyleDef styleDef : doc.paragraphStyles()) {
-                registerParagraphStyle(styleDef);
+                styleRegistry.registerParagraphStyle(styleDef);
             }
         }
 
         // 문자 스타일
         if (doc.characterStyles() != null) {
             for (IntermediateStyleDef styleDef : doc.characterStyles()) {
-                registerCharacterStyle(styleDef);
+                styleRegistry.registerCharacterStyle(styleDef);
             }
-        }
-    }
-
-    private void registerParagraphStyle(IntermediateStyleDef styleDef) {
-        // CharPr 생성
-        String charPrId = String.valueOf(nextCharPrIndex++);
-        CharPr charPr = hwpxFile.headerXMLFile().refList().charProperties().addNew();
-        buildCharPr(charPr, charPrId, styleDef);
-
-        // ParaPr 생성
-        String paraPrId = String.valueOf(nextParaPrIndex++);
-        ParaPr paraPr = hwpxFile.headerXMLFile().refList().paraProperties().addNew();
-        buildParaPr(paraPr, paraPrId, styleDef);
-
-        // Style 생성
-        String styleId = String.valueOf(nextStyleIndex++);
-        Style style = hwpxFile.headerXMLFile().refList().styles().addNew();
-        style.idAnd(styleId)
-                .typeAnd(StyleType.PARA)
-                .nameAnd(styleDef.name() != null ? styleDef.name() : "Style_" + styleId)
-                .engNameAnd(styleDef.name() != null ? styleDef.name() : "Style_" + styleId)
-                .paraPrIDRefAnd(paraPrId)
-                .charPrIDRefAnd(charPrId)
-                .nextStyleIDRefAnd(styleId)
-                .langIDAnd("1042")
-                .lockForm(false);
-
-        paraStyleIdToParaPrId.put(styleDef.id(), paraPrId);
-        paraStyleIdToStyleId.put(styleDef.id(), styleId);
-        charStyleIdToCharPrId.put(styleDef.id(), charPrId);
-        paraStyleIdToStyleDef.put(styleDef.id(), styleDef);
-    }
-
-    private void registerCharacterStyle(IntermediateStyleDef styleDef) {
-        String charPrId = String.valueOf(nextCharPrIndex++);
-        CharPr charPr = hwpxFile.headerXMLFile().refList().charProperties().addNew();
-        buildCharPr(charPr, charPrId, styleDef);
-        charStyleIdToCharPrId.put(styleDef.id(), charPrId);
-        charStyleIdToStyleDef.put(styleDef.id(), styleDef);
-    }
-
-    private void buildCharPr(CharPr charPr, String id, IntermediateStyleDef styleDef) {
-        int height = styleDef.fontSizeHwpunits() != null ? styleDef.fontSizeHwpunits() : 1000;
-        String textColor = styleDef.textColor() != null ? styleDef.textColor() : "#000000";
-
-        charPr.idAnd(id)
-                .heightAnd(height)
-                .textColorAnd(textColor)
-                .shadeColorAnd("none")
-                .useFontSpaceAnd(false)
-                .useKerningAnd(false)
-                .symMarkAnd(SymMarkSort.NONE)
-                .borderFillIDRef("2");
-
-        // Bold/Italic 설정
-        if (Boolean.TRUE.equals(styleDef.bold())) {
-            charPr.createBold();
-        }
-        if (Boolean.TRUE.equals(styleDef.italic())) {
-            charPr.createItalic();
-        }
-
-        // 폰트 참조
-        String fontId = resolveFontId(styleDef.fontFamily());
-        charPr.createFontRef();
-        charPr.fontRef().set(fontId, fontId, fontId, fontId, fontId, fontId, fontId);
-
-        charPr.createRatio();
-        charPr.ratio().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
-
-        // 자간 (letterSpacing)
-        short spacing = styleDef.letterSpacing() != null ? styleDef.letterSpacing() : 0;
-        charPr.createSpacing();
-        charPr.spacing().set(spacing, spacing, spacing, spacing, spacing, spacing, spacing);
-
-        charPr.createRelSz();
-        charPr.relSz().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
-
-        charPr.createOffset();
-        charPr.offset().set((short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0);
-
-        charPr.createUnderline();
-        charPr.underline().typeAnd(UnderlineType.NONE).shapeAnd(LineType3.SOLID).color("#000000");
-
-        charPr.createStrikeout();
-        charPr.strikeout().shapeAnd(LineType2.NONE).color("#000000");
-
-        charPr.createOutline();
-        charPr.outline().type(LineType1.NONE);
-
-        charPr.createShadow();
-        charPr.shadow().typeAnd(CharShadowType.NONE).colorAnd("#B2B2B2")
-                .offsetXAnd((short) 10).offsetY((short) 10);
-    }
-
-    private void buildParaPr(ParaPr paraPr, String id, IntermediateStyleDef styleDef) {
-        paraPr.idAnd(id)
-                .tabPrIDRefAnd("0")
-                .condenseAnd((byte) 0)
-                .fontLineHeightAnd(false)
-                .snapToGridAnd(true)
-                .suppressLineNumbersAnd(false)
-                .checked(false);
-
-        // 정렬
-        HorizontalAlign2 hAlign = mapAlignment(styleDef.alignment());
-        paraPr.createAlign();
-        paraPr.align().horizontalAnd(hAlign).vertical(VerticalAlign1.BASELINE);
-
-        paraPr.createHeading();
-        paraPr.heading().typeAnd(ParaHeadingType.NONE).idRefAnd("0").level((byte) 0);
-
-        paraPr.createBreakSetting();
-        paraPr.breakSetting()
-                .breakLatinWordAnd(LineBreakForLatin.KEEP_WORD)
-                .breakNonLatinWordAnd(LineBreakForNonLatin.KEEP_WORD)
-                .widowOrphanAnd(false)
-                .keepWithNextAnd(false)
-                .keepLinesAnd(false)
-                .pageBreakBeforeAnd(false)
-                .lineWrap(LineWrap.BREAK);
-
-        paraPr.createAutoSpacing();
-        paraPr.autoSpacing().eAsianEngAnd(false).eAsianNum(false);
-
-        // 마진
-        int indent = styleDef.firstLineIndent() != null ? styleDef.firstLineIndent().intValue() : 0;
-        int left = styleDef.leftMargin() != null ? styleDef.leftMargin().intValue() : 0;
-        int right = styleDef.rightMargin() != null ? styleDef.rightMargin().intValue() : 0;
-        int prev = styleDef.spaceBefore() != null ? styleDef.spaceBefore().intValue() : 0;
-        int next = styleDef.spaceAfter() != null ? styleDef.spaceAfter().intValue() : 0;
-
-        paraPr.createMargin();
-        paraPr.margin().createIntent();
-        paraPr.margin().intent().valueAnd(indent).unit(ValueUnit2.HWPUNIT);
-        paraPr.margin().createLeft();
-        paraPr.margin().left().valueAnd(left).unit(ValueUnit2.HWPUNIT);
-        paraPr.margin().createRight();
-        paraPr.margin().right().valueAnd(right).unit(ValueUnit2.HWPUNIT);
-        paraPr.margin().createPrev();
-        paraPr.margin().prev().valueAnd(prev).unit(ValueUnit2.HWPUNIT);
-        paraPr.margin().createNext();
-        paraPr.margin().next().valueAnd(next).unit(ValueUnit2.HWPUNIT);
-
-        // 줄 간격
-        LineSpacingType lsType = LineSpacingType.PERCENT;
-        int lsValue = 130;
-        if (styleDef.lineSpacingType() != null) {
-            if ("fixed".equals(styleDef.lineSpacingType())) {
-                lsType = LineSpacingType.FIXED;
-            }
-        }
-        if (styleDef.lineSpacingPercent() != null) {
-            lsValue = styleDef.lineSpacingPercent();
-        }
-
-        paraPr.createLineSpacing();
-        paraPr.lineSpacing().typeAnd(lsType).valueAnd(lsValue).unit(ValueUnit2.HWPUNIT);
-
-        paraPr.createBorder();
-        paraPr.border().borderFillIDRefAnd("2")
-                .offsetLeftAnd(0).offsetRightAnd(0)
-                .offsetTopAnd(0).offsetBottomAnd(0)
-                .connectAnd(false).ignoreMargin(false);
-    }
-
-    private String resolveFontId(String fontFamily) {
-        if (fontFamily != null) {
-            String hwpxName = FontMapper.mapToHwpxFont(fontFamily);
-            String id = fontNameToId.get(hwpxName);
-            if (id != null) return id;
-        }
-        // 기본: 함초롬바탕 (id=1)
-        return "1";
-    }
-
-    private static HorizontalAlign2 mapAlignment(String alignment) {
-        if (alignment == null) return HorizontalAlign2.JUSTIFY;
-        switch (alignment) {
-            case "left":
-                return HorizontalAlign2.LEFT;
-            case "center":
-                return HorizontalAlign2.CENTER;
-            case "right":
-                return HorizontalAlign2.RIGHT;
-            case "justify":
-                return HorizontalAlign2.JUSTIFY;
-            default:
-                return HorizontalAlign2.JUSTIFY;
         }
     }
 
@@ -494,12 +238,24 @@ public class IntermediateToHwpxConverter {
      * SecPr 단락을 생성한다. SecPr + ColPr + PageNum + <hp:t/> + linesegarray.
      * floating 객체는 포함하지 않는다 (별도 단락에 배치).
      */
-    private void addSectionBreakPara(SectionXMLFile section, IntermediatePage page, boolean isFirst) {
+    /**
+     * SecPr 단락을 생성한다.
+     * 페이지 모드와 스프레드 모드 모두에서 사용 가능한 통합 메서드.
+     *
+     * @param section       섹션 파일
+     * @param pageWidth     페이지/스프레드 너비 (HWPUNIT)
+     * @param pageHeight    페이지/스프레드 높이 (HWPUNIT)
+     * @param useDocMargins true: 문서 레이아웃 마진 사용, false: 최소 마진 사용
+     * @param addPageNum    true: 페이지 번호 컨트롤 추가
+     * @return 생성된 Para 객체
+     */
+    private Para createSectionBreakPara(SectionXMLFile section, long pageWidth, long pageHeight,
+                                         boolean useDocMargins, boolean addPageNum) {
         Para para = section.addNewPara();
         para.idAnd(nextParaId())
                 .paraPrIDRefAnd("3")
                 .styleIDRefAnd("0")
-                .pageBreakAnd(false)  // SecPr 자체가 섹션 구분 역할을 한다
+                .pageBreakAnd(false)
                 .columnBreakAnd(false)
                 .merged(false);
 
@@ -537,26 +293,34 @@ public class IntermediateToHwpxConverter {
                 .restartTypeAnd(LineNumberRestartType.Unknown)
                 .countByAnd(0).distanceAnd(0).startNumber(0);
 
-        // 페이지 크기
+        // 페이지/스프레드 크기
         secPr.createPagePr();
         secPr.pagePr()
                 .landscapeAnd(PageDirection.WIDELY)
-                .widthAnd((int) page.pageWidth())
-                .heightAnd((int) page.pageHeight())
+                .widthAnd((int) pageWidth)
+                .heightAnd((int) pageHeight)
                 .gutterType(GutterMethod.LEFT_ONLY);
 
         // 마진
-        DocumentLayout layout = doc.layout();
-        long marginTop = layout != null ? layout.marginTop() : 5668;
-        long marginBottom = layout != null ? layout.marginBottom() : 4252;
-        long marginLeft = layout != null ? layout.marginLeft() : 8504;
-        long marginRight = layout != null ? layout.marginRight() : 8504;
+        int marginTop, marginBottom, marginLeft, marginRight, headerFooter;
+        if (useDocMargins) {
+            DocumentLayout layout = doc.layout();
+            marginTop = (int) (layout != null ? layout.marginTop() : 5668);
+            marginBottom = (int) (layout != null ? layout.marginBottom() : 4252);
+            marginLeft = (int) (layout != null ? layout.marginLeft() : 8504);
+            marginRight = (int) (layout != null ? layout.marginRight() : 8504);
+            headerFooter = 4252;
+        } else {
+            // 스프레드 모드: 최소 마진
+            marginTop = marginBottom = marginLeft = marginRight = 1417;
+            headerFooter = 1417;
+        }
 
         secPr.pagePr().createMargin();
         secPr.pagePr().margin()
-                .headerAnd(4252).footerAnd(4252).gutterAnd(0)
-                .leftAnd((int) marginLeft).rightAnd((int) marginRight)
-                .topAnd((int) marginTop).bottom((int) marginBottom);
+                .headerAnd(headerFooter).footerAnd(headerFooter).gutterAnd(0)
+                .leftAnd(marginLeft).rightAnd(marginRight)
+                .topAnd(marginTop).bottom(marginBottom);
 
         secPr.createFootNotePr();
         secPr.footNotePr().createAutoNumFormat();
@@ -595,16 +359,24 @@ public class IntermediateToHwpxConverter {
                 .layoutAnd(ColumnDirection.LEFT)
                 .colCountAnd(1).sameSzAnd(true).sameGap(0);
 
-        // 페이지 번호 (하단 중앙, 아라비아 숫자)
-        Ctrl pageNumCtrl = run.addNewCtrl();
-        pageNumCtrl.addNewPageNum()
-                .posAnd(PageNumPosition.BOTTOM_CENTER)
-                .formatTypeAnd(kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.NumberType1.DIGIT)
-                .sideCharAnd("");
+        // 페이지 번호 (페이지 모드에서만)
+        if (addPageNum) {
+            Ctrl pageNumCtrl = run.addNewCtrl();
+            pageNumCtrl.addNewPageNum()
+                    .posAnd(PageNumPosition.BOTTOM_CENTER)
+                    .formatTypeAnd(kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.NumberType1.DIGIT)
+                    .sideCharAnd("");
+        }
 
         run.addNewT();
-
         addLineSegArray(para);
+
+        return para;
+    }
+
+    // 페이지 모드용 래퍼 (하위 호환성)
+    private void addSectionBreakPara(SectionXMLFile section, IntermediatePage page, boolean isFirst) {
+        createSectionBreakPara(section, page.pageWidth(), page.pageHeight(), true, true);
     }
 
     private void addPageBorderFills(SecPr secPr) {
@@ -625,211 +397,9 @@ public class IntermediateToHwpxConverter {
         pbf.offset().leftAnd(1417L).rightAnd(1417L).topAnd(1417L).bottom(1417L);
     }
 
-    /**
-     * 스프레드용 SecPr 단락 생성.
-     */
-    private void addSectionBreakParaForSpread(SectionXMLFile section, IntermediateSpread spread, boolean isFirst) {
-        Para para = section.addNewPara();
-        para.idAnd(nextParaId())
-                .paraPrIDRefAnd("3")
-                .styleIDRefAnd("0")
-                .pageBreakAnd(false)
-                .columnBreakAnd(false)
-                .merged(false);
-
-        Run run = para.addNewRun();
-        run.charPrIDRef("0");
-
-        run.createSecPr();
-        SecPr secPr = run.secPr();
-        secPr.idAnd("")
-                .textDirectionAnd(TextDirection.HORIZONTAL)
-                .spaceColumnsAnd(1134)
-                .tabStopAnd(8000)
-                .tabStopValAnd(4000)
-                .tabStopUnitAnd(kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.ValueUnit1.HWPUNIT)
-                .outlineShapeIDRefAnd("1")
-                .memoShapeIDRefAnd("0")
-                .textVerticalWidthHeadAnd(false);
-
-        secPr.createGrid();
-        secPr.grid().lineGridAnd(0).charGridAnd(0).wonggojiFormat(false);
-
-        secPr.createStartNum();
-        secPr.startNum().pageStartsOnAnd(PageStartON.BOTH)
-                .pageAnd(0).picAnd(0).tblAnd(0).equation(0);
-
-        secPr.createVisibility();
-        secPr.visibility()
-                .hideFirstHeaderAnd(false).hideFirstFooterAnd(false)
-                .hideFirstMasterPageAnd(false)
-                .borderAnd(VisibilityOption.SHOW_ALL).fillAnd(VisibilityOption.SHOW_ALL)
-                .hideFirstPageNumAnd(false).hideFirstEmptyLineAnd(false).showLineNumber(false);
-
-        secPr.createLineNumberShape();
-        secPr.lineNumberShape()
-                .restartTypeAnd(LineNumberRestartType.Unknown)
-                .countByAnd(0).distanceAnd(0).startNumber(0);
-
-        // 스프레드 크기
-        secPr.createPagePr();
-        secPr.pagePr()
-                .landscapeAnd(PageDirection.WIDELY)
-                .widthAnd((int) spread.spreadWidth())
-                .heightAnd((int) spread.spreadHeight())
-                .gutterType(GutterMethod.LEFT_ONLY);
-
-        // 마진 (스프레드에서는 0 또는 최소값)
-        secPr.pagePr().createMargin();
-        secPr.pagePr().margin()
-                .headerAnd(1417).footerAnd(1417).gutterAnd(0)
-                .leftAnd(1417).rightAnd(1417)
-                .topAnd(1417).bottom(1417);
-
-        secPr.createFootNotePr();
-        secPr.footNotePr().createAutoNumFormat();
-        secPr.footNotePr().autoNumFormat()
-                .typeAnd(NumberType2.DIGIT).userCharAnd("").prefixCharAnd("").suffixCharAnd(")").supscript(false);
-        secPr.footNotePr().createNoteLine();
-        secPr.footNotePr().noteLine().lengthAnd(-1)
-                .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
-        secPr.footNotePr().createNoteSpacing();
-        secPr.footNotePr().noteSpacing().betweenNotesAnd(283).belowLineAnd(567).aboveLine(850);
-        secPr.footNotePr().createNumbering();
-        secPr.footNotePr().numbering().typeAnd(FootNoteNumberingType.CONTINUOUS).newNum(1);
-        secPr.footNotePr().createPlacement();
-        secPr.footNotePr().placement().placeAnd(FootNotePlace.EACH_COLUMN).beneathText(false);
-
-        secPr.createEndNotePr();
-        secPr.endNotePr().createAutoNumFormat();
-        secPr.endNotePr().autoNumFormat()
-                .typeAnd(NumberType2.DIGIT).userCharAnd("").prefixCharAnd("").suffixCharAnd(")").supscript(false);
-        secPr.endNotePr().createNoteLine();
-        secPr.endNotePr().noteLine().lengthAnd(14692344)
-                .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
-        secPr.endNotePr().createNoteSpacing();
-        secPr.endNotePr().noteSpacing().betweenNotesAnd(0).belowLineAnd(567).aboveLine(850);
-        secPr.endNotePr().createNumbering();
-        secPr.endNotePr().numbering().typeAnd(EndNoteNumberingType.CONTINUOUS).newNum(1);
-        secPr.endNotePr().createPlacement();
-        secPr.endNotePr().placement().placeAnd(EndNotePlace.END_OF_DOCUMENT).beneathText(false);
-
-        addPageBorderFills(secPr);
-
-        // ColPr
-        Ctrl ctrl = run.addNewCtrl();
-        ctrl.addNewColPr()
-                .idAnd("").typeAnd(MultiColumnType.NEWSPAPER)
-                .layoutAnd(ColumnDirection.LEFT)
-                .colCountAnd(1).sameSzAnd(true).sameGap(0);
-
-        run.addNewT();
-        addLineSegArray(para);
-    }
-
-    /**
-     * 스프레드용 SecPr 단락 생성 (Para 반환).
-     * 모든 floating 객체를 이 단락에 추가하여 페이지 오버플로우를 방지한다.
-     */
+    // 스프레드 모드용 래퍼 (Para 반환)
     private Para addSectionBreakParaForSpreadWithReturn(SectionXMLFile section, IntermediateSpread spread) {
-        Para para = section.addNewPara();
-        para.idAnd(nextParaId())
-                .paraPrIDRefAnd("3")
-                .styleIDRefAnd("0")
-                .pageBreakAnd(false)
-                .columnBreakAnd(false)
-                .merged(false);
-
-        Run run = para.addNewRun();
-        run.charPrIDRef("0");
-
-        run.createSecPr();
-        SecPr secPr = run.secPr();
-        secPr.idAnd("")
-                .textDirectionAnd(TextDirection.HORIZONTAL)
-                .spaceColumnsAnd(1134)
-                .tabStopAnd(8000)
-                .tabStopValAnd(4000)
-                .tabStopUnitAnd(kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.ValueUnit1.HWPUNIT)
-                .outlineShapeIDRefAnd("1")
-                .memoShapeIDRefAnd("0")
-                .textVerticalWidthHeadAnd(false);
-
-        secPr.createGrid();
-        secPr.grid().lineGridAnd(0).charGridAnd(0).wonggojiFormat(false);
-
-        secPr.createStartNum();
-        secPr.startNum().pageStartsOnAnd(PageStartON.BOTH)
-                .pageAnd(0).picAnd(0).tblAnd(0).equation(0);
-
-        secPr.createVisibility();
-        secPr.visibility()
-                .hideFirstHeaderAnd(false).hideFirstFooterAnd(false)
-                .hideFirstMasterPageAnd(false)
-                .borderAnd(VisibilityOption.SHOW_ALL).fillAnd(VisibilityOption.SHOW_ALL)
-                .hideFirstPageNumAnd(false).hideFirstEmptyLineAnd(false).showLineNumber(false);
-
-        secPr.createLineNumberShape();
-        secPr.lineNumberShape()
-                .restartTypeAnd(LineNumberRestartType.Unknown)
-                .countByAnd(0).distanceAnd(0).startNumber(0);
-
-        // 스프레드 크기
-        secPr.createPagePr();
-        secPr.pagePr()
-                .landscapeAnd(PageDirection.WIDELY)
-                .widthAnd((int) spread.spreadWidth())
-                .heightAnd((int) spread.spreadHeight())
-                .gutterType(GutterMethod.LEFT_ONLY);
-
-        // 마진 (스프레드에서는 0 또는 최소값)
-        secPr.pagePr().createMargin();
-        secPr.pagePr().margin()
-                .headerAnd(1417).footerAnd(1417).gutterAnd(0)
-                .leftAnd(1417).rightAnd(1417)
-                .topAnd(1417).bottom(1417);
-
-        secPr.createFootNotePr();
-        secPr.footNotePr().createAutoNumFormat();
-        secPr.footNotePr().autoNumFormat()
-                .typeAnd(NumberType2.DIGIT).userCharAnd("").prefixCharAnd("").suffixCharAnd(")").supscript(false);
-        secPr.footNotePr().createNoteLine();
-        secPr.footNotePr().noteLine().lengthAnd(-1)
-                .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
-        secPr.footNotePr().createNoteSpacing();
-        secPr.footNotePr().noteSpacing().betweenNotesAnd(283).belowLineAnd(567).aboveLine(850);
-        secPr.footNotePr().createNumbering();
-        secPr.footNotePr().numbering().typeAnd(FootNoteNumberingType.CONTINUOUS).newNum(1);
-        secPr.footNotePr().createPlacement();
-        secPr.footNotePr().placement().placeAnd(FootNotePlace.EACH_COLUMN).beneathText(false);
-
-        secPr.createEndNotePr();
-        secPr.endNotePr().createAutoNumFormat();
-        secPr.endNotePr().autoNumFormat()
-                .typeAnd(NumberType2.DIGIT).userCharAnd("").prefixCharAnd("").suffixCharAnd(")").supscript(false);
-        secPr.endNotePr().createNoteLine();
-        secPr.endNotePr().noteLine().lengthAnd(14692344)
-                .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
-        secPr.endNotePr().createNoteSpacing();
-        secPr.endNotePr().noteSpacing().betweenNotesAnd(0).belowLineAnd(567).aboveLine(850);
-        secPr.endNotePr().createNumbering();
-        secPr.endNotePr().numbering().typeAnd(EndNoteNumberingType.CONTINUOUS).newNum(1);
-        secPr.endNotePr().createPlacement();
-        secPr.endNotePr().placement().placeAnd(EndNotePlace.END_OF_DOCUMENT).beneathText(false);
-
-        addPageBorderFills(secPr);
-
-        // ColPr
-        Ctrl ctrl = run.addNewCtrl();
-        ctrl.addNewColPr()
-                .idAnd("").typeAnd(MultiColumnType.NEWSPAPER)
-                .layoutAnd(ColumnDirection.LEFT)
-                .colCountAnd(1).sameSzAnd(true).sameGap(0);
-
-        run.addNewT();
-        addLineSegArray(para);
-
-        return para;
+        return createSectionBreakPara(section, spread.spreadWidth(), spread.spreadHeight(), false, false);
     }
 
     /**
@@ -897,6 +467,11 @@ public class IntermediateToHwpxConverter {
     private int convertTextFrame(Run anchorRun, IntermediateFrame frame) {
         int equationCount = 0;
         if (frame.paragraphs() == null) return 0;
+
+        // 다중 컬럼인 경우 테이블로 변환
+        if (frame.columnCount() > 1) {
+            return convertMultiColumnTextFrame(anchorRun, frame);
+        }
 
         // PAPER 기준 좌표: 음수 좌표는 bleed 영역(페이지 밖)을 의미하며 유효함
         long x = frame.x();
@@ -1005,6 +580,215 @@ public class IntermediateToHwpxConverter {
     }
 
     /**
+     * 다중 컬럼 텍스트 프레임을 1행 N열 테이블로 변환한다.
+     */
+    private int convertMultiColumnTextFrame(Run anchorRun, IntermediateFrame frame) {
+        int equationCount = 0;
+        int colCount = frame.columnCount();
+
+        // PAPER 기준 좌표
+        long x = Math.max(0, frame.x());
+        long y = Math.max(0, frame.y());
+        long totalWidth = frame.width();
+        long height = frame.height();
+        long gutter = frame.columnGutter();
+
+        // 컬럼 너비 = (전체너비 - 간격합계) / 컬럼수
+        long totalGutter = gutter * (colCount - 1);
+        long cellWidth = (totalWidth - totalGutter) / colCount;
+
+        // 테이블 생성
+        Table table = anchorRun.addNewTable();
+
+        // ShapeObject 기본 속성
+        String tableId = nextShapeId();
+        table.idAnd(tableId)
+                .zOrderAnd(frame.zOrder())
+                .numberingTypeAnd(NumberingType.TABLE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+
+        // 테이블 속성
+        table.pageBreakAnd(TablePageBreak.CELL)
+                .repeatHeaderAnd(false)
+                .rowCntAnd((short) 1)
+                .colCntAnd((short) colCount)
+                .cellSpacingAnd(0)  // 셀 간격은 개별 셀 여백으로 처리
+                .borderFillIDRefAnd("1")  // 투명 테두리
+                .noAdjustAnd(false);
+
+        // ShapeSize
+        table.createSZ();
+        table.sz().widthAnd(totalWidth).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(height).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        // ShapePosition — 용지(PAPER) 기준 절대 좌표
+        table.createPos();
+        table.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(y)
+                .horzOffset(x);
+
+        // OutMargin
+        table.createOutMargin();
+        table.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        // InMargin (프레임 내부 여백)
+        table.createInMargin();
+        table.inMargin().leftAnd(frame.insetLeft())
+                .rightAnd(frame.insetRight())
+                .topAnd(frame.insetTop())
+                .bottomAnd(frame.insetBottom());
+
+        // 단락 분배: 균등 분배 전략
+        List<IntermediateParagraph> allParas = frame.paragraphs();
+        int totalParas = allParas.size();
+        int parasPerColumn = Math.max(1, (totalParas + colCount - 1) / colCount);
+
+        // 단일 행(Tr) 생성
+        Tr tr = table.addNewTr();
+
+        // 각 컬럼(Tc) 생성
+        for (int col = 0; col < colCount; col++) {
+            Tc tc = tr.addNewTc();
+            tc.nameAnd("")
+                    .headerAnd(false)
+                    .hasMarginAnd(true)  // 셀 마진 사용
+                    .protectAnd(false)
+                    .editableAnd(false)
+                    .dirtyAnd(false)
+                    .borderFillIDRefAnd("1");  // 투명 테두리
+
+            // 셀 주소
+            tc.createCellAddr();
+            tc.cellAddr().colAddrAnd((short) col).rowAddrAnd((short) 0);
+
+            // 셀 병합 (병합 없음)
+            tc.createCellSpan();
+            tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
+
+            // 셀 크기
+            tc.createCellSz();
+            tc.cellSz().widthAnd(cellWidth).heightAnd(height);
+
+            // 셀 여백
+            tc.createCellMargin();
+            if (col < colCount - 1) {
+                // 마지막 컬럼이 아니면 오른쪽 여백으로 gutter 절반
+                tc.cellMargin().leftAnd(0L).rightAnd(gutter / 2).topAnd(0L).bottomAnd(0L);
+            } else {
+                tc.cellMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+            }
+            if (col > 0) {
+                // 첫 컬럼이 아니면 왼쪽 여백으로 gutter 절반
+                tc.cellMargin().leftAnd(gutter / 2);
+            }
+
+            // 셀 내부 SubList
+            tc.createSubList();
+            SubList subList = tc.subList();
+            subList.idAnd("")
+                    .textDirectionAnd(TextDirection.HORIZONTAL)
+                    .lineWrapAnd(LineWrapMethod.BREAK)
+                    .vertAlignAnd(VerticalAlign2.TOP);
+
+            // 이 컬럼에 배정된 단락들 추가
+            int startIdx = col * parasPerColumn;
+            int endIdx = Math.min(startIdx + parasPerColumn, totalParas);
+
+            for (int i = startIdx; i < endIdx; i++) {
+                IntermediateParagraph iPara = allParas.get(i);
+                equationCount += addParagraphToSubList(subList, iPara);
+            }
+
+            // 빈 셀 방지
+            if (subList.countOfPara() == 0) {
+                Para emptyPara = subList.addNewPara();
+                emptyPara.idAnd(nextParaId())
+                        .paraPrIDRefAnd("3")
+                        .styleIDRefAnd("0")
+                        .pageBreakAnd(false)
+                        .columnBreakAnd(false)
+                        .merged(false);
+                Run run = emptyPara.addNewRun();
+                run.charPrIDRef("0");
+                run.addNewT();
+            }
+        }
+
+        return equationCount;
+    }
+
+    /**
+     * 단락을 SubList에 추가한다 (테이블 셀용).
+     */
+    private int addParagraphToSubList(SubList subList, IntermediateParagraph iPara) {
+        int equationCount = 0;
+
+        String paraPrId = "3";
+        String styleId = "0";
+        String paraCharPrId = "0";
+        IntermediateStyleDef paraStyleDef = null;
+
+        if (iPara.paragraphStyleRef() != null) {
+            String mapped = styleRegistry.getParaPrId(iPara.paragraphStyleRef());
+            if (mapped != null) paraPrId = mapped;
+            String mappedStyle = styleRegistry.getStyleId(iPara.paragraphStyleRef());
+            if (mappedStyle != null) styleId = mappedStyle;
+            String mappedCharPr = styleRegistry.getCharPrId(iPara.paragraphStyleRef());
+            if (mappedCharPr != null) paraCharPrId = mappedCharPr;
+            paraStyleDef = styleRegistry.getParagraphStyleDef(iPara.paragraphStyleRef());
+        }
+
+        Para para = subList.addNewPara();
+        para.idAnd(nextParaId())
+                .paraPrIDRefAnd(paraPrId)
+                .styleIDRefAnd(styleId)
+                .pageBreakAnd(false)
+                .columnBreakAnd(false)
+                .merged(false);
+
+        if (iPara.contentItems().isEmpty()) {
+            Run run = para.addNewRun();
+            run.charPrIDRef(paraCharPrId);
+            run.addNewT();
+            return 0;
+        }
+
+        for (IntermediateParagraph.ContentItem item : iPara.contentItems()) {
+            if (item.isEquation()) {
+                addInlineEquationRun(para, item.equation());
+                equationCount++;
+            } else if (item.isTextRun()) {
+                String charPrId = resolveCharPrId(item.textRun(), paraCharPrId, paraStyleDef);
+                String text = sanitizeText(item.textRun().text() != null ? item.textRun().text() : "");
+
+                Run run = para.addNewRun();
+                run.charPrIDRef(charPrId);
+                run.addNewT().addText(text);
+            }
+        }
+
+        if (para.countOfRun() == 0) {
+            Run run = para.addNewRun();
+            run.charPrIDRef("0");
+            run.addNewT();
+        }
+
+        return equationCount;
+    }
+
+    /**
      * IntermediateFrame의 단락들을 ParaListCore(SubList 또는 SectionXMLFile)에 추가한다.
      */
     private int addParagraphsToParaList(ParaListCore paraList, IntermediateFrame frame) {
@@ -1016,13 +800,13 @@ public class IntermediateToHwpxConverter {
             String paraCharPrId = "0";  // 단락 스타일의 CharPr ID (런 기본값)
             IntermediateStyleDef paraStyleDef = null;
             if (iPara.paragraphStyleRef() != null) {
-                String mapped = paraStyleIdToParaPrId.get(iPara.paragraphStyleRef());
+                String mapped = styleRegistry.getParaPrId(iPara.paragraphStyleRef());
                 if (mapped != null) paraPrId = mapped;
-                String mappedStyle = paraStyleIdToStyleId.get(iPara.paragraphStyleRef());
+                String mappedStyle = styleRegistry.getStyleId(iPara.paragraphStyleRef());
                 if (mappedStyle != null) styleId = mappedStyle;
-                String mappedCharPr = charStyleIdToCharPrId.get(iPara.paragraphStyleRef());
+                String mappedCharPr = styleRegistry.getCharPrId(iPara.paragraphStyleRef());
                 if (mappedCharPr != null) paraCharPrId = mappedCharPr;
-                paraStyleDef = paraStyleIdToStyleDef.get(iPara.paragraphStyleRef());
+                paraStyleDef = styleRegistry.getParagraphStyleDef(iPara.paragraphStyleRef());
             }
 
             if (iPara.contentItems().isEmpty()) {
@@ -1132,7 +916,7 @@ public class IntermediateToHwpxConverter {
 
         // 문자 스타일 참조로 찾기
         if (iRun.characterStyleRef() != null) {
-            IntermediateStyleDef charStyleDef = charStyleIdToStyleDef.get(iRun.characterStyleRef());
+            IntermediateStyleDef charStyleDef = styleRegistry.getCharacterStyleDef(iRun.characterStyleRef());
             if (charStyleDef != null && paraStyleDef != null && hasCharStyleOverrides(charStyleDef)) {
                 // 문자 스타일이 단락 스타일과 다른 속성을 가지면 병합된 CharPr 생성
                 return createMergedCharPr(paraStyleDef, charStyleDef);
@@ -1142,7 +926,7 @@ public class IntermediateToHwpxConverter {
                 return paraCharPrId;
             }
             // paraStyleDef가 없으면 문자 스타일 CharPr 직접 사용
-            String id = charStyleIdToCharPrId.get(iRun.characterStyleRef());
+            String id = styleRegistry.getCharPrId(iRun.characterStyleRef());
             if (id != null) return id;
         }
 
@@ -1166,7 +950,7 @@ public class IntermediateToHwpxConverter {
      * 문자 스타일의 속성이 있으면 그것을 사용하고, 없으면 단락 스타일에서 상속한다.
      */
     private String createMergedCharPr(IntermediateStyleDef paraStyle, IntermediateStyleDef charStyle) {
-        String charPrId = String.valueOf(nextCharPrIndex++);
+        String charPrId = styleRegistry.nextCharPrId();
         CharPr charPr = hwpxFile.headerXMLFile().refList().charProperties().addNew();
 
         // 문자 스타일 우선, 없으면 단락 스타일에서 상속
@@ -1192,7 +976,7 @@ public class IntermediateToHwpxConverter {
         if (italic) charPr.createItalic();
 
         String fontFamily = charStyle.fontFamily() != null ? charStyle.fontFamily() : paraStyle.fontFamily();
-        String fontId = resolveFontId(fontFamily);
+        String fontId = fontRegistry.resolveFontId(fontFamily);
         charPr.createFontRef();
         charPr.fontRef().set(fontId, fontId, fontId, fontId, fontId, fontId, fontId);
 
@@ -1225,7 +1009,7 @@ public class IntermediateToHwpxConverter {
     }
 
     private String createRunCharPr(IntermediateTextRun iRun, IntermediateStyleDef paraStyleDef) {
-        String charPrId = String.valueOf(nextCharPrIndex++);
+        String charPrId = styleRegistry.nextCharPrId();
         CharPr charPr = hwpxFile.headerXMLFile().refList().charProperties().addNew();
 
         // 단락 스타일 속성을 기본값으로 사용하고, 런 레벨 오버라이드로 덮어쓴다
@@ -1266,7 +1050,7 @@ public class IntermediateToHwpxConverter {
         }
 
         String fontFamily = iRun.fontFamily() != null ? iRun.fontFamily() : baseFontFamily;
-        String fontId = resolveFontId(fontFamily);
+        String fontId = fontRegistry.resolveFontId(fontFamily);
         charPr.createFontRef();
         charPr.fontRef().set(fontId, fontId, fontId, fontId, fontId, fontId, fontId);
 
@@ -1350,6 +1134,8 @@ public class IntermediateToHwpxConverter {
             // PAPER 기준 좌표: 음수 좌표는 bleed 영역(용지 바깥)을 의미하며 유효함
             long posX = frame.x();
             long posY = frame.y();
+            long croppedW = displayW;
+            long croppedH = displayH;
 
             Picture pic = anchorRun.addNewPicture();
             String picId = nextShapeId();
@@ -1374,14 +1160,14 @@ public class IntermediateToHwpxConverter {
             pic.orgSz().set(displayW, displayH);
 
             pic.createCurSz();
-            pic.curSz().set(displayW, displayH);
+            pic.curSz().set(croppedW, croppedH);
 
             pic.createFlip();
             pic.flip().horizontalAnd(false).verticalAnd(false);
 
             pic.createRotationInfo();
             pic.rotationInfo().angleAnd((short) 0)
-                    .centerXAnd(displayW / 2).centerYAnd(displayH / 2)
+                    .centerXAnd(croppedW / 2).centerYAnd(croppedH / 2)
                     .rotateimageAnd(true);
 
             pic.createRenderingInfo();
@@ -1391,8 +1177,8 @@ public class IntermediateToHwpxConverter {
 
             // ShapeSize
             pic.createSZ();
-            pic.sz().widthAnd(displayW).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                    .heightAnd(displayH).heightRelToAnd(HeightRelTo.ABSOLUTE)
+            pic.sz().widthAnd(croppedW).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                    .heightAnd(croppedH).heightRelToAnd(HeightRelTo.ABSOLUTE)
                     .protectAnd(false);
 
             // ShapePosition — 용지(PAPER) 기준 절대 좌표
@@ -1413,16 +1199,16 @@ public class IntermediateToHwpxConverter {
             pic.createOutMargin();
             pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
-            // ImageRect
+            // ImageRect (크롭 후 크기)
             pic.createImgRect();
             pic.imgRect().createPt0();
             pic.imgRect().pt0().set(0L, 0L);
             pic.imgRect().createPt1();
-            pic.imgRect().pt1().set(displayW, 0L);
+            pic.imgRect().pt1().set(croppedW, 0L);
             pic.imgRect().createPt2();
-            pic.imgRect().pt2().set(displayW, displayH);
+            pic.imgRect().pt2().set(croppedW, croppedH);
             pic.imgRect().createPt3();
-            pic.imgRect().pt3().set(0L, displayH);
+            pic.imgRect().pt3().set(0L, croppedH);
 
             // ImageClip (pixel * 75)
             long clipW = (long) pixelW * 75;
