@@ -32,6 +32,7 @@ import kr.dogfoot.hwpxlib.tool.blankfilemaker.BlankFileMaker;
 import kr.dogfoot.hwpxlib.tool.equationconverter.EquationBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertException;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertResult;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.hwpx.HwpxShapeWriter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.*;
@@ -81,6 +82,9 @@ public class IntermediateToHwpxConverter {
 
     // BorderFill ID 카운터 (1, 2는 BlankFileMaker에서 사용)
     private int borderFillIdCounter = 3;
+
+    // 도형 작성기 (shape frame → HWPX Rectangle/Ellipse/Polygon)
+    private final HwpxShapeWriter shapeWriter = new HwpxShapeWriter(SHAPE_ID_COUNTER);
 
     private IntermediateToHwpxConverter(IntermediateDocument doc) {
         this.doc = doc;
@@ -1864,209 +1868,11 @@ public class IntermediateToHwpxConverter {
     // ── 사각형 프레임 변환 (페이지 경계선 등) ──
 
     /**
-     * 사각형 프레임을 HWPX Rectangle으로 변환한다.
-     * 페이지 경계선이나 테두리 사각형을 그릴 때 사용한다.
-     */
-    /**
      * 인라인 벡터 도형을 HWPX Rectangle/Ellipse/Polygon으로 변환한다.
+     * HwpxShapeWriter에 위임한다.
      */
     private void convertShapeFrame(Run anchorRun, IntermediateFrame frame) {
-        long x = frame.x();
-        long y = frame.y();
-        long w = frame.width();
-        long h = frame.height();
-
-        String shapeType = frame.shapeType();
-        if (shapeType == null) shapeType = "rectangle";
-
-        // 도형 타입에 따라 적절한 객체 생성
-        if ("oval".equals(shapeType)) {
-            convertOvalShape(anchorRun, frame, x, y, w, h);
-        } else if ("polygon".equals(shapeType)) {
-            convertPolygonShape(anchorRun, frame, x, y, w, h);
-        } else {
-            // rectangle 또는 기본
-            convertRectangleShape(anchorRun, frame, x, y, w, h);
-        }
-    }
-
-    private void convertRectangleShape(Run anchorRun, IntermediateFrame frame,
-                                        long x, long y, long w, long h) {
-        Rectangle rect = anchorRun.addNewRectangle();
-        setupShapeCommon(rect, frame, x, y, w, h);
-
-        // Rectangle 고유 속성 — 4 코너
-        rect.ratioAnd(frame.cornerRatio());
-        rect.createPt0();
-        rect.pt0().set(0L, 0L);
-        rect.createPt1();
-        rect.pt1().set(w, 0L);
-        rect.createPt2();
-        rect.pt2().set(w, h);
-        rect.createPt3();
-        rect.pt3().set(0L, h);
-
-        setupShapeLineAndFill(rect, frame);
-    }
-
-    private void convertOvalShape(Run anchorRun, IntermediateFrame frame,
-                                   long x, long y, long w, long h) {
-        Ellipse ellipse = anchorRun.addNewEllipse();
-        setupShapeCommon(ellipse, frame, x, y, w, h);
-
-        // Ellipse 고유 속성 - 중심, 축1, 축2
-        ellipse.createCenter();
-        ellipse.center().set(w / 2, h / 2);
-        ellipse.createAx1();
-        ellipse.ax1().set(w, h / 2);
-        ellipse.createAx2();
-        ellipse.ax2().set(w / 2, h);
-
-        setupShapeLineAndFill(ellipse, frame);
-    }
-
-    private void convertPolygonShape(Run anchorRun, IntermediateFrame frame,
-                                      long x, long y, long w, long h) {
-        Polygon polygon = anchorRun.addNewPolygon();
-        setupShapeCommon(polygon, frame, x, y, w, h);
-
-        // Polygon 경로 점 설정
-        List<double[]> pathPoints = frame.pathPoints();
-        if (pathPoints != null && !pathPoints.isEmpty()) {
-            // 상대 좌표로 변환 (HWPX는 도형 내부 상대 좌표 사용)
-            double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
-            for (double[] pt : pathPoints) {
-                minX = Math.min(minX, pt[0]);
-                minY = Math.min(minY, pt[1]);
-            }
-            for (double[] pt : pathPoints) {
-                long ptX = CoordinateConverter.pointsToHwpunits(pt[0] - minX);
-                long ptY = CoordinateConverter.pointsToHwpunits(pt[1] - minY);
-                polygon.addNewPt().set(ptX, ptY);
-            }
-        } else {
-            // 경로 점이 없으면 사각형으로 대체
-            polygon.addNewPt().set(0L, 0L);
-            polygon.addNewPt().set(w, 0L);
-            polygon.addNewPt().set(w, h);
-            polygon.addNewPt().set(0L, h);
-        }
-
-        setupShapeLineAndFill(polygon, frame);
-    }
-
-    private <T extends DrawingObject<T>> void setupShapeCommon(T shape, IntermediateFrame frame,
-                                                                 long x, long y, long w, long h) {
-        // ShapeObject 기본 속성
-        ((ShapeObject<T>) shape)
-                .idAnd(nextShapeId())
-                .zOrderAnd(frame.zOrder())
-                .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
-                .textFlowAnd(TextFlowSide.BOTH_SIDES)
-                .lockAnd(false)
-                .dropcapstyleAnd(DropCapStyle.None);
-
-        // ShapeComponent
-        ShapeComponent<T> sc = (ShapeComponent<T>) shape;
-        sc.hrefAnd("");
-        sc.groupLevelAnd((short) 0);
-        sc.instidAnd(nextShapeId());
-
-        sc.createOffset();
-        sc.offset().set(0L, 0L);
-
-        sc.createOrgSz();
-        sc.orgSz().set(w, h);
-
-        sc.createCurSz();
-        sc.curSz().set(w, h);
-
-        sc.createFlip();
-        sc.flip().horizontalAnd(false).verticalAnd(false);
-
-        sc.createRotationInfo();
-        sc.rotationInfo().angleAnd((short) 0)
-                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
-
-        sc.createRenderingInfo();
-        sc.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        sc.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        sc.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-
-        // ShapeSize
-        ShapeObject<T> so = (ShapeObject<T>) shape;
-        so.createSZ();
-        so.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
-
-        // ShapePosition — 인라인 객체는 글자처럼 취급
-        so.createPos();
-        if (frame.isInline()) {
-            // 인라인 객체: 글자처럼 취급 (텍스트 흐름에 따름)
-            so.pos().treatAsCharAnd(true)
-                    .affectLSpacingAnd(true)
-                    .flowWithTextAnd(true)
-                    .allowOverlapAnd(false)
-                    .holdAnchorAndSOAnd(false)
-                    .vertRelToAnd(VertRelTo.PARA)
-                    .horzRelToAnd(HorzRelTo.PARA)
-                    .vertAlignAnd(VertAlign.BOTTOM)
-                    .horzAlignAnd(HorzAlign.LEFT)
-                    .vertOffsetAnd(0L)
-                    .horzOffset(0L);
-        } else {
-            // 절대 위치 객체: 용지 기준 좌표
-            so.pos().treatAsCharAnd(false)
-                    .affectLSpacingAnd(false)
-                    .flowWithTextAnd(false)
-                    .allowOverlapAnd(true)
-                    .holdAnchorAndSOAnd(false)
-                    .vertRelToAnd(VertRelTo.PAPER)
-                    .horzRelToAnd(HorzRelTo.PAPER)
-                    .vertAlignAnd(VertAlign.TOP)
-                    .horzAlignAnd(HorzAlign.LEFT)
-                    .vertOffsetAnd(y)
-                    .horzOffset(x);
-        }
-
-        // OutMargin
-        so.createOutMargin();
-        so.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
-    }
-
-    private <T extends DrawingObject<T>> void setupShapeLineAndFill(T shape, IntermediateFrame frame) {
-        // LineShape (테두리)
-        boolean hasStroke = frame.strokeColor() != null && frame.strokeWeight() > 0;
-        String strokeColor = frame.strokeColor() != null ? frame.strokeColor() : "#000000";
-        int strokeWidthHwp = hasStroke ? (int) (frame.strokeWeight() * 100) : 0;
-        if (hasStroke && strokeWidthHwp < 14) strokeWidthHwp = 14;
-
-        shape.createLineShape();
-        shape.lineShape().colorAnd(strokeColor).widthAnd(strokeWidthHwp)
-                .styleAnd(hasStroke ? LineType2.SOLID : LineType2.NONE)
-                .endCapAnd(LineCap.FLAT)
-                .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
-                .headfillAnd(true).tailfillAnd(true)
-                .headSzAnd(ArrowSize.MEDIUM_MEDIUM).tailSzAnd(ArrowSize.MEDIUM_MEDIUM)
-                .outlineStyleAnd(OutlineStyle.NORMAL).alpha(0f);
-
-        // FillBrush (채우기)
-        if (frame.fillColor() != null) {
-            shape.createFillBrush();
-            shape.fillBrush().createWinBrush();
-            shape.fillBrush().winBrush().faceColorAnd(frame.fillColor())
-                    .hatchColorAnd(frame.fillColor())
-                    .alpha(0f);
-        }
-
-        // Shadow (필수 요소 - 없으면 NONE으로 설정)
-        shape.createShadow();
-        shape.shadow().typeAnd(DrawingShadowType.NONE)
-                .colorAnd("#B2B2B2")
-                .offsetXAnd(0L).offsetYAnd(0L)
-                .alpha(0f);
+        shapeWriter.write(anchorRun, frame);
     }
 
     private void convertRectangleFrame(Run anchorRun, IntermediateFrame frame) {

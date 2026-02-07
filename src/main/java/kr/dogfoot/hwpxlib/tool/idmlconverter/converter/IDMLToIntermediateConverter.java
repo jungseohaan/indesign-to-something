@@ -3,8 +3,10 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.IDMLEquationExtractor;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertException;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.idml.VectorShapeConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.imageinserter.DesignFileConverter;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 import kr.dogfoot.hwpxlib.tool.textfit.TextFitter;
@@ -83,6 +85,10 @@ public class IDMLToIntermediateConverter {
     private final Map<String, List<String>> linkedFrameTextCache;
     // 연결된 프레임 체인의 프레임 순서 (frameId -> 체인 내 인덱스)
     private final Map<String, Integer> linkedFrameIndexCache;
+    // 색상 참조 해석기
+    private final ColorResolver colorResolver;
+    // 벡터 도형 변환기
+    private final VectorShapeConverter vectorShapeConverter;
 
     private IDMLToIntermediateConverter(IDMLDocument idmlDoc, ConvertOptions options,
                                         String sourceFileName) {
@@ -95,6 +101,8 @@ public class IDMLToIntermediateConverter {
         this.warnings = new ArrayList<String>();
         this.linkedFrameTextCache = new HashMap<String, List<String>>();
         this.linkedFrameIndexCache = new HashMap<String, Integer>();
+        this.colorResolver = new ColorResolver(idmlDoc);
+        this.vectorShapeConverter = new VectorShapeConverter(colorResolver);
     }
 
     private IntermediateDocument doConvert() throws ConvertException {
@@ -631,97 +639,12 @@ public class IDMLToIntermediateConverter {
 
     /**
      * 인라인 벡터 도형을 IntermediateFrame으로 변환한다.
+     * VectorShapeConverter에 위임한다.
      */
     private IntermediateFrame convertInlineVectorShape(IDMLVectorShape shape,
                                                          double[] pageBounds, double[] pageTransform,
                                                          int zOrder) {
-        if (shape == null || shape.geometricBounds() == null || shape.itemTransform() == null) {
-            return null;
-        }
-
-        IntermediateFrame iFrame = new IntermediateFrame();
-        iFrame.frameId("shape_" + shape.selfId());
-        iFrame.frameType("shape");
-        iFrame.isInline(true);
-        iFrame.zOrder(zOrder);
-
-        // 도형 타입 설정
-        switch (shape.shapeType()) {
-            case RECTANGLE:
-                iFrame.shapeType("rectangle");
-                break;
-            case OVAL:
-                iFrame.shapeType("oval");
-                break;
-            case POLYGON:
-                iFrame.shapeType("polygon");
-                break;
-            case GRAPHIC_LINE:
-                iFrame.shapeType("line");
-                break;
-            default:
-                iFrame.shapeType("rectangle");
-        }
-
-        // 좌표 계산 (페이지 상대)
-        double[] shapeBounds = shape.geometricBounds();
-        double[] shapeTransform = shape.itemTransform();
-        double[] shapeAbs = IDMLGeometry.absoluteTopLeft(shapeBounds, shapeTransform);
-        double[] pageAbs = IDMLGeometry.absoluteTopLeft(pageBounds, pageTransform);
-
-        double relX = shapeAbs[0] - pageAbs[0];
-        double relY = shapeAbs[1] - pageAbs[1];
-        double w = IDMLGeometry.width(shapeBounds);
-        double h = IDMLGeometry.height(shapeBounds);
-
-        iFrame.x(CoordinateConverter.pointsToHwpunits(relX));
-        iFrame.y(CoordinateConverter.pointsToHwpunits(relY));
-        iFrame.width(CoordinateConverter.pointsToHwpunits(w));
-        iFrame.height(CoordinateConverter.pointsToHwpunits(h));
-
-        // 색상 설정
-        if (shape.hasFill()) {
-            String fillHex = resolveColorRef(shape.fillColor());
-            iFrame.fillColor(fillHex);
-            iFrame.fillTint(shape.fillTint());
-        }
-
-        if (shape.hasStroke()) {
-            String strokeHex = resolveColorRef(shape.strokeColor());
-            iFrame.strokeColor(strokeHex);
-            iFrame.strokeWeight(shape.strokeWeight());
-            iFrame.strokeTint(shape.strokeTint());
-        }
-
-        // 모서리 둥글기
-        if (shape.hasRoundedCorners()) {
-            iFrame.cornerRadius(shape.cornerRadius());
-            iFrame.cornerRadii(shape.cornerRadii());
-            // cornerRadius를 ratio로 변환 (대략적인 변환)
-            double maxDim = Math.min(w, h);
-            if (maxDim > 0) {
-                short ratio = (short) Math.min(50, Math.round(shape.cornerRadius() / maxDim * 100));
-                iFrame.cornerRatio(ratio);
-            }
-        }
-
-        // 폴리곤 경로 점 저장
-        if (shape.shapeType() == IDMLVectorShape.ShapeType.POLYGON && shape.pathPoints() != null) {
-            List<double[]> points = new ArrayList<>();
-            for (IDMLVectorShape.PathPoint pt : shape.pathPoints()) {
-                points.add(new double[]{ pt.anchorX(), pt.anchorY() });
-            }
-            iFrame.pathPoints(points);
-        }
-
-        System.err.println("[DEBUG] 인라인 도형 변환: " + shape.selfId()
-                + " | type=" + iFrame.shapeType()
-                + " | pos=(" + iFrame.x() + "," + iFrame.y() + ")"
-                + " | size=" + iFrame.width() + "x" + iFrame.height()
-                + " | fill=" + iFrame.fillColor()
-                + " | stroke=" + iFrame.strokeColor());
-
-        return iFrame;
+        return vectorShapeConverter.convert(shape, pageBounds, pageTransform, zOrder);
     }
 
     private IntermediateFrame convertImageFrameForSpread(IDMLImageFrame imgFrame, IDMLPage page,
@@ -2453,24 +2376,10 @@ public class IDMLToIntermediateConverter {
 
     /**
      * 색상 참조를 HEX 색상으로 변환한다.
+     * ColorResolver에 위임한다.
      */
     private String resolveColorRef(String colorRef) {
-        if (colorRef == null) return null;
-        if (colorRef.startsWith("#")) return colorRef;
-        if (colorRef.contains("None") || colorRef.contains("[None]")) return null;
-
-        // IDML Color 정의에서 색상 조회
-        String hexColor = idmlDoc.getColor(colorRef);
-        if (hexColor != null) {
-            return hexColor;
-        }
-
-        // 기본 색상 처리
-        if (colorRef.contains("Black")) return "#000000";
-        if (colorRef.contains("White")) return "#FFFFFF";
-
-        // 변환 실패 시 null 반환 (기본값 사용)
-        return null;
+        return colorResolver.resolve(colorRef);
     }
 
     /**
