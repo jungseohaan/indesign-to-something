@@ -232,6 +232,9 @@ public class AttributeNames {
     public static final String sameGap = "sameGap";
     public static final String gap = "gap";
     public static final String editable = "editable";
+    public static final String next = "next";
+    public static final String prev = "prev";
+    public static final String lineShapeFixed = "lineShapeFixed";
     public static final String dirty = "dirty";
     public static final String zorder = "zorder";
     public static final String fieldid = "fieldid";

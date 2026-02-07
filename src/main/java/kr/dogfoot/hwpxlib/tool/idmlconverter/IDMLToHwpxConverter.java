@@ -45,6 +45,21 @@ public class IDMLToHwpxConverter {
      */
     public static ConvertResult convert(String idmlPath, String hwpxPath,
                                          ConvertOptions options) throws ConvertException {
+        return convert(idmlPath, hwpxPath, options, ProgressReporter.NONE);
+    }
+
+    /**
+     * IDML 파일을 HWPX 파일로 변환한다 (진행률 보고 포함).
+     *
+     * @param idmlPath IDML 파일 경로
+     * @param hwpxPath 출력 HWPX 파일 경로
+     * @param options  변환 옵션
+     * @param reporter 진행률 보고기
+     * @return 변환 결과 (경고, 통계)
+     */
+    public static ConvertResult convert(String idmlPath, String hwpxPath,
+                                         ConvertOptions options,
+                                         ProgressReporter reporter) throws ConvertException {
         // Phase 1: IDML 로드
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
         try {
@@ -69,6 +84,9 @@ public class IDMLToHwpxConverter {
                 throw new ConvertException(ConvertException.Phase.HWPX_GENERATION,
                         "Failed to write HWPX file: " + e.getMessage(), e);
             }
+
+            // 변환 완료 보고
+            reporter.reportComplete(result);
 
             return result;
         } finally {

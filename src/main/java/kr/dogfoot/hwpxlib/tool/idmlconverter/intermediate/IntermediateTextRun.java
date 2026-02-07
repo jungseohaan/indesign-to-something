@@ -12,6 +12,7 @@ public class IntermediateTextRun {
     private Integer fontSizeHwpunits;
     private String textColor;
     private String fontFamily;
+    private Short letterSpacing;  // 자간 (-50 ~ 50)
 
     public String characterStyleRef() { return characterStyleRef; }
     public void characterStyleRef(String v) { this.characterStyleRef = v; }
@@ -33,4 +34,7 @@ public class IntermediateTextRun {
 
     public String fontFamily() { return fontFamily; }
     public void fontFamily(String v) { this.fontFamily = v; }
+
+    public Short letterSpacing() { return letterSpacing; }
+    public void letterSpacing(Short v) { this.letterSpacing = v; }
 }

@@ -19,6 +19,18 @@ public class DrawText extends SwitchableObject {
      */
     private Boolean editable;
     /**
+     * 다음 연결된 글상자 ID
+     */
+    private String next;
+    /**
+     * 이전 연결된 글상자 ID
+     */
+    private String prev;
+    /**
+     * 텍스트 상자 크기 고정 여부
+     */
+    private Boolean lineShapeFixed;
+    /**
      * 여백
      */
     private LeftRightTopBottom textMargin;
@@ -74,6 +86,45 @@ public class DrawText extends SwitchableObject {
         return this;
     }
 
+    public String next() {
+        return next;
+    }
+
+    public void next(String next) {
+        this.next = next;
+    }
+
+    public DrawText nextAnd(String next) {
+        this.next = next;
+        return this;
+    }
+
+    public String prev() {
+        return prev;
+    }
+
+    public void prev(String prev) {
+        this.prev = prev;
+    }
+
+    public DrawText prevAnd(String prev) {
+        this.prev = prev;
+        return this;
+    }
+
+    public Boolean lineShapeFixed() {
+        return lineShapeFixed;
+    }
+
+    public void lineShapeFixed(Boolean lineShapeFixed) {
+        this.lineShapeFixed = lineShapeFixed;
+    }
+
+    public DrawText lineShapeFixedAnd(Boolean lineShapeFixed) {
+        this.lineShapeFixed = lineShapeFixed;
+        return this;
+    }
+
     public LeftRightTopBottom textMargin() {
         return textMargin;
     }
@@ -109,6 +160,9 @@ public class DrawText extends SwitchableObject {
         this.lastWidth = from.lastWidth;
         this.name = from.name;
         this.editable = from.editable;
+        this.next = from.next;
+        this.prev = from.prev;
+        this.lineShapeFixed = from.lineShapeFixed;
 
         if (from.textMargin != null) {
             textMargin = from.textMargin.clone();

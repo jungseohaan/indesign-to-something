@@ -98,6 +98,7 @@ public class IDMLVectorShape {
     private ShapeType shapeType;
     private double[] geometricBounds;  // [top, left, bottom, right]
     private double[] itemTransform;    // [a, b, c, d, tx, ty]
+    private int zOrder;                // 파싱 순서 (렌더링 z-order)
     private List<PathPoint> pathPoints;
     private boolean pathOpen;          // true = 열린 경로 (선), false = 닫힌 경로 (면)
     private List<SubPath> subPaths;    // 복합 경로 (여러 GeometryPathType)
@@ -115,6 +116,15 @@ public class IDMLVectorShape {
     private LineJoin lineJoin;         // 선 연결 모양
     private double miterLimit;         // Miter 한계값
     private double[] dashPattern;      // 점선 패턴 (예: [4, 2] = 4pt 선, 2pt 간격)
+
+    // 투명도 (0~100, 100=불투명)
+    private double fillTint = 100;     // 채우기 색 농도 (tint)
+    private double strokeTint = 100;   // 선 색 농도 (tint)
+    private double opacity = 100;      // 전체 불투명도
+
+    // 인라인/앵커 객체 플래그
+    private boolean isInline;          // Story 내 인라인 그래픽 여부
+    private String parentStoryId;      // 인라인 그래픽의 부모 Story ID
 
     public IDMLVectorShape() {
         this.pathPoints = new ArrayList<>();
@@ -141,6 +151,9 @@ public class IDMLVectorShape {
 
     public double[] itemTransform() { return itemTransform; }
     public void itemTransform(double[] v) { this.itemTransform = v; }
+
+    public int zOrder() { return zOrder; }
+    public void zOrder(int v) { this.zOrder = v; }
 
     public List<PathPoint> pathPoints() { return pathPoints; }
     public void addPathPoint(PathPoint p) { this.pathPoints.add(p); }
@@ -190,6 +203,21 @@ public class IDMLVectorShape {
 
     public double[] dashPattern() { return dashPattern; }
     public void dashPattern(double[] v) { this.dashPattern = v; }
+
+    public double fillTint() { return fillTint; }
+    public void fillTint(double v) { this.fillTint = v; }
+
+    public double strokeTint() { return strokeTint; }
+    public void strokeTint(double v) { this.strokeTint = v; }
+
+    public double opacity() { return opacity; }
+    public void opacity(double v) { this.opacity = v; }
+
+    public boolean isInline() { return isInline; }
+    public void isInline(boolean v) { this.isInline = v; }
+
+    public String parentStoryId() { return parentStoryId; }
+    public void parentStoryId(String v) { this.parentStoryId = v; }
 
     /**
      * 점선 패턴이 있는지 확인.

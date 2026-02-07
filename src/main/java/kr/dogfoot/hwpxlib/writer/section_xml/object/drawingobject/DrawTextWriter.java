@@ -29,7 +29,10 @@ public class DrawTextWriter extends ElementWriter {
                 .elementWriter(this)
                 .attribute(AttributeNames.lastWidth, drawText.lastWidth())
                 .attribute(AttributeNames.name, drawText.name())
-                .attribute(AttributeNames.editable, drawText.editable());
+                .attribute(AttributeNames.editable, drawText.editable())
+                .attribute(AttributeNames.next, drawText.next())
+                .attribute(AttributeNames.prev, drawText.prev())
+                .attribute(AttributeNames.lineShapeFixed, drawText.lineShapeFixed());
 
         if (drawText.subList() != null) {
             writeChild(ElementWriterSort.SubList, drawText.subList());

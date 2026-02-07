@@ -11,6 +11,7 @@ public class IDMLImageFrame {
     private String selfId;
     private double[] geometricBounds;    // 프레임의 bounds [top, left, bottom, right]
     private double[] itemTransform;      // 프레임의 transform [a, b, c, d, tx, ty]
+    private int zOrder;                  // 파싱 순서 (렌더링 z-order)
     private String linkResourceURI;
     private String linkStoredState;
     private String linkResourceFormat;
@@ -28,6 +29,9 @@ public class IDMLImageFrame {
 
     public double[] itemTransform() { return itemTransform; }
     public void itemTransform(double[] v) { this.itemTransform = v; }
+
+    public int zOrder() { return zOrder; }
+    public void zOrder(int v) { this.zOrder = v; }
 
     public String linkResourceURI() { return linkResourceURI; }
     public void linkResourceURI(String v) { this.linkResourceURI = v; }

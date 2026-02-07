@@ -124,6 +124,14 @@ public class StyleRegistry {
         return String.valueOf(nextCharPrIndex++);
     }
 
+    /**
+     * 다음 ParaPr ID를 할당하고 반환한다.
+     * 인라인 단락 속성 오버라이드용 ParaPr을 생성할 때 사용한다.
+     */
+    public String nextParaPrId() {
+        return String.valueOf(nextParaPrIndex++);
+    }
+
     public String getParaPrId(String styleId) {
         return paraStyleIdToParaPrId.get(styleId);
     }

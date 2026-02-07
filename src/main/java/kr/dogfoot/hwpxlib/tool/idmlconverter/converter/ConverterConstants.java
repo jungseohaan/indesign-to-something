@@ -14,8 +14,8 @@ public final class ConverterConstants {
     public static final int DEFAULT_IMAGE_DPI = 72;
 
     // ===== 좌표 변환 =====
-    /** 1 point = 283.4645 HWPUNIT */
-    public static final double HWPUNIT_PER_POINT = 283.4645;
+    /** 1 point = 100 HWPUNIT (7200 hwpunit/inch ÷ 72 points/inch) */
+    public static final double HWPUNIT_PER_POINT = 100.0;
 
     /** 1 pixel (72 DPI) = 100 HWPUNIT */
     public static final int HWPUNIT_PER_PIXEL_72DPI = 100;

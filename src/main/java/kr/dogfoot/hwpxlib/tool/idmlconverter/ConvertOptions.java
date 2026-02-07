@@ -16,6 +16,7 @@ public class ConvertOptions {
     private boolean singlePagePerSpread;
     private boolean mergeAllPages;
     private boolean spreadBasedConversion;
+    private boolean drawPageBoundary;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -30,6 +31,7 @@ public class ConvertOptions {
         this.singlePagePerSpread = false;
         this.mergeAllPages = false;
         this.spreadBasedConversion = false;
+        this.drawPageBoundary = false;
     }
 
     public static ConvertOptions defaults() {
@@ -168,6 +170,21 @@ public class ConvertOptions {
 
     public ConvertOptions spreadBasedConversion(boolean spreadBasedConversion) {
         this.spreadBasedConversion = spreadBasedConversion;
+        return this;
+    }
+
+    /**
+     * 페이지 경계선 그리기 옵션.
+     * true이면 PNG 배경에 페이지 경계선을 그리고,
+     * HWPX에도 페이지 경계를 나타내는 벡터 사각형을 추가한다.
+     * 인디자인 스프레드에서 개별 페이지 영역을 시각적으로 표시한다.
+     */
+    public boolean drawPageBoundary() {
+        return drawPageBoundary;
+    }
+
+    public ConvertOptions drawPageBoundary(boolean drawPageBoundary) {
+        this.drawPageBoundary = drawPageBoundary;
         return this;
     }
 }

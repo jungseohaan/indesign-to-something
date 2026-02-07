@@ -122,7 +122,9 @@ public class StyleMapper {
         int idx = 0;
         for (Map.Entry<String, IDMLStyleDef> entry : idmlStyles.entrySet()) {
             String id = "pstyle_" + idx;
-            IntermediateStyleDef mapped = mapParagraphStyle(entry.getValue(), id, colorMap);
+            // 스타일 상속 해결 후 매핑
+            IDMLStyleDef resolved = resolveStyleInheritance(entry.getValue(), idmlStyles);
+            IntermediateStyleDef mapped = mapParagraphStyle(resolved, id, colorMap);
             outStyles.add(mapped);
             refToId.put(entry.getKey(), id);
             idx++;
@@ -137,12 +139,66 @@ public class StyleMapper {
         int idx = 0;
         for (Map.Entry<String, IDMLStyleDef> entry : idmlStyles.entrySet()) {
             String id = "cstyle_" + idx;
-            IntermediateStyleDef mapped = mapCharacterStyle(entry.getValue(), id, colorMap);
+            // 스타일 상속 해결 후 매핑
+            IDMLStyleDef resolved = resolveStyleInheritance(entry.getValue(), idmlStyles);
+            IntermediateStyleDef mapped = mapCharacterStyle(resolved, id, colorMap);
             outStyles.add(mapped);
             refToId.put(entry.getKey(), id);
             idx++;
         }
         return refToId;
+    }
+
+    /**
+     * 부모 스타일(basedOn)에서 상속된 속성을 해결한다.
+     */
+    private static IDMLStyleDef resolveStyleInheritance(IDMLStyleDef style, Map<String, IDMLStyleDef> allStyles) {
+        if (style.basedOn() == null || style.basedOn().isEmpty()) {
+            return style;
+        }
+
+        // 부모 스타일 찾기
+        IDMLStyleDef parent = allStyles.get(style.basedOn());
+        if (parent == null) {
+            return style;
+        }
+
+        // 부모 스타일도 상속 해결 (재귀)
+        parent = resolveStyleInheritance(parent, allStyles);
+
+        // 새 스타일 객체 생성하여 병합
+        IDMLStyleDef merged = new IDMLStyleDef();
+        merged.selfRef(style.selfRef());
+        merged.name(style.name());
+        merged.basedOn(style.basedOn());
+
+        // 부모 속성 먼저 복사, 자식 속성으로 덮어쓰기
+        merged.fontFamily(style.fontFamily() != null ? style.fontFamily() : parent.fontFamily());
+        merged.fontSize(style.fontSize() != null ? style.fontSize() : parent.fontSize());
+        merged.fillColor(style.fillColor() != null ? style.fillColor() : parent.fillColor());
+        merged.fontStyle(style.fontStyle() != null ? style.fontStyle() : parent.fontStyle());
+        merged.bold(style.bold() != null ? style.bold() : parent.bold());
+        merged.italic(style.italic() != null ? style.italic() : parent.italic());
+        merged.textAlignment(style.textAlignment() != null ? style.textAlignment() : parent.textAlignment());
+        merged.firstLineIndent(style.firstLineIndent() != null ? style.firstLineIndent() : parent.firstLineIndent());
+        merged.leftIndent(style.leftIndent() != null ? style.leftIndent() : parent.leftIndent());
+        merged.rightIndent(style.rightIndent() != null ? style.rightIndent() : parent.rightIndent());
+        merged.spaceBefore(style.spaceBefore() != null ? style.spaceBefore() : parent.spaceBefore());
+        merged.spaceAfter(style.spaceAfter() != null ? style.spaceAfter() : parent.spaceAfter());
+        merged.leading(style.leading() != null ? style.leading() : parent.leading());
+        merged.leadingType(style.leadingType() != null ? style.leadingType() : parent.leadingType());
+        merged.autoLeading(style.autoLeading() != null ? style.autoLeading() : parent.autoLeading());
+        merged.tracking(style.tracking() != null ? style.tracking() : parent.tracking());
+        merged.desiredWordSpacing(style.desiredWordSpacing() != null ? style.desiredWordSpacing() : parent.desiredWordSpacing());
+
+        // 탭 정지점 상속
+        if (style.tabStops() != null && !style.tabStops().isEmpty()) {
+            merged.tabStops(style.tabStops());
+        } else if (parent.tabStops() != null) {
+            merged.tabStops(parent.tabStops());
+        }
+
+        return merged;
     }
 
     /**
@@ -164,43 +220,42 @@ public class StyleMapper {
 
     /**
      * IDML 색상 참조를 #RRGGBB로 변환.
-     * 흰색(#FFFFFF 또는 유사)은 배경 이미지 없이 안 보이므로 30% 회색으로 대체한다.
      */
     public static String resolveColor(String fillColor, Map<String, String> colorMap) {
         if (fillColor == null || fillColor.isEmpty()) return null;
-        String hex;
+        if (fillColor.contains("None") || fillColor.contains("[None]")) return null;
         if (fillColor.startsWith("#")) {
-            hex = fillColor;
-        } else {
-            // "Color/..." 형식
-            hex = colorMap.get(fillColor);
-            if (hex == null) {
-                // "Color/Black" 같은 이름
-                if (fillColor.contains("Black")) return "#000000";
-                if (fillColor.contains("White")) return "#4D4D4D";
-                return null;
+            return fillColor;
+        }
+
+        // 직접 조회
+        String hex = colorMap.get(fillColor);
+        if (hex != null) {
+            return hex;
+        }
+
+        // "Color/..." 형식에서 키만 추출하여 재시도
+        if (fillColor.startsWith("Color/")) {
+            String colorKey = fillColor.substring(6);  // "Color/" 제거
+            for (Map.Entry<String, String> entry : colorMap.entrySet()) {
+                if (entry.getKey().endsWith("/" + colorKey) || entry.getKey().equals(colorKey)) {
+                    return entry.getValue();
+                }
             }
         }
-        // 흰색 또는 거의 흰색 → 30% 회색 (#4D4D4D)
-        if (isNearWhite(hex)) {
-            return "#4D4D4D";
-        }
-        return hex;
-    }
 
-    /**
-     * 색상이 흰색 또는 거의 흰색인지 확인한다 (R, G, B 모두 240 이상).
-     */
-    private static boolean isNearWhite(String hex) {
-        if (hex == null || !hex.startsWith("#") || hex.length() < 7) return false;
-        try {
-            int r = Integer.parseInt(hex.substring(1, 3), 16);
-            int g = Integer.parseInt(hex.substring(3, 5), 16);
-            int b = Integer.parseInt(hex.substring(5, 7), 16);
-            return r >= 240 && g >= 240 && b >= 240;
-        } catch (NumberFormatException e) {
-            return false;
-        }
+        // 기본 색상 이름으로 처리
+        String upper = fillColor.toUpperCase();
+        if (upper.contains("BLACK")) return "#000000";
+        if (upper.contains("WHITE")) return "#FFFFFF";
+        if (upper.contains("RED")) return "#FF0000";
+        if (upper.contains("GREEN")) return "#00FF00";
+        if (upper.contains("BLUE")) return "#0000FF";
+        if (upper.contains("YELLOW")) return "#FFFF00";
+        if (upper.contains("CYAN")) return "#00FFFF";
+        if (upper.contains("MAGENTA")) return "#FF00FF";
+
+        return null;
     }
 
     /**

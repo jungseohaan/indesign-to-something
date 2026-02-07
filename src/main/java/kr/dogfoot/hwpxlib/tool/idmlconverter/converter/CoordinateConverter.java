@@ -98,4 +98,18 @@ public class CoordinateConverter {
     public static double hwpunitsToMm(long hwpunits) {
         return hwpunits * 25.4 / 7200.0;
     }
+
+    /**
+     * 좌표 값을 로그용 문자열로 변환 (소수점 5자리).
+     */
+    public static String fmt(double value) {
+        return String.format("%.5f", value);
+    }
+
+    /**
+     * 좌표 값을 로그용 문자열로 변환 (정수).
+     */
+    public static String fmtInt(double value) {
+        return String.format("%.0f", value);
+    }
 }

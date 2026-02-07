@@ -3,7 +3,10 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.object.common.ObjectList;
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.BorderFill;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.borderfill.Border;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.CharPr;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.ParaPr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.ParaListCore;
@@ -12,11 +15,16 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Ctrl;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.LineSeg;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Ellipse;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Equation;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Polygon;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawingObject;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.shapecomponent.ShapeComponent;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.shapeobject.ShapeObject;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.secpr.SecPr;
@@ -71,6 +79,9 @@ public class IntermediateToHwpxConverter {
     private FontRegistry fontRegistry;
     private StyleRegistry styleRegistry;
 
+    // BorderFill ID 카운터 (1, 2는 BlankFileMaker에서 사용)
+    private int borderFillIdCounter = 3;
+
     private IntermediateToHwpxConverter(IntermediateDocument doc) {
         this.doc = doc;
         this.result = new ConvertResult();
@@ -99,6 +110,11 @@ public class IntermediateToHwpxConverter {
         // 기존 section0 초기화 (첫 페이지용)
         SectionXMLFile section0 = hwpxFile.sectionXMLFileList().get(0);
         section0.removeAllParas();
+
+        // 디버그: 스프레드 모드 상태 출력
+        System.err.println("[DEBUG] useSpreadMode: " + doc.useSpreadMode());
+        System.err.println("[DEBUG] spreads count: " + (doc.spreads() != null ? doc.spreads().size() : "null"));
+        System.err.println("[DEBUG] pages count: " + (doc.pages() != null ? doc.pages().size() : "null"));
 
         if (doc.useSpreadMode() && doc.spreads() != null && !doc.spreads().isEmpty()) {
             // === 스프레드 모드: 각 스프레드를 하나의 section으로 변환 ===
@@ -138,6 +154,15 @@ public class IntermediateToHwpxConverter {
                     } else if ("image".equals(frame.frameType())) {
                         boolean ok = convertImageFrame(frameRun, frame);
                         if (ok) imagesConverted++;
+                        framesConverted++;
+                    } else if ("rectangle".equals(frame.frameType())) {
+                        convertRectangleFrame(frameRun, frame);
+                        framesConverted++;
+                    } else if ("table".equals(frame.frameType())) {
+                        convertTableFrame(frameRun, frame);
+                        framesConverted++;
+                    } else if ("shape".equals(frame.frameType())) {
+                        convertShapeFrame(frameRun, frame);
                         framesConverted++;
                     }
                 }
@@ -188,6 +213,24 @@ public class IntermediateToHwpxConverter {
                         if (ok) imagesConverted++;
                         framesConverted++;
                         addMinimalLineSegArray(framePara);  // 최소 높이로 페이지 오버플로우 방지
+                    } else if ("rectangle".equals(frame.frameType())) {
+                        Para framePara = createFloatingObjectPara(section);
+                        Run frameRun = framePara.runs().iterator().next();
+                        convertRectangleFrame(frameRun, frame);
+                        framesConverted++;
+                        addMinimalLineSegArray(framePara);
+                    } else if ("table".equals(frame.frameType())) {
+                        Para framePara = createFloatingObjectPara(section);
+                        Run frameRun = framePara.runs().iterator().next();
+                        convertTableFrame(frameRun, frame);
+                        framesConverted++;
+                        addMinimalLineSegArray(framePara);
+                    } else if ("shape".equals(frame.frameType())) {
+                        Para framePara = createFloatingObjectPara(section);
+                        Run frameRun = framePara.runs().iterator().next();
+                        convertShapeFrame(frameRun, frame);
+                        framesConverted++;
+                        addMinimalLineSegArray(framePara);
                     }
                 }
 
@@ -245,12 +288,16 @@ public class IntermediateToHwpxConverter {
      * @param section       섹션 파일
      * @param pageWidth     페이지/스프레드 너비 (HWPUNIT)
      * @param pageHeight    페이지/스프레드 높이 (HWPUNIT)
-     * @param useDocMargins true: 문서 레이아웃 마진 사용, false: 최소 마진 사용
+     * @param marginTop     상단 마진 (HWPUNIT), 0이면 기본값 사용
+     * @param marginBottom  하단 마진 (HWPUNIT), 0이면 기본값 사용
+     * @param marginLeft    좌측 마진 (HWPUNIT), 0이면 기본값 사용
+     * @param marginRight   우측 마진 (HWPUNIT), 0이면 기본값 사용
      * @param addPageNum    true: 페이지 번호 컨트롤 추가
      * @return 생성된 Para 객체
      */
-    private Para createSectionBreakPara(SectionXMLFile section, long pageWidth, long pageHeight,
-                                         boolean useDocMargins, boolean addPageNum) {
+    private Para createSectionBreakParaWithMargins(SectionXMLFile section, long pageWidth, long pageHeight,
+                                         long marginTop, long marginBottom, long marginLeft, long marginRight,
+                                         boolean addPageNum) {
         Para para = section.addNewPara();
         para.idAnd(nextParaId())
                 .paraPrIDRefAnd("3")
@@ -301,26 +348,18 @@ public class IntermediateToHwpxConverter {
                 .heightAnd((int) pageHeight)
                 .gutterType(GutterMethod.LEFT_ONLY);
 
-        // 마진
-        int marginTop, marginBottom, marginLeft, marginRight, headerFooter;
-        if (useDocMargins) {
-            DocumentLayout layout = doc.layout();
-            marginTop = (int) (layout != null ? layout.marginTop() : 5668);
-            marginBottom = (int) (layout != null ? layout.marginBottom() : 4252);
-            marginLeft = (int) (layout != null ? layout.marginLeft() : 8504);
-            marginRight = (int) (layout != null ? layout.marginRight() : 8504);
-            headerFooter = 4252;
-        } else {
-            // 스프레드 모드: 최소 마진
-            marginTop = marginBottom = marginLeft = marginRight = 1417;
-            headerFooter = 1417;
-        }
+        // 마진 - 명시적으로 전달된 값 사용 (0이면 최소값 적용)
+        int mTop = marginTop > 0 ? (int) marginTop : 1417;
+        int mBottom = marginBottom > 0 ? (int) marginBottom : 1417;
+        int mLeft = marginLeft > 0 ? (int) marginLeft : 1417;
+        int mRight = marginRight > 0 ? (int) marginRight : 1417;
+        int headerFooter = 1417;
 
         secPr.pagePr().createMargin();
         secPr.pagePr().margin()
                 .headerAnd(headerFooter).footerAnd(headerFooter).gutterAnd(0)
-                .leftAnd(marginLeft).rightAnd(marginRight)
-                .topAnd(marginTop).bottom(marginBottom);
+                .leftAnd(mLeft).rightAnd(mRight)
+                .topAnd(mTop).bottom(mBottom);
 
         secPr.createFootNotePr();
         secPr.footNotePr().createAutoNumFormat();
@@ -374,9 +413,10 @@ public class IntermediateToHwpxConverter {
         return para;
     }
 
-    // 페이지 모드용 래퍼 (하위 호환성)
+    // 페이지 모드용 래퍼 - 페이지별 마진 사용
     private void addSectionBreakPara(SectionXMLFile section, IntermediatePage page, boolean isFirst) {
-        createSectionBreakPara(section, page.pageWidth(), page.pageHeight(), true, true);
+        createSectionBreakParaWithMargins(section, page.pageWidth(), page.pageHeight(),
+                page.marginTop(), page.marginBottom(), page.marginLeft(), page.marginRight(), true);
     }
 
     private void addPageBorderFills(SecPr secPr) {
@@ -397,9 +437,10 @@ public class IntermediateToHwpxConverter {
         pbf.offset().leftAnd(1417L).rightAnd(1417L).topAnd(1417L).bottom(1417L);
     }
 
-    // 스프레드 모드용 래퍼 (Para 반환)
+    // 스프레드 모드용 래퍼 (Para 반환) - 스프레드는 마진 0 사용 (최소값 적용됨)
     private Para addSectionBreakParaForSpreadWithReturn(SectionXMLFile section, IntermediateSpread spread) {
-        return createSectionBreakPara(section, spread.spreadWidth(), spread.spreadHeight(), false, false);
+        return createSectionBreakParaWithMargins(section, spread.spreadWidth(), spread.spreadHeight(),
+                0, 0, 0, 0, false);
     }
 
     /**
@@ -507,20 +548,31 @@ public class IntermediateToHwpxConverter {
         rect.createFlip();
         rect.flip().horizontalAnd(false).verticalAnd(false);
 
+        // 회전 정보 적용
+        // HWPX rotationInfo.angle은 도(degree) 단위
+        // IDML과 HWPX 모두 같은 방향 사용
+        double hwpxAngle = frame.rotationAngle();
+        short rotationAngleDegrees = (short) Math.round(hwpxAngle);
         rect.createRotationInfo();
-        rect.rotationInfo().angleAnd((short) 0)
+        rect.rotationInfo().angleAnd(rotationAngleDegrees)
                 .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+
+        // 회전 행렬 계산
+        // HWPX rotMatrix 형식: [cos, -sin, tx, sin, cos, ty]
+        double radians = Math.toRadians(hwpxAngle);
+        float cos = (float) Math.cos(radians);
+        float sin = (float) Math.sin(radians);
 
         rect.createRenderingInfo();
         rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(cos, -sin, 0f, sin, cos, 0f);
 
-        // ShapeSize
+        // ShapeSize (크기 고정)
         rect.createSZ();
         rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
                 .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+                .protectAnd(true);
 
         // ShapePosition — 용지(PAPER) 기준 절대 좌표
         rect.createPos();
@@ -551,25 +603,58 @@ public class IntermediateToHwpxConverter {
         rect.createPt3();
         rect.pt3().set(0L, h);
 
-        // LineShape (파란색 얇은 실선, 0.1mm ≈ 28 hwpunit)
+        // LineShape (테두리/획)
         rect.createLineShape();
-        rect.lineShape().colorAnd("#0000FF").widthAnd(28)
-                .styleAnd(LineType2.SOLID)
-                .endCapAnd(LineCap.FLAT)
-                .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
-                .headfillAnd(true).tailfillAnd(true)
-                .headSzAnd(ArrowSize.MEDIUM_MEDIUM).tailSzAnd(ArrowSize.MEDIUM_MEDIUM)
-                .outlineStyleAnd(OutlineStyle.NORMAL).alpha(0f);
+        String strokeColor = frame.strokeColor();
+        double strokeWeight = frame.strokeWeight();
+        double strokeTint = frame.strokeTint();
+
+        if (strokeColor != null && strokeWeight > 0) {
+            // 획이 있는 경우
+            int strokeWidthHwp = (int) (strokeWeight * 100);  // 1pt = 100 hwpunit
+            if (strokeWidthHwp < 14) strokeWidthHwp = 14;  // 최소 두께
+            float strokeAlpha = (float) ((100.0 - strokeTint) / 100.0);  // 투명도 (0=불투명, 1=투명)
+
+            rect.lineShape().colorAnd(strokeColor).widthAnd(strokeWidthHwp)
+                    .styleAnd(LineType2.SOLID)
+                    .endCapAnd(LineCap.FLAT)
+                    .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
+                    .headfillAnd(true).tailfillAnd(true)
+                    .headSzAnd(ArrowSize.MEDIUM_MEDIUM).tailSzAnd(ArrowSize.MEDIUM_MEDIUM)
+                    .outlineStyleAnd(OutlineStyle.NORMAL).alpha(strokeAlpha);
+        } else {
+            // 획 없음 - 투명
+            rect.lineShape().colorAnd("#000000").widthAnd(0)
+                    .styleAnd(LineType2.NONE)
+                    .endCapAnd(LineCap.FLAT)
+                    .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
+                    .headfillAnd(true).tailfillAnd(true)
+                    .headSzAnd(ArrowSize.MEDIUM_MEDIUM).tailSzAnd(ArrowSize.MEDIUM_MEDIUM)
+                    .outlineStyleAnd(OutlineStyle.NORMAL).alpha(0f);
+        }
+
+        // FillBrush (채우기)
+        String textFrameFillColor = frame.textFrameFillColor();
+        double fillTint = frame.fillTint();
+        if (textFrameFillColor != null) {
+            float fillAlpha = (float) ((100.0 - fillTint) / 100.0);  // 투명도
+            rect.createFillBrush();
+            rect.fillBrush().createWinBrush();
+            rect.fillBrush().winBrush().faceColorAnd(textFrameFillColor)
+                    .hatchColorAnd(textFrameFillColor)
+                    .alpha(fillAlpha);
+        }
 
         // DrawText — 내부 텍스트
         rect.createDrawText();
         DrawText dt = rect.drawText();
-        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
+        dt.lastWidthAnd(w).nameAnd("").editableAnd(false).lineShapeFixedAnd(true);
         dt.createTextMargin();
         dt.textMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
         dt.createSubList();
         SubList subList = dt.subList();
-        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
+        TextDirection textDir = frame.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
+        subList.idAnd("").textDirectionAnd(textDir)
                 .lineWrapAnd(LineWrapMethod.BREAK)
                 .vertAlignAnd(VerticalAlign2.TOP);
 
@@ -580,22 +665,226 @@ public class IntermediateToHwpxConverter {
     }
 
     /**
-     * 다중 컬럼 텍스트 프레임을 1행 N열 테이블로 변환한다.
+     * 다중 컬럼 텍스트 프레임을 연결된 글상자(Linked Text Boxes)로 변환한다.
+     * N개 Rectangle을 생성하고 DrawText.next/prev로 연결한다.
      */
     private int convertMultiColumnTextFrame(Run anchorRun, IntermediateFrame frame) {
         int equationCount = 0;
         int colCount = frame.columnCount();
 
         // PAPER 기준 좌표
-        long x = Math.max(0, frame.x());
-        long y = Math.max(0, frame.y());
+        long x = frame.x();
+        long y = frame.y();
         long totalWidth = frame.width();
-        long height = frame.height();
+        long h = frame.height();
         long gutter = frame.columnGutter();
 
         // 컬럼 너비 = (전체너비 - 간격합계) / 컬럼수
         long totalGutter = gutter * (colCount - 1);
-        long cellWidth = (totalWidth - totalGutter) / colCount;
+        long colWidth = (totalWidth - totalGutter) / colCount;
+
+        // 회전 정보
+        double hwpxAngle = frame.rotationAngle();
+        short rotationAngleDegrees = (short) Math.round(hwpxAngle);
+        double radians = Math.toRadians(hwpxAngle);
+        float cos = (float) Math.cos(radians);
+        float sin = (float) Math.sin(radians);
+
+        // 단락 분배: 균등 분배 전략
+        List<IntermediateParagraph> allParas = frame.paragraphs();
+        int totalParas = allParas.size();
+        int parasPerColumn = Math.max(1, (totalParas + colCount - 1) / colCount);
+
+        // 컬럼별 ID 먼저 생성 (next/prev 링크 설정에 필요)
+        List<String> boxIds = new ArrayList<>();
+        for (int col = 0; col < colCount; col++) {
+            boxIds.add(nextShapeId());
+        }
+
+        // N개 Rectangle 생성
+        for (int col = 0; col < colCount; col++) {
+            String boxId = boxIds.get(col);
+            long colX = x + (colWidth + gutter) * col;
+
+            Rectangle rect = anchorRun.addNewRectangle();
+
+            // ShapeObject 기본 속성
+            rect.idAnd(boxId)
+                    .zOrderAnd(frame.zOrder())
+                    .numberingTypeAnd(NumberingType.PICTURE)
+                    .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                    .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                    .lockAnd(false)
+                    .dropcapstyleAnd(DropCapStyle.None);
+
+            // ShapeComponent
+            rect.hrefAnd("");
+            rect.groupLevelAnd((short) 0);
+            rect.instidAnd(nextShapeId());
+
+            rect.createOffset();
+            rect.offset().set(0L, 0L);
+
+            rect.createOrgSz();
+            rect.orgSz().set(colWidth, h);
+
+            rect.createCurSz();
+            rect.curSz().set(colWidth, h);
+
+            rect.createFlip();
+            rect.flip().horizontalAnd(false).verticalAnd(false);
+
+            // 회전 정보
+            rect.createRotationInfo();
+            rect.rotationInfo().angleAnd(rotationAngleDegrees)
+                    .centerXAnd(colWidth / 2).centerYAnd(h / 2).rotateimageAnd(true);
+
+            rect.createRenderingInfo();
+            rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+            rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+            rect.renderingInfo().addNewRotMatrix().set(cos, -sin, 0f, sin, cos, 0f);
+
+            // ShapeSize
+            rect.createSZ();
+            rect.sz().widthAnd(colWidth).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                    .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                    .protectAnd(true);
+
+            // ShapePosition — 용지(PAPER) 기준 절대 좌표
+            rect.createPos();
+            rect.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(false)
+                    .allowOverlapAnd(true)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PAPER)
+                    .horzRelToAnd(HorzRelTo.PAPER)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(y)
+                    .horzOffset(colX);
+
+            // OutMargin
+            rect.createOutMargin();
+            rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+            // Rectangle 고유 속성 — 4 코너, 직각
+            rect.ratioAnd((short) 0);
+            rect.createPt0();
+            rect.pt0().set(0L, 0L);
+            rect.createPt1();
+            rect.pt1().set(colWidth, 0L);
+            rect.createPt2();
+            rect.pt2().set(colWidth, h);
+            rect.createPt3();
+            rect.pt3().set(0L, h);
+
+            // LineShape (테두리/획)
+            rect.createLineShape();
+            String strokeColor = frame.strokeColor();
+            double strokeWeight = frame.strokeWeight();
+            double strokeTint = frame.strokeTint();
+
+            if (strokeColor != null && strokeWeight > 0) {
+                int strokeWidthHwp = (int) (strokeWeight * 100);
+                if (strokeWidthHwp < 14) strokeWidthHwp = 14;
+                float strokeAlpha = (float) ((100.0 - strokeTint) / 100.0);
+
+                rect.lineShape().colorAnd(strokeColor).widthAnd(strokeWidthHwp)
+                        .styleAnd(LineType2.SOLID)
+                        .endCapAnd(LineCap.FLAT)
+                        .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
+                        .headfillAnd(true).tailfillAnd(true)
+                        .headSzAnd(ArrowSize.MEDIUM_MEDIUM).tailSzAnd(ArrowSize.MEDIUM_MEDIUM)
+                        .outlineStyleAnd(OutlineStyle.NORMAL).alpha(strokeAlpha);
+            } else {
+                rect.lineShape().colorAnd("#000000").widthAnd(0)
+                        .styleAnd(LineType2.NONE)
+                        .endCapAnd(LineCap.FLAT)
+                        .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
+                        .headfillAnd(true).tailfillAnd(true)
+                        .headSzAnd(ArrowSize.MEDIUM_MEDIUM).tailSzAnd(ArrowSize.MEDIUM_MEDIUM)
+                        .outlineStyleAnd(OutlineStyle.NORMAL).alpha(0f);
+            }
+
+            // FillBrush (채우기) - 첫 번째 컬럼만 배경색 적용
+            String textFrameFillColor = frame.textFrameFillColor();
+            double fillTint = frame.fillTint();
+            if (textFrameFillColor != null) {
+                float fillAlpha = (float) ((100.0 - fillTint) / 100.0);
+                rect.createFillBrush();
+                rect.fillBrush().createWinBrush();
+                rect.fillBrush().winBrush().faceColorAnd(textFrameFillColor)
+                        .hatchColorAnd(textFrameFillColor)
+                        .alpha(fillAlpha);
+            }
+
+            // DrawText — 내부 텍스트
+            rect.createDrawText();
+            DrawText dt = rect.drawText();
+            dt.lastWidthAnd(colWidth).nameAnd("col_" + col).editableAnd(false).lineShapeFixedAnd(true);
+
+            // 연결된 글상자 링크 설정
+            if (col > 0) {
+                dt.prevAnd(boxIds.get(col - 1));
+            }
+            if (col < colCount - 1) {
+                dt.nextAnd(boxIds.get(col + 1));
+            }
+
+            dt.createTextMargin();
+            // 프레임 여백 (첫/마지막 컬럼에만 좌우 여백 적용)
+            long leftMargin = (col == 0) ? frame.insetLeft() : 0L;
+            long rightMargin = (col == colCount - 1) ? frame.insetRight() : 0L;
+            dt.textMargin().leftAnd(leftMargin).rightAnd(rightMargin)
+                    .topAnd(frame.insetTop()).bottomAnd(frame.insetBottom());
+
+            dt.createSubList();
+            SubList subList = dt.subList();
+            TextDirection textDir = frame.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
+            subList.idAnd("").textDirectionAnd(textDir)
+                    .lineWrapAnd(LineWrapMethod.BREAK)
+                    .vertAlignAnd(VerticalAlign2.TOP);
+
+            // 이 컬럼에 배정된 단락들 추가
+            int startIdx = col * parasPerColumn;
+            int endIdx = Math.min(startIdx + parasPerColumn, totalParas);
+
+            for (int i = startIdx; i < endIdx; i++) {
+                IntermediateParagraph iPara = allParas.get(i);
+                equationCount += addParagraphToSubList(subList, iPara);
+            }
+
+            // 빈 박스 방지 - 최소 빈 단락 추가
+            if (subList.countOfPara() == 0) {
+                Para emptyPara = subList.addNewPara();
+                emptyPara.idAnd(nextParaId())
+                        .paraPrIDRefAnd("3")
+                        .styleIDRefAnd("0")
+                        .pageBreakAnd(false)
+                        .columnBreakAnd(false)
+                        .merged(false);
+                Run run = emptyPara.addNewRun();
+                run.charPrIDRef("0");
+                run.addNewT();
+            }
+        }
+
+        return equationCount;
+    }
+
+    /**
+     * IntermediateTable 프레임을 HWPX Table로 변환한다.
+     */
+    private void convertTableFrame(Run anchorRun, IntermediateFrame frame) {
+        IntermediateTable iTable = frame.table();
+        if (iTable == null) return;
+
+        // PAPER 기준 좌표
+        long x = Math.max(0, frame.x());
+        long y = Math.max(0, frame.y());
+        long totalWidth = frame.width();
+        long totalHeight = frame.height();
 
         // 테이블 생성
         Table table = anchorRun.addNewTable();
@@ -613,17 +902,17 @@ public class IntermediateToHwpxConverter {
         // 테이블 속성
         table.pageBreakAnd(TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
-                .rowCntAnd((short) 1)
-                .colCntAnd((short) colCount)
-                .cellSpacingAnd(0)  // 셀 간격은 개별 셀 여백으로 처리
-                .borderFillIDRefAnd("1")  // 투명 테두리
+                .rowCntAnd((short) iTable.rowCount())
+                .colCntAnd((short) iTable.columnCount())
+                .cellSpacingAnd(iTable.cellSpacing())
+                .borderFillIDRefAnd("1")  // 기본 테두리 (TODO: 커스텀 테두리 지원)
                 .noAdjustAnd(false);
 
         // ShapeSize
         table.createSZ();
         table.sz().widthAnd(totalWidth).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(height).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+                .heightAnd(totalHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(true);  // 크기 고정
 
         // ShapePosition — 용지(PAPER) 기준 절대 좌표
         table.createPos();
@@ -643,90 +932,90 @@ public class IntermediateToHwpxConverter {
         table.createOutMargin();
         table.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
-        // InMargin (프레임 내부 여백)
+        // InMargin (테이블 내부 여백)
         table.createInMargin();
-        table.inMargin().leftAnd(frame.insetLeft())
-                .rightAnd(frame.insetRight())
-                .topAnd(frame.insetTop())
-                .bottomAnd(frame.insetBottom());
+        table.inMargin().leftAnd(iTable.insetLeft())
+                .rightAnd(iTable.insetRight())
+                .topAnd(iTable.insetTop())
+                .bottomAnd(iTable.insetBottom());
 
-        // 단락 분배: 균등 분배 전략
-        List<IntermediateParagraph> allParas = frame.paragraphs();
-        int totalParas = allParas.size();
-        int parasPerColumn = Math.max(1, (totalParas + colCount - 1) / colCount);
+        // 행(Tr) 생성
+        for (IntermediateTableRow iRow : iTable.rows()) {
+            Tr tr = table.addNewTr();
 
-        // 단일 행(Tr) 생성
-        Tr tr = table.addNewTr();
+            // 각 셀(Tc) 생성
+            for (IntermediateTableCell iCell : iRow.cells()) {
+                Tc tc = tr.addNewTc();
 
-        // 각 컬럼(Tc) 생성
-        for (int col = 0; col < colCount; col++) {
-            Tc tc = tr.addNewTc();
-            tc.nameAnd("")
-                    .headerAnd(false)
-                    .hasMarginAnd(true)  // 셀 마진 사용
-                    .protectAnd(false)
-                    .editableAnd(false)
-                    .dirtyAnd(false)
-                    .borderFillIDRefAnd("1");  // 투명 테두리
+                // 셀별 테두리/채우기 BorderFill 생성
+                String cellBorderFillId = createCellBorderFill(iCell);
 
-            // 셀 주소
-            tc.createCellAddr();
-            tc.cellAddr().colAddrAnd((short) col).rowAddrAnd((short) 0);
+                tc.nameAnd("")
+                        .headerAnd(false)
+                        .hasMarginAnd(true)
+                        .protectAnd(false)
+                        .editableAnd(false)
+                        .dirtyAnd(false)
+                        .borderFillIDRefAnd(cellBorderFillId);
 
-            // 셀 병합 (병합 없음)
-            tc.createCellSpan();
-            tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
+                // 셀 주소
+                tc.createCellAddr();
+                tc.cellAddr().colAddrAnd((short) iCell.columnIndex())
+                        .rowAddrAnd((short) iCell.rowIndex());
 
-            // 셀 크기
-            tc.createCellSz();
-            tc.cellSz().widthAnd(cellWidth).heightAnd(height);
+                // 셀 병합
+                tc.createCellSpan();
+                tc.cellSpan().colSpanAnd((short) iCell.columnSpan())
+                        .rowSpanAnd((short) iCell.rowSpan());
 
-            // 셀 여백
-            tc.createCellMargin();
-            if (col < colCount - 1) {
-                // 마지막 컬럼이 아니면 오른쪽 여백으로 gutter 절반
-                tc.cellMargin().leftAnd(0L).rightAnd(gutter / 2).topAnd(0L).bottomAnd(0L);
-            } else {
-                tc.cellMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
-            }
-            if (col > 0) {
-                // 첫 컬럼이 아니면 왼쪽 여백으로 gutter 절반
-                tc.cellMargin().leftAnd(gutter / 2);
-            }
+                // 셀 크기
+                tc.createCellSz();
+                tc.cellSz().widthAnd(iCell.width()).heightAnd(iCell.height());
 
-            // 셀 내부 SubList
-            tc.createSubList();
-            SubList subList = tc.subList();
-            subList.idAnd("")
-                    .textDirectionAnd(TextDirection.HORIZONTAL)
-                    .lineWrapAnd(LineWrapMethod.BREAK)
-                    .vertAlignAnd(VerticalAlign2.TOP);
+                // 셀 여백
+                tc.createCellMargin();
+                tc.cellMargin().leftAnd(iCell.marginLeft())
+                        .rightAnd(iCell.marginRight())
+                        .topAnd(iCell.marginTop())
+                        .bottomAnd(iCell.marginBottom());
 
-            // 이 컬럼에 배정된 단락들 추가
-            int startIdx = col * parasPerColumn;
-            int endIdx = Math.min(startIdx + parasPerColumn, totalParas);
+                // 셀 내부 SubList
+                tc.createSubList();
+                SubList subList = tc.subList();
+                subList.idAnd("")
+                        .textDirectionAnd(TextDirection.HORIZONTAL)
+                        .lineWrapAnd(LineWrapMethod.BREAK);
 
-            for (int i = startIdx; i < endIdx; i++) {
-                IntermediateParagraph iPara = allParas.get(i);
-                equationCount += addParagraphToSubList(subList, iPara);
-            }
+                // 수직 정렬
+                String vAlign = iCell.verticalAlign();
+                if ("center".equals(vAlign)) {
+                    subList.vertAlignAnd(VerticalAlign2.CENTER);
+                } else if ("bottom".equals(vAlign)) {
+                    subList.vertAlignAnd(VerticalAlign2.BOTTOM);
+                } else {
+                    subList.vertAlignAnd(VerticalAlign2.TOP);
+                }
 
-            // 빈 셀 방지
-            if (subList.countOfPara() == 0) {
-                Para emptyPara = subList.addNewPara();
-                emptyPara.idAnd(nextParaId())
-                        .paraPrIDRefAnd("3")
-                        .styleIDRefAnd("0")
-                        .pageBreakAnd(false)
-                        .columnBreakAnd(false)
-                        .merged(false);
-                Run run = emptyPara.addNewRun();
-                run.charPrIDRef("0");
-                run.addNewT();
+                // 셀 내용 (단락) 추가
+                for (IntermediateParagraph iPara : iCell.paragraphs()) {
+                    addParagraphToSubList(subList, iPara);
+                }
+
+                // 빈 셀 방지
+                if (subList.countOfPara() == 0) {
+                    Para emptyPara = subList.addNewPara();
+                    emptyPara.idAnd(nextParaId())
+                            .paraPrIDRefAnd("3")
+                            .styleIDRefAnd("0")
+                            .pageBreakAnd(false)
+                            .columnBreakAnd(false)
+                            .merged(false);
+                    Run run = emptyPara.addNewRun();
+                    run.charPrIDRef("0");
+                    run.addNewT();
+                }
             }
         }
-
-        return equationCount;
     }
 
     /**
@@ -748,6 +1037,11 @@ public class IntermediateToHwpxConverter {
             String mappedCharPr = styleRegistry.getCharPrId(iPara.paragraphStyleRef());
             if (mappedCharPr != null) paraCharPrId = mappedCharPr;
             paraStyleDef = styleRegistry.getParagraphStyleDef(iPara.paragraphStyleRef());
+        }
+
+        // 인라인 단락 속성이 있으면 새 ParaPr 생성
+        if (hasInlineParagraphOverrides(iPara)) {
+            paraPrId = createInlineParaPr(iPara, paraStyleDef);
         }
 
         Para para = subList.addNewPara();
@@ -807,6 +1101,11 @@ public class IntermediateToHwpxConverter {
                 String mappedCharPr = styleRegistry.getCharPrId(iPara.paragraphStyleRef());
                 if (mappedCharPr != null) paraCharPrId = mappedCharPr;
                 paraStyleDef = styleRegistry.getParagraphStyleDef(iPara.paragraphStyleRef());
+            }
+
+            // 인라인 단락 속성이 있으면 새 ParaPr 생성
+            if (hasInlineParagraphOverrides(iPara)) {
+                paraPrId = createInlineParaPr(iPara, paraStyleDef);
             }
 
             if (iPara.contentItems().isEmpty()) {
@@ -880,6 +1179,321 @@ public class IntermediateToHwpxConverter {
         text = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFC);
         text = text.replace('\t', ' ');
         return text;
+    }
+
+    /**
+     * 인라인 단락 속성(로컬 오버라이드)이 있는지 확인한다.
+     */
+    private boolean hasInlineParagraphOverrides(IntermediateParagraph iPara) {
+        return iPara.inlineAlignment() != null
+                || iPara.inlineFirstLineIndent() != null
+                || iPara.inlineLeftMargin() != null
+                || iPara.inlineRightMargin() != null
+                || iPara.inlineSpaceBefore() != null
+                || iPara.inlineSpaceAfter() != null
+                || iPara.inlineLineSpacing() != null
+                || iPara.shadingOn();
+    }
+
+    /**
+     * 인라인 단락 속성을 적용한 새 ParaPr을 생성한다.
+     */
+    private String createInlineParaPr(IntermediateParagraph iPara, IntermediateStyleDef baseStyle) {
+        String paraPrId = styleRegistry.nextParaPrId();
+        ParaPr paraPr = hwpxFile.headerXMLFile().refList().paraProperties().addNew();
+
+        // 기본 속성 설정 (StyleRegistry.buildParaPr과 유사)
+        paraPr.idAnd(paraPrId)
+                .tabPrIDRefAnd("0")
+                .condenseAnd((byte) 0)
+                .fontLineHeightAnd(false)
+                .snapToGridAnd(true)
+                .suppressLineNumbersAnd(false)
+                .checked(false);
+
+        // 정렬 - 인라인 우선, 없으면 스타일, 기본값 JUSTIFY
+        String alignment = iPara.inlineAlignment();
+        if (alignment == null && baseStyle != null) {
+            alignment = baseStyle.alignment();
+        }
+        HorizontalAlign2 hAlign = mapAlignmentString(alignment);
+        paraPr.createAlign();
+        paraPr.align().horizontalAnd(hAlign).vertical(VerticalAlign1.BASELINE);
+
+        paraPr.createHeading();
+        paraPr.heading().typeAnd(ParaHeadingType.NONE).idRefAnd("0").level((byte) 0);
+
+        paraPr.createBreakSetting();
+        paraPr.breakSetting()
+                .breakLatinWordAnd(LineBreakForLatin.KEEP_WORD)
+                .breakNonLatinWordAnd(LineBreakForNonLatin.KEEP_WORD)
+                .widowOrphanAnd(false)
+                .keepWithNextAnd(false)
+                .keepLinesAnd(false)
+                .pageBreakBeforeAnd(false)
+                .lineWrap(LineWrap.BREAK);
+
+        paraPr.createAutoSpacing();
+        paraPr.autoSpacing().eAsianEngAnd(false).eAsianNum(false);
+
+        // 마진 - 인라인 우선, 없으면 스타일
+        int indent = iPara.inlineFirstLineIndent() != null ? iPara.inlineFirstLineIndent().intValue()
+                : (baseStyle != null && baseStyle.firstLineIndent() != null ? baseStyle.firstLineIndent().intValue() : 0);
+        int left = iPara.inlineLeftMargin() != null ? iPara.inlineLeftMargin().intValue()
+                : (baseStyle != null && baseStyle.leftMargin() != null ? baseStyle.leftMargin().intValue() : 0);
+        int right = iPara.inlineRightMargin() != null ? iPara.inlineRightMargin().intValue()
+                : (baseStyle != null && baseStyle.rightMargin() != null ? baseStyle.rightMargin().intValue() : 0);
+        int prev = iPara.inlineSpaceBefore() != null ? iPara.inlineSpaceBefore().intValue()
+                : (baseStyle != null && baseStyle.spaceBefore() != null ? baseStyle.spaceBefore().intValue() : 0);
+        int next = iPara.inlineSpaceAfter() != null ? iPara.inlineSpaceAfter().intValue()
+                : (baseStyle != null && baseStyle.spaceAfter() != null ? baseStyle.spaceAfter().intValue() : 0);
+
+        paraPr.createMargin();
+        paraPr.margin().createIntent();
+        paraPr.margin().intent().valueAnd(indent).unit(ValueUnit2.HWPUNIT);
+        paraPr.margin().createLeft();
+        paraPr.margin().left().valueAnd(left).unit(ValueUnit2.HWPUNIT);
+        paraPr.margin().createRight();
+        paraPr.margin().right().valueAnd(right).unit(ValueUnit2.HWPUNIT);
+        paraPr.margin().createPrev();
+        paraPr.margin().prev().valueAnd(prev).unit(ValueUnit2.HWPUNIT);
+        paraPr.margin().createNext();
+        paraPr.margin().next().valueAnd(next).unit(ValueUnit2.HWPUNIT);
+
+        // 줄 간격 - 인라인 우선, 없으면 스타일
+        LineSpacingType lsType = LineSpacingType.PERCENT;
+        int lsValue = 130;
+        if (iPara.inlineLineSpacing() != null) {
+            // 인라인 줄간격이 있으면 백분율로 적용
+            lsType = LineSpacingType.PERCENT;
+            lsValue = iPara.inlineLineSpacing();
+        } else if (baseStyle != null) {
+            if ("fixed".equals(baseStyle.lineSpacingType())) {
+                lsType = LineSpacingType.FIXED;
+            }
+            if (baseStyle.lineSpacingPercent() != null) {
+                lsValue = baseStyle.lineSpacingPercent();
+            }
+        }
+        paraPr.createLineSpacing();
+        paraPr.lineSpacing().typeAnd(lsType).valueAnd(lsValue).unit(ValueUnit2.HWPUNIT);
+
+        // 단락 음영 처리
+        String borderFillId = "2";  // 기본 BorderFill (투명)
+        int offsetLeft = 0, offsetRight = 0, offsetTop = 0, offsetBottom = 0;
+        if (iPara.shadingOn() && iPara.shadingColor() != null) {
+            borderFillId = createShadingBorderFill(iPara.shadingColor());
+            // 음영 오프셋 적용
+            if (iPara.shadingOffsetLeft() != null) {
+                offsetLeft = iPara.shadingOffsetLeft().intValue();
+            }
+            if (iPara.shadingOffsetRight() != null) {
+                offsetRight = iPara.shadingOffsetRight().intValue();
+            }
+            if (iPara.shadingOffsetTop() != null) {
+                offsetTop = iPara.shadingOffsetTop().intValue();
+            }
+            if (iPara.shadingOffsetBottom() != null) {
+                offsetBottom = iPara.shadingOffsetBottom().intValue();
+            }
+        }
+
+        paraPr.createBorder();
+        paraPr.border().borderFillIDRefAnd(borderFillId)
+                .offsetLeftAnd(offsetLeft).offsetRightAnd(offsetRight)
+                .offsetTopAnd(offsetTop).offsetBottomAnd(offsetBottom)
+                .connectAnd(false).ignoreMargin(false);
+
+        return paraPrId;
+    }
+
+    /**
+     * 테이블 셀용 BorderFill을 생성한다.
+     */
+    private String createCellBorderFill(IntermediateTableCell cell) {
+        String bfId = String.valueOf(borderFillIdCounter++);
+        BorderFill bf = hwpxFile.headerXMLFile().refList().borderFills().addNew();
+
+        bf.idAnd(bfId)
+                .threeDAnd(false)
+                .shadowAnd(false)
+                .centerLineAnd(CenterLineSort.NONE)
+                .breakCellSeparateLine(false);
+
+        // 대각선 설정 (slash = 좌상→우하 ↘, backSlash = 우상→좌하 ↙)
+        bf.createSlash();
+        if (cell.topLeftDiagonalLine()) {
+            bf.slash().typeAnd(SlashType.CENTER).CrookedAnd(false).isCounter(false);
+        } else {
+            bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+        }
+
+        bf.createBackSlash();
+        if (cell.topRightDiagonalLine()) {
+            bf.backSlash().typeAnd(SlashType.CENTER).CrookedAnd(false).isCounter(false);
+        } else {
+            bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+        }
+
+        // 테두리 설정
+        bf.createLeftBorder();
+        applyCellBorder(bf.leftBorder(), cell.leftBorder());
+
+        bf.createRightBorder();
+        applyCellBorder(bf.rightBorder(), cell.rightBorder());
+
+        bf.createTopBorder();
+        applyCellBorder(bf.topBorder(), cell.topBorder());
+
+        bf.createBottomBorder();
+        applyCellBorder(bf.bottomBorder(), cell.bottomBorder());
+
+        // 대각선 스타일 설정
+        bf.createDiagonal();
+        if ((cell.topLeftDiagonalLine() || cell.topRightDiagonalLine()) && cell.diagonalBorder() != null) {
+            IntermediateTableCell.CellBorder diag = cell.diagonalBorder();
+            LineType2 lineType = strokeTypeToLineType(diag.strokeType);
+            LineWidth lineWidth = hwpunitToLineWidth(diag.strokeWeight);
+            String color = diag.strokeColor != null ? diag.strokeColor : "#000000";
+            bf.diagonal().typeAnd(lineType).widthAnd(lineWidth).color(color);
+        } else {
+            bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        }
+
+        // 배경 채우기 설정
+        if (cell.fillColor() != null && !cell.fillColor().isEmpty()) {
+            bf.createFillBrush();
+            bf.fillBrush().createWinBrush();
+            bf.fillBrush().winBrush()
+                    .faceColorAnd(cell.fillColor())
+                    .hatchColorAnd("#FF000000")
+                    .alpha(0f);
+        }
+
+        return bfId;
+    }
+
+    /**
+     * IntermediateTableCell.CellBorder를 HWPX Border에 적용한다.
+     */
+    private void applyCellBorder(Border hwpxBorder, IntermediateTableCell.CellBorder cellBorder) {
+        if (cellBorder == null || cellBorder.strokeWeight <= 0) {
+            // 테두리 없음
+            hwpxBorder.typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+            return;
+        }
+
+        // 선 타입
+        LineType2 lineType = strokeTypeToLineType(cellBorder.strokeType);
+        hwpxBorder.typeAnd(lineType);
+
+        // 선 두께 (HWPUNIT → mm → LineWidth)
+        LineWidth lineWidth = hwpunitToLineWidth(cellBorder.strokeWeight);
+        hwpxBorder.widthAnd(lineWidth);
+
+        // 선 색상
+        String color = cellBorder.strokeColor;
+        if (color == null || color.isEmpty()) {
+            color = "#000000";
+        }
+        hwpxBorder.color(color);
+    }
+
+    /**
+     * HWPUNIT (1/7200 inch) 값을 LineWidth enum으로 변환한다.
+     */
+    private LineWidth hwpunitToLineWidth(double hwpunit) {
+        // 1 inch = 7200 HWPUNIT, 1 inch = 25.4 mm
+        // mm = hwpunit * 25.4 / 7200
+        double mm = hwpunit * 25.4 / 7200.0;
+
+        // 가장 가까운 LineWidth 선택
+        if (mm <= 0.1) return LineWidth.MM_0_1;
+        if (mm <= 0.12) return LineWidth.MM_0_12;
+        if (mm <= 0.15) return LineWidth.MM_0_15;
+        if (mm <= 0.2) return LineWidth.MM_0_2;
+        if (mm <= 0.25) return LineWidth.MM_0_25;
+        if (mm <= 0.3) return LineWidth.MM_0_3;
+        if (mm <= 0.4) return LineWidth.MM_0_4;
+        if (mm <= 0.5) return LineWidth.MM_0_5;
+        if (mm <= 0.6) return LineWidth.MM_0_6;
+        if (mm <= 0.7) return LineWidth.MM_0_7;
+        if (mm <= 1.0) return LineWidth.MM_1_0;
+        if (mm <= 1.5) return LineWidth.MM_1_5;
+        if (mm <= 2.0) return LineWidth.MM_2_0;
+        if (mm <= 3.0) return LineWidth.MM_3_0;
+        if (mm <= 4.0) return LineWidth.MM_4_0;
+        return LineWidth.MM_5_0;
+    }
+
+    /**
+     * strokeType 문자열을 LineType2 enum으로 변환한다.
+     */
+    private LineType2 strokeTypeToLineType(String strokeType) {
+        if (strokeType == null) return LineType2.SOLID;
+        switch (strokeType.toLowerCase()) {
+            case "solid": return LineType2.SOLID;
+            case "dashed": case "dash": return LineType2.DASH;
+            case "dotted": case "dot": return LineType2.DOT;
+            case "none": return LineType2.NONE;
+            default: return LineType2.SOLID;
+        }
+    }
+
+    /**
+     * 단락 음영용 BorderFill을 생성한다.
+     */
+    private String createShadingBorderFill(String fillColor) {
+        String bfId = String.valueOf(borderFillIdCounter++);
+        BorderFill bf = hwpxFile.headerXMLFile().refList().borderFills().addNew();
+
+        bf.idAnd(bfId)
+                .threeDAnd(false)
+                .shadowAnd(false)
+                .centerLineAnd(CenterLineSort.NONE)
+                .breakCellSeparateLine(false);
+
+        bf.createSlash();
+        bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+
+        bf.createBackSlash();
+        bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+
+        // 테두리 없음
+        bf.createLeftBorder();
+        bf.leftBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createRightBorder();
+        bf.rightBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createTopBorder();
+        bf.topBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createBottomBorder();
+        bf.bottomBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createDiagonal();
+        bf.diagonal().typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_1).color("#000000");
+
+        // 배경 채우기 설정
+        bf.createFillBrush();
+        bf.fillBrush().createWinBrush();
+        bf.fillBrush().winBrush()
+                .faceColorAnd(fillColor)
+                .hatchColorAnd("#FF000000")
+                .alpha(0f);
+
+        return bfId;
+    }
+
+    /**
+     * 정렬 문자열을 HorizontalAlign2로 변환한다.
+     */
+    private static HorizontalAlign2 mapAlignmentString(String alignment) {
+        if (alignment == null) return HorizontalAlign2.JUSTIFY;
+        switch (alignment) {
+            case "left": return HorizontalAlign2.LEFT;
+            case "center": return HorizontalAlign2.CENTER;
+            case "right": return HorizontalAlign2.RIGHT;
+            case "justify": return HorizontalAlign2.JUSTIFY;
+            default: return HorizontalAlign2.JUSTIFY;
+        }
     }
 
     /**
@@ -982,8 +1596,13 @@ public class IntermediateToHwpxConverter {
 
         charPr.createRatio();
         charPr.ratio().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
+
+        // 자간 (letterSpacing) - 문자 스타일 우선, 없으면 단락 스타일에서 상속
+        short spacing = charStyle.letterSpacing() != null ? charStyle.letterSpacing()
+                : (paraStyle.letterSpacing() != null ? paraStyle.letterSpacing() : (short) 0);
         charPr.createSpacing();
-        charPr.spacing().set((short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0);
+        charPr.spacing().set(spacing, spacing, spacing, spacing, spacing, spacing, spacing);
+
         charPr.createRelSz();
         charPr.relSz().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
         charPr.createOffset();
@@ -1005,7 +1624,8 @@ public class IntermediateToHwpxConverter {
         return iRun.bold() != null || iRun.italic() != null
                 || iRun.fontSizeHwpunits() != null
                 || iRun.textColor() != null
-                || iRun.fontFamily() != null;
+                || iRun.fontFamily() != null
+                || iRun.letterSpacing() != null;
     }
 
     private String createRunCharPr(IntermediateTextRun iRun, IntermediateStyleDef paraStyleDef) {
@@ -1018,12 +1638,14 @@ public class IntermediateToHwpxConverter {
         String baseFontFamily = null;
         Boolean baseBold = null;
         Boolean baseItalic = null;
+        short baseLetterSpacing = 0;
         if (paraStyleDef != null) {
             if (paraStyleDef.fontSizeHwpunits() != null) baseHeight = paraStyleDef.fontSizeHwpunits();
             if (paraStyleDef.textColor() != null) baseTextColor = paraStyleDef.textColor();
             baseFontFamily = paraStyleDef.fontFamily();
             baseBold = paraStyleDef.bold();
             baseItalic = paraStyleDef.italic();
+            if (paraStyleDef.letterSpacing() != null) baseLetterSpacing = paraStyleDef.letterSpacing();
         }
 
         int height = iRun.fontSizeHwpunits() != null ? iRun.fontSizeHwpunits() : baseHeight;
@@ -1057,8 +1679,10 @@ public class IntermediateToHwpxConverter {
         charPr.createRatio();
         charPr.ratio().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
 
+        // 자간 (letterSpacing) - 런 레벨 우선, 없으면 스타일에서 상속
+        short letterSpacing = iRun.letterSpacing() != null ? iRun.letterSpacing() : baseLetterSpacing;
         charPr.createSpacing();
-        charPr.spacing().set((short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0);
+        charPr.spacing().set(letterSpacing, letterSpacing, letterSpacing, letterSpacing, letterSpacing, letterSpacing, letterSpacing);
 
         charPr.createRelSz();
         charPr.relSz().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
@@ -1235,6 +1859,318 @@ public class IntermediateToHwpxConverter {
             result.addWarning("Image insertion failed for " + frame.frameId() + ": " + e.getMessage());
             return false;
         }
+    }
+
+    // ── 사각형 프레임 변환 (페이지 경계선 등) ──
+
+    /**
+     * 사각형 프레임을 HWPX Rectangle으로 변환한다.
+     * 페이지 경계선이나 테두리 사각형을 그릴 때 사용한다.
+     */
+    /**
+     * 인라인 벡터 도형을 HWPX Rectangle/Ellipse/Polygon으로 변환한다.
+     */
+    private void convertShapeFrame(Run anchorRun, IntermediateFrame frame) {
+        long x = frame.x();
+        long y = frame.y();
+        long w = frame.width();
+        long h = frame.height();
+
+        String shapeType = frame.shapeType();
+        if (shapeType == null) shapeType = "rectangle";
+
+        // 도형 타입에 따라 적절한 객체 생성
+        if ("oval".equals(shapeType)) {
+            convertOvalShape(anchorRun, frame, x, y, w, h);
+        } else if ("polygon".equals(shapeType)) {
+            convertPolygonShape(anchorRun, frame, x, y, w, h);
+        } else {
+            // rectangle 또는 기본
+            convertRectangleShape(anchorRun, frame, x, y, w, h);
+        }
+    }
+
+    private void convertRectangleShape(Run anchorRun, IntermediateFrame frame,
+                                        long x, long y, long w, long h) {
+        Rectangle rect = anchorRun.addNewRectangle();
+        setupShapeCommon(rect, frame, x, y, w, h);
+
+        // Rectangle 고유 속성 — 4 코너
+        rect.ratioAnd(frame.cornerRatio());
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        setupShapeLineAndFill(rect, frame);
+    }
+
+    private void convertOvalShape(Run anchorRun, IntermediateFrame frame,
+                                   long x, long y, long w, long h) {
+        Ellipse ellipse = anchorRun.addNewEllipse();
+        setupShapeCommon(ellipse, frame, x, y, w, h);
+
+        // Ellipse 고유 속성 - 중심, 축1, 축2
+        ellipse.createCenter();
+        ellipse.center().set(w / 2, h / 2);
+        ellipse.createAx1();
+        ellipse.ax1().set(w, h / 2);
+        ellipse.createAx2();
+        ellipse.ax2().set(w / 2, h);
+
+        setupShapeLineAndFill(ellipse, frame);
+    }
+
+    private void convertPolygonShape(Run anchorRun, IntermediateFrame frame,
+                                      long x, long y, long w, long h) {
+        Polygon polygon = anchorRun.addNewPolygon();
+        setupShapeCommon(polygon, frame, x, y, w, h);
+
+        // Polygon 경로 점 설정
+        List<double[]> pathPoints = frame.pathPoints();
+        if (pathPoints != null && !pathPoints.isEmpty()) {
+            // 상대 좌표로 변환 (HWPX는 도형 내부 상대 좌표 사용)
+            double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+            for (double[] pt : pathPoints) {
+                minX = Math.min(minX, pt[0]);
+                minY = Math.min(minY, pt[1]);
+            }
+            for (double[] pt : pathPoints) {
+                long ptX = CoordinateConverter.pointsToHwpunits(pt[0] - minX);
+                long ptY = CoordinateConverter.pointsToHwpunits(pt[1] - minY);
+                polygon.addNewPt().set(ptX, ptY);
+            }
+        } else {
+            // 경로 점이 없으면 사각형으로 대체
+            polygon.addNewPt().set(0L, 0L);
+            polygon.addNewPt().set(w, 0L);
+            polygon.addNewPt().set(w, h);
+            polygon.addNewPt().set(0L, h);
+        }
+
+        setupShapeLineAndFill(polygon, frame);
+    }
+
+    private <T extends DrawingObject<T>> void setupShapeCommon(T shape, IntermediateFrame frame,
+                                                                 long x, long y, long w, long h) {
+        // ShapeObject 기본 속성
+        ((ShapeObject<T>) shape)
+                .idAnd(nextShapeId())
+                .zOrderAnd(frame.zOrder())
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+
+        // ShapeComponent
+        ShapeComponent<T> sc = (ShapeComponent<T>) shape;
+        sc.hrefAnd("");
+        sc.groupLevelAnd((short) 0);
+        sc.instidAnd(nextShapeId());
+
+        sc.createOffset();
+        sc.offset().set(0L, 0L);
+
+        sc.createOrgSz();
+        sc.orgSz().set(w, h);
+
+        sc.createCurSz();
+        sc.curSz().set(w, h);
+
+        sc.createFlip();
+        sc.flip().horizontalAnd(false).verticalAnd(false);
+
+        sc.createRotationInfo();
+        sc.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+
+        sc.createRenderingInfo();
+        sc.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        sc.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        sc.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        // ShapeSize
+        ShapeObject<T> so = (ShapeObject<T>) shape;
+        so.createSZ();
+        so.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        // ShapePosition — 인라인 객체는 글자처럼 취급
+        so.createPos();
+        if (frame.isInline()) {
+            // 인라인 객체: 글자처럼 취급 (텍스트 흐름에 따름)
+            so.pos().treatAsCharAnd(true)
+                    .affectLSpacingAnd(true)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.BOTTOM)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(0L)
+                    .horzOffset(0L);
+        } else {
+            // 절대 위치 객체: 용지 기준 좌표
+            so.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(false)
+                    .allowOverlapAnd(true)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PAPER)
+                    .horzRelToAnd(HorzRelTo.PAPER)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(y)
+                    .horzOffset(x);
+        }
+
+        // OutMargin
+        so.createOutMargin();
+        so.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+    }
+
+    private <T extends DrawingObject<T>> void setupShapeLineAndFill(T shape, IntermediateFrame frame) {
+        // LineShape (테두리)
+        boolean hasStroke = frame.strokeColor() != null && frame.strokeWeight() > 0;
+        String strokeColor = frame.strokeColor() != null ? frame.strokeColor() : "#000000";
+        int strokeWidthHwp = hasStroke ? (int) (frame.strokeWeight() * 100) : 0;
+        if (hasStroke && strokeWidthHwp < 14) strokeWidthHwp = 14;
+
+        shape.createLineShape();
+        shape.lineShape().colorAnd(strokeColor).widthAnd(strokeWidthHwp)
+                .styleAnd(hasStroke ? LineType2.SOLID : LineType2.NONE)
+                .endCapAnd(LineCap.FLAT)
+                .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
+                .headfillAnd(true).tailfillAnd(true)
+                .headSzAnd(ArrowSize.MEDIUM_MEDIUM).tailSzAnd(ArrowSize.MEDIUM_MEDIUM)
+                .outlineStyleAnd(OutlineStyle.NORMAL).alpha(0f);
+
+        // FillBrush (채우기)
+        if (frame.fillColor() != null) {
+            shape.createFillBrush();
+            shape.fillBrush().createWinBrush();
+            shape.fillBrush().winBrush().faceColorAnd(frame.fillColor())
+                    .hatchColorAnd(frame.fillColor())
+                    .alpha(0f);
+        }
+
+        // Shadow (필수 요소 - 없으면 NONE으로 설정)
+        shape.createShadow();
+        shape.shadow().typeAnd(DrawingShadowType.NONE)
+                .colorAnd("#B2B2B2")
+                .offsetXAnd(0L).offsetYAnd(0L)
+                .alpha(0f);
+    }
+
+    private void convertRectangleFrame(Run anchorRun, IntermediateFrame frame) {
+        long x = frame.x();
+        long y = frame.y();
+        long w = frame.width();
+        long h = frame.height();
+
+        Rectangle rect = anchorRun.addNewRectangle();
+
+        // ShapeObject 기본 속성
+        rect.idAnd(nextShapeId())
+                .zOrderAnd(frame.zOrder())
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)  // 텍스트 앞에 배치
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+
+        // ShapeComponent
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(nextShapeId());
+
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+
+        rect.createCurSz();
+        rect.curSz().set(w, h);
+
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        // ShapeSize
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        // ShapePosition — 용지(PAPER) 기준 절대 좌표
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(y)
+                .horzOffset(x);
+
+        // OutMargin
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        // Rectangle 고유 속성 — 4 코너
+        rect.ratioAnd((short) 0);
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        // LineShape (테두리 색상 및 두께)
+        String borderColor = frame.borderColor() != null ? frame.borderColor() : "#000000";
+        // borderWidth는 points 단위, HWPX는 hwpunit (1pt = 100 hwpunit)
+        int borderWidthHwp = (int) (frame.borderWidth() * 100);
+        if (borderWidthHwp < 14) borderWidthHwp = 14;  // 최소 두께
+
+        rect.createLineShape();
+        rect.lineShape().colorAnd(borderColor).widthAnd(borderWidthHwp)
+                .styleAnd(LineType2.SOLID)
+                .endCapAnd(LineCap.FLAT)
+                .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
+                .headfillAnd(true).tailfillAnd(true)
+                .headSzAnd(ArrowSize.MEDIUM_MEDIUM).tailSzAnd(ArrowSize.MEDIUM_MEDIUM)
+                .outlineStyleAnd(OutlineStyle.NORMAL).alpha(0f);
+
+        // FillBrush — 채우기 (투명이면 생략, 지정된 색상이면 WinBrush 설정)
+        if (frame.fillColor() != null) {
+            rect.createFillBrush();
+            rect.fillBrush().createWinBrush();
+            rect.fillBrush().winBrush().faceColorAnd(frame.fillColor())
+                    .hatchColorAnd(frame.fillColor())
+                    .alpha(0f);
+        }
+        // fillColor가 null이면 FillBrush를 생성하지 않음 → 투명 (채우기 없음)
     }
 
     // ── 유틸리티 ──

@@ -10,6 +10,7 @@ import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.URLDecoder;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -38,6 +39,20 @@ public class IDMLPageRenderer {
      * @return PNG 바이트 배열
      */
     public byte[] renderPage(IDMLSpread spread, IDMLPage page, String linksDirectory) throws IOException {
+        return renderPage(spread, page, linksDirectory, false);
+    }
+
+    /**
+     * 페이지를 PNG로 렌더링한다.
+     *
+     * @param spread 스프레드
+     * @param page   페이지
+     * @param linksDirectory 이미지 파일 검색 디렉토리 (옵션)
+     * @param drawPageBoundary 페이지 경계선 그리기 여부
+     * @return PNG 바이트 배열
+     */
+    public byte[] renderPage(IDMLSpread spread, IDMLPage page, String linksDirectory,
+                              boolean drawPageBoundary) throws IOException {
         // 페이지 크기 (points)
         double pageWidthPt = page.widthPoints();
         double pageHeightPt = page.heightPoints();
@@ -60,20 +75,29 @@ public class IDMLPageRenderer {
 
         // 페이지 좌표계 변환 설정
         // 페이지의 절대 좌표를 (0,0) 기준으로 변환
+        // geometricBounds + itemTransform을 적용하여 실제 절대 좌표 계산
+        double[] pageBounds = page.geometricBounds();
         double[] pageTransform = page.itemTransform();
-        double pageTx = pageTransform != null ? pageTransform[4] : 0;
-        double pageTy = pageTransform != null ? pageTransform[5] : 0;
+        double[] pageAbs = IDMLGeometry.absoluteTopLeft(pageBounds, pageTransform);
+        double pageTx = pageAbs[0];
+        double pageTy = pageAbs[1];
 
-        // 1. 벡터 도형 렌더링 (z-order 낮음)
-        List<IDMLVectorShape> shapes = spread.getVectorShapesOnPage(page);
-        for (IDMLVectorShape shape : shapes) {
-            renderVectorShape(g, shape, pageTx, pageTy, scale);
+        // 페이지 경계로 클리핑 (페이지 밖으로 확장되는 stroke 처리)
+        g.setClip(0, 0, pixelWidth, pixelHeight);
+
+        // z-order 순서로 모든 렌더링 항목 (이미지 + 벡터) 가져오기
+        List<IDMLSpread.RenderableItem> items = spread.getRenderableItemsOnPage(page);
+        for (IDMLSpread.RenderableItem item : items) {
+            if (item.type() == IDMLSpread.RenderableItem.Type.IMAGE) {
+                renderImage(g, item.imageFrame(), pageTx, pageTy, scale, linksDirectory);
+            } else {
+                renderVectorShape(g, item.vectorShape(), pageTx, pageTy, scale);
+            }
         }
 
-        // 2. 이미지 렌더링
-        List<IDMLImageFrame> images = spread.getImageFramesOnPage(page);
-        for (IDMLImageFrame imgFrame : images) {
-            renderImage(g, imgFrame, pageTx, pageTy, scale, linksDirectory);
+        // 페이지 경계선 그리기 (옵션)
+        if (drawPageBoundary) {
+            drawPageBoundaryLines(g, pixelWidth, pixelHeight, scale);
         }
 
         g.dispose();
@@ -221,6 +245,37 @@ public class IDMLPageRenderer {
         double renderW = shapeW + margin * 2;
         double renderH = shapeH + margin * 2;
 
+        // 페이지 크기 계산
+        double pageWidth = pageBounds != null ? pageBounds[3] - pageBounds[1] : Double.MAX_VALUE;
+        double pageHeight = pageBounds != null ? pageBounds[2] - pageBounds[0] : Double.MAX_VALUE;
+
+        // 페이지 경계로 클리핑 - 음수 좌표나 페이지 밖 부분 제외
+        double clipOffsetX = 0;
+        double clipOffsetY = 0;
+
+        // 왼쪽/위쪽 경계 클리핑
+        if (renderX < 0) {
+            clipOffsetX = -renderX;
+            renderW -= clipOffsetX;
+            renderX = 0;
+        }
+        if (renderY < 0) {
+            clipOffsetY = -renderY;
+            renderH -= clipOffsetY;
+            renderY = 0;
+        }
+
+        // 오른쪽/아래쪽 경계 클리핑
+        if (renderX + renderW > pageWidth) {
+            renderW = pageWidth - renderX;
+        }
+        if (renderY + renderH > pageHeight) {
+            renderH = pageHeight - renderY;
+        }
+
+        // 클리핑 후 유효한 영역이 없으면 스킵
+        if (renderW <= 0 || renderH <= 0) return null;
+
         // 픽셀 크기
         double scale = dpi / 72.0;
         int pixelWidth = (int) Math.ceil(renderW * scale);
@@ -235,9 +290,9 @@ public class IDMLPageRenderer {
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 
         // 렌더링 좌표 변환: 도형을 (0,0) 기준으로 그리기
-        // renderX, renderY를 기준점으로 사용
-        double offsetX = pageAbs[0] + renderX;
-        double offsetY = pageAbs[1] + renderY;
+        // 클리핑 오프셋을 적용하여 보이는 부분만 그리기
+        double offsetX = pageAbs[0] + renderX - clipOffsetX;
+        double offsetY = pageAbs[1] + renderY - clipOffsetY;
 
         renderVectorShape(g, shape, offsetX, offsetY, scale);
         g.dispose();
@@ -251,7 +306,7 @@ public class IDMLPageRenderer {
     }
 
     /**
-     * 단일 이미지 프레임을 투명 PNG로 렌더링한다 (클리핑 적용).
+     * 단일 이미지 프레임을 투명 PNG로 렌더링한다 (스케일, 회전, 클리핑 적용).
      *
      * @param imgFrame 이미지 프레임
      * @param page     페이지 (좌표 변환용)
@@ -268,21 +323,32 @@ public class IDMLPageRenderer {
         double[] imageTransform = imgFrame.imageTransform();
         if (frameBounds == null || frameTransform == null) return null;
 
-        // 페이지 절대 좌표 계산 (전체 아핀 변환 적용)
+        // 페이지 절대 좌표 계산
         double[] pageBounds = page.geometricBounds();
         double[] pageTransform = page.itemTransform();
         double[] pageAbs = (pageBounds != null && pageTransform != null)
                 ? applyTransform(pageTransform, pageBounds[1], pageBounds[0])
                 : new double[]{0, 0};
 
-        // 프레임의 절대 좌표 계산 (전체 아핀 변환 적용)
-        double[] frameAbs = applyTransform(frameTransform, frameBounds[1], frameBounds[0]);
+        // 프레임의 4개 코너를 변환하여 실제 bounding box 계산
+        double top = frameBounds[0], left = frameBounds[1];
+        double bottom = frameBounds[2], right = frameBounds[3];
 
-        // 페이지 상대 좌표 = 프레임 절대좌표 - 페이지 절대좌표
-        double frameX = frameAbs[0] - pageAbs[0];
-        double frameY = frameAbs[1] - pageAbs[1];
-        double frameW = frameBounds[3] - frameBounds[1];
-        double frameH = frameBounds[2] - frameBounds[0];
+        double[] tl = applyTransform(frameTransform, left, top);
+        double[] tr = applyTransform(frameTransform, right, top);
+        double[] bl = applyTransform(frameTransform, left, bottom);
+        double[] br = applyTransform(frameTransform, right, bottom);
+
+        // 변환된 bounding box (페이지 상대)
+        double minX = Math.min(Math.min(tl[0], tr[0]), Math.min(bl[0], br[0])) - pageAbs[0];
+        double maxX = Math.max(Math.max(tl[0], tr[0]), Math.max(bl[0], br[0])) - pageAbs[0];
+        double minY = Math.min(Math.min(tl[1], tr[1]), Math.min(bl[1], br[1])) - pageAbs[1];
+        double maxY = Math.max(Math.max(tl[1], tr[1]), Math.max(bl[1], br[1])) - pageAbs[1];
+
+        double frameX = minX;
+        double frameY = minY;
+        double frameW = maxX - minX;
+        double frameH = maxY - minY;
 
         if (frameW < 0.5 || frameH < 0.5) return null;
 
@@ -293,18 +359,7 @@ public class IDMLPageRenderer {
 
         if (pixelWidth < 1 || pixelHeight < 1) return null;
 
-        // 이미지 변환 정보
-        double imgScaleX = 1.0, imgScaleY = 1.0;
-        double imgTx = 0, imgTy = 0;
-        if (imageTransform != null && imageTransform.length >= 6) {
-            imgScaleX = imageTransform[0];
-            imgScaleY = imageTransform[3];
-            imgTx = imageTransform[4];
-            imgTy = imageTransform[5];
-        }
-
         // graphicBounds = [left, top, right, bottom] - 이미지 콘텐츠의 좌표계 범위 (points 단위)
-        // imageTransform은 graphicBounds 원점을 (imgTx, imgTy)에 배치함
         double[] graphicBounds = imgFrame.graphicBounds();
         double gLeft = 0, gTop = 0, gRight = srcImage.getWidth(), gBottom = srcImage.getHeight();
         if (graphicBounds != null && graphicBounds.length >= 4) {
@@ -314,81 +369,62 @@ public class IDMLPageRenderer {
             gBottom = graphicBounds[3];
         }
 
-        // 이미지 스케일 (source pixel -> points)
-        double absScaleX = Math.abs(imgScaleX);
-        double absScaleY = Math.abs(imgScaleY);
-        if (absScaleX < 0.001) absScaleX = 1.0;
-        if (absScaleY < 0.001) absScaleY = 1.0;
-
         // 그래픽 좌표 (points) → 소스 픽셀 변환 스케일
-        // graphicBounds의 범위 (points)가 srcImage의 픽셀 범위에 해당
         double graphicW = gRight - gLeft;
         double graphicH = gBottom - gTop;
         double pointsToPixelX = (graphicW > 0) ? srcImage.getWidth() / graphicW : 1.0;
         double pointsToPixelY = (graphicH > 0) ? srcImage.getHeight() / graphicH : 1.0;
-
-        // 프레임 로컬 좌표계에서 클리핑 영역 계산
-        // frameBounds = [top, left, bottom, right] - 프레임 로컬 좌표
-        // imageTransform의 tx, ty는 프레임 로컬 좌표계에서의 이미지 원점 위치
-        // graphic_pos = (frame_local_pos - imgTx) / imgScale + gLeft
-        double frameLeft = frameBounds[1];
-        double frameTop = frameBounds[0];
-        double frameRight = frameBounds[3];
-        double frameBottom = frameBounds[2];
-
-        double graphicLeft = (frameLeft - imgTx) / imgScaleX + gLeft;
-        double graphicTop = (frameTop - imgTy) / imgScaleY + gTop;
-        double graphicRight = (frameRight - imgTx) / imgScaleX + gLeft;
-        double graphicBottom = (frameBottom - imgTy) / imgScaleY + gTop;
-
-        // 그래픽 좌표 (points)를 소스 픽셀 좌표로 변환
-        double srcLeft = (graphicLeft - gLeft) * pointsToPixelX;
-        double srcTop = (graphicTop - gTop) * pointsToPixelY;
-        double srcRight = (graphicRight - gLeft) * pointsToPixelX;
-        double srcBottom = (graphicBottom - gTop) * pointsToPixelY;
-
-        // 소스 이미지 범위로 클리핑
-        int srcX1 = Math.max(0, (int) Math.floor(srcLeft));
-        int srcY1 = Math.max(0, (int) Math.floor(srcTop));
-        int srcX2 = Math.min(srcImage.getWidth(), (int) Math.ceil(srcRight));
-        int srcY2 = Math.min(srcImage.getHeight(), (int) Math.ceil(srcBottom));
-
-        // 유효한 영역이 있는지 확인
-        if (srcX1 >= srcX2 || srcY1 >= srcY2) {
-            return null;  // 이미지가 프레임 영역과 겹치지 않음
-        }
 
         // 투명 PNG 생성
         BufferedImage image = new BufferedImage(pixelWidth, pixelHeight, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = image.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 
-        // 대상 영역 계산 (출력 이미지 내 위치, 픽셀)
-        // 수정: 그래픽 좌표 → 소스 픽셀 변환을 고려한 스케일
-        double srcToOutputScaleX = absScaleX / pointsToPixelX * scale;
-        double srcToOutputScaleY = absScaleY / pointsToPixelY * scale;
-        double dstX1 = (srcX1 - srcLeft) * srcToOutputScaleX;
-        double dstY1 = (srcY1 - srcTop) * srcToOutputScaleY;
-        double dstX2 = dstX1 + (srcX2 - srcX1) * srcToOutputScaleX;
-        double dstY2 = dstY1 + (srcY2 - srcY1) * srcToOutputScaleY;
+        // 출력 좌표계로 변환:
+        // 1. 페이지 원점 기준으로 이동
+        // 2. frameTransform 적용 (스케일, 회전, 이동)
+        // 3. imageTransform 적용 (이미지 배치)
+        // 4. graphicBounds → 픽셀 변환
 
-        // 이미지 반전 처리
-        int actualSrcX1 = srcX1, actualSrcX2 = srcX2;
-        int actualSrcY1 = srcY1, actualSrcY2 = srcY2;
-        if (imgScaleX < 0) {
-            actualSrcX1 = srcImage.getWidth() - srcX2;
-            actualSrcX2 = srcImage.getWidth() - srcX1;
+        AffineTransform outputTransform = new AffineTransform();
+        // 출력 이미지 원점으로 이동
+        outputTransform.translate(-minX * scale, -minY * scale);
+        // 페이지 절대 좌표 → 픽셀 좌표
+        outputTransform.scale(scale, scale);
+        outputTransform.translate(-pageAbs[0], -pageAbs[1]);
+        // 프레임 변환 적용 (a, b, c, d, tx, ty)
+        outputTransform.concatenate(new AffineTransform(
+                frameTransform[0], frameTransform[1],
+                frameTransform[2], frameTransform[3],
+                frameTransform[4], frameTransform[5]));
+        // 이미지 변환 적용 (imageTransform이 있는 경우)
+        if (imageTransform != null && imageTransform.length >= 6) {
+            outputTransform.concatenate(new AffineTransform(
+                    imageTransform[0], imageTransform[1],
+                    imageTransform[2], imageTransform[3],
+                    imageTransform[4], imageTransform[5]));
         }
-        if (imgScaleY < 0) {
-            actualSrcY1 = srcImage.getHeight() - srcY2;
-            actualSrcY2 = srcImage.getHeight() - srcY1;
-        }
+        // graphicBounds 원점에서 픽셀 좌표로 변환
+        outputTransform.translate(-gLeft, -gTop);
+        outputTransform.scale(1.0 / pointsToPixelX, 1.0 / pointsToPixelY);
+
+        // 프레임 클리핑 경로 설정 (변환된 프레임 영역만 보이도록)
+        GeneralPath clipPath = new GeneralPath();
+        double[] c1 = new double[]{(tl[0] - pageAbs[0] - minX) * scale, (tl[1] - pageAbs[1] - minY) * scale};
+        double[] c2 = new double[]{(tr[0] - pageAbs[0] - minX) * scale, (tr[1] - pageAbs[1] - minY) * scale};
+        double[] c3 = new double[]{(br[0] - pageAbs[0] - minX) * scale, (br[1] - pageAbs[1] - minY) * scale};
+        double[] c4 = new double[]{(bl[0] - pageAbs[0] - minX) * scale, (bl[1] - pageAbs[1] - minY) * scale};
+        clipPath.moveTo(c1[0], c1[1]);
+        clipPath.lineTo(c2[0], c2[1]);
+        clipPath.lineTo(c3[0], c3[1]);
+        clipPath.lineTo(c4[0], c4[1]);
+        clipPath.closePath();
+        g.setClip(clipPath);
 
         // 이미지 그리기
-        g.drawImage(srcImage,
-                (int) dstX1, (int) dstY1, (int) dstX2, (int) dstY2,
-                actualSrcX1, actualSrcY1, actualSrcX2, actualSrcY2, null);
+        g.drawImage(srcImage, outputTransform, null);
 
         g.dispose();
 
@@ -529,6 +565,22 @@ public class IDMLPageRenderer {
         // PathPoints로 경로 생성
         GeneralPath path = new GeneralPath();
         if (points.size() > 0) {
+            // 디버그: 인라인 그래픽 렌더링 위치 확인
+            String selfId = shape.selfId();
+            if (selfId != null && (selfId.startsWith("u38a") || selfId.startsWith("u38b") || selfId.startsWith("u38d"))) {
+                IDMLVectorShape.PathPoint firstPt = points.get(0);
+                double[] firstLocal = applyTransform(transform, firstPt.anchorX(), firstPt.anchorY());
+                double firstPx = (firstLocal[0] - pageTx) * scale;
+                double firstPy = (firstLocal[1] - pageTy) * scale;
+                System.err.println("[DEBUG] 벡터 렌더링: " + selfId
+                        + " | PathPoints=" + points.size()
+                        + " | 첫점원본=(" + String.format("%.1f,%.1f", firstPt.anchorX(), firstPt.anchorY()) + ")"
+                        + " | 변환후=(" + String.format("%.1f,%.1f", firstLocal[0], firstLocal[1]) + ")"
+                        + " | 픽셀=(" + String.format("%.1f,%.1f", firstPx, firstPy) + ")"
+                        + " | pageTxTy=(" + String.format("%.1f,%.1f", pageTx, pageTy) + ")"
+                        + " | fillColor=" + shape.fillColor());
+            }
+
             boolean first = true;
             for (int i = 0; i < points.size(); i++) {
                 IDMLVectorShape.PathPoint pt = points.get(i);
@@ -598,6 +650,8 @@ public class IDMLPageRenderer {
         if (allowFill && shape.hasFill()) {
             Color fillColor = resolveColor(shape.fillColor());
             if (fillColor != null) {
+                // 투명도 적용 (fillTint: 0~100)
+                fillColor = applyTint(fillColor, shape.fillTint(), shape.opacity());
                 g.setColor(fillColor);
                 g.fill(path);
             }
@@ -607,6 +661,8 @@ public class IDMLPageRenderer {
         if (shape.hasStroke()) {
             Color strokeColor = resolveColor(shape.strokeColor());
             if (strokeColor != null) {
+                // 투명도 적용 (strokeTint: 0~100)
+                strokeColor = applyTint(strokeColor, shape.strokeTint(), shape.opacity());
                 g.setColor(strokeColor);
                 g.setStroke(createStroke(shape));
                 g.draw(path);
@@ -658,8 +714,8 @@ public class IDMLPageRenderer {
     }
 
     /**
-     * 이미지를 렌더링한다.
-     * 이미지 클리핑: 프레임 영역만 보이도록 소스 이미지의 일부만 그린다.
+     * 이미지를 렌더링한다 (스케일, 회전, 클리핑 적용).
+     * AffineTransform을 사용하여 정확한 변환을 적용.
      */
     private void renderImage(Graphics2D g, IDMLImageFrame imgFrame,
                               double pageTx, double pageTy, double scale,
@@ -677,98 +733,81 @@ public class IDMLPageRenderer {
 
         if (frameBounds == null || frameTransform == null) return;
 
-        // 프레임의 페이지 상대 위치 (픽셀)
-        double frameX = (frameBounds[1] + frameTransform[4] - pageTx) * scale;
-        double frameY = (frameBounds[0] + frameTransform[5] - pageTy) * scale;
-        double frameW = (frameBounds[3] - frameBounds[1]) * scale;
-        double frameH = (frameBounds[2] - frameBounds[0]) * scale;
+        // 프레임의 4개 코너를 변환하여 클리핑 경로 생성
+        double top = frameBounds[0], left = frameBounds[1];
+        double bottom = frameBounds[2], right = frameBounds[3];
+
+        double[] tl = applyTransform(frameTransform, left, top);
+        double[] tr = applyTransform(frameTransform, right, top);
+        double[] bl = applyTransform(frameTransform, left, bottom);
+        double[] br = applyTransform(frameTransform, right, bottom);
+
+        // 페이지 상대 좌표로 변환 (픽셀)
+        double tlX = (tl[0] - pageTx) * scale, tlY = (tl[1] - pageTy) * scale;
+        double trX = (tr[0] - pageTx) * scale, trY = (tr[1] - pageTy) * scale;
+        double blX = (bl[0] - pageTx) * scale, blY = (bl[1] - pageTy) * scale;
+        double brX = (br[0] - pageTx) * scale, brY = (br[1] - pageTy) * scale;
+
+        // 클리핑 경로 생성 (변환된 프레임 영역)
+        GeneralPath clipPath = new GeneralPath();
+        clipPath.moveTo(tlX, tlY);
+        clipPath.lineTo(trX, trY);
+        clipPath.lineTo(brX, brY);
+        clipPath.lineTo(blX, blY);
+        clipPath.closePath();
+
+        // graphicBounds = [left, top, right, bottom] - 이미지 콘텐츠의 좌표계 범위 (points 단위)
+        double[] graphicBounds = imgFrame.graphicBounds();
+        double gLeft = 0, gTop = 0, gRight = srcImage.getWidth(), gBottom = srcImage.getHeight();
+        if (graphicBounds != null && graphicBounds.length >= 4) {
+            gLeft = graphicBounds[0];
+            gTop = graphicBounds[1];
+            gRight = graphicBounds[2];
+            gBottom = graphicBounds[3];
+        }
+
+        // 그래픽 좌표 (points) → 소스 픽셀 변환 스케일
+        double graphicW = gRight - gLeft;
+        double graphicH = gBottom - gTop;
+        double pointsToPixelX = (graphicW > 0) ? srcImage.getWidth() / graphicW : 1.0;
+        double pointsToPixelY = (graphicH > 0) ? srcImage.getHeight() / graphicH : 1.0;
+
+        // 현재 클립 저장
+        Shape oldClip = g.getClip();
+
+        // 프레임 클리핑 적용
+        g.setClip(clipPath);
+
+        // AffineTransform 구성:
+        // 1. 페이지 좌표 → 픽셀 좌표 (scale)
+        // 2. 페이지 원점 이동 (-pageTx, -pageTy)
+        // 3. 프레임 변환 적용 (frameTransform)
+        // 4. 이미지 변환 적용 (imageTransform)
+        // 5. graphicBounds 원점 → 픽셀 좌표
+        AffineTransform imgTransform = new AffineTransform();
+        imgTransform.scale(scale, scale);
+        imgTransform.translate(-pageTx, -pageTy);
+        imgTransform.concatenate(new AffineTransform(
+                frameTransform[0], frameTransform[1],
+                frameTransform[2], frameTransform[3],
+                frameTransform[4], frameTransform[5]));
 
         if (imageTransform != null && imageTransform.length >= 6) {
-            // 이미지 변환 정보
-            double imgScaleX = imageTransform[0];
-            double imgScaleY = imageTransform[3];
-            double imgTx = imageTransform[4];
-            double imgTy = imageTransform[5];
-
-            // graphicBounds = [left, top, right, bottom] - 이미지 콘텐츠의 좌표계 범위 (points 단위)
-            double[] graphicBounds = imgFrame.graphicBounds();
-            double gLeft = 0, gTop = 0, gRight = srcImage.getWidth(), gBottom = srcImage.getHeight();
-            if (graphicBounds != null && graphicBounds.length >= 4) {
-                gLeft = graphicBounds[0];
-                gTop = graphicBounds[1];
-                gRight = graphicBounds[2];
-                gBottom = graphicBounds[3];
-            }
-
-            // 그래픽 좌표 (points) → 소스 픽셀 변환 스케일
-            double graphicW = gRight - gLeft;
-            double graphicH = gBottom - gTop;
-            double pointsToPixelX = (graphicW > 0) ? srcImage.getWidth() / graphicW : 1.0;
-            double pointsToPixelY = (graphicH > 0) ? srcImage.getHeight() / graphicH : 1.0;
-
-            // 원본 이미지 픽셀당 화면 픽셀 수
-            double pixelScaleX = Math.abs(imgScaleX) * pointsToPixelX * scale;
-            double pixelScaleY = Math.abs(imgScaleY) * pointsToPixelY * scale;
-
-            // 프레임 영역이 그래픽 좌표계에서 어디에 해당하는지 계산
-            // frame_pos = (graphic_pos - gLeft) * imgScale + imgTx  (points 단위)
-            // 따라서: graphic_pos = (frame_pos - imgTx) / imgScale + gLeft
-            double framePosX = frameBounds[1] + frameTransform[4] - pageTx;  // frame left in page coords (points)
-            double framePosY = frameBounds[0] + frameTransform[5] - pageTy;  // frame top in page coords (points)
-            double graphicLeft = (framePosX - imgTx - frameTransform[4] + pageTx) / imgScaleX + gLeft;
-            double graphicTop = (framePosY - imgTy - frameTransform[5] + pageTy) / imgScaleY + gTop;
-
-            // 좌표 계산 단순화: frame bounds 기준
-            graphicLeft = (frameBounds[1] - imgTx) / imgScaleX + gLeft;
-            graphicTop = (frameBounds[0] - imgTy) / imgScaleY + gTop;
-            double graphicRight = graphicLeft + (frameBounds[3] - frameBounds[1]) / Math.abs(imgScaleX);
-            double graphicBottom = graphicTop + (frameBounds[2] - frameBounds[0]) / Math.abs(imgScaleY);
-
-            // 그래픽 좌표 (points)를 소스 픽셀 좌표로 변환
-            double srcLeft = (graphicLeft - gLeft) * pointsToPixelX;
-            double srcTop = (graphicTop - gTop) * pointsToPixelY;
-            double srcRight = (graphicRight - gLeft) * pointsToPixelX;
-            double srcBottom = (graphicBottom - gTop) * pointsToPixelY;
-
-            // 소스 이미지 범위로 클리핑
-            int srcX1 = Math.max(0, (int) Math.floor(srcLeft));
-            int srcY1 = Math.max(0, (int) Math.floor(srcTop));
-            int srcX2 = Math.min(srcImage.getWidth(), (int) Math.ceil(srcRight));
-            int srcY2 = Math.min(srcImage.getHeight(), (int) Math.ceil(srcBottom));
-
-            // 유효한 영역이 있는지 확인
-            if (srcX1 >= srcX2 || srcY1 >= srcY2) {
-                return;  // 이미지가 프레임 영역과 겹치지 않음
-            }
-
-            // 대상 영역 계산 (프레임 내 위치)
-            double dstX1 = frameX + (srcX1 - srcLeft) * pixelScaleX;
-            double dstY1 = frameY + (srcY1 - srcTop) * pixelScaleY;
-            double dstX2 = dstX1 + (srcX2 - srcX1) * pixelScaleX;
-            double dstY2 = dstY1 + (srcY2 - srcY1) * pixelScaleY;
-
-            // 이미지 반전 처리
-            if (imgScaleX < 0) {
-                int tmp = srcX1;
-                srcX1 = srcImage.getWidth() - srcX2;
-                srcX2 = srcImage.getWidth() - tmp;
-            }
-            if (imgScaleY < 0) {
-                int tmp = srcY1;
-                srcY1 = srcImage.getHeight() - srcY2;
-                srcY2 = srcImage.getHeight() - tmp;
-            }
-
-            // 이미지 그리기 (소스 영역 -> 대상 영역)
-            g.drawImage(srcImage,
-                    (int) dstX1, (int) dstY1, (int) dstX2, (int) dstY2,
-                    srcX1, srcY1, srcX2, srcY2, null);
-        } else {
-            // 변환 정보가 없으면 프레임에 맞춰 그리기
-            g.drawImage(srcImage, (int) frameX, (int) frameY,
-                    (int) (frameX + frameW), (int) (frameY + frameH),
-                    0, 0, srcImage.getWidth(), srcImage.getHeight(), null);
+            imgTransform.concatenate(new AffineTransform(
+                    imageTransform[0], imageTransform[1],
+                    imageTransform[2], imageTransform[3],
+                    imageTransform[4], imageTransform[5]));
         }
+
+        // graphicBounds 원점에서 픽셀 좌표로 변환
+        imgTransform.translate(-gLeft, -gTop);
+        imgTransform.scale(1.0 / pointsToPixelX, 1.0 / pointsToPixelY);
+
+        // 이미지 그리기
+        g.drawImage(srcImage, imgTransform, null);
+
+        // 클립 복원
+        g.setClip(oldClip);
     }
 
     /**
@@ -800,19 +839,57 @@ public class IDMLPageRenderer {
             if (f.exists()) imageFile = f;
         }
 
-        if (imageFile == null) return null;
+        if (imageFile == null) {
+            System.err.println("  [WARN] Image file not found: " + uri);
+            if (linksDirectory != null) {
+                System.err.println("         Searched in: " + linksDirectory);
+            }
+            if (idmlDoc.basePath() != null) {
+                System.err.println("         Searched in: " + new File(idmlDoc.basePath(), "Links").getAbsolutePath());
+            }
+            return null;
+        }
 
         try {
             String ext = getExtension(imageFile).toLowerCase();
+            System.err.println("[INFO]     이미지 로드: " + imageFile.getName());
 
-            // 디자인 파일은 PNG로 변환
+            // 디자인 파일은 PNG로 변환 (PSD, AI, EPS만 캐싱 대상)
             if (isDesignFormat(ext)) {
+                // 캐시 파일 확인 (원본파일.png)
+                if (isCacheableDesignFormat(ext)) {
+                    File cacheFile = new File(imageFile.getAbsolutePath() + ".png");
+                    if (cacheFile.exists() && cacheFile.length() > 0) {
+                        System.err.println("[INFO]       → 캐시된 PNG 사용: " + cacheFile.getName());
+                        return ImageIO.read(cacheFile);
+                    }
+                }
+
+                System.err.println("[INFO]       → 디자인 파일 변환 중 (" + ext.toUpperCase() + ")...");
                 byte[] pngData = DesignFileConverter.convertToPng(imageFile, dpi);
+                if (pngData == null || pngData.length == 0) {
+                    System.err.println("  [WARN] Design file conversion returned empty data: " + imageFile.getAbsolutePath());
+                    return null;
+                }
+
+                // 캐시 파일 저장 (PSD, AI, EPS만)
+                if (isCacheableDesignFormat(ext)) {
+                    try {
+                        File cacheFile = new File(imageFile.getAbsolutePath() + ".png");
+                        java.nio.file.Files.write(cacheFile.toPath(), pngData);
+                        System.err.println("[INFO]       → 캐시 저장: " + cacheFile.getName());
+                    } catch (Exception ce) {
+                        System.err.println("[WARN]       캐시 저장 실패: " + ce.getMessage());
+                    }
+                }
+
                 return ImageIO.read(new ByteArrayInputStream(pngData));
             } else {
                 return ImageIO.read(imageFile);
             }
         } catch (IOException e) {
+            System.err.println("  [ERROR] Failed to load image: " + imageFile.getAbsolutePath());
+            System.err.println("          Reason: " + e.getMessage());
             return null;
         }
     }
@@ -915,6 +992,26 @@ public class IDMLPageRenderer {
         }
     }
 
+    /**
+     * 색상에 투명도(tint)와 전체 불투명도(opacity)를 적용한다.
+     * @param color 원본 색상
+     * @param tint 색 농도 (0~100, 100=원본 색상)
+     * @param opacity 전체 불투명도 (0~100, 100=불투명)
+     * @return 투명도가 적용된 색상
+     */
+    private Color applyTint(Color color, double tint, double opacity) {
+        if (color == null) return null;
+
+        // tint와 opacity를 0~1 범위로 변환
+        double tintFactor = Math.max(0, Math.min(100, tint)) / 100.0;
+        double opacityFactor = Math.max(0, Math.min(100, opacity)) / 100.0;
+
+        // 최종 알파값 계산 (tint * opacity)
+        int alpha = (int) (255 * tintFactor * opacityFactor);
+
+        return new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha);
+    }
+
     private static String stripFileUri(String uri) {
         String path = uri;
         if (path.startsWith("file:///")) {
@@ -948,5 +1045,26 @@ public class IDMLPageRenderer {
     private static boolean isDesignFormat(String ext) {
         return "psd".equals(ext) || "ai".equals(ext) || "eps".equals(ext)
                 || "pdf".equals(ext) || "tiff".equals(ext) || "tif".equals(ext);
+    }
+
+    /**
+     * 캐싱 대상 디자인 파일 형식인지 확인 (PSD, AI, EPS만 캐싱)
+     */
+    private static boolean isCacheableDesignFormat(String ext) {
+        return "psd".equals(ext) || "ai".equals(ext) || "eps".equals(ext);
+    }
+
+    /**
+     * 페이지 경계선을 그린다.
+     * InDesign 스타일의 페이지 경계선: 얇은 검정색 실선
+     */
+    private void drawPageBoundaryLines(Graphics2D g, int pixelWidth, int pixelHeight, double scale) {
+        // 페이지 경계선 스타일: 0.5pt 검정색 실선
+        float strokeWidth = (float) (0.5 * scale);
+        g.setColor(Color.BLACK);
+        g.setStroke(new BasicStroke(strokeWidth));
+
+        // 페이지 바운딩 박스 (사각형)
+        g.drawRect(0, 0, pixelWidth - 1, pixelHeight - 1);
     }
 }
