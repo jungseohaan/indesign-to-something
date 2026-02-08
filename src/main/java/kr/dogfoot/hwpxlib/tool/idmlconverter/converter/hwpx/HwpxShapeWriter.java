@@ -120,8 +120,9 @@ public class HwpxShapeWriter {
     private <T extends DrawingObject<T>> void setupShapeCommon(T shape, IntermediateFrame frame,
                                                                  long x, long y, long w, long h) {
         // ShapeObject 기본 속성
+        String shapeId = nextShapeId();
         ((ShapeObject<T>) shape)
-                .idAnd(nextShapeId())
+                .idAnd(shapeId)
                 .zOrderAnd(frame.zOrder())
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
@@ -133,7 +134,7 @@ public class HwpxShapeWriter {
         ShapeComponent<T> sc = (ShapeComponent<T>) shape;
         sc.hrefAnd("");
         sc.groupLevelAnd((short) 0);
-        sc.instidAnd(nextShapeId());
+        sc.instidAnd(shapeId);
 
         sc.createOffset();
         sc.offset().set(0L, 0L);
@@ -230,6 +231,6 @@ public class HwpxShapeWriter {
     }
 
     private String nextShapeId() {
-        return String.valueOf(shapeIdCounter.getAndIncrement());
+        return String.valueOf(shapeIdCounter.incrementAndGet());
     }
 }

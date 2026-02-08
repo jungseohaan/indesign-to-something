@@ -72,7 +72,7 @@ public class HwpxImageWriter {
             // ShapeComponent
             pic.hrefAnd("");
             pic.groupLevelAnd((short) 0);
-            pic.instidAnd(nextShapeId());
+            pic.instidAnd(picId);
             pic.reverseAnd(false);
 
             pic.createOffset();
@@ -162,6 +162,6 @@ public class HwpxImageWriter {
     }
 
     private String nextShapeId() {
-        return String.valueOf(shapeIdCounter.getAndIncrement());
+        return String.valueOf(shapeIdCounter.incrementAndGet());
     }
 }

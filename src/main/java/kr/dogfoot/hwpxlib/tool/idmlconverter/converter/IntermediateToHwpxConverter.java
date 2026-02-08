@@ -840,7 +840,8 @@ public class IntermediateToHwpxConverter {
         Rectangle rect = anchorRun.addNewRectangle();
 
         // ShapeObject 기본 속성
-        rect.idAnd(nextShapeId())
+        String shapeId = nextShapeId();
+        rect.idAnd(shapeId)
                 .zOrderAnd(frame.zOrder())
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)  // 텍스트 앞에 배치
@@ -851,7 +852,7 @@ public class IntermediateToHwpxConverter {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(nextShapeId());
+        rect.instidAnd(shapeId);
 
         rect.createOffset();
         rect.offset().set(0L, 0L);
