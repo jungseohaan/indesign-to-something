@@ -8,6 +8,7 @@ import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.util.List;
+import java.util.Map;
 
 /**
  * IDML 문서 구조 분석기.
@@ -114,6 +115,57 @@ public class IDMLAnalyzer {
         structure.setTotalVectorShapes(totalVectorShapes);
         structure.setTotalTables(totalTables);
 
+        // 마스터 스프레드 분석
+        for (Map.Entry<String, IDMLSpread> entry : doc.masterSpreads().entrySet()) {
+            String masterId = entry.getKey();
+            IDMLSpread ms = entry.getValue();
+
+            MasterSpreadInfo msInfo = new MasterSpreadInfo();
+            msInfo.setId(masterId);
+
+            // 마스터 이름: 첫 번째 페이지의 이름 또는 ID에서 추출
+            String masterName = masterId;
+            if (!ms.pages().isEmpty()) {
+                String pageName = ms.pages().get(0).name();
+                if (pageName != null && !pageName.isEmpty()) {
+                    masterName = pageName;
+                }
+            }
+            msInfo.setName(masterName);
+            msInfo.setPageCount(ms.pages().size());
+            msInfo.setTextFrameCount(ms.textFrames().size());
+            msInfo.setImageFrameCount(ms.imageFrames().size());
+            msInfo.setVectorCount(ms.vectorShapes().size());
+            msInfo.setGroupCount(ms.groups().size());
+
+            // 이 마스터를 사용하는 일반 페이지 수집
+            for (IDMLSpread spread : doc.spreads()) {
+                for (IDMLPage page : spread.pages()) {
+                    if (masterId.equals(page.appliedMasterSpread())) {
+                        msInfo.addAppliedPage(String.valueOf(page.pageNumber()));
+                    }
+                }
+            }
+
+            structure.addMasterSpread(msInfo);
+        }
+
+        // 일반 스프레드의 마스터 이름 설정
+        for (SpreadInfo si : structure.getSpreads()) {
+            if (!si.getPages().isEmpty()) {
+                String masterRef = si.getPages().get(0).getMasterSpread();
+                if (masterRef != null) {
+                    // 마스터 스프레드에서 이름 찾기
+                    for (MasterSpreadInfo msInfo : structure.getMasterSpreads()) {
+                        if (masterRef.equals(msInfo.getId())) {
+                            si.setMasterSpreadName(msInfo.getName());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         return structure;
     }
 
@@ -129,6 +181,34 @@ public class IDMLAnalyzer {
             info.setY(bounds[0]);
             info.setWidth(bounds[3] - bounds[1]);
             info.setHeight(bounds[2] - bounds[0]);
+        }
+
+        // 인라인 텍스트 프레임 탐색
+        String storyId = frame.parentStoryId();
+        if (storyId != null) {
+            IDMLStory story = doc.getStory(storyId);
+            if (story != null) {
+                for (IDMLParagraph para : story.paragraphs()) {
+                    for (IDMLCharacterRun run : para.characterRuns()) {
+                        if (run.inlineFrames() != null) {
+                            for (IDMLTextFrame inlineTf : run.inlineFrames()) {
+                                FrameInfo child = new FrameInfo();
+                                child.setId(inlineTf.selfId());
+                                child.setType("text");
+                                child.setLabel(extractTextLabel(inlineTf, doc));
+                                double[] iBounds = inlineTf.geometricBounds();
+                                if (iBounds != null && iBounds.length >= 4) {
+                                    child.setX(iBounds[1]);
+                                    child.setY(iBounds[0]);
+                                    child.setWidth(iBounds[3] - iBounds[1]);
+                                    child.setHeight(iBounds[2] - iBounds[0]);
+                                }
+                                info.addChild(child);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         return info;

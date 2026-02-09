@@ -2,13 +2,16 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.converter.idml;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.IDMLEquationExtractor;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IDMLPageRenderer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.StyleMapper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.textfit.TextFitter;
 
+import java.io.IOException;
 import java.util.*;
+import java.util.Base64;
 
 /**
  * IDML 텍스트 프레임을 IntermediateFrame으로 변환한다.
@@ -31,6 +34,9 @@ public class TextFrameConverter {
     private final Map<String, List<String>> linkedFrameTextCache;
     private final Map<String, Integer> linkedFrameIndexCache;
 
+    // 인라인 그래픽 PNG 렌더링용 (옵션)
+    private IDMLPageRenderer inlineGraphicRenderer;
+
     public TextFrameConverter(IDMLDocument idmlDoc,
                               Map<String, String> paraStyleRefToId,
                               Map<String, String> charStyleRefToId,
@@ -43,6 +49,13 @@ public class TextFrameConverter {
         this.warnings = warnings;
         this.linkedFrameTextCache = new HashMap<>();
         this.linkedFrameIndexCache = new HashMap<>();
+    }
+
+    /**
+     * 인라인 그래픽 PNG 렌더러를 설정한다.
+     */
+    public void setInlineGraphicRenderer(IDMLPageRenderer renderer) {
+        this.inlineGraphicRenderer = renderer;
     }
 
     /**
@@ -165,6 +178,18 @@ public class TextFrameConverter {
     public void setFramePosition(IntermediateFrame iFrame,
                                   double[] frameBounds, double[] frameTransform,
                                   double[] pageBounds, double[] pageTransform) {
+        setFramePosition(iFrame, frameBounds, frameTransform, pageBounds, pageTransform, -1);
+    }
+
+    /**
+     * 프레임의 페이지 상대 좌표를 설정한다 (스케일, 회전 변환 적용).
+     *
+     * @param containerWidthHwpunits 컨테이너 너비 (HWPUNIT), -1이면 페이지 너비 사용
+     */
+    public void setFramePosition(IntermediateFrame iFrame,
+                                  double[] frameBounds, double[] frameTransform,
+                                  double[] pageBounds, double[] pageTransform,
+                                  long containerWidthHwpunits) {
         if (frameBounds == null) {
             iFrame.x(0);
             iFrame.y(0);
@@ -185,9 +210,35 @@ public class TextFrameConverter {
         double width = transformedBox[2] - transformedBox[0];
         double height = transformedBox[3] - transformedBox[1];
 
-        iFrame.x(CoordinateConverter.pointsToHwpunits(relX));
+        // 컨테이너 너비 계산 (HWPUNIT으로 변환된 값 사용)
+        long widthHwpunits = CoordinateConverter.pointsToHwpunits(width);
+        long xHwpunits = CoordinateConverter.pointsToHwpunits(relX);
+
+        // 페이지 오른쪽 여백 경계 계산
+        if (containerWidthHwpunits <= 0 && pageBounds != null && pageBounds.length >= 4) {
+            // 페이지 너비: right - left
+            double pageWidth = pageBounds[3] - pageBounds[1];
+            // 기본 오른쪽 여백 (60pt = 약 21mm)
+            double rightMargin = 60.0;
+            // 오른쪽 경계 = 페이지 너비 - 오른쪽 여백
+            double rightEdge = pageWidth - rightMargin;
+            // 최대 너비 = 오른쪽 경계 - x좌표
+            long rightEdgeHwpunits = CoordinateConverter.pointsToHwpunits(rightEdge);
+            long maxWidth = rightEdgeHwpunits - xHwpunits;
+            if (maxWidth > 0 && widthHwpunits > maxWidth) {
+                widthHwpunits = maxWidth;
+            }
+        } else if (containerWidthHwpunits > 0) {
+            // 명시적으로 지정된 컨테이너 너비 사용
+            long maxWidth = containerWidthHwpunits - xHwpunits;
+            if (maxWidth > 0 && widthHwpunits > maxWidth) {
+                widthHwpunits = maxWidth;
+            }
+        }
+
+        iFrame.x(xHwpunits);
         iFrame.y(CoordinateConverter.pointsToHwpunits(relY));
-        iFrame.width(CoordinateConverter.pointsToHwpunits(width));
+        iFrame.width(widthHwpunits);
         iFrame.height(CoordinateConverter.pointsToHwpunits(height));
 
         // 회전 각도 추출 및 설정
@@ -299,8 +350,9 @@ public class TextFrameConverter {
 
     /**
      * IDML 단락의 인라인 속성(로컬 오버라이드)을 IntermediateParagraph에 설정한다.
+     * 글상자와 테이블 셀 모두에서 사용된다.
      */
-    private void setInlineParagraphProperties(IDMLParagraph para, IntermediateParagraph iPara) {
+    public void setInlineParagraphProperties(IDMLParagraph para, IntermediateParagraph iPara) {
         // 정렬
         if (para.justification() != null) {
             iPara.inlineAlignment(StyleMapper.mapAlignment(para.justification()));
@@ -325,9 +377,11 @@ public class TextFrameConverter {
         if (para.spaceAfter() != null) {
             iPara.inlineSpaceAfter(CoordinateConverter.pointsToHwpunits(para.spaceAfter()));
         }
-        // 줄간격 (leading → 백분율로 변환, 기본 폰트 크기 12pt 기준)
+        // 줄간격 (leading → 백분율로 변환, 단락의 실제 폰트 크기 기준)
         if (para.leading() != null) {
-            int lineSpacingPercent = (int) Math.round(para.leading() / 12.0 * 100.0);
+            double baseFontSizePt = getDominantFontSizePt(para);
+            int lineSpacingPercent = (int) Math.round(para.leading() / baseFontSizePt * 100.0);
+            lineSpacingPercent = Math.max(100, Math.min(300, lineSpacingPercent));
             iPara.inlineLineSpacing(lineSpacingPercent);
         }
         // 자간 (tracking → HWPX spacing 변환)
@@ -363,20 +417,426 @@ public class TextFrameConverter {
     }
 
     /**
+     * 단락의 주요 폰트 크기(pt)를 반환한다.
+     * 런 중 최대값 → 단락 스타일 → 기본 10pt 순으로 결정.
+     */
+    public double getDominantFontSizePt(IDMLParagraph para) {
+        double maxSize = 0;
+        for (IDMLCharacterRun run : para.characterRuns()) {
+            if (run.fontSize() != null && run.fontSize() > maxSize) {
+                maxSize = run.fontSize();
+            }
+        }
+        if (maxSize > 0) return maxSize;
+
+        String styleRef = para.appliedParagraphStyle();
+        if (styleRef != null) {
+            IDMLStyleDef styleDef = idmlDoc.getParagraphStyle(styleRef);
+            if (styleDef != null && styleDef.fontSize() != null) {
+                return styleDef.fontSize();
+            }
+        }
+        return 10.0;
+    }
+
+    /**
      * 일반 텍스트 런만 있는 단락을 변환한다.
      */
     public void convertTextRuns(IDMLParagraph para, IntermediateParagraph iPara) {
         for (IDMLCharacterRun run : para.characterRuns()) {
             if (run.isNPFont()) continue;
+
+            boolean hasInlineFrames = (run.inlineFrames() != null && !run.inlineFrames().isEmpty());
+            boolean hasInlineGraphics = (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty());
+
+            // 텍스트 런을 먼저 추가 (인라인 그래픽은 텍스트 뒤에 위치)
             IntermediateTextRun iRun = createTextRun(run);
             if (iRun != null) {
-                // 단락 인라인 자간을 런에 전파 (런 레벨 자간이 없을 때)
                 if (iRun.letterSpacing() == null && iPara.inlineLetterSpacing() != null) {
                     iRun.letterSpacing(iPara.inlineLetterSpacing());
                 }
                 iPara.addRun(iRun);
             }
+
+            // 인라인 객체(TextFrame) 처리 - Story 내 그래픽이 있으면 PNG로 렌더링
+            if (hasInlineFrames) {
+                for (IDMLTextFrame inlineFrame : run.inlineFrames()) {
+                    processInlineTextFrame(inlineFrame, iPara);
+                }
+            }
+
+            // 인라인 그래픽(Rectangle, Polygon 등) 처리 - IntermediateFrame으로 변환
+            if (hasInlineGraphics) {
+                for (IDMLCharacterRun.InlineGraphic graphic : run.inlineGraphics()) {
+                    IntermediateFrame inlineFrame = createInlineGraphicFrame(graphic);
+                    if (inlineFrame != null) {
+                        iPara.addInlineFrame(inlineFrame);
+                    }
+                }
+            }
         }
+    }
+
+    /**
+     * 인라인 TextFrame 객체를 처리한다.
+     * Story가 그래픽만 포함하면 PNG로 렌더링하여 인라인 이미지로 변환한다.
+     */
+    private void processInlineTextFrame(IDMLTextFrame inlineFrame, IntermediateParagraph iPara) {
+        // 인라인 TextFrame이 참조하는 Story 조회
+        String parentStoryId = inlineFrame.parentStoryId();
+        IDMLStory referencedStory = (parentStoryId != null) ? idmlDoc.getStory(parentStoryId) : null;
+
+        if (referencedStory != null && inlineGraphicRenderer != null) {
+            // 1. Story에 직접 그래픽이 있는 경우
+            List<IDMLCharacterRun.InlineGraphic> graphics = referencedStory.getAllInlineGraphics();
+            if (!graphics.isEmpty()) {
+                for (IDMLCharacterRun.InlineGraphic graphic : graphics) {
+                    IntermediateFrame imageFrame = createInlineGraphicFrame(graphic);
+                    if (imageFrame != null) {
+                        iPara.addInlineFrame(imageFrame);
+                    }
+                }
+                return;
+            }
+
+            // 2. Story에 테이블이 있고, 테이블 셀에 그래픽이 있는 경우 (중첩 테이블 내 인라인 그래픽)
+            // 재귀적으로 모든 중첩 테이블의 그래픽을 추출하여 렌더링
+            if (referencedStory.hasTables()) {
+                List<IDMLCharacterRun.InlineGraphic> tableGraphics = extractGraphicsFromStoryTables(referencedStory);
+                if (!tableGraphics.isEmpty()) {
+                    System.err.println("[DEBUG-NESTED-TABLE-INLINE] Found " + tableGraphics.size() +
+                            " graphics in nested tables of " + inlineFrame.selfId());
+                    // 각 그래픽을 PNG로 렌더링하여 인라인 이미지로 추가
+                    for (IDMLCharacterRun.InlineGraphic graphic : tableGraphics) {
+                        System.err.println("[DEBUG-NESTED-TABLE-INLINE] Rendering: " + graphic.selfId() +
+                                " type=" + graphic.type());
+                        IntermediateFrame imageFrame = createInlineGraphicFrame(graphic);
+                        if (imageFrame != null) {
+                            iPara.addInlineFrame(imageFrame);
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // 인라인 TextFrame의 텍스트 내용 추출
+        if (referencedStory != null) {
+            String textContent = extractStoryText(referencedStory);
+            if (textContent != null && !textContent.trim().isEmpty()) {
+                // 텍스트 내용을 인라인 텍스트 프레임으로 변환
+                IntermediateFrame textFrameResult = createInlineTextFrameWithContent(inlineFrame, referencedStory);
+                if (textFrameResult != null) {
+                    iPara.addInlineFrame(textFrameResult);
+                    return;
+                }
+            }
+        }
+
+        // 내용이 없으면 공백 삽입
+        IntermediateTextRun iRun = new IntermediateTextRun();
+        iRun.text(" ");
+        iPara.addRun(iRun);
+    }
+
+    /**
+     * Story의 텍스트 내용을 추출한다.
+     */
+    private String extractStoryText(IDMLStory story) {
+        StringBuilder sb = new StringBuilder();
+        for (IDMLParagraph para : story.paragraphs()) {
+            for (IDMLCharacterRun run : para.characterRuns()) {
+                if (run.content() != null) {
+                    sb.append(run.content());
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 인라인 TextFrame을 텍스트 내용과 함께 IntermediateFrame으로 변환한다.
+     */
+    private IntermediateFrame createInlineTextFrameWithContent(IDMLTextFrame inlineFrame, IDMLStory story) {
+        double[] bounds = inlineFrame.geometricBounds();
+        if (bounds == null || bounds.length < 4) return null;
+
+        double widthPts = bounds[3] - bounds[1];
+        double heightPts = bounds[2] - bounds[0];
+
+        // ItemTransform 스케일 적용
+        double[] transform = inlineFrame.itemTransform();
+        if (transform != null && transform.length >= 4) {
+            double scaleX = Math.abs(transform[0]);
+            double scaleY = Math.abs(transform[3]);
+            if (scaleX > 0.001) widthPts *= scaleX;
+            if (scaleY > 0.001) heightPts *= scaleY;
+        }
+
+        if (widthPts <= 0 || heightPts <= 0) return null;
+
+        long width = CoordinateConverter.pointsToHwpunits(widthPts);
+        long height = CoordinateConverter.pointsToHwpunits(heightPts);
+
+        IntermediateFrame iFrame = new IntermediateFrame();
+        iFrame.frameId("inline_tf_" + inlineFrame.selfId());
+        iFrame.frameType("text");
+        iFrame.isInline(true);
+        iFrame.width(width);
+        iFrame.height(height);
+        iFrame.x(0);
+        iFrame.y(0);
+
+        // Story의 단락을 IntermediateParagraph로 변환
+        for (IDMLParagraph para : story.paragraphs()) {
+            IntermediateParagraph iPara = new IntermediateParagraph();
+            iPara.paragraphStyleRef(para.appliedParagraphStyle());
+
+            for (IDMLCharacterRun run : para.characterRuns()) {
+                String content = run.content();
+                // 단락 끝 \n 제거 (IDMLParagraph로 이미 단락 분리됨)
+                if (content != null && content.endsWith("\n")) {
+                    content = content.substring(0, content.length() - 1);
+                }
+                if (content != null && !content.isEmpty()) {
+                    IntermediateTextRun iRun = new IntermediateTextRun();
+                    iRun.text(content);
+                    iRun.characterStyleRef(run.appliedCharacterStyle());
+                    iRun.fontFamily(run.fontFamily());
+                    if (run.fontSize() != null) {
+                        iRun.fontSizeHwpunits(CoordinateConverter.fontSizeToHeight(run.fontSize()));
+                    }
+                    iRun.textColor(colorResolver.resolve(run.fillColor()));
+                    iPara.addRun(iRun);
+                }
+            }
+
+            if (!iPara.runs().isEmpty()) {
+                iFrame.addParagraph(iPara);
+            }
+        }
+
+        return iFrame.paragraphs().isEmpty() ? null : iFrame;
+    }
+
+    /**
+     * 이중 인라인 객체용 플레이스홀더 프레임 생성.
+     */
+    private IntermediateFrame createPlaceholderFrame(IDMLTextFrame textFrame) {
+        double[] bounds = textFrame.geometricBounds();
+        if (bounds == null || bounds.length < 4) return null;
+
+        double widthPts = bounds[3] - bounds[1];
+        double heightPts = bounds[2] - bounds[0];
+        if (widthPts <= 0 || heightPts <= 0) return null;
+
+        long width = CoordinateConverter.pointsToHwpunits(widthPts);
+        long height = CoordinateConverter.pointsToHwpunits(heightPts);
+
+        IntermediateFrame iFrame = new IntermediateFrame();
+        iFrame.frameId("placeholder_" + textFrame.selfId());
+        iFrame.frameType("shape");
+        iFrame.shapeType("rectangle");
+        iFrame.isInline(true);
+        iFrame.width(width);
+        iFrame.height(height);
+        iFrame.x(0);
+        iFrame.y(0);
+        // 연한 회색 배경으로 플레이스홀더 표시
+        iFrame.fillColor("#EEEEEE");
+        return iFrame;
+    }
+
+    /**
+     * 인라인 TextFrame 전체를 PNG 이미지로 렌더링한다.
+     * TextFrame의 geometricBounds를 사용하여 크기 계산.
+     */
+    private IntermediateFrame renderInlineTextFrameAsImage(IDMLTextFrame textFrame,
+                                                           List<IDMLCharacterRun.InlineGraphic> graphics) {
+        double[] bounds = textFrame.geometricBounds();
+        if (bounds == null || bounds.length < 4) return null;
+
+        // TextFrame 크기 계산 (points)
+        double widthPts = bounds[3] - bounds[1];  // right - left
+        double heightPts = bounds[2] - bounds[0]; // bottom - top
+        if (widthPts <= 0 || heightPts <= 0) return null;
+
+        System.err.println("[DEBUG-INLINE-TF] Rendering TextFrame " + textFrame.selfId() +
+                " bounds=[" + String.format("%.1f,%.1f,%.1f,%.1f", bounds[0], bounds[1], bounds[2], bounds[3]) +
+                "] size=" + String.format("%.1fx%.1f", widthPts, heightPts) + " pts" +
+                " with " + graphics.size() + " graphics");
+
+        // 크기 (HWPUNIT)
+        long width = CoordinateConverter.pointsToHwpunits(widthPts);
+        long height = CoordinateConverter.pointsToHwpunits(heightPts);
+
+        IntermediateFrame iFrame = new IntermediateFrame();
+        iFrame.frameId("inline_tf_" + textFrame.selfId());
+        iFrame.isInline(true);
+        iFrame.width(width);
+        iFrame.height(height);
+        iFrame.x(0);
+        iFrame.y(0);
+
+        // PNG 렌더링 시도
+        try {
+            IDMLPageRenderer.RenderResult result =
+                    inlineGraphicRenderer.renderInlineTextFrameToPng(textFrame, graphics);
+            if (result != null && result.pngData() != null && result.pngData().length > 0) {
+                iFrame.frameType("image");
+
+                IntermediateImage img = new IntermediateImage();
+                img.imageId("inline_tf_" + textFrame.selfId());
+                img.format("png");
+                img.base64Data(Base64.getEncoder().encodeToString(result.pngData()));
+                img.pixelWidth(result.pixelWidth());
+                img.pixelHeight(result.pixelHeight());
+                img.displayWidth(width);
+                img.displayHeight(height);
+                iFrame.image(img);
+
+                return iFrame;
+            }
+        } catch (IOException e) {
+            System.err.println("[WARNING] Failed to render inline TextFrame: " + textFrame.selfId());
+        }
+
+        return null;
+    }
+
+    /**
+     * Story의 테이블 셀에서 모든 그래픽을 추출한다 (이중 인라인 처리용).
+     * 테이블 셀 내의 TextFrame 참조를 따라가 그래픽을 수집한다.
+     * 중첩 테이블도 재귀적으로 탐색한다.
+     * 중복 그래픽은 제거된다.
+     */
+    private List<IDMLCharacterRun.InlineGraphic> extractGraphicsFromStoryTables(IDMLStory story) {
+        Set<String> visitedStories = new HashSet<>();
+        Set<String> seenGraphicIds = new HashSet<>();
+        List<IDMLCharacterRun.InlineGraphic> allGraphics = extractGraphicsFromStoryTablesRecursive(story, visitedStories);
+
+        // 중복 그래픽 제거
+        List<IDMLCharacterRun.InlineGraphic> uniqueGraphics = new ArrayList<>();
+        for (IDMLCharacterRun.InlineGraphic g : allGraphics) {
+            if (g.selfId() != null && !seenGraphicIds.contains(g.selfId())) {
+                seenGraphicIds.add(g.selfId());
+                uniqueGraphics.add(g);
+            }
+        }
+        return uniqueGraphics;
+    }
+
+    /**
+     * 재귀적으로 Story의 테이블 셀에서 그래픽을 추출한다.
+     * visited 집합으로 순환 참조를 방지한다.
+     */
+    private List<IDMLCharacterRun.InlineGraphic> extractGraphicsFromStoryTablesRecursive(
+            IDMLStory story, Set<String> visited) {
+        List<IDMLCharacterRun.InlineGraphic> graphics = new ArrayList<>();
+
+        if (story == null || story.selfId() == null) return graphics;
+
+        // 순환 참조 방지
+        if (visited.contains(story.selfId())) {
+            return graphics;
+        }
+        visited.add(story.selfId());
+
+        for (IDMLTable table : story.tables()) {
+            for (IDMLTableRow row : table.rows()) {
+                for (IDMLTableCell cell : row.cells()) {
+                    // 셀의 TextFrame 참조에서 그래픽 추출 (재귀적으로)
+                    for (String storyRef : cell.textFrameStoryRefs()) {
+                        IDMLStory refStory = idmlDoc.getStory(storyRef);
+                        if (refStory != null) {
+                            // 참조된 Story의 직접 그래픽
+                            graphics.addAll(refStory.getAllInlineGraphics());
+                            // 참조된 Story의 테이블 내 그래픽 (재귀)
+                            graphics.addAll(extractGraphicsFromStoryTablesRecursive(refStory, visited));
+                        }
+                    }
+                    // 셀 단락에서 직접 그래픽 추출
+                    for (IDMLParagraph para : cell.paragraphs()) {
+                        for (IDMLCharacterRun run : para.characterRuns()) {
+                            if (run.inlineGraphics() != null) {
+                                graphics.addAll(run.inlineGraphics());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return graphics;
+    }
+
+    /**
+     * 인라인 그래픽(Rectangle, Polygon 등)을 IntermediateFrame으로 변환한다.
+     * 렌더러가 설정된 경우 PNG 이미지로 렌더링하여 저장한다.
+     */
+    private IntermediateFrame createInlineGraphicFrame(IDMLCharacterRun.InlineGraphic graphic) {
+        // 그룹 내 내장 텍스트 로깅
+        if ("group".equals(graphic.type()) && graphic.embeddedText() != null && !graphic.embeddedText().isEmpty()) {
+            System.err.println("[INFO-EMBEDDED-TEXT] Group " + graphic.selfId() +
+                    " contains embedded text: \"" + graphic.embeddedText() + "\"" +
+                    (graphic.embeddedTextFont() != null ? " (font: " + graphic.embeddedTextFont() + ")" : ""));
+        }
+
+        IntermediateFrame iFrame = new IntermediateFrame();
+        iFrame.frameId("inline_" + graphic.selfId());
+        iFrame.isInline(true);
+
+        // 크기 설정 (points → HWPUNIT)
+        long width = CoordinateConverter.pointsToHwpunits(graphic.widthPoints());
+        long height = CoordinateConverter.pointsToHwpunits(graphic.heightPoints());
+        iFrame.width(width);
+        iFrame.height(height);
+
+        // 인라인 객체는 상대 좌표 (0, 0) - 텍스트 흐름에 따라 배치됨
+        iFrame.x(0);
+        iFrame.y(0);
+
+        // 렌더러가 설정된 경우 PNG 이미지로 렌더링
+        if (inlineGraphicRenderer != null) {
+            try {
+                IDMLPageRenderer.RenderResult result = inlineGraphicRenderer.renderInlineGraphicToPng(graphic);
+                if (result != null && result.pngData() != null && result.pngData().length > 0) {
+                    // 이미지 프레임으로 설정
+                    iFrame.frameType("image");
+
+                    IntermediateImage img = new IntermediateImage();
+                    img.imageId("inline_graphic_" + graphic.selfId());
+                    img.format("png");
+                    img.base64Data(Base64.getEncoder().encodeToString(result.pngData()));
+                    img.pixelWidth(result.pixelWidth());
+                    img.pixelHeight(result.pixelHeight());
+                    img.displayWidth(width);
+                    img.displayHeight(height);
+                    iFrame.image(img);
+
+                    return iFrame;
+                }
+            } catch (IOException e) {
+                System.err.println("[WARNING] Failed to render inline graphic: " + graphic.selfId());
+            }
+        }
+
+        // 렌더러 없거나 렌더링 실패 시: 인라인 shape은 HWPX에서 지원이 불안정하므로 건너뜀
+        // (인라인 벡터 도형을 shape으로 내보내면 파일 손상 발생)
+        System.err.println("[WARNING] Skipping inline graphic (PNG rendering failed): " + graphic.selfId() +
+                " type=" + graphic.type() + " width=" + graphic.widthPoints() + " height=" + graphic.heightPoints());
+        return null;
+    }
+
+    /**
+     * 인라인 그래픽 마커용 텍스트 런 생성 (하위 호환).
+     */
+    private IntermediateTextRun createInlineGraphicRun(IDMLCharacterRun.InlineGraphic graphic) {
+        IntermediateTextRun iRun = new IntermediateTextRun();
+        iRun.text("<인라인객체>");
+        iRun.inlineObjectType(graphic.type());
+        iRun.inlineObjectId(graphic.selfId());
+        return iRun;
     }
 
     /**
@@ -385,6 +845,14 @@ public class TextFrameConverter {
     public IntermediateTextRun createTextRun(IDMLCharacterRun run) {
         String content = run.content();
         if (content == null || content.isEmpty()) return null;
+
+        // <Br/> 태그의 \n이 단락 끝에 남아있으면 제거
+        // 단락 경계는 IDMLParagraph 레벨에서 이미 처리되므로,
+        // 끝의 \n은 HWPX 변환 시 빈 단락을 중복 생성함
+        if (content.endsWith("\n")) {
+            content = content.substring(0, content.length() - 1);
+            if (content.isEmpty()) return null;
+        }
 
         IntermediateTextRun iRun = new IntermediateTextRun();
         iRun.text(content);
@@ -417,6 +885,14 @@ public class TextFrameConverter {
                 iRun.italic(true);
             }
         }
+        // 런 레벨 자간 (CharacterStyleRange의 Tracking 속성)
+        // 기본값: -15% (빽빽하게 표시)
+        short letterSpacing = -15;
+        if (run.tracking() != null) {
+            letterSpacing = (short) Math.round(run.tracking() / 10.0);
+            letterSpacing = (short) Math.max(-50, Math.min(50, letterSpacing));
+        }
+        iRun.letterSpacing(letterSpacing);
 
         return iRun;
     }
@@ -443,14 +919,31 @@ public class TextFrameConverter {
                 // NP 런 내용은 수식에 포함되므로 건너뜀
             } else {
                 inNPRun = false;
-                // non-NP 런은 무조건 텍스트
+
+                // 텍스트 런을 먼저 추가 (인라인 그래픽은 텍스트 뒤에 위치)
                 IntermediateTextRun iRun = createTextRun(run);
                 if (iRun != null) {
-                    // 단락 인라인 자간을 런에 전파 (런 레벨 자간이 없을 때)
                     if (iRun.letterSpacing() == null && iPara.inlineLetterSpacing() != null) {
                         iRun.letterSpacing(iPara.inlineLetterSpacing());
                     }
                     iPara.addRun(iRun);
+                }
+
+                // 인라인 객체(TextFrame) 처리
+                if (run.inlineFrames() != null && !run.inlineFrames().isEmpty()) {
+                    for (IDMLTextFrame inlineFrame : run.inlineFrames()) {
+                        processInlineTextFrame(inlineFrame, iPara);
+                    }
+                }
+
+                // 인라인 그래픽(Rectangle, Polygon 등) 처리
+                if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) {
+                    for (IDMLCharacterRun.InlineGraphic graphic : run.inlineGraphics()) {
+                        IntermediateFrame inlineFrame = createInlineGraphicFrame(graphic);
+                        if (inlineFrame != null) {
+                            iPara.addInlineFrame(inlineFrame);
+                        }
+                    }
                 }
             }
         }

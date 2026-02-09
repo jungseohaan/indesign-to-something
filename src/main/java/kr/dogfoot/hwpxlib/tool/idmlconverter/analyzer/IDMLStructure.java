@@ -8,6 +8,7 @@ import java.util.List;
  */
 public class IDMLStructure {
     private List<SpreadInfo> spreads;
+    private List<MasterSpreadInfo> masterSpreads;
     private int totalTextFrames;
     private int totalImageFrames;
     private int totalVectorShapes;
@@ -15,10 +16,14 @@ public class IDMLStructure {
 
     public IDMLStructure() {
         this.spreads = new ArrayList<>();
+        this.masterSpreads = new ArrayList<>();
     }
 
     public List<SpreadInfo> getSpreads() { return spreads; }
     public void addSpread(SpreadInfo spread) { spreads.add(spread); }
+
+    public List<MasterSpreadInfo> getMasterSpreads() { return masterSpreads; }
+    public void addMasterSpread(MasterSpreadInfo ms) { masterSpreads.add(ms); }
 
     public int getTotalTextFrames() { return totalTextFrames; }
     public void setTotalTextFrames(int v) { this.totalTextFrames = v; }
@@ -42,6 +47,7 @@ public class IDMLStructure {
         private int textFrameCount;
         private int imageFrameCount;
         private int vectorCount;
+        private String masterSpreadName; // 적용된 마스터 스프레드 이름
 
         // 스프레드 레이아웃 상세 정보
         private double boundsTop;
@@ -90,6 +96,51 @@ public class IDMLStructure {
 
         public double getTotalHeight() { return totalHeight; }
         public void setTotalHeight(double v) { this.totalHeight = v; }
+
+        public String getMasterSpreadName() { return masterSpreadName; }
+        public void setMasterSpreadName(String v) { this.masterSpreadName = v; }
+    }
+
+    /**
+     * 마스터 스프레드 정보.
+     */
+    public static class MasterSpreadInfo {
+        private String id;
+        private String name;  // 마스터 이름 (예: "A-마스터")
+        private int pageCount;
+        private int textFrameCount;
+        private int imageFrameCount;
+        private int vectorCount;
+        private int groupCount;
+        private List<String> appliedPages;  // 이 마스터를 사용하는 일반 페이지 번호
+
+        public MasterSpreadInfo() {
+            this.appliedPages = new ArrayList<>();
+        }
+
+        public String getId() { return id; }
+        public void setId(String v) { this.id = v; }
+
+        public String getName() { return name; }
+        public void setName(String v) { this.name = v; }
+
+        public int getPageCount() { return pageCount; }
+        public void setPageCount(int v) { this.pageCount = v; }
+
+        public int getTextFrameCount() { return textFrameCount; }
+        public void setTextFrameCount(int v) { this.textFrameCount = v; }
+
+        public int getImageFrameCount() { return imageFrameCount; }
+        public void setImageFrameCount(int v) { this.imageFrameCount = v; }
+
+        public int getVectorCount() { return vectorCount; }
+        public void setVectorCount(int v) { this.vectorCount = v; }
+
+        public int getGroupCount() { return groupCount; }
+        public void setGroupCount(int v) { this.groupCount = v; }
+
+        public List<String> getAppliedPages() { return appliedPages; }
+        public void addAppliedPage(String pageNum) { appliedPages.add(pageNum); }
     }
 
     /**
@@ -173,6 +224,7 @@ public class IDMLStructure {
         private double height;
         private String linkPath;      // 이미지 링크 경로 (이미지 타입만)
         private boolean needsPreview; // PSD, AI, EPS 파일 여부
+        private List<FrameInfo> children; // 인라인 자식 프레임 (텍스트 타입만)
 
         public String getId() { return id; }
         public void setId(String v) { this.id = v; }
@@ -200,5 +252,12 @@ public class IDMLStructure {
 
         public boolean isNeedsPreview() { return needsPreview; }
         public void setNeedsPreview(boolean v) { this.needsPreview = v; }
+
+        public List<FrameInfo> getChildren() { return children; }
+        public void addChild(FrameInfo child) {
+            if (this.children == null) this.children = new ArrayList<>();
+            this.children.add(child);
+        }
+        public boolean hasChildren() { return children != null && !children.isEmpty(); }
     }
 }

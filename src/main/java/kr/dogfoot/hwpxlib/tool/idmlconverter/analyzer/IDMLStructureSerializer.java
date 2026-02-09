@@ -22,6 +22,16 @@ public class IDMLStructureSerializer {
         }
         sb.append("\n  ],\n");
 
+        // master spreads
+        sb.append("  \"master_spreads\": [\n");
+        boolean firstMaster = true;
+        for (MasterSpreadInfo ms : structure.getMasterSpreads()) {
+            if (!firstMaster) sb.append(",\n");
+            firstMaster = false;
+            sb.append(masterSpreadToJson(ms, "    "));
+        }
+        sb.append("\n  ],\n");
+
         // totals
         sb.append("  \"total_text_frames\": ").append(structure.getTotalTextFrames()).append(",\n");
         sb.append("  \"total_image_frames\": ").append(structure.getTotalImageFrames()).append(",\n");
@@ -40,6 +50,7 @@ public class IDMLStructureSerializer {
         sb.append(indent).append("  \"text_frame_count\": ").append(spread.getTextFrameCount()).append(",\n");
         sb.append(indent).append("  \"image_frame_count\": ").append(spread.getImageFrameCount()).append(",\n");
         sb.append(indent).append("  \"vector_count\": ").append(spread.getVectorCount()).append(",\n");
+        sb.append(indent).append("  \"master_spread_name\": ").append(jsonString(spread.getMasterSpreadName())).append(",\n");
 
         // 스프레드 바운드 정보
         sb.append(indent).append("  \"bounds_top\": ").append(spread.getBoundsTop()).append(",\n");
@@ -142,7 +153,45 @@ public class IDMLStructureSerializer {
             sb.append(indent).append("  \"needs_preview\": ").append(frame.isNeedsPreview());
         }
 
+        // 인라인 자식 프레임
+        if (frame.hasChildren()) {
+            sb.append(",\n");
+            sb.append(indent).append("  \"children\": [\n");
+            boolean firstChild = true;
+            for (FrameInfo child : frame.getChildren()) {
+                if (!firstChild) sb.append(",\n");
+                firstChild = false;
+                sb.append(frameToJson(child, indent + "    "));
+            }
+            sb.append("\n").append(indent).append("  ]");
+        }
+
         sb.append("\n").append(indent).append("}");
+        return sb.toString();
+    }
+
+    private static String masterSpreadToJson(MasterSpreadInfo ms, String indent) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(indent).append("{\n");
+        sb.append(indent).append("  \"id\": ").append(jsonString(ms.getId())).append(",\n");
+        sb.append(indent).append("  \"name\": ").append(jsonString(ms.getName())).append(",\n");
+        sb.append(indent).append("  \"page_count\": ").append(ms.getPageCount()).append(",\n");
+        sb.append(indent).append("  \"text_frame_count\": ").append(ms.getTextFrameCount()).append(",\n");
+        sb.append(indent).append("  \"image_frame_count\": ").append(ms.getImageFrameCount()).append(",\n");
+        sb.append(indent).append("  \"vector_count\": ").append(ms.getVectorCount()).append(",\n");
+        sb.append(indent).append("  \"group_count\": ").append(ms.getGroupCount()).append(",\n");
+
+        // applied pages
+        sb.append(indent).append("  \"applied_pages\": [");
+        boolean first = true;
+        for (String p : ms.getAppliedPages()) {
+            if (!first) sb.append(", ");
+            first = false;
+            sb.append(jsonString(p));
+        }
+        sb.append("]\n");
+
+        sb.append(indent).append("}");
         return sb.toString();
     }
 
