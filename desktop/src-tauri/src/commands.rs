@@ -137,6 +137,44 @@ pub struct FrameInfo {
     pub needs_preview: bool,
     #[serde(default)]
     pub children: Option<Vec<FrameInfo>>,
+    #[serde(default)]
+    pub story_content: Option<StoryContentInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StoryContentInfo {
+    pub story_id: String,
+    pub paragraph_count: i32,
+    #[serde(default)]
+    pub truncated: bool,
+    pub paragraphs: Vec<ParagraphSummary>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ParagraphSummary {
+    pub index: i32,
+    pub style_name: Option<String>,
+    pub runs: Vec<RunSummary>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RunSummary {
+    #[serde(rename = "type")]
+    pub run_type: String,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub font_style: Option<String>,
+    #[serde(default)]
+    pub font_size: Option<f64>,
+    #[serde(default)]
+    pub frame_id: Option<String>,
+    #[serde(default)]
+    pub graphic_type: Option<String>,
+    #[serde(default)]
+    pub width: Option<f64>,
+    #[serde(default)]
+    pub height: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -952,4 +990,76 @@ pub async fn convert_hwpx_to_idml(
     }
 
     final_result.ok_or_else(|| "No result received".to_string())
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Playground: Create IDML from Master Spreads
+// ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateIdmlResult {
+    pub success: bool,
+    pub master_count: i32,
+    pub page_size: PageSize,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    pub validation: Option<ValidationResult>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PageSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidationResult {
+    pub valid: bool,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+/// Create a new IDML file by copying master spreads from a source IDML
+#[tauri::command]
+pub async fn create_idml_from_masters(
+    source_path: String,
+    output_path: String,
+    master_ids: Option<Vec<String>>,
+    validate: bool,
+    jar_path: String,
+) -> Result<CreateIdmlResult, String> {
+    let java = find_java();
+
+    let mut args = vec![
+        "-jar".to_string(),
+        jar_path,
+        "--create-from-masters".to_string(),
+        source_path,
+        output_path,
+    ];
+
+    if let Some(ids) = master_ids {
+        if !ids.is_empty() {
+            args.push("--masters".to_string());
+            args.push(ids.join(","));
+        }
+    }
+
+    if validate {
+        args.push("--validate".to_string());
+    }
+
+    let output = Command::new(&java)
+        .args(&args)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to execute Java: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Create from masters failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse output: {}", e))
 }

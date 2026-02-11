@@ -3,8 +3,11 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.analyzer.IDMLAnalyzer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IDMLPageRenderer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
+import kr.dogfoot.hwpxlib.tool.hwpxconverter.HwpxToIdmlConverter;
 
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.List;
 
 /**
  * IDML to HWPX 변환기 CLI 진입점.
@@ -41,8 +44,18 @@ public class ConverterCLI {
                 runRenderVector(args);
             } else if ("--render-image".equals(command)) {
                 runRenderImage(args);
+            } else if ("--render-master-spread".equals(command)) {
+                runRenderMasterSpread(args);
             } else if ("--text-frame-detail".equals(command)) {
                 runTextFrameDetail(args);
+            } else if ("--hwpx-to-idml".equals(command)) {
+                runHwpxToIdml(args);
+            } else if ("--create-from-masters".equals(command)) {
+                runCreateFromMasters(args);
+            } else if ("--validate-idml".equals(command)) {
+                String idmlPath = args[1];
+                IDMLValidator.Result vr = IDMLValidator.validate(idmlPath);
+                System.out.println(vr.toJson());
             } else {
                 printUsage();
                 System.exit(1);
@@ -284,6 +297,89 @@ public class ConverterCLI {
     }
 
     /**
+     * 마스터 스프레드를 PNG로 렌더링하고 JSON 결과 출력.
+     */
+    private static void runRenderMasterSpread(String[] args) throws Exception {
+        if (args.length < 3) {
+            System.err.println("Error: Missing idml path or master id");
+            printUsage();
+            System.exit(1);
+        }
+
+        String idmlPath = args[1];
+        String masterId = args[2];
+        int dpi = 150;
+        String linksDirectory = null;
+
+        // 옵션 파싱
+        for (int i = 3; i < args.length; i++) {
+            if ("--dpi".equals(args[i]) && i + 1 < args.length) {
+                dpi = Integer.parseInt(args[++i]);
+            } else if ("--links-directory".equals(args[i]) && i + 1 < args.length) {
+                linksDirectory = args[++i];
+            }
+        }
+
+        // IDML 파일 로드
+        IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
+        if (idmlDoc == null) {
+            outputJsonError("Failed to load IDML file: " + idmlPath);
+            System.exit(1);
+        }
+
+        // 마스터 스프레드 찾기
+        IDMLSpread masterSpread = idmlDoc.getMasterSpread(masterId);
+        if (masterSpread == null) {
+            outputJsonError("Master spread not found: " + masterId);
+            System.exit(1);
+        }
+
+        if (masterSpread.pages().isEmpty()) {
+            outputJsonError("Master spread has no pages: " + masterId);
+            System.exit(1);
+        }
+
+        // 모든 페이지를 나란히 렌더링
+        IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, dpi);
+        byte[] pngData = renderer.renderSpreadPages(masterSpread, linksDirectory, true, true);
+
+        // 합산된 이미지 크기 계산
+        int gap = (int) Math.ceil(2 * dpi / 72.0);
+        int pixelWidth = 0, pixelHeight = 0;
+        for (IDMLPage p : masterSpread.pages()) {
+            int pw = (int) Math.ceil(p.widthPoints() * dpi / 72.0);
+            int ph = (int) Math.ceil(p.heightPoints() * dpi / 72.0);
+            pixelWidth += pw;
+            pixelHeight = Math.max(pixelHeight, ph);
+        }
+        pixelWidth += gap * (masterSpread.pages().size() - 1);
+
+        // Base64 인코딩하여 JSON 출력
+        String base64Data = Base64.getEncoder().encodeToString(pngData);
+        String dataUrl = "data:image/png;base64," + base64Data;
+
+        // 마스터 이름 추출
+        String masterName = masterId;
+        if (!masterSpread.pages().isEmpty()) {
+            String pageName = masterSpread.pages().get(0).name();
+            if (pageName != null && !pageName.isEmpty()) {
+                masterName = pageName;
+            }
+        }
+
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"data_url\": \"").append(dataUrl).append("\",\n");
+        json.append("  \"width\": ").append(pixelWidth).append(",\n");
+        json.append("  \"height\": ").append(pixelHeight).append(",\n");
+        json.append("  \"filename\": \"").append(escapeJson(masterName + ".png")).append("\",\n");
+        json.append("  \"page_count\": ").append(masterSpread.pages().size()).append("\n");
+        json.append("}");
+
+        System.out.println(json);
+    }
+
+    /**
      * 텍스트 프레임의 상세 정보를 JSON으로 출력 (단락별 텍스트 및 스타일).
      */
     private static void runTextFrameDetail(String[] args) throws Exception {
@@ -506,6 +602,145 @@ public class ConverterCLI {
         System.out.println(json);
     }
 
+    /**
+     * HWPX를 IDML로 변환.
+     */
+    private static void runHwpxToIdml(String[] args) throws Exception {
+        if (args.length < 3) {
+            System.err.println("Error: Missing input or output path");
+            printUsage();
+            System.exit(1);
+        }
+
+        String inputPath = args[1];
+        String outputPath = args[2];
+        boolean useProgressJson = false;
+
+        // Parse options
+        for (int i = 3; i < args.length; i++) {
+            if ("--progress".equals(args[i])) {
+                useProgressJson = true;
+            }
+        }
+
+        try {
+            if (useProgressJson) {
+                // 진행률 JSON 출력
+                System.out.println("{\"type\": \"progress\", \"current\": 1, \"total\": 4, \"message\": \"Loading HWPX file...\"}");
+            }
+
+            kr.dogfoot.hwpxlib.tool.hwpxconverter.ConvertResult result =
+                    HwpxToIdmlConverter.convert(inputPath, outputPath);
+
+            if (useProgressJson) {
+                // 완료 결과 JSON 출력 (Rust ConvertResult 형식에 맞춤)
+                StringBuilder json = new StringBuilder();
+                json.append("{\"type\": \"complete\", \"result\": {");
+                json.append("\"pages_converted\": ").append(result.pageCount());
+                json.append(", \"frames_converted\": 0");
+                json.append(", \"images_converted\": 0");
+                json.append(", \"warnings\": [");
+                boolean first = true;
+                for (String warning : result.warnings()) {
+                    if (!first) json.append(", ");
+                    first = false;
+                    json.append("\"").append(escapeJson(warning)).append("\"");
+                }
+                json.append("]}}");
+                System.out.println(json);
+            } else {
+                System.out.println("Conversion completed: " + result.summary());
+                if (result.hasWarnings()) {
+                    System.out.println("Warnings:");
+                    for (String warning : result.warnings()) {
+                        System.out.println("  - " + warning);
+                    }
+                }
+            }
+        } catch (kr.dogfoot.hwpxlib.tool.hwpxconverter.ConvertException e) {
+            if (useProgressJson) {
+                System.out.println("{\"type\": \"error\", \"message\": \"" + escapeJson(e.getMessage()) + "\"}");
+            } else {
+                System.err.println("Conversion failed [" + e.phase() + "]: " + e.getMessage());
+                if (e.getCause() != null) {
+                    e.getCause().printStackTrace(System.err);
+                }
+            }
+            System.exit(2);
+        }
+    }
+
+    /**
+     * 소스 IDML에서 마스터 스프레드를 복사하여 빈 IDML 생성.
+     */
+    private static void runCreateFromMasters(String[] args) throws Exception {
+        if (args.length < 3) {
+            System.err.println("Error: Missing source or output path");
+            printUsage();
+            System.exit(1);
+        }
+
+        String sourcePath = args[1];
+        String outputPath = args[2];
+        List<String> masterIds = null;
+        boolean doValidate = false;
+
+        for (int i = 3; i < args.length; i++) {
+            if ("--masters".equals(args[i]) && i + 1 < args.length) {
+                String idsStr = args[++i];
+                masterIds = Arrays.asList(idsStr.split(","));
+            } else if ("--validate".equals(args[i])) {
+                doValidate = true;
+            }
+        }
+
+        IDMLTemplateCreator.CreateResult result = IDMLTemplateCreator.create(sourcePath, outputPath, masterIds);
+
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"success\": ").append(result.success()).append(",\n");
+        json.append("  \"master_count\": ").append(result.masterCount()).append(",\n");
+        json.append("  \"page_size\": {\"width\": ").append(result.pageWidth())
+                .append(", \"height\": ").append(result.pageHeight()).append("}");
+
+        if (!result.warnings().isEmpty()) {
+            json.append(",\n  \"warnings\": [");
+            boolean first = true;
+            for (String w : result.warnings()) {
+                if (!first) json.append(", ");
+                first = false;
+                json.append("\"").append(escapeJson(w)).append("\"");
+            }
+            json.append("]");
+        }
+
+        if (doValidate) {
+            IDMLTemplateCreator.ValidationResult vr = IDMLTemplateCreator.validate(outputPath);
+            json.append(",\n  \"validation\": {\n");
+            json.append("    \"valid\": ").append(vr.valid()).append(",\n");
+            json.append("    \"errors\": [");
+            boolean first = true;
+            for (String e : vr.errors()) {
+                if (!first) json.append(", ");
+                first = false;
+                json.append("\"").append(escapeJson(e)).append("\"");
+            }
+            json.append("],\n");
+            json.append("    \"warnings\": [");
+            first = true;
+            for (String w : vr.warnings()) {
+                if (!first) json.append(", ");
+                first = false;
+                json.append("\"").append(escapeJson(w)).append("\"");
+            }
+            json.append("]\n");
+            json.append("  }");
+        }
+
+        json.append("\n}");
+        System.out.println(json);
+    }
+
     private static String getStyleName(String styleRef) {
         if (styleRef == null) return "";
         try {
@@ -532,14 +767,15 @@ public class ConverterCLI {
     }
 
     private static void printUsage() {
-        System.out.println("IDML to HWPX Converter");
+        System.out.println("IDML / HWPX Converter");
         System.out.println();
         System.out.println("Usage:");
         System.out.println("  java -jar converter.jar --analyze <idml-path>");
         System.out.println("  java -jar converter.jar --convert <input-idml> <output-hwpx> [options]");
+        System.out.println("  java -jar converter.jar --hwpx-to-idml <input-hwpx> <output-idml> [--progress]");
         System.out.println("  java -jar converter.jar --render-vector <idml-path> <frame-id> [--dpi <dpi>]");
         System.out.println();
-        System.out.println("Options:");
+        System.out.println("IDML to HWPX Options:");
         System.out.println("  --progress           Output progress as JSON");
         System.out.println("  --spread-mode        Convert by spread (default: by page)");
         System.out.println("  --vector-dpi <dpi>   Vector rendering DPI (default: 150)");
@@ -547,5 +783,13 @@ public class ConverterCLI {
         System.out.println("  --links-directory <path>  Directory for image links");
         System.out.println("  --start-page <num>   Start page number (1-based)");
         System.out.println("  --end-page <num>     End page number (1-based)");
+        System.out.println();
+        System.out.println("HWPX to IDML Options:");
+        System.out.println("  --progress           Output progress as JSON");
+        System.out.println();
+        System.out.println("Create from Masters:");
+        System.out.println("  java -jar converter.jar --create-from-masters <source-idml> <output-idml> [options]");
+        System.out.println("  --masters id1,id2    Master spread IDs to copy (default: all)");
+        System.out.println("  --validate           Validate created IDML");
     }
 }

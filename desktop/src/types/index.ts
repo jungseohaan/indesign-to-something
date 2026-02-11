@@ -66,6 +66,32 @@ export interface FrameInfo {
   needs_preview?: boolean; // PSD, AI, EPS 여부
   // 인라인 자식 프레임 (텍스트 타입만)
   children?: FrameInfo[];
+  // 스토리 내용 요약 (텍스트 타입만)
+  story_content?: StoryContentInfo;
+}
+
+export interface StoryContentInfo {
+  story_id: string;
+  paragraph_count: number;
+  truncated: boolean;
+  paragraphs: ParagraphSummaryItem[];
+}
+
+export interface ParagraphSummaryItem {
+  index: number;
+  style_name: string | null;
+  runs: RunSummaryItem[];
+}
+
+export interface RunSummaryItem {
+  type: "text" | "inline_frame" | "inline_graphic";
+  text?: string;
+  font_style?: string;
+  font_size?: number;
+  frame_id?: string;
+  graphic_type?: string;
+  width?: number;
+  height?: number;
 }
 
 export interface ImagePreview {
@@ -157,4 +183,17 @@ export interface CharacterRun {
   font_style: string | null;
   fill_color: string | null;
   anchors: string[];
+}
+
+// Playground Types
+export interface CreateIdmlResult {
+  success: boolean;
+  master_count: number;
+  page_size: { width: number; height: number };
+  warnings?: string[];
+  validation?: {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+  };
 }
