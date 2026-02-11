@@ -50,6 +50,9 @@ pub fn run() {
             commands::generate_master_preview,
             commands::get_text_frame_detail,
             commands::create_idml_from_masters,
+            commands::extract_template_schema,
+            commands::merge_idml,
+            commands::read_text_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

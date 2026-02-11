@@ -16,6 +16,15 @@ export interface MasterSpreadInfo {
   vector_count: number;
   group_count: number;
   applied_pages: string[];
+  // Master page layout info
+  page_width: number;
+  page_height: number;
+  margin_top: number;
+  margin_bottom: number;
+  margin_left: number;
+  margin_right: number;
+  column_count: number;
+  column_gutter: number;
 }
 
 export interface SpreadInfo {
@@ -185,10 +194,67 @@ export interface CharacterRun {
   anchors: string[];
 }
 
+// Template Schema Types
+export interface TemplateSchema {
+  version: string;
+  source: string;
+  layout: SchemaLayout;
+  masterSpreads: SchemaMasterSpread[];
+  groupTemplate: GroupTemplate | null;
+  itemFields: string[];
+}
+
+export interface SchemaLayout {
+  pageWidth: number;
+  pageHeight: number;
+  margins: { top: number; bottom: number; left: number; right: number };
+  columns: { count: number; gutter: number };
+}
+
+export interface SchemaMasterSpread {
+  id: string;
+  name: string;
+  pageCount: number;
+}
+
+export interface GroupTemplate {
+  width: number;
+  totalHeight: number;
+  children: GroupChild[];
+}
+
+export interface GroupChild {
+  type: "rectangle" | "textFrame" | "graphicLine";
+  role: string;
+  bounds?: { top: number; left: number; width: number; height: number };
+  fields?: FieldDef[];
+  autoSize?: string;
+  contentType?: string;
+  fillColor?: string;
+  strokeWeight?: number;
+  strokeColor?: string;
+}
+
+export interface FieldDef {
+  style: string;
+  name: string;
+}
+
+export interface DataItem {
+  [fieldName: string]: string;
+}
+
+export interface MergeData {
+  pages: { master: string; textFrame: boolean }[];
+  tfMode: "master" | "custom";
+  items: DataItem[];
+}
+
 // Playground Types
 export interface CreateIdmlResult {
   success: boolean;
   master_count: number;
+  page_count: number;
   page_size: { width: number; height: number };
   warnings?: string[];
   validation?: {

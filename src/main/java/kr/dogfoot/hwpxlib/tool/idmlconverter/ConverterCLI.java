@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.hwpxconverter.HwpxToIdmlConverter;
 
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -56,6 +57,12 @@ public class ConverterCLI {
                 String idmlPath = args[1];
                 IDMLValidator.Result vr = IDMLValidator.validate(idmlPath);
                 System.out.println(vr.toJson());
+            } else if ("--extract-schema".equals(command)) {
+                String idmlPath = args[1];
+                String schema = IDMLSchemaExtractor.extractSchema(idmlPath);
+                System.out.println(schema);
+            } else if ("--merge".equals(command)) {
+                runMerge(args);
             } else {
                 printUsage();
                 System.exit(1);
@@ -683,23 +690,55 @@ public class ConverterCLI {
         String sourcePath = args[1];
         String outputPath = args[2];
         List<String> masterIds = null;
+        List<String> pageSpecs = null;
+        List<double[]> textFrameSpecs = null;
+        int inlineCount = 0;
+        String tfMode = "master";
         boolean doValidate = false;
 
         for (int i = 3; i < args.length; i++) {
             if ("--masters".equals(args[i]) && i + 1 < args.length) {
                 String idsStr = args[++i];
                 masterIds = Arrays.asList(idsStr.split(","));
+            } else if ("--pages".equals(args[i]) && i + 1 < args.length) {
+                String pagesStr = args[++i];
+                pageSpecs = Arrays.asList(pagesStr.split(","));
+            } else if ("--text-frames".equals(args[i]) && i + 1 < args.length) {
+                String tfStr = args[++i];
+                textFrameSpecs = new ArrayList<double[]>();
+                for (String spec : tfStr.split(",")) {
+                    if ("none".equalsIgnoreCase(spec.trim())) {
+                        textFrameSpecs.add(null);
+                    } else if ("auto".equalsIgnoreCase(spec.trim())) {
+                        textFrameSpecs.add(new double[]{-1, -1});
+                    } else {
+                        String[] parts = spec.trim().split("x");
+                        if (parts.length == 2) {
+                            textFrameSpecs.add(new double[]{
+                                    Double.parseDouble(parts[0]),
+                                    Double.parseDouble(parts[1])});
+                        } else {
+                            textFrameSpecs.add(new double[]{-1, -1});
+                        }
+                    }
+                }
+            } else if ("--inline-count".equals(args[i]) && i + 1 < args.length) {
+                inlineCount = Integer.parseInt(args[++i]);
+            } else if ("--tf-mode".equals(args[i]) && i + 1 < args.length) {
+                tfMode = args[++i];
             } else if ("--validate".equals(args[i])) {
                 doValidate = true;
             }
         }
 
-        IDMLTemplateCreator.CreateResult result = IDMLTemplateCreator.create(sourcePath, outputPath, masterIds);
+        IDMLTemplateCreator.CreateResult result = IDMLTemplateCreator.create(
+                sourcePath, outputPath, masterIds, pageSpecs, textFrameSpecs, inlineCount, tfMode);
 
         StringBuilder json = new StringBuilder();
         json.append("{\n");
         json.append("  \"success\": ").append(result.success()).append(",\n");
         json.append("  \"master_count\": ").append(result.masterCount()).append(",\n");
+        json.append("  \"page_count\": ").append(result.pageCount()).append(",\n");
         json.append("  \"page_size\": {\"width\": ").append(result.pageWidth())
                 .append(", \"height\": ").append(result.pageHeight()).append("}");
 
@@ -735,6 +774,54 @@ public class ConverterCLI {
             }
             json.append("]\n");
             json.append("  }");
+        }
+
+        json.append("\n}");
+        System.out.println(json);
+    }
+
+    /**
+     * --merge <source.idml> <data.json> <output.idml> [--validate]
+     */
+    private static void runMerge(String[] args) throws Exception {
+        if (args.length < 4) {
+            System.err.println("Usage: --merge <source.idml> <data.json> <output.idml> [--validate]");
+            System.exit(1);
+        }
+
+        String sourcePath = args[1];
+        String dataPath = args[2];
+        String outputPath = args[3];
+        boolean validate = false;
+        for (int i = 4; i < args.length; i++) {
+            if ("--validate".equals(args[i])) validate = true;
+        }
+
+        String dataJson = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(dataPath)), "UTF-8");
+        IDMLTemplateCreator.CreateResult result = IDMLTemplateCreator.createFromData(sourcePath, outputPath, dataJson);
+
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"success\": ").append(result.success()).append(",\n");
+        json.append("  \"master_count\": ").append(result.masterCount()).append(",\n");
+        json.append("  \"page_count\": ").append(result.pageCount()).append(",\n");
+        json.append("  \"page_size\": {\"width\": ").append(result.pageWidth()).append(", \"height\": ").append(result.pageHeight()).append("}");
+
+        if (validate) {
+            IDMLTemplateCreator.ValidationResult vr = IDMLTemplateCreator.validate(outputPath);
+            json.append(",\n  \"validation\": {\n");
+            json.append("    \"valid\": ").append(vr.valid()).append(",\n");
+            json.append("    \"errors\": [");
+            for (int i = 0; i < vr.errors().size(); i++) {
+                if (i > 0) json.append(", ");
+                json.append("\"").append(vr.errors().get(i).replace("\"", "\\\"")).append("\"");
+            }
+            json.append("],\n    \"warnings\": [");
+            for (int i = 0; i < vr.warnings().size(); i++) {
+                if (i > 0) json.append(", ");
+                json.append("\"").append(vr.warnings().get(i).replace("\"", "\\\"")).append("\"");
+            }
+            json.append("]\n  }");
         }
 
         json.append("\n}");
