@@ -43,6 +43,18 @@ build/
 *.psd
 *.ai
 
+### Desktop (Tauri) ###
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+
+### Build artifacts ###
+dependency-reduced-pom.xml
+
+### Temporary files ###
+extract_err.log
+physics_items.json
+
 ### Large hwpx files (over 1MB) ###
 testFile/tool/idml_converted_from_json.hwpx
 testFile/tool/idml_converted_p8_20.hwpx

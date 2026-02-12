@@ -99,6 +99,13 @@ public class IntermediateParagraph {
     }
 
     /**
+     * 인라인 프레임 추가 (인라인 이미지/텍스트박스 등).
+     */
+    public void addInlineFrame(IntermediateFrame frame) {
+        contentItems.add(new ContentItem(frame));
+    }
+
+    /**
      * 수식이 포함되어 있는지 확인.
      */
     public boolean hasEquation() {
@@ -137,25 +144,36 @@ public class IntermediateParagraph {
     }
 
     /**
-     * 콘텐츠 항목 (텍스트 런 또는 인라인 수식).
+     * 콘텐츠 항목 (텍스트 런, 인라인 수식, 또는 인라인 프레임).
      */
     public static class ContentItem {
         private final IntermediateTextRun textRun;
         private final IntermediateEquation equation;
+        private final IntermediateFrame inlineFrame;
 
         public ContentItem(IntermediateTextRun textRun) {
             this.textRun = textRun;
             this.equation = null;
+            this.inlineFrame = null;
         }
 
         public ContentItem(IntermediateEquation equation) {
             this.textRun = null;
             this.equation = equation;
+            this.inlineFrame = null;
+        }
+
+        public ContentItem(IntermediateFrame inlineFrame) {
+            this.textRun = null;
+            this.equation = null;
+            this.inlineFrame = inlineFrame;
         }
 
         public boolean isTextRun() { return textRun != null; }
         public boolean isEquation() { return equation != null; }
+        public boolean isInlineFrame() { return inlineFrame != null; }
         public IntermediateTextRun textRun() { return textRun; }
         public IntermediateEquation equation() { return equation; }
+        public IntermediateFrame inlineFrame() { return inlineFrame; }
     }
 }

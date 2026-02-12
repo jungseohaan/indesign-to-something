@@ -275,10 +275,13 @@ pub async fn get_jar_path(app: AppHandle) -> Result<String, String> {
         }
     }
 
-    // Also try absolute path for development
-    let absolute_path = std::path::Path::new("/Users/seohan/works/indesign-to-something/target/hwpxlib-1.0.9-cli.jar");
-    if absolute_path.exists() {
-        return Ok(absolute_path.to_string_lossy().to_string());
+    // Also try absolute path for development (use $HOME to avoid hardcoding username)
+    if let Ok(home) = std::env::var("HOME") {
+        let absolute_path = std::path::PathBuf::from(&home)
+            .join("works/indesign-to-something/target/hwpxlib-1.0.9-cli.jar");
+        if absolute_path.exists() {
+            return Ok(absolute_path.to_string_lossy().to_string());
+        }
     }
 
     Err("Converter JAR not found".to_string())
@@ -1285,4 +1288,158 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
     tokio::fs::read_to_string(&path)
         .await
         .map_err(|e| format!("Failed to read file: {}", e))
+}
+
+/// Write a text file
+#[tauri::command]
+pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
+    tokio::fs::write(&path, &content)
+        .await
+        .map_err(|e| format!("Failed to write file: {}", e))
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Question Extraction (Python-based)
+// ─────────────────────────────────────────────────────────────────
+
+/// Find Python 3 executable path
+fn find_python() -> String {
+    let python_paths = [
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "/usr/bin/python3",
+    ];
+
+    for path in &python_paths {
+        if std::path::Path::new(path).exists() {
+            return path.to_string();
+        }
+    }
+
+    // Try `which python3`
+    if let Ok(output) = std::process::Command::new("which")
+        .arg("python3")
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return path;
+            }
+        }
+    }
+
+    "python3".to_string()
+}
+
+/// Find the extract_physics.py script
+fn find_extract_script(app: &AppHandle) -> Result<String, String> {
+    // Try bundled resource first
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let path = resource_dir.join("extract_physics.py");
+        if path.exists() {
+            return Ok(path.to_string_lossy().to_string());
+        }
+    }
+
+    // Development mode: search relative paths from current working directory
+    if let Ok(current_dir) = std::env::current_dir() {
+        let paths_to_try = [
+            current_dir.join("../../extract_physics.py"),
+            current_dir.join("../extract_physics.py"),
+            current_dir.join("extract_physics.py"),
+        ];
+
+        for path in &paths_to_try {
+            if path.exists() {
+                return Ok(path.canonicalize()
+                    .unwrap_or(path.clone())
+                    .to_string_lossy()
+                    .to_string());
+            }
+        }
+    }
+
+    // Absolute fallback for development
+    if let Ok(home) = std::env::var("HOME") {
+        let path = std::path::PathBuf::from(&home)
+            .join("works/indesign-to-something/extract_physics.py");
+        if path.exists() {
+            return Ok(path.to_string_lossy().to_string());
+        }
+    }
+
+    Err("extract_physics.py를 찾을 수 없습니다.".to_string())
+}
+
+/// Extract question items from an IDML file using the Python extraction script
+#[tauri::command]
+pub async fn extract_questions(
+    app: AppHandle,
+    idml_path: String,
+    spreads: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let python = find_python();
+    let script = find_extract_script(&app)?;
+
+    // 1. Create temp directory for IDML extraction
+    let temp_dir = std::env::temp_dir().join(format!(
+        "idml-extract-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    ));
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("임시 디렉토리 생성 실패: {}", e))?;
+
+    // 2. Unzip IDML to temp dir
+    let temp_dir_str = temp_dir.to_string_lossy().to_string();
+    let unzip_output = Command::new("unzip")
+        .args(["-o", "-q", &idml_path, "-d", &temp_dir_str])
+        .output()
+        .await
+        .map_err(|e| format!("IDML 압축 해제 실패: {}", e))?;
+
+    if !unzip_output.status.success() {
+        let stderr = String::from_utf8_lossy(&unzip_output.stderr);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        return Err(format!("IDML 압축 해제 실패: {}", stderr));
+    }
+
+    // 3. Determine Links directory (same parent as IDML file + "/Links")
+    let idml_parent = std::path::Path::new(&idml_path)
+        .parent()
+        .ok_or("잘못된 IDML 경로")?;
+    let links_dir = idml_parent.join("Links");
+    let links_dir_str = links_dir.to_string_lossy().to_string();
+
+    // 4. Join spread filenames with commas
+    let spreads_arg = spreads.join(",");
+
+    // 5. Run Python script
+    let output = Command::new(&python)
+        .args([
+            &script,
+            "--idml-dir", &temp_dir_str,
+            "--links-dir", &links_dir_str,
+            "--spreads", &spreads_arg,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("Python 실행 실패: {}", e))?;
+
+    // 6. Clean up temp directory
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    // 7. Check for errors
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("문제 추출 실패:\n{}", stderr));
+    }
+
+    // 8. Parse stdout JSON
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(&stdout)
+        .map_err(|e| format!("추출 결과 파싱 실패: {}\n출력: {}", e, &stdout[..stdout.len().min(500)]))
 }

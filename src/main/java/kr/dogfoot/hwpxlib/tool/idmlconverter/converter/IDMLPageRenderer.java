@@ -1067,4 +1067,151 @@ public class IDMLPageRenderer {
         // 페이지 바운딩 박스 (사각형)
         g.drawRect(0, 0, pixelWidth - 1, pixelHeight - 1);
     }
+
+    /**
+     * 스프레드의 모든 페이지를 나란히 배치하여 하나의 PNG로 렌더링한다.
+     *
+     * @param spread         스프레드
+     * @param linksDirectory 이미지 파일 검색 디렉토리 (옵션)
+     * @param drawPageBoundary 페이지 경계선 그리기 여부
+     * @param drawBackground   배경 그리기 여부
+     * @return PNG 바이트 배열
+     */
+    public byte[] renderSpreadPages(IDMLSpread spread, String linksDirectory,
+                                     boolean drawPageBoundary, boolean drawBackground) throws IOException {
+        List<IDMLPage> pages = spread.pages();
+        if (pages.isEmpty()) return new byte[0];
+
+        double scale = dpi / 72.0;
+        int gap = (int) Math.ceil(2 * scale);  // 페이지 간 2pt 간격
+
+        // 전체 이미지 크기 계산
+        int totalWidth = 0;
+        int maxHeight = 0;
+        int[] pageWidths = new int[pages.size()];
+        int[] pageHeights = new int[pages.size()];
+        for (int i = 0; i < pages.size(); i++) {
+            IDMLPage page = pages.get(i);
+            pageWidths[i] = (int) Math.ceil(page.widthPoints() * scale);
+            pageHeights[i] = (int) Math.ceil(page.heightPoints() * scale);
+            totalWidth += pageWidths[i];
+            maxHeight = Math.max(maxHeight, pageHeights[i]);
+        }
+        totalWidth += gap * (pages.size() - 1);
+
+        // 투명 배경 이미지 생성
+        BufferedImage compositeImage = new BufferedImage(totalWidth, maxHeight, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D compositeG = compositeImage.createGraphics();
+        compositeG.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        compositeG.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+
+        if (drawBackground) {
+            compositeG.setColor(Color.WHITE);
+            compositeG.fillRect(0, 0, totalWidth, maxHeight);
+        }
+
+        // 각 페이지를 렌더링하여 합성
+        int xOffset = 0;
+        for (int i = 0; i < pages.size(); i++) {
+            byte[] pageData = renderPage(spread, pages.get(i), linksDirectory, drawPageBoundary);
+            if (pageData != null && pageData.length > 0) {
+                BufferedImage pageImage = ImageIO.read(new ByteArrayInputStream(pageData));
+                if (pageImage != null) {
+                    compositeG.drawImage(pageImage, xOffset, 0, null);
+                }
+            }
+            xOffset += pageWidths[i] + gap;
+        }
+
+        compositeG.dispose();
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(compositeImage, "png", baos);
+        return baos.toByteArray();
+    }
+
+    /**
+     * 인라인 TextFrame과 그 안의 그래픽을 PNG로 렌더링한다.
+     *
+     * @param textFrame 인라인 텍스트 프레임
+     * @param graphics  텍스트 프레임 내 인라인 그래픽 목록
+     * @return 렌더링 결과
+     */
+    public RenderResult renderInlineTextFrameToPng(IDMLTextFrame textFrame,
+                                                    List<IDMLCharacterRun.InlineGraphic> graphics) throws IOException {
+        double[] bounds = textFrame.geometricBounds();
+        if (bounds == null || bounds.length < 4) return null;
+
+        double widthPts = bounds[3] - bounds[1];
+        double heightPts = bounds[2] - bounds[0];
+        if (widthPts <= 0 || heightPts <= 0) return null;
+
+        double scale = dpi / 72.0;
+        int pixelWidth = (int) Math.ceil(widthPts * scale);
+        int pixelHeight = (int) Math.ceil(heightPts * scale);
+
+        if (pixelWidth <= 0 || pixelHeight <= 0) return null;
+
+        BufferedImage image = new BufferedImage(pixelWidth, pixelHeight, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+
+        // 각 인라인 그래픽을 프레임 내 상대 좌표로 렌더링
+        // (간단한 플레이스홀더 렌더링 - 추후 벡터 렌더링으로 확장 가능)
+        g.setColor(new Color(0xEE, 0xEE, 0xEE));
+        g.fillRect(0, 0, pixelWidth, pixelHeight);
+
+        if (graphics != null) {
+            for (IDMLCharacterRun.InlineGraphic graphic : graphics) {
+                int gw = (int) Math.ceil(graphic.widthPoints() * scale);
+                int gh = (int) Math.ceil(graphic.heightPoints() * scale);
+                g.setColor(new Color(0xDD, 0xDD, 0xDD));
+                g.fillRect(0, 0, Math.min(gw, pixelWidth), Math.min(gh, pixelHeight));
+            }
+        }
+
+        g.dispose();
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", baos);
+        byte[] pngData = baos.toByteArray();
+
+        return new RenderResult(pngData, 0, 0, widthPts, heightPts, pixelWidth, pixelHeight);
+    }
+
+    /**
+     * 단일 인라인 그래픽을 PNG로 렌더링한다.
+     *
+     * @param graphic 인라인 그래픽
+     * @return 렌더링 결과
+     */
+    public RenderResult renderInlineGraphicToPng(IDMLCharacterRun.InlineGraphic graphic) throws IOException {
+        double widthPts = graphic.widthPoints();
+        double heightPts = graphic.heightPoints();
+        if (widthPts <= 0 || heightPts <= 0) return null;
+
+        double scale = dpi / 72.0;
+        int pixelWidth = (int) Math.ceil(widthPts * scale);
+        int pixelHeight = (int) Math.ceil(heightPts * scale);
+        if (pixelWidth <= 0 || pixelHeight <= 0) return null;
+
+        BufferedImage image = new BufferedImage(pixelWidth, pixelHeight, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        // 플레이스홀더 렌더링 (추후 실제 벡터 렌더링으로 확장)
+        g.setColor(new Color(0xEE, 0xEE, 0xEE));
+        g.fillRect(0, 0, pixelWidth, pixelHeight);
+        g.setColor(new Color(0xCC, 0xCC, 0xCC));
+        g.drawRect(0, 0, pixelWidth - 1, pixelHeight - 1);
+
+        g.dispose();
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", baos);
+        byte[] pngData = baos.toByteArray();
+
+        return new RenderResult(pngData, 0, 0, widthPts, heightPts, pixelWidth, pixelHeight);
+    }
 }

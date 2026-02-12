@@ -32,6 +32,9 @@ public class IDMLTableCell {
     private boolean topRightDiagonalLine;  // 대각선 ↙ (우상→좌하)
     private CellBorder diagonalBorder;     // 대각선 스타일
 
+    // TextFrame Story 참조 (셀 내 인라인 텍스트 프레임)
+    private List<String> textFrameStoryRefs;
+
     // Cell padding/insets (points)
     private double topInset;
     private double bottomInset;
@@ -43,6 +46,7 @@ public class IDMLTableCell {
 
     public IDMLTableCell() {
         this.paragraphs = new ArrayList<>();
+        this.textFrameStoryRefs = new ArrayList<>();
         this.rowSpan = 1;
         this.columnSpan = 1;
         this.topInset = 4;
@@ -92,6 +96,9 @@ public class IDMLTableCell {
 
     public List<IDMLParagraph> paragraphs() { return paragraphs; }
     public void addParagraph(IDMLParagraph para) { paragraphs.add(para); }
+
+    public List<String> textFrameStoryRefs() { return textFrameStoryRefs; }
+    public void addTextFrameStoryRef(String storyId) { textFrameStoryRefs.add(storyId); }
 
     public CellBorder topBorder() { return topBorder; }
     public void topBorder(CellBorder v) { this.topBorder = v; }

@@ -48,12 +48,14 @@ public class IDMLSpread {
     private List<IDMLTextFrame> textFrames;
     private List<IDMLImageFrame> imageFrames;
     private List<IDMLVectorShape> vectorShapes;
+    private List<IDMLGroup> groups;
 
     public IDMLSpread() {
         this.pages = new ArrayList<IDMLPage>();
         this.textFrames = new ArrayList<IDMLTextFrame>();
         this.imageFrames = new ArrayList<IDMLImageFrame>();
         this.vectorShapes = new ArrayList<IDMLVectorShape>();
+        this.groups = new ArrayList<IDMLGroup>();
     }
 
     public String selfId() { return selfId; }
@@ -70,6 +72,9 @@ public class IDMLSpread {
 
     public List<IDMLVectorShape> vectorShapes() { return vectorShapes; }
     public void addVectorShape(IDMLVectorShape shape) { vectorShapes.add(shape); }
+
+    public List<IDMLGroup> groups() { return groups; }
+    public void addGroup(IDMLGroup group) { groups.add(group); }
 
     /**
      * ID로 텍스트 프레임을 찾는다.

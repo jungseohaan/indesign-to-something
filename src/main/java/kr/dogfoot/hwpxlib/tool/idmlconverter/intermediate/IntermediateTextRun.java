@@ -13,6 +13,9 @@ public class IntermediateTextRun {
     private String textColor;
     private String fontFamily;
     private Short letterSpacing;  // 자간 (-50 ~ 50)
+    private boolean inlineObject; // 인라인 객체 마커 여부 (TextFrame 참조용)
+    private String inlineObjectType; // 인라인 객체 유형 ("rectangle", "polygon" 등)
+    private String inlineObjectId;   // 인라인 객체 ID
 
     public String characterStyleRef() { return characterStyleRef; }
     public void characterStyleRef(String v) { this.characterStyleRef = v; }
@@ -37,4 +40,13 @@ public class IntermediateTextRun {
 
     public Short letterSpacing() { return letterSpacing; }
     public void letterSpacing(Short v) { this.letterSpacing = v; }
+
+    public boolean isInlineObject() { return inlineObject; }
+    public void inlineObject(boolean v) { this.inlineObject = v; }
+
+    public String inlineObjectType() { return inlineObjectType; }
+    public void inlineObjectType(String v) { this.inlineObjectType = v; this.inlineObject = true; }
+
+    public String inlineObjectId() { return inlineObjectId; }
+    public void inlineObjectId(String v) { this.inlineObjectId = v; }
 }

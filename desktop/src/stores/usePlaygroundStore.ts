@@ -59,6 +59,9 @@ interface PlaygroundState {
   isCreating: boolean;
   createResult: CreateIdmlResult | null;
 
+  // Export
+  isExporting: boolean;
+
   // Inline Text Frames
   inlineCount: number;
 
@@ -74,6 +77,7 @@ interface PlaygroundState {
   selectMaster: (master: MasterSpreadInfo) => Promise<void>;
   createIdml: () => Promise<void>;
   mergeIdml: () => Promise<void>;
+  exportIdml: () => Promise<void>;
   clearError: () => void;
   reset: () => void;
 
@@ -119,6 +123,7 @@ export const usePlaygroundStore = create<PlaygroundState>((set, get) => ({
   isGeneratingPreview: false,
   isCreating: false,
   createResult: null,
+  isExporting: false,
   inlineCount: 5,
   tfMode: "master" as const,
   error: null,
@@ -162,18 +167,30 @@ export const usePlaygroundStore = create<PlaygroundState>((set, get) => ({
         return;
       }
 
-      // Run analyze and extract-schema in parallel
+      // Run analyze (required) and extract-schema (optional) in parallel
       const [structure, schema] = await Promise.all([
         invoke<IDMLStructure>("analyze_idml", { path: idmlPath, jarPath }),
-        invoke<TemplateSchema>("extract_template_schema", { sourcePath: idmlPath, jarPath }),
+        invoke<TemplateSchema>("extract_template_schema", { sourcePath: idmlPath, jarPath }).catch(() => null),
       ]);
 
       const masters = structure.master_spreads || [];
-      const firstMasterId = masters.length > 0 ? masters[0].id : null;
+
+      // IDML 문서의 실제 페이지를 추출
+      const docPages: PageSpec[] = [];
+      for (const spread of structure.spreads) {
+        for (const page of spread.pages) {
+          docPages.push(createPage(page.master_spread ?? null));
+        }
+      }
+      // 페이지가 없으면 빈 페이지 하나 생성
+      if (docPages.length === 0) {
+        const firstMasterId = masters.length > 0 ? masters[0].id : null;
+        docPages.push(createPage(firstMasterId));
+      }
 
       // Create empty items with schema fields
       const emptyItem: DataItem = {};
-      if (schema.itemFields) {
+      if (schema?.itemFields) {
         for (const field of schema.itemFields) {
           emptyItem[field] = "";
         }
@@ -182,8 +199,8 @@ export const usePlaygroundStore = create<PlaygroundState>((set, get) => ({
       set({
         masterSpreads: masters,
         schema,
-        items: [{ ...emptyItem }],
-        pages: [createPage(firstMasterId)],
+        items: schema ? [{ ...emptyItem }] : [],
+        pages: docPages,
         isLoading: false,
         isExtracting: false,
       });
@@ -339,6 +356,47 @@ export const usePlaygroundStore = create<PlaygroundState>((set, get) => ({
     }
   },
 
+  exportIdml: async () => {
+    const { idmlPath, jarPath, pages } = get();
+    if (!idmlPath || !jarPath || pages.length === 0) return;
+
+    const idmlFilename = idmlPath
+      .substring(idmlPath.lastIndexOf("/") + 1)
+      .replace(".idml", "");
+    const idmlDir = idmlPath.substring(0, idmlPath.lastIndexOf("/"));
+    const defaultOutputName = `${idmlFilename}-export.idml`;
+
+    const outputPath = await save({
+      filters: [{ name: "IDML Files", extensions: ["idml"] }],
+      defaultPath: `${idmlDir}/${defaultOutputName}`,
+    });
+
+    if (!outputPath) return;
+
+    set({ isExporting: true, error: null });
+
+    try {
+      const pageSpecs = pages.map((p) => p.masterSpreadId || "none");
+      const textFrameSpecs = pages.map(() => "none");
+
+      await invoke<CreateIdmlResult>("create_idml_from_masters", {
+        sourcePath: idmlPath,
+        outputPath,
+        masterIds: null,
+        pageSpecs,
+        textFrameSpecs,
+        inlineCount: null,
+        tfMode: null,
+        validate: true,
+        jarPath,
+      });
+
+      set({ isExporting: false });
+    } catch (e) {
+      set({ error: `IDML 내보내기 실패: ${e}`, isExporting: false });
+    }
+  },
+
   // Page Actions
   addPage: () => {
     const { pages, masterSpreads } = get();
@@ -348,7 +406,6 @@ export const usePlaygroundStore = create<PlaygroundState>((set, get) => ({
 
   removePage: (id: string) => {
     const { pages } = get();
-    if (pages.length <= 1) return;
     set({ pages: pages.filter((p) => p.id !== id) });
   },
 
@@ -510,5 +567,6 @@ export const usePlaygroundStore = create<PlaygroundState>((set, get) => ({
       isExtracting: false,
       isGeneratingPreview: false,
       isCreating: false,
+      isExporting: false,
     }),
 }));

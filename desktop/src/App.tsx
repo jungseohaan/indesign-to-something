@@ -6,7 +6,10 @@ import { ImagePreviewPanel } from "./components/ImagePreviewPanel";
 import { LayoutDetailPanel } from "./components/LayoutDetailPanel";
 import { ConversionPanel } from "./components/ConversionPanel";
 import { PlaygroundPage } from "./components/PlaygroundPage";
+import { ExtractPage } from "./components/ExtractPage";
 import { useAppStore } from "./stores/useAppStore";
+
+type Tab = "playground" | "extract" | "converter";
 
 function App() {
   const initJarPath = useAppStore((state) => state.initJarPath);
@@ -15,19 +18,18 @@ function App() {
   const selectedSpread = useAppStore((state) => state.selectedSpread);
   const selectedPage = useAppStore((state) => state.selectedPage);
   const [showAbout, setShowAbout] = useState(false);
-  const [currentView, setCurrentView] = useState<"converter" | "playground">("converter");
+  const [currentTab, setCurrentTab] = useState<Tab>("playground");
 
   useEffect(() => {
     initJarPath();
 
-    // 메뉴 이벤트 리스너
     const unlistenOpenIdml = listen("menu-open-idml", () => {
-      setCurrentView("converter");
+      setCurrentTab("converter");
       selectFile();
     });
 
     const unlistenOpenHwpx = listen("menu-open-hwpx", () => {
-      setCurrentView("converter");
+      setCurrentTab("converter");
       selectHwpxFile();
     });
 
@@ -36,7 +38,11 @@ function App() {
     });
 
     const unlistenPlayground = listen("menu-playground", () => {
-      setCurrentView("playground");
+      setCurrentTab("playground");
+    });
+
+    const unlistenExtract = listen("menu-extract", () => {
+      setCurrentTab("extract");
     });
 
     return () => {
@@ -44,37 +50,57 @@ function App() {
       unlistenOpenHwpx.then((f) => f());
       unlistenAbout.then((f) => f());
       unlistenPlayground.then((f) => f());
+      unlistenExtract.then((f) => f());
     };
   }, [initJarPath, selectFile, selectHwpxFile]);
 
-  // 스프레드나 페이지가 선택되면 레이아웃 상세 정보를, 아니면 이미지 미리보기를 표시
   const showLayoutDetail = selectedSpread || selectedPage;
 
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "playground", label: "Playground - 자동조판기" },
+    { key: "extract", label: "문제 추출하기" },
+    { key: "converter", label: "HWPX 내보내기" },
+  ];
+
   return (
-    <>
-      {currentView === "converter" ? (
-        <div className="h-screen flex flex-col bg-white">
-          {/* Header - File Selection */}
+    <div className="h-screen flex flex-col bg-white">
+      {/* Tab Bar */}
+      <div className="flex items-center border-b bg-gray-50 px-4 shrink-0">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setCurrentTab(tab.key)}
+            className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              currentTab === tab.key
+                ? "border-blue-500 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      {currentTab === "playground" ? (
+        <PlaygroundPage />
+      ) : currentTab === "extract" ? (
+        <ExtractPage />
+      ) : (
+        <div className="flex-1 flex flex-col min-h-0">
           <FileSelector />
 
-          {/* Main Content */}
           <div className="flex-1 flex min-h-0">
-            {/* Left Panel - Inventory View */}
             <div className="w-1/2 border-r overflow-hidden">
               <InventoryView />
             </div>
-
-            {/* Right Panel - Layout Detail or Image Preview */}
             <div className="w-1/2 overflow-hidden">
               {showLayoutDetail ? <LayoutDetailPanel /> : <ImagePreviewPanel />}
             </div>
           </div>
 
-          {/* Footer - Conversion Panel */}
           <ConversionPanel />
         </div>
-      ) : (
-        <PlaygroundPage onBack={() => setCurrentView("converter")} />
       )}
 
       {/* About Dialog */}
@@ -97,7 +123,7 @@ function App() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 

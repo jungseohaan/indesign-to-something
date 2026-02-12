@@ -108,12 +108,19 @@ public class IDMLLoader {
                 parseGraphic(parseXML(graphicFile), doc);
             }
 
-            // 4.5. 마스터 스프레드 로드 (마진 정보 수집)
+            // 4.5. 마스터 스프레드 로드 (마진 정보 수집 + IDMLSpread 객체 생성)
             Map<String, MasterPageMargins> masterMargins = new HashMap<String, MasterPageMargins>();
             for (String masterSrc : masterSpreadSources) {
                 File masterFile = new File(dir, masterSrc);
                 if (masterFile.exists()) {
-                    parseMasterSpreadForMargins(parseXML(masterFile), masterMargins);
+                    Document masterDoc = parseXML(masterFile);
+                    parseMasterSpreadForMargins(masterDoc, masterMargins);
+
+                    // 마스터 스프레드를 IDMLSpread 객체로도 로드
+                    IDMLSpread masterSpread = parseSpread(masterDoc, doc.hiddenLayerIds());
+                    if (masterSpread.selfId() != null) {
+                        doc.addMasterSpread(masterSpread.selfId(), masterSpread);
+                    }
                 }
             }
 
@@ -392,8 +399,11 @@ public class IDMLLoader {
     private static IDMLSpread parseSpread(Document spreadDoc, Set<String> hiddenLayerIds) {
         IDMLSpread spread = new IDMLSpread();
 
-        // Spread 루트 요소 찾기
+        // Spread 또는 MasterSpread 루트 요소 찾기
         NodeList spreadNodes = spreadDoc.getElementsByTagName("Spread");
+        if (spreadNodes.getLength() == 0) {
+            spreadNodes = spreadDoc.getElementsByTagName("MasterSpread");
+        }
         if (spreadNodes.getLength() == 0) return spread;
 
         Element spreadElem = (Element) spreadNodes.item(0);

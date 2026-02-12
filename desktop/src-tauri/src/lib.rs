@@ -30,6 +30,11 @@ pub fn run() {
                         let _ = window.emit("menu-playground", ());
                     }
                 }
+                "extract" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.emit("menu-extract", ());
+                    }
+                }
                 "about" => {
                     // 프론트엔드에 정보 이벤트 전달
                     if let Some(window) = app.get_webview_window("main") {
@@ -53,6 +58,8 @@ pub fn run() {
             commands::extract_template_schema,
             commands::merge_idml,
             commands::read_text_file,
+            commands::write_text_file,
+            commands::extract_questions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -132,6 +139,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
 
     // View 메뉴
     let playground = MenuItem::with_id(handle, "playground", "Playground", true, Some("CmdOrCtrl+P"))?;
+    let extract = MenuItem::with_id(handle, "extract", "문제 추출하기", true, Some("CmdOrCtrl+E"))?;
 
     #[cfg(debug_assertions)]
     let view_menu = {
@@ -142,6 +150,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
             true,
             &[
                 &playground,
+                &extract,
                 &PredefinedMenuItem::separator(handle)?,
                 &PredefinedMenuItem::fullscreen(handle, Some("Toggle Fullscreen"))?,
                 &PredefinedMenuItem::separator(handle)?,
@@ -157,6 +166,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         true,
         &[
             &playground,
+            &extract,
             &PredefinedMenuItem::separator(handle)?,
             &PredefinedMenuItem::fullscreen(handle, Some("Toggle Fullscreen"))?,
         ],

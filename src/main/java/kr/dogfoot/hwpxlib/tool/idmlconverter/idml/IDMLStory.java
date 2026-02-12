@@ -35,6 +35,21 @@ public class IDMLStory {
     public boolean hasTables() { return !tables.isEmpty(); }
 
     /**
+     * Story 내 모든 인라인 그래픽을 수집하여 반환한다.
+     */
+    public List<IDMLCharacterRun.InlineGraphic> getAllInlineGraphics() {
+        List<IDMLCharacterRun.InlineGraphic> result = new ArrayList<IDMLCharacterRun.InlineGraphic>();
+        for (IDMLParagraph para : paragraphs) {
+            for (IDMLCharacterRun run : para.characterRuns()) {
+                if (run.inlineGraphics() != null) {
+                    result.addAll(run.inlineGraphics());
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
      * Story에 의미 있는 콘텐츠가 없는지 확인한다.
      * 테이블이 있거나 의미 있는 텍스트가 있으면 false.
      */

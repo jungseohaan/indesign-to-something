@@ -181,6 +181,16 @@ public class IDMLStructureSerializer {
         sb.append(indent).append("  \"vector_count\": ").append(ms.getVectorCount()).append(",\n");
         sb.append(indent).append("  \"group_count\": ").append(ms.getGroupCount()).append(",\n");
 
+        // 페이지 레이아웃 정보
+        sb.append(indent).append("  \"page_width\": ").append(ms.getPageWidth()).append(",\n");
+        sb.append(indent).append("  \"page_height\": ").append(ms.getPageHeight()).append(",\n");
+        sb.append(indent).append("  \"margin_top\": ").append(ms.getMarginTop()).append(",\n");
+        sb.append(indent).append("  \"margin_bottom\": ").append(ms.getMarginBottom()).append(",\n");
+        sb.append(indent).append("  \"margin_left\": ").append(ms.getMarginLeft()).append(",\n");
+        sb.append(indent).append("  \"margin_right\": ").append(ms.getMarginRight()).append(",\n");
+        sb.append(indent).append("  \"column_count\": ").append(ms.getColumnCount()).append(",\n");
+        sb.append(indent).append("  \"column_gutter\": ").append(ms.getColumnGutter()).append(",\n");
+
         // applied pages
         sb.append(indent).append("  \"applied_pages\": [");
         boolean first = true;

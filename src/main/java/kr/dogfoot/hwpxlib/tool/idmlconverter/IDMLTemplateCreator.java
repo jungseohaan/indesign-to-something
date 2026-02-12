@@ -124,15 +124,47 @@ public class IDMLTemplateCreator {
             boolean hasTextFrames = !tfPageIndices.isEmpty();
             String storyId = "autoflow_story";
 
-            // 6. 소스의 designmap.xml을 수정하여 Spread/Story 참조를 빈 스프레드로 교체
+            // 6. 각 마스터의 레이아웃 캐시 구축
+            Map<String, MasterLayout> layoutCache = new HashMap<String, MasterLayout>();
+            for (MasterSpreadRef ref : selectedMasters) {
+                MasterLayout ml = extractMasterLayout(sourceZip, ref.src);
+                if (ml != null) layoutCache.put(ref.masterId, ml);
+            }
+
+            // 7. 페이지를 스프레드로 그룹핑 (마스터의 pageCount 기준, facing pages 지원)
+            List<List<Integer>> spreadGroups = new ArrayList<List<Integer>>();
+            {
+                int pi = 0;
+                while (pi < pageCount) {
+                    String mId = null;
+                    if (pageSpecs != null && pi < pageSpecs.size()) {
+                        mId = pageSpecs.get(pi);
+                        if ("none".equalsIgnoreCase(mId)) mId = null;
+                    } else {
+                        mId = firstMasterId;
+                    }
+                    MasterLayout ml = (mId != null && layoutCache.containsKey(mId))
+                            ? layoutCache.get(mId) : layout;
+                    int groupSize = Math.min(ml.pageCount, pageCount - pi);
+                    List<Integer> group = new ArrayList<Integer>();
+                    for (int j = 0; j < groupSize; j++) {
+                        group.add(pi + j);
+                    }
+                    spreadGroups.add(group);
+                    pi += groupSize;
+                }
+            }
+            int spreadCount = spreadGroups.size();
+
+            // 8. 소스의 designmap.xml을 수정하여 Spread/Story 참조를 빈 스프레드로 교체
             Set<String> selectedMasterSrcs = new HashSet<String>();
             for (MasterSpreadRef ref : selectedMasters) {
                 selectedMasterSrcs.add(ref.src);
             }
-            String modifiedDesignmap = modifyDesignmap(sourceZip, selectedMasterSrcs, pageCount,
+            String modifiedDesignmap = modifyDesignmap(sourceZip, selectedMasterSrcs, spreadCount, pageCount,
                     hasTextFrames, storyId, hasTextFrames ? inlineCount : 0);
 
-            // 7. 출력 파일 생성
+            // 9. 출력 파일 생성
             File outputFile = new File(outputPath);
             File parentDir = outputFile.getParentFile();
             if (parentDir != null && !parentDir.exists()) {
@@ -159,81 +191,71 @@ public class IDMLTemplateCreator {
                 // XML/ 복사 (Tags.xml, BackingStory.xml 등)
                 copyMatchingEntries(sourceZip, zos, "XML/", copiedEntries);
 
+                // Links/ 복사 (임베디드 이미지 등)
+                copyMatchingEntries(sourceZip, zos, "Links/", copiedEntries);
+
                 // 선택된 MasterSpreads/ 복사
                 for (MasterSpreadRef ref : selectedMasters) {
                     copyZipEntry(sourceZip, zos, ref.src);
                     copiedEntries.add(ref.src);
                 }
 
-                // 각 페이지의 마스터에 맞는 레이아웃 캐시 (마스터별)
-                Map<String, MasterLayout> layoutCache = new HashMap<String, MasterLayout>();
-                for (MasterSpreadRef ref : selectedMasters) {
-                    MasterLayout ml = extractMasterLayout(sourceZip, ref.src);
-                    if (ml != null) layoutCache.put(ref.masterId, ml);
-                }
-
-                // Spread 생성 (페이지별 1 스프레드)
+                // Spread 생성 (facing pages 지원)
                 String domVersion = designmap.domVersion != null ? designmap.domVersion : "21.1";
-                for (int i = 0; i < pageCount; i++) {
-                    String masterId;
-                    if (pageSpecs != null && !pageSpecs.isEmpty()) {
-                        masterId = pageSpecs.get(i);
-                        if ("none".equalsIgnoreCase(masterId)) masterId = null;
-                    } else {
-                        masterId = firstMasterId;
+                for (int si = 0; si < spreadCount; si++) {
+                    List<Integer> group = spreadGroups.get(si);
+                    String spreadId = "ublank" + si;
+
+                    List<PageGenSpec> spreadPages = new ArrayList<PageGenSpec>();
+                    for (int gi = 0; gi < group.size(); gi++) {
+                        int pageIdx = group.get(gi);
+                        PageGenSpec pgs = new PageGenSpec();
+                        pgs.pageId = "ublankpage" + pageIdx;
+                        pgs.pageName = String.valueOf(pageIdx + 1);
+
+                        String masterId = null;
+                        if (pageSpecs != null && pageIdx < pageSpecs.size()) {
+                            masterId = pageSpecs.get(pageIdx);
+                            if ("none".equalsIgnoreCase(masterId)) masterId = null;
+                        } else {
+                            masterId = firstMasterId;
+                        }
+                        pgs.appliedMaster = masterId;
+
+                        MasterLayout pageLayout = (masterId != null && layoutCache.containsKey(masterId))
+                                ? layoutCache.get(masterId) : layout;
+
+                        pgs.marginTop = pageLayout.marginTop;
+                        pgs.marginBottom = pageLayout.marginBottom;
+                        pgs.marginLeft = pageLayout.marginLeft;
+                        pgs.marginRight = pageLayout.marginRight;
+                        pgs.columnCount = isCustomMode ? overrideColumnCount : pageLayout.columnCount;
+                        pgs.columnGutter = isCustomMode ? overrideColumnGutter : pageLayout.columnGutter;
+
+                        // 텍스트 프레임 정보
+                        if (textFrameSpecs != null && pageIdx < textFrameSpecs.size() && textFrameSpecs.get(pageIdx) != null) {
+                            pgs.textFrameId = "tf_autoflow_" + pageIdx;
+                            pgs.parentStoryId = storyId;
+                            double[] spec = textFrameSpecs.get(pageIdx);
+                            pgs.tfWidth = spec[0] < 0 ? pageLayout.pageWidth - pageLayout.marginLeft - pageLayout.marginRight : spec[0];
+                            pgs.tfHeight = spec[1] < 0 ? pageLayout.pageHeight - pageLayout.marginTop - pageLayout.marginBottom : spec[1];
+
+                            int posInChain = tfPageIndices.indexOf(pageIdx);
+                            if (posInChain > 0) pgs.prevFrameId = "tf_autoflow_" + tfPageIndices.get(posInChain - 1);
+                            if (posInChain >= 0 && posInChain < tfPageIndices.size() - 1)
+                                pgs.nextFrameId = "tf_autoflow_" + tfPageIndices.get(posInChain + 1);
+                        }
+
+                        spreadPages.add(pgs);
                     }
 
-                    // 이 페이지의 레이아웃 결정 (마스터별)
-                    MasterLayout pageLayout = (masterId != null && layoutCache.containsKey(masterId))
-                            ? layoutCache.get(masterId) : layout;
+                    // 스프레드의 첫 페이지 레이아웃 사용
+                    String firstMasterInGroup = spreadPages.get(0).appliedMaster;
+                    MasterLayout groupLayout = (firstMasterInGroup != null && layoutCache.containsKey(firstMasterInGroup))
+                            ? layoutCache.get(firstMasterInGroup) : layout;
 
-                    String spreadId = "ublank" + i;
-                    String pageId = "ublankpage" + i;
-
-                    // 텍스트 프레임 정보
-                    String textFrameId = null;
-                    String prevFrameId = "n";
-                    String nextFrameId = "n";
-                    double tfWidth = 0;
-                    double tfHeight = 0;
-
-                    if (textFrameSpecs != null && i < textFrameSpecs.size() && textFrameSpecs.get(i) != null) {
-                        textFrameId = "tf_autoflow_" + i;
-                        double[] spec = textFrameSpecs.get(i);
-
-                        // auto(-1)면 콘텐츠영역 전체 너비/높이 사용 (다단은 TextFramePreference로)
-                        if (spec[0] < 0) {
-                            tfWidth = pageLayout.pageWidth - pageLayout.marginLeft - pageLayout.marginRight;
-                        } else {
-                            tfWidth = spec[0];
-                        }
-                        if (spec[1] < 0) {
-                            tfHeight = pageLayout.pageHeight - pageLayout.marginTop - pageLayout.marginBottom;
-                        } else {
-                            tfHeight = spec[1];
-                        }
-
-                        // linked frame chain: 이전/다음 텍스트 프레임 ID
-                        int posInChain = tfPageIndices.indexOf(i);
-                        if (posInChain > 0) {
-                            prevFrameId = "tf_autoflow_" + tfPageIndices.get(posInChain - 1);
-                        }
-                        if (posInChain >= 0 && posInChain < tfPageIndices.size() - 1) {
-                            nextFrameId = "tf_autoflow_" + tfPageIndices.get(posInChain + 1);
-                        }
-                    }
-
-                    // custom 모드면 컬럼 설정 오버라이드
-                    int effectiveColCount = isCustomMode ? overrideColumnCount : pageLayout.columnCount;
-                    double effectiveColGutter = isCustomMode ? overrideColumnGutter : pageLayout.columnGutter;
-
-                    String spreadXml = generateEmptySpread(
-                            pageLayout.pageWidth, pageLayout.pageHeight, masterId, domVersion,
-                            spreadId, pageId, String.valueOf(i + 1),
-                            textFrameId, storyId, prevFrameId, nextFrameId,
-                            tfWidth, tfHeight, pageLayout.marginTop, pageLayout.marginLeft,
-                            effectiveColCount, effectiveColGutter,
-                            designmap.activeLayer);
+                    String spreadXml = generateSpreadXml(groupLayout.pageWidth, groupLayout.pageHeight,
+                            domVersion, spreadId, spreadPages, designmap.activeLayer);
                     writeEntry(zos, "Spreads/Spread_" + spreadId + ".xml", spreadXml);
                 }
 
@@ -374,9 +396,33 @@ public class IDMLTemplateCreator {
             boolean hasTextFrames = !tfPageIndices.isEmpty();
             String storyId = "autoflow_story";
 
+            // 레이아웃 캐시 구축
+            Map<String, MasterLayout> layoutCache = new HashMap<>();
+            for (MasterSpreadRef ref : selectedMasters) {
+                MasterLayout ml = extractMasterLayout(sourceZip, ref.src);
+                if (ml != null) layoutCache.put(ref.masterId, ml);
+            }
+
+            // 페이지를 스프레드로 그룹핑
+            List<List<Integer>> spreadGroups = new ArrayList<>();
+            {
+                int pi = 0;
+                while (pi < pageCount) {
+                    String mId = (pageSpecs != null && pi < pageSpecs.size()) ? pageSpecs.get(pi) : firstMasterId;
+                    if ("none".equalsIgnoreCase(mId)) mId = null;
+                    MasterLayout ml = (mId != null && layoutCache.containsKey(mId)) ? layoutCache.get(mId) : layout;
+                    int groupSize = Math.min(ml.pageCount, pageCount - pi);
+                    List<Integer> group = new ArrayList<>();
+                    for (int j = 0; j < groupSize; j++) group.add(pi + j);
+                    spreadGroups.add(group);
+                    pi += groupSize;
+                }
+            }
+            int spreadCount = spreadGroups.size();
+
             Set<String> selectedMasterSrcs = new HashSet<>();
             for (MasterSpreadRef ref : selectedMasters) selectedMasterSrcs.add(ref.src);
-            String modifiedDesignmap = modifyDesignmap(sourceZip, selectedMasterSrcs, pageCount,
+            String modifiedDesignmap = modifyDesignmap(sourceZip, selectedMasterSrcs, spreadCount, pageCount,
                     hasTextFrames, storyId, hasTextFrames ? inlineCount : 0);
 
             File outputFile = new File(outputPath);
@@ -395,61 +441,57 @@ public class IDMLTemplateCreator {
                 copyMatchingEntries(sourceZip, zos, "META-INF/", copiedEntries);
                 copyMatchingEntries(sourceZip, zos, "Resources/", copiedEntries);
                 copyMatchingEntries(sourceZip, zos, "XML/", copiedEntries);
+                copyMatchingEntries(sourceZip, zos, "Links/", copiedEntries);
 
                 for (MasterSpreadRef ref : selectedMasters) {
                     copyZipEntry(sourceZip, zos, ref.src);
                     copiedEntries.add(ref.src);
                 }
 
-                Map<String, MasterLayout> layoutCache = new HashMap<>();
-                for (MasterSpreadRef ref : selectedMasters) {
-                    MasterLayout ml = extractMasterLayout(sourceZip, ref.src);
-                    if (ml != null) layoutCache.put(ref.masterId, ml);
-                }
-
                 String domVersion = designmap.domVersion != null ? designmap.domVersion : "21.1";
-                for (int i = 0; i < pageCount; i++) {
-                    String masterId;
-                    if (pageSpecs != null && !pageSpecs.isEmpty()) {
-                        masterId = pageSpecs.get(i);
+                for (int si = 0; si < spreadCount; si++) {
+                    List<Integer> group = spreadGroups.get(si);
+                    String spreadId = "ublank" + si;
+
+                    List<PageGenSpec> spreadPages = new ArrayList<>();
+                    for (int gi = 0; gi < group.size(); gi++) {
+                        int pageIdx = group.get(gi);
+                        PageGenSpec pgs = new PageGenSpec();
+                        pgs.pageId = "ublankpage" + pageIdx;
+                        pgs.pageName = String.valueOf(pageIdx + 1);
+
+                        String masterId = (pageSpecs != null && pageIdx < pageSpecs.size()) ? pageSpecs.get(pageIdx) : firstMasterId;
                         if ("none".equalsIgnoreCase(masterId)) masterId = null;
-                    } else {
-                        masterId = firstMasterId;
+                        pgs.appliedMaster = masterId;
+
+                        MasterLayout pageLayout = (masterId != null && layoutCache.containsKey(masterId))
+                                ? layoutCache.get(masterId) : layout;
+                        pgs.marginTop = pageLayout.marginTop;
+                        pgs.marginBottom = pageLayout.marginBottom;
+                        pgs.marginLeft = pageLayout.marginLeft;
+                        pgs.marginRight = pageLayout.marginRight;
+                        pgs.columnCount = isCustomMode ? overrideColumnCount : pageLayout.columnCount;
+                        pgs.columnGutter = isCustomMode ? overrideColumnGutter : pageLayout.columnGutter;
+
+                        if (textFrameSpecs != null && pageIdx < textFrameSpecs.size() && textFrameSpecs.get(pageIdx) != null) {
+                            pgs.textFrameId = "tf_autoflow_" + pageIdx;
+                            pgs.parentStoryId = storyId;
+                            double[] spec = textFrameSpecs.get(pageIdx);
+                            pgs.tfWidth = spec[0] < 0 ? pageLayout.pageWidth - pageLayout.marginLeft - pageLayout.marginRight : spec[0];
+                            pgs.tfHeight = spec[1] < 0 ? pageLayout.pageHeight - pageLayout.marginTop - pageLayout.marginBottom : spec[1];
+                            int posInChain = tfPageIndices.indexOf(pageIdx);
+                            if (posInChain > 0) pgs.prevFrameId = "tf_autoflow_" + tfPageIndices.get(posInChain - 1);
+                            if (posInChain >= 0 && posInChain < tfPageIndices.size() - 1)
+                                pgs.nextFrameId = "tf_autoflow_" + tfPageIndices.get(posInChain + 1);
+                        }
+                        spreadPages.add(pgs);
                     }
 
-                    MasterLayout pageLayout = (masterId != null && layoutCache.containsKey(masterId))
-                            ? layoutCache.get(masterId) : layout;
-
-                    String spreadId = "ublank" + i;
-                    String pageId = "ublankpage" + i;
-
-                    String textFrameId = null;
-                    String prevFrameId = "n";
-                    String nextFrameId = "n";
-                    double tfWidth = 0, tfHeight = 0;
-
-                    if (textFrameSpecs != null && i < textFrameSpecs.size() && textFrameSpecs.get(i) != null) {
-                        textFrameId = "tf_autoflow_" + i;
-                        double[] spec = textFrameSpecs.get(i);
-                        tfWidth = spec[0] < 0 ? pageLayout.pageWidth - pageLayout.marginLeft - pageLayout.marginRight : spec[0];
-                        tfHeight = spec[1] < 0 ? pageLayout.pageHeight - pageLayout.marginTop - pageLayout.marginBottom : spec[1];
-
-                        int posInChain = tfPageIndices.indexOf(i);
-                        if (posInChain > 0) prevFrameId = "tf_autoflow_" + tfPageIndices.get(posInChain - 1);
-                        if (posInChain >= 0 && posInChain < tfPageIndices.size() - 1)
-                            nextFrameId = "tf_autoflow_" + tfPageIndices.get(posInChain + 1);
-                    }
-
-                    int effectiveColCount = isCustomMode ? overrideColumnCount : pageLayout.columnCount;
-                    double effectiveColGutter = isCustomMode ? overrideColumnGutter : pageLayout.columnGutter;
-
-                    String spreadXml = generateEmptySpread(
-                            pageLayout.pageWidth, pageLayout.pageHeight, masterId, domVersion,
-                            spreadId, pageId, String.valueOf(i + 1),
-                            textFrameId, storyId, prevFrameId, nextFrameId,
-                            tfWidth, tfHeight, pageLayout.marginTop, pageLayout.marginLeft,
-                            effectiveColCount, effectiveColGutter,
-                            designmap.activeLayer);
+                    String firstMasterInGroup = spreadPages.get(0).appliedMaster;
+                    MasterLayout groupLayout = (firstMasterInGroup != null && layoutCache.containsKey(firstMasterInGroup))
+                            ? layoutCache.get(firstMasterInGroup) : layout;
+                    String spreadXml = generateSpreadXml(groupLayout.pageWidth, groupLayout.pageHeight,
+                            domVersion, spreadId, spreadPages, designmap.activeLayer);
                     writeEntry(zos, "Spreads/Spread_" + spreadId + ".xml", spreadXml);
                 }
 
@@ -881,6 +923,28 @@ public class IDMLTemplateCreator {
         double marginRight = 56.69291338582678;
         int columnCount = 1;
         double columnGutter = 14.173228346456694;
+        int pageCount = 1; // number of pages in this master spread
+    }
+
+    /** Per-page specification for generating a spread with N pages. */
+    private static class PageGenSpec {
+        String pageId;
+        String pageName;
+        String appliedMaster;
+        // text frame (null = no text frame)
+        String textFrameId;
+        String parentStoryId;
+        String prevFrameId = "n";
+        String nextFrameId = "n";
+        double tfWidth;
+        double tfHeight;
+        // margins
+        double marginTop;
+        double marginBottom;
+        double marginLeft;
+        double marginRight;
+        int columnCount;
+        double columnGutter;
     }
 
     // ─────────────────────────────────────────────────────────
@@ -931,8 +995,8 @@ public class IDMLTemplateCreator {
      * 3. 기존 idPkg:Story 참조 제거 (빈 문서이므로)
      * 4. StoryList에서 제거된 Story ID만 삭제 (BackingStory ID는 유지)
      */
-    private static String modifyDesignmap(ZipFile zip, Set<String> keepMasterSrcs, int pageCount,
-                                              boolean hasTextFrames, String storyId,
+    private static String modifyDesignmap(ZipFile zip, Set<String> keepMasterSrcs, int spreadCount,
+                                              int pageCount, boolean hasTextFrames, String storyId,
                                               int inlineCount) throws Exception {
         ZipEntry entry = zip.getEntry("designmap.xml");
         if (entry == null) {
@@ -1018,7 +1082,7 @@ public class IDMLTemplateCreator {
                 }
             }
         }
-        for (int i = 0; i < pageCount; i++) {
+        for (int i = 0; i < spreadCount; i++) {
             Element spreadElem = doc.createElement("idPkg:Spread");
             spreadElem.setAttribute("src", "Spreads/Spread_ublank" + i + ".xml");
             if (insertBefore != null) {
@@ -1166,6 +1230,7 @@ public class IDMLTemplateCreator {
             if (pages.getLength() > 0) {
                 Element pageElem = (Element) pages.item(0);
                 MasterLayout ml = new MasterLayout();
+                ml.pageCount = pages.getLength();
 
                 String boundsStr = pageElem.getAttribute("GeometricBounds");
                 if (boundsStr != null && !boundsStr.isEmpty()) {
@@ -1233,83 +1298,100 @@ public class IDMLTemplateCreator {
     // Spread generation
     // ─────────────────────────────────────────────────────────
 
-    private static String generateEmptySpread(double pageWidth, double pageHeight,
-                                               String appliedMaster, String domVersion,
-                                               String spreadId, String pageId, String pageName,
-                                               String textFrameId, String parentStoryId,
-                                               String prevFrameId, String nextFrameId,
-                                               double tfWidth, double tfHeight,
-                                               double marginTop, double marginLeft,
-                                               int columnCount, double columnGutter,
-                                               String itemLayer) {
+    /**
+     * 스프레드 XML 생성 (N페이지 facing pages 지원).
+     * 1페이지 스프레드: 페이지가 x=0에 위치
+     * 2페이지 스프레드: 왼쪽 페이지 x=-pageWidth, 오른쪽 페이지 x=0
+     * N페이지: p번째 페이지의 x = (p - (N-1)) * pageWidth
+     */
+    private static String generateSpreadXml(double pageWidth, double pageHeight,
+                                             String domVersion, String spreadId,
+                                             List<PageGenSpec> pages, String itemLayer) {
+        int numPages = pages.size();
         double halfHeight = pageHeight / 2.0;
+
         StringBuilder sb = new StringBuilder();
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
         sb.append("<idPkg:Spread xmlns:idPkg=\"http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging\" DOMVersion=\"").append(domVersion).append("\">\n");
-        sb.append("\t<Spread Self=\"").append(spreadId).append("\" PageTransitionType=\"None\" PageTransitionDirection=\"NotApplicable\" PageTransitionDuration=\"Medium\" ShowMasterItems=\"true\" PageCount=\"1\" BindingLocation=\"0\" SpreadHidden=\"false\" AllowPageShuffle=\"true\" ItemTransform=\"1 0 0 1 0 0\" FlattenerOverride=\"Default\">\n");
+        sb.append("\t<Spread Self=\"").append(spreadId).append("\" PageTransitionType=\"None\" PageTransitionDirection=\"NotApplicable\" PageTransitionDuration=\"Medium\" ShowMasterItems=\"true\" PageCount=\"").append(numPages).append("\" BindingLocation=\"0\" SpreadHidden=\"false\" AllowPageShuffle=\"true\" ItemTransform=\"1 0 0 1 0 0\" FlattenerOverride=\"Default\">\n");
         sb.append("\t\t<FlattenerPreference LineArtAndTextResolution=\"400\" GradientAndMeshResolution=\"400\" ClipComplexRegions=\"false\" ConvertAllStrokesToOutlines=\"false\" ConvertAllTextToOutlines=\"false\">\n");
         sb.append("\t\t\t<Properties>\n");
         sb.append("\t\t\t\t<RasterVectorBalance type=\"double\">50</RasterVectorBalance>\n");
         sb.append("\t\t\t</Properties>\n");
         sb.append("\t\t</FlattenerPreference>\n");
-        sb.append("\t\t<Page Self=\"").append(pageId).append("\" TabOrder=\"\" AppliedMaster=\"");
-        sb.append(appliedMaster != null ? appliedMaster : "n");
-        sb.append("\" OverrideList=\"\" MasterPageTransform=\"1 0 0 1 0 0\" Name=\"").append(pageName).append("\"");
-        sb.append(" AppliedTrapPreset=\"TrapPreset/$ID/kDefaultTrapStyleName\"");
-        sb.append(" GeometricBounds=\"0 0 ").append(pageHeight).append(" ").append(pageWidth).append("\"");
-        sb.append(" ItemTransform=\"1 0 0 1 0 -").append(halfHeight).append("\"");
-        sb.append(" LayoutRule=\"UseMaster\" SnapshotBlendingMode=\"IgnoreLayoutSnapshots\" OptionalPage=\"false\" GridStartingPoint=\"TopOutside\" UseMasterGrid=\"true\">\n");
-        sb.append("\t\t\t<Properties>\n");
-        sb.append("\t\t\t\t<PageColor type=\"enumeration\">UseMasterColor</PageColor>\n");
-        sb.append("\t\t\t</Properties>\n");
-        sb.append("\t\t\t<MarginPreference ColumnCount=\"1\" ColumnGutter=\"14.173228346456694\" Top=\"56.69291338582678\" Bottom=\"56.69291338582678\" Left=\"56.69291338582678\" Right=\"56.69291338582678\" ColumnDirection=\"Horizontal\" ColumnsPositions=\"0 ").append(pageWidth - 2 * 56.69291338582678).append("\" />\n");
-        sb.append("\t\t</Page>\n");
 
-        // TextFrame (자동 플로우용)
-        if (textFrameId != null) {
-            double tfTop = marginTop;
-            double tfLeft = marginLeft;
-            double tfBottom = tfTop + tfHeight;
-            double tfRight = tfLeft + tfWidth;
-            sb.append("\t\t<TextFrame Self=\"").append(textFrameId).append("\"");
-            sb.append(" ParentStory=\"").append(parentStoryId).append("\"");
-            sb.append(" ContentType=\"TextType\"");
-            sb.append(" Visible=\"true\"");
-            if (itemLayer != null && !itemLayer.isEmpty()) {
-                sb.append(" ItemLayer=\"").append(itemLayer).append("\"");
-            }
-            sb.append(" GeometricBounds=\"").append(tfTop).append(" ").append(tfLeft).append(" ").append(tfBottom).append(" ").append(tfRight).append("\"");
-            sb.append(" ItemTransform=\"1 0 0 1 0 -").append(halfHeight).append("\"");
-            sb.append(" PreviousTextFrame=\"").append(prevFrameId).append("\"");
-            sb.append(" NextTextFrame=\"").append(nextFrameId).append("\"");
-            sb.append(" AppliedObjectStyle=\"ObjectStyle/$ID/[Normal Text Frame]\"");
-            sb.append(" FillColor=\"Color/$ID/[None]\" StrokeColor=\"Color/$ID/[None]\" StrokeWeight=\"0\">\n");
-            // PathGeometry — InDesign requires this to render the frame shape
+        // 각 페이지 생성
+        for (int p = 0; p < numPages; p++) {
+            PageGenSpec page = pages.get(p);
+            double xOffset = (p - (numPages - 1)) * pageWidth;
+
+            sb.append("\t\t<Page Self=\"").append(page.pageId).append("\" TabOrder=\"\" AppliedMaster=\"");
+            sb.append(page.appliedMaster != null ? page.appliedMaster : "n");
+            sb.append("\" OverrideList=\"\" MasterPageTransform=\"1 0 0 1 0 0\" Name=\"").append(page.pageName).append("\"");
+            sb.append(" AppliedTrapPreset=\"TrapPreset/$ID/kDefaultTrapStyleName\"");
+            sb.append(" GeometricBounds=\"0 0 ").append(pageHeight).append(" ").append(pageWidth).append("\"");
+            sb.append(" ItemTransform=\"1 0 0 1 ").append(xOffset).append(" -").append(halfHeight).append("\"");
+            sb.append(" LayoutRule=\"UseMaster\" SnapshotBlendingMode=\"IgnoreLayoutSnapshots\" OptionalPage=\"false\" GridStartingPoint=\"TopOutside\" UseMasterGrid=\"true\">\n");
             sb.append("\t\t\t<Properties>\n");
-            sb.append("\t\t\t\t<PathGeometry>\n");
-            sb.append("\t\t\t\t\t<GeometryPathType PathOpen=\"false\">\n");
-            sb.append("\t\t\t\t\t\t<PathPointArray>\n");
-            sb.append("\t\t\t\t\t\t\t<PathPointType Anchor=\"").append(tfLeft).append(" ").append(tfTop).append("\"");
-            sb.append(" LeftDirection=\"").append(tfLeft).append(" ").append(tfTop).append("\"");
-            sb.append(" RightDirection=\"").append(tfLeft).append(" ").append(tfTop).append("\" />\n");
-            sb.append("\t\t\t\t\t\t\t<PathPointType Anchor=\"").append(tfLeft).append(" ").append(tfBottom).append("\"");
-            sb.append(" LeftDirection=\"").append(tfLeft).append(" ").append(tfBottom).append("\"");
-            sb.append(" RightDirection=\"").append(tfLeft).append(" ").append(tfBottom).append("\" />\n");
-            sb.append("\t\t\t\t\t\t\t<PathPointType Anchor=\"").append(tfRight).append(" ").append(tfBottom).append("\"");
-            sb.append(" LeftDirection=\"").append(tfRight).append(" ").append(tfBottom).append("\"");
-            sb.append(" RightDirection=\"").append(tfRight).append(" ").append(tfBottom).append("\" />\n");
-            sb.append("\t\t\t\t\t\t\t<PathPointType Anchor=\"").append(tfRight).append(" ").append(tfTop).append("\"");
-            sb.append(" LeftDirection=\"").append(tfRight).append(" ").append(tfTop).append("\"");
-            sb.append(" RightDirection=\"").append(tfRight).append(" ").append(tfTop).append("\" />\n");
-            sb.append("\t\t\t\t\t\t</PathPointArray>\n");
-            sb.append("\t\t\t\t\t</GeometryPathType>\n");
-            sb.append("\t\t\t\t</PathGeometry>\n");
+            sb.append("\t\t\t\t<PageColor type=\"enumeration\">UseMasterColor</PageColor>\n");
             sb.append("\t\t\t</Properties>\n");
-            int cols = Math.max(columnCount, 1);
-            sb.append("\t\t\t<TextFramePreference TextColumnCount=\"").append(cols).append("\"");
-            sb.append(" TextColumnGutter=\"").append(columnGutter).append("\"");
-            sb.append(" InsetSpacing=\"0 0 0 0\" VerticalJustification=\"TopAlign\" />\n");
-            sb.append("\t\t</TextFrame>\n");
+            double contentWidth = pageWidth - page.marginLeft - page.marginRight;
+            sb.append("\t\t\t<MarginPreference ColumnCount=\"").append(Math.max(page.columnCount, 1)).append("\" ColumnGutter=\"").append(page.columnGutter).append("\"");
+            sb.append(" Top=\"").append(page.marginTop).append("\" Bottom=\"").append(page.marginBottom).append("\"");
+            sb.append(" Left=\"").append(page.marginLeft).append("\" Right=\"").append(page.marginRight).append("\"");
+            sb.append(" ColumnDirection=\"Horizontal\" ColumnsPositions=\"0 ").append(contentWidth).append("\" />\n");
+            sb.append("\t\t</Page>\n");
+        }
+
+        // 각 페이지의 TextFrame 생성
+        for (int p = 0; p < numPages; p++) {
+            PageGenSpec page = pages.get(p);
+            if (page.textFrameId != null) {
+                double xOffset = (p - (numPages - 1)) * pageWidth;
+                double tfTop = page.marginTop;
+                double tfLeft = page.marginLeft;
+                double tfBottom = tfTop + page.tfHeight;
+                double tfRight = tfLeft + page.tfWidth;
+
+                sb.append("\t\t<TextFrame Self=\"").append(page.textFrameId).append("\"");
+                sb.append(" ParentStory=\"").append(page.parentStoryId).append("\"");
+                sb.append(" ContentType=\"TextType\"");
+                sb.append(" Visible=\"true\"");
+                if (itemLayer != null && !itemLayer.isEmpty()) {
+                    sb.append(" ItemLayer=\"").append(itemLayer).append("\"");
+                }
+                sb.append(" GeometricBounds=\"").append(tfTop).append(" ").append(tfLeft).append(" ").append(tfBottom).append(" ").append(tfRight).append("\"");
+                sb.append(" ItemTransform=\"1 0 0 1 ").append(xOffset).append(" -").append(halfHeight).append("\"");
+                sb.append(" PreviousTextFrame=\"").append(page.prevFrameId).append("\"");
+                sb.append(" NextTextFrame=\"").append(page.nextFrameId).append("\"");
+                sb.append(" AppliedObjectStyle=\"ObjectStyle/$ID/[Normal Text Frame]\"");
+                sb.append(" FillColor=\"Color/$ID/[None]\" StrokeColor=\"Color/$ID/[None]\" StrokeWeight=\"0\">\n");
+                sb.append("\t\t\t<Properties>\n");
+                sb.append("\t\t\t\t<PathGeometry>\n");
+                sb.append("\t\t\t\t\t<GeometryPathType PathOpen=\"false\">\n");
+                sb.append("\t\t\t\t\t\t<PathPointArray>\n");
+                sb.append("\t\t\t\t\t\t\t<PathPointType Anchor=\"").append(tfLeft).append(" ").append(tfTop).append("\"");
+                sb.append(" LeftDirection=\"").append(tfLeft).append(" ").append(tfTop).append("\"");
+                sb.append(" RightDirection=\"").append(tfLeft).append(" ").append(tfTop).append("\" />\n");
+                sb.append("\t\t\t\t\t\t\t<PathPointType Anchor=\"").append(tfLeft).append(" ").append(tfBottom).append("\"");
+                sb.append(" LeftDirection=\"").append(tfLeft).append(" ").append(tfBottom).append("\"");
+                sb.append(" RightDirection=\"").append(tfLeft).append(" ").append(tfBottom).append("\" />\n");
+                sb.append("\t\t\t\t\t\t\t<PathPointType Anchor=\"").append(tfRight).append(" ").append(tfBottom).append("\"");
+                sb.append(" LeftDirection=\"").append(tfRight).append(" ").append(tfBottom).append("\"");
+                sb.append(" RightDirection=\"").append(tfRight).append(" ").append(tfBottom).append("\" />\n");
+                sb.append("\t\t\t\t\t\t\t<PathPointType Anchor=\"").append(tfRight).append(" ").append(tfTop).append("\"");
+                sb.append(" LeftDirection=\"").append(tfRight).append(" ").append(tfTop).append("\"");
+                sb.append(" RightDirection=\"").append(tfRight).append(" ").append(tfTop).append("\" />\n");
+                sb.append("\t\t\t\t\t\t</PathPointArray>\n");
+                sb.append("\t\t\t\t\t</GeometryPathType>\n");
+                sb.append("\t\t\t\t</PathGeometry>\n");
+                sb.append("\t\t\t</Properties>\n");
+                int cols = Math.max(page.columnCount, 1);
+                sb.append("\t\t\t<TextFramePreference TextColumnCount=\"").append(cols).append("\"");
+                sb.append(" TextColumnGutter=\"").append(page.columnGutter).append("\"");
+                sb.append(" InsetSpacing=\"0 0 0 0\" VerticalJustification=\"TopAlign\" />\n");
+                sb.append("\t\t</TextFrame>\n");
+            }
         }
 
         sb.append("\t</Spread>\n");

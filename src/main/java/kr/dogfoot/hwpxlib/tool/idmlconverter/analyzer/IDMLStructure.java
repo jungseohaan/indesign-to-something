@@ -114,6 +114,16 @@ public class IDMLStructure {
         private int groupCount;
         private List<String> appliedPages;  // 이 마스터를 사용하는 일반 페이지 번호
 
+        // 마스터 페이지 레이아웃 정보 (첫 번째 페이지 기준)
+        private double pageWidth;
+        private double pageHeight;
+        private double marginTop;
+        private double marginBottom;
+        private double marginLeft;
+        private double marginRight;
+        private int columnCount;
+        private double columnGutter;
+
         public MasterSpreadInfo() {
             this.appliedPages = new ArrayList<>();
         }
@@ -141,6 +151,30 @@ public class IDMLStructure {
 
         public List<String> getAppliedPages() { return appliedPages; }
         public void addAppliedPage(String pageNum) { appliedPages.add(pageNum); }
+
+        public double getPageWidth() { return pageWidth; }
+        public void setPageWidth(double v) { this.pageWidth = v; }
+
+        public double getPageHeight() { return pageHeight; }
+        public void setPageHeight(double v) { this.pageHeight = v; }
+
+        public double getMarginTop() { return marginTop; }
+        public void setMarginTop(double v) { this.marginTop = v; }
+
+        public double getMarginBottom() { return marginBottom; }
+        public void setMarginBottom(double v) { this.marginBottom = v; }
+
+        public double getMarginLeft() { return marginLeft; }
+        public void setMarginLeft(double v) { this.marginLeft = v; }
+
+        public double getMarginRight() { return marginRight; }
+        public void setMarginRight(double v) { this.marginRight = v; }
+
+        public int getColumnCount() { return columnCount; }
+        public void setColumnCount(int v) { this.columnCount = v; }
+
+        public double getColumnGutter() { return columnGutter; }
+        public void setColumnGutter(double v) { this.columnGutter = v; }
     }
 
     /**

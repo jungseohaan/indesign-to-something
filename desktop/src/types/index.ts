@@ -250,6 +250,27 @@ export interface MergeData {
   items: DataItem[];
 }
 
+// Question Extraction Types
+export interface ExtractionResult {
+  tables: { id: string; html: string }[];
+  items: ExtractedItem[];
+}
+
+export interface ExtractedItem {
+  number: string;
+  년도출처: string;
+  발문1: string;
+  그림: boolean;
+  발문2: string;
+  보기: string[] | null;
+  선지: string[];
+  교사용풀이: string;
+  표내용: string | null;
+  실험: string | null;
+  정답: number | null;
+  이미지: { filename: string; path: string | null; exists: boolean }[];
+}
+
 // Playground Types
 export interface CreateIdmlResult {
   success: boolean;

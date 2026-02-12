@@ -14,6 +14,7 @@ public class IDMLDocument {
     private Map<String, IDMLFontDef> fonts;
     private Map<String, String> colors;
     private Set<String> hiddenLayerIds;
+    private Map<String, IDMLSpread> masterSpreads;
     private String basePath;
     private File tempDir;  // ZIP에서 추출한 임시 디렉토리 (cleanup 대상)
     private int pageNumberStart;
@@ -26,6 +27,7 @@ public class IDMLDocument {
         this.fonts = new LinkedHashMap<String, IDMLFontDef>();
         this.colors = new LinkedHashMap<String, String>();
         this.hiddenLayerIds = new HashSet<String>();
+        this.masterSpreads = new LinkedHashMap<String, IDMLSpread>();
         this.pageNumberStart = 1;
     }
 
@@ -51,6 +53,10 @@ public class IDMLDocument {
     public Map<String, String> colors() { return colors; }
     public String getColor(String colorRef) { return colors.get(colorRef); }
     public void putColor(String colorRef, String hexColor) { colors.put(colorRef, hexColor); }
+
+    public Map<String, IDMLSpread> masterSpreads() { return masterSpreads; }
+    public IDMLSpread getMasterSpread(String masterId) { return masterSpreads.get(masterId); }
+    public void addMasterSpread(String masterId, IDMLSpread spread) { masterSpreads.put(masterId, spread); }
 
     public Set<String> hiddenLayerIds() { return hiddenLayerIds; }
     public void addHiddenLayerId(String id) { hiddenLayerIds.add(id); }

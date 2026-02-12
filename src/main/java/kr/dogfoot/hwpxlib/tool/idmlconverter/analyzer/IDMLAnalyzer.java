@@ -138,6 +138,18 @@ public class IDMLAnalyzer {
             msInfo.setVectorCount(ms.vectorShapes().size());
             msInfo.setGroupCount(ms.groups().size());
 
+            // 첫 번째 페이지에서 레이아웃 정보 추출
+            if (!ms.pages().isEmpty()) {
+                IDMLPage firstPage = ms.pages().get(0);
+                msInfo.setPageWidth(firstPage.widthPoints());
+                msInfo.setPageHeight(firstPage.heightPoints());
+                msInfo.setMarginTop(firstPage.marginTop());
+                msInfo.setMarginBottom(firstPage.marginBottom());
+                msInfo.setMarginLeft(firstPage.marginLeft());
+                msInfo.setMarginRight(firstPage.marginRight());
+                msInfo.setColumnCount(firstPage.columnCount());
+            }
+
             // 이 마스터를 사용하는 일반 페이지 수집
             for (IDMLSpread spread : doc.spreads()) {
                 for (IDMLPage page : spread.pages()) {
