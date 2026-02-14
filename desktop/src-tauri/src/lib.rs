@@ -60,6 +60,7 @@ pub fn run() {
             commands::read_text_file,
             commands::write_text_file,
             commands::extract_questions,
+            commands::export_ast,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

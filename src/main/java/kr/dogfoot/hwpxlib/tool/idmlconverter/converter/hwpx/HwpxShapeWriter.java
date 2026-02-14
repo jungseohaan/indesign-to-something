@@ -75,13 +75,26 @@ public class HwpxShapeWriter {
         Ellipse ellipse = anchorRun.addNewEllipse();
         setupShapeCommon(ellipse, frame, x, y, w, h);
 
-        // Ellipse 고유 속성 - 중심, 축1, 축2
+        // Ellipse 필수 속성
+        ellipse.intervalDirtyAnd(false);
+        ellipse.hasArcPrAnd(false);
+        ellipse.arcTypeAnd(ArcType.NORMAL);
+
+        // Ellipse 고유 속성 - 중심, 축1, 축2, 시작/끝점
         ellipse.createCenter();
         ellipse.center().set(w / 2, h / 2);
         ellipse.createAx1();
         ellipse.ax1().set(w, h / 2);
         ellipse.createAx2();
         ellipse.ax2().set(w / 2, h);
+        ellipse.createStart1();
+        ellipse.start1().set(w, h / 2);
+        ellipse.createEnd1();
+        ellipse.end1().set(w, h / 2);
+        ellipse.createStart2();
+        ellipse.start2().set(w / 2, h);
+        ellipse.createEnd2();
+        ellipse.end2().set(w / 2, h);
 
         setupLineAndFill(ellipse, frame);
     }
@@ -134,7 +147,7 @@ public class HwpxShapeWriter {
         ShapeComponent<T> sc = (ShapeComponent<T>) shape;
         sc.hrefAnd("");
         sc.groupLevelAnd((short) 0);
-        sc.instidAnd(shapeId);
+        sc.instidAnd(nextShapeId());
 
         sc.createOffset();
         sc.offset().set(0L, 0L);

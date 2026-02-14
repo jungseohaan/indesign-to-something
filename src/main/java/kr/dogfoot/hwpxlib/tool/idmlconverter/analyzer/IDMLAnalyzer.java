@@ -9,6 +9,7 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * IDML 문서 구조 분석기.
@@ -83,23 +84,35 @@ public class IDMLAnalyzer {
                 pageInfo.setColumnCount(page.columnCount());
                 pageInfo.setMasterSpread(page.appliedMasterSpread());
 
-                // 텍스트 프레임
+                // 그룹 객체 (먼저 처리하여 자식 ID를 수집)
+                List<IDMLGroup> groups = spread.getGroupsOnPage(page);
+                Set<String> groupChildIds = new java.util.HashSet<>();
+                for (IDMLGroup group : groups) {
+                    collectGroupChildIds(group, groupChildIds);
+                    FrameInfo frameInfo = createGroupFrameInfo(group, doc);
+                    pageInfo.addFrame(frameInfo);
+                }
+
+                // 텍스트 프레임 (그룹 자식 제외)
                 List<IDMLTextFrame> textFrames = spread.getTextFramesOnPage(page);
                 for (IDMLTextFrame frame : textFrames) {
+                    if (groupChildIds.contains(frame.selfId())) continue;
                     FrameInfo frameInfo = createTextFrameInfo(frame, doc);
                     pageInfo.addFrame(frameInfo);
                 }
 
-                // 이미지 프레임
+                // 이미지 프레임 (그룹 자식 제외)
                 List<IDMLImageFrame> imageFrames = spread.getImageFramesOnPage(page);
                 for (IDMLImageFrame frame : imageFrames) {
+                    if (groupChildIds.contains(frame.selfId())) continue;
                     FrameInfo frameInfo = createImageFrameInfo(frame);
                     pageInfo.addFrame(frameInfo);
                 }
 
-                // 벡터 도형
+                // 벡터 도형 (그룹 자식 제외)
                 List<IDMLVectorShape> vectorShapes = spread.getVectorShapesOnPage(page);
                 for (IDMLVectorShape shape : vectorShapes) {
+                    if (groupChildIds.contains(shape.selfId())) continue;
                     FrameInfo frameInfo = createVectorFrameInfo(shape);
                     pageInfo.addFrame(frameInfo);
                 }
@@ -195,31 +208,72 @@ public class IDMLAnalyzer {
             info.setHeight(bounds[2] - bounds[0]);
         }
 
-        // 인라인 텍스트 프레임 탐색
+        // Story 내용 탐색
         String storyId = frame.parentStoryId();
         if (storyId != null) {
             IDMLStory story = doc.getStory(storyId);
             if (story != null) {
+                // story_content 수집
+                StoryContentInfo sci = new StoryContentInfo();
+                sci.setStoryId(storyId);
+                sci.setParagraphCount(story.paragraphs().size());
+
                 for (IDMLParagraph para : story.paragraphs()) {
+                    ParagraphSummary ps = new ParagraphSummary();
+                    // 단락 스타일명
+                    String styleRef = para.appliedParagraphStyle();
+                    if (styleRef != null) {
+                        int lastSlash = styleRef.lastIndexOf('/');
+                        ps.setStyleName(lastSlash >= 0 ? styleRef.substring(lastSlash + 1) : styleRef);
+                    }
+
+                    StringBuilder paraText = new StringBuilder();
                     for (IDMLCharacterRun run : para.characterRuns()) {
+                        // 텍스트 런
+                        if (run.content() != null && !run.content().isEmpty()) {
+                            RunSummary rs = new RunSummary();
+                            rs.setType("text");
+                            rs.setText(run.content());
+                            rs.setFontStyle(run.fontStyle());
+                            rs.setFontSize(run.fontSize());
+                            ps.addRun(rs);
+                            paraText.append(run.content());
+                        }
+                        // 인라인 TextFrame (재귀 + 런 요약)
                         if (run.inlineFrames() != null) {
                             for (IDMLTextFrame inlineTf : run.inlineFrames()) {
-                                FrameInfo child = new FrameInfo();
-                                child.setId(inlineTf.selfId());
-                                child.setType("text");
-                                child.setLabel(extractTextLabel(inlineTf, doc));
-                                double[] iBounds = inlineTf.geometricBounds();
-                                if (iBounds != null && iBounds.length >= 4) {
-                                    child.setX(iBounds[1]);
-                                    child.setY(iBounds[0]);
-                                    child.setWidth(iBounds[3] - iBounds[1]);
-                                    child.setHeight(iBounds[2] - iBounds[0]);
+                                info.addChild(createTextFrameInfo(inlineTf, doc));
+
+                                RunSummary rs = new RunSummary();
+                                rs.setType("inline_frame");
+                                rs.setFrameId(inlineTf.selfId());
+                                double[] ib = inlineTf.geometricBounds();
+                                if (ib != null && ib.length >= 4) {
+                                    rs.setWidth(ib[3] - ib[1]);
+                                    rs.setHeight(ib[2] - ib[0]);
                                 }
-                                info.addChild(child);
+                                ps.addRun(rs);
+                            }
+                        }
+                        // 인라인 그래픽/그룹 (재귀 + 런 요약)
+                        if (run.inlineGraphics() != null) {
+                            for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
+                                info.addChild(createInlineGraphicFrameInfo(ig, doc));
+
+                                RunSummary rs = new RunSummary();
+                                rs.setType("inline_graphic");
+                                rs.setGraphicType(ig.type());
+                                rs.setFrameId(ig.selfId());
+                                rs.setWidth(ig.widthPoints());
+                                rs.setHeight(ig.heightPoints());
+                                ps.addRun(rs);
                             }
                         }
                     }
+                    ps.setText(paraText.toString());
+                    sci.addParagraph(ps);
                 }
+                info.setStoryContent(sci);
             }
         }
 
@@ -267,6 +321,68 @@ public class IDMLAnalyzer {
         return info;
     }
 
+    private static FrameInfo createGroupFrameInfo(IDMLGroup group, IDMLDocument doc) {
+        FrameInfo info = new FrameInfo();
+        info.setId(group.selfId());
+        info.setType("group");
+
+        // 그룹 내 자식 수 요약
+        int textCount = group.textFrames().size();
+        int imageCount = group.imageFrames().size();
+        int vectorCount = group.vectorShapes().size();
+        int childGroupCount = group.childGroups().size();
+        StringBuilder label = new StringBuilder("Group");
+        List<String> parts = new java.util.ArrayList<>();
+        if (textCount > 0) parts.add(textCount + "T");
+        if (imageCount > 0) parts.add(imageCount + "I");
+        if (vectorCount > 0) parts.add(vectorCount + "V");
+        if (childGroupCount > 0) parts.add(childGroupCount + "G");
+        if (!parts.isEmpty()) {
+            label.append(" (").append(String.join(" ", parts)).append(")");
+        }
+        info.setLabel(label.toString());
+
+        double[] bounds = group.geometricBounds();
+        if (bounds != null && bounds.length >= 4) {
+            info.setX(bounds[1]);
+            info.setY(bounds[0]);
+            info.setWidth(bounds[3] - bounds[1]);
+            info.setHeight(bounds[2] - bounds[0]);
+        }
+
+        // 자식 요소를 FrameInfo children으로 추가
+        for (IDMLTextFrame tf : group.textFrames()) {
+            info.addChild(createTextFrameInfo(tf, doc));
+        }
+        for (IDMLImageFrame img : group.imageFrames()) {
+            info.addChild(createImageFrameInfo(img));
+        }
+        for (IDMLVectorShape vs : group.vectorShapes()) {
+            info.addChild(createVectorFrameInfo(vs));
+        }
+        for (IDMLGroup childGroup : group.childGroups()) {
+            info.addChild(createGroupFrameInfo(childGroup, doc));
+        }
+
+        return info;
+    }
+
+    private static void collectGroupChildIds(IDMLGroup group, Set<String> ids) {
+        for (IDMLTextFrame tf : group.textFrames()) {
+            ids.add(tf.selfId());
+        }
+        for (IDMLImageFrame img : group.imageFrames()) {
+            ids.add(img.selfId());
+        }
+        for (IDMLVectorShape vs : group.vectorShapes()) {
+            ids.add(vs.selfId());
+        }
+        for (IDMLGroup child : group.childGroups()) {
+            ids.add(child.selfId());
+            collectGroupChildIds(child, ids);
+        }
+    }
+
     private static FrameInfo createVectorFrameInfo(IDMLVectorShape shape) {
         FrameInfo info = new FrameInfo();
         info.setId(shape.selfId());
@@ -279,6 +395,49 @@ public class IDMLAnalyzer {
             info.setY(bounds[0]);
             info.setWidth(bounds[3] - bounds[1]);
             info.setHeight(bounds[2] - bounds[0]);
+        }
+
+        return info;
+    }
+
+    /**
+     * 인라인 그래픽/그룹을 FrameInfo로 변환.
+     * Group의 경우 내부 TextFrame과 자식 그래픽을 재귀적으로 children에 추가.
+     */
+    private static FrameInfo createInlineGraphicFrameInfo(IDMLCharacterRun.InlineGraphic ig, IDMLDocument doc) {
+        FrameInfo info = new FrameInfo();
+        info.setId(ig.selfId());
+
+        if ("group".equals(ig.type())) {
+            info.setType("group");
+
+            // 라벨 생성
+            int tfCount = ig.childTextFrames().size();
+            int gCount = ig.childGraphics().size();
+            StringBuilder label = new StringBuilder("InlineGroup");
+            java.util.List<String> parts = new java.util.ArrayList<>();
+            if (tfCount > 0) parts.add(tfCount + "T");
+            if (gCount > 0) parts.add(gCount + "G/V");
+            if (!parts.isEmpty()) {
+                label.append(" (").append(String.join(" ", parts)).append(")");
+            }
+            info.setLabel(label.toString());
+            info.setWidth(ig.widthPoints());
+            info.setHeight(ig.heightPoints());
+
+            // 자식 TextFrame (재귀)
+            for (IDMLTextFrame tf : ig.childTextFrames()) {
+                info.addChild(createTextFrameInfo(tf, doc));
+            }
+            // 자식 그래픽/중첩 그룹 (재귀)
+            for (IDMLCharacterRun.InlineGraphic childG : ig.childGraphics()) {
+                info.addChild(createInlineGraphicFrameInfo(childG, doc));
+            }
+        } else {
+            info.setType("vector");
+            info.setLabel("Inline " + (ig.type() != null ? ig.type() : "graphic"));
+            info.setWidth(ig.widthPoints());
+            info.setHeight(ig.heightPoints());
         }
 
         return info;

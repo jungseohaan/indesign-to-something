@@ -196,7 +196,6 @@ public class IDMLToIntermediateConverter {
                         IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, options.vectorDpi());
                         byte[] pageBackground = renderer.renderPage(spread, page, options.linksDirectory(),
                                 options.drawPageBoundary());
-
                         if (pageBackground != null && pageBackground.length > 0) {
                             // 페이지 크기 (픽셀)
                             double scale = options.vectorDpi() / 72.0;
@@ -373,6 +372,18 @@ public class IDMLToIntermediateConverter {
                             shape, page.geometricBounds(), page.itemTransform(), zOrderCounter++);
                     if (shapeFrame != null) {
                         iPage.addFrame(shapeFrame);
+                    }
+                }
+
+                // 그룹 객체 변환 (페이지 모드)
+                if (options.includeImages()) {
+                    List<IDMLGroup> groupsOnPage = spread.getGroupsOnPage(page);
+                    for (IDMLGroup group : groupsOnPage) {
+                        IntermediateFrame groupFrame = convertGroupToFrame(
+                                group, page, spread, zOrderCounter++);
+                        if (groupFrame != null) {
+                            iPage.addFrame(groupFrame);
+                        }
                     }
                 }
 
@@ -581,6 +592,23 @@ public class IDMLToIntermediateConverter {
                         iSpread.addFrame(shapeFrame);
                     }
                 }
+
+                // 그룹 객체 변환 (스프레드 모드)
+                if (options.includeImages()) {
+                    List<IDMLGroup> groupsOnPage = spread.getGroupsOnPage(page);
+                    for (IDMLGroup group : groupsOnPage) {
+                        IntermediateFrame groupFrame = convertGroupToFrame(
+                                group, page, spread, zOrderCounter++);
+                        if (groupFrame != null) {
+                            // 스프레드 내 페이지 오프셋 적용
+                            long offsetX = CoordinateConverter.pointsToHwpunits(pageTopLeft[0]);
+                            long offsetY = CoordinateConverter.pointsToHwpunits(pageTopLeft[1]);
+                            groupFrame.x(groupFrame.x() + offsetX);
+                            groupFrame.y(groupFrame.y() + offsetY);
+                            iSpread.addFrame(groupFrame);
+                        }
+                    }
+                }
             }
 
             doc.addSpread(iSpread);
@@ -648,6 +676,118 @@ public class IDMLToIntermediateConverter {
                                                          double[] pageBounds, double[] pageTransform,
                                                          int zOrder) {
         return vectorShapeConverter.convert(shape, pageBounds, pageTransform, zOrder);
+    }
+
+    /**
+     * 그룹 객체를 IntermediateFrame("group")으로 변환한다.
+     * 그룹의 자식 벡터/이미지를 각각 PNG로 렌더링하여 groupChildImages에 추가한다.
+     */
+    private IntermediateFrame convertGroupToFrame(IDMLGroup group, IDMLPage page,
+                                                    IDMLSpread spread, int zOrder) {
+        double[] groupBounds = group.geometricBounds();
+        double[] groupTransform = group.itemTransform();
+        if (groupBounds == null || groupTransform == null) return null;
+
+        // 그룹의 페이지 상대 좌표 계산
+        double[] pos = IDMLGeometry.pageRelativePosition(
+                groupBounds, groupTransform,
+                page.geometricBounds(), page.itemTransform());
+        double groupW = IDMLGeometry.width(groupBounds);
+        double groupH = IDMLGeometry.height(groupBounds);
+
+        if (groupW < 0.5 || groupH < 0.5) return null;
+
+        IntermediateFrame frame = new IntermediateFrame();
+        frame.frameId("group_" + group.selfId());
+        frame.frameType("group");
+        frame.x(CoordinateConverter.pointsToHwpunits(pos[0]));
+        frame.y(CoordinateConverter.pointsToHwpunits(pos[1]));
+        frame.width(CoordinateConverter.pointsToHwpunits(groupW));
+        frame.height(CoordinateConverter.pointsToHwpunits(groupH));
+        frame.zOrder(zOrder);
+
+        IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, options.vectorDpi());
+        boolean hasChildren = false;
+
+        // 벡터 자식을 개별 PNG로 렌더링
+        for (IDMLVectorShape shape : group.vectorShapes()) {
+            try {
+                IDMLPageRenderer.RenderResult result = renderer.renderVectorToPng(shape, page);
+                if (result != null && result.pngData() != null && result.pngData().length > 0) {
+                    IntermediateFrame childFrame = createChildImageFrame(
+                            result, "gvec_" + shape.selfId(), page);
+                    if (childFrame != null) {
+                        frame.addGroupChildImage(childFrame);
+                        hasChildren = true;
+                    }
+                }
+            } catch (IOException e) {
+                warnings.add("Group vector render failed: " + shape.selfId() + " - " + e.getMessage());
+            }
+        }
+
+        // 이미지 자식을 개별 PNG로 렌더링
+        for (IDMLImageFrame imgFrame : group.imageFrames()) {
+            try {
+                IDMLPageRenderer.RenderResult result = renderer.renderImageToPng(
+                        imgFrame, page, options.linksDirectory());
+                if (result != null && result.pngData() != null && result.pngData().length > 0) {
+                    IntermediateFrame childFrame = createChildImageFrame(
+                            result, "gimg_" + imgFrame.selfId(), page);
+                    if (childFrame != null) {
+                        frame.addGroupChildImage(childFrame);
+                        hasChildren = true;
+                    }
+                }
+            } catch (IOException e) {
+                warnings.add("Group image render failed: " + imgFrame.selfId() + " - " + e.getMessage());
+            }
+        }
+
+        // 중첩 그룹 재귀 처리
+        for (IDMLGroup childGroup : group.childGroups()) {
+            IntermediateFrame childGroupFrame = convertGroupToFrame(childGroup, page, spread, 0);
+            if (childGroupFrame != null && childGroupFrame.groupChildImages() != null) {
+                for (IntermediateFrame grandChild : childGroupFrame.groupChildImages()) {
+                    frame.addGroupChildImage(grandChild);
+                    hasChildren = true;
+                }
+            }
+        }
+
+        if (!hasChildren) return null;
+
+        System.err.println("[INFO] 그룹 변환: " + group.selfId()
+                + " | 자식 이미지 " + frame.groupChildImages().size() + "개"
+                + " | 크기 " + CoordinateConverter.fmtInt(groupW) + "x" + CoordinateConverter.fmtInt(groupH) + "pt");
+
+        return frame;
+    }
+
+    /**
+     * 렌더링 결과를 IntermediateFrame(image)으로 변환한다.
+     */
+    private IntermediateFrame createChildImageFrame(IDMLPageRenderer.RenderResult result,
+                                                      String imageId, IDMLPage page) {
+        IntermediateFrame childFrame = new IntermediateFrame();
+        childFrame.frameId(imageId);
+        childFrame.frameType("image");
+        childFrame.x(CoordinateConverter.pointsToHwpunits(result.x()));
+        childFrame.y(CoordinateConverter.pointsToHwpunits(result.y()));
+        childFrame.width(CoordinateConverter.pointsToHwpunits(result.width()));
+        childFrame.height(CoordinateConverter.pointsToHwpunits(result.height()));
+
+        IntermediateImage img = new IntermediateImage();
+        img.imageId(imageId);
+        img.format("png");
+        img.base64Data(Base64.getEncoder().encodeToString(result.pngData()));
+        img.pixelWidth(result.pixelWidth());
+        img.pixelHeight(result.pixelHeight());
+        img.displayWidth(childFrame.width());
+        img.displayHeight(childFrame.height());
+        childFrame.image(img);
+
+        return childFrame;
     }
 
     private IntermediateFrame convertImageFrameForSpread(IDMLImageFrame imgFrame, IDMLPage page,

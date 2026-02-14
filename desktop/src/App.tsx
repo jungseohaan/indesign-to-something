@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { FileSelector } from "./components/FileSelector";
-import { InventoryView } from "./components/InventoryView";
-import { ImagePreviewPanel } from "./components/ImagePreviewPanel";
-import { LayoutDetailPanel } from "./components/LayoutDetailPanel";
+import { ASTTreePanel } from "./components/ASTTreePanel";
+import { ASTDetailPanel } from "./components/ASTDetailPanel";
 import { ConversionPanel } from "./components/ConversionPanel";
 import { PlaygroundPage } from "./components/PlaygroundPage";
 import { ExtractPage } from "./components/ExtractPage";
@@ -15,8 +14,6 @@ function App() {
   const initJarPath = useAppStore((state) => state.initJarPath);
   const selectFile = useAppStore((state) => state.selectFile);
   const selectHwpxFile = useAppStore((state) => state.selectHwpxFile);
-  const selectedSpread = useAppStore((state) => state.selectedSpread);
-  const selectedPage = useAppStore((state) => state.selectedPage);
   const [showAbout, setShowAbout] = useState(false);
   const [currentTab, setCurrentTab] = useState<Tab>("playground");
 
@@ -54,8 +51,6 @@ function App() {
     };
   }, [initJarPath, selectFile, selectHwpxFile]);
 
-  const showLayoutDetail = selectedSpread || selectedPage;
-
   const tabs: { key: Tab; label: string }[] = [
     { key: "playground", label: "Playground - 자동조판기" },
     { key: "extract", label: "문제 추출하기" },
@@ -92,10 +87,10 @@ function App() {
 
           <div className="flex-1 flex min-h-0">
             <div className="w-1/2 border-r overflow-hidden">
-              <InventoryView />
+              <ASTTreePanel />
             </div>
             <div className="w-1/2 overflow-hidden">
-              {showLayoutDetail ? <LayoutDetailPanel /> : <ImagePreviewPanel />}
+              <ASTDetailPanel />
             </div>
           </div>
 

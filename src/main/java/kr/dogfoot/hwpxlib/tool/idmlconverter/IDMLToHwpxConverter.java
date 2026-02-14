@@ -2,6 +2,8 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter;
 
 import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.writer.HWPXWriter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IDMLToIntermediateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IntermediateToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
@@ -9,6 +11,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.IntermediateDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.JsonDeserializer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.JsonSerializer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
 
 import java.io.File;
 
@@ -63,18 +66,32 @@ public class IDMLToHwpxConverter {
         // Phase 1: IDML 로드
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
         try {
-            // Phase 2: IDML → Intermediate
+            ConvertResult result;
             String sourceFileName = new File(idmlPath).getName();
-            IDMLToIntermediateConverter.Result intermediateResult =
-                    IDMLToIntermediateConverter.convert(idmlDoc, options, sourceFileName);
-            IntermediateDocument intermediate = intermediateResult.document();
 
-            // Phase 3: Intermediate → HWPX
-            ConvertResult result = IntermediateToHwpxConverter.convert(intermediate);
+            if (options.useEventStream()) {
+                // === 새 파이프라인: 4단계 정규화 → AST → HWPX ===
+                System.err.println("[Pipeline] Using event-stream (AST) pipeline");
 
-            // 중간 변환 경고 전파
-            for (String warning : intermediateResult.warnings()) {
-                result.addWarning(warning);
+                // Phase 2: IDML → ASTDocument (4단계 정규화)
+                ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
+
+                // Phase 3: AST → HWPX
+                result = ASTToHwpxConverter.convert(astDoc);
+            } else {
+                // === 기존 파이프라인: Intermediate → HWPX ===
+                // Phase 2: IDML → Intermediate
+                IDMLToIntermediateConverter.Result intermediateResult =
+                        IDMLToIntermediateConverter.convert(idmlDoc, options, sourceFileName);
+                IntermediateDocument intermediate = intermediateResult.document();
+
+                // Phase 3: Intermediate → HWPX
+                result = IntermediateToHwpxConverter.convert(intermediate);
+
+                // 중간 변환 경고 전파
+                for (String warning : intermediateResult.warnings()) {
+                    result.addWarning(warning);
+                }
             }
 
             // Phase 4: HWPX 파일 저장

@@ -17,9 +17,10 @@ public class IntermediateFrame {
         DESIGN_FORMAT_IMAGE(1),   // PSD, AI, PDF, EPS, TIFF 이미지
         VECTOR_GRAPHIC_IMAGE(2),  // 벡터 그래픽을 렌더링한 이미지
         REGULAR_IMAGE(3),         // 일반 이미지 (PNG, JPEG 등)
-        TEXT_FRAME(4),            // 텍스트 프레임
-        TABLE(5),                 // 테이블
-        PAGE_BOUNDARY(6);         // 페이지 경계선 (최상위에 표시)
+        GROUP(4),                 // 그룹 프레임 (인라인 PNG 포함 글상자)
+        TEXT_FRAME(5),            // 텍스트 프레임
+        TABLE(6),                 // 테이블
+        PAGE_BOUNDARY(7);         // 페이지 경계선 (최상위에 표시)
 
         private final int order;
         ContentCategory(int order) { this.order = order; }
@@ -94,6 +95,9 @@ public class IntermediateFrame {
     private List<IntermediateParagraph> paragraphs;
     private IntermediateImage image;
     private IntermediateTable table;
+
+    // 그룹 프레임 자식 이미지 (frameType == "group")
+    private List<IntermediateFrame> groupChildImages;
 
     public IntermediateFrame() {
         this.paragraphs = new ArrayList<IntermediateParagraph>();
@@ -234,6 +238,15 @@ public class IntermediateFrame {
     public long columnRuleInsetWidth() { return columnRuleInsetWidth; }
     public void columnRuleInsetWidth(long v) { this.columnRuleInsetWidth = v; }
 
+    public List<IntermediateFrame> groupChildImages() { return groupChildImages; }
+    public void groupChildImages(List<IntermediateFrame> v) { this.groupChildImages = v; }
+    public void addGroupChildImage(IntermediateFrame child) {
+        if (this.groupChildImages == null) {
+            this.groupChildImages = new ArrayList<IntermediateFrame>();
+        }
+        this.groupChildImages.add(child);
+    }
+
     /**
      * 프레임의 콘텐츠 카테고리를 반환한다.
      * HWPX 내보내기 시 z-order 정렬에 사용된다.
@@ -252,6 +265,11 @@ public class IntermediateFrame {
         // 테이블
         if ("table".equals(frameType)) {
             return ContentCategory.TABLE;
+        }
+
+        // 그룹 프레임
+        if ("group".equals(frameType)) {
+            return ContentCategory.GROUP;
         }
 
         // 인라인 벡터 도형

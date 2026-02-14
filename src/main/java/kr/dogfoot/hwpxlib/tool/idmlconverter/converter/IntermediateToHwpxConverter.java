@@ -136,33 +136,17 @@ public class IntermediateToHwpxConverter {
         System.err.println("[DEBUG] spreads count: " + (doc.spreads() != null ? doc.spreads().size() : "null"));
         System.err.println("[DEBUG] pages count: " + (doc.pages() != null ? doc.pages().size() : "null"));
 
+        // 모든 페이지를 section0 하나에 SecPr 구분자로 넣음 (한컴 호환)
         if (doc.useSpreadMode() && doc.spreads() != null && !doc.spreads().isEmpty()) {
-            // === 스프레드 모드: 각 스프레드를 하나의 section으로 변환 ===
-            int spreadIndex = 0;
+            // === 스프레드 모드 ===
             for (IntermediateSpread spread : doc.spreads()) {
-                SectionXMLFile section;
-                if (spreadIndex == 0) {
-                    section = section0;
-                } else {
-                    section = hwpxFile.sectionXMLFileList().addNew();
-                    hwpxFile.contentHPFFile().manifest().addNew()
-                            .idAnd("section" + spreadIndex)
-                            .hrefAnd("Contents/section" + spreadIndex + ".xml")
-                            .mediaType("application/xml");
-                    hwpxFile.contentHPFFile().spine().addNew()
-                            .idref("section" + spreadIndex);
-                }
+                // 스프레드 크기로 SecPr 생성
+                Para secPrPara = addSectionBreakParaForSpreadWithReturn(section0, spread);
 
-                // 스프레드 크기로 SecPr 생성 - 모든 floating 객체를 이 단락에 추가
-                Para secPrPara = addSectionBreakParaForSpreadWithReturn(section, spread);
-
-                // 프레임을 콘텐츠 카테고리 순서대로 정렬:
-                // 배경 이미지 → 디자인 포맷 이미지 → 벡터 그래픽 → 일반 이미지 → 텍스트
-                // 같은 카테고리 내에서는 z-order 순서로 정렬
+                // 프레임을 콘텐츠 카테고리 순서대로 정렬
                 List<IntermediateFrame> sortedFrames = new ArrayList<>(spread.frames());
                 sortedFrames.sort((a, b) -> Integer.compare(a.exportOrder(), b.exportOrder()));
 
-                // 모든 프레임을 SecPr 단락의 새 Run에 추가 (단일 단락 = 페이지 오버플로우 방지)
                 for (IntermediateFrame frame : sortedFrames) {
                     Run frameRun = secPrPara.addNewRun();
                     frameRun.charPrIDRef("0");
@@ -184,88 +168,77 @@ public class IntermediateToHwpxConverter {
                     } else if ("shape".equals(frame.frameType())) {
                         convertShapeFrame(frameRun, frame);
                         framesConverted++;
+                    } else if ("group".equals(frame.frameType())) {
+                        convertGroupFrame(frameRun, frame);
+                        framesConverted++;
                     }
                 }
 
-                // 빈 section 방지 - SecPr 단락이 이미 있으므로 필요 없음
-
                 pagesConverted++;
-                spreadIndex++;
             }
         } else {
-            // === 페이지 모드: 각 페이지를 별도 section으로 변환 ===
-            int pageIndex = 0;
+            // === 페이지 모드 ===
             for (IntermediatePage page : doc.pages()) {
-                SectionXMLFile section;
-                if (pageIndex == 0) {
-                    section = section0;
-                } else {
-                    section = hwpxFile.sectionXMLFileList().addNew();
-                    hwpxFile.contentHPFFile().manifest().addNew()
-                            .idAnd("section" + pageIndex)
-                            .hrefAnd("Contents/section" + pageIndex + ".xml")
-                            .mediaType("application/xml");
-                    hwpxFile.contentHPFFile().spine().addNew()
-                            .idref("section" + pageIndex);
-                }
-
                 // SecPr 단락 생성 (페이지 속성)
-                addSectionBreakPara(section, page, true);
+                addSectionBreakPara(section0, page, true);
 
-                // 프레임을 콘텐츠 카테고리 순서대로 정렬:
-                // 배경 이미지 → 디자인 포맷 이미지 → 벡터 그래픽 → 일반 이미지 → 텍스트
+                // 프레임을 콘텐츠 카테고리 순서대로 정렬
                 List<IntermediateFrame> sortedFrames = new ArrayList<>(page.frames());
                 sortedFrames.sort((a, b) -> Integer.compare(a.exportOrder(), b.exportOrder()));
 
-                // 각 floating 객체를 별도 단락에 배치
                 for (IntermediateFrame frame : sortedFrames) {
                     if ("text".equals(frame.frameType())) {
-                        Para framePara = createFloatingObjectPara(section);
+                        Para framePara = createFloatingObjectPara(section0);
                         Run frameRun = framePara.runs().iterator().next();
                         int eqCount = convertTextFrame(frameRun, frame);
                         equationsConverted += eqCount;
                         framesConverted++;
-                        addMinimalLineSegArray(framePara);  // 최소 높이로 페이지 오버플로우 방지
+                        addMinimalLineSegArray(framePara);
                     } else if ("image".equals(frame.frameType())) {
-                        Para framePara = createFloatingObjectPara(section);
+                        Para framePara = createFloatingObjectPara(section0);
                         Run frameRun = framePara.runs().iterator().next();
                         boolean ok = convertImageFrame(frameRun, frame);
                         if (ok) imagesConverted++;
                         framesConverted++;
-                        addMinimalLineSegArray(framePara);  // 최소 높이로 페이지 오버플로우 방지
+                        addMinimalLineSegArray(framePara);
                     } else if ("rectangle".equals(frame.frameType())) {
-                        Para framePara = createFloatingObjectPara(section);
+                        Para framePara = createFloatingObjectPara(section0);
                         Run frameRun = framePara.runs().iterator().next();
                         convertRectangleFrame(frameRun, frame);
                         framesConverted++;
                         addMinimalLineSegArray(framePara);
                     } else if ("table".equals(frame.frameType())) {
-                        Para framePara = createFloatingObjectPara(section);
+                        Para framePara = createFloatingObjectPara(section0);
                         Run frameRun = framePara.runs().iterator().next();
                         convertTableFrame(frameRun, frame);
                         framesConverted++;
                         addMinimalLineSegArray(framePara);
                     } else if ("shape".equals(frame.frameType())) {
-                        Para framePara = createFloatingObjectPara(section);
+                        Para framePara = createFloatingObjectPara(section0);
                         Run frameRun = framePara.runs().iterator().next();
                         convertShapeFrame(frameRun, frame);
+                        framesConverted++;
+                        addMinimalLineSegArray(framePara);
+                    } else if ("group".equals(frame.frameType())) {
+                        Para framePara = createFloatingObjectPara(section0);
+                        Run frameRun = framePara.runs().iterator().next();
+                        convertGroupFrame(frameRun, frame);
                         framesConverted++;
                         addMinimalLineSegArray(framePara);
                     }
                 }
 
-                // 빈 section 방지
-                if (section.countOfPara() == 0) {
-                    addEmptyPara(section);
-                }
-
                 pagesConverted++;
-                pageIndex++;
             }
         }
 
-        // header.xml의 secCnt를 섹션 개수로 업데이트
-        hwpxFile.headerXMLFile().secCnt((short) hwpxFile.sectionXMLFileList().count());
+        // 빈 section 방지
+        if (section0.countOfPara() == 0) {
+            addEmptyPara(section0);
+        }
+
+        // 단일 section0 사용
+        hwpxFile.headerXMLFile().secCnt((short) 1);
 
         result.hwpxFile(hwpxFile);
         result.pagesConverted(pagesConverted);
@@ -824,6 +797,14 @@ public class IntermediateToHwpxConverter {
     // ── 사각형 프레임 변환 (페이지 경계선 등) ──
 
     /**
+     * 그룹 프레임을 HWPX Rectangle+DrawText(인라인 이미지 포함)로 변환한다.
+     * HwpxTextFrameWriter에 위임한다.
+     */
+    private void convertGroupFrame(Run anchorRun, IntermediateFrame frame) {
+        textFrameWriter.writeGroupFrame(anchorRun, frame);
+    }
+
+    /**
      * 인라인 벡터 도형을 HWPX Rectangle/Ellipse/Polygon으로 변환한다.
      * HwpxShapeWriter에 위임한다.
      */
@@ -852,7 +833,7 @@ public class IntermediateToHwpxConverter {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(shapeId);
+        rect.instidAnd(nextShapeId());
 
         rect.createOffset();
         rect.offset().set(0L, 0L);

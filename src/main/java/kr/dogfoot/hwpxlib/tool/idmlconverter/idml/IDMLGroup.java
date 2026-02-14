@@ -13,11 +13,13 @@ public class IDMLGroup {
     private List<IDMLTextFrame> textFrames;
     private List<IDMLImageFrame> imageFrames;
     private List<IDMLVectorShape> vectorShapes;
+    private List<IDMLGroup> childGroups;
 
     public IDMLGroup() {
         this.textFrames = new ArrayList<IDMLTextFrame>();
         this.imageFrames = new ArrayList<IDMLImageFrame>();
         this.vectorShapes = new ArrayList<IDMLVectorShape>();
+        this.childGroups = new ArrayList<IDMLGroup>();
     }
 
     public String selfId() { return selfId; }
@@ -37,4 +39,7 @@ public class IDMLGroup {
 
     public List<IDMLVectorShape> vectorShapes() { return vectorShapes; }
     public void addVectorShape(IDMLVectorShape shape) { vectorShapes.add(shape); }
+
+    public List<IDMLGroup> childGroups() { return childGroups; }
+    public void addChildGroup(IDMLGroup group) { childGroups.add(group); }
 }

@@ -229,10 +229,19 @@ public class IDMLSpread {
      * 특정 페이지에 속한 모든 렌더링 항목 (이미지 + 벡터)을 z-order 순으로 반환.
      */
     public List<RenderableItem> getRenderableItemsOnPage(IDMLPage page) {
+        return getRenderableItemsOnPage(page, false);
+    }
+
+    /**
+     * 특정 페이지에 속한 모든 렌더링 항목 (이미지 + 벡터)을 z-order 순으로 반환.
+     * @param includeGroupItems true이면 그룹에서 추출된 항목도 포함 (프리뷰 렌더링용)
+     */
+    public List<RenderableItem> getRenderableItemsOnPage(IDMLPage page, boolean includeGroupItems) {
         List<RenderableItem> result = new ArrayList<RenderableItem>();
 
-        // 이미지 프레임 추가
+        // 이미지 프레임 추가 (그룹에서 추출된 것은 제외 — 그룹 글상자로 별도 처리)
         for (IDMLImageFrame frame : imageFrames) {
+            if (!includeGroupItems && frame.fromGroup()) continue;
             if (frame.geometricBounds() != null && frame.itemTransform() != null
                     && page.geometricBounds() != null && page.itemTransform() != null) {
                 if (IDMLGeometry.isFrameOnPage(
@@ -262,6 +271,10 @@ public class IDMLSpread {
             vectorTotal++;
             // 인라인 그래픽은 PNG 배경 렌더링에서 제외 (별도 HWPX 객체로 내보냄)
             if (shape.isInline()) {
+                continue;
+            }
+            // 그룹에서 추출된 벡터는 제외 (그룹 글상자로 별도 처리)
+            if (!includeGroupItems && shape.fromGroup()) {
                 continue;
             }
             if (shape.geometricBounds() != null && shape.itemTransform() != null
@@ -301,6 +314,24 @@ public class IDMLSpread {
             }
         });
 
+        return result;
+    }
+
+    /**
+     * 특정 페이지에 속한 그룹 목록.
+     */
+    public List<IDMLGroup> getGroupsOnPage(IDMLPage page) {
+        List<IDMLGroup> result = new ArrayList<IDMLGroup>();
+        for (IDMLGroup group : groups) {
+            if (group.geometricBounds() != null && group.itemTransform() != null
+                    && page.geometricBounds() != null && page.itemTransform() != null) {
+                if (IDMLGeometry.isFrameOnPage(
+                        group.geometricBounds(), group.itemTransform(),
+                        page.geometricBounds(), page.itemTransform())) {
+                    result.add(group);
+                }
+            }
+        }
         return result;
     }
 

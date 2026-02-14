@@ -125,6 +125,10 @@ public class IDMLVectorShape {
     // 인라인/앵커 객체 플래그
     private boolean isInline;          // Story 내 인라인 그래픽 여부
     private String parentStoryId;      // 인라인 그래픽의 부모 Story ID
+    private boolean fromGroup;         // Group 내에서 추출된 요소 여부
+
+    // 클리핑 자식 도형 (외부 Rectangle이 클리핑 프레임 역할, 내부 자식이 실제 채우기)
+    private IDMLVectorShape clippedChild;  // null이면 클리핑 없음
 
     public IDMLVectorShape() {
         this.pathPoints = new ArrayList<>();
@@ -218,6 +222,13 @@ public class IDMLVectorShape {
 
     public String parentStoryId() { return parentStoryId; }
     public void parentStoryId(String v) { this.parentStoryId = v; }
+
+    public boolean fromGroup() { return fromGroup; }
+    public void fromGroup(boolean v) { this.fromGroup = v; }
+
+    public IDMLVectorShape clippedChild() { return clippedChild; }
+    public void clippedChild(IDMLVectorShape v) { this.clippedChild = v; }
+    public boolean hasClippedChild() { return clippedChild != null; }
 
     /**
      * 점선 패턴이 있는지 확인.

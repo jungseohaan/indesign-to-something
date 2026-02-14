@@ -260,12 +260,14 @@ public class DesignFileConverter {
         tempPng.deleteOnExit();
 
         try {
-            // 투명 PNG 생성: pngalpha 디바이스 사용 (32비트 RGBA)
+            // 투명 PNG 생성: pngalpha 디바이스 + ArtBox 크롭 (AI 파일은 PDF 기반이므로
+            // MediaBox가 A4 전체인 경우가 많음. ArtBox만 렌더링해야 실제 그래픽 영역만 추출됨)
             ProcessBuilder pb = new ProcessBuilder(
                     "gs",
                     "-dNOPAUSE",
                     "-dBATCH",
                     "-dSAFER",
+                    "-dUseArtBox",
                     "-sDEVICE=pngalpha",
                     "-r" + dpi,
                     "-sOutputFile=" + tempPng.getAbsolutePath(),

@@ -169,6 +169,7 @@ pub struct StoryContentInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ParagraphSummary {
+    #[serde(default)]
     pub index: i32,
     pub style_name: Option<String>,
     pub runs: Vec<RunSummary>,
@@ -800,6 +801,7 @@ pub async fn convert_idml(
         input_path,
         output_path,
         "--progress".to_string(),
+        "--event-stream".to_string(),
     ];
 
     if options.spread_based {
@@ -1301,6 +1303,26 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
 // ─────────────────────────────────────────────────────────────────
 // Question Extraction (Python-based)
 // ─────────────────────────────────────────────────────────────────
+
+/// Export AST (intermediate representation) as JSON
+#[tauri::command]
+pub async fn export_ast(idml_path: String, jar_path: String) -> Result<serde_json::Value, String> {
+    let java = find_java();
+    let output = Command::new(&java)
+        .args(["-jar", &jar_path, "--export-ast", &idml_path])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to execute Java: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("AST export failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse AST JSON: {}", e))
+}
 
 /// Find Python 3 executable path
 fn find_python() -> String {

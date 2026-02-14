@@ -64,16 +64,49 @@ public class FontRegistry {
 
     /**
      * 폰트 이름에 해당하는 HWPX 폰트 ID를 반환한다.
-     * 매핑되지 않은 폰트는 기본 폰트(함초롬바탕, id=1)를 반환한다.
+     * 1. 직접 등록된 폰트명 확인 (HYhwpEQ 등 특수 폰트)
+     * 2. FontMapper로 매핑 후 조회
+     * 3. 미등록이면 동적 등록
      */
     public String resolveFontId(String fontFamily) {
         if (fontFamily != null) {
+            // 직접 등록 폰트 확인 (HYhwpEQ 등 FontMapper를 거치면 안 되는 폰트)
+            String directId = fontNameToId.get(fontFamily);
+            if (directId != null) return directId;
+
+            // FontMapper 매핑
             String hwpxName = FontMapper.mapToHwpxFont(fontFamily);
             String id = fontNameToId.get(hwpxName);
             if (id != null) return id;
+
+            // 동적 등록: FontMapper 매핑 결과가 기존에 없으면 새로 등록
+            if (!registeredFonts.contains(hwpxName)) {
+                String fontId = String.valueOf(nextFontId);
+                addFontToAllLanguages(hwpxName, fontId);
+                fontNameToId.put(hwpxName, fontId);
+                registeredFonts.add(hwpxName);
+                nextFontId++;
+                return fontId;
+            }
         }
         // 기본: 함초롬바탕 (id=1)
         return "1";
+    }
+
+    /**
+     * HWPX 폰트 이름을 직접 등록한다.
+     * FontMapper를 거치지 않고 지정된 이름 그대로 등록.
+     */
+    public String registerDirectFont(String fontName) {
+        String existing = fontNameToId.get(fontName);
+        if (existing != null) return existing;
+
+        String fontId = String.valueOf(nextFontId);
+        addFontToAllLanguages(fontName, fontId);
+        fontNameToId.put(fontName, fontId);
+        registeredFonts.add(fontName);
+        nextFontId++;
+        return fontId;
     }
 
     /**

@@ -33,9 +33,24 @@ public class IDMLCharacterRun {
         private String type;           // "rectangle", "polygon", "ellipse", "group", etc.
         private double widthPoints;
         private double heightPoints;
+        private double[] geometricBounds;  // [top, left, bottom, right] — 프레임의 로컬 좌표
         private double[] itemTransform;
         private String embeddedText;
         private String embeddedTextFont;
+        private List<InlineGraphic> childGraphics;       // Group 내 자식 그래픽
+        private List<IDMLTextFrame> childTextFrames;     // Group 내 자식 텍스트프레임
+
+        // 이미지 링크 정보 (Rectangle/Polygon/Oval 내부에 Image가 있는 경우)
+        private String linkResourceURI;
+        private String linkResourceFormat;
+        private String linkStoredState;
+        private double[] imageTransform;    // 이미지의 transform (클리핑용)
+        private double[] graphicBounds;     // 원본 이미지 크기
+
+        public InlineGraphic() {
+            this.childGraphics = new ArrayList<>();
+            this.childTextFrames = new ArrayList<>();
+        }
 
         public String selfId() { return selfId; }
         public void selfId(String v) { this.selfId = v; }
@@ -49,6 +64,9 @@ public class IDMLCharacterRun {
         public double heightPoints() { return heightPoints; }
         public void heightPoints(double v) { this.heightPoints = v; }
 
+        public double[] geometricBounds() { return geometricBounds; }
+        public void geometricBounds(double[] v) { this.geometricBounds = v; }
+
         public double[] itemTransform() { return itemTransform; }
         public void itemTransform(double[] v) { this.itemTransform = v; }
 
@@ -57,6 +75,29 @@ public class IDMLCharacterRun {
 
         public String embeddedTextFont() { return embeddedTextFont; }
         public void embeddedTextFont(String v) { this.embeddedTextFont = v; }
+
+        public List<InlineGraphic> childGraphics() { return childGraphics; }
+        public void addChildGraphic(InlineGraphic g) { this.childGraphics.add(g); }
+
+        public List<IDMLTextFrame> childTextFrames() { return childTextFrames; }
+        public void addChildTextFrame(IDMLTextFrame tf) { this.childTextFrames.add(tf); }
+
+        public String linkResourceURI() { return linkResourceURI; }
+        public void linkResourceURI(String v) { this.linkResourceURI = v; }
+
+        public String linkResourceFormat() { return linkResourceFormat; }
+        public void linkResourceFormat(String v) { this.linkResourceFormat = v; }
+
+        public String linkStoredState() { return linkStoredState; }
+        public void linkStoredState(String v) { this.linkStoredState = v; }
+
+        public double[] imageTransform() { return imageTransform; }
+        public void imageTransform(double[] v) { this.imageTransform = v; }
+
+        public double[] graphicBounds() { return graphicBounds; }
+        public void graphicBounds(double[] v) { this.graphicBounds = v; }
+
+        public boolean hasImage() { return linkResourceURI != null && !linkResourceURI.isEmpty(); }
     }
 
     public String appliedCharacterStyle() { return appliedCharacterStyle; }

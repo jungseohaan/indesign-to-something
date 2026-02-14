@@ -17,6 +17,7 @@ public class ConvertOptions {
     private boolean mergeAllPages;
     private boolean spreadBasedConversion;
     private boolean drawPageBoundary;
+    private boolean useEventStream;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -25,13 +26,14 @@ public class ConvertOptions {
         this.includeEquations = true;
         this.includeStyles = true;
         this.imageOutputDir = null;
-        this.imageDpi = 72;
+        this.imageDpi = 220;
         this.vectorDpi = 300;
         this.linksDirectory = null;
         this.singlePagePerSpread = false;
         this.mergeAllPages = false;
         this.spreadBasedConversion = false;
         this.drawPageBoundary = false;
+        this.useEventStream = false;
     }
 
     public static ConvertOptions defaults() {
@@ -185,6 +187,20 @@ public class ConvertOptions {
 
     public ConvertOptions drawPageBoundary(boolean drawPageBoundary) {
         this.drawPageBoundary = drawPageBoundary;
+        return this;
+    }
+
+    /**
+     * 이벤트 스트림(AST) 기반 변환 파이프라인 사용 여부.
+     * true이면 새로운 4단계 정규화 파이프라인을 사용한다:
+     * IDMLLoader → IDMLNormalizer (4단계) → ASTDocument → ASTToHwpxConverter → HWPX
+     */
+    public boolean useEventStream() {
+        return useEventStream;
+    }
+
+    public ConvertOptions useEventStream(boolean useEventStream) {
+        this.useEventStream = useEventStream;
         return this;
     }
 }

@@ -886,8 +886,8 @@ public class TextFrameConverter {
             }
         }
         // 런 레벨 자간 (CharacterStyleRange의 Tracking 속성)
-        // 기본값: -15% (빽빽하게 표시)
-        short letterSpacing = -15;
+        // 기본값: -10% (빽빽하게 표시)
+        short letterSpacing = -10;
         if (run.tracking() != null) {
             letterSpacing = (short) Math.round(run.tracking() / 10.0);
             letterSpacing = (short) Math.max(-50, Math.min(50, letterSpacing));

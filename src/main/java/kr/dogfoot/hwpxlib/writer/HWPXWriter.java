@@ -68,9 +68,17 @@ public class HWPXWriter {
     }
 
     private void mineType() throws IOException {
-        putIntoZip(ZipEntryName.MineType,
-                MineTypes.HWPX,
-                StandardCharsets.UTF_8);
+        byte[] bytes = MineTypes.HWPX.getBytes(StandardCharsets.UTF_8);
+        ZipEntry entry = new ZipEntry(ZipEntryName.MineType);
+        entry.setMethod(ZipEntry.STORED);
+        entry.setSize(bytes.length);
+        entry.setCompressedSize(bytes.length);
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(bytes);
+        entry.setCrc(crc.getValue());
+        zos.putNextEntry(entry);
+        zos.write(bytes, 0, bytes.length);
+        zos.closeEntry();
     }
 
     private void version_xml() throws Exception {

@@ -259,6 +259,7 @@ public class IDMLStructure {
         private String linkPath;      // 이미지 링크 경로 (이미지 타입만)
         private boolean needsPreview; // PSD, AI, EPS 파일 여부
         private List<FrameInfo> children; // 인라인 자식 프레임 (텍스트 타입만)
+        private StoryContentInfo storyContent; // Story 내용 요약 (텍스트 타입만)
 
         public String getId() { return id; }
         public void setId(String v) { this.id = v; }
@@ -293,5 +294,90 @@ public class IDMLStructure {
             this.children.add(child);
         }
         public boolean hasChildren() { return children != null && !children.isEmpty(); }
+
+        public StoryContentInfo getStoryContent() { return storyContent; }
+        public void setStoryContent(StoryContentInfo v) { this.storyContent = v; }
+    }
+
+    /**
+     * Story 내용 요약 정보 (텍스트 프레임용).
+     */
+    public static class StoryContentInfo {
+        private String storyId;
+        private int paragraphCount;
+        private List<ParagraphSummary> paragraphs;
+
+        public StoryContentInfo() {
+            this.paragraphs = new ArrayList<>();
+        }
+
+        public String getStoryId() { return storyId; }
+        public void setStoryId(String v) { this.storyId = v; }
+
+        public int getParagraphCount() { return paragraphCount; }
+        public void setParagraphCount(int v) { this.paragraphCount = v; }
+
+        public List<ParagraphSummary> getParagraphs() { return paragraphs; }
+        public void addParagraph(ParagraphSummary p) { this.paragraphs.add(p); }
+    }
+
+    /**
+     * 단락 요약 정보.
+     */
+    public static class ParagraphSummary {
+        private String styleName;
+        private String text;
+        private List<RunSummary> runs;
+
+        public ParagraphSummary() {
+            this.runs = new ArrayList<>();
+        }
+
+        public String getStyleName() { return styleName; }
+        public void setStyleName(String v) { this.styleName = v; }
+
+        public String getText() { return text; }
+        public void setText(String v) { this.text = v; }
+
+        public List<RunSummary> getRuns() { return runs; }
+        public void addRun(RunSummary r) { this.runs.add(r); }
+    }
+
+    /**
+     * 런(CharacterRun) 요약 정보.
+     */
+    public static class RunSummary {
+        private String type;  // "text", "inline_frame", "inline_graphic"
+        private String text;
+        private String fontStyle;
+        private Double fontSize;
+        private String frameId;       // inline_frame일 때
+        private String graphicType;   // inline_graphic일 때
+        private double width;
+        private double height;
+
+        public String getType() { return type; }
+        public void setType(String v) { this.type = v; }
+
+        public String getText() { return text; }
+        public void setText(String v) { this.text = v; }
+
+        public String getFontStyle() { return fontStyle; }
+        public void setFontStyle(String v) { this.fontStyle = v; }
+
+        public Double getFontSize() { return fontSize; }
+        public void setFontSize(Double v) { this.fontSize = v; }
+
+        public String getFrameId() { return frameId; }
+        public void setFrameId(String v) { this.frameId = v; }
+
+        public String getGraphicType() { return graphicType; }
+        public void setGraphicType(String v) { this.graphicType = v; }
+
+        public double getWidth() { return width; }
+        public void setWidth(double v) { this.width = v; }
+
+        public double getHeight() { return height; }
+        public void setHeight(double v) { this.height = v; }
     }
 }

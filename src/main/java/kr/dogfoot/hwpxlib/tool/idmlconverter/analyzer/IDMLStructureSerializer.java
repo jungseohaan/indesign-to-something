@@ -153,6 +153,12 @@ public class IDMLStructureSerializer {
             sb.append(indent).append("  \"needs_preview\": ").append(frame.isNeedsPreview());
         }
 
+        // story_content (텍스트 타입만)
+        if (frame.getStoryContent() != null) {
+            sb.append(",\n");
+            sb.append(storyContentToJson(frame.getStoryContent(), indent + "  "));
+        }
+
         // 인라인 자식 프레임
         if (frame.hasChildren()) {
             sb.append(",\n");
@@ -167,6 +173,64 @@ public class IDMLStructureSerializer {
         }
 
         sb.append("\n").append(indent).append("}");
+        return sb.toString();
+    }
+
+    private static String storyContentToJson(StoryContentInfo sci, String indent) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(indent).append("\"story_content\": {\n");
+        sb.append(indent).append("  \"story_id\": ").append(jsonString(sci.getStoryId())).append(",\n");
+        sb.append(indent).append("  \"paragraph_count\": ").append(sci.getParagraphCount()).append(",\n");
+
+        sb.append(indent).append("  \"paragraphs\": [\n");
+        boolean firstPara = true;
+        int paraIndex = 0;
+        for (ParagraphSummary ps : sci.getParagraphs()) {
+            if (!firstPara) sb.append(",\n");
+            firstPara = false;
+            sb.append(indent).append("    {\n");
+            sb.append(indent).append("      \"index\": ").append(paraIndex++).append(",\n");
+            sb.append(indent).append("      \"style_name\": ").append(jsonString(ps.getStyleName())).append(",\n");
+            sb.append(indent).append("      \"text\": ").append(jsonString(ps.getText())).append(",\n");
+            sb.append(indent).append("      \"runs\": [\n");
+            boolean firstRun = true;
+            for (RunSummary rs : ps.getRuns()) {
+                if (!firstRun) sb.append(",\n");
+                firstRun = false;
+                sb.append(runSummaryToJson(rs, indent + "        "));
+            }
+            sb.append("\n").append(indent).append("      ]\n");
+            sb.append(indent).append("    }");
+        }
+        sb.append("\n").append(indent).append("  ]\n");
+        sb.append(indent).append("}");
+        return sb.toString();
+    }
+
+    private static String runSummaryToJson(RunSummary rs, String indent) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(indent).append("{");
+        sb.append("\"type\": ").append(jsonString(rs.getType()));
+        if (rs.getText() != null) {
+            sb.append(", \"text\": ").append(jsonString(rs.getText()));
+        }
+        if (rs.getFontStyle() != null) {
+            sb.append(", \"font_style\": ").append(jsonString(rs.getFontStyle()));
+        }
+        if (rs.getFontSize() != null) {
+            sb.append(", \"font_size\": ").append(rs.getFontSize());
+        }
+        if (rs.getFrameId() != null) {
+            sb.append(", \"frame_id\": ").append(jsonString(rs.getFrameId()));
+        }
+        if (rs.getGraphicType() != null) {
+            sb.append(", \"graphic_type\": ").append(jsonString(rs.getGraphicType()));
+        }
+        if (rs.getWidth() > 0 || rs.getHeight() > 0) {
+            sb.append(", \"width\": ").append(rs.getWidth());
+            sb.append(", \"height\": ").append(rs.getHeight());
+        }
+        sb.append("}");
         return sb.toString();
     }
 

@@ -2,399 +2,176 @@ import { useState } from "react";
 import { useAppStore } from "../stores/useAppStore";
 import type { SpreadInfo, PageInfo, FrameInfo, MasterSpreadInfo } from "../types";
 
-function FrameIcon({ type }: { type: string }) {
-  const iconMap: Record<string, string> = {
-    text: "📝",
-    image: "🖼️",
-    vector: "📐",
-    table: "📊",
-  };
-  return <span className="mr-1">{iconMap[type] || "📄"}</span>;
-}
+export function InventoryView() {
+  const { structure, selectedSpread, selectedPage, selectedImage, selectedTextFrame, selectedMaster } = useAppStore();
+  const { selectSpread, selectPage, selectFrame, selectMaster } = useAppStore();
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-function FrameItem({
-  frame,
-  isSelected,
-  onSelect,
-  selectedFrameId,
-  onSelectFrame,
-  depth = 0,
-}: {
-  frame: FrameInfo;
-  isSelected: boolean;
-  onSelect: () => void;
-  selectedFrameId?: string | null;
-  onSelectFrame?: (frame: FrameInfo) => void;
-  depth?: number;
-}) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  // text, image, vector 모두 선택 가능
-  const isClickable = frame.type === "text" || frame.type === "image" || frame.type === "vector";
-  const hasChildren = frame.children && frame.children.length > 0;
-  const paddingLeft = 12 + depth * 4; // pl-12 = 3rem, 각 depth마다 1rem 추가
-
-  return (
-    <div>
-      <div
-        className={`py-1 text-sm flex items-center ${
-          isSelected
-            ? "bg-blue-100 text-blue-800"
-            : "text-gray-600 hover:bg-gray-100"
-        } ${isClickable ? "cursor-pointer" : ""}`}
-        style={{ paddingLeft: `${paddingLeft * 4}px` }}
-        onClick={isClickable ? onSelect : undefined}
-      >
-        {hasChildren && (
-          <span
-            className="mr-1 text-xs text-gray-400 hover:text-gray-600"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsExpanded(!isExpanded);
-            }}
-          >
-            {isExpanded ? "▼" : "▶"}
-          </span>
-        )}
-        <FrameIcon type={frame.type} />
-        <span className={isSelected ? "text-blue-600" : "text-gray-500"}>
-          [{frame.type}]
-        </span>{" "}
-        {frame.label || frame.id}
-        {hasChildren && (
-          <span className="ml-1 text-xs text-orange-500">
-            ({frame.children!.length} inline)
-          </span>
-        )}
+  if (!structure) {
+    return (
+      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+        IDML 파일을 열어주세요
       </div>
-      {isExpanded && hasChildren && (
-        <div>
-          {frame.children!.map((child) => (
-            <FrameItem
-              key={child.id}
-              frame={child}
-              isSelected={child.id === (selectedFrameId ?? null)}
-              onSelect={() => onSelectFrame?.(child)}
-              selectedFrameId={selectedFrameId}
-              onSelectFrame={onSelectFrame}
-              depth={depth + 1}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+    );
+  }
 
-function PageItem({
-  page,
-  isExpanded,
-  isSelected,
-  onToggle,
-  onSelectPage,
-  selectedFrameId,
-  onSelectFrame,
-}: {
-  page: PageInfo;
-  isExpanded: boolean;
-  isSelected: boolean;
-  onToggle: () => void;
-  onSelectPage: () => void;
-  selectedFrameId: string | null;
-  onSelectFrame: (frame: FrameInfo) => void;
-}) {
-  const handleClick = (e: React.MouseEvent) => {
+  const toggleGroup = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    onSelectPage();
-  };
-
-  const handleToggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onToggle();
-  };
-
-  return (
-    <div>
-      <div
-        className={`pl-8 py-1 flex items-center cursor-pointer ${
-          isSelected ? "bg-blue-100" : "hover:bg-gray-100"
-        }`}
-        onClick={handleClick}
-      >
-        <span
-          className="mr-2 text-gray-400 hover:text-gray-600"
-          onClick={handleToggle}
-        >
-          {isExpanded ? "▼" : "▶"}
-        </span>
-        <span className={isSelected ? "text-blue-700" : ""}>
-          📄 {page.name || page.id}
-        </span>
-        <span className="ml-2 text-xs text-gray-400">
-          ({page.frames.length} frames)
-        </span>
-      </div>
-      {isExpanded && (
-        <div>
-          {page.frames.map((frame) => (
-            <FrameItem
-              key={frame.id}
-              frame={frame}
-              isSelected={frame.id === selectedFrameId}
-              onSelect={() => onSelectFrame(frame)}
-              selectedFrameId={selectedFrameId}
-              onSelectFrame={onSelectFrame}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SpreadItem({
-  spread,
-  index,
-  isSelected,
-  selectedPageId,
-  selectedFrameId,
-  onSelectSpread,
-  onSelectPage,
-  onSelectFrame,
-}: {
-  spread: SpreadInfo;
-  index: number;
-  isSelected: boolean;
-  selectedPageId: string | null;
-  selectedFrameId: string | null;
-  onSelectSpread: () => void;
-  onSelectPage: (page: PageInfo) => void;
-  onSelectFrame: (frame: FrameInfo) => void;
-}) {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set());
-
-  const togglePage = (pageId: string) => {
-    setExpandedPages((prev) => {
+    setExpandedGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(pageId)) {
-        next.delete(pageId);
-      } else {
-        next.add(pageId);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
 
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onSelectSpread();
+  const frameIcon = (type: string) => {
+    switch (type) {
+      case "text": return "T";
+      case "image": return "I";
+      case "vector": return "V";
+      case "table": return "#";
+      case "group": return "G";
+      default: return "?";
+    }
   };
 
-  const handleToggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsExpanded(!isExpanded);
+  const frameColor = (type: string) => {
+    switch (type) {
+      case "text": return "text-blue-600 bg-blue-50";
+      case "image": return "text-green-600 bg-green-50";
+      case "vector": return "text-purple-600 bg-purple-50";
+      case "table": return "text-orange-600 bg-orange-50";
+      case "group": return "text-amber-600 bg-amber-50";
+      default: return "text-gray-600 bg-gray-50";
+    }
+  };
+
+  const renderFrame = (frame: FrameInfo, depth: number) => {
+    const paddingLeft = 8 + depth * 16;
+    const isGroup = frame.type === "group";
+    const isExpanded = expandedGroups.has(frame.id);
+    const hasChildren = frame.children && frame.children.length > 0;
+
+    return (
+      <div key={frame.id}>
+        <div
+          onClick={(e) => {
+            if (isGroup && hasChildren) {
+              toggleGroup(frame.id, e);
+              selectFrame(frame);
+            } else {
+              selectFrame(frame);
+            }
+          }}
+          style={{ paddingLeft: `${paddingLeft * 0.25}rem` }}
+          className={`py-0.5 cursor-pointer hover:bg-blue-50 flex items-center gap-2 pr-3 ${
+            (selectedImage?.id === frame.id || selectedTextFrame?.id === frame.id)
+              ? "bg-blue-100"
+              : ""
+          }`}
+        >
+          {isGroup && hasChildren ? (
+            <span className="text-[10px] text-gray-400 w-3 text-center select-none">
+              {isExpanded ? "▼" : "▶"}
+            </span>
+          ) : (
+            <span className="w-3" />
+          )}
+          <span
+            className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold flex-shrink-0 ${frameColor(
+              frame.type
+            )}`}
+          >
+            {frameIcon(frame.type)}
+          </span>
+          <span className="truncate text-xs text-gray-700">
+            {frame.label || frame.id}
+          </span>
+          <span className="text-[10px] text-gray-400 ml-auto whitespace-nowrap">
+            {Math.round(frame.width)}x{Math.round(frame.height)}
+          </span>
+        </div>
+        {isGroup && isExpanded && hasChildren && (
+          <div>
+            {frame.children!.map((child) => renderFrame(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
-    <div className="border-b last:border-b-0">
-      <div
-        className={`py-2 px-2 flex items-center cursor-pointer font-medium ${
-          isSelected ? "bg-blue-100" : "hover:bg-gray-50"
-        }`}
-        onClick={handleClick}
-      >
-        <span
-          className="mr-2 text-gray-400 hover:text-gray-600"
-          onClick={handleToggle}
-        >
-          {isExpanded ? "▼" : "▶"}
-        </span>
-        <span className={isSelected ? "text-blue-700" : ""}>
-          📁 Spread {index + 1}
-        </span>
-        {spread.master_spread_name && (
-          <span className="ml-2 text-xs text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded">
-            {spread.master_spread_name}
-          </span>
-        )}
-        <span className="ml-2 text-xs text-gray-500">
-          ({spread.page_count} pages, {spread.text_frame_count} text,{" "}
-          {spread.image_frame_count} images, {spread.vector_count} vectors)
-        </span>
+    <div className="h-full overflow-auto text-sm">
+      {/* Summary */}
+      <div className="px-3 py-2 bg-gray-50 border-b text-xs text-gray-500">
+        {structure.spreads.length} spreads &middot;{" "}
+        {structure.total_text_frames} text &middot;{" "}
+        {structure.total_image_frames} image &middot;{" "}
+        {structure.total_vector_shapes} vector &middot;{" "}
+        {structure.total_tables} table
       </div>
-      {isExpanded && (
-        <div className="pb-2">
-          {spread.pages.map((page) => (
-            <PageItem
-              key={page.id}
-              page={page}
-              isExpanded={expandedPages.has(page.id)}
-              isSelected={page.id === selectedPageId}
-              onToggle={() => togglePage(page.id)}
-              onSelectPage={() => onSelectPage(page)}
-              selectedFrameId={selectedFrameId}
-              onSelectFrame={onSelectFrame}
-            />
+
+      {/* Master Spreads */}
+      {structure.master_spreads.length > 0 && (
+        <div className="border-b">
+          <div className="px-3 py-1.5 bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Masters
+          </div>
+          {structure.master_spreads.map((ms: MasterSpreadInfo) => (
+            <div
+              key={ms.id}
+              onClick={() => selectMaster(ms)}
+              className={`px-3 py-1.5 cursor-pointer border-b border-gray-100 hover:bg-blue-50 ${
+                selectedMaster?.id === ms.id ? "bg-blue-100" : ""
+              }`}
+            >
+              <span className="font-medium">{ms.name || ms.id}</span>
+              <span className="text-gray-400 ml-2 text-xs">
+                {ms.page_count}p
+              </span>
+            </div>
           ))}
         </div>
       )}
-    </div>
-  );
-}
 
-function MasterSpreadItem({
-  master,
-  isSelected,
-  onSelect,
-}: {
-  master: MasterSpreadInfo;
-  isSelected: boolean;
-  onSelect: () => void;
-}) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onSelect();
-  };
-
-  const handleToggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsExpanded(!isExpanded);
-  };
-
-  const totalElements = master.text_frame_count + master.image_frame_count +
-    master.vector_count + master.group_count;
-
-  return (
-    <div className="border-b last:border-b-0">
-      <div
-        className={`py-2 px-2 flex items-center cursor-pointer font-medium ${
-          isSelected ? "bg-purple-100" : "hover:bg-purple-50"
-        }`}
-        onClick={handleClick}
-      >
-        <span
-          className="mr-2 text-gray-400 hover:text-gray-600"
-          onClick={handleToggle}
-        >
-          {isExpanded ? "▼" : "▶"}
-        </span>
-        <span className={isSelected ? "text-purple-800" : "text-purple-700"}>
-          {master.name}
-        </span>
-        <span className="ml-2 text-xs text-gray-500">
-          ({master.page_count} pages, {totalElements} elements)
-        </span>
-      </div>
-      {isExpanded && (
-        <div className="pb-2 pl-8 text-sm text-gray-600">
-          <div className="py-0.5">
-            텍스트: {master.text_frame_count}개
-            {master.image_frame_count > 0 && <> · 이미지: {master.image_frame_count}개</>}
-            {master.vector_count > 0 && <> · 벡터: {master.vector_count}개</>}
-            {master.group_count > 0 && <> · 그룹: {master.group_count}개</>}
+      {/* Spreads */}
+      {structure.spreads.map((spread: SpreadInfo, si: number) => (
+        <div key={spread.id} className="border-b">
+          <div
+            onClick={() => selectSpread(spread)}
+            className={`px-3 py-1.5 cursor-pointer font-medium hover:bg-blue-50 flex items-center justify-between ${
+              selectedSpread?.id === spread.id ? "bg-blue-100" : "bg-gray-50"
+            }`}
+          >
+            <span>Spread {si + 1}</span>
+            <span className="text-xs text-gray-400">
+              {spread.page_count}p &middot; {spread.text_frame_count}T{" "}
+              {spread.image_frame_count}I {spread.vector_count}V
+            </span>
           </div>
-          {master.applied_pages.length > 0 && (
-            <div className="py-0.5 text-xs text-gray-400">
-              적용 페이지: {master.applied_pages.join(", ")}
+
+          {spread.pages.map((page: PageInfo) => (
+            <div key={page.id}>
+              <div
+                onClick={() => selectPage(page)}
+                className={`px-5 py-1 cursor-pointer hover:bg-blue-50 flex items-center justify-between ${
+                  selectedPage?.id === page.id ? "bg-blue-100" : ""
+                }`}
+              >
+                <span>
+                  {page.name || `Page ${page.page_number}`}
+                </span>
+                <span className="text-xs text-gray-400">
+                  {page.frames.length} frames
+                </span>
+              </div>
+
+              {page.frames.map((frame: FrameInfo) => renderFrame(frame, 0))}
             </div>
-          )}
+          ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-export function InventoryView() {
-  const {
-    idmlStructure,
-    isAnalyzing,
-    selectedImage,
-    selectedTextFrame,
-    selectedSpread,
-    selectedPage,
-    selectedMaster,
-    selectFrame,
-    selectSpread,
-    selectPage,
-    selectMaster,
-  } = useAppStore();
-
-  // 현재 선택된 프레임 ID
-  const selectedFrameId = selectedTextFrame?.id || selectedImage?.id || null;
-  const selectedSpreadId = selectedSpread?.id || null;
-  const selectedPageId = selectedPage?.id || null;
-  const selectedMasterId = selectedMaster?.id || null;
-
-  if (isAnalyzing) {
-    return (
-      <div className="flex items-center justify-center h-full text-gray-500">
-        분석 중...
-      </div>
-    );
-  }
-
-  if (!idmlStructure) {
-    return (
-      <div className="flex items-center justify-center h-full text-gray-400">
-        IDML 파일을 선택하세요
-      </div>
-    );
-  }
-
-  const hasMasterSpreads = idmlStructure.master_spreads && idmlStructure.master_spreads.length > 0;
-
-  return (
-    <div className="h-full overflow-auto">
-      <div className="p-2 bg-gray-100 border-b font-medium text-sm">
-        인벤토리 뷰
-        <span className="ml-2 text-gray-500 font-normal">
-          총 {idmlStructure.total_text_frames} 텍스트,{" "}
-          {idmlStructure.total_image_frames} 이미지,{" "}
-          {idmlStructure.total_vector_shapes} 벡터,{" "}
-          {idmlStructure.total_tables} 테이블
-        </span>
-      </div>
-
-      {/* 마스터 스프레드 섹션 */}
-      {hasMasterSpreads && (
-        <>
-          <div className="px-2 py-1.5 bg-purple-50 border-b text-xs font-medium text-purple-700 uppercase tracking-wide">
-            Master Spreads ({idmlStructure.master_spreads.length})
-          </div>
-          <div>
-            {idmlStructure.master_spreads.map((master) => (
-              <MasterSpreadItem
-                key={master.id}
-                master={master}
-                isSelected={master.id === selectedMasterId}
-                onSelect={() => selectMaster(master)}
-              />
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* 스프레드 섹션 */}
-      <div className="px-2 py-1.5 bg-gray-50 border-b border-t text-xs font-medium text-gray-600 uppercase tracking-wide">
-        Spreads ({idmlStructure.spreads.length})
-      </div>
-      <div>
-        {idmlStructure.spreads.map((spread, index) => (
-          <SpreadItem
-            key={spread.id}
-            spread={spread}
-            index={index}
-            isSelected={spread.id === selectedSpreadId}
-            selectedPageId={selectedPageId}
-            selectedFrameId={selectedFrameId}
-            onSelectSpread={() => selectSpread(spread)}
-            onSelectPage={selectPage}
-            onSelectFrame={selectFrame}
-          />
-        ))}
-      </div>
+      ))}
     </div>
   );
 }

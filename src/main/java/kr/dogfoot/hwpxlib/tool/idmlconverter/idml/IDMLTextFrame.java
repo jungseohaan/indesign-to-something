@@ -23,6 +23,7 @@ public class IDMLTextFrame {
     private double[] cornerRadii;    // [topLeft, topRight, bottomLeft, bottomRight]
     private double fillTint = 100;   // 0~100, 100=opaque
     private double strokeTint = 100;
+    private String strokeType = "Solid"; // Solid, Dashed, Dotted
 
     // 컬럼 상세 속성
     private String columnType = "FixedNumber";  // FixedNumber, FixedWidth, FlexibleWidth
@@ -34,6 +35,12 @@ public class IDMLTextFrame {
 
     // 텍스트 감싸기 무시
     private boolean ignoreWrap;
+
+    // 앵커 위치 (AnchoredObjectSetting)
+    private String anchoredPosition;  // InlinePosition, AboveLinePosition, Anchored
+
+    // 그룹 소속 정보
+    private String parentGroupId;
 
     // 단 경계선 (Column Rule)
     private boolean useColumnRule;              // 경계선 삽입 여부
@@ -95,6 +102,9 @@ public class IDMLTextFrame {
     public double strokeTint() { return strokeTint; }
     public void strokeTint(double v) { this.strokeTint = v; }
 
+    public String strokeType() { return strokeType; }
+    public void strokeType(String v) { this.strokeType = v; }
+
     public String columnType() { return columnType; }
     public void columnType(String v) { this.columnType = v; }
 
@@ -109,6 +119,12 @@ public class IDMLTextFrame {
 
     public boolean ignoreWrap() { return ignoreWrap; }
     public void ignoreWrap(boolean v) { this.ignoreWrap = v; }
+
+    public String anchoredPosition() { return anchoredPosition; }
+    public void anchoredPosition(String v) { this.anchoredPosition = v; }
+
+    public String parentGroupId() { return parentGroupId; }
+    public void parentGroupId(String v) { this.parentGroupId = v; }
 
     public boolean useColumnRule() { return useColumnRule; }
     public void useColumnRule(boolean v) { this.useColumnRule = v; }

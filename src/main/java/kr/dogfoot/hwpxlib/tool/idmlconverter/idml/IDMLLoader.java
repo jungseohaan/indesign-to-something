@@ -146,6 +146,7 @@ public class IDMLLoader {
                                 page.marginRight(master.marginRight);
                                 if (page.columnCount() <= 1 && master.columnCount > 1) {
                                     page.columnCount(master.columnCount);
+                                    page.columnGutter(master.columnGutter);
                                 }
                             }
                         }
@@ -167,6 +168,9 @@ public class IDMLLoader {
                         doc.putStory(storyId, story);
                     }
                 }
+
+                // 7-1. 로드된 Story 내 인라인 TextFrame이 참조하는 추가 Story를 재귀 로드
+                loadReferencedInlineStories(doc, storiesDir);
             }
 
             // 8. Story에서 인라인 그래픽(앵커 오브젝트) 추출 및 스프레드에 추가
@@ -467,7 +471,14 @@ public class IDMLLoader {
             } else if ("Group".equals(elem.getTagName())) {
                 double[] groupTransform = IDMLGeometry.parseTransform(
                         elem.getAttribute("ItemTransform"));
-                parseGroupForFrames(elem, spread, groupTransform, hiddenLayerIds, zOrderCounter);
+                String groupSelfId = elem.getAttribute("Self");
+                parseGroupForFrames(elem, spread, groupTransform, hiddenLayerIds, zOrderCounter, groupSelfId);
+
+                // 그룹 구조도 보존 (글상자 변환용)
+                IDMLGroup group = parseGroupAsObject(elem, groupTransform, hiddenLayerIds);
+                if (group != null) {
+                    spread.addGroup(group);
+                }
             }
         }
 
@@ -492,6 +503,7 @@ public class IDMLLoader {
             page.marginLeft(parseDoubleAttrDef(marginPref, "Left", 0));
             page.marginRight(parseDoubleAttrDef(marginPref, "Right", 0));
             page.columnCount(parseIntAttr(marginPref, "ColumnCount", 1));
+            page.columnGutter(parseDoubleAttrDef(marginPref, "ColumnGutter", 12.0));
         }
 
         return page;
@@ -519,6 +531,20 @@ public class IDMLLoader {
         frame.cornerRadius(parseDoubleAttrDef(frameElem, "CornerRadius", 0));
         frame.fillTint(parseDoubleAttrDef(frameElem, "FillTint", 100));
         frame.strokeTint(parseDoubleAttrDef(frameElem, "StrokeTint", 100));
+
+        // StrokeType (Solid, Dashed, Dotted, etc.)
+        String strokeType = getAttrOrNull(frameElem, "StrokeType");
+        if (strokeType != null) {
+            if (strokeType.contains("Dashed")) {
+                frame.strokeType("Dashed");
+            } else if (strokeType.contains("Dotted")) {
+                frame.strokeType("Dotted");
+            } else if (strokeType.contains("Solid")) {
+                frame.strokeType("Solid");
+            } else {
+                frame.strokeType(strokeType);
+            }
+        }
 
         // Per-corner radius
         double tlRadius = parseDoubleAttrDef(frameElem, "TopLeftCornerRadius", -1);
@@ -678,9 +704,32 @@ public class IDMLLoader {
         }
 
         // 스타일 속성
-        shape.fillColor(getAttrOrNull(shapeElem, "FillColor"));
-        shape.strokeColor(getAttrOrNull(shapeElem, "StrokeColor"));
-        shape.strokeWeight(parseDoubleAttrDef(shapeElem, "StrokeWeight", 1.0));
+        String fillColor = getAttrOrNull(shapeElem, "FillColor");
+        String strokeColor = getAttrOrNull(shapeElem, "StrokeColor");
+        double strokeWeight = parseDoubleAttrDef(shapeElem, "StrokeWeight", 1.0);
+
+        shape.fillColor(fillColor);
+        shape.strokeColor(strokeColor);
+        shape.strokeWeight(strokeWeight);
+
+        // 클리핑 프레임 패턴 감지: 외부 Rectangle(채우기 없음)이 내부 자식 도형을 클리핑
+        if (!shape.hasFill()) {
+            NodeList childNodes = shapeElem.getChildNodes();
+            for (int i = 0; i < childNodes.getLength(); i++) {
+                Node child = childNodes.item(i);
+                if (child.getNodeType() != Node.ELEMENT_NODE) continue;
+                Element childElem = (Element) child;
+                String childTag = childElem.getTagName();
+                if ("Rectangle".equals(childTag) || "Polygon".equals(childTag)
+                        || "Oval".equals(childTag)) {
+                    IDMLVectorShape childShape = tryParseVectorShape(childElem);
+                    if (childShape != null && childShape.hasFill()) {
+                        shape.clippedChild(childShape);
+                        break;
+                    }
+                }
+            }
+        }
         shape.cornerRadius(parseDoubleAttrDef(shapeElem, "CornerRadius", 0));
 
         // 개별 모서리 둥글기 (TopLeftCornerRadius, TopRightCornerRadius, BottomLeftCornerRadius, BottomRightCornerRadius)
@@ -811,7 +860,8 @@ public class IDMLLoader {
     private static void parseGroupForFrames(Element groupElem, IDMLSpread spread,
                                              double[] accumulatedTransform,
                                              Set<String> hiddenLayerIds,
-                                             int[] zOrderCounter) {
+                                             int[] zOrderCounter,
+                                             String groupSelfId) {
         // Group 자체가 숨겨진 레이어에 속하면 전체 건너뛰기
         String groupLayer = getAttrOrNull(groupElem, "ItemLayer");
         if (groupLayer != null && hiddenLayerIds.contains(groupLayer)) return;
@@ -832,6 +882,7 @@ public class IDMLLoader {
                     // 프레임의 ItemTransform에 Group 변환을 결합
                     frame.itemTransform(CoordinateConverter.combineTransforms(
                             accumulatedTransform, frame.itemTransform()));
+                    frame.parentGroupId(groupSelfId);
                     spread.addTextFrame(frame);
                 }
             } else if ("Rectangle".equals(elem.getTagName())
@@ -842,6 +893,7 @@ public class IDMLLoader {
                     // 이미지 프레임의 ItemTransform에 Group 변환을 결합
                     imageFrame.itemTransform(CoordinateConverter.combineTransforms(
                             accumulatedTransform, imageFrame.itemTransform()));
+                    imageFrame.fromGroup(true);
                     imageFrame.zOrder(zOrderCounter[0]++);
                     spread.addImageFrame(imageFrame);
                 } else {
@@ -851,15 +903,8 @@ public class IDMLLoader {
                         double[] combinedTransform = CoordinateConverter.combineTransforms(
                                 accumulatedTransform, vectorShape.itemTransform());
 
-                        // 디버그: 누적 변환의 ty가 1000pt 이상인 경우 로그 출력
-                        if (combinedTransform[5] > 1000 || combinedTransform[5] < -1000) {
-                            System.err.println("[DEBUG] 큰 Y오프셋 벡터: " + vectorShape.selfId()
-                                + " ty=" + CoordinateConverter.fmt(combinedTransform[5])
-                                + " (원본ty=" + CoordinateConverter.fmt(vectorShape.itemTransform()[5])
-                                + ", 누적ty=" + CoordinateConverter.fmt(accumulatedTransform[5]) + ")");
-                        }
-
                         vectorShape.itemTransform(combinedTransform);
+                        vectorShape.fromGroup(true);
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
@@ -871,6 +916,7 @@ public class IDMLLoader {
                     vectorShape.shapeType(IDMLVectorShape.ShapeType.GRAPHIC_LINE);
                     vectorShape.itemTransform(CoordinateConverter.combineTransforms(
                             accumulatedTransform, vectorShape.itemTransform()));
+                    vectorShape.fromGroup(true);
                     vectorShape.zOrder(zOrderCounter[0]++);
                     spread.addVectorShape(vectorShape);
                 }
@@ -880,9 +926,154 @@ public class IDMLLoader {
                         elem.getAttribute("ItemTransform"));
                 double[] combined = CoordinateConverter.combineTransforms(
                         accumulatedTransform, childGroupTransform);
-                parseGroupForFrames(elem, spread, combined, hiddenLayerIds, zOrderCounter);
+                parseGroupForFrames(elem, spread, combined, hiddenLayerIds, zOrderCounter, groupSelfId);
             }
         }
+    }
+
+    /**
+     * Group 요소를 IDMLGroup 객체로 파싱한다 (구조 보존).
+     * 텍스트 프레임은 제외하고, 이미지/벡터/중첩 그룹만 수집한다.
+     */
+    private static IDMLGroup parseGroupAsObject(Element groupElem,
+                                                  double[] accumulatedTransform,
+                                                  Set<String> hiddenLayerIds) {
+        String groupLayer = getAttrOrNull(groupElem, "ItemLayer");
+        if (groupLayer != null && hiddenLayerIds.contains(groupLayer)) return null;
+
+        IDMLGroup group = new IDMLGroup();
+        group.selfId(groupElem.getAttribute("Self"));
+        group.geometricBounds(IDMLGeometry.parseBounds(
+                groupElem.getAttribute("GeometricBounds")));
+        group.itemTransform(accumulatedTransform);
+
+        NodeList children = groupElem.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node node = children.item(i);
+            if (node.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element elem = (Element) node;
+
+            String itemLayer = getAttrOrNull(elem, "ItemLayer");
+            if (itemLayer != null && hiddenLayerIds.contains(itemLayer)) continue;
+
+            if ("TextFrame".equals(elem.getTagName())) {
+                IDMLTextFrame frame = parseTextFrame(elem);
+                if (frame != null) {
+                    frame.itemTransform(CoordinateConverter.combineTransforms(
+                            accumulatedTransform, frame.itemTransform()));
+                    group.addTextFrame(frame);
+                }
+            } else if ("Rectangle".equals(elem.getTagName())
+                    || "Polygon".equals(elem.getTagName())
+                    || "Oval".equals(elem.getTagName())) {
+                IDMLImageFrame imageFrame = tryParseImageFrame(elem);
+                if (imageFrame != null) {
+                    imageFrame.itemTransform(CoordinateConverter.combineTransforms(
+                            accumulatedTransform, imageFrame.itemTransform()));
+                    group.addImageFrame(imageFrame);
+                } else {
+                    IDMLVectorShape vectorShape = tryParseVectorShape(elem);
+                    if (vectorShape != null) {
+                        vectorShape.itemTransform(CoordinateConverter.combineTransforms(
+                                accumulatedTransform, vectorShape.itemTransform()));
+                        group.addVectorShape(vectorShape);
+                    }
+                }
+            } else if ("GraphicLine".equals(elem.getTagName())) {
+                IDMLVectorShape vectorShape = tryParseVectorShape(elem);
+                if (vectorShape != null) {
+                    vectorShape.shapeType(IDMLVectorShape.ShapeType.GRAPHIC_LINE);
+                    vectorShape.itemTransform(CoordinateConverter.combineTransforms(
+                            accumulatedTransform, vectorShape.itemTransform()));
+                    group.addVectorShape(vectorShape);
+                }
+            } else if ("Group".equals(elem.getTagName())) {
+                double[] childGroupTransform = IDMLGeometry.parseTransform(
+                        elem.getAttribute("ItemTransform"));
+                double[] combined = CoordinateConverter.combineTransforms(
+                        accumulatedTransform, childGroupTransform);
+                IDMLGroup childGroup = parseGroupAsObject(elem, combined, hiddenLayerIds);
+                if (childGroup != null) {
+                    group.addChildGroup(childGroup);
+                }
+            }
+        }
+
+        // 자식 요소가 전혀 없으면 null 반환
+        if (group.textFrames().isEmpty() && group.imageFrames().isEmpty()
+                && group.vectorShapes().isEmpty() && group.childGroups().isEmpty()) {
+            return null;
+        }
+
+        // geometricBounds가 없거나 [0,0,0,0]이면 자식들의 bounds로부터 계산
+        double[] gb = group.geometricBounds();
+        if (gb == null || (gb[0] == 0 && gb[1] == 0 && gb[2] == 0 && gb[3] == 0)) {
+            group.geometricBounds(computeGroupBounds(group));
+        }
+
+        return group;
+    }
+
+    /**
+     * 그룹의 자식 요소들로부터 geometricBounds를 계산한다.
+     * 자식들의 bounds+transform으로 스프레드 좌표계 기준 영역을 구한 뒤,
+     * 그룹의 itemTransform 역변환을 적용하여 그룹 로컬 좌표계로 변환한다.
+     * 반환: [top, left, bottom, right] (그룹 로컬 좌표계)
+     */
+    private static double[] computeGroupBounds(IDMLGroup group) {
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+
+        // 자식의 bounds 중심을 자식의 transform으로 스프레드 좌표계로 변환
+        for (IDMLTextFrame tf : group.textFrames()) {
+            double[] b = tf.geometricBounds();
+            double[] t = tf.itemTransform();
+            if (b == null || t == null) continue;
+            double[] tl = CoordinateConverter.applyTransform(t, b[1], b[0]);
+            double[] br = CoordinateConverter.applyTransform(t, b[3], b[2]);
+            if (tl[0] < minX) minX = tl[0]; if (tl[1] < minY) minY = tl[1];
+            if (br[0] > maxX) maxX = br[0]; if (br[1] > maxY) maxY = br[1];
+        }
+        for (IDMLImageFrame img : group.imageFrames()) {
+            double[] b = img.geometricBounds();
+            double[] t = img.itemTransform();
+            if (b == null || t == null) continue;
+            double[] tl = CoordinateConverter.applyTransform(t, b[1], b[0]);
+            double[] br = CoordinateConverter.applyTransform(t, b[3], b[2]);
+            if (tl[0] < minX) minX = tl[0]; if (tl[1] < minY) minY = tl[1];
+            if (br[0] > maxX) maxX = br[0]; if (br[1] > maxY) maxY = br[1];
+        }
+        for (IDMLVectorShape vs : group.vectorShapes()) {
+            double[] b = vs.geometricBounds();
+            double[] t = vs.itemTransform();
+            if (b == null || t == null) continue;
+            double[] tl = CoordinateConverter.applyTransform(t, b[1], b[0]);
+            double[] br = CoordinateConverter.applyTransform(t, b[3], b[2]);
+            if (tl[0] < minX) minX = tl[0]; if (tl[1] < minY) minY = tl[1];
+            if (br[0] > maxX) maxX = br[0]; if (br[1] > maxY) maxY = br[1];
+        }
+        for (IDMLGroup child : group.childGroups()) {
+            double[] b = child.geometricBounds();
+            double[] t = child.itemTransform();
+            if (b == null || t == null) continue;
+            double[] tl = CoordinateConverter.applyTransform(t, b[1], b[0]);
+            double[] br = CoordinateConverter.applyTransform(t, b[3], b[2]);
+            if (tl[0] < minX) minX = tl[0]; if (tl[1] < minY) minY = tl[1];
+            if (br[0] > maxX) maxX = br[0]; if (br[1] > maxY) maxY = br[1];
+        }
+
+        if (minX == Double.MAX_VALUE) return null;
+
+        // 스프레드 좌표계 기준 영역을 그룹의 transform 역변환으로 로컬 좌표계로 변환
+        // 그룹 transform이 단순 이동(identity + translation)인 경우만 역변환 적용
+        double[] gt = group.itemTransform();
+        if (gt != null) {
+            // 단순 이동: a=1,b=0,c=0,d=1 → 역변환은 tx,ty 빼기
+            minX -= gt[4]; minY -= gt[5];
+            maxX -= gt[4]; maxY -= gt[5];
+        }
+
+        return new double[]{minY, minX, maxY, maxX};  // [top, left, bottom, right]
     }
 
     // ===== Story XML 파싱 =====
@@ -1223,7 +1414,26 @@ public class IDMLLoader {
                 inlineFrame.selfId(elem.getAttribute("Self"));
                 inlineFrame.parentStoryId(getAttrOrNull(elem, "ParentStory"));
                 inlineFrame.appliedObjectStyle(getAttrOrNull(elem, "AppliedObjectStyle"));
+                inlineFrame.geometricBounds(resolveGeometricBounds(elem));
+                inlineFrame.itemTransform(IDMLGeometry.parseTransform(elem.getAttribute("ItemTransform")));
+                // AnchoredObjectSetting 파싱 (직접 자식 또는 후손)
+                List<Element> aosList = getDescendantElements(elem, "AnchoredObjectSetting");
+                if (!aosList.isEmpty()) {
+                    String anchoredPos = aosList.get(0).getAttribute("AnchoredPosition");
+                    if (anchoredPos != null && !anchoredPos.isEmpty()) {
+                        inlineFrame.anchoredPosition(anchoredPos);
+                    }
+                }
                 run.addInlineFrame(inlineFrame);
+            } else if ("Group".equals(elem.getTagName())) {
+                // 인라인 Group
+                IDMLCharacterRun.InlineGraphic inlineGroup = parseInlineGroup(elem);
+                run.addInlineGraphic(inlineGroup);
+            } else if ("Rectangle".equals(elem.getTagName()) || "Polygon".equals(elem.getTagName())
+                    || "Oval".equals(elem.getTagName())) {
+                // 인라인 그래픽
+                IDMLCharacterRun.InlineGraphic graphic = parseInlineGraphicElement(elem);
+                run.addInlineGraphic(graphic);
             }
         }
 
@@ -1233,6 +1443,124 @@ public class IDMLLoader {
         }
 
         return run;
+    }
+
+    /**
+     * 인라인 그래픽 요소(Rectangle, Polygon, Oval)를 InlineGraphic으로 파싱.
+     * 내부에 TextFrame이 있으면 childTextFrames로 수집.
+     */
+    private static IDMLCharacterRun.InlineGraphic parseInlineGraphicElement(Element elem) {
+        IDMLCharacterRun.InlineGraphic graphic = new IDMLCharacterRun.InlineGraphic();
+        graphic.selfId(elem.getAttribute("Self"));
+        String tag = elem.getTagName();
+        if ("Rectangle".equals(tag)) graphic.type("rectangle");
+        else if ("Polygon".equals(tag)) graphic.type("polygon");
+        else if ("Oval".equals(tag)) graphic.type("ellipse");
+        else graphic.type(tag.toLowerCase());
+
+        double[] bounds = resolveGeometricBounds(elem);
+        if (bounds != null && bounds.length >= 4) {
+            graphic.widthPoints(bounds[3] - bounds[1]);
+            graphic.heightPoints(bounds[2] - bounds[0]);
+            graphic.geometricBounds(bounds);
+        }
+        graphic.itemTransform(IDMLGeometry.parseTransform(elem.getAttribute("ItemTransform")));
+
+        // Rectangle/Polygon/Oval 내부에 Image, TextFrame 등이 있을 수 있음
+        collectInlineChildren(elem, graphic);
+        collectInlineImageLink(elem, graphic);
+
+        return graphic;
+    }
+
+    /**
+     * 인라인 Group을 InlineGraphic(type="group")으로 파싱.
+     * Group 내부의 TextFrame, 그래픽, 중첩 Group을 재귀적으로 수집.
+     */
+    private static IDMLCharacterRun.InlineGraphic parseInlineGroup(Element groupElem) {
+        IDMLCharacterRun.InlineGraphic group = new IDMLCharacterRun.InlineGraphic();
+        group.selfId(groupElem.getAttribute("Self"));
+        group.type("group");
+
+        double[] bounds = resolveGeometricBounds(groupElem);
+        if (bounds != null && bounds.length >= 4) {
+            group.widthPoints(bounds[3] - bounds[1]);
+            group.heightPoints(bounds[2] - bounds[0]);
+            group.geometricBounds(bounds);
+        }
+        group.itemTransform(IDMLGeometry.parseTransform(groupElem.getAttribute("ItemTransform")));
+
+        collectInlineChildren(groupElem, group);
+        collectInlineImageLink(groupElem, group);
+
+        return group;
+    }
+
+    /**
+     * 요소의 자식에서 TextFrame, 그래픽, Group을 재귀적으로 수집.
+     */
+    private static void collectInlineChildren(Element parent, IDMLCharacterRun.InlineGraphic target) {
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node node = children.item(i);
+            if (node.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element child = (Element) node;
+            String tag = child.getTagName();
+
+            if ("TextFrame".equals(tag)) {
+                IDMLTextFrame tf = new IDMLTextFrame();
+                tf.selfId(child.getAttribute("Self"));
+                tf.parentStoryId(getAttrOrNull(child, "ParentStory"));
+                tf.appliedObjectStyle(getAttrOrNull(child, "AppliedObjectStyle"));
+                tf.geometricBounds(resolveGeometricBounds(child));
+                tf.itemTransform(IDMLGeometry.parseTransform(child.getAttribute("ItemTransform")));
+                target.addChildTextFrame(tf);
+            } else if ("Rectangle".equals(tag) || "Polygon".equals(tag) || "Oval".equals(tag)) {
+                target.addChildGraphic(parseInlineGraphicElement(child));
+            } else if ("Group".equals(tag)) {
+                target.addChildGraphic(parseInlineGroup(child));
+            }
+        }
+    }
+
+    /**
+     * 인라인 그래픽 요소 내부에 Image/PDF/EPS + Link가 있으면 링크 정보를 추출한다.
+     */
+    private static void collectInlineImageLink(Element shapeElem, IDMLCharacterRun.InlineGraphic graphic) {
+        List<Element> images = getDescendantElements(shapeElem, "Image");
+        if (images.isEmpty()) images = getDescendantElements(shapeElem, "PDF");
+        if (images.isEmpty()) images = getDescendantElements(shapeElem, "EPS");
+        if (images.isEmpty()) return;
+
+        Element imageElem = images.get(0);
+
+        // 이미지의 ItemTransform (클리핑용)
+        String imgTransformStr = imageElem.getAttribute("ItemTransform");
+        if (imgTransformStr != null && !imgTransformStr.isEmpty()) {
+            graphic.imageTransform(IDMLGeometry.parseTransform(imgTransformStr));
+        }
+
+        // GraphicBounds (원본 이미지 크기)
+        Element imgProps = getFirstChildElement(imageElem, "Properties");
+        if (imgProps != null) {
+            Element graphicBoundsElem = getFirstChildElement(imgProps, "GraphicBounds");
+            if (graphicBoundsElem != null) {
+                double left = parseDoubleAttrDef(graphicBoundsElem, "Left", 0);
+                double top = parseDoubleAttrDef(graphicBoundsElem, "Top", 0);
+                double right = parseDoubleAttrDef(graphicBoundsElem, "Right", 0);
+                double bottom = parseDoubleAttrDef(graphicBoundsElem, "Bottom", 0);
+                graphic.graphicBounds(new double[]{left, top, right, bottom});
+            }
+        }
+
+        // Link 정보
+        List<Element> links = getChildElements(imageElem, "Link");
+        if (!links.isEmpty()) {
+            Element link = links.get(0);
+            graphic.linkResourceURI(getAttrOrNull(link, "LinkResourceURI"));
+            graphic.linkStoredState(getAttrOrNull(link, "StoredState"));
+            graphic.linkResourceFormat(getAttrOrNull(link, "LinkResourceFormat"));
+        }
     }
 
     // ===== 인라인 그래픽(앵커 오브젝트) 추출 =====
@@ -1499,6 +1827,87 @@ public class IDMLLoader {
         return storyIds;
     }
 
+    /**
+     * 로드된 Story 내부의 인라인 TextFrame(및 InlineGraphic 내 childTextFrame)이
+     * 참조하는 추가 Story를 재귀적으로 로드한다.
+     */
+    private static void loadReferencedInlineStories(IDMLDocument doc, File storiesDir) throws Exception {
+        Set<String> loaded = new LinkedHashSet<String>(doc.stories().keySet());
+        Queue<String> queue = new LinkedList<String>();
+
+        // 이미 로드된 스토리에서 참조하는 인라인 스토리 ID 수집
+        for (IDMLStory story : doc.stories().values()) {
+            collectInlineStoryIds(story, loaded, queue);
+        }
+
+        // BFS로 추가 스토리 로드
+        while (!queue.isEmpty()) {
+            String storyId = queue.poll();
+            if (loaded.contains(storyId)) continue;
+            loaded.add(storyId);
+
+            File storyFile = new File(storiesDir, "Story_" + storyId + ".xml");
+            if (!storyFile.exists()) continue;
+
+            IDMLStory story = parseStory(parseXML(storyFile), storyId);
+            doc.putStory(storyId, story);
+
+            // 새로 로드된 스토리에서 또 다른 인라인 참조 수집
+            collectInlineStoryIds(story, loaded, queue);
+        }
+    }
+
+    /**
+     * Story의 인라인 TextFrame 및 InlineGraphic.childTextFrames에서
+     * 참조하는 Story ID를 수집하여 큐에 추가한다.
+     */
+    private static void collectInlineStoryIds(IDMLStory story, Set<String> loaded, Queue<String> queue) {
+        // Story 직속 paragraphs
+        collectInlineStoryIdsFromParagraphs(story.paragraphs(), loaded, queue);
+
+        // Story 내 테이블 셀의 paragraphs
+        for (IDMLTable table : story.tables()) {
+            for (IDMLTableRow row : table.rows()) {
+                for (IDMLTableCell cell : row.cells()) {
+                    collectInlineStoryIdsFromParagraphs(cell.paragraphs(), loaded, queue);
+                }
+            }
+        }
+    }
+
+    private static void collectInlineStoryIdsFromParagraphs(List<IDMLParagraph> paragraphs,
+                                                              Set<String> loaded, Queue<String> queue) {
+        for (IDMLParagraph para : paragraphs) {
+            for (IDMLCharacterRun run : para.characterRuns()) {
+                // 직접 인라인 TextFrame
+                for (IDMLTextFrame inlineTf : run.inlineFrames()) {
+                    String sid = inlineTf.parentStoryId();
+                    if (sid != null && !loaded.contains(sid)) {
+                        queue.add(sid);
+                    }
+                }
+                // InlineGraphic 내 childTextFrames (Rectangle > TextFrame 등)
+                for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
+                    collectInlineStoryIdsFromGraphic(ig, loaded, queue);
+                }
+            }
+        }
+    }
+
+    private static void collectInlineStoryIdsFromGraphic(IDMLCharacterRun.InlineGraphic ig,
+                                                           Set<String> loaded, Queue<String> queue) {
+        for (IDMLTextFrame childTf : ig.childTextFrames()) {
+            String sid = childTf.parentStoryId();
+            if (sid != null && !loaded.contains(sid)) {
+                queue.add(sid);
+            }
+        }
+        // 재귀: childGraphics 내부도 탐색
+        for (IDMLCharacterRun.InlineGraphic childIg : ig.childGraphics()) {
+            collectInlineStoryIdsFromGraphic(childIg, loaded, queue);
+        }
+    }
+
     // ===== ZIP 처리 =====
 
     private static File extractZip(File zipFile) throws ConvertException {
@@ -1753,6 +2162,7 @@ public class IDMLLoader {
         double marginLeft;
         double marginRight;
         int columnCount = 1;
+        double columnGutter = 12.0;
     }
 
     /**
@@ -1775,6 +2185,7 @@ public class IDMLLoader {
                 margins.marginLeft = parseDoubleAttrDef(marginPref, "Left", 0);
                 margins.marginRight = parseDoubleAttrDef(marginPref, "Right", 0);
                 margins.columnCount = parseIntAttr(marginPref, "ColumnCount", 1);
+                margins.columnGutter = parseDoubleAttrDef(marginPref, "ColumnGutter", 12.0);
                 masterMargins.put(masterSpreadId, margins);
             }
         }

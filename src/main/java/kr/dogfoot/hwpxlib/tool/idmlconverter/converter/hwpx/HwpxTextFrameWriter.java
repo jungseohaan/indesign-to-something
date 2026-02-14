@@ -96,7 +96,7 @@ public class HwpxTextFrameWriter {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(shapeId);
+        rect.instidAnd(nextShapeId());
 
         rect.createOffset();
         rect.offset().set(0L, 0L);
@@ -240,7 +240,7 @@ public class HwpxTextFrameWriter {
             // ShapeComponent
             rect.hrefAnd("");
             rect.groupLevelAnd((short) 0);
-            rect.instidAnd(boxId);
+            rect.instidAnd(nextShapeId());
 
             rect.createOffset();
             rect.offset().set(0L, 0L);
@@ -552,6 +552,137 @@ public class HwpxTextFrameWriter {
         }
 
         return equationCount;
+    }
+
+    /**
+     * 그룹 프레임을 HWPX Rectangle+DrawText로 변환한다.
+     * DrawText 안에 각 자식 이미지를 인라인 Picture로 배치한다.
+     */
+    public void writeGroupFrame(Run anchorRun, IntermediateFrame frame) {
+        List<IntermediateFrame> children = frame.groupChildImages();
+        if (children == null || children.isEmpty()) return;
+
+        long x = frame.x();
+        long y = frame.y();
+        long w = frame.width();
+        long h = frame.height();
+
+        Rectangle rect = anchorRun.addNewRectangle();
+
+        // ShapeObject 기본 속성
+        String shapeId = nextShapeId();
+        rect.idAnd(shapeId)
+                .zOrderAnd(frame.zOrder())
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+
+        // ShapeComponent
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(nextShapeId());
+
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+
+        rect.createCurSz();
+        rect.curSz().set(w, h);
+
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        // ShapeSize (크기 고정)
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(true);
+
+        // ShapePosition — 용지(PAPER) 기준 절대 좌표
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(y)
+                .horzOffset(x);
+
+        // OutMargin
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        // Rectangle 고유 속성 — 4 코너
+        rect.ratioAnd((short) 0);
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        // LineShape — 테두리 없음
+        rect.createLineShape();
+        rect.lineShape().colorAnd("#000000").widthAnd(0)
+                .styleAnd(LineType2.NONE)
+                .endCapAnd(LineCap.FLAT)
+                .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
+                .headfillAnd(true).tailfillAnd(true)
+                .headSzAnd(ArrowSize.MEDIUM_MEDIUM).tailSzAnd(ArrowSize.MEDIUM_MEDIUM)
+                .outlineStyleAnd(OutlineStyle.NORMAL).alpha(0f);
+
+        // FillBrush 없음 (투명)
+
+        // DrawText — 내부에 인라인 이미지 배치
+        rect.createDrawText();
+        DrawText dt = rect.drawText();
+        dt.lastWidthAnd(w).nameAnd("").editableAnd(false).lineShapeFixedAnd(true);
+        dt.createTextMargin();
+        dt.textMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        dt.createSubList();
+        SubList subList = dt.subList();
+        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
+                .lineWrapAnd(LineWrapMethod.BREAK)
+                .vertAlignAnd(VerticalAlign2.TOP);
+
+        // 각 자식 이미지를 인라인 Picture로 추가
+        Para para = subList.addNewPara();
+        para.idAnd(nextParaId())
+                .paraPrIDRefAnd("3")
+                .styleIDRefAnd("0")
+                .pageBreakAnd(false)
+                .columnBreakAnd(false)
+                .merged(false);
+
+        for (IntermediateFrame child : children) {
+            addInlineImageRun(para, child);
+        }
+
+        // 빈 단락 방지
+        if (para.countOfRun() == 0) {
+            Run run = para.addNewRun();
+            run.charPrIDRef("0");
+            run.addNewT();
+        }
     }
 
     // ── Helper Methods ──
@@ -1033,7 +1164,7 @@ public class HwpxTextFrameWriter {
             // ShapeComponent
             pic.hrefAnd("");
             pic.groupLevelAnd((short) 0);
-            pic.instidAnd(shapeId);
+            pic.instidAnd(nextShapeId());
             pic.reverseAnd(false);
 
             pic.createOffset();
@@ -1147,7 +1278,7 @@ public class HwpxTextFrameWriter {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(shapeId);
+        rect.instidAnd(nextShapeId());
         rect.createOffset();
         rect.offset().set(0L, 0L);
         rect.createOrgSz();
@@ -1297,7 +1428,7 @@ public class HwpxTextFrameWriter {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(shapeId);
+        rect.instidAnd(nextShapeId());
         rect.createOffset();
         rect.offset().set(0L, 0L);
         rect.createOrgSz();
@@ -1371,7 +1502,7 @@ public class HwpxTextFrameWriter {
         // ShapeComponent
         ellipse.hrefAnd("");
         ellipse.groupLevelAnd((short) 0);
-        ellipse.instidAnd(shapeId);
+        ellipse.instidAnd(nextShapeId());
         ellipse.createOffset();
         ellipse.offset().set(0L, 0L);
         ellipse.createOrgSz();
@@ -1445,7 +1576,7 @@ public class HwpxTextFrameWriter {
         // ShapeComponent
         polygon.hrefAnd("");
         polygon.groupLevelAnd((short) 0);
-        polygon.instidAnd(shapeId);
+        polygon.instidAnd(nextShapeId());
         polygon.createOffset();
         polygon.offset().set(0L, 0L);
         polygon.createOrgSz();

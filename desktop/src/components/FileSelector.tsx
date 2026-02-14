@@ -1,7 +1,7 @@
 import { useAppStore } from "../stores/useAppStore";
 
 export function FileSelector() {
-  const { idmlPath, isAnalyzing, selectFile, selectHwpxFile } = useAppStore();
+  const { idmlPath, isAnalyzing, selectFile } = useAppStore();
 
   const filename = idmlPath
     ? idmlPath.substring(idmlPath.lastIndexOf("/") + 1)
@@ -16,22 +16,13 @@ export function FileSelector() {
           </span>
         )}
       </div>
-      <div className="flex items-center gap-2">
-        <button
-          onClick={selectFile}
-          disabled={isAnalyzing}
-          className="px-4 py-1.5 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 disabled:opacity-50"
-        >
-          {isAnalyzing ? "분석 중..." : "IDML 열기"}
-        </button>
-        <button
-          onClick={selectHwpxFile}
-          disabled={isAnalyzing}
-          className="px-4 py-1.5 bg-green-500 text-white text-sm rounded hover:bg-green-600 disabled:opacity-50"
-        >
-          HWPX 열기
-        </button>
-      </div>
+      <button
+        onClick={selectFile}
+        disabled={isAnalyzing}
+        className="px-4 py-1.5 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 disabled:opacity-50"
+      >
+        {isAnalyzing ? "분석 중..." : "IDML 열기"}
+      </button>
     </div>
   );
 }

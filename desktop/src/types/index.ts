@@ -64,7 +64,7 @@ export interface PageInfo {
 
 export interface FrameInfo {
   id: string;
-  type: "text" | "image" | "vector" | "table";
+  type: "text" | "image" | "vector" | "table" | "group";
   label: string;
   x: number;
   y: number;

@@ -20,6 +20,7 @@ public class IDMLImageFrame {
     // 이미지 클리핑 정보
     private double[] imageTransform;     // 이미지의 transform (프레임 내 위치/스케일)
     private double[] graphicBounds;      // 원본 이미지 크기 [left, top, right, bottom]
+    private boolean fromGroup;           // Group 내에서 추출된 요소 여부
 
     public String selfId() { return selfId; }
     public void selfId(String v) { this.selfId = v; }
@@ -50,6 +51,9 @@ public class IDMLImageFrame {
 
     public double[] graphicBounds() { return graphicBounds; }
     public void graphicBounds(double[] v) { this.graphicBounds = v; }
+
+    public boolean fromGroup() { return fromGroup; }
+    public void fromGroup(boolean v) { this.fromGroup = v; }
 
     public double widthPoints() {
         return geometricBounds != null ? IDMLGeometry.width(geometricBounds) : 0;

@@ -234,10 +234,11 @@ public class StyleRegistry {
         charPr.fontRef().set(fontId, fontId, fontId, fontId, fontId, fontId, fontId);
 
         charPr.createRatio();
-        charPr.ratio().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
+        charPr.ratio().set((short) 90, (short) 90, (short) 90, (short) 90, (short) 90, (short) 90, (short) 90);
 
-        // 자간 (letterSpacing)
-        short spacing = styleDef.letterSpacing() != null ? styleDef.letterSpacing() : 0;
+        // 자간 (letterSpacing) — 전역 -10% 적용
+        short baseSpacing = styleDef.letterSpacing() != null ? styleDef.letterSpacing() : 0;
+        short spacing = (short) (baseSpacing - 10);
         charPr.createSpacing();
         charPr.spacing().set(spacing, spacing, spacing, spacing, spacing, spacing, spacing);
 

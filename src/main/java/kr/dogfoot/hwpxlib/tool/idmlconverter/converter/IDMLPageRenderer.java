@@ -53,6 +53,21 @@ public class IDMLPageRenderer {
      */
     public byte[] renderPage(IDMLSpread spread, IDMLPage page, String linksDirectory,
                               boolean drawPageBoundary) throws IOException {
+        return renderPage(spread, page, linksDirectory, drawPageBoundary, false);
+    }
+
+    /**
+     * 페이지를 PNG로 렌더링한다.
+     *
+     * @param spread 스프레드
+     * @param page   페이지
+     * @param linksDirectory 이미지 파일 검색 디렉토리 (옵션)
+     * @param drawPageBoundary 페이지 경계선 그리기 여부
+     * @param includeGroupItems 그룹에서 추출된 항목도 포함 (프리뷰 렌더링용)
+     * @return PNG 바이트 배열
+     */
+    public byte[] renderPage(IDMLSpread spread, IDMLPage page, String linksDirectory,
+                              boolean drawPageBoundary, boolean includeGroupItems) throws IOException {
         // 페이지 크기 (points)
         double pageWidthPt = page.widthPoints();
         double pageHeightPt = page.heightPoints();
@@ -85,8 +100,34 @@ public class IDMLPageRenderer {
         // 페이지 경계로 클리핑 (페이지 밖으로 확장되는 stroke 처리)
         g.setClip(0, 0, pixelWidth, pixelHeight);
 
+        // 마스터 페이지 아이템을 먼저 렌더링 (배경 레이어)
+        String masterSpreadId = page.appliedMasterSpread();
+        if (masterSpreadId != null) {
+            IDMLSpread masterSpread = idmlDoc.getMasterSpread(masterSpreadId);
+            if (masterSpread != null && !masterSpread.pages().isEmpty()) {
+                int pageIdx = findPageIndexInSpread(spread, page);
+                int masterPageIdx = Math.min(pageIdx, masterSpread.pages().size() - 1);
+                IDMLPage masterPage = masterSpread.pages().get(masterPageIdx);
+
+                double[] masterPageAbs = IDMLGeometry.absoluteTopLeft(
+                        masterPage.geometricBounds(), masterPage.itemTransform());
+
+                List<IDMLSpread.RenderableItem> masterItems =
+                        masterSpread.getRenderableItemsOnPage(masterPage, true);
+                for (IDMLSpread.RenderableItem item : masterItems) {
+                    if (item.type() == IDMLSpread.RenderableItem.Type.IMAGE) {
+                        renderImage(g, item.imageFrame(),
+                                masterPageAbs[0], masterPageAbs[1], scale, linksDirectory);
+                    } else {
+                        renderVectorShape(g, item.vectorShape(),
+                                masterPageAbs[0], masterPageAbs[1], scale);
+                    }
+                }
+            }
+        }
+
         // z-order 순서로 모든 렌더링 항목 (이미지 + 벡터) 가져오기
-        List<IDMLSpread.RenderableItem> items = spread.getRenderableItemsOnPage(page);
+        List<IDMLSpread.RenderableItem> items = spread.getRenderableItemsOnPage(page, includeGroupItems);
         for (IDMLSpread.RenderableItem item : items) {
             if (item.type() == IDMLSpread.RenderableItem.Type.IMAGE) {
                 renderImage(g, item.imageFrame(), pageTx, pageTy, scale, linksDirectory);
@@ -106,6 +147,16 @@ public class IDMLPageRenderer {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(image, "png", baos);
         return baos.toByteArray();
+    }
+
+    private static int findPageIndexInSpread(IDMLSpread spread, IDMLPage page) {
+        List<IDMLPage> pages = spread.pages();
+        for (int i = 0; i < pages.size(); i++) {
+            if (pages.get(i).selfId().equals(page.selfId())) {
+                return i;
+            }
+        }
+        return 0;
     }
 
     /**
@@ -437,11 +488,77 @@ public class IDMLPageRenderer {
     }
 
     /**
+     * shape의 pathPoints를 GeneralPath로 변환한다 (클리핑 경로 생성용).
+     */
+    private GeneralPath buildPathFromShape(IDMLVectorShape shape, double[] transform,
+                                            double pageTx, double pageTy, double scale) {
+        List<IDMLVectorShape.PathPoint> points = shape.pathPoints();
+        if (points.isEmpty()) return null;
+
+        GeneralPath path = new GeneralPath();
+        boolean first = true;
+        for (int i = 0; i < points.size(); i++) {
+            IDMLVectorShape.PathPoint pt = points.get(i);
+            double[] local = applyTransform(transform, pt.anchorX(), pt.anchorY());
+            double px = (local[0] - pageTx) * scale;
+            double py = (local[1] - pageTy) * scale;
+
+            if (first) {
+                path.moveTo(px, py);
+                first = false;
+            } else {
+                IDMLVectorShape.PathPoint prevPt = points.get(i - 1);
+                if (prevPt.isStraight() && pt.isStraight()) {
+                    path.lineTo(px, py);
+                } else {
+                    double[] ctrl1 = applyTransform(transform, prevPt.rightX(), prevPt.rightY());
+                    double[] ctrl2 = applyTransform(transform, pt.leftX(), pt.leftY());
+                    path.curveTo((ctrl1[0] - pageTx) * scale, (ctrl1[1] - pageTy) * scale,
+                                 (ctrl2[0] - pageTx) * scale, (ctrl2[1] - pageTy) * scale, px, py);
+                }
+            }
+        }
+        if (!shape.pathOpen() && points.size() > 2) {
+            path.closePath();
+        }
+        return path;
+    }
+
+    /**
      * 벡터 도형을 렌더링한다.
      */
     private void renderVectorShape(Graphics2D g, IDMLVectorShape shape,
                                     double pageTx, double pageTy, double scale) {
         double[] transform = shape.itemTransform();
+
+        // 클리핑 프레임 패턴: 부모를 클립으로, 자식을 실제 렌더링
+        if (shape.hasClippedChild()) {
+            // 1. 부모의 pathPoints로 클리핑 경로 생성
+            GeneralPath clipPath = buildPathFromShape(shape, transform, pageTx, pageTy, scale);
+            if (clipPath != null) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setClip(clipPath);
+
+                // 2. 합성 변환: parent * child
+                IDMLVectorShape child = shape.clippedChild();
+                double[] childT = child.itemTransform();
+                double[] pT = transform;
+                double[] compositeT = {
+                    pT[0]*childT[0] + pT[2]*childT[1], pT[1]*childT[0] + pT[3]*childT[1],
+                    pT[0]*childT[2] + pT[2]*childT[3], pT[1]*childT[2] + pT[3]*childT[3],
+                    pT[0]*childT[4] + pT[2]*childT[5] + pT[4], pT[1]*childT[4] + pT[3]*childT[5] + pT[5]
+                };
+
+                // 3. 자식 도형 렌더링 (합성 변환 적용)
+                double[] origTransform = child.itemTransform();
+                child.itemTransform(compositeT);
+                renderVectorShape(g2, child, pageTx, pageTy, scale);
+                child.itemTransform(origTransform);  // 원복
+
+                g2.dispose();
+            }
+            return;
+        }
 
         // SubPath가 있으면 먼저 처리 (PathPoints보다 우선)
         if (shape.hasSubPaths()) {
@@ -1113,7 +1230,7 @@ public class IDMLPageRenderer {
         // 각 페이지를 렌더링하여 합성
         int xOffset = 0;
         for (int i = 0; i < pages.size(); i++) {
-            byte[] pageData = renderPage(spread, pages.get(i), linksDirectory, drawPageBoundary);
+            byte[] pageData = renderPage(spread, pages.get(i), linksDirectory, drawPageBoundary, true);
             if (pageData != null && pageData.length > 0) {
                 BufferedImage pageImage = ImageIO.read(new ByteArrayInputStream(pageData));
                 if (pageImage != null) {

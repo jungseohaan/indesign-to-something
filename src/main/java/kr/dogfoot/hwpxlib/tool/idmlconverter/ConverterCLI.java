@@ -1,8 +1,11 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.analyzer.IDMLAnalyzer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSerializer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IDMLPageRenderer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.tool.hwpxconverter.HwpxToIdmlConverter;
 
 import java.util.Arrays;
@@ -63,6 +66,10 @@ public class ConverterCLI {
                 System.out.println(schema);
             } else if ("--merge".equals(command)) {
                 runMerge(args);
+            } else if ("--spread-tree".equals(command)) {
+                runSpreadTree(args);
+            } else if ("--export-ast".equals(command)) {
+                runExportAst(args);
             } else {
                 printUsage();
                 System.exit(1);
@@ -105,6 +112,9 @@ public class ConverterCLI {
                     break;
                 case "--include-images":
                     options = options.includeImages(true);
+                    break;
+                case "--event-stream":
+                    options = options.useEventStream(true);
                     break;
                 case "--links-directory":
                     if (i + 1 < args.length) {
@@ -853,6 +863,257 @@ public class ConverterCLI {
                 .replace("\t", "\\t");
     }
 
+    /**
+     * 스프레드의 원본 XML 계층 트리 구조를 JSON으로 출력.
+     * --spread-tree <idml-path> <spread-index|master-id>
+     */
+    private static void runSpreadTree(String[] args) throws Exception {
+        if (args.length < 3) {
+            System.err.println("Error: Missing idml path or spread identifier");
+            System.exit(1);
+        }
+        String idmlPath = args[1];
+        String spreadId = args[2];
+
+        // IDML zip에서 스프레드 XML 직접 읽기
+        javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+
+        org.w3c.dom.Element spreadElem = null;
+
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(idmlPath)) {
+            // designmap.xml에서 스프레드 소스 목록 구하기
+            java.util.zip.ZipEntry designEntry = zip.getEntry("designmap.xml");
+            org.w3c.dom.Document designDoc = factory.newDocumentBuilder().parse(zip.getInputStream(designEntry));
+            org.w3c.dom.Element root = designDoc.getDocumentElement();
+
+            String targetEntry = null;
+
+            // master ID로 찾기 (예: ue9)
+            org.w3c.dom.NodeList masterNodes = root.getElementsByTagName("idPkg:MasterSpread");
+            for (int i = 0; i < masterNodes.getLength(); i++) {
+                String src = ((org.w3c.dom.Element) masterNodes.item(i)).getAttribute("src");
+                if (src != null && src.contains(spreadId)) {
+                    targetEntry = src;
+                    break;
+                }
+            }
+
+            // 일반 스프레드: 인덱스 또는 ID로 찾기
+            if (targetEntry == null) {
+                List<String> spreadSources = new ArrayList<>();
+                org.w3c.dom.NodeList spreadNodes = root.getElementsByTagName("idPkg:Spread");
+                for (int i = 0; i < spreadNodes.getLength(); i++) {
+                    String src = ((org.w3c.dom.Element) spreadNodes.item(i)).getAttribute("src");
+                    if (src != null) spreadSources.add(src);
+                }
+
+                try {
+                    int idx = Integer.parseInt(spreadId);
+                    if (idx >= 0 && idx < spreadSources.size()) {
+                        targetEntry = spreadSources.get(idx);
+                    }
+                } catch (NumberFormatException e) {
+                    for (String src : spreadSources) {
+                        if (src.contains(spreadId)) {
+                            targetEntry = src;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (targetEntry == null) {
+                outputJsonError("Spread not found: " + spreadId);
+                System.exit(1);
+            }
+
+            java.util.zip.ZipEntry spreadEntry = zip.getEntry(targetEntry);
+            if (spreadEntry == null) {
+                outputJsonError("Spread file not found in IDML: " + targetEntry);
+                System.exit(1);
+            }
+
+            org.w3c.dom.Document spreadDoc = factory.newDocumentBuilder().parse(zip.getInputStream(spreadEntry));
+            spreadElem = spreadDoc.getDocumentElement();
+
+            // idPkg:MasterSpread / idPkg:Spread 래퍼인 경우 내부 MasterSpread/Spread 요소 추출
+            String rootTag = spreadElem.getTagName();
+            if (rootTag.startsWith("idPkg:")) {
+                org.w3c.dom.NodeList inner = spreadElem.getChildNodes();
+                for (int i = 0; i < inner.getLength(); i++) {
+                    if (inner.item(i).getNodeType() == org.w3c.dom.Node.ELEMENT_NODE) {
+                        spreadElem = (org.w3c.dom.Element) inner.item(i);
+                        break;
+                    }
+                }
+            }
+        }
+
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"id\": \"").append(escapeJson(spreadElem.getAttribute("Self"))).append("\",\n");
+        json.append("  \"type\": \"").append(escapeJson(spreadElem.getTagName())).append("\",\n");
+        json.append("  \"children\": [\n");
+
+        boolean first = true;
+        org.w3c.dom.NodeList children = spreadElem.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            org.w3c.dom.Node child = children.item(i);
+            if (child.getNodeType() != org.w3c.dom.Node.ELEMENT_NODE) continue;
+            org.w3c.dom.Element elem = (org.w3c.dom.Element) child;
+            String tag = elem.getTagName();
+
+            // 주요 객체만 포함 (Page, TextFrame, Group, Rectangle, Polygon, Oval, GraphicLine)
+            if (!"Page".equals(tag) && !"TextFrame".equals(tag) && !"Group".equals(tag)
+                    && !"Rectangle".equals(tag) && !"Polygon".equals(tag)
+                    && !"Oval".equals(tag) && !"GraphicLine".equals(tag)) {
+                continue;
+            }
+
+            if (!first) json.append(",\n");
+            first = false;
+            buildTreeNode(json, elem, "    ");
+        }
+
+        json.append("\n  ]\n");
+        json.append("}");
+        System.out.println(json);
+    }
+
+    /**
+     * XML 요소를 트리 노드 JSON으로 변환 (재귀).
+     */
+    private static void buildTreeNode(StringBuilder json, org.w3c.dom.Element elem, String indent) {
+        String tag = elem.getTagName();
+        String selfId = elem.getAttribute("Self");
+        String name = elem.getAttribute("Name");
+
+        json.append(indent).append("{\n");
+        json.append(indent).append("  \"type\": \"").append(escapeJson(tag)).append("\",\n");
+        json.append(indent).append("  \"id\": \"").append(escapeJson(selfId != null ? selfId : "")).append("\"");
+
+        if (name != null && !name.isEmpty() && !"$ID/".equals(name)) {
+            json.append(",\n").append(indent).append("  \"name\": \"").append(escapeJson(name)).append("\"");
+        }
+
+        // 도형 속성
+        String fillColor = elem.getAttribute("FillColor");
+        if (fillColor != null && !fillColor.isEmpty()) {
+            json.append(",\n").append(indent).append("  \"fillColor\": \"").append(escapeJson(fillColor)).append("\"");
+        }
+        String strokeColor = elem.getAttribute("StrokeColor");
+        if (strokeColor != null && !strokeColor.isEmpty()) {
+            json.append(",\n").append(indent).append("  \"strokeColor\": \"").append(escapeJson(strokeColor)).append("\"");
+        }
+
+        // 텍스트프레임: story 참조
+        if ("TextFrame".equals(tag)) {
+            String storyId = elem.getAttribute("ParentStory");
+            if (storyId != null && !storyId.isEmpty()) {
+                json.append(",\n").append(indent).append("  \"storyId\": \"").append(escapeJson(storyId)).append("\"");
+            }
+        }
+
+        // 이미지 포함 여부
+        if ("Rectangle".equals(tag) || "Polygon".equals(tag) || "Oval".equals(tag)) {
+            org.w3c.dom.NodeList images = elem.getElementsByTagName("Image");
+            if (images.getLength() > 0) {
+                json.append(",\n").append(indent).append("  \"hasImage\": true");
+                org.w3c.dom.NodeList links = elem.getElementsByTagName("Link");
+                if (links.getLength() > 0) {
+                    String linkUri = ((org.w3c.dom.Element) links.item(0)).getAttribute("LinkResourceURI");
+                    if (linkUri != null && !linkUri.isEmpty()) {
+                        // 파일명만 추출
+                        String fileName = linkUri;
+                        int lastSlash = linkUri.lastIndexOf('/');
+                        if (lastSlash >= 0) fileName = linkUri.substring(lastSlash + 1);
+                        json.append(",\n").append(indent).append("  \"imageFile\": \"").append(escapeJson(fileName)).append("\"");
+                    }
+                }
+            }
+        }
+
+        // bounds
+        String bounds = elem.getAttribute("GeometricBounds");
+        if (bounds != null && !bounds.isEmpty()) {
+            json.append(",\n").append(indent).append("  \"bounds\": \"").append(escapeJson(bounds)).append("\"");
+        }
+
+        // transform
+        String transform = elem.getAttribute("ItemTransform");
+        if (transform != null && !transform.isEmpty()) {
+            json.append(",\n").append(indent).append("  \"transform\": \"").append(escapeJson(transform)).append("\"");
+        }
+
+        // 자식 요소 (Group, Rectangle 등의 내부 중첩)
+        List<org.w3c.dom.Element> childElements = new ArrayList<>();
+        org.w3c.dom.NodeList children = elem.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            org.w3c.dom.Node child = children.item(i);
+            if (child.getNodeType() != org.w3c.dom.Node.ELEMENT_NODE) continue;
+            org.w3c.dom.Element childElem = (org.w3c.dom.Element) child;
+            String childTag = childElem.getTagName();
+            if ("TextFrame".equals(childTag) || "Group".equals(childTag)
+                    || "Rectangle".equals(childTag) || "Polygon".equals(childTag)
+                    || "Oval".equals(childTag) || "GraphicLine".equals(childTag)) {
+                childElements.add(childElem);
+            }
+        }
+
+        if (!childElements.isEmpty()) {
+            json.append(",\n").append(indent).append("  \"children\": [\n");
+            boolean first = true;
+            for (org.w3c.dom.Element childElem : childElements) {
+                if (!first) json.append(",\n");
+                first = false;
+                buildTreeNode(json, childElem, indent + "    ");
+            }
+            json.append("\n").append(indent).append("  ]");
+        }
+
+        json.append("\n").append(indent).append("}");
+    }
+
+
+
+    /**
+     * AST 중간 표현을 JSON으로 내보내기.
+     * --export-ast <idml-path>
+     */
+    private static void runExportAst(String[] args) throws Exception {
+        if (args.length < 2) {
+            System.err.println("Error: Missing IDML path");
+            printUsage();
+            System.exit(1);
+        }
+
+        String idmlPath = args[1];
+
+        // IDML 로드
+        IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
+        if (idmlDoc == null) {
+            outputJsonError("Failed to load IDML file: " + idmlPath);
+            System.exit(1);
+        }
+
+        // 파일명 추출
+        String fileName = idmlPath;
+        int lastSlash = Math.max(idmlPath.lastIndexOf('/'), idmlPath.lastIndexOf('\\'));
+        if (lastSlash >= 0) fileName = idmlPath.substring(lastSlash + 1);
+
+        // 4단계 정규화 → AST
+        ConvertOptions options = ConvertOptions.defaults().useEventStream(true);
+        ASTDocument ast = IDMLNormalizer.normalize(idmlDoc, options, fileName);
+
+        // JSON 직렬화
+        String json = ASTSerializer.toJson(ast);
+        System.out.println(json);
+
+        // 임시 디렉토리 정리
+        idmlDoc.cleanup();
+    }
+
     private static void printUsage() {
         System.out.println("IDML / HWPX Converter");
         System.out.println();
@@ -860,6 +1121,7 @@ public class ConverterCLI {
         System.out.println("  java -jar converter.jar --analyze <idml-path>");
         System.out.println("  java -jar converter.jar --convert <input-idml> <output-hwpx> [options]");
         System.out.println("  java -jar converter.jar --hwpx-to-idml <input-hwpx> <output-idml> [--progress]");
+        System.out.println("  java -jar converter.jar --export-ast <idml-path>");
         System.out.println("  java -jar converter.jar --render-vector <idml-path> <frame-id> [--dpi <dpi>]");
         System.out.println();
         System.out.println("IDML to HWPX Options:");
@@ -870,6 +1132,7 @@ public class ConverterCLI {
         System.out.println("  --links-directory <path>  Directory for image links");
         System.out.println("  --start-page <num>   Start page number (1-based)");
         System.out.println("  --end-page <num>     End page number (1-based)");
+        System.out.println("  --event-stream       Use AST-based event stream pipeline");
         System.out.println();
         System.out.println("HWPX to IDML Options:");
         System.out.println("  --progress           Output progress as JSON");
