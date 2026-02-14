@@ -1,0 +1,346 @@
+%!Adobe-FontList 1.14
+%Locale:0x412
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:CID
+FontName:AdobeMyungjoStd-Medium
+FamilyName:Adobe Myungjo Std
+StyleName:M
+FullName:Adobe Myungjo Std M
+MenuName:Adobe 명조 Std M
+StyleBits:0
+FamilyNameNative:Adobe 명조 Std
+StyleNameNative:M
+FullNameNative:Adobe 명조 Std M
+WritingScript:Korean
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\AdobeMyungjoStd-Medium.otf
+DataFormat:sfntData
+isCFF:yes
+FileLength:4103860
+FileModTime:1374037716
+WeightClass:500
+WidthClass:5
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-Bold
+FamilyName:Avenir Next Condensed
+StyleName:Bold
+FullName:Avenir Next Condensed Bold
+MenuName:Avenir Next Condensed
+StyleBits:2
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:72
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:700
+WidthClass:3
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-BoldItalic
+FamilyName:Avenir Next Condensed
+StyleName:Bold Italic
+FullName:Avenir Next Condensed Bold Italic
+MenuName:Avenir Next Condensed
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:372
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:700
+WidthClass:3
+AngleClass:1
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-DemiBold
+FamilyName:Avenir Next Condensed
+StyleName:Demi Bold
+FullName:Avenir Next Condensed Demi Bold
+MenuName:Avenir Next Condensed Demi Bold
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:672
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:600
+WidthClass:3
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-DemiBoldItalic
+FamilyName:Avenir Next Condensed
+StyleName:Demi Bold Italic
+FullName:Avenir Next Condensed Demi Bold Italic
+MenuName:Avenir Next Condensed Demi Bold
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:972
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:600
+WidthClass:3
+AngleClass:1
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-Italic
+FamilyName:Avenir Next Condensed
+StyleName:Italic
+FullName:Avenir Next Condensed Italic
+MenuName:Avenir Next Condensed
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:1272
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:400
+WidthClass:3
+AngleClass:1
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-Medium
+FamilyName:Avenir Next Condensed
+StyleName:Medium
+FullName:Avenir Next Condensed Medium
+MenuName:Avenir Next Condensed Medium
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:1572
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:500
+WidthClass:3
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-MediumItalic
+FamilyName:Avenir Next Condensed
+StyleName:Medium Italic
+FullName:Avenir Next Medium Condensed Italic
+MenuName:Avenir Next Condensed Medium
+StyleBits:1
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:1872
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:500
+WidthClass:3
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-Regular
+FamilyName:Avenir Next Condensed
+StyleName:Regular
+FullName:Avenir Next Condensed Regular
+MenuName:Avenir Next Condensed
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:2172
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:400
+WidthClass:3
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-Heavy
+FamilyName:Avenir Next Condensed
+StyleName:Heavy
+FullName:Avenir Next Condensed Heavy
+MenuName:Avenir Next Condensed Heavy
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:2472
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:900
+WidthClass:3
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-HeavyItalic
+FamilyName:Avenir Next Condensed
+StyleName:Heavy Italic
+FullName:Avenir Next Condensed Heavy Italic
+MenuName:Avenir Next Condensed Heavy
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:2772
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:900
+WidthClass:3
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-UltraLight
+FamilyName:Avenir Next Condensed
+StyleName:Ultra Light
+FullName:Avenir Next Condensed Ultra Light
+MenuName:Avenir Next Condensed Ultra Light
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:3072
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:275
+WidthClass:3
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:AvenirNextCondensed-UltraLightItalic
+FamilyName:Avenir Next Condensed
+StyleName:Ultra Light Italic
+FullName:Avenir Next Condensed Ultra Light Italic
+MenuName:Avenir Next Condensed Ultra Light
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Avenir Next Condensed.ttc
+TTCOffset:3372
+DataFormat:sfntData
+FileLength:3284564
+FileModTime:1510108370
+WeightClass:275
+WidthClass:3
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:Dinreg
+FamilyName:Dinreg
+StyleName:Regular
+FullName:Dinreg Regular
+MenuName:Dinreg
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\Dinreg Regular.ttf
+DataFormat:sfntData
+FileLength:38444
+FileModTime:1141438388
+WeightClass:5
+WidthClass:5
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:NPSIG
+FamilyName:NP_SIG
+StyleName:Regular
+FullName:NP_SIG
+MenuName:NP_SIG
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\NP_SIG.TTF
+DataFormat:sfntData
+FileLength:27624
+FileModTime:1456989242
+WeightClass:400
+WidthClass:5
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:TrueType
+FontName:TimeBurner
+FamilyName:TimeBurner
+StyleName:Regular
+FullName:TimeBurner
+MenuName:TimeBurner
+StyleBits:0
+WritingScript:Roman
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\timeburnernormal.ttf
+DataFormat:sfntData
+FileLength:62784
+FileModTime:1447291552
+WeightClass:400
+WidthClass:5
+AngleClass:0
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:CID
+FontName:TmonMonsoriOTFBlack
+FamilyName:TmonMonsoriOTF
+StyleName:Black
+FullName:TmonMonsoriOTF Black
+MenuName:Tmon몬소리OTF Black
+StyleBits:2
+FamilyNameNative:Tmon몬소리OTF
+StyleNameNative:Black
+FullNameNative:Tmon몬소리OTF Black
+WritingScript:Korean
+OutlineFileName:C:\Users\MK25\Desktop\작업중\25비상고등_풀수록_수학Ⅰ\26풀수록_수학Ⅰ본문\Document fonts\TmonMonsori.otf.otf
+DataFormat:sfntData
+isCFF:yes
+FileLength:2237940
+FileModTime:1474361876
+WeightClass:900
+WidthClass:5
+AngleClass:0
+%EndFont
+
