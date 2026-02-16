@@ -13,9 +13,12 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Ctrl;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.LineSeg;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.RunItem;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.T;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawingObject;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
@@ -121,6 +124,9 @@ public class ASTToHwpxConverter {
         }
 
         hwpxFile.headerXMLFile().secCnt((short) 1);
+
+        // 최종 정리: 모든 SubList에서 마지막 빈 단락 제거
+        cleanupTrailingEmptyParas(section0);
 
         result.hwpxFile(hwpxFile);
         result.pagesConverted(pagesConverted);
@@ -231,7 +237,9 @@ public class ASTToHwpxConverter {
             }
         }
 
-        // 나머지 (TABLE, FIGURE)는 기존대로 플로팅
+        // 나머지 (TABLE, FIGURE) 플로팅 처리
+        // FIGURE는 하나의 앵커 단락에 모아서 페이지 넘침 방지
+        Para figureAnchorPara = null;
         for (ASTBlock block : otherBlocks) {
             switch (block.blockType()) {
                 case TABLE:
@@ -239,7 +247,10 @@ public class ASTToHwpxConverter {
                     framesConverted++;
                     break;
                 case FIGURE:
-                    convertFigure(sectionFile, (ASTFigure) block);
+                    if (figureAnchorPara == null) {
+                        figureAnchorPara = createFloatingObjectPara(sectionFile);
+                    }
+                    convertFigure(figureAnchorPara, (ASTFigure) block);
                     framesConverted++;
                     break;
             }
@@ -365,6 +376,7 @@ public class ASTToHwpxConverter {
         for (ASTParagraph para : block.paragraphs()) {
             addParagraphToSubList(subList, para);
         }
+        removeTrailingEmptyHwpxPara(subList);
 
         if (subList.countOfPara() == 0) {
             addEmptySubListPara(subList);
@@ -637,8 +649,8 @@ public class ASTToHwpxConverter {
         Para framePara = createFloatingObjectPara(sectionFile);
         Run anchorRun = framePara.runs().iterator().next();
 
-        long x = Math.max(0, block.x());
-        long y = Math.max(0, block.y());
+        long x = block.x();
+        long y = block.y();
         long w = block.width();
         long h = block.height();
 
@@ -728,14 +740,16 @@ public class ASTToHwpxConverter {
         tc.createSubList();
         SubList subList = tc.subList();
         TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
+        VerticalAlign2 cellVAlign = mapVerticalJustification(block.verticalJustification());
         subList.idAnd("").textDirectionAnd(textDir)
                 .lineWrapAnd(LineWrapMethod.BREAK)
-                .vertAlignAnd(VerticalAlign2.TOP);
+                .vertAlignAnd(cellVAlign);
 
         // 단락 추가
         for (ASTParagraph para : block.paragraphs()) {
             addParagraphToSubList(subList, para);
         }
+        removeTrailingEmptyHwpxPara(subList);
 
         // 빈 텍스트 프레임 방지
         if (subList.countOfPara() == 0) {
@@ -864,6 +878,11 @@ public class ASTToHwpxConverter {
             run.charPrIDRef(paraCharPrId);
             run.addNewT();
         }
+
+        // 빈 단락이 SubList 끝에 추가된 경우 제거 (앞에 다른 단락이 있을 때만)
+        if (subList.countOfPara() > 1 && isHwpxParaEmpty(para)) {
+            subList.removePara(para);
+        }
     }
 
     private boolean hasParagraphOverrides(ASTParagraph para) {
@@ -876,7 +895,23 @@ public class ASTToHwpxConverter {
                 || para.lineSpacing() != null;
     }
 
+    private ASTStyleDef findParagraphStyle(String styleRef) {
+        if (styleRef == null) return null;
+        for (ASTStyleDef sd : doc.paragraphStyles()) {
+            if (styleRef.equals(sd.styleId())) return sd;
+        }
+        // ParagraphStyle/ 접두어 없이 검색
+        for (ASTStyleDef sd : doc.paragraphStyles()) {
+            String id = sd.styleId();
+            if (id != null && id.endsWith("/" + styleRef)) return sd;
+        }
+        return null;
+    }
+
     private String createOverrideParaPr(ASTParagraph astPara, String baseParaPrId) {
+        // 기본 스타일에서 값 상속
+        ASTStyleDef baseStyle = findParagraphStyle(astPara.paragraphStyleRef());
+
         String newId = styleRegistry.nextParaPrId();
         ParaPr paraPr = hwpxFile.headerXMLFile().refList().paraProperties().addNew();
         paraPr.idAnd(newId)
@@ -887,8 +922,12 @@ public class ASTToHwpxConverter {
                 .suppressLineNumbersAnd(false)
                 .checked(false);
 
-        // 정렬
-        HorizontalAlign2 hAlign = mapAlignment(astPara.alignment());
+        // 정렬: 단락 오버라이드 → 스타일 → JUSTIFY
+        String alignStr = astPara.alignment();
+        if (alignStr == null && baseStyle != null) {
+            alignStr = baseStyle.alignment();
+        }
+        HorizontalAlign2 hAlign = mapAlignment(alignStr);
         paraPr.createAlign();
         paraPr.align().horizontalAnd(hAlign).vertical(VerticalAlign1.BASELINE);
 
@@ -908,12 +947,17 @@ public class ASTToHwpxConverter {
         paraPr.createAutoSpacing();
         paraPr.autoSpacing().eAsianEngAnd(false).eAsianNum(false);
 
-        // 마진
-        int indent = astPara.firstLineIndent() != null ? astPara.firstLineIndent().intValue() : 0;
-        int left = astPara.leftMargin() != null ? astPara.leftMargin().intValue() : 0;
-        int right = astPara.rightMargin() != null ? astPara.rightMargin().intValue() : 0;
-        int prev = astPara.spaceBefore() != null ? astPara.spaceBefore().intValue() : 0;
-        int next = astPara.spaceAfter() != null ? astPara.spaceAfter().intValue() : 0;
+        // 마진: 단락 오버라이드 → 스타일 → 0
+        int indent = resolveParaLong(astPara.firstLineIndent(),
+                baseStyle != null ? baseStyle.firstLineIndent() : null);
+        int left = resolveParaLong(astPara.leftMargin(),
+                baseStyle != null ? baseStyle.leftMargin() : null);
+        int right = resolveParaLong(astPara.rightMargin(),
+                baseStyle != null ? baseStyle.rightMargin() : null);
+        int prev = resolveParaLong(astPara.spaceBefore(),
+                baseStyle != null ? baseStyle.spaceBefore() : null);
+        int next = resolveParaLong(astPara.spaceAfter(),
+                baseStyle != null ? baseStyle.spaceAfter() : null);
 
         paraPr.createMargin();
         paraPr.margin().createIntent();
@@ -927,12 +971,20 @@ public class ASTToHwpxConverter {
         paraPr.margin().createNext();
         paraPr.margin().next().valueAnd(next).unit(ValueUnit2.HWPUNIT);
 
-        // 줄 간격
+        // 줄 간격: 단락 오버라이드 → 스타일 → 160% PERCENT
         paraPr.createLineSpacing();
-        if (astPara.lineSpacing() != null) {
+        Integer lsValue = astPara.lineSpacing();
+        String lsType = astPara.lineSpacingType();
+        if (lsValue == null && baseStyle != null && baseStyle.lineSpacing() != null) {
+            lsValue = baseStyle.lineSpacing();
+            lsType = baseStyle.lineSpacingType();
+        }
+        if (lsValue != null) {
+            LineSpacingType hwpxType = "fixed".equals(lsType)
+                    ? LineSpacingType.FIXED : LineSpacingType.PERCENT;
             paraPr.lineSpacing()
-                    .typeAnd(LineSpacingType.PERCENT)
-                    .valueAnd(astPara.lineSpacing())
+                    .typeAnd(hwpxType)
+                    .valueAnd(lsValue)
                     .unit(ValueUnit2.HWPUNIT);
         } else {
             paraPr.lineSpacing()
@@ -942,6 +994,12 @@ public class ASTToHwpxConverter {
         }
 
         return newId;
+    }
+
+    private static int resolveParaLong(Long paraOverride, Long styleValue) {
+        if (paraOverride != null) return paraOverride.intValue();
+        if (styleValue != null) return styleValue.intValue();
+        return 0;
     }
 
     // ── 텍스트 런 변환 ──
@@ -1193,6 +1251,7 @@ public class ASTToHwpxConverter {
                 addInlineTableToSubList(subList, astTable);
             }
         }
+        removeTrailingEmptyHwpxPara(subList);
 
         if (subList.countOfPara() == 0) {
             addEmptySubListPara(subList);
@@ -1347,6 +1406,7 @@ public class ASTToHwpxConverter {
                 for (ASTParagraph astPara : astCell.paragraphs()) {
                     addParagraphToSubList(cellSubList, astPara, astCell.height());
                 }
+                removeTrailingEmptyHwpxPara(cellSubList);
 
                 if (cellSubList.countOfPara() == 0) {
                     addEmptySubListPara(cellSubList, astCell.height());
@@ -1364,9 +1424,10 @@ public class ASTToHwpxConverter {
 
         long displayW = obj.width() > 0 ? obj.width() : 1000;
         long displayH = obj.height() > 0 ? obj.height() : 1000;
-
-        int pixelW = obj.pixelWidth() > 0 ? obj.pixelWidth() : 100;
-        int pixelH = obj.pixelHeight() > 0 ? obj.pixelHeight() : 100;
+        long clipW = (long) obj.pixelWidth() * 75;
+        long clipH = (long) obj.pixelHeight() * 75;
+        if (clipW <= 0) clipW = displayW;
+        if (clipH <= 0) clipH = displayH;
 
         Run run = para.addNewRun();
         run.charPrIDRef("0");
@@ -1381,7 +1442,8 @@ public class ASTToHwpxConverter {
                 .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
-                .dropcapstyleAnd(DropCapStyle.None);
+                .dropcapstyleAnd(DropCapStyle.None)
+                .reverseAnd(false);
 
         // ShapeComponent
         pic.hrefAnd("");
@@ -1444,11 +1506,12 @@ public class ASTToHwpxConverter {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, displayH);
 
-        // ImageClip/Dim — 소스 이미지 크기 (pixel × 75)
-        long clipW = (long) pixelW * 75;
-        long clipH = (long) pixelH * 75;
+        // ImageClip/Dim — pixel * 75 (96 DPI 기준 HWPUNIT)
         pic.createImgClip();
         pic.imgClip().leftAnd(0L).rightAnd(clipW).topAnd(0L).bottomAnd(clipH);
+
+        pic.createInMargin();
+        pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         pic.createImgDim();
         pic.imgDim().dimwidthAnd(clipW).dimheightAnd(clipH);
@@ -1476,8 +1539,8 @@ public class ASTToHwpxConverter {
         Para framePara = createFloatingObjectPara(sectionFile);
         Run anchorRun = framePara.runs().iterator().next();
 
-        long x = Math.max(0, astTable.x());
-        long y = Math.max(0, astTable.y());
+        long x = astTable.x();
+        long y = astTable.y();
         long totalWidth = astTable.width();
 
         Table table = anchorRun.addNewTable();
@@ -1588,6 +1651,7 @@ public class ASTToHwpxConverter {
                 for (ASTParagraph astPara : astCell.paragraphs()) {
                     addParagraphToSubList(subList, astPara, astCell.height());
                 }
+                removeTrailingEmptyHwpxPara(subList);
 
                 // 빈 셀 방지
                 if (subList.countOfPara() == 0) {
@@ -1677,31 +1741,38 @@ public class ASTToHwpxConverter {
 
     // ── 이미지/도형 변환 (floating Picture) ──
 
-    private void convertFigure(SectionXMLFile sectionFile, ASTFigure figure) {
-        if (figure.kind() == ASTFigure.FigureKind.IMAGE) {
-            convertFigureImage(sectionFile, figure);
-        } else {
-            // RENDERED_SHAPE, RENDERED_GROUP → PNG 이미지로 처리
-            convertFigureImage(sectionFile, figure);
-        }
+    /**
+     * 공유 앵커 단락을 사용하는 figure 변환 (페이지 넘침 방지).
+     */
+    private void convertFigure(Para anchorPara, ASTFigure figure) {
+        convertFigureImage(anchorPara, figure);
     }
 
-    private void convertFigureImage(SectionXMLFile sectionFile, ASTFigure figure) {
+    /**
+     * 개별 앵커 단락을 생성하는 figure 변환 (배경 이미지 등).
+     */
+    private void convertFigure(SectionXMLFile sectionFile, ASTFigure figure) {
+        Para framePara = createFloatingObjectPara(sectionFile);
+        convertFigureImage(framePara, figure);
+    }
+
+    private void convertFigureImage(Para anchorPara, ASTFigure figure) {
         byte[] imageData = figure.imageData();
         if (imageData == null || imageData.length == 0) return;
 
         String format = figure.imageFormat() != null ? figure.imageFormat() : "png";
         String itemId = ImageInserter.registerImage(hwpxFile, imageData, format);
 
-        long x = Math.max(0, figure.x());
-        long y = Math.max(0, figure.y());
+        long x = figure.x();
+        long y = figure.y();
         long displayW = figure.width();
         long displayH = figure.height();
-        int pixelW = figure.pixelWidth() > 0 ? figure.pixelWidth() : 100;
-        int pixelH = figure.pixelHeight() > 0 ? figure.pixelHeight() : 100;
+        long clipW = (long) figure.pixelWidth() * 75;
+        long clipH = (long) figure.pixelHeight() * 75;
+        if (clipW <= 0) clipW = displayW;
+        if (clipH <= 0) clipH = displayH;
 
-        Para framePara = createFloatingObjectPara(sectionFile);
-        Run anchorRun = framePara.runs().iterator().next();
+        Run anchorRun = anchorPara.runs().iterator().next();
 
         Picture pic = anchorRun.addNewPicture();
         String picId = nextShapeId();
@@ -1713,7 +1784,8 @@ public class ASTToHwpxConverter {
                 .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
-                .dropcapstyleAnd(DropCapStyle.None);
+                .dropcapstyleAnd(DropCapStyle.None)
+                .reverseAnd(false);
 
         // ShapeComponent
         pic.hrefAnd("");
@@ -1730,7 +1802,7 @@ public class ASTToHwpxConverter {
         pic.curSz().set(displayW, displayH);
 
         pic.createFlip();
-        pic.flip().horizontalAnd(false).verticalAnd(false);
+        pic.flip().horizontalAnd(figure.flipHorizontal()).verticalAnd(figure.flipVertical());
 
         pic.createRotationInfo();
         short rotAngle = (short) Math.round(figure.rotationAngle());
@@ -1784,11 +1856,12 @@ public class ASTToHwpxConverter {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, displayH);
 
-        // ImageClip/Dim — 소스 이미지 크기 (pixel × 75)
-        long clipW = (long) pixelW * 75;
-        long clipH = (long) pixelH * 75;
+        // ImageClip/Dim — pixel * 75 (96 DPI 기준 HWPUNIT)
         pic.createImgClip();
         pic.imgClip().leftAnd(0L).rightAnd(clipW).topAnd(0L).bottomAnd(clipH);
+
+        pic.createInMargin();
+        pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         pic.createImgDim();
         pic.imgDim().dimwidthAnd(clipW).dimheightAnd(clipH);
@@ -1812,6 +1885,15 @@ public class ASTToHwpxConverter {
 
         long w = bg.pageWidth();
         long h = bg.pageHeight();
+        long bgClipW, bgClipH;
+        try {
+            int[] sz = ImageInserter.detectPixelSize(pngData);
+            bgClipW = (long) sz[0] * 75;
+            bgClipH = (long) sz[1] * 75;
+        } catch (Exception e) {
+            bgClipW = w;
+            bgClipH = h;
+        }
 
         Para framePara = createFloatingObjectPara(sectionFile);
         Run anchorRun = framePara.runs().iterator().next();
@@ -1826,7 +1908,8 @@ public class ASTToHwpxConverter {
                 .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
-                .dropcapstyleAnd(DropCapStyle.None);
+                .dropcapstyleAnd(DropCapStyle.None)
+                .reverseAnd(false);
 
         pic.hrefAnd("");
         pic.groupLevelAnd((short) 0);
@@ -1886,13 +1969,12 @@ public class ASTToHwpxConverter {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, h);
 
-        // ImageClip/Dim — 소스 이미지 크기 (pixel × 75)
-        int bgPixelW = bg.pixelWidth() > 0 ? bg.pixelWidth() : 100;
-        int bgPixelH = bg.pixelHeight() > 0 ? bg.pixelHeight() : 100;
-        long bgClipW = (long) bgPixelW * 75;
-        long bgClipH = (long) bgPixelH * 75;
+        // ImageClip/Dim — pixel * 75 (96 DPI 기준 HWPUNIT)
         pic.createImgClip();
         pic.imgClip().leftAnd(0L).rightAnd(bgClipW).topAnd(0L).bottomAnd(bgClipH);
+
+        pic.createInMargin();
+        pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         pic.createImgDim();
         pic.imgDim().dimwidthAnd(bgClipW).dimheightAnd(bgClipH);
@@ -1957,6 +2039,96 @@ public class ASTToHwpxConverter {
         Run run = emptyPara.addNewRun();
         run.charPrIDRef(charPrId);
         run.addNewT();
+    }
+
+    /**
+     * SubList의 마지막 단락이 빈 단락이면 제거.
+     * HWPX 글상자/셀 끝에 불필요한 줄바꿈이 생기지 않도록 한다.
+     */
+    private static void removeTrailingEmptyHwpxPara(SubList subList) {
+        while (subList.countOfPara() > 1) {
+            Para last = subList.getPara(subList.countOfPara() - 1);
+            boolean empty = isHwpxParaEmpty(last);
+            if (empty) {
+                subList.removePara(subList.countOfPara() - 1);
+            } else {
+                break;
+            }
+        }
+    }
+
+    private static boolean isHwpxParaEmpty(Para para) {
+        for (Run run : para.runs()) {
+            for (int i = 0; i < run.countOfRunItem(); i++) {
+                RunItem item = run.getRunItem(i);
+                if (item instanceof T) {
+                    T t = (T) item;
+                    if (!t.isEmpty()) {
+                        if (t.isOnlyText() && t.onlyText().strip().isEmpty()) continue;
+                        // itemList 방식: 모든 아이템이 공백 텍스트이면 빈 것으로 간주
+                        if (!t.isOnlyText() && t.countOfItems() > 0) {
+                            boolean allBlank = true;
+                            for (int j = 0; j < t.countOfItems(); j++) {
+                                Object ti = t.getItem(j);
+                                if (ti instanceof kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.t.NormalText) {
+                                    String s = ((kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.t.NormalText) ti).text();
+                                    if (s != null && !s.strip().isEmpty()) { allBlank = false; break; }
+                                } else {
+                                    allBlank = false; break;
+                                }
+                            }
+                            if (allBlank) continue;
+                        }
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * SectionXMLFile 전체를 재귀 순회하여 모든 SubList의 마지막 빈 단락을 제거한다.
+     */
+    private static void cleanupTrailingEmptyParas(SectionXMLFile section) {
+        for (int i = 0; i < section.countOfPara(); i++) {
+            cleanupParaRecursive(section.getPara(i));
+        }
+    }
+
+    private static void cleanupParaRecursive(Para para) {
+        for (Run run : para.runs()) {
+            for (int i = 0; i < run.countOfRunItem(); i++) {
+                RunItem item = run.getRunItem(i);
+                if (item instanceof Table) {
+                    Table table = (Table) item;
+                    for (Tr tr : table.trs()) {
+                        for (Tc tc : tr.tcs()) {
+                            SubList subList = tc.subList();
+                            if (subList != null) {
+                                cleanupSubListRecursive(subList);
+                            }
+                        }
+                    }
+                } else if (item instanceof DrawingObject) {
+                    DrawText dt = ((DrawingObject<?>) item).drawText();
+                    if (dt != null && dt.subList() != null) {
+                        cleanupSubListRecursive(dt.subList());
+                    }
+                }
+            }
+        }
+    }
+
+    private static void cleanupSubListRecursive(SubList subList) {
+        // 먼저 자식 요소를 재귀 순회
+        for (int i = 0; i < subList.countOfPara(); i++) {
+            cleanupParaRecursive(subList.getPara(i));
+        }
+        // 마지막 빈 단락 제거
+        removeTrailingEmptyHwpxPara(subList);
     }
 
     private String tinyCharPrId;
@@ -2057,10 +2229,11 @@ public class ASTToHwpxConverter {
     private HorizontalAlign2 mapAlignment(String alignment) {
         if (alignment == null) return HorizontalAlign2.JUSTIFY;
         switch (alignment.toLowerCase()) {
-            case "left": case "leftjustify": return HorizontalAlign2.LEFT;
-            case "center": case "centerjustify": return HorizontalAlign2.CENTER;
-            case "right": case "rightjustify": return HorizontalAlign2.RIGHT;
-            case "justify": case "fulljustify": case "leftjustified": return HorizontalAlign2.JUSTIFY;
+            case "left": case "leftjustify": case "leftalign": return HorizontalAlign2.LEFT;
+            case "center": case "centerjustify": case "centeralign": return HorizontalAlign2.CENTER;
+            case "right": case "rightjustify": case "rightalign": return HorizontalAlign2.RIGHT;
+            case "justify": case "fulljustify": case "leftjustified": case "fullyjustified":
+                return HorizontalAlign2.JUSTIFY;
             default: return HorizontalAlign2.JUSTIFY;
         }
     }

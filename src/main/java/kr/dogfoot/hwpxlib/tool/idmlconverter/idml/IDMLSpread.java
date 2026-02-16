@@ -1,7 +1,5 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.idml;
 
-import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -94,50 +92,9 @@ public class IDMLSpread {
      */
     public List<IDMLTextFrame> getTextFramesOnPage(IDMLPage page) {
         List<IDMLTextFrame> result = new ArrayList<IDMLTextFrame>();
-
-        // 페이지 좌표 범위 계산
-        double[] pageBounds = page.geometricBounds();
-        double[] pageTransform = page.itemTransform();
-        double pageMinX = 0, pageMaxX = 0, pageMinY = 0, pageMaxY = 0;
-        if (pageBounds != null && pageTransform != null) {
-            double[] pageTopLeft = CoordinateConverter.applyTransform(pageTransform, pageBounds[1], pageBounds[0]);
-            double[] pageBottomRight = CoordinateConverter.applyTransform(pageTransform, pageBounds[3], pageBounds[2]);
-            pageMinX = Math.min(pageTopLeft[0], pageBottomRight[0]);
-            pageMaxX = Math.max(pageTopLeft[0], pageBottomRight[0]);
-            pageMinY = Math.min(pageTopLeft[1], pageBottomRight[1]);
-            pageMaxY = Math.max(pageTopLeft[1], pageBottomRight[1]);
-        }
-
         for (IDMLTextFrame frame : textFrames) {
             if (frame.geometricBounds() != null && frame.itemTransform() != null
                     && page.geometricBounds() != null && page.itemTransform() != null) {
-
-                // 큰 Y 오프셋인 경우 디버그 로그
-                double ty = frame.itemTransform()[5];
-                if (ty > 1000 || ty < -1000) {
-                    double[] frameBounds = frame.geometricBounds();
-                    double frameCenterX = (frameBounds[1] + frameBounds[3]) / 2.0;
-                    double frameCenterY = (frameBounds[0] + frameBounds[2]) / 2.0;
-                    double[] frameCenter = CoordinateConverter.applyTransform(frame.itemTransform(),
-                            frameCenterX, frameCenterY);
-
-                    boolean isOnPage = IDMLGeometry.isFrameOnPage(
-                            frame.geometricBounds(), frame.itemTransform(),
-                            page.geometricBounds(), page.itemTransform());
-
-                    System.err.println("[DEBUG] 텍스트 페이지 할당: " + frame.selfId()
-                            + " | 페이지 " + page.pageNumber()
-                            + " | 페이지X=[" + CoordinateConverter.fmtInt(pageMinX) + "," + CoordinateConverter.fmtInt(pageMaxX) + "]"
-                            + " Y=[" + CoordinateConverter.fmtInt(pageMinY) + "," + CoordinateConverter.fmtInt(pageMaxY) + "]"
-                            + " | 텍스트(" + CoordinateConverter.fmtInt(frameCenter[0]) + "," + CoordinateConverter.fmtInt(frameCenter[1]) + ")"
-                            + " | 포함=" + isOnPage);
-
-                    if (isOnPage) {
-                        result.add(frame);
-                    }
-                    continue;
-                }
-
                 if (IDMLGeometry.isFrameOnPage(
                         frame.geometricBounds(), frame.itemTransform(),
                         page.geometricBounds(), page.itemTransform())) {
@@ -171,50 +128,9 @@ public class IDMLSpread {
      */
     public List<IDMLVectorShape> getVectorShapesOnPage(IDMLPage page) {
         List<IDMLVectorShape> result = new ArrayList<IDMLVectorShape>();
-
-        // 페이지 좌표 범위 계산
-        double[] pageBounds = page.geometricBounds();
-        double[] pageTransform = page.itemTransform();
-        double pageMinX = 0, pageMaxX = 0, pageMinY = 0, pageMaxY = 0;
-        if (pageBounds != null && pageTransform != null) {
-            double[] pageTopLeft = CoordinateConverter.applyTransform(pageTransform, pageBounds[1], pageBounds[0]);
-            double[] pageBottomRight = CoordinateConverter.applyTransform(pageTransform, pageBounds[3], pageBounds[2]);
-            pageMinX = Math.min(pageTopLeft[0], pageBottomRight[0]);
-            pageMaxX = Math.max(pageTopLeft[0], pageBottomRight[0]);
-            pageMinY = Math.min(pageTopLeft[1], pageBottomRight[1]);
-            pageMaxY = Math.max(pageTopLeft[1], pageBottomRight[1]);
-        }
-
         for (IDMLVectorShape shape : vectorShapes) {
             if (shape.geometricBounds() != null && shape.itemTransform() != null
                     && page.geometricBounds() != null && page.itemTransform() != null) {
-
-                // 큰 Y 오프셋인 경우 디버그 로그
-                double ty = shape.itemTransform()[5];
-                if (ty > 1000 || ty < -1000) {
-                    double[] shapeBounds = shape.geometricBounds();
-                    double shapeCenterX = (shapeBounds[1] + shapeBounds[3]) / 2.0;
-                    double shapeCenterY = (shapeBounds[0] + shapeBounds[2]) / 2.0;
-                    double[] shapeCenter = CoordinateConverter.applyTransform(shape.itemTransform(),
-                            shapeCenterX, shapeCenterY);
-
-                    boolean isOnPage = IDMLGeometry.isFrameOnPage(
-                            shape.geometricBounds(), shape.itemTransform(),
-                            page.geometricBounds(), page.itemTransform());
-
-                    System.err.println("[DEBUG] 벡터 페이지 할당: " + shape.selfId()
-                            + " | 페이지 " + page.pageNumber()
-                            + " | 페이지X=[" + CoordinateConverter.fmtInt(pageMinX) + "," + CoordinateConverter.fmtInt(pageMaxX) + "]"
-                            + " Y=[" + CoordinateConverter.fmtInt(pageMinY) + "," + CoordinateConverter.fmtInt(pageMaxY) + "]"
-                            + " | 벡터(" + CoordinateConverter.fmtInt(shapeCenter[0]) + "," + CoordinateConverter.fmtInt(shapeCenter[1]) + ")"
-                            + " | 포함=" + isOnPage);
-
-                    if (isOnPage) {
-                        result.add(shape);
-                    }
-                    continue;
-                }
-
                 if (IDMLGeometry.isFrameOnPage(
                         shape.geometricBounds(), shape.itemTransform(),
                         page.geometricBounds(), page.itemTransform())) {
@@ -252,56 +168,15 @@ public class IDMLSpread {
             }
         }
 
-        // 페이지 범위 계산 (디버그용)
-        double[] pageBounds = page.geometricBounds();
-        double[] pageTransform = page.itemTransform();
-        double pageMinX = 0, pageMaxX = 0, pageMinY = 0, pageMaxY = 0;
-        if (pageBounds != null && pageTransform != null) {
-            double[] pageTopLeft = CoordinateConverter.applyTransform(pageTransform, pageBounds[1], pageBounds[0]);
-            double[] pageBottomRight = CoordinateConverter.applyTransform(pageTransform, pageBounds[3], pageBounds[2]);
-            pageMinX = Math.min(pageTopLeft[0], pageBottomRight[0]);
-            pageMaxX = Math.max(pageTopLeft[0], pageBottomRight[0]);
-            pageMinY = Math.min(pageTopLeft[1], pageBottomRight[1]);
-            pageMaxY = Math.max(pageTopLeft[1], pageBottomRight[1]);
-        }
-
         // 벡터 도형 추가 (인라인 그래픽은 제외 - HWPX 네이티브 객체로 내보내기 위해)
-        int vectorTotal = 0, vectorOnPage = 0;
         for (IDMLVectorShape shape : vectorShapes) {
-            vectorTotal++;
-            // 인라인 그래픽은 PNG 배경 렌더링에서 제외 (별도 HWPX 객체로 내보냄)
-            if (shape.isInline()) {
-                continue;
-            }
-            // 그룹에서 추출된 벡터는 제외 (그룹 글상자로 별도 처리)
-            if (!includeGroupItems && shape.fromGroup()) {
-                continue;
-            }
+            if (shape.isInline()) continue;
+            if (!includeGroupItems && shape.fromGroup()) continue;
             if (shape.geometricBounds() != null && shape.itemTransform() != null
                     && page.geometricBounds() != null && page.itemTransform() != null) {
-
-                boolean onPage = IDMLGeometry.isFrameOnPage(
+                if (IDMLGeometry.isFrameOnPage(
                         shape.geometricBounds(), shape.itemTransform(),
-                        page.geometricBounds(), page.itemTransform());
-
-                // 특정 인라인 그래픽 디버그 (u38a3 등)
-                String selfId = shape.selfId();
-                if (selfId != null && (selfId.startsWith("u38a") || selfId.startsWith("u38b") || selfId.startsWith("u38d"))) {
-                    double[] shapeBounds = shape.geometricBounds();
-                    double shapeCenterX = (shapeBounds[1] + shapeBounds[3]) / 2.0;
-                    double shapeCenterY = (shapeBounds[0] + shapeBounds[2]) / 2.0;
-                    double[] shapeCenter = CoordinateConverter.applyTransform(shape.itemTransform(),
-                            shapeCenterX, shapeCenterY);
-                    System.err.println("[DEBUG] 렌더링 체크: " + selfId
-                            + " | 페이지 " + page.pageNumber()
-                            + " | 벡터중심(" + CoordinateConverter.fmtInt(shapeCenter[0]) + "," + CoordinateConverter.fmtInt(shapeCenter[1]) + ")"
-                            + " | 페이지범위 X=[" + CoordinateConverter.fmtInt(pageMinX) + "," + CoordinateConverter.fmtInt(pageMaxX) + "]"
-                            + " Y=[" + CoordinateConverter.fmtInt(pageMinY) + "," + CoordinateConverter.fmtInt(pageMaxY) + "]"
-                            + " | onPage=" + onPage);
-                }
-
-                if (onPage) {
-                    vectorOnPage++;
+                        page.geometricBounds(), page.itemTransform())) {
                     result.add(new RenderableItem(shape));
                 }
             }

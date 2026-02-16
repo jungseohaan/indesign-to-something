@@ -191,6 +191,11 @@ public class IDMLToIntermediateConverter {
                 List<IDMLTextFrame> textFrames = spread.getTextFramesOnPage(page);
 
                 // 모든 이미지와 벡터 그래픽을 페이지 크기의 배경 PNG로 렌더링
+                // 인라인 그래픽 렌더러 설정 (인라인 group/rectangle PNG 렌더링용)
+                IDMLPageRenderer inlineRenderer = new IDMLPageRenderer(idmlDoc, options.vectorDpi());
+                inlineRenderer.setLinksDirectory(options.linksDirectory());
+                textFrameConverter.setInlineGraphicRenderer(inlineRenderer);
+
                 if (options.includeImages()) {
                     try {
                         IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, options.vectorDpi());

@@ -335,14 +335,14 @@ public class StyleRegistry {
 
     private static HorizontalAlign2 mapAlignment(String alignment) {
         if (alignment == null) return HorizontalAlign2.JUSTIFY;
-        switch (alignment) {
-            case "left":
+        switch (alignment.toLowerCase()) {
+            case "left": case "leftalign":
                 return HorizontalAlign2.LEFT;
-            case "center":
+            case "center": case "centeralign":
                 return HorizontalAlign2.CENTER;
-            case "right":
+            case "right": case "rightalign":
                 return HorizontalAlign2.RIGHT;
-            case "justify":
+            case "justify": case "leftjustified": case "fullyjustified":
                 return HorizontalAlign2.JUSTIFY;
             default:
                 return HorizontalAlign2.JUSTIFY;

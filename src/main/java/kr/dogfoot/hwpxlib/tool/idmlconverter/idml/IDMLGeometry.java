@@ -125,6 +125,43 @@ public class IDMLGeometry {
     }
 
     /**
+     * 스케일만 적용한 너비 (회전 제외).
+     * transform에서 scaleX = sqrt(a² + b²)을 추출하여 로컬 너비에 곱한다.
+     * 비회전 시 transformedWidth와 동일하고, 회전 시 바운딩 박스 팽창 없이 원본 크기.
+     */
+    public static double scaledWidth(double[] bounds, double[] transform) {
+        if (transform == null) return width(bounds);
+        double sx = Math.sqrt(transform[0] * transform[0] + transform[1] * transform[1]);
+        return sx * width(bounds);
+    }
+
+    /**
+     * 스케일만 적용한 높이 (회전 제외).
+     */
+    public static double scaledHeight(double[] bounds, double[] transform) {
+        if (transform == null) return height(bounds);
+        double sy = Math.sqrt(transform[2] * transform[2] + transform[3] * transform[3]);
+        return sy * height(bounds);
+    }
+
+    /**
+     * 프레임의 페이지 상대 중심점 계산 (points).
+     * @return [relCenterX, relCenterY]
+     */
+    public static double[] pageRelativeCenter(
+            double[] frameBounds, double[] frameTransform,
+            double[] pageBounds, double[] pageTransform) {
+        double centerX = (frameBounds[1] + frameBounds[3]) / 2.0;
+        double centerY = (frameBounds[0] + frameBounds[2]) / 2.0;
+        double[] absCenter = CoordinateConverter.applyTransform(frameTransform, centerX, centerY);
+        double[] pageAbs = absoluteTopLeft(pageBounds, pageTransform);
+        return new double[]{
+                absCenter[0] - pageAbs[0],
+                absCenter[1] - pageAbs[1]
+        };
+    }
+
+    /**
      * ItemTransform에서 회전 각도를 추출한다.
      * transform = [a, b, c, d, tx, ty] 에서:
      *   a = scaleX * cos(θ)
@@ -132,7 +169,9 @@ public class IDMLGeometry {
      *   c = -scaleY * sin(θ)
      *   d = scaleY * cos(θ)
      *
-     * 회전 각도 θ = atan2(b, a) (시계 방향 양수, 도 단위로 반환)
+     * 행렬식(det = ad - bc)이 음수이면 flip이 포함되어 있으므로,
+     * 수평 flip을 제거한 후 순수 회전 각도를 추출한다.
+     * Rot(θ) * FlipH → a = -cos(θ), b = -sin(θ) → θ = atan2(-b, -a)
      *
      * @param transform ItemTransform 배열 [a, b, c, d, tx, ty]
      * @return 회전 각도 (도, degree) - 시계 방향 양수
@@ -143,12 +182,28 @@ public class IDMLGeometry {
         }
         double a = transform[0];
         double b = transform[1];
+        double c = transform[2];
+        double d = transform[3];
 
-        // atan2(b, a)로 라디안 → 도 변환
-        double radians = Math.atan2(b, a);
-        double degrees = Math.toDegrees(radians);
+        double det = a * d - b * c;
+        if (det < 0) {
+            // flip 포함: 수평 flip을 분리하면 Rot = M * FlipH → atan2(-b, -a)
+            return Math.toDegrees(Math.atan2(-b, -a));
+        }
 
-        return degrees;
+        return Math.toDegrees(Math.atan2(b, a));
+    }
+
+    /**
+     * ItemTransform에 flip(반전)이 포함되어 있는지 판별.
+     * 행렬식(det = ad - bc)이 음수이면 flip이 포함된 것.
+     */
+    public static boolean hasFlip(double[] transform) {
+        if (transform == null || transform.length < 4) {
+            return false;
+        }
+        double det = transform[0] * transform[3] - transform[1] * transform[2];
+        return det < 0;
     }
 
     /**

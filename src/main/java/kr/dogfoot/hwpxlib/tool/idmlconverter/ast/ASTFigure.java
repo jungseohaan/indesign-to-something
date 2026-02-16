@@ -15,6 +15,8 @@ public class ASTFigure extends ASTBlock {
     private long height;
     private int zOrder;
     private double rotationAngle;
+    private boolean flipHorizontal;
+    private boolean flipVertical;
 
     // 이미지 데이터
     private String imageFormat;
@@ -45,6 +47,12 @@ public class ASTFigure extends ASTBlock {
 
     public double rotationAngle() { return rotationAngle; }
     public void rotationAngle(double v) { this.rotationAngle = v; }
+
+    public boolean flipHorizontal() { return flipHorizontal; }
+    public void flipHorizontal(boolean v) { this.flipHorizontal = v; }
+
+    public boolean flipVertical() { return flipVertical; }
+    public void flipVertical(boolean v) { this.flipVertical = v; }
 
     public String imageFormat() { return imageFormat; }
     public void imageFormat(String v) { this.imageFormat = v; }

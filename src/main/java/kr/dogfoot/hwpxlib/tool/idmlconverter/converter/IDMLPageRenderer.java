@@ -23,11 +23,16 @@ public class IDMLPageRenderer {
     private final IDMLDocument idmlDoc;
     private final Map<String, String> colorMap;  // colorRef -> "#RRGGBB"
     private final int dpi;
+    private String linksDirectory;  // 인라인 그래픽 이미지 로드용
 
     public IDMLPageRenderer(IDMLDocument idmlDoc, int dpi) {
         this.idmlDoc = idmlDoc;
         this.colorMap = idmlDoc.colors();
         this.dpi = dpi;
+    }
+
+    public void setLinksDirectory(String linksDirectory) {
+        this.linksDirectory = linksDirectory;
     }
 
     /**
@@ -1316,12 +1321,24 @@ public class IDMLPageRenderer {
         BufferedImage image = new BufferedImage(pixelWidth, pixelHeight, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = image.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 
-        // 플레이스홀더 렌더링 (추후 실제 벡터 렌더링으로 확장)
-        g.setColor(new Color(0xEE, 0xEE, 0xEE));
-        g.fillRect(0, 0, pixelWidth, pixelHeight);
-        g.setColor(new Color(0xCC, 0xCC, 0xCC));
-        g.drawRect(0, 0, pixelWidth - 1, pixelHeight - 1);
+        // 인라인 그래픽의 로컬 좌표 원점 (geometricBounds 기준)
+        double[] bounds = graphic.geometricBounds();
+        double originX = (bounds != null && bounds.length >= 4) ? bounds[1] : 0;
+        double originY = (bounds != null && bounds.length >= 4) ? bounds[0] : 0;
+
+        // 그래픽 자체 또는 자식들의 이미지를 렌더링
+        boolean hasContent = renderInlineGraphicContent(g, graphic, originX, originY, scale);
+
+        if (!hasContent) {
+            // 이미지가 없는 경우 placeholder
+            g.setColor(new Color(0xEE, 0xEE, 0xEE));
+            g.fillRect(0, 0, pixelWidth, pixelHeight);
+            g.setColor(new Color(0xCC, 0xCC, 0xCC));
+            g.drawRect(0, 0, pixelWidth - 1, pixelHeight - 1);
+        }
 
         g.dispose();
 
@@ -1330,5 +1347,174 @@ public class IDMLPageRenderer {
         byte[] pngData = baos.toByteArray();
 
         return new RenderResult(pngData, 0, 0, widthPts, heightPts, pixelWidth, pixelHeight);
+    }
+
+    /**
+     * 인라인 그래픽의 이미지 콘텐츠를 렌더링한다.
+     * 자체 이미지가 있으면 그리고, group이면 자식들을 재귀적으로 처리한다.
+     *
+     * @return 하나 이상의 이미지를 그렸으면 true
+     */
+    private boolean renderInlineGraphicContent(Graphics2D g, IDMLCharacterRun.InlineGraphic graphic,
+                                                double originX, double originY, double scale) {
+        boolean rendered = false;
+
+        // 자체 이미지가 있는 경우 (Rectangle/Polygon에 Image가 포함된 경우)
+        if (graphic.hasImage()) {
+            rendered = renderInlineImage(g, graphic, originX, originY, scale);
+        }
+
+        // Group인 경우 자식 그래픽을 재귀적으로 렌더링
+        if (graphic.childGraphics() != null) {
+            for (IDMLCharacterRun.InlineGraphic child : graphic.childGraphics()) {
+                if (renderInlineGraphicContent(g, child, originX, originY, scale)) {
+                    rendered = true;
+                }
+            }
+        }
+
+        return rendered;
+    }
+
+    /**
+     * 단일 인라인 이미지를 렌더링한다.
+     * IDMLImageFrame 기반 renderImage()와 유사한 로직을 InlineGraphic 구조에 적용한다.
+     */
+    private boolean renderInlineImage(Graphics2D g, IDMLCharacterRun.InlineGraphic graphic,
+                                       double originX, double originY, double scale) {
+        // 이미지 로드 (InlineGraphic의 linkResourceURI 사용)
+        BufferedImage srcImage = loadInlineImage(graphic);
+        if (srcImage == null) return false;
+
+        double[] frameBounds = graphic.geometricBounds();
+        double[] frameTransform = graphic.itemTransform();
+        double[] imgTransformArr = graphic.imageTransform();
+
+        if (frameBounds == null || frameTransform == null) {
+            // transform 없으면 단순 그리기
+            g.drawImage(srcImage, 0, 0, (int)(graphic.widthPoints() * scale),
+                    (int)(graphic.heightPoints() * scale), null);
+            return true;
+        }
+
+        double top = frameBounds[0], left = frameBounds[1];
+        double bottom = frameBounds[2], right = frameBounds[3];
+
+        // 프레임의 4개 코너를 변환하여 클리핑 경로 생성
+        double[] tl = applyTransform(frameTransform, left, top);
+        double[] tr = applyTransform(frameTransform, right, top);
+        double[] bl = applyTransform(frameTransform, left, bottom);
+        double[] br = applyTransform(frameTransform, right, bottom);
+
+        // 인라인 그래픽 로컬 좌표로 변환 (픽셀)
+        double tlX = (tl[0] - originX) * scale, tlY = (tl[1] - originY) * scale;
+        double trX = (tr[0] - originX) * scale, trY = (tr[1] - originY) * scale;
+        double blX = (bl[0] - originX) * scale, blY = (bl[1] - originY) * scale;
+        double brX = (br[0] - originX) * scale, brY = (br[1] - originY) * scale;
+
+        GeneralPath clipPath = new GeneralPath();
+        clipPath.moveTo(tlX, tlY);
+        clipPath.lineTo(trX, trY);
+        clipPath.lineTo(brX, brY);
+        clipPath.lineTo(blX, blY);
+        clipPath.closePath();
+
+        double[] graphicBounds = graphic.graphicBounds();
+        double gLeft = 0, gTop = 0, gRight = srcImage.getWidth(), gBottom = srcImage.getHeight();
+        if (graphicBounds != null && graphicBounds.length >= 4) {
+            gLeft = graphicBounds[0];
+            gTop = graphicBounds[1];
+            gRight = graphicBounds[2];
+            gBottom = graphicBounds[3];
+        }
+
+        double graphicW = gRight - gLeft;
+        double graphicH = gBottom - gTop;
+        double pointsToPixelX = (graphicW > 0) ? srcImage.getWidth() / graphicW : 1.0;
+        double pointsToPixelY = (graphicH > 0) ? srcImage.getHeight() / graphicH : 1.0;
+
+        Shape oldClip = g.getClip();
+        g.setClip(clipPath);
+
+        AffineTransform imgAT = new AffineTransform();
+        imgAT.scale(scale, scale);
+        imgAT.translate(-originX, -originY);
+        imgAT.concatenate(new AffineTransform(
+                frameTransform[0], frameTransform[1],
+                frameTransform[2], frameTransform[3],
+                frameTransform[4], frameTransform[5]));
+
+        if (imgTransformArr != null && imgTransformArr.length >= 6) {
+            imgAT.concatenate(new AffineTransform(
+                    imgTransformArr[0], imgTransformArr[1],
+                    imgTransformArr[2], imgTransformArr[3],
+                    imgTransformArr[4], imgTransformArr[5]));
+        }
+
+        imgAT.translate(-gLeft, -gTop);
+        imgAT.scale(1.0 / pointsToPixelX, 1.0 / pointsToPixelY);
+
+        g.drawImage(srcImage, imgAT, null);
+        g.setClip(oldClip);
+
+        return true;
+    }
+
+    /**
+     * 인라인 그래픽의 이미지를 로드한다.
+     * loadImage()와 동일한 검색 로직을 InlineGraphic의 linkResourceURI에 적용한다.
+     */
+    private BufferedImage loadInlineImage(IDMLCharacterRun.InlineGraphic graphic) {
+        String uri = graphic.linkResourceURI();
+        if (uri == null || uri.isEmpty()) return null;
+
+        String path = stripFileUri(uri);
+        String filename = extractFilename(path);
+
+        File imageFile = null;
+
+        if (linksDirectory != null && filename != null) {
+            File f = new File(linksDirectory, filename);
+            if (f.exists()) imageFile = f;
+        }
+
+        if (imageFile == null) {
+            File f = new File(path);
+            if (f.exists()) imageFile = f;
+        }
+
+        if (imageFile == null && idmlDoc.basePath() != null && filename != null) {
+            File linksDir = new File(idmlDoc.basePath(), "Links");
+            File f = new File(linksDir, filename);
+            if (f.exists()) imageFile = f;
+        }
+
+        if (imageFile == null) return null;
+
+        try {
+            String ext = getExtension(imageFile).toLowerCase();
+            if (isDesignFormat(ext)) {
+                if (isCacheableDesignFormat(ext)) {
+                    File cacheFile = new File(imageFile.getAbsolutePath() + ".png");
+                    if (cacheFile.exists() && cacheFile.length() > 0) {
+                        return ImageIO.read(cacheFile);
+                    }
+                }
+                byte[] pngData = DesignFileConverter.convertToPng(imageFile, dpi);
+                if (pngData == null || pngData.length == 0) return null;
+                if (isCacheableDesignFormat(ext)) {
+                    try {
+                        File cacheFile = new File(imageFile.getAbsolutePath() + ".png");
+                        Files.write(cacheFile.toPath(), pngData);
+                    } catch (Exception ignored) {}
+                }
+                return ImageIO.read(new ByteArrayInputStream(pngData));
+            } else {
+                return ImageIO.read(imageFile);
+            }
+        } catch (IOException e) {
+            System.err.println("  [ERROR] Failed to load inline image: " + imageFile.getName() + " - " + e.getMessage());
+            return null;
+        }
     }
 }

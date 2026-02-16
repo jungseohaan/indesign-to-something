@@ -354,6 +354,7 @@ public class IDMLLoader {
     // ===== Resources/Graphic.xml 파싱 =====
 
     private static void parseGraphic(Document graphicDoc, IDMLDocument doc) {
+        // 색상 파싱
         NodeList colors = graphicDoc.getElementsByTagName("Color");
         for (int i = 0; i < colors.getLength(); i++) {
             Element colorElem = (Element) colors.item(i);
@@ -365,6 +366,26 @@ public class IDMLLoader {
             String hexColor = convertColorToHex(colorValue, model, space);
             if (hexColor != null) {
                 doc.putColor(selfRef, hexColor);
+            }
+        }
+
+        // 그레이디언트 파싱: 첫 번째 GradientStop의 색상을 대표 색상으로 등록
+        NodeList gradients = graphicDoc.getElementsByTagName("Gradient");
+        for (int i = 0; i < gradients.getLength(); i++) {
+            Element gradientElem = (Element) gradients.item(i);
+            String selfRef = gradientElem.getAttribute("Self");
+
+            // 첫 번째 GradientStop의 StopColor를 찾아 대표 색상으로 사용
+            NodeList stops = gradientElem.getElementsByTagName("GradientStop");
+            if (stops.getLength() > 0) {
+                Element firstStop = (Element) stops.item(0);
+                String stopColorRef = firstStop.getAttribute("StopColor");
+                if (stopColorRef != null && !stopColorRef.isEmpty()) {
+                    String hexColor = doc.getColor(stopColorRef);
+                    if (hexColor != null) {
+                        doc.putColor(selfRef, hexColor);
+                    }
+                }
             }
         }
     }
@@ -430,13 +451,6 @@ public class IDMLLoader {
             } else if ("TextFrame".equals(elem.getTagName())) {
                 IDMLTextFrame frame = parseTextFrame(elem);
                 if (frame != null) {
-                    // 디버그: 스프레드 직접 자식 텍스트의 ty 확인
-                    double ty = frame.itemTransform()[5];
-                    if (ty > 1000 || ty < -1000) {
-                        System.err.println("[DEBUG] 스프레드 직접 텍스트: " + frame.selfId()
-                            + " ty=" + CoordinateConverter.fmt(ty)
-                            + " storyId=" + frame.parentStoryId());
-                    }
                     spread.addTextFrame(frame);
                 }
             } else if ("Rectangle".equals(elem.getTagName())
@@ -450,15 +464,14 @@ public class IDMLLoader {
                     // 이미지가 없으면 순수 벡터 도형으로 파싱
                     IDMLVectorShape vectorShape = tryParseVectorShape(elem);
                     if (vectorShape != null) {
-                        // 디버그: 스프레드 직접 자식 벡터의 ty 확인
-                        double ty = vectorShape.itemTransform()[5];
-                        if (ty > 1000 || ty < -1000) {
-                            System.err.println("[DEBUG] 스프레드 직접 벡터: " + vectorShape.selfId()
-                                + " ty=" + CoordinateConverter.fmt(ty));
-                        }
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
+                    // 프레임 내부의 Group 자식도 탐색
+                    double[] frameTransform = IDMLGeometry.parseTransform(
+                            elem.getAttribute("ItemTransform"));
+                    extractGroupsFromFrame(elem, spread, frameTransform,
+                            hiddenLayerIds, zOrderCounter);
                 }
             } else if ("GraphicLine".equals(elem.getTagName())) {
                 // 그래픽 라인도 벡터 도형으로 처리
@@ -567,11 +580,31 @@ public class IDMLLoader {
             frame.columnCount(parseIntAttr(tfPref, "TextColumnCount", 1));
             frame.columnGutter(parseDoubleAttrDef(tfPref, "TextColumnGutter", 12.0));
 
-            // InsetSpacing (단일 값 또는 4면 개별 값)
+            // InsetSpacing (속성 단일 값 또는 Properties 리스트)
             String insetStr = tfPref.getAttribute("InsetSpacing");
             if (insetStr != null && !insetStr.isEmpty()) {
-                double inset = Double.parseDouble(insetStr);
-                frame.insetSpacing(new double[]{inset, inset, inset, inset});
+                try {
+                    double inset = Double.parseDouble(insetStr);
+                    frame.insetSpacing(new double[]{inset, inset, inset, inset});
+                } catch (NumberFormatException ignored) {}
+            }
+            if (frame.insetSpacing() == null) {
+                Element tfProps = getFirstChildElement(tfPref, "Properties");
+                if (tfProps != null) {
+                    Element insetElem = getFirstChildElement(tfProps, "InsetSpacing");
+                    if (insetElem != null) {
+                        List<Element> items = getChildElements(insetElem, "ListItem");
+                        if (items.size() >= 4) {
+                            try {
+                                double[] insets = new double[4];
+                                for (int si = 0; si < 4; si++) {
+                                    insets[si] = Double.parseDouble(items.get(si).getTextContent().trim());
+                                }
+                                frame.insetSpacing(insets);
+                            } catch (NumberFormatException ignored) {}
+                        }
+                    }
+                }
             }
 
             // 컬럼 유형 (고정 수, 고정 너비, 가변 너비)
@@ -751,10 +784,42 @@ public class IDMLLoader {
         shape.fillTint(parseDoubleAttrDef(shapeElem, "FillTint", 100));
         shape.strokeTint(parseDoubleAttrDef(shapeElem, "StrokeTint", 100));
 
-        // 라인 스타일 속성
-        String startCap = getAttrOrNull(shapeElem, "LeftLineEnd");
-        String endCap = getAttrOrNull(shapeElem, "RightLineEnd");
-        String lineJoin = getAttrOrNull(shapeElem, "StrokeCornerAdjustment");
+        // 라인 끝 모양 (EndCap: ButtEndCap, RoundEndCap, ProjectingEndCap)
+        String endCapStr = getAttrOrNull(shapeElem, "EndCap");
+        if (endCapStr != null) {
+            if (endCapStr.contains("Round")) {
+                shape.startCap(IDMLVectorShape.LineCap.ROUND);
+                shape.endCap(IDMLVectorShape.LineCap.ROUND);
+            } else if (endCapStr.contains("Projecting")) {
+                shape.startCap(IDMLVectorShape.LineCap.PROJECTING);
+                shape.endCap(IDMLVectorShape.LineCap.PROJECTING);
+            }
+        }
+
+        // 라인 연결 모양 (EndJoin: MiterEndJoin, RoundEndJoin, BevelEndJoin)
+        String endJoinStr = getAttrOrNull(shapeElem, "EndJoin");
+        if (endJoinStr != null) {
+            if (endJoinStr.contains("Round")) {
+                shape.lineJoin(IDMLVectorShape.LineJoin.ROUND);
+            } else if (endJoinStr.contains("Bevel")) {
+                shape.lineJoin(IDMLVectorShape.LineJoin.BEVEL);
+            }
+        }
+        shape.miterLimit(parseDoubleAttrDef(shapeElem, "MiterLimit", 4.0));
+
+        // StrokeType → 점선 패턴 (Solid, Canned Dashed, Canned Dotted, Japanese Dots 등)
+        String strokeType = getAttrOrNull(shapeElem, "StrokeType");
+        if (strokeType != null) {
+            double[] dash = resolveStrokeDashPattern(strokeType, shape.strokeWeight());
+            if (dash != null) {
+                shape.dashPattern(dash);
+            }
+            // Japanese Dots는 CAP_ROUND 필수 (0-길이 대시 → 둥근 점)
+            if (strokeType.contains("Japanese Dots")) {
+                shape.startCap(IDMLVectorShape.LineCap.ROUND);
+                shape.endCap(IDMLVectorShape.LineCap.ROUND);
+            }
+        }
 
         // PathPoint 파싱 (Properties/PathGeometry/GeometryPathType/PathPointArray)
         Element props = getFirstChildElement(shapeElem, "Properties");
@@ -779,6 +844,30 @@ public class IDMLLoader {
         }
 
         return shape;
+    }
+
+    /**
+     * IDML StrokeType → 점선 dash 패턴 (포인트 단위).
+     * Solid이면 null 반환 (점선 없음).
+     */
+    private static double[] resolveStrokeDashPattern(String strokeType, double strokeWeight) {
+        if (strokeType == null || strokeType.contains("Solid")) return null;
+        if (strokeWeight <= 0) strokeWeight = 1.0;
+
+        if (strokeType.contains("Canned Dashed 4x4")) {
+            return new double[]{4, 4};
+        } else if (strokeType.contains("Canned Dashed 3x2")) {
+            return new double[]{3, 2};
+        } else if (strokeType.contains("Canned Dotted")) {
+            return new double[]{strokeWeight, strokeWeight * 2};
+        } else if (strokeType.contains("Japanese Dots")) {
+            // CAP_ROUND + 0-길이 대시 → 둥근 점. BasicStroke는 양수만 허용하므로 0.01 사용.
+            return new double[]{0.01, strokeWeight * 3};
+        } else if (strokeType.contains("Dashed")) {
+            return new double[]{6, 4};
+        }
+        // Wavy, Hash, Diamond 등 복잡한 패턴은 Solid 처리
+        return null;
     }
 
     /**
@@ -847,6 +936,33 @@ public class IDMLLoader {
     }
 
     /**
+     * 프레임(Rectangle/Polygon/Oval) 내부의 Group 자식을 탐색하여
+     * 벡터 도형/이미지/텍스트 프레임을 추출한다.
+     * InDesign에서 프레임 안에 Group이 배치될 수 있으며,
+     * 이 경우 프레임의 ItemTransform을 누적하여 Group 내 요소를 처리한다.
+     */
+    private static void extractGroupsFromFrame(Element frameElem, IDMLSpread spread,
+                                                double[] frameTransform,
+                                                Set<String> hiddenLayerIds,
+                                                int[] zOrderCounter) {
+        NodeList children = frameElem.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node node = children.item(i);
+            if (node.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element child = (Element) node;
+            if ("Group".equals(child.getTagName())) {
+                double[] groupTransform = IDMLGeometry.parseTransform(
+                        child.getAttribute("ItemTransform"));
+                double[] combined = CoordinateConverter.combineTransforms(
+                        frameTransform, groupTransform);
+                String groupSelfId = child.getAttribute("Self");
+                parseGroupForFrames(child, spread, combined, hiddenLayerIds,
+                        zOrderCounter, groupSelfId);
+            }
+        }
+    }
+
+    /**
      * Group 내부의 TextFrame과 이미지 프레임을 재귀적으로 수집한다.
      * Group의 ItemTransform을 자식 프레임의 ItemTransform에 결합하여
      * 절대 좌표를 올바르게 계산한다.
@@ -908,6 +1024,9 @@ public class IDMLLoader {
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
+                    // 프레임 내부의 Group 자식도 탐색
+                    extractGroupsFromFrame(elem, spread, accumulatedTransform,
+                            hiddenLayerIds, zOrderCounter);
                 }
             } else if ("GraphicLine".equals(elem.getTagName())) {
                 // 그래픽 라인도 벡터 도형으로 처리
@@ -1986,8 +2105,10 @@ public class IDMLLoader {
     }
 
     /**
-     * PathGeometry > GeometryPathType > PathPointArray > PathPointType[Anchor]
+     * PathGeometry > GeometryPathType > PathPointArray > PathPointType
      * 에서 bounding box를 계산한다.
+     * Anchor, LeftDirection, RightDirection 모든 좌표를 포함하여
+     * 베지에 곡선이 앵커 밖으로 확장되는 경우를 처리한다.
      */
     private static double[] computeBoundsFromPathGeometry(Element elem) {
         List<Element> pathPoints = getDescendantElements(elem, "PathPointType");
@@ -1999,16 +2120,20 @@ public class IDMLLoader {
         double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
 
         for (Element pp : pathPoints) {
-            String anchor = pp.getAttribute("Anchor");
-            if (anchor == null || anchor.isEmpty()) continue;
-            String[] parts = anchor.trim().split("\\s+");
-            if (parts.length >= 2) {
-                double x = Double.parseDouble(parts[0]);
-                double y = Double.parseDouble(parts[1]);
-                if (x < minX) minX = x;
-                if (x > maxX) maxX = x;
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
+            // Anchor, LeftDirection, RightDirection 모두 포함
+            String[] attrs = {"Anchor", "LeftDirection", "RightDirection"};
+            for (String attr : attrs) {
+                String val = pp.getAttribute(attr);
+                if (val == null || val.isEmpty()) continue;
+                String[] parts = val.trim().split("\\s+");
+                if (parts.length >= 2) {
+                    double x = Double.parseDouble(parts[0]);
+                    double y = Double.parseDouble(parts[1]);
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
             }
         }
 

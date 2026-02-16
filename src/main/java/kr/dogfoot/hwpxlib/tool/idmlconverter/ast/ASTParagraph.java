@@ -18,6 +18,7 @@ public class ASTParagraph {
     private Long spaceBefore;
     private Long spaceAfter;
     private Integer lineSpacing;
+    private String lineSpacingType; // "fixed" or "percent"
     private Short letterSpacing;
 
     // 단락 배경
@@ -59,6 +60,9 @@ public class ASTParagraph {
 
     public Integer lineSpacing() { return lineSpacing; }
     public void lineSpacing(Integer v) { this.lineSpacing = v; }
+
+    public String lineSpacingType() { return lineSpacingType; }
+    public void lineSpacingType(String v) { this.lineSpacingType = v; }
 
     public Short letterSpacing() { return letterSpacing; }
     public void letterSpacing(Short v) { this.letterSpacing = v; }
