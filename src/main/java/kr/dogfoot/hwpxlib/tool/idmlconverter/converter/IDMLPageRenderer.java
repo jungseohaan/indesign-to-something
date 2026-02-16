@@ -687,22 +687,6 @@ public class IDMLPageRenderer {
         // PathPoints로 경로 생성
         GeneralPath path = new GeneralPath();
         if (points.size() > 0) {
-            // 디버그: 인라인 그래픽 렌더링 위치 확인
-            String selfId = shape.selfId();
-            if (selfId != null && (selfId.startsWith("u38a") || selfId.startsWith("u38b") || selfId.startsWith("u38d"))) {
-                IDMLVectorShape.PathPoint firstPt = points.get(0);
-                double[] firstLocal = applyTransform(transform, firstPt.anchorX(), firstPt.anchorY());
-                double firstPx = (firstLocal[0] - pageTx) * scale;
-                double firstPy = (firstLocal[1] - pageTy) * scale;
-                System.err.println("[DEBUG] 벡터 렌더링: " + selfId
-                        + " | PathPoints=" + points.size()
-                        + " | 첫점원본=(" + String.format("%.1f,%.1f", firstPt.anchorX(), firstPt.anchorY()) + ")"
-                        + " | 변환후=(" + String.format("%.1f,%.1f", firstLocal[0], firstLocal[1]) + ")"
-                        + " | 픽셀=(" + String.format("%.1f,%.1f", firstPx, firstPy) + ")"
-                        + " | pageTxTy=(" + String.format("%.1f,%.1f", pageTx, pageTy) + ")"
-                        + " | fillColor=" + shape.fillColor());
-            }
-
             boolean first = true;
             for (int i = 0; i < points.size(); i++) {
                 IDMLVectorShape.PathPoint pt = points.get(i);

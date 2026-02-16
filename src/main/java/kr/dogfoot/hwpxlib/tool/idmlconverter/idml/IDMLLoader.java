@@ -781,7 +781,12 @@ public class IDMLLoader {
         }
 
         // 투명도 (FillTint, StrokeTint: 0~100, 100=불투명)
-        shape.fillTint(parseDoubleAttrDef(shapeElem, "FillTint", 100));
+        // FillTint=0 + 유효한 FillColor → 100%로 보정 (아웃라인된 글리프 등 IDML 내보내기 아티팩트)
+        double fillTint = parseDoubleAttrDef(shapeElem, "FillTint", 100);
+        if (fillTint == 0 && shape.hasFill()) {
+            fillTint = 100;
+        }
+        shape.fillTint(fillTint);
         shape.strokeTint(parseDoubleAttrDef(shapeElem, "StrokeTint", 100));
 
         // 라인 끝 모양 (EndCap: ButtEndCap, RoundEndCap, ProjectingEndCap)
@@ -1712,14 +1717,9 @@ public class IDMLLoader {
 
         int[] inlineZOrder = {10000};  // 인라인 그래픽은 높은 z-order 시작
 
-        System.err.println("[DEBUG] 인라인 그래픽 추출 시작. 대상 Story 수: " + neededStoryIds.size());
-
         for (String storyId : neededStoryIds) {
             File storyFile = new File(storiesDir, "Story_" + storyId + ".xml");
-            if (!storyFile.exists()) {
-                System.err.println("[DEBUG] Story 파일 없음: " + storyId);
-                continue;
-            }
+            if (!storyFile.exists()) continue;
 
             Document storyDoc = parseXML(storyFile);
 
@@ -1727,20 +1727,11 @@ public class IDMLLoader {
             List<InlineGraphicInfo> inlineGraphics = new ArrayList<>();
             collectInlineGraphics(storyDoc.getDocumentElement(), inlineGraphics);
 
-            // 디버그: 인라인 그래픽 수집 결과 (u65d 포함 모든 스토리)
-            System.err.println("[DEBUG] Story " + storyId + ": 인라인 그래픽 " + inlineGraphics.size() + "개");
-            if (!inlineGraphics.isEmpty()) {
-                System.err.println("[DEBUG] Story " + storyId + ": 인라인 그래픽 " + inlineGraphics.size() + "개 발견");
-            }
-
             if (inlineGraphics.isEmpty()) continue;
 
             // 이 Story를 참조하는 모든 TextFrame 찾기
             List<IDMLTextFrame> textFrames = storyToTextFrames.get(storyId);
-            if (textFrames == null || textFrames.isEmpty()) {
-                System.err.println("[DEBUG] Story " + storyId + ": TextFrame 없음!");
-                continue;
-            }
+            if (textFrames == null || textFrames.isEmpty()) continue;
 
             // 각 인라인 그래픽을 모든 관련 스프레드에 추가
             // (나중에 isFrameOnPage로 올바른 페이지에만 렌더링)
@@ -1783,16 +1774,6 @@ public class IDMLLoader {
                         finalTransform[4] = groupCombinedTransform[4] + textFrameTransform[4];
                         finalTransform[5] = groupCombinedTransform[5] + textFrameTransform[5];
                     }
-
-                    // 디버그 로그
-                    System.err.println("[DEBUG] 인라인 그래픽: " + vectorShape.selfId()
-                        + " | groupTy=" + CoordinateConverter.fmt(groupCombinedTransform[5])
-                        + " | tfTy=" + CoordinateConverter.fmt(textFrameTransform[5])
-                        + " | deltaY=" + CoordinateConverter.fmtInt(bestDeltaY)
-                        + " | needsOffset=" + needsOffset
-                        + " | finalTy=" + CoordinateConverter.fmt(finalTransform[5])
-                        + " | Story=" + storyId
-                        + " | TextFrames=" + textFrames.size());
 
                     // 결합된 변환 적용
                     vectorShape.itemTransform(finalTransform);

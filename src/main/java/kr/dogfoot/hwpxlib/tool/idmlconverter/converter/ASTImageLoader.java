@@ -735,6 +735,77 @@ public class ASTImageLoader {
         }
     }
 
+    /**
+     * 이미지 데이터에 회전/반전을 사전 렌더링.
+     * composedTransform의 회전/반전 성분을 픽셀 레벨에서 적용하여
+     * HWPX rotationInfo 없이 올바르게 표시되도록 한다.
+     *
+     * @param imageData  원본 이미지 바이트 (PNG/JPEG)
+     * @param composedTransform 합성된 아핀 변환 [a, b, c, d, tx, ty]
+     * @return 회전된 이미지와 새 치수를 포함한 ImageResult, 또는 실패 시 null
+     */
+    public static ImageResult preRenderRotation(byte[] imageData, double[] composedTransform) {
+        if (imageData == null || composedTransform == null) return null;
+
+        try {
+            BufferedImage srcImg = ImageIO.read(new ByteArrayInputStream(imageData));
+            if (srcImg == null) return null;
+
+            double a = composedTransform[0], b = composedTransform[1];
+            double c = composedTransform[2], d = composedTransform[3];
+            double scaleX = Math.sqrt(a * a + b * b);
+            double scaleY = Math.sqrt(c * c + d * d);
+            if (scaleX < 1e-10 || scaleY < 1e-10) return null;
+
+            // 정규화된 회전/반전 행렬 (스케일 제거)
+            AffineTransform rotFlip = new AffineTransform(
+                    a / scaleX, b / scaleX, c / scaleY, d / scaleY, 0, 0);
+
+            int srcW = srcImg.getWidth();
+            int srcH = srcImg.getHeight();
+
+            // 4코너를 변환하여 새 바운딩 박스 계산
+            double[] corners = new double[]{0, 0, srcW, 0, srcW, srcH, 0, srcH};
+            double[] transformed = new double[8];
+            rotFlip.transform(corners, 0, transformed, 0, 4);
+
+            double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+            double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+            for (int i = 0; i < 8; i += 2) {
+                minX = Math.min(minX, transformed[i]);
+                maxX = Math.max(maxX, transformed[i]);
+                minY = Math.min(minY, transformed[i + 1]);
+                maxY = Math.max(maxY, transformed[i + 1]);
+            }
+
+            int newW = Math.max(1, (int) Math.ceil(maxX - minX));
+            int newH = Math.max(1, (int) Math.ceil(maxY - minY));
+
+            BufferedImage dstImg = new BufferedImage(newW, newH, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = dstImg.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                    RenderingHints.VALUE_RENDER_QUALITY);
+
+            // 원점 보정 후 회전/반전 적용
+            g.translate(-minX, -minY);
+            g.transform(rotFlip);
+            g.drawImage(srcImg, 0, 0, null);
+            g.dispose();
+
+            byte[] pngData = encodePng(dstImg);
+            ImageResult result = new ImageResult();
+            result.imageData = pngData;
+            result.format = "png";
+            result.pixelWidth = newW;
+            result.pixelHeight = newH;
+            return result;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
     private static byte[] encodePng(BufferedImage image) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(image, "png", baos);

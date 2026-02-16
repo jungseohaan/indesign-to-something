@@ -71,40 +71,12 @@ public class TextFrameConverter {
         setFramePosition(iFrame, tf.geometricBounds(), tf.itemTransform(),
                 page.geometricBounds(), page.itemTransform());
 
-        // 디버그: 좌표 계산 추적
-        long pageRelX = iFrame.x();
-        long pageRelY = iFrame.y();
-
         iFrame.x(iFrame.x() + CoordinateConverter.pointsToHwpunits(pageTopLeft[0]));
         iFrame.y(iFrame.y() + CoordinateConverter.pointsToHwpunits(pageTopLeft[1]));
         iFrame.zOrder(zOrder);
 
         // 텍스트 방향 설정 (세로쓰기 여부)
         iFrame.verticalText(story.isVertical());
-
-        // 첫 번째 단락의 텍스트 미리보기 (디버그용)
-        String textPreview = "";
-        if (!story.paragraphs().isEmpty() && !story.paragraphs().get(0).characterRuns().isEmpty()) {
-            textPreview = story.paragraphs().get(0).characterRuns().get(0).content();
-            if (textPreview != null && textPreview.length() > 20) {
-                textPreview = textPreview.substring(0, 20);
-            }
-        }
-
-        // 디버그 출력
-        double[] fb = tf.geometricBounds();
-        System.err.printf("[DEBUG] TextFrame %s: \"%s\"%n", tf.selfId(), textPreview);
-        System.err.printf("  IDML bounds: [%.2f, %.2f, %.2f, %.2f] (top,left,bottom,right)%n",
-                fb[0], fb[1], fb[2], fb[3]);
-        System.err.printf("  IDML size: %.2f x %.2f pts (%.2f x %.2f mm)%n",
-                fb[3]-fb[1], fb[2]-fb[0], (fb[3]-fb[1])*0.3528, (fb[2]-fb[0])*0.3528);
-        System.err.printf("  pageTopLeft offset: [%.2f, %.2f] pts%n", pageTopLeft[0], pageTopLeft[1]);
-        System.err.printf("  페이지 상대 좌표: (%d, %d) HWPUNIT = (%.2f, %.2f) mm%n",
-                pageRelX, pageRelY, pageRelX/283.465, pageRelY/283.465);
-        System.err.printf("  최종 스프레드 좌표: (%d, %d) HWPUNIT = (%.2f, %.2f) mm%n",
-                iFrame.x(), iFrame.y(), iFrame.x()/283.465, iFrame.y()/283.465);
-        System.err.printf("  최종 크기: %d x %d HWPUNIT = %.2f x %.2f mm%n%n",
-                iFrame.width(), iFrame.height(), iFrame.width()/283.465, iFrame.height()/283.465);
 
         // 컬럼 정보 설정
         setColumnInfo(iFrame, tf);
@@ -244,12 +216,6 @@ public class TextFrameConverter {
         // 회전 각도 추출 및 설정
         double rotation = IDMLGeometry.extractRotation(frameTransform);
         iFrame.rotationAngle(rotation);
-
-        // 회전이 있는 경우 디버그 출력
-        if (Math.abs(rotation) > 0.1) {
-            System.err.println("[DEBUG] Frame rotation: " + iFrame.frameId() + " = "
-                    + CoordinateConverter.fmt(rotation) + "°");
-        }
     }
 
     /**
@@ -504,12 +470,8 @@ public class TextFrameConverter {
             if (referencedStory.hasTables()) {
                 List<IDMLCharacterRun.InlineGraphic> tableGraphics = extractGraphicsFromStoryTables(referencedStory);
                 if (!tableGraphics.isEmpty()) {
-                    System.err.println("[DEBUG-NESTED-TABLE-INLINE] Found " + tableGraphics.size() +
-                            " graphics in nested tables of " + inlineFrame.selfId());
                     // 각 그래픽을 PNG로 렌더링하여 인라인 이미지로 추가
                     for (IDMLCharacterRun.InlineGraphic graphic : tableGraphics) {
-                        System.err.println("[DEBUG-NESTED-TABLE-INLINE] Rendering: " + graphic.selfId() +
-                                " type=" + graphic.type());
                         IntermediateFrame imageFrame = createInlineGraphicFrame(graphic);
                         if (imageFrame != null) {
                             iPara.addInlineFrame(imageFrame);
@@ -660,11 +622,6 @@ public class TextFrameConverter {
         double widthPts = bounds[3] - bounds[1];  // right - left
         double heightPts = bounds[2] - bounds[0]; // bottom - top
         if (widthPts <= 0 || heightPts <= 0) return null;
-
-        System.err.println("[DEBUG-INLINE-TF] Rendering TextFrame " + textFrame.selfId() +
-                " bounds=[" + String.format("%.1f,%.1f,%.1f,%.1f", bounds[0], bounds[1], bounds[2], bounds[3]) +
-                "] size=" + String.format("%.1fx%.1f", widthPts, heightPts) + " pts" +
-                " with " + graphics.size() + " graphics");
 
         // 크기 (HWPUNIT)
         long width = CoordinateConverter.pointsToHwpunits(widthPts);

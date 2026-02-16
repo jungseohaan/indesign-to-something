@@ -158,10 +158,8 @@ public class IDMLToIntermediateConverter {
 
         if (options.spreadBasedConversion()) {
             // === 스프레드 모드: 각 스프레드를 하나의 큰 페이지로 변환 ===
-            System.err.println("[DEBUG] Spread mode enabled, converting spreads...");
             doc.useSpreadMode(true);
             convertSpreads(doc, processedStories);
-            System.err.println("[DEBUG] After convertSpreads: spreads count = " + doc.spreads().size());
             return doc;
         }
 
@@ -322,32 +320,6 @@ public class IDMLToIntermediateConverter {
 
                         // 텍스트 방향 설정 (세로쓰기 여부)
                         iFrame.verticalText(story.isVertical());
-
-                        // 디버그: 좌표 계산 추적 (페이지 모드)
-                        String textPreview = "";
-                        if (!story.paragraphs().isEmpty() && !story.paragraphs().get(0).characterRuns().isEmpty()) {
-                            textPreview = story.paragraphs().get(0).characterRuns().get(0).content();
-                            if (textPreview != null && textPreview.length() > 20) {
-                                textPreview = textPreview.substring(0, 20);
-                            }
-                        }
-                        double[] fb = tf.geometricBounds();
-                        double[] ft = tf.itemTransform();
-                        double[] pb = page.geometricBounds();
-                        double[] pt = page.itemTransform();
-                        System.err.printf("[DEBUG-PAGE] TextFrame %s: \"%s\"%n", tf.selfId(), textPreview);
-                        System.err.printf("  IDML frameBounds: [%.2f, %.2f, %.2f, %.2f] (top,left,bottom,right)%n",
-                                fb[0], fb[1], fb[2], fb[3]);
-                        System.err.printf("  IDML frameTransform: [%.4f, %.4f, %.4f, %.4f, %.2f, %.2f]%n",
-                                ft[0], ft[1], ft[2], ft[3], ft[4], ft[5]);
-                        System.err.printf("  IDML pageBounds: [%.2f, %.2f, %.2f, %.2f]%n",
-                                pb[0], pb[1], pb[2], pb[3]);
-                        System.err.printf("  IDML pageTransform: [%.4f, %.4f, %.4f, %.4f, %.2f, %.2f]%n",
-                                pt[0], pt[1], pt[2], pt[3], pt[4], pt[5]);
-                        System.err.printf("  결과 좌표: (%d, %d) HWPUNIT = (%.2f, %.2f) mm%n",
-                                iFrame.x(), iFrame.y(), iFrame.x()/283.465, iFrame.y()/283.465);
-                        System.err.printf("  결과 크기: %d x %d HWPUNIT = %.2f x %.2f mm%n%n",
-                                iFrame.width(), iFrame.height(), iFrame.width()/283.465, iFrame.height()/283.465);
 
                         // Story 내용 변환
                         Map<String, List<IDMLEquationExtractor.ExtractedEquation>> storyEquations =

@@ -768,21 +768,57 @@ public class Stage4_BuildAST {
     }
 
     /**
-     * 인라인 그래픽 계층에서 이미지를 직접 포함하는 가장 가까운 자식 프레임을 찾는다.
-     * 외부 앵커 Rectangle은 텍스트 프레임 전체 높이를 가질 수 있으므로,
-     * 실제 이미지 프레임의 크기를 사용해야 정확한 표시 크기를 얻을 수 있다.
+     * 인라인 그래픽 계층에서 이미지를 직접 포함하는 자식 프레임을 찾는다.
+     * 부모 Group의 linkResourceURI와 일치하는 자식을 우선 선택한다.
+     * (collectInlineImageLink가 Image→PDF→EPS 순서로 검색하므로,
+     * Group의 URI가 주요 콘텐츠 이미지를 가리킨다.)
+     * 일치하는 자식이 없으면 가장 큰 이미지 자식을 선택한다.
      */
     private static IDMLCharacterRun.InlineGraphic findImageFrame(IDMLCharacterRun.InlineGraphic ig) {
-        // 자식 그래픽 중 이미지를 가진 것을 재귀 탐색
+        // 1. 부모의 linkResourceURI와 일치하는 자식을 우선 검색
+        String parentURI = ig.linkResourceURI();
+        if (parentURI != null && !parentURI.isEmpty()) {
+            IDMLCharacterRun.InlineGraphic match = findImageFrameByURI(ig, parentURI);
+            if (match != null) return match;
+        }
+        // 2. 일치하는 자식이 없으면 가장 큰 이미지 자식 선택
+        return findLargestImageFrame(ig);
+    }
+
+    private static IDMLCharacterRun.InlineGraphic findImageFrameByURI(
+            IDMLCharacterRun.InlineGraphic ig, String targetURI) {
         for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
-            if (child.hasImage() && child.childGraphics().isEmpty()) {
-                // 이미지를 직접 포함하는 리프 프레임
+            if (child.hasImage() && child.childGraphics().isEmpty()
+                    && targetURI.equals(child.linkResourceURI())) {
                 return child;
             }
-            IDMLCharacterRun.InlineGraphic found = findImageFrame(child);
+            IDMLCharacterRun.InlineGraphic found = findImageFrameByURI(child, targetURI);
             if (found != null) return found;
         }
         return null;
+    }
+
+    private static IDMLCharacterRun.InlineGraphic findLargestImageFrame(IDMLCharacterRun.InlineGraphic ig) {
+        IDMLCharacterRun.InlineGraphic best = null;
+        double bestArea = 0;
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            if (child.hasImage() && child.childGraphics().isEmpty()) {
+                double area = child.widthPoints() * child.heightPoints();
+                if (area > bestArea) {
+                    bestArea = area;
+                    best = child;
+                }
+            }
+            IDMLCharacterRun.InlineGraphic found = findLargestImageFrame(child);
+            if (found != null) {
+                double area = found.widthPoints() * found.heightPoints();
+                if (area > bestArea) {
+                    bestArea = area;
+                    best = found;
+                }
+            }
+        }
+        return best;
     }
 
     /**
@@ -1033,22 +1069,38 @@ public class Stage4_BuildAST {
     private static ASTFigure createFigureFromImageFrame(IDMLImageFrame imgFrame,
                                                           IDMLPage page,
                                                           ASTImageLoader imageLoader) {
-        // 스케일만 적용한 크기 (회전에 의한 바운딩 박스 팽창 제외)
-        // HWPX는 rotationInfo로 회전을 별도 적용하므로, 회전 전 크기를 사용해야 함
-        double w = IDMLGeometry.scaledWidth(imgFrame.geometricBounds(), imgFrame.itemTransform());
-        double h = IDMLGeometry.scaledHeight(imgFrame.geometricBounds(), imgFrame.itemTransform());
+        double[] t = imgFrame.itemTransform();
+        boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001);
 
-        // 중심점 기반 위치 계산: 회전과 무관하게 올바른 위치
-        // HWPX는 (horzOffset, vertOffset)에 놓은 후 중심을 기준으로 회전하므로,
-        // position = pageCenter - halfSize 로 계산
-        double[] relCenter = IDMLGeometry.pageRelativeCenter(
-                imgFrame.geometricBounds(), imgFrame.itemTransform(),
-                page.geometricBounds(), page.itemTransform());
+        long wHwp, hHwp, xHwp, yHwp;
 
-        long wHwp = CoordinateConverter.pointsToHwpunits(w);
-        long hHwp = CoordinateConverter.pointsToHwpunits(h);
-        long xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
-        long yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
+        if (hasRotOrFlip) {
+            // === 회전/반전 사전 렌더링 경로 (벡터 도형과 동일) ===
+            double w = IDMLGeometry.transformedWidth(imgFrame.geometricBounds(), imgFrame.itemTransform());
+            double h = IDMLGeometry.transformedHeight(imgFrame.geometricBounds(), imgFrame.itemTransform());
+            wHwp = CoordinateConverter.pointsToHwpunits(w);
+            hHwp = CoordinateConverter.pointsToHwpunits(h);
+
+            double[] bbox = IDMLGeometry.getTransformedBoundingBox(
+                    imgFrame.geometricBounds(), imgFrame.itemTransform());
+            double[] pageAbs = IDMLGeometry.absoluteTopLeft(
+                    page.geometricBounds(), page.itemTransform());
+            xHwp = CoordinateConverter.pointsToHwpunits(bbox[0] - pageAbs[0]);
+            yHwp = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
+        } else {
+            // === 기존 비회전 경로 ===
+            double w = IDMLGeometry.scaledWidth(imgFrame.geometricBounds(), imgFrame.itemTransform());
+            double h = IDMLGeometry.scaledHeight(imgFrame.geometricBounds(), imgFrame.itemTransform());
+
+            double[] relCenter = IDMLGeometry.pageRelativeCenter(
+                    imgFrame.geometricBounds(), imgFrame.itemTransform(),
+                    page.geometricBounds(), page.itemTransform());
+
+            wHwp = CoordinateConverter.pointsToHwpunits(w);
+            hHwp = CoordinateConverter.pointsToHwpunits(h);
+            xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
+            yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
+        }
 
         if (wHwp <= 0 || hHwp <= 0) return null;
 
@@ -1060,6 +1112,15 @@ public class Stage4_BuildAST {
                 imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds());
 
         if (result == null || result.imageData == null) return null;
+
+        // 회전/반전이 있으면 이미지를 픽셀 레벨에서 회전
+        if (hasRotOrFlip) {
+            ASTImageLoader.ImageResult rotated =
+                    ASTImageLoader.preRenderRotation(result.imageData, imgFrame.itemTransform());
+            if (rotated != null) {
+                result = rotated;
+            }
+        }
 
         ASTFigure figure = new ASTFigure();
         figure.kind(ASTFigure.FigureKind.IMAGE);
@@ -1074,27 +1135,20 @@ public class Stage4_BuildAST {
         figure.pixelHeight(result.pixelHeight);
         figure.imagePath(imgFrame.linkResourceURI());
 
-        // Flip + 회전 처리
-        // HWPX flip 속성은 뷰어 호환성 문제로 사용하지 않고 픽셀 레벨에서 처리
-        if (IDMLGeometry.hasFlip(imgFrame.itemTransform())) {
-            double rotation = IDMLGeometry.extractRotation(imgFrame.itemTransform());
-            if (Math.abs(Math.abs(rotation) - 180) < 0.5) {
-                // 순수 수직 플립 (rot≈180 + flipH = flipV): 픽셀 flipV, HWPX 회전 없음
-                result.imageData = ASTImageLoader.flipVertically(result.imageData);
-            } else if (Math.abs(rotation) < 0.5) {
-                // 순수 수평 플립 (rot≈0 + flipH): 픽셀 flipH, HWPX 회전 없음
-                result.imageData = ASTImageLoader.flipHorizontally(result.imageData);
-            } else {
-                // 플립 + 실제 회전: 픽셀 flipH + HWPX 회전
-                result.imageData = ASTImageLoader.flipHorizontally(result.imageData);
-                figure.rotationAngle(rotation);
-            }
-        } else {
-            double rotation = IDMLGeometry.extractRotation(imgFrame.itemTransform());
-            if (Math.abs(rotation) > 0.1) {
-                figure.rotationAngle(rotation);
+        if (!hasRotOrFlip) {
+            // 비회전 경로에서만 기존 flip 처리
+            if (IDMLGeometry.hasFlip(imgFrame.itemTransform())) {
+                double rotation = IDMLGeometry.extractRotation(imgFrame.itemTransform());
+                if (Math.abs(Math.abs(rotation) - 180) < 0.5) {
+                    result.imageData = ASTImageLoader.flipVertically(result.imageData);
+                    figure.imageData(result.imageData);
+                } else if (Math.abs(rotation) < 0.5) {
+                    result.imageData = ASTImageLoader.flipHorizontally(result.imageData);
+                    figure.imageData(result.imageData);
+                }
             }
         }
+        // hasRotOrFlip: 회전/반전이 preRenderRotation에서 이미 처리됨
 
         return figure;
     }
@@ -1136,7 +1190,17 @@ public class Stage4_BuildAST {
             xHwp = CoordinateConverter.pointsToHwpunits(bbox[0] - pageAbs[0]);
             yHwp = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
 
-            if (wHwp <= 0 || hHwp <= 0) return null;
+            // 선 도형(GraphicLine 등)은 한 축이 0일 수 있음: stroke weight를 최소 크기로 사용
+            if (wHwp <= 0 || hHwp <= 0) {
+                if (shape.hasStroke() && shape.strokeWeight() > 0) {
+                    long minDim = CoordinateConverter.pointsToHwpunits(shape.strokeWeight());
+                    if (minDim < 100) minDim = 100;
+                    if (wHwp <= 0) wHwp = minDim;
+                    if (hHwp <= 0) hHwp = minDim;
+                } else {
+                    return null;
+                }
+            }
 
             // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
             long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));

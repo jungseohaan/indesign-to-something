@@ -51,15 +51,6 @@ public class VectorShapeConverter {
         // 폴리곤 경로 점 저장
         setPathPoints(iFrame, shape);
 
-        if (isDebugEnabled()) {
-            System.err.println("[DEBUG] 인라인 도형 변환: " + shape.selfId()
-                    + " | type=" + iFrame.shapeType()
-                    + " | pos=(" + iFrame.x() + "," + iFrame.y() + ")"
-                    + " | size=" + iFrame.width() + "x" + iFrame.height()
-                    + " | fill=" + iFrame.fillColor()
-                    + " | stroke=" + iFrame.strokeColor());
-        }
-
         return iFrame;
     }
 
@@ -149,7 +140,4 @@ public class VectorShapeConverter {
         return colorResolver.resolve(colorRef);
     }
 
-    private boolean isDebugEnabled() {
-        return true; // TODO: ConvertOptions에서 가져오기
-    }
 }

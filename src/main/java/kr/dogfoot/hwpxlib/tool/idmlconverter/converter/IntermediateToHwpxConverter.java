@@ -131,11 +131,6 @@ public class IntermediateToHwpxConverter {
         SectionXMLFile section0 = hwpxFile.sectionXMLFileList().get(0);
         section0.removeAllParas();
 
-        // 디버그: 스프레드 모드 상태 출력
-        System.err.println("[DEBUG] useSpreadMode: " + doc.useSpreadMode());
-        System.err.println("[DEBUG] spreads count: " + (doc.spreads() != null ? doc.spreads().size() : "null"));
-        System.err.println("[DEBUG] pages count: " + (doc.pages() != null ? doc.pages().size() : "null"));
-
         // 모든 페이지를 section0 하나에 SecPr 구분자로 넣음 (한컴 호환)
         if (doc.useSpreadMode() && doc.spreads() != null && !doc.spreads().isEmpty()) {
             // === 스프레드 모드 ===
