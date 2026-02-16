@@ -140,7 +140,9 @@ export function ImagePreviewPanel() {
                 <div className="text-xs text-gray-500 mb-1">
                   {p.style_name || "(no style)"}
                 </div>
-                {p.text && <div className="mb-1 whitespace-pre-wrap">{p.text}</div>}
+                {p.runs && p.runs.some(r => r.type === "text" && r.text) && (
+                  <div className="mb-1 whitespace-pre-wrap">{p.runs.filter(r => r.type === "text").map(r => r.text).join("")}</div>
+                )}
                 {p.runs && p.runs.length > 0 && (
                   <div className="mt-1 border-t pt-1 space-y-0.5">
                     {p.runs.map((r, ri) => (

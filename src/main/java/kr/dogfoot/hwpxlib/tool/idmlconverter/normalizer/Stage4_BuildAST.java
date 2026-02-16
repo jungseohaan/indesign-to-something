@@ -416,6 +416,11 @@ public class Stage4_BuildAST {
             ASTInlineObject inlineObj = createInlineObjectFromGraphic(ig, imageLoader);
             if (inlineObj != null) {
                 para.addItem(inlineObj);
+                // IMAGE로 처리된 Group은 자식 텍스트프레임을 별도 추출하지 않음
+                // (이미지와 텍스트 오버레이가 하나의 시각 단위이므로 분리하면 겹침)
+                if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE) {
+                    continue;
+                }
             }
             // 인라인 그래픽 내부의 자식 텍스트프레임 처리 (중첩 Group 포함, 재귀)
             collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader);

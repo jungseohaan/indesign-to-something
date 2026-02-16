@@ -794,6 +794,7 @@ pub async fn convert_idml(
     options: ConvertOptions,
     jar_path: String,
 ) -> Result<ConvertResult, String> {
+    let input_path_ref = input_path.clone();
     let mut args = vec![
         "-jar".to_string(),
         jar_path,
@@ -815,9 +816,14 @@ pub async fn convert_idml(
         args.push("--include-images".to_string());
     }
 
-    if let Some(links_dir) = options.links_directory {
+    // links_directory: 명시적 지정이 있으면 사용, 없으면 IDML 파일 옆 Links/ 폴더 자동 탐색
+    let links_dir = options.links_directory.or_else(|| {
+        let idml_path = std::path::Path::new(&input_path_ref);
+        idml_path.parent().map(|p| p.join("Links")).filter(|p| p.is_dir()).map(|p| p.to_string_lossy().to_string())
+    });
+    if let Some(dir) = links_dir {
         args.push("--links-directory".to_string());
-        args.push(links_dir);
+        args.push(dir);
     }
 
     if let Some(start) = options.start_page {
