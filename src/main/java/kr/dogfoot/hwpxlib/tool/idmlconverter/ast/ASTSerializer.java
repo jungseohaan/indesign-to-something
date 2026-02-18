@@ -452,6 +452,27 @@ public class ASTSerializer {
             }
         }
 
+        // tabStops
+        if (para.hasTabStops()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append("\"tabStops\":[");
+            for (int i = 0; i < para.tabStops().size(); i++) {
+                if (i > 0) sb.append(',');
+                ASTTabStop ts = para.tabStops().get(i);
+                sb.append('{');
+                sb.append("\"position\":").append(ts.position());
+                if (ts.alignment() != null) {
+                    sb.append(",\"alignment\":\"").append(escapeJson(ts.alignment())).append('"');
+                }
+                if (ts.leader() != null) {
+                    sb.append(",\"leader\":\"").append(escapeJson(ts.leader())).append('"');
+                }
+                sb.append('}');
+            }
+            sb.append(']');
+        }
+
         // items
         if (para.items() != null && !para.items().isEmpty()) {
             if (!first) sb.append(',');

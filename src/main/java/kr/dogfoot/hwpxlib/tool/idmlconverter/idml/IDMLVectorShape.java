@@ -129,6 +129,8 @@ public class IDMLVectorShape {
 
     // 클리핑 자식 도형 (외부 Rectangle이 클리핑 프레임 역할, 내부 자식이 실제 채우기)
     private IDMLVectorShape clippedChild;  // null이면 클리핑 없음
+    // 복수 클리핑 자식 (Group 내부의 여러 도형을 클리핑 프레임으로 제한)
+    private List<IDMLVectorShape> clippedChildren;  // null이면 클리핑 그룹 없음
 
     public IDMLVectorShape() {
         this.pathPoints = new ArrayList<>();
@@ -229,6 +231,13 @@ public class IDMLVectorShape {
     public IDMLVectorShape clippedChild() { return clippedChild; }
     public void clippedChild(IDMLVectorShape v) { this.clippedChild = v; }
     public boolean hasClippedChild() { return clippedChild != null; }
+
+    public List<IDMLVectorShape> clippedChildren() { return clippedChildren; }
+    public void addClippedChild(IDMLVectorShape child) {
+        if (clippedChildren == null) clippedChildren = new ArrayList<>();
+        clippedChildren.add(child);
+    }
+    public boolean hasClippedChildren() { return clippedChildren != null && !clippedChildren.isEmpty(); }
 
     /**
      * 점선 패턴이 있는지 확인.

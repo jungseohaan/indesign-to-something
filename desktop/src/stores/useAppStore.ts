@@ -46,6 +46,7 @@ interface AppState {
   error: string | null;
   spreadBased: boolean;
   vectorDpi: 96 | 150;
+  layoutMode: "preserve" | "editable";
 
   // Actions
   initJarPath: () => Promise<void>;
@@ -59,6 +60,7 @@ interface AppState {
   startConversion: () => Promise<void>;
   setSpreadBased: (v: boolean) => void;
   setVectorDpi: (v: 96 | 150) => void;
+  setLayoutMode: (v: "preserve" | "editable") => void;
   clearError: () => void;
 }
 
@@ -84,6 +86,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   spreadBased: false,
   vectorDpi: 150,
+  layoutMode: "preserve",
 
   initJarPath: async () => {
     try {
@@ -252,7 +255,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   startConversion: async () => {
-    const { idmlPath, jarPath, spreadBased, vectorDpi } = get();
+    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode } = get();
     if (!idmlPath) return;
 
     const outputPath = await save({
@@ -280,6 +283,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           links_directory: null,
           start_page: null,
           end_page: null,
+          layout_mode: layoutMode,
         },
         jarPath,
       });
@@ -293,5 +297,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSpreadBased: (v) => set({ spreadBased: v }),
   setVectorDpi: (v) => set({ vectorDpi: v }),
+  setLayoutMode: (v) => set({ layoutMode: v }),
   clearError: () => set({ error: null }),
 }));

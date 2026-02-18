@@ -205,6 +205,12 @@ pub struct ConvertOptions {
     pub start_page: Option<i32>,
     #[serde(default)]
     pub end_page: Option<i32>,
+    #[serde(default = "default_layout_mode")]
+    pub layout_mode: String,
+}
+
+fn default_layout_mode() -> String {
+    "preserve".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -212,6 +218,18 @@ pub struct ConvertResult {
     pub pages_converted: i32,
     pub frames_converted: i32,
     pub images_converted: i32,
+    #[serde(default)]
+    pub equations_converted: i32,
+    #[serde(default)]
+    pub styles_converted: i32,
+    #[serde(default)]
+    pub images_skipped: i32,
+    #[serde(default)]
+    pub images_psd: i32,
+    #[serde(default)]
+    pub images_ai: i32,
+    #[serde(default)]
+    pub images_tiff: i32,
     pub warnings: Vec<String>,
 }
 
@@ -838,6 +856,11 @@ pub async fn convert_idml(
             args.push("--end-page".to_string());
             args.push(end.to_string());
         }
+    }
+
+    if options.layout_mode != "preserve" {
+        args.push("--layout-mode".to_string());
+        args.push(options.layout_mode.clone());
     }
 
     println!("Convert args: {:?}", args);

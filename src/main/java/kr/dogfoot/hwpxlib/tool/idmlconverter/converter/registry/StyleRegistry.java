@@ -168,6 +168,27 @@ public class StyleRegistry {
         return paragraphStyleCount() + characterStyleCount();
     }
 
+    /**
+     * ASTParagraph의 인라인 탭 정지점으로부터 TabPr을 생성한다.
+     */
+    public String createInlineTabPr(java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop> tabStops) {
+        String tabPrId = String.valueOf(nextTabPrIndex++);
+        TabPr tabPr = hwpxFile.headerXMLFile().refList().tabProperties().addNew();
+        tabPr.idAnd(tabPrId)
+                .autoTabLeftAnd(false)
+                .autoTabRightAnd(false);
+
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop ts : tabStops) {
+            TabItem item = tabPr.addNewTabItem();
+            item.posAnd((int) ts.position())
+                    .typeAnd(mapTabItemType(ts.alignment()))
+                    .leaderAnd(mapTabLeader(ts.leader()))
+                    .unitAnd(ValueUnit2.HWPUNIT);
+        }
+
+        return tabPrId;
+    }
+
     // ── Private helpers ──
 
     private String createTabPr(IntermediateStyleDef styleDef) {

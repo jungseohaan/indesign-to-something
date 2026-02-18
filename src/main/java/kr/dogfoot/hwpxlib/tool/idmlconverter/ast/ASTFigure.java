@@ -25,6 +25,12 @@ public class ASTFigure extends ASTBlock {
     private int pixelWidth;
     private int pixelHeight;
 
+    // 페이지 크롭 비율 (0.0~1.0, 이미지가 페이지를 넘는 경우)
+    private double cropLeftFraction;
+    private double cropTopFraction;
+    private double cropRightFraction;
+    private double cropBottomFraction;
+
     public BlockType blockType() { return BlockType.FIGURE; }
 
     public FigureKind kind() { return kind; }
@@ -68,4 +74,21 @@ public class ASTFigure extends ASTBlock {
 
     public int pixelHeight() { return pixelHeight; }
     public void pixelHeight(int v) { this.pixelHeight = v; }
+
+    public double cropLeftFraction() { return cropLeftFraction; }
+    public void cropLeftFraction(double v) { this.cropLeftFraction = v; }
+
+    public double cropTopFraction() { return cropTopFraction; }
+    public void cropTopFraction(double v) { this.cropTopFraction = v; }
+
+    public double cropRightFraction() { return cropRightFraction; }
+    public void cropRightFraction(double v) { this.cropRightFraction = v; }
+
+    public double cropBottomFraction() { return cropBottomFraction; }
+    public void cropBottomFraction(double v) { this.cropBottomFraction = v; }
+
+    public boolean hasCrop() {
+        return cropLeftFraction > 0 || cropTopFraction > 0
+                || cropRightFraction > 0 || cropBottomFraction > 0;
+    }
 }

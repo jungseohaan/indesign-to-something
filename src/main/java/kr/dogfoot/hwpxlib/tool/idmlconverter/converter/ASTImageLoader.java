@@ -16,7 +16,10 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.file.Files;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * AST 파이프라인용 이미지 로더.
@@ -26,6 +29,11 @@ public class ASTImageLoader {
 
     private final IDMLDocument idmlDoc;
     private final ConvertOptions options;
+
+    // 경로 캐시: URI → 절대경로 (병렬 loadImage 대응)
+    private final ConcurrentHashMap<String, String> resolvedPathCache = new ConcurrentHashMap<>();
+    // 디렉토리 파일 목록 캐시: dirPath → {lowerName → File} (대소문자 무시 검색 O(1))
+    private final ConcurrentHashMap<String, Map<String, File>> dirListingCache = new ConcurrentHashMap<>();
 
     public ASTImageLoader(IDMLDocument idmlDoc, ConvertOptions options) {
         this.idmlDoc = idmlDoc;
@@ -150,6 +158,18 @@ public class ASTImageLoader {
     }
 
     private String resolveImagePath(String path, String filename) {
+        // 캐시 히트 시 즉시 반환
+        String cached = resolvedPathCache.get(path);
+        if (cached != null) return cached;
+
+        String result = resolveImagePathUncached(path, filename);
+        if (result != null) {
+            resolvedPathCache.put(path, result);
+        }
+        return result;
+    }
+
+    private String resolveImagePathUncached(String path, String filename) {
         // 1. 절대 경로
         File absolute = new File(path);
         if (absolute.exists()) return absolute.getAbsolutePath();
@@ -160,7 +180,7 @@ public class ASTImageLoader {
             if (linksDir.isDirectory()) {
                 File inLinks = new File(linksDir, filename);
                 if (inLinks.exists()) return inLinks.getAbsolutePath();
-                String found = findFileIgnoreCase(linksDir, filename);
+                String found = findFileIgnoreCaseCached(linksDir, filename);
                 if (found != null) return found;
             }
         }
@@ -184,7 +204,7 @@ public class ASTImageLoader {
 
                 File linksDir = new File(idmlDoc.basePath(), "Links");
                 if (linksDir.isDirectory()) {
-                    String found = findFileIgnoreCase(linksDir, filename);
+                    String found = findFileIgnoreCaseCached(linksDir, filename);
                     if (found != null) return found;
                 }
             }
@@ -604,6 +624,186 @@ public class ASTImageLoader {
         }
     }
 
+    /**
+     * 클리핑 프레임 + 복수 자식 도형을 합성 래스터화.
+     * 유효 영역(자식 바운딩 박스 ∩ 클리핑 프레임)만 렌더링하여 효율적으로 처리한다.
+     *
+     * @param clipFrame     클리핑 프레임 (외부 도형, 채우기 없음)
+     * @param colorResolver 색상 해석기
+     * @param renderLeft    렌더링 영역 좌측 (클리핑 프레임 로컬 좌표, points)
+     * @param renderTop     렌더링 영역 상단 (클리핑 프레임 로컬 좌표, points)
+     * @param renderW       렌더링 영역 너비 (points)
+     * @param renderH       렌더링 영역 높이 (points)
+     */
+    public ImageResult rasterizeClippedGroup(IDMLVectorShape clipFrame,
+                                              kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver colorResolver,
+                                              double renderLeft, double renderTop,
+                                              double renderW, double renderH) {
+        if (renderW <= 0 || renderH <= 0) return null;
+        if (!clipFrame.hasClippedChildren()) return null;
+
+        int targetDpi = options.imageDpi();
+        double scale = targetDpi / 72.0;
+
+        double strokePad = 1;
+        for (IDMLVectorShape child : clipFrame.clippedChildren()) {
+            if (child.hasStroke()) {
+                strokePad = Math.max(strokePad, child.strokeWeight() * scale / 2.0 + 1);
+            }
+        }
+
+        int pixW = Math.max(10, (int) Math.ceil(renderW * scale + strokePad * 2));
+        int pixH = Math.max(10, (int) Math.ceil(renderH * scale + strokePad * 2));
+
+        BufferedImage image = new BufferedImage(pixW, pixH, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g.translate(strokePad, strokePad);
+
+        // 클리핑 프레임의 경로를 렌더링 좌표계에서 구축
+        AffineTransform clipAt = new AffineTransform();
+        clipAt.scale(scale, scale);
+        clipAt.translate(-renderLeft, -renderTop);
+        GeneralPath clipRawPath = buildRawPath(clipFrame);
+        Shape clipShape;
+        if (clipRawPath.getBounds2D().getWidth() > 0) {
+            clipShape = clipAt.createTransformedShape(clipRawPath);
+        } else {
+            // path points가 없으면 clip frame bounds를 사용
+            double cw = clipFrame.widthPoints() * scale;
+            double ch = clipFrame.heightPoints() * scale;
+            double cx = (clipFrame.geometricBounds()[1] - renderLeft) * scale;
+            double cy = (clipFrame.geometricBounds()[0] - renderTop) * scale;
+            clipShape = new Rectangle2D.Double(cx, cy, cw, ch);
+        }
+        g.setClip(clipShape);
+
+        // 각 자식 도형을 렌더링 좌표계에서 개별 렌더링
+        for (IDMLVectorShape child : clipFrame.clippedChildren()) {
+            double[] ct = child.itemTransform();
+            AffineTransform childAt = new AffineTransform();
+            childAt.scale(scale, scale);
+            childAt.translate(-renderLeft, -renderTop);
+            childAt.concatenate(new AffineTransform(ct[0], ct[1], ct[2], ct[3], ct[4], ct[5]));
+
+            GeneralPath rawPath = buildRawPath(child);
+            Shape childShape = childAt.createTransformedShape(rawPath);
+
+            float alpha = (float) (child.opacity() / 100.0);
+
+            // 채우기
+            String fillRef = child.fillColor();
+            if (fillRef != null && child.hasFill()) {
+                String fillHex = colorResolver.resolve(fillRef);
+                Color fillColor = hexToColor(fillHex);
+                if (fillColor != null) {
+                    float fillAlpha = alpha * (float) (child.fillTint() / 100.0);
+                    g.setColor(withAlpha(fillColor, fillAlpha));
+                    g.fill(childShape);
+                }
+            }
+
+            // 선
+            String strokeRef = child.strokeColor();
+            if (strokeRef != null && child.hasStroke()) {
+                String strokeHex = colorResolver.resolve(strokeRef);
+                Color strokeColor = hexToColor(strokeHex);
+                if (strokeColor != null) {
+                    float strokeAlpha = alpha * (float) (child.strokeTint() / 100.0);
+                    g.setColor(withAlpha(strokeColor, strokeAlpha));
+
+                    int cap = BasicStroke.CAP_BUTT;
+                    int join = BasicStroke.JOIN_MITER;
+                    if (child.endCap() == IDMLVectorShape.LineCap.ROUND) cap = BasicStroke.CAP_ROUND;
+                    if (child.endCap() == IDMLVectorShape.LineCap.PROJECTING) cap = BasicStroke.CAP_SQUARE;
+                    if (child.lineJoin() == IDMLVectorShape.LineJoin.ROUND) join = BasicStroke.JOIN_ROUND;
+                    if (child.lineJoin() == IDMLVectorShape.LineJoin.BEVEL) join = BasicStroke.JOIN_BEVEL;
+
+                    float strokeW = (float) (child.strokeWeight() * scale);
+                    BasicStroke stroke;
+                    if (child.hasDashPattern()) {
+                        float[] dashArr = new float[child.dashPattern().length];
+                        for (int di = 0; di < dashArr.length; di++)
+                            dashArr[di] = (float) (child.dashPattern()[di] * scale);
+                        stroke = new BasicStroke(strokeW, cap, join, (float) child.miterLimit(), dashArr, 0);
+                    } else {
+                        stroke = new BasicStroke(strokeW, cap, join, (float) child.miterLimit());
+                    }
+                    g.setStroke(stroke);
+                    g.draw(childShape);
+                }
+            }
+        }
+
+        g.dispose();
+
+        try {
+            byte[] pngData = encodePng(image);
+            ImageResult result = new ImageResult();
+            result.imageData = pngData;
+            result.format = "png";
+            result.pixelWidth = pixW;
+            result.pixelHeight = pixH;
+            return result;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 도형의 경로를 좌표 정규화 없이 구축한다 (원래 IDML 좌표 그대로).
+     * 클리핑 프레임 좌표계 변환 시 사용.
+     */
+    private GeneralPath buildRawPath(IDMLVectorShape shape) {
+        GeneralPath path = new GeneralPath();
+
+        if (shape.hasSubPaths()) {
+            for (IDMLVectorShape.SubPath sub : shape.subPaths()) {
+                appendRawSubPath(path, sub.points(), sub.isOpen());
+            }
+        } else if (!shape.pathPoints().isEmpty()) {
+            appendRawSubPath(path, shape.pathPoints(), shape.pathOpen());
+        }
+
+        return path;
+    }
+
+    private void appendRawSubPath(GeneralPath path, java.util.List<IDMLVectorShape.PathPoint> points,
+                                   boolean open) {
+        if (points.isEmpty()) return;
+
+        IDMLVectorShape.PathPoint first = points.get(0);
+        path.moveTo((float) first.anchorX(), (float) first.anchorY());
+
+        for (int i = 1; i < points.size(); i++) {
+            IDMLVectorShape.PathPoint prev = points.get(i - 1);
+            IDMLVectorShape.PathPoint curr = points.get(i);
+
+            if (prev.isStraight() && curr.isStraight()) {
+                path.lineTo((float) curr.anchorX(), (float) curr.anchorY());
+            } else {
+                path.curveTo(
+                    (float) prev.rightX(), (float) prev.rightY(),
+                    (float) curr.leftX(), (float) curr.leftY(),
+                    (float) curr.anchorX(), (float) curr.anchorY());
+            }
+        }
+
+        if (!open && points.size() > 1) {
+            IDMLVectorShape.PathPoint last = points.get(points.size() - 1);
+            if (last.isStraight() && first.isStraight()) {
+                path.closePath();
+            } else {
+                path.curveTo(
+                    (float) last.rightX(), (float) last.rightY(),
+                    (float) first.leftX(), (float) first.leftY(),
+                    (float) first.anchorX(), (float) first.anchorY());
+                path.closePath();
+            }
+        }
+    }
+
     private Shape createAwtShape(IDMLVectorShape shape, double scale) {
         double w = shape.widthPoints() * scale;
         double h = shape.heightPoints() * scale;
@@ -940,15 +1140,20 @@ public class ASTImageLoader {
         }
     }
 
-    private static String findFileIgnoreCase(File directory, String filename) {
-        File[] files = directory.listFiles();
-        if (files == null) return null;
-        String lowerTarget = filename.toLowerCase();
-        for (File f : files) {
-            if (f.isFile() && f.getName().toLowerCase().equals(lowerTarget)) {
-                return f.getAbsolutePath();
+    private String findFileIgnoreCaseCached(File directory, String filename) {
+        String dirKey = directory.getAbsolutePath();
+        Map<String, File> listing = dirListingCache.computeIfAbsent(dirKey, k -> {
+            File[] files = directory.listFiles();
+            if (files == null) return new HashMap<>();
+            Map<String, File> map = new HashMap<>(files.length);
+            for (File f : files) {
+                if (f.isFile()) {
+                    map.put(f.getName().toLowerCase(), f);
+                }
             }
-        }
-        return null;
+            return map;
+        });
+        File found = listing.get(filename.toLowerCase());
+        return found != null ? found.getAbsolutePath() : null;
     }
 }

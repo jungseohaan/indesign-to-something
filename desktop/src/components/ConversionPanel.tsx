@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAppStore } from "../stores/useAppStore";
 
 export function ConversionPanel() {
@@ -9,11 +10,15 @@ export function ConversionPanel() {
     error,
     spreadBased,
     vectorDpi,
+    layoutMode,
     startConversion,
     setSpreadBased,
     setVectorDpi,
+    setLayoutMode,
     clearError,
   } = useAppStore();
+
+  const [showWarnings, setShowWarnings] = useState(false);
 
   return (
     <div className="px-4 py-3 border-t bg-gray-50">
@@ -27,6 +32,86 @@ export function ConversionPanel() {
           >
             닫기
           </button>
+        </div>
+      )}
+
+      {/* Conversion Report */}
+      {result && (
+        <div className="mb-2 px-3 py-2 bg-green-50 border border-green-200 rounded">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-green-600 font-semibold text-sm">변환 완료</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
+            <span>
+              <span className="text-gray-400">📄</span>{" "}
+              <span className="font-semibold text-gray-800">{result.pages_converted}</span> 페이지
+            </span>
+            <span className="text-gray-300">|</span>
+            <span>
+              <span className="text-gray-400 font-bold">T</span>{" "}
+              <span className="font-semibold text-gray-800">{result.frames_converted}</span> 텍스트프레임
+            </span>
+            <span className="text-gray-300">|</span>
+            <span>
+              <span className="text-gray-400">🖼</span>{" "}
+              <span className="font-semibold text-gray-800">{result.images_converted}</span> 이미지
+              {(result.images_psd > 0 || result.images_ai > 0 || result.images_tiff > 0) && (
+                <span className="text-gray-500">
+                  {" "}(
+                  {[
+                    result.images_psd > 0 && `PSD ${result.images_psd}`,
+                    result.images_ai > 0 && `AI ${result.images_ai}`,
+                    result.images_tiff > 0 && `TIFF ${result.images_tiff}`,
+                  ].filter(Boolean).join(", ")}
+                  )
+                </span>
+              )}
+            </span>
+            {result.equations_converted > 0 && (
+              <>
+                <span className="text-gray-300">|</span>
+                <span>
+                  <span className="text-gray-400">📐</span>{" "}
+                  <span className="font-semibold text-gray-800">{result.equations_converted}</span> 수식
+                </span>
+              </>
+            )}
+            {result.styles_converted > 0 && (
+              <>
+                <span className="text-gray-300">|</span>
+                <span>
+                  <span className="text-gray-400">🎨</span>{" "}
+                  <span className="font-semibold text-gray-800">{result.styles_converted}</span> 스타일
+                </span>
+              </>
+            )}
+            {result.images_skipped > 0 && (
+              <>
+                <span className="text-gray-300">|</span>
+                <span className="text-amber-600">
+                  건너뜀: 이미지 {result.images_skipped}개
+                </span>
+              </>
+            )}
+            {result.warnings.length > 0 && (
+              <>
+                <span className="text-gray-300">|</span>
+                <button
+                  onClick={() => setShowWarnings(!showWarnings)}
+                  className="text-amber-600 hover:text-amber-700 underline"
+                >
+                  경고 {result.warnings.length}건 {showWarnings ? "▲" : "▼"}
+                </button>
+              </>
+            )}
+          </div>
+          {showWarnings && result.warnings.length > 0 && (
+            <div className="mt-2 max-h-32 overflow-y-auto text-xs text-amber-700 bg-amber-50 rounded p-2 border border-amber-100">
+              {result.warnings.map((w, i) => (
+                <div key={i} className="py-0.5">• {w}</div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -53,18 +138,21 @@ export function ConversionPanel() {
               <option value={150}>150</option>
             </select>
           </label>
+          <label className="flex items-center gap-1.5 text-sm">
+            레이아웃:
+            <select
+              value={layoutMode}
+              onChange={(e) => setLayoutMode(e.target.value as "preserve" | "editable")}
+              className="border border-gray-300 rounded px-2 py-0.5 text-sm"
+            >
+              <option value="preserve">레이아웃 유지</option>
+              <option value="editable">편집 우선 (1단)</option>
+            </select>
+          </label>
         </div>
 
-        {/* Result / Progress / Convert Button */}
+        {/* Progress / Convert Button */}
         <div className="flex items-center gap-3">
-          {result && (
-            <span className="text-sm text-green-600">
-              변환 완료: {result.pages_converted}페이지,{" "}
-              {result.frames_converted}프레임
-              {result.warnings.length > 0 &&
-                ` (경고 ${result.warnings.length}건)`}
-            </span>
-          )}
           {isConverting && progress && (
             <span className="text-sm text-blue-600">
               {progress.message} ({progress.current}/{progress.total})

@@ -30,6 +30,9 @@ public class ASTParagraph {
     private Long shadingTopOffset;
     private Long shadingBottomOffset;
 
+    // 탭 정지점 (인라인 오버라이드, HWPUNIT 단위)
+    private List<ASTTabStop> tabStops;
+
     // 인라인 항목 (읽기 순서)
     private List<ASTInlineItem> items;
 
@@ -87,6 +90,15 @@ public class ASTParagraph {
 
     public Long shadingBottomOffset() { return shadingBottomOffset; }
     public void shadingBottomOffset(Long v) { this.shadingBottomOffset = v; }
+
+    public List<ASTTabStop> tabStops() { return tabStops; }
+    public boolean hasTabStops() { return tabStops != null && !tabStops.isEmpty(); }
+    public void addTabStop(ASTTabStop ts) {
+        if (this.tabStops == null) {
+            this.tabStops = new ArrayList<>();
+        }
+        this.tabStops.add(ts);
+    }
 
     public List<ASTInlineItem> items() { return items; }
     public void addItem(ASTInlineItem item) { items.add(item); }

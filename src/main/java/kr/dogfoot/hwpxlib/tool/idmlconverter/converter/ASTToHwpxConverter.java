@@ -21,11 +21,14 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawingObject;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Equation;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.secpr.SecPr;
 import kr.dogfoot.hwpxlib.tool.blankfilemaker.BlankFileMaker;
+import kr.dogfoot.hwpxlib.tool.equationconverter.EquationBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertException;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertResult;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ProgressReporter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
@@ -59,8 +62,13 @@ public class ASTToHwpxConverter {
     private static final AtomicLong SHAPE_ID_COUNTER = new AtomicLong(8000000L);
 
     public static ConvertResult convert(ASTDocument doc) throws ConvertException {
+        return convert(doc, ProgressReporter.NONE, 0, 0);
+    }
+
+    public static ConvertResult convert(ASTDocument doc, ProgressReporter reporter,
+                                         int progressOffset, int progressTotal) throws ConvertException {
         try {
-            return new ASTToHwpxConverter(doc).doConvert();
+            return new ASTToHwpxConverter(doc, reporter, progressOffset, progressTotal).doConvert();
         } catch (ConvertException ce) {
             throw ce;
         } catch (Exception e) {
@@ -71,6 +79,9 @@ public class ASTToHwpxConverter {
 
     private final ASTDocument doc;
     private final ConvertResult result;
+    private final ProgressReporter reporter;
+    private final int progressOffset;
+    private final int progressTotal;
     private HWPXFile hwpxFile;
     private FontRegistry fontRegistry;
     private StyleRegistry styleRegistry;
@@ -79,11 +90,16 @@ public class ASTToHwpxConverter {
     // 통계
     private int pagesConverted;
     private int framesConverted;
+    private int equationsConverted;
     private int imagesConverted;
 
-    private ASTToHwpxConverter(ASTDocument doc) {
+    private ASTToHwpxConverter(ASTDocument doc, ProgressReporter reporter,
+                                int progressOffset, int progressTotal) {
         this.doc = doc;
         this.result = new ConvertResult();
+        this.reporter = reporter;
+        this.progressOffset = progressOffset;
+        this.progressTotal = progressTotal;
     }
 
     private ConvertResult doConvert() throws ConvertException {
@@ -106,9 +122,14 @@ public class ASTToHwpxConverter {
         SectionXMLFile section0 = hwpxFile.sectionXMLFileList().get(0);
         section0.removeAllParas();
 
+        int totalSections = doc.sections().size();
         for (ASTSection section : doc.sections()) {
             convertSection(section0, section);
             pagesConverted++;
+            // 진행률: progressOffset~(progressOffset+80)% 구간에 페이지 진행률 매핑
+            int progress = progressOffset + (int)(80.0 * pagesConverted / Math.max(progressTotal, 1));
+            reporter.reportProgress(progress, 100,
+                    "페이지 변환 중... (" + pagesConverted + "/" + totalSections + ")");
         }
 
         // 6. 배경 PNG 배치
@@ -132,6 +153,7 @@ public class ASTToHwpxConverter {
         result.pagesConverted(pagesConverted);
         result.framesConverted(framesConverted);
         result.imagesConverted(imagesConverted);
+        result.equationsConverted(equationsConverted);
         result.stylesConverted(styleRegistry.totalStyleCount());
 
         System.err.println("[ASTToHwpxConverter] Done. " + result.summary());
@@ -196,9 +218,6 @@ public class ASTToHwpxConverter {
         ASTPageLayout layout = section.layout();
         if (layout == null) return;
 
-        // SecPr 단락 생성
-        createSectionBreakPara(sectionFile, layout);
-
         // TEXT_FRAME_BLOCK 수집
         List<ASTTextFrameBlock> textFrameBlocks = new ArrayList<>();
         List<ASTBlock> otherBlocks = new ArrayList<>();
@@ -211,50 +230,61 @@ public class ASTToHwpxConverter {
         }
 
         // 텍스트 프레임 → 인라인 글상자 또는 플로팅 테이블로 변환
-        if (!textFrameBlocks.isEmpty()) {
-            // 인라인 글상자 대상과 플로팅 대상 분리
-            List<ASTTextFrameBlock> inlineBlocks = new ArrayList<>();
-            List<ASTTextFrameBlock> floatingBlocks = new ArrayList<>();
-            for (ASTTextFrameBlock block : textFrameBlocks) {
-                if (needsFloatingPosition(block, layout)) {
-                    floatingBlocks.add(block);
-                } else {
-                    inlineBlocks.add(block);
-                }
+        List<ASTTextFrameBlock> inlineBlocks = new ArrayList<>();
+        List<ASTTextFrameBlock> floatingBlocks = new ArrayList<>();
+        List<ASTTextFrameBlock> backgroundBlocks = new ArrayList<>();
+        for (ASTTextFrameBlock block : textFrameBlocks) {
+            if (!needsFloatingPosition(block, layout)) {
+                inlineBlocks.add(block);
+            } else if (block.isBackgroundOnly()) {
+                backgroundBlocks.add(block);
+            } else {
+                floatingBlocks.add(block);
             }
+        }
 
-            // 인라인 글상자: 읽기 순서 정렬 후 변환
-            sortInReadingOrder(inlineBlocks);
-            for (ASTTextFrameBlock block : inlineBlocks) {
-                addTextBox(sectionFile, block);
-                framesConverted++;
-            }
+        // 인라인 글상자: 읽기 순서 정렬 후 변환
+        sortInReadingOrder(inlineBlocks);
+        for (ASTTextFrameBlock block : inlineBlocks) {
+            addTextBox(sectionFile, block);
+            framesConverted++;
+        }
 
-            // 플로팅 테이블: 원래 절대 좌표 유지
-            for (ASTTextFrameBlock block : floatingBlocks) {
-                convertTextFrameBlock(sectionFile, block);
-                framesConverted++;
-            }
+        // SecPr 단락 생성 — 이 단락 하나에 모든 플로팅 객체 + secPr을 넣는다.
+        // HWPX는 흐름 기반이므로 본문 단락이 많으면 페이지 넘침이 발생한다.
+        // 모든 플로팅 객체(PAPER 절대좌표)를 secPr 단락의 run으로 배치하면
+        // 본문에 빈 앵커 단락이 생기지 않아 넘침 문제가 없다.
+        Para secPrPara = createSectionPara(sectionFile);
+
+        // 배경 전용 블록: BEHIND_TEXT, z-order=0 — 가장 먼저 출력하여
+        // document order와 z-order 모두 최하위에 위치시킨다.
+        for (ASTTextFrameBlock block : backgroundBlocks) {
+            convertTextFrameBlock(secPrPara, block);
+            framesConverted++;
         }
 
         // 나머지 (TABLE, FIGURE) 플로팅 처리
-        // FIGURE는 하나의 앵커 단락에 모아서 페이지 넘침 방지
-        Para figureAnchorPara = null;
         for (ASTBlock block : otherBlocks) {
             switch (block.blockType()) {
                 case TABLE:
-                    convertTable(sectionFile, (ASTTable) block);
+                    convertTable(secPrPara, (ASTTable) block);
                     framesConverted++;
                     break;
                 case FIGURE:
-                    if (figureAnchorPara == null) {
-                        figureAnchorPara = createFloatingObjectPara(sectionFile);
-                    }
-                    convertFigure(figureAnchorPara, (ASTFigure) block);
+                    convertFigure(secPrPara, (ASTFigure) block);
                     framesConverted++;
                     break;
             }
         }
+
+        // 일반 플로팅 테이블: IN_FRONT_OF_TEXT
+        for (ASTTextFrameBlock block : floatingBlocks) {
+            convertTextFrameBlock(secPrPara, block);
+            framesConverted++;
+        }
+
+        // SecPr run을 마지막에 추가 (페이지 레이아웃 정의)
+        addSecPrRun(secPrPara, layout);
     }
 
     // ── 글상자 변환 ──
@@ -505,7 +535,11 @@ public class ASTToHwpxConverter {
 
     // ── SecPr 생성 ──
 
-    private void createSectionBreakPara(SectionXMLFile sectionFile, ASTPageLayout layout) {
+    /**
+     * 섹션 단락 생성 (플로팅 객체 + secPr을 담을 단일 단락).
+     * 이 단락에 플로팅 객체 run들을 먼저 추가한 뒤, addSecPrRun()으로 마무리한다.
+     */
+    private Para createSectionPara(SectionXMLFile sectionFile) {
         Para para = sectionFile.addNewPara();
         para.idAnd(nextParaId())
                 .paraPrIDRefAnd("3")
@@ -513,7 +547,13 @@ public class ASTToHwpxConverter {
                 .pageBreakAnd(false)
                 .columnBreakAnd(false)
                 .merged(false);
+        return para;
+    }
 
+    /**
+     * SecPr run을 단락의 마지막에 추가하여 섹션을 완성한다.
+     */
+    private void addSecPrRun(Para para, ASTPageLayout layout) {
         Run run = para.addNewRun();
         run.charPrIDRef("0");
 
@@ -604,9 +644,11 @@ public class ASTToHwpxConverter {
         // PageBorderFills
         addPageBorderFills(secPr);
 
-        // ColPr (다단 설정)
-        int colCount = layout.columnCount() > 0 ? layout.columnCount() : 1;
-        int colGutter = (int) layout.columnGutter();
+        // ColPr (다단 설정) — 페이지 레벨은 항상 1단.
+        // 모든 콘텐츠가 플로팅 글상자로 배치되므로 페이지 흐름 영역에 텍스트가 없음.
+        // 다단은 개별 글상자 내부의 SubList colPr로 처리됨.
+        int colCount = 1;
+        int colGutter = 0;
         Ctrl ctrl = run.addNewCtrl();
         ctrl.addNewColPr()
                 .idAnd("").typeAnd(MultiColumnType.NEWSPAPER)
@@ -645,23 +687,30 @@ public class ASTToHwpxConverter {
     // ── 텍스트 프레임 블록 변환 (플로팅 1x1 테이블) ──
     // 글상자(rect+drawText) 대신 1x1 테이블을 사용하여 클릭만으로 텍스트 편집 가능
 
-    private void convertTextFrameBlock(SectionXMLFile sectionFile, ASTTextFrameBlock block) {
-        Para framePara = createFloatingObjectPara(sectionFile);
-        Run anchorRun = framePara.runs().iterator().next();
-
+    private void convertTextFrameBlock(Para framePara, ASTTextFrameBlock block) {
         long x = block.x();
         long y = block.y();
         long w = block.width();
         long h = block.height();
 
+        // 음수 또는 0 크기 블록 건너뜀 (페이지 밖 객체)
+        if (w <= 0 || h <= 0) return;
+
+        Run anchorRun = framePara.addNewRun();
+        anchorRun.charPrIDRef("0");
+
         Table table = anchorRun.addNewTable();
 
-        // ShapeObject
+        // ShapeObject — 배경 전용 블록은 BEHIND_TEXT + z-order=0, 일반은 IN_FRONT_OF_TEXT
+        TextWrapMethod wrapMethod = block.isBackgroundOnly()
+                ? TextWrapMethod.BEHIND_TEXT
+                : TextWrapMethod.IN_FRONT_OF_TEXT;
+        int zOrder = block.isBackgroundOnly() ? 0 : block.zOrder();
         String tableId = nextShapeId();
         table.idAnd(tableId)
-                .zOrderAnd(block.zOrder())
+                .zOrderAnd(zOrder)
                 .numberingTypeAnd(NumberingType.TABLE)
-                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textWrapAnd(wrapMethod)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None);
@@ -869,6 +918,9 @@ public class ASTToHwpxConverter {
                 case BREAK:
                     addBreak(para, (ASTBreak) item);
                     break;
+                case EQUATION:
+                    addEquationRun(para, (ASTEquation) item);
+                    break;
             }
         }
 
@@ -892,7 +944,8 @@ public class ASTToHwpxConverter {
                 || para.rightMargin() != null
                 || para.spaceBefore() != null
                 || para.spaceAfter() != null
-                || para.lineSpacing() != null;
+                || para.lineSpacing() != null
+                || para.hasTabStops();
     }
 
     private ASTStyleDef findParagraphStyle(String styleRef) {
@@ -914,8 +967,15 @@ public class ASTToHwpxConverter {
 
         String newId = styleRegistry.nextParaPrId();
         ParaPr paraPr = hwpxFile.headerXMLFile().refList().paraProperties().addNew();
+
+        // 인라인 탭 정지점 → TabPr 생성
+        String tabPrId = "0";
+        if (astPara.hasTabStops()) {
+            tabPrId = styleRegistry.createInlineTabPr(astPara.tabStops());
+        }
+
         paraPr.idAnd(newId)
-                .tabPrIDRefAnd("0")
+                .tabPrIDRefAnd(tabPrId)
                 .condenseAnd((byte) 0)
                 .fontLineHeightAnd(false)
                 .snapToGridAnd(true)
@@ -1533,11 +1593,34 @@ public class ASTToHwpxConverter {
         run.addNewT().addNewLineBreak();
     }
 
+    /**
+     * ASTEquation → HWPX Equation (인라인 수식).
+     */
+    private void addEquationRun(Para para, ASTEquation eq) {
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+        try {
+            Equation template = EquationBuilder.fromHwpScript(eq.hwpScript());
+            Equation hwpxEq = run.addNewEquation();
+            hwpxEq.versionAnd(template.version())
+                    .textColorAnd(template.textColor())
+                    .baseUnitAnd(template.baseUnit())
+                    .lineModeAnd(template.lineMode())
+                    .fontAnd(template.font());
+            hwpxEq.createScript();
+            hwpxEq.script().addText(eq.hwpScript());
+            equationsConverted++;
+        } catch (Exception e) {
+            // 수식 파싱 실패 시 텍스트로 표시
+            run.addNewT().addText("[수식: " + eq.hwpScript() + "]");
+        }
+    }
+
     // ── 테이블 변환 ──
 
-    private void convertTable(SectionXMLFile sectionFile, ASTTable astTable) {
-        Para framePara = createFloatingObjectPara(sectionFile);
-        Run anchorRun = framePara.runs().iterator().next();
+    private void convertTable(Para framePara, ASTTable astTable) {
+        Run anchorRun = framePara.addNewRun();
+        anchorRun.charPrIDRef("0");
 
         long x = astTable.x();
         long y = astTable.y();
@@ -1759,6 +1842,7 @@ public class ASTToHwpxConverter {
     private void convertFigureImage(Para anchorPara, ASTFigure figure) {
         byte[] imageData = figure.imageData();
         if (imageData == null || imageData.length == 0) return;
+        if (figure.width() <= 0 || figure.height() <= 0) return;
 
         String format = figure.imageFormat() != null ? figure.imageFormat() : "png";
         String itemId = ImageInserter.registerImage(hwpxFile, imageData, format);
@@ -1772,7 +1856,25 @@ public class ASTToHwpxConverter {
         if (clipW <= 0) clipW = displayW;
         if (clipH <= 0) clipH = displayH;
 
-        Run anchorRun = anchorPara.runs().iterator().next();
+        // 페이지 크롭 적용 (스프레드 걸침 이미지)
+        long imgClipLeft = 0, imgClipTop = 0, imgClipRight = clipW, imgClipBottom = clipH;
+        if (figure.hasCrop()) {
+            imgClipLeft = Math.round(clipW * figure.cropLeftFraction());
+            imgClipTop = Math.round(clipH * figure.cropTopFraction());
+            imgClipRight = clipW - Math.round(clipW * figure.cropRightFraction());
+            imgClipBottom = clipH - Math.round(clipH * figure.cropBottomFraction());
+
+            // 표시 크기를 보이는 영역으로 축소
+            displayW = Math.round(figure.width() * (1.0 - figure.cropLeftFraction() - figure.cropRightFraction()));
+            displayH = Math.round(figure.height() * (1.0 - figure.cropTopFraction() - figure.cropBottomFraction()));
+
+            // 위치 조정: 크롭된 부분만큼 페이지 경계로 이동
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+        }
+
+        Run anchorRun = anchorPara.addNewRun();
+        anchorRun.charPrIDRef("0");
 
         Picture pic = anchorRun.addNewPicture();
         String picId = nextShapeId();
@@ -1856,13 +1958,15 @@ public class ASTToHwpxConverter {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, displayH);
 
-        // ImageClip/Dim — pixel * 75 (96 DPI 기준 HWPUNIT)
+        // ImageClip — 원본 이미지 내 표시 영역 (pixel * 75)
         pic.createImgClip();
-        pic.imgClip().leftAnd(0L).rightAnd(clipW).topAnd(0L).bottomAnd(clipH);
+        pic.imgClip().leftAnd(imgClipLeft).rightAnd(imgClipRight)
+                .topAnd(imgClipTop).bottomAnd(imgClipBottom);
 
         pic.createInMargin();
         pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
+        // ImgDim — 원본 이미지 전체 크기 (pixel * 75)
         pic.createImgDim();
         pic.imgDim().dimwidthAnd(clipW).dimheightAnd(clipH);
 
@@ -1997,6 +2101,8 @@ public class ASTToHwpxConverter {
                 .merged(false);
         Run run = para.addNewRun();
         run.charPrIDRef("0");
+        run.addNewT();
+        addLineSegArray(para);
         return para;
     }
 

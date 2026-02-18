@@ -131,6 +131,11 @@ public class ConverterCLI {
                         options = options.endPage(Integer.parseInt(args[++i]));
                     }
                     break;
+                case "--layout-mode":
+                    if (i + 1 < args.length) {
+                        options = options.layoutMode(args[++i]);
+                    }
+                    break;
                 default:
                     System.err.println("Unknown option: " + arg);
             }

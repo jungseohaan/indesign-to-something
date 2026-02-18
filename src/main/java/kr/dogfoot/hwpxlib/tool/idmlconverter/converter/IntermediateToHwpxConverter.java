@@ -174,9 +174,6 @@ public class IntermediateToHwpxConverter {
         } else {
             // === 페이지 모드 ===
             for (IntermediatePage page : doc.pages()) {
-                // SecPr 단락 생성 (페이지 속성)
-                addSectionBreakPara(section0, page, true);
-
                 // 프레임을 콘텐츠 카테고리 순서대로 정렬
                 List<IntermediateFrame> sortedFrames = new ArrayList<>(page.frames());
                 sortedFrames.sort((a, b) -> Integer.compare(a.exportOrder(), b.exportOrder()));
@@ -222,6 +219,9 @@ public class IntermediateToHwpxConverter {
                         addMinimalLineSegArray(framePara);
                     }
                 }
+
+                // SecPr 단락 생성 (섹션 끝에 배치하여 해당 페이지의 레이아웃을 정의)
+                addSectionBreakPara(section0, page, true);
 
                 pagesConverted++;
             }

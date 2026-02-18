@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
@@ -8,6 +9,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Stage 4: 스토리 우선 AST 구축.
@@ -72,10 +74,14 @@ public class Stage4_BuildAST {
                     processedStories.add(storyId);
 
                     IDMLStory story = idmlDoc.getStory(storyId);
-                    if (story == null || story.isEmpty()) continue;
+                    boolean hasFill = tf.fillColor() != null
+                            && !tf.fillColor().contains("None")
+                            && !tf.fillColor().contains("Paper");
+                    if (story == null || (story.isEmpty() && !hasFill)) continue;
 
                     // 텍스트 프레임 블록 생성
                     ASTTextFrameBlock block = createTextFrameBlock(tf, page, fo.zOrder(), colorResolver);
+                    if (block == null) continue; // 페이지 밖 객체 건너뜀
 
                     // 스토리 → 단락 변환
                     convertStoryToParagraphs(story, block, pool, idmlDoc, colorResolver, imageLoader);
@@ -88,33 +94,66 @@ public class Stage4_BuildAST {
                     }
                 }
 
-                // 페이지의 이미지 프레임 → ASTFigure 블록 변환
+                // 페이지의 이미지 프레임 → ASTFigure 블록 변환 (병렬)
                 // 같은 이미지가 같은 위치/크기로 중복 배치된 경우 하나만 출력 (PSD 레이어 가시성 미지원 대응)
                 if (imageLoader != null) {
                     List<IDMLImageFrame> imageFrames = spread.getImageFramesOnPage(page);
                     Set<String> processedFrameKeys = new HashSet<>();
+                    List<IDMLImageFrame> uniqueFrames = new ArrayList<>();
                     for (IDMLImageFrame imgFrame : imageFrames) {
                         String dedupKey = buildImageFrameDedupKey(imgFrame);
                         if (dedupKey != null && !processedFrameKeys.add(dedupKey)) {
                             continue;  // 중복 프레임 스킵
                         }
-                        ASTFigure figure = createFigureFromImageFrame(imgFrame, page, imageLoader);
-                        if (figure != null) {
-                            section.addBlock(figure);
-                        }
+                        uniqueFrames.add(imgFrame);
                     }
+                    ASTImageLoader finalImageLoader = imageLoader;
+                    IDMLPage finalPage = page;
+                    int totalImgFrames = uniqueFrames.size();
+                    List<ASTFigure> imageFigures = uniqueFrames.parallelStream()
+                            .map(imgFrame -> {
+                                ASTFigure fig = createFigureFromImageFrame(imgFrame, finalPage, finalImageLoader);
+                                if (fig == null) {
+                                    System.err.println("[IMG-FAIL] Page " + finalPage.pageNumber()
+                                            + " imageFrame URI=" + imgFrame.linkResourceURI()
+                                            + " bounds=" + java.util.Arrays.toString(imgFrame.geometricBounds())
+                                            + " transform=" + java.util.Arrays.toString(imgFrame.itemTransform()));
+                                }
+                                return fig;
+                            })
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList());
+                    if (imageFigures.size() < totalImgFrames) {
+                        System.err.println("[IMG-WARN] Page " + page.pageNumber()
+                                + ": " + (totalImgFrames - imageFigures.size()) + "/" + totalImgFrames + " image frames failed");
+                    }
+                    imageFigures.forEach(section::addBlock);
                 }
 
-                // 페이지의 벡터 도형 → ASTFigure (PNG 래스터화) 블록 변환
+                // 페이지의 벡터 도형 → ASTFigure (PNG 래스터화) 블록 변환 (병렬)
                 if (imageLoader != null) {
                     List<IDMLVectorShape> vectorShapes = spread.getVectorShapesOnPage(page);
-                    for (IDMLVectorShape shape : vectorShapes) {
-                        ASTFigure figure = createFigureFromVectorShape(shape, page, imageLoader, colorResolver);
-                        if (figure != null) {
-                            section.addBlock(figure);
-                        }
-                    }
+                    ASTImageLoader finalImageLoader2 = imageLoader;
+                    IDMLPage finalPage2 = page;
+                    List<ASTFigure> vectorFigures = vectorShapes.parallelStream()
+                            .map(shape -> createFigureFromVectorShape(shape, finalPage2, finalImageLoader2, colorResolver))
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList());
+                    vectorFigures.forEach(section::addBlock);
                 }
+
+                // 디버그: 각 페이지별 블록 수
+                int textBlocks = 0, figureBlocks = 0, tableBlocks = 0;
+                for (ASTBlock b : section.blocks()) {
+                    if (b instanceof ASTTextFrameBlock) textBlocks++;
+                    else if (b instanceof ASTFigure) figureBlocks++;
+                    else if (b instanceof ASTTable) tableBlocks++;
+                }
+                System.err.println("[Stage4] Page " + page.pageNumber()
+                        + ": textFrames=" + textBlocks + " figures=" + figureBlocks
+                        + " tables=" + tableBlocks
+                        + " imgFrames=" + (imageLoader != null ? spread.getImageFramesOnPage(page).size() : 0)
+                        + " vectors=" + (imageLoader != null ? spread.getVectorShapesOnPage(page).size() : 0));
 
                 doc.addSection(section);
             }
@@ -206,10 +245,34 @@ public class Stage4_BuildAST {
         double w = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
         double h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
 
-        block.x(CoordinateConverter.pointsToHwpunits(relPos[0]));
-        block.y(CoordinateConverter.pointsToHwpunits(relPos[1]));
-        block.width(CoordinateConverter.pointsToHwpunits(w));
-        block.height(CoordinateConverter.pointsToHwpunits(h));
+        long xHwp = CoordinateConverter.pointsToHwpunits(relPos[0]);
+        long yHwp = CoordinateConverter.pointsToHwpunits(relPos[1]);
+        long wHwp = CoordinateConverter.pointsToHwpunits(w);
+        long hHwp = CoordinateConverter.pointsToHwpunits(h);
+
+        // 페이지 경계 클리핑: 양쪽 페이지에 걸친 배경 사각형 등을 페이지 내로 제한
+        long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
+        long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
+        if (xHwp < 0) { wHwp += xHwp; xHwp = 0; }
+        if (yHwp < 0) { hHwp += yHwp; yHwp = 0; }
+        if (xHwp + wHwp > pageW) { wHwp = pageW - xHwp; }
+        if (yHwp + hHwp > pageH) { hHwp = pageH - yHwp; }
+        // 클리핑 결과 크기가 0 이하 → 페이지 밖 객체이므로 건너뜀
+        if (wHwp <= 0 || hHwp <= 0) {
+            System.err.println("[CLIP-SKIP] TextFrame id=" + tf.selfId()
+                    + " clipped to w=" + wHwp + " h=" + hHwp
+                    + " (orig x=" + CoordinateConverter.pointsToHwpunits(relPos[0])
+                    + " y=" + CoordinateConverter.pointsToHwpunits(relPos[1])
+                    + " w=" + CoordinateConverter.pointsToHwpunits(w)
+                    + " h=" + CoordinateConverter.pointsToHwpunits(h)
+                    + " pageW=" + pageW + " pageH=" + pageH + ")");
+            return null;
+        }
+
+        block.x(xHwp);
+        block.y(yHwp);
+        block.width(wHwp);
+        block.height(hHwp);
         block.zOrder(zOrder);
         block.columnCount(tf.columnCount());
         block.columnGutter(CoordinateConverter.pointsToHwpunits(tf.columnGutter()));
@@ -349,9 +412,34 @@ public class Stage4_BuildAST {
             para.shadingTint(idmlPara.shadingTint());
         }
 
-        // Character Runs → 인라인 항목
-        for (IDMLCharacterRun run : idmlPara.characterRuns()) {
-            convertCharacterRun(run, idmlPara, para, pool, idmlDoc, colorResolver, imageLoader);
+        // 탭 정지점 (인라인 오버라이드)
+        if (idmlPara.tabStops() != null) {
+            for (IDMLStyleDef.TabStop ts : idmlPara.tabStops()) {
+                long posHwpunits = CoordinateConverter.pointsToHwpunits(ts.position());
+                String alignment = mapTabAlignment(ts.alignment());
+                para.addTabStop(new ASTTabStop(posHwpunits, alignment, ts.leader()));
+            }
+        }
+
+        // Character Runs → 인라인 항목 (BT수식M 폰트 런은 그룹핑하여 ASTEquation으로 변환)
+        List<IDMLCharacterRun> runs = idmlPara.characterRuns();
+        List<IDMLCharacterRun> mathGroup = new ArrayList<>();
+
+        for (IDMLCharacterRun run : runs) {
+            if (run.isBTFont()) {
+                mathGroup.add(run);
+            } else {
+                // 수식 그룹 종료 → 변환
+                if (!mathGroup.isEmpty()) {
+                    flushMathGroup(mathGroup, para);
+                    mathGroup.clear();
+                }
+                convertCharacterRun(run, idmlPara, para, pool, idmlDoc, colorResolver, imageLoader);
+            }
+        }
+        // 마지막 수식 그룹 처리
+        if (!mathGroup.isEmpty()) {
+            flushMathGroup(mathGroup, para);
         }
 
         // 단락 끝의 trailing lineBreak 제거
@@ -371,6 +459,20 @@ public class Stage4_BuildAST {
         }
 
         return para;
+    }
+
+    /**
+     * IDML 탭 정렬 문자열을 HWPX 탭 타입으로 매핑.
+     */
+    private static String mapTabAlignment(String idmlAlignment) {
+        if (idmlAlignment == null) return "left";
+        switch (idmlAlignment) {
+            case "CenterAlign": return "center";
+            case "RightAlign": return "right";
+            case "DecimalAlign": // IDML uses "Character" for decimal
+            case "Character": return "decimal";
+            default: return "left"; // LeftAlign 또는 기타
+        }
     }
 
     /**
@@ -424,6 +526,31 @@ public class Stage4_BuildAST {
             }
             // 인라인 그래픽 내부의 자식 텍스트프레임 처리 (중첩 Group 포함, 재귀)
             collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader);
+        }
+    }
+
+    /**
+     * 연속된 수식 폰트 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
+     * 수식으로 변환할 수 없는 경우 (순수 텍스트 등) 일반 텍스트 런으로 폴백.
+     */
+    private static void flushMathGroup(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+        String hwpScript = BTFontEquationConverter.convert(mathRuns);
+        if (hwpScript != null) {
+            String sourceType = mathRuns.get(0).isBTFont() ? "BT_FONT" : "NP_FONT";
+            para.addItem(new ASTEquation(hwpScript, sourceType));
+        } else {
+            // 수식이 아닌 BT 폰트 텍스트 → 일반 텍스트 런으로 폴백
+            for (IDMLCharacterRun run : mathRuns) {
+                String text = run.content();
+                if (text != null && !text.isEmpty()) {
+                    ASTTextRun textRun = new ASTTextRun();
+                    textRun.text(text);
+                    if (run.fontFamily() != null) textRun.fontFamily(run.fontFamily());
+                    if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
+                    if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
+                    para.addItem(textRun);
+                }
+            }
         }
     }
 
@@ -1142,7 +1269,11 @@ public class Stage4_BuildAST {
 
         if (!hasRotOrFlip) {
             // 비회전 경로에서만 기존 flip 처리
-            if (IDMLGeometry.hasFlip(imgFrame.itemTransform())) {
+            // 프레임과 이미지 양쪽 flip을 XOR: 둘 다 flip이면 상쇄
+            boolean frameFlip = IDMLGeometry.hasFlip(imgFrame.itemTransform());
+            boolean imageFlip = IDMLGeometry.hasFlip(imgFrame.imageTransform());
+            boolean netFlip = frameFlip ^ imageFlip;
+            if (netFlip) {
                 double rotation = IDMLGeometry.extractRotation(imgFrame.itemTransform());
                 if (Math.abs(Math.abs(rotation) - 180) < 0.5) {
                     result.imageData = ASTImageLoader.flipVertically(result.imageData);
@@ -1155,6 +1286,31 @@ public class Stage4_BuildAST {
         }
         // hasRotOrFlip: 회전/반전이 preRenderRotation에서 이미 처리됨
 
+        // 페이지 경계를 벗어나는 이미지의 크롭 비율 계산 (스프레드 걸침 이미지 처리)
+        // bleed(인쇄 여백 넘침, ~1%)는 무시하고, 실제 페이지 걸침(>5%)만 크롭
+        long pageW = CoordinateConverter.pointsToHwpunits(
+                IDMLGeometry.width(page.geometricBounds()));
+        long pageH = CoordinateConverter.pointsToHwpunits(
+                IDMLGeometry.height(page.geometricBounds()));
+        double minCropThreshold = 0.05;  // 5% 미만은 bleed로 간주, 크롭하지 않음
+
+        if (xHwp < 0) {
+            double frac = (double) -xHwp / wHwp;
+            if (frac > minCropThreshold) figure.cropLeftFraction(frac);
+        }
+        if (yHwp < 0) {
+            double frac = (double) -yHwp / hHwp;
+            if (frac > minCropThreshold) figure.cropTopFraction(frac);
+        }
+        if (xHwp + wHwp > pageW) {
+            double frac = (double) (xHwp + wHwp - pageW) / wHwp;
+            if (frac > minCropThreshold) figure.cropRightFraction(frac);
+        }
+        if (yHwp + hHwp > pageH) {
+            double frac = (double) (yHwp + hHwp - pageH) / hHwp;
+            if (frac > minCropThreshold) figure.cropBottomFraction(frac);
+        }
+
         return figure;
     }
 
@@ -1165,6 +1321,11 @@ public class Stage4_BuildAST {
                                                           IDMLPage page,
                                                           ASTImageLoader imageLoader,
                                                           ColorResolver colorResolver) {
+        // === 복수 클리핑 자식 (clippedChildren) 처리 ===
+        if (shape.hasClippedChildren()) {
+            return createFigureFromClippedGroup(shape, page, imageLoader, colorResolver);
+        }
+
         // 채우기/선 색상 해석
         IDMLVectorShape renderTarget = shape.hasClippedChild() ? shape.clippedChild() : shape;
         String fillHex = resolveColorHex(renderTarget.fillColor(), colorResolver);
@@ -1290,6 +1451,96 @@ public class Stage4_BuildAST {
         return figure;
     }
 
+    /**
+     * 클리핑 프레임 + 복수 자식 도형을 합성 래스터화하여 ASTFigure로 변환.
+     * 유효 영역(자식 바운딩 박스 ∩ 클리핑 프레임)만 렌더링하고 배치한다.
+     */
+    private static ASTFigure createFigureFromClippedGroup(IDMLVectorShape clipFrame,
+                                                           IDMLPage page,
+                                                           ASTImageLoader imageLoader,
+                                                           ColorResolver colorResolver) {
+        // 자식 중 하나라도 보이는 색상이 있는지 확인
+        boolean anyVisible = false;
+        for (IDMLVectorShape child : clipFrame.clippedChildren()) {
+            String fh = resolveColorHex(child.fillColor(), colorResolver);
+            String sh = resolveColorHex(child.strokeColor(), colorResolver);
+            if (fh != null || sh != null) { anyVisible = true; break; }
+        }
+        if (!anyVisible) return null;
+
+        double[] clipBounds = clipFrame.geometricBounds(); // [top, left, bottom, right]
+        double clipTop = clipBounds[0], clipLeft = clipBounds[1];
+        double clipBottom = clipBounds[2], clipRight = clipBounds[3];
+
+        // 자식들의 바운딩 박스를 클리핑 프레임 로컬 좌표계에서 계산
+        double uLeft = Double.MAX_VALUE, uTop = Double.MAX_VALUE;
+        double uRight = -Double.MAX_VALUE, uBottom = -Double.MAX_VALUE;
+        for (IDMLVectorShape child : clipFrame.clippedChildren()) {
+            double[] ct = child.itemTransform();
+            double[] cb = child.geometricBounds();
+            // 자식 bounds의 4개 꼭짓점을 클리핑 프레임 공간으로 변환
+            double[][] corners = {{cb[1], cb[0]}, {cb[3], cb[0]}, {cb[1], cb[2]}, {cb[3], cb[2]}};
+            for (double[] c : corners) {
+                double tx = ct[0] * c[0] + ct[2] * c[1] + ct[4];
+                double ty = ct[1] * c[0] + ct[3] * c[1] + ct[5];
+                uLeft = Math.min(uLeft, tx);
+                uTop = Math.min(uTop, ty);
+                uRight = Math.max(uRight, tx);
+                uBottom = Math.max(uBottom, ty);
+            }
+        }
+
+        // 클리핑 프레임과 교차 → 유효 영역
+        double eLeft = Math.max(uLeft, clipLeft);
+        double eTop = Math.max(uTop, clipTop);
+        double eRight = Math.min(uRight, clipRight);
+        double eBottom = Math.min(uBottom, clipBottom);
+
+        if (eRight <= eLeft || eBottom <= eTop) return null;
+
+        double effectiveW = eRight - eLeft;
+        double effectiveH = eBottom - eTop;
+        double effectiveCX = (eLeft + eRight) / 2.0;
+        double effectiveCY = (eTop + eBottom) / 2.0;
+
+        // 유효 영역 중심을 절대 좌표로 변환
+        double[] t = clipFrame.itemTransform();
+        double[] absCenter = CoordinateConverter.applyTransform(t, effectiveCX, effectiveCY);
+        double[] pageAbs = IDMLGeometry.absoluteTopLeft(
+                page.geometricBounds(), page.itemTransform());
+
+        long wHwp = CoordinateConverter.pointsToHwpunits(effectiveW);
+        long hHwp = CoordinateConverter.pointsToHwpunits(effectiveH);
+        long xHwp = CoordinateConverter.pointsToHwpunits(absCenter[0] - pageAbs[0]) - wHwp / 2;
+        long yHwp = CoordinateConverter.pointsToHwpunits(absCenter[1] - pageAbs[1]) - hHwp / 2;
+
+        if (wHwp <= 0 || hHwp <= 0) return null;
+
+        // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
+        long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
+        long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
+        if (wHwp > pageW * 2 || hHwp > pageH * 2) return null;
+
+        // 유효 영역만 합성 래스터화
+        ASTImageLoader.ImageResult result = imageLoader.rasterizeClippedGroup(
+                clipFrame, colorResolver, eLeft, eTop, effectiveW, effectiveH);
+        if (result == null || result.imageData == null) return null;
+
+        ASTFigure figure = new ASTFigure();
+        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
+        figure.x(xHwp);
+        figure.y(yHwp);
+        figure.width(wHwp);
+        figure.height(hHwp);
+        figure.zOrder(clipFrame.zOrder());
+        figure.imageData(result.imageData);
+        figure.imageFormat(result.format);
+        figure.pixelWidth(result.pixelWidth);
+        figure.pixelHeight(result.pixelHeight);
+
+        return figure;
+    }
+
     private static String resolveColorHex(String colorRef, ColorResolver colorResolver) {
         if (colorRef == null || "None".equals(colorRef) || colorRef.contains("[None]")) return null;
         String hex = colorResolver.resolve(colorRef);
@@ -1319,10 +1570,13 @@ public class Stage4_BuildAST {
     }
 
     /**
-     * 텍스트 프레임 블록에 실제 콘텐츠(텍스트 또는 인라인 객체)가 있는지 확인.
+     * 텍스트 프레임 블록에 실제 콘텐츠(텍스트, 인라인 객체, 또는 배경색)가 있는지 확인.
      * 스타일만 있고 텍스트가 없는 빈 단락만 포함된 블록은 제거 대상.
+     * 단, fillColor가 있으면 장식용 배경 사각형이므로 유지한다.
      */
     private static boolean hasContent(ASTTextFrameBlock block) {
+        // 배경색이 있으면 텍스트가 없어도 유지 (장식용 배경 사각형)
+        if (block.fillColor() != null) return true;
         if (block.paragraphs().isEmpty()) return false;
         for (ASTParagraph para : block.paragraphs()) {
             if (!para.items().isEmpty()) return true;

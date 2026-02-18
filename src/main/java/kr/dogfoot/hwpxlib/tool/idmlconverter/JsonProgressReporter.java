@@ -29,6 +29,12 @@ public class JsonProgressReporter implements ProgressReporter {
         sb.append("\"pages_converted\": ").append(result.pagesConverted()).append(", ");
         sb.append("\"frames_converted\": ").append(result.framesConverted()).append(", ");
         sb.append("\"images_converted\": ").append(result.imagesConverted()).append(", ");
+        sb.append("\"equations_converted\": ").append(result.equationsConverted()).append(", ");
+        sb.append("\"styles_converted\": ").append(result.stylesConverted()).append(", ");
+        sb.append("\"images_skipped\": ").append(result.imagesSkipped()).append(", ");
+        sb.append("\"images_psd\": ").append(result.imagesPsdConverted()).append(", ");
+        sb.append("\"images_ai\": ").append(result.imagesAiConverted()).append(", ");
+        sb.append("\"images_tiff\": ").append(result.imagesTiffConverted()).append(", ");
         sb.append("\"warnings\": [");
         boolean first = true;
         for (String warning : result.warnings()) {

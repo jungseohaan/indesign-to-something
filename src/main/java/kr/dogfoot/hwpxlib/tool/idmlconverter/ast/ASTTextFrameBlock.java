@@ -108,4 +108,23 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public List<ASTParagraph> paragraphs() { return paragraphs; }
     public void addParagraph(ASTParagraph p) { paragraphs.add(p); }
+
+    /**
+     * 배경 전용 블록인지 판별.
+     * fillColor가 있으면서 실질 텍스트가 없는 블록 (장식용 배경 사각형).
+     */
+    public boolean isBackgroundOnly() {
+        if (fillColor == null || fillColor.isEmpty()) return false;
+        for (ASTParagraph para : paragraphs) {
+            for (ASTInlineItem item : para.items()) {
+                if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null && !text.trim().isEmpty()) return false;
+                } else if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
 }

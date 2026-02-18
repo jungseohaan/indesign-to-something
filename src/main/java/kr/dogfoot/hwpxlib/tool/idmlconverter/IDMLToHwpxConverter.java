@@ -64,6 +64,7 @@ public class IDMLToHwpxConverter {
                                          ConvertOptions options,
                                          ProgressReporter reporter) throws ConvertException {
         // Phase 1: IDML 로드
+        reporter.reportProgress(0, 100, "IDML 파일 로딩 중...");
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
         try {
             ConvertResult result;
@@ -74,18 +75,22 @@ public class IDMLToHwpxConverter {
                 System.err.println("[Pipeline] Using event-stream (AST) pipeline");
 
                 // Phase 2: IDML → ASTDocument (4단계 정규화)
+                reporter.reportProgress(5, 100, "IDML 구조 분석 중...");
                 ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
 
-                // Phase 3: AST → HWPX
-                result = ASTToHwpxConverter.convert(astDoc);
+                // Phase 3: AST → HWPX (페이지별 진행률: 10~90)
+                int totalPages = astDoc.sections().size();
+                result = ASTToHwpxConverter.convert(astDoc, reporter, 10, totalPages);
             } else {
                 // === 기존 파이프라인: Intermediate → HWPX ===
                 // Phase 2: IDML → Intermediate
+                reporter.reportProgress(5, 100, "IDML 구조 분석 중...");
                 IDMLToIntermediateConverter.Result intermediateResult =
                         IDMLToIntermediateConverter.convert(idmlDoc, options, sourceFileName);
                 IntermediateDocument intermediate = intermediateResult.document();
 
                 // Phase 3: Intermediate → HWPX
+                reporter.reportProgress(50, 100, "HWPX 변환 중...");
                 result = IntermediateToHwpxConverter.convert(intermediate);
 
                 // 중간 변환 경고 전파
@@ -95,6 +100,7 @@ public class IDMLToHwpxConverter {
             }
 
             // Phase 4: HWPX 파일 저장
+            reporter.reportProgress(95, 100, "HWPX 파일 저장 중...");
             try {
                 HWPXWriter.toFilepath(result.hwpxFile(), hwpxPath);
             } catch (Exception e) {

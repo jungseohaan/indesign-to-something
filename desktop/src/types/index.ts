@@ -118,12 +118,19 @@ export interface ConvertOptions {
   links_directory: string | null;
   start_page: number | null;
   end_page: number | null;
+  layout_mode: "preserve" | "editable";
 }
 
 export interface ConvertResult {
   pages_converted: number;
   frames_converted: number;
   images_converted: number;
+  equations_converted: number;
+  styles_converted: number;
+  images_skipped: number;
+  images_psd: number;
+  images_ai: number;
+  images_tiff: number;
   warnings: string[];
 }
 

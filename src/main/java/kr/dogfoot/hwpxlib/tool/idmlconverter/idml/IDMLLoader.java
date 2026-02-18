@@ -338,9 +338,9 @@ public class IDMLLoader {
             if (tabList != null) {
                 List<Element> listItems = getChildElements(tabList, "ListItem");
                 for (Element item : listItems) {
-                    Double position = parseDoubleAttr(item, "Position");
-                    String alignment = getAttrOrNull(item, "Alignment");
-                    String leader = getAttrOrNull(item, "Leader");
+                    Double position = parseChildElementDouble(item, "Position");
+                    String alignment = getChildElementText(item, "Alignment");
+                    String leader = getChildElementText(item, "Leader");
                     if (position != null) {
                         def.addTabStop(new IDMLStyleDef.TabStop(position, alignment, leader));
                     }
@@ -467,11 +467,13 @@ public class IDMLLoader {
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
-                    // 프레임 내부의 Group 자식도 탐색
-                    double[] frameTransform = IDMLGeometry.parseTransform(
-                            elem.getAttribute("ItemTransform"));
-                    extractGroupsFromFrame(elem, spread, frameTransform,
-                            hiddenLayerIds, zOrderCounter);
+                    // 클리핑 자식이 있으면 Group 자식이 이미 수집됨 → extractGroups 건너뛰기
+                    if (vectorShape == null || !vectorShape.hasClippedChildren()) {
+                        double[] frameTransform = IDMLGeometry.parseTransform(
+                                elem.getAttribute("ItemTransform"));
+                        extractGroupsFromFrame(elem, spread, frameTransform,
+                                hiddenLayerIds, zOrderCounter);
+                    }
                 }
             } else if ("GraphicLine".equals(elem.getTagName())) {
                 // 그래픽 라인도 벡터 도형으로 처리
@@ -760,6 +762,11 @@ public class IDMLLoader {
                         shape.clippedChild(childShape);
                         break;
                     }
+                } else if ("Group".equals(childTag)) {
+                    // Group 자식 클리핑: 외부 프레임이 클리핑 마스크, 내부 Group의 도형이 피클리핑 대상
+                    double[] groupTransform = IDMLGeometry.parseTransform(
+                            childElem.getAttribute("ItemTransform"));
+                    collectClippedChildrenFromGroup(childElem, shape, groupTransform);
                 }
             }
         }
@@ -963,6 +970,45 @@ public class IDMLLoader {
                 String groupSelfId = child.getAttribute("Self");
                 parseGroupForFrames(child, spread, combined, hiddenLayerIds,
                         zOrderCounter, groupSelfId);
+            }
+        }
+    }
+
+    /**
+     * 클리핑 프레임 내부의 Group에서 벡터 도형 자식을 재귀적으로 수집한다.
+     * 수집된 도형은 clipFrame의 clippedChildren에 추가되며,
+     * itemTransform은 클리핑 프레임 로컬 좌표계 기준으로 설정된다.
+     *
+     * @param groupElem          Group 요소
+     * @param clipFrame          클리핑 프레임 (외부 도형)
+     * @param accumulatedTransform 이 Group까지의 누적 변환 (클리핑 프레임 기준)
+     */
+    private static void collectClippedChildrenFromGroup(Element groupElem,
+                                                         IDMLVectorShape clipFrame,
+                                                         double[] accumulatedTransform) {
+        NodeList children = groupElem.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node node = children.item(i);
+            if (node.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element elem = (Element) node;
+            String tag = elem.getTagName();
+
+            if ("Rectangle".equals(tag) || "Polygon".equals(tag)
+                    || "Oval".equals(tag) || "GraphicLine".equals(tag)) {
+                IDMLVectorShape childShape = tryParseVectorShape(elem);
+                if (childShape != null) {
+                    double[] combinedTransform = CoordinateConverter.combineTransforms(
+                            accumulatedTransform, childShape.itemTransform());
+                    childShape.itemTransform(combinedTransform);
+                    clipFrame.addClippedChild(childShape);
+                }
+            } else if ("Group".equals(tag)) {
+                // 중첩 Group: 누적 변환에 현재 Group 변환을 결합
+                double[] childGroupTransform = IDMLGeometry.parseTransform(
+                        elem.getAttribute("ItemTransform"));
+                double[] combined = CoordinateConverter.combineTransforms(
+                        accumulatedTransform, childGroupTransform);
+                collectClippedChildrenFromGroup(elem, clipFrame, combined);
             }
         }
     }
@@ -1483,7 +1529,7 @@ public class IDMLLoader {
         para.shadingOffsetTop(parseDoubleAttr(paraRange, "ParagraphShadingTopOffset"));
         para.shadingOffsetBottom(parseDoubleAttr(paraRange, "ParagraphShadingBottomOffset"));
 
-        // Leading은 Properties 안에 있을 수 있음
+        // Leading과 TabList는 Properties 안에 있을 수 있음
         Element paraProps = getFirstChildElement(paraRange, "Properties");
         if (paraProps != null) {
             String leadingText = getPropertyText(paraProps, "Leading");
@@ -1491,6 +1537,20 @@ public class IDMLLoader {
                 try {
                     para.leading(Double.parseDouble(leadingText));
                 } catch (NumberFormatException ignored) {}
+            }
+
+            // 인라인 탭 정지점 오버라이드
+            Element tabList = getFirstChildElement(paraProps, "TabList");
+            if (tabList != null) {
+                List<Element> listItems = getChildElements(tabList, "ListItem");
+                for (Element item : listItems) {
+                    Double position = parseChildElementDouble(item, "Position");
+                    String alignment = getChildElementText(item, "Alignment");
+                    String leader = getChildElementText(item, "Leader");
+                    if (position != null) {
+                        para.addTabStop(new IDMLStyleDef.TabStop(position, alignment, leader));
+                    }
+                }
             }
         }
 
@@ -2242,6 +2302,27 @@ public class IDMLLoader {
             return Integer.parseInt(val);
         } catch (NumberFormatException e) {
             return defaultVal;
+        }
+    }
+
+    /**
+     * 자식 엘리먼트의 텍스트 내용을 반환한다.
+     * IDML TabList 등에서 &lt;Position type="unit"&gt;215.4&lt;/Position&gt; 형태를 파싱할 때 사용.
+     */
+    private static String getChildElementText(Element parent, String childName) {
+        Element child = getFirstChildElement(parent, childName);
+        if (child == null) return null;
+        String text = child.getTextContent();
+        return (text != null && !text.isEmpty()) ? text.trim() : null;
+    }
+
+    private static Double parseChildElementDouble(Element parent, String childName) {
+        String text = getChildElementText(parent, childName);
+        if (text == null) return null;
+        try {
+            return Double.parseDouble(text);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

@@ -20,6 +20,9 @@ public class IDMLParagraph {
     private Double leading;            // 줄간격 (points, Auto일 경우 null)
     private Double tracking;           // 자간 (1/1000 em)
 
+    // 탭 정지점 (인라인 오버라이드)
+    private java.util.List<IDMLStyleDef.TabStop> tabStops;
+
     // 단락 음영 (Paragraph Shading)
     private boolean shadingOn;         // 음영 사용 여부
     private String shadingColor;       // 음영 색상 (Color 참조)
@@ -84,6 +87,15 @@ public class IDMLParagraph {
 
     public Double shadingOffsetBottom() { return shadingOffsetBottom; }
     public void shadingOffsetBottom(Double v) { this.shadingOffsetBottom = v; }
+
+    public java.util.List<IDMLStyleDef.TabStop> tabStops() { return tabStops; }
+    public void tabStops(java.util.List<IDMLStyleDef.TabStop> v) { this.tabStops = v; }
+    public void addTabStop(IDMLStyleDef.TabStop ts) {
+        if (this.tabStops == null) {
+            this.tabStops = new java.util.ArrayList<>();
+        }
+        this.tabStops.add(ts);
+    }
 
     public List<IDMLCharacterRun> characterRuns() { return characterRuns; }
     public void addCharacterRun(IDMLCharacterRun run) { characterRuns.add(run); }

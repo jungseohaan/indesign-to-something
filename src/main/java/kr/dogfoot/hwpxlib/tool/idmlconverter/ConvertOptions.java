@@ -18,6 +18,7 @@ public class ConvertOptions {
     private boolean spreadBasedConversion;
     private boolean drawPageBoundary;
     private boolean useEventStream;
+    private String layoutMode;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -34,6 +35,7 @@ public class ConvertOptions {
         this.spreadBasedConversion = false;
         this.drawPageBoundary = false;
         this.useEventStream = false;
+        this.layoutMode = "preserve";
     }
 
     public static ConvertOptions defaults() {
@@ -201,6 +203,20 @@ public class ConvertOptions {
 
     public ConvertOptions useEventStream(boolean useEventStream) {
         this.useEventStream = useEventStream;
+        return this;
+    }
+
+    /**
+     * 레이아웃 모드.
+     * "preserve": 원본 레이아웃 유지 (분할 글상자)
+     * "editable": 편집 우선 (1단 병합) — 향후 구현 예정
+     */
+    public String layoutMode() {
+        return layoutMode;
+    }
+
+    public ConvertOptions layoutMode(String layoutMode) {
+        this.layoutMode = layoutMode;
         return this;
     }
 }

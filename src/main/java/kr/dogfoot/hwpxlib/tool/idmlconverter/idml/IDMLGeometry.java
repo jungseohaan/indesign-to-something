@@ -208,21 +208,17 @@ public class IDMLGeometry {
 
     /**
      * 프레임이 특정 페이지에 속하는지 판별.
-     * 프레임의 중심점이 페이지 영역 안에 있는지 확인.
-     *
-     * 경계 처리: 약간의 허용 오차를 두어 경계 근처의 객체도 포함
-     * → 경계에 있는 객체가 누락되지 않도록 함
+     * 프레임의 바운딩 박스와 페이지 영역이 교차(overlap)하는지 확인.
+     * 스프레드에 걸친 대형 이미지도 양쪽 페이지 모두에 포함된다.
      */
     public static boolean isFrameOnPage(
             double[] frameBounds, double[] frameTransform,
             double[] pageBounds, double[] pageTransform) {
-        // 프레임 중심점
-        double frameCenterX = (frameBounds[1] + frameBounds[3]) / 2.0;
-        double frameCenterY = (frameBounds[0] + frameBounds[2]) / 2.0;
-        double[] frameCenter = CoordinateConverter.applyTransform(
-                frameTransform, frameCenterX, frameCenterY);
+        // 프레임 바운딩 박스 (스프레드 좌표계)
+        double[] frameBox = getTransformedBoundingBox(frameBounds, frameTransform);
+        // frameBox: [minX, minY, maxX, maxY]
 
-        // 페이지 영역
+        // 페이지 영역 (스프레드 좌표계)
         double[] pageTopLeft = CoordinateConverter.applyTransform(
                 pageTransform, pageBounds[1], pageBounds[0]);
         double[] pageBottomRight = CoordinateConverter.applyTransform(
@@ -233,9 +229,11 @@ public class IDMLGeometry {
         double pageMinY = Math.min(pageTopLeft[1], pageBottomRight[1]);
         double pageMaxY = Math.max(pageTopLeft[1], pageBottomRight[1]);
 
-        // 페이지 영역 내부인지 확인 (약간의 여유를 주어 경계 문제 방지)
+        // AABB 교차 검사: 두 영역이 겹치지 않는 조건의 반대
         double tolerance = 0.1;  // 0.1pt 허용 오차
-        return frameCenter[0] >= pageMinX - tolerance && frameCenter[0] <= pageMaxX + tolerance
-                && frameCenter[1] >= pageMinY - tolerance && frameCenter[1] <= pageMaxY + tolerance;
+        return frameBox[2] >= pageMinX + tolerance   // frame.maxX > page.minX
+                && frameBox[0] <= pageMaxX - tolerance  // frame.minX < page.maxX
+                && frameBox[3] >= pageMinY + tolerance   // frame.maxY > page.minY
+                && frameBox[1] <= pageMaxY - tolerance;  // frame.minY < page.maxY
     }
 }
