@@ -693,15 +693,23 @@ public class Stage4_BuildAST {
         for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
             ASTInlineObject inlineObj = createInlineObjectFromGraphic(ig, imageLoader, colorResolver);
             if (inlineObj != null) {
-                para.addItem(inlineObj);
+                // 크기 0인 RENDERED_GROUP 래퍼는 추가하지 않음 (배경 사각형+텍스트프레임 구조의 Group)
+                boolean isEmptyWrapper = inlineObj.kind() == ASTInlineObject.ObjectKind.RENDERED_GROUP
+                        && inlineObj.width() <= 0 && inlineObj.height() <= 0
+                        && (inlineObj.imageData() == null || inlineObj.imageData().length == 0);
+                if (!isEmptyWrapper) {
+                    para.addItem(inlineObj);
+                }
                 // IMAGE로 처리된 Group은 자식 텍스트프레임을 별도 추출하지 않음
                 // (이미지와 텍스트 오버레이가 하나의 시각 단위이므로 분리하면 겹침)
                 if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE) {
                     continue;
                 }
             }
+            // 부모 Group의 배경 사각형에서 채우기 색상 추출
+            String groupFillHex = extractGroupBackgroundFill(ig, colorResolver);
             // 인라인 그래픽 내부의 자식 텍스트프레임 처리 (중첩 Group 포함, 재귀)
-            collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader);
+            collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, groupFillHex);
         }
     }
 
@@ -738,17 +746,38 @@ public class Stage4_BuildAST {
                                                  ASTParagraph para,
                                                  IDMLDocument idmlDoc,
                                                  ColorResolver colorResolver,
-                                                 ASTImageLoader imageLoader) {
+                                                 ASTImageLoader imageLoader,
+                                                 String parentFillColor) {
         for (IDMLTextFrame childTf : ig.childTextFrames()) {
             ASTInlineObject childObj = createInlineObjectFromTextFrame(childTf, idmlDoc, colorResolver, imageLoader);
             if (childObj != null) {
+                if (parentFillColor != null && childObj.fillColor() == null) {
+                    childObj.fillColor(parentFillColor);
+                }
                 para.addItem(childObj);
             }
         }
         // 중첩 그래픽(Group 등) 내부의 TextFrame도 재귀적으로 처리
         for (IDMLCharacterRun.InlineGraphic childIg : ig.childGraphics()) {
-            collectChildTextFrames(childIg, para, idmlDoc, colorResolver, imageLoader);
+            collectChildTextFrames(childIg, para, idmlDoc, colorResolver, imageLoader, parentFillColor);
         }
+    }
+
+    /**
+     * 인라인 Group의 자식 그래픽에서 배경 사각형의 채우기 색상을 추출.
+     * Group이 배경 사각형 + 텍스트 프레임으로 구성된 경우,
+     * 배경 사각형의 fillColor를 텍스트 프레임에 전달하기 위해 사용.
+     */
+    private static String extractGroupBackgroundFill(IDMLCharacterRun.InlineGraphic ig,
+                                                       ColorResolver colorResolver) {
+        if (!"group".equals(ig.type())) return null;
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            if (child.hasVectorShape() && child.vectorShape().fillColor() != null) {
+                String hex = resolveColorHex(child.vectorShape().fillColor(), colorResolver);
+                if (hex != null) return hex;
+            }
+        }
+        return null;
     }
 
     /**
@@ -1205,6 +1234,15 @@ public class Stage4_BuildAST {
         } else {
             obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
         }
+
+        // 앵커/래핑 속성 복사 (IDML → AST)
+        obj.anchoredPosition(ig.anchoredPosition());
+        obj.textWrapMode(ig.textWrapMode());
+        obj.textWrapSide(ig.textWrapSide());
+        obj.textWrapTop(CoordinateConverter.pointsToHwpunits(ig.textWrapTop()));
+        obj.textWrapLeft(CoordinateConverter.pointsToHwpunits(ig.textWrapLeft()));
+        obj.textWrapBottom(CoordinateConverter.pointsToHwpunits(ig.textWrapBottom()));
+        obj.textWrapRight(CoordinateConverter.pointsToHwpunits(ig.textWrapRight()));
 
         return obj;
     }

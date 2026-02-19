@@ -22,6 +22,16 @@ public class ASTInlineObject extends ASTInlineItem {
     private int pixelWidth;
     private int pixelHeight;
 
+    // 앵커/래핑 속성 (IDML 원본값)
+    private String anchoredPosition;   // "InlinePosition", "AboveLinePosition", "Anchored"
+    private String textWrapMode;       // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap"
+    private String textWrapSide;       // "BothSides", "LeftSide", "RightSide", "LargestArea"
+    private long textWrapTop, textWrapLeft, textWrapBottom, textWrapRight; // HWPUNIT
+
+    // 프레임 스타일 (INLINE_TEXT_FRAME — 부모 Group의 배경 사각형에서 전달)
+    private String fillColor;      // "#RRGGBB" hex
+    private double fillTint = 100; // 0~100
+
     // 인라인 텍스트 프레임 데이터 (INLINE_TEXT_FRAME)
     private java.util.List<ASTParagraph> paragraphs;
     private java.util.List<ASTTable> inlineTables;
@@ -54,6 +64,30 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public int pixelHeight() { return pixelHeight; }
     public void pixelHeight(int v) { this.pixelHeight = v; }
+
+    public String anchoredPosition() { return anchoredPosition; }
+    public void anchoredPosition(String v) { this.anchoredPosition = v; }
+
+    public String textWrapMode() { return textWrapMode; }
+    public void textWrapMode(String v) { this.textWrapMode = v; }
+
+    public String textWrapSide() { return textWrapSide; }
+    public void textWrapSide(String v) { this.textWrapSide = v; }
+
+    public long textWrapTop() { return textWrapTop; }
+    public void textWrapTop(long v) { this.textWrapTop = v; }
+    public long textWrapLeft() { return textWrapLeft; }
+    public void textWrapLeft(long v) { this.textWrapLeft = v; }
+    public long textWrapBottom() { return textWrapBottom; }
+    public void textWrapBottom(long v) { this.textWrapBottom = v; }
+    public long textWrapRight() { return textWrapRight; }
+    public void textWrapRight(long v) { this.textWrapRight = v; }
+
+    public String fillColor() { return fillColor; }
+    public void fillColor(String v) { this.fillColor = v; }
+
+    public double fillTint() { return fillTint; }
+    public void fillTint(double v) { this.fillTint = v; }
 
     public java.util.List<ASTParagraph> paragraphs() { return paragraphs; }
     public void paragraphs(java.util.List<ASTParagraph> v) { this.paragraphs = v; }

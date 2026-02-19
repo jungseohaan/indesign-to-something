@@ -44,6 +44,12 @@ public class IDMLCharacterRun {
         // 벡터 도형 정보 (Polygon/Rectangle 글리프 아웃라인 등, 래스터화용)
         private IDMLVectorShape vectorShape;
 
+        // 앵커/래핑 속성 (AnchoredObjectSetting, TextWrapPreference)
+        private String anchoredPosition;    // "InlinePosition", "AboveLinePosition", "Anchored"
+        private String textWrapMode;        // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap"
+        private String textWrapSide;        // "BothSides", "LeftSide", "RightSide", "LargestArea"
+        private double textWrapTop, textWrapLeft, textWrapBottom, textWrapRight; // TextWrapOffset (points)
+
         // 이미지 링크 정보 (Rectangle/Polygon/Oval 내부에 Image가 있는 경우)
         private String linkResourceURI;
         private String linkResourceFormat;
@@ -102,6 +108,24 @@ public class IDMLCharacterRun {
         public void graphicBounds(double[] v) { this.graphicBounds = v; }
 
         public boolean hasImage() { return linkResourceURI != null && !linkResourceURI.isEmpty(); }
+
+        public String anchoredPosition() { return anchoredPosition; }
+        public void anchoredPosition(String v) { this.anchoredPosition = v; }
+
+        public String textWrapMode() { return textWrapMode; }
+        public void textWrapMode(String v) { this.textWrapMode = v; }
+
+        public String textWrapSide() { return textWrapSide; }
+        public void textWrapSide(String v) { this.textWrapSide = v; }
+
+        public double textWrapTop() { return textWrapTop; }
+        public void textWrapTop(double v) { this.textWrapTop = v; }
+        public double textWrapLeft() { return textWrapLeft; }
+        public void textWrapLeft(double v) { this.textWrapLeft = v; }
+        public double textWrapBottom() { return textWrapBottom; }
+        public void textWrapBottom(double v) { this.textWrapBottom = v; }
+        public double textWrapRight() { return textWrapRight; }
+        public void textWrapRight(double v) { this.textWrapRight = v; }
 
         public IDMLVectorShape vectorShape() { return vectorShape; }
         public void vectorShape(IDMLVectorShape v) { this.vectorShape = v; }

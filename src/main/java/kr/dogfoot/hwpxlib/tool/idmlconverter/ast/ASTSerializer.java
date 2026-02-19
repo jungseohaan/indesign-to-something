@@ -493,6 +493,8 @@ public class ASTSerializer {
             writeTextRun(sb, (ASTTextRun) item);
         } else if (item instanceof ASTInlineObject) {
             writeInlineObject(sb, (ASTInlineObject) item);
+        } else if (item instanceof ASTEquation) {
+            writeEquation(sb, (ASTEquation) item);
         } else if (item instanceof ASTBreak) {
             writeBreak(sb, (ASTBreak) item);
         }
@@ -542,6 +544,13 @@ public class ASTSerializer {
             first = writeIntField(sb, "pixelHeight", obj.pixelHeight(), first);
         }
         first = writeBooleanField(sb, "hasImageData", obj.imageData() != null, first);
+        first = writeStringField(sb, "anchoredPosition", obj.anchoredPosition(), first);
+        first = writeStringField(sb, "textWrapMode", obj.textWrapMode(), first);
+        first = writeStringField(sb, "textWrapSide", obj.textWrapSide(), first);
+        first = writeStringField(sb, "fillColor", obj.fillColor(), first);
+        if (obj.fillTint() != 100.0) {
+            first = writeDoubleField(sb, "fillTint", obj.fillTint(), first);
+        }
         // 인라인 텍스트 프레임 단락
         if (obj.paragraphs() != null && !obj.paragraphs().isEmpty()) {
             if (!first) sb.append(',');
@@ -553,6 +562,15 @@ public class ASTSerializer {
             sb.append(']');
             first = false;
         }
+        sb.append('}');
+    }
+
+    private static void writeEquation(StringBuilder sb, ASTEquation eq) {
+        sb.append('{');
+        boolean first = true;
+        first = writeStringField(sb, "itemType", "EQUATION", first);
+        first = writeStringField(sb, "hwpScript", eq.hwpScript(), first);
+        first = writeStringField(sb, "sourceType", eq.sourceType(), first);
         sb.append('}');
     }
 

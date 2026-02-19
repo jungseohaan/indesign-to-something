@@ -61,6 +61,13 @@ public class ASTToHwpxConverter {
     private static final AtomicLong PARA_ID_COUNTER = new AtomicLong(2000000000L);
     private static final AtomicLong SHAPE_ID_COUNTER = new AtomicLong(8000000L);
 
+    /**
+     * 인라인 이미지 높이가 이 값(HWPUNIT)을 초과하면 자리차지(TOP_AND_BOTTOM)로 전환.
+     * IDML에 명시적 래핑 속성이 없는 대형 인라인 이미지의 텍스트 겹침 방지용.
+     * 5000 HWPUNIT = 50pt ≈ 17.6mm (약 4줄 높이).
+     */
+    private static final long INLINE_IMAGE_HEIGHT_THRESHOLD = 5000;
+
     public static ConvertResult convert(ASTDocument doc) throws ConvertException {
         return convert(doc, ProgressReporter.NONE, 0, 0);
     }
@@ -474,7 +481,7 @@ public class ASTToHwpxConverter {
                     .headSzAnd(ArrowSize.SMALL_SMALL).tailSzAnd(ArrowSize.SMALL_SMALL)
                     .outlineStyleAnd(OutlineStyle.NORMAL).alphaAnd(alpha);
         } else {
-            rect.lineShape().colorAnd("#000000").widthAnd(14)
+            rect.lineShape().colorAnd("#000000").widthAnd(0)
                     .styleAnd(LineType2.NONE)
                     .endCapAnd(LineCap.FLAT)
                     .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
@@ -1241,7 +1248,16 @@ public class ASTToHwpxConverter {
 
         long w = obj.width() > 0 ? obj.width() : 5000;
         if (w < 142) w = 142;
-        long inlineMinH = 1600; // 최소 높이 (한 줄), 내용에 맞게 자동 확장됨
+        long inlineMinH = 1600; // 최소 높이 (한 줄)
+        long h = obj.height() > inlineMinH ? obj.height() : inlineMinH;
+
+        // IDML 속성 기반 래핑 모드 결정 (크기 기반 폴백은 이미지에만 적용, 텍스트프레임은 인라인 유지)
+        boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
+        String wrapMode = obj.textWrapMode();
+        boolean useWrapping = isAnchored && wrapMode != null && !"None".equals(wrapMode);
+
+        TextWrapMethod twm = useWrapping ? mapTextWrapMethod(wrapMode) : TextWrapMethod.TOP_AND_BOTTOM;
+        TextFlowSide tfs = useWrapping ? mapTextFlowSide(obj.textWrapSide()) : TextFlowSide.BOTH_SIDES;
 
         Run run = para.addNewRun();
         run.charPrIDRef("0");
@@ -1253,8 +1269,8 @@ public class ASTToHwpxConverter {
         rect.idAnd(shapeId)
                 .zOrderAnd(0)
                 .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
-                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .textWrapAnd(twm)
+                .textFlowAnd(tfs)
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None);
 
@@ -1265,14 +1281,14 @@ public class ASTToHwpxConverter {
         rect.createOffset();
         rect.offset().set(0L, 0L);
         rect.createOrgSz();
-        rect.orgSz().set(w, inlineMinH);
+        rect.orgSz().set(w, h);
         rect.createCurSz();
         rect.curSz().set(w, 0L); // height=0: 내용에 맞게 자동 확장
         rect.createFlip();
         rect.flip().horizontalAnd(false).verticalAnd(false);
         rect.createRotationInfo();
         rect.rotationInfo().angleAnd((short) 0)
-                .centerXAnd(w / 2).centerYAnd(inlineMinH / 2).rotateimageAnd(true);
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
         rect.createRenderingInfo();
         rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
@@ -1280,6 +1296,9 @@ public class ASTToHwpxConverter {
 
         // LineShape — 인라인 프레임은 테두리 없음
         setupTextBoxLineShape(rect, null, 0, "Solid", 100);
+
+        // FillBrush — 부모 Group 배경 사각형의 채우기 색상
+        setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());
 
         // DrawText
         rect.createDrawText();
@@ -1324,33 +1343,54 @@ public class ASTToHwpxConverter {
         rect.createPt1();
         rect.pt1().set(w, 0L);
         rect.createPt2();
-        rect.pt2().set(w, inlineMinH);
+        rect.pt2().set(w, h);
         rect.createPt3();
-        rect.pt3().set(0L, inlineMinH);
+        rect.pt3().set(0L, h);
 
         // ShapeSize
         rect.createSZ();
         rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(inlineMinH).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
-        // ShapePosition — 글자처럼 취급 (인라인)
+        // ShapePosition
         rect.createPos();
-        rect.pos().treatAsCharAnd(true)
-                .affectLSpacingAnd(true)
-                .flowWithTextAnd(true)
-                .allowOverlapAnd(false)
-                .holdAnchorAndSOAnd(false)
-                .vertRelToAnd(VertRelTo.PARA)
-                .horzRelToAnd(HorzRelTo.PARA)
-                .vertAlignAnd(VertAlign.BOTTOM)
-                .horzAlignAnd(HorzAlign.LEFT)
-                .vertOffsetAnd(0L)
-                .horzOffset(0L);
+        if (useWrapping) {
+            // 어울리기/자리차지 — 단락 기준 플로팅
+            rect.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.CENTER)
+                    .vertOffsetAnd(0L)
+                    .horzOffset(0L);
+        } else {
+            // 기존 인라인 (글자처럼 취급)
+            rect.pos().treatAsCharAnd(true)
+                    .affectLSpacingAnd(true)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.BOTTOM)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(0L)
+                    .horzOffset(0L);
+        }
 
-        // OutMargin
+        // OutMargin — IDML TextWrapOffset 반영
         rect.createOutMargin();
-        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        if (useWrapping) {
+            rect.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
+                    .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
+        } else {
+            rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        }
     }
 
     /**
@@ -1489,18 +1529,40 @@ public class ASTToHwpxConverter {
         if (clipW <= 0) clipW = displayW;
         if (clipH <= 0) clipH = displayH;
 
+        // IDML 속성 기반 래핑 모드 결정
+        boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
+        String wrapMode = obj.textWrapMode();
+        boolean idmlWrapping = isAnchored && wrapMode != null && !"None".equals(wrapMode);
+        // 크기 기반 폴백: IDML 래핑 속성이 없지만 이미지가 큰 경우 자리차지로 전환
+        boolean sizeFallback = !idmlWrapping && displayH > INLINE_IMAGE_HEIGHT_THRESHOLD;
+        boolean useWrapping = idmlWrapping || sizeFallback;
+
+        // TextWrapMethod / TextFlowSide 결정
+        TextWrapMethod twm;
+        TextFlowSide tfs;
+        if (idmlWrapping) {
+            twm = mapTextWrapMethod(wrapMode);
+            tfs = mapTextFlowSide(obj.textWrapSide());
+        } else if (sizeFallback) {
+            twm = TextWrapMethod.TOP_AND_BOTTOM;
+            tfs = TextFlowSide.BOTH_SIDES;
+        } else {
+            twm = TextWrapMethod.TOP_AND_BOTTOM;
+            tfs = TextFlowSide.BOTH_SIDES;
+        }
+
         Run run = para.addNewRun();
         run.charPrIDRef("0");
 
         Picture pic = run.addNewPicture();
         String picId = nextShapeId();
 
-        // ShapeObject (인라인)
+        // ShapeObject
         pic.idAnd(picId)
                 .zOrderAnd(0)
                 .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
-                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .textWrapAnd(twm)
+                .textFlowAnd(tfs)
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None)
                 .reverseAnd(false);
@@ -1537,23 +1599,44 @@ public class ASTToHwpxConverter {
                 .heightAnd(displayH).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
-        // ShapePosition — 인라인 (글자처럼 취급)
+        // ShapePosition
         pic.createPos();
-        pic.pos().treatAsCharAnd(true)
-                .affectLSpacingAnd(true)
-                .flowWithTextAnd(true)
-                .allowOverlapAnd(false)
-                .holdAnchorAndSOAnd(false)
-                .vertRelToAnd(VertRelTo.PARA)
-                .horzRelToAnd(HorzRelTo.PARA)
-                .vertAlignAnd(VertAlign.BOTTOM)
-                .horzAlignAnd(HorzAlign.LEFT)
-                .vertOffsetAnd(0L)
-                .horzOffset(0L);
+        if (useWrapping) {
+            // 어울리기/자리차지 — 단락 기준 플로팅
+            pic.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.CENTER)
+                    .vertOffsetAnd(0L)
+                    .horzOffset(0L);
+        } else {
+            // 기존 인라인 (글자처럼 취급)
+            pic.pos().treatAsCharAnd(true)
+                    .affectLSpacingAnd(true)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.BOTTOM)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(0L)
+                    .horzOffset(0L);
+        }
 
-        // OutMargin
+        // OutMargin — IDML TextWrapOffset 반영
         pic.createOutMargin();
-        pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        if (useWrapping) {
+            pic.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
+                    .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
+        } else {
+            pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        }
 
         // ImageRect — 표시 영역 (HWPUNIT)
         pic.createImgRect();
@@ -1583,6 +1666,32 @@ public class ASTToHwpxConverter {
                 .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
 
         imagesConverted++;
+    }
+
+    /**
+     * IDML TextWrapMode → HWPX TextWrapMethod 매핑.
+     */
+    private static TextWrapMethod mapTextWrapMethod(String idmlMode) {
+        if (idmlMode == null) return TextWrapMethod.TOP_AND_BOTTOM;
+        switch (idmlMode) {
+            case "BoundingBoxTextWrap": return TextWrapMethod.SQUARE;
+            case "JumpObjectTextWrap": return TextWrapMethod.TOP_AND_BOTTOM;
+            case "Contour": return TextWrapMethod.TIGHT;
+            default: return TextWrapMethod.TOP_AND_BOTTOM;
+        }
+    }
+
+    /**
+     * IDML TextWrapSide → HWPX TextFlowSide 매핑.
+     */
+    private static TextFlowSide mapTextFlowSide(String idmlSide) {
+        if (idmlSide == null) return TextFlowSide.BOTH_SIDES;
+        switch (idmlSide) {
+            case "LeftSide": return TextFlowSide.LEFT_ONLY;
+            case "RightSide": return TextFlowSide.RIGHT_ONLY;
+            case "LargestArea": return TextFlowSide.LARGEST_ONLY;
+            default: return TextFlowSide.BOTH_SIDES;
+        }
     }
 
     // ── 줄바꿈 ──

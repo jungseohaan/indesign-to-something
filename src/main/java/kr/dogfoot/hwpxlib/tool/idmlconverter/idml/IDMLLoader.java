@@ -1692,6 +1692,9 @@ public class IDMLLoader {
         }
         graphic.itemTransform(IDMLGeometry.parseTransform(elem.getAttribute("ItemTransform")));
 
+        // 앵커/래핑 속성 파싱
+        parseAnchorAndWrapSettings(elem, graphic);
+
         // Rectangle/Polygon/Oval 내부에 Image, TextFrame 등이 있을 수 있음
         collectInlineChildren(elem, graphic);
         collectInlineImageLink(elem, graphic);
@@ -1724,10 +1727,48 @@ public class IDMLLoader {
         }
         group.itemTransform(IDMLGeometry.parseTransform(groupElem.getAttribute("ItemTransform")));
 
+        // 앵커/래핑 속성 파싱
+        parseAnchorAndWrapSettings(groupElem, group);
+
         collectInlineChildren(groupElem, group);
         collectInlineImageLink(groupElem, group);
 
         return group;
+    }
+
+    /**
+     * 인라인 그래픽/그룹에서 AnchoredObjectSetting, TextWrapPreference 파싱.
+     */
+    private static void parseAnchorAndWrapSettings(Element elem, IDMLCharacterRun.InlineGraphic graphic) {
+        List<Element> aosList = getDescendantElements(elem, "AnchoredObjectSetting");
+        if (!aosList.isEmpty()) {
+            String pos = aosList.get(0).getAttribute("AnchoredPosition");
+            if (pos != null && !pos.isEmpty()) {
+                graphic.anchoredPosition(pos);
+            }
+        }
+        List<Element> twpList = getDescendantElements(elem, "TextWrapPreference");
+        if (!twpList.isEmpty()) {
+            Element twp = twpList.get(0);
+            String mode = twp.getAttribute("TextWrapMode");
+            if (mode != null && !mode.isEmpty()) {
+                graphic.textWrapMode(mode);
+            }
+            String side = twp.getAttribute("TextWrapSide");
+            if (side != null && !side.isEmpty()) {
+                graphic.textWrapSide(side);
+            }
+            Element props = getFirstChildElement(twp, "Properties");
+            if (props != null) {
+                Element offset = getFirstChildElement(props, "TextWrapOffset");
+                if (offset != null) {
+                    graphic.textWrapTop(parseDoubleAttrDef(offset, "Top", 0));
+                    graphic.textWrapLeft(parseDoubleAttrDef(offset, "Left", 0));
+                    graphic.textWrapBottom(parseDoubleAttrDef(offset, "Bottom", 0));
+                    graphic.textWrapRight(parseDoubleAttrDef(offset, "Right", 0));
+                }
+            }
+        }
     }
 
     /**

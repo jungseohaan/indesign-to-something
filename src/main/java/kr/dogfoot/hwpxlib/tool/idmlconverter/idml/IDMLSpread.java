@@ -139,6 +139,7 @@ public class IDMLSpread {
     public List<IDMLVectorShape> getVectorShapesOnPage(IDMLPage page) {
         List<IDMLVectorShape> result = new ArrayList<IDMLVectorShape>();
         for (IDMLVectorShape shape : vectorShapes) {
+            if (shape.isInline()) continue;
             if (shape.geometricBounds() != null && shape.itemTransform() != null
                     && page.geometricBounds() != null && page.itemTransform() != null) {
                 if (IDMLGeometry.isFrameOnPage(
