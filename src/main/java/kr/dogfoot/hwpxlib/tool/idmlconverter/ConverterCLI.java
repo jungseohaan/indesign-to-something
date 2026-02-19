@@ -1094,6 +1094,23 @@ public class ConverterCLI {
         }
 
         String idmlPath = args[1];
+        String linksDirectory = null;
+
+        // 옵션 파싱
+        for (int i = 2; i < args.length; i++) {
+            if ("--links-directory".equals(args[i]) && i + 1 < args.length) {
+                linksDirectory = args[++i];
+            }
+        }
+
+        // Links 디렉토리 자동 감지
+        if (linksDirectory == null) {
+            java.io.File idmlFile = new java.io.File(idmlPath);
+            java.io.File linksDir = new java.io.File(idmlFile.getParentFile(), "Links");
+            if (linksDir.isDirectory()) {
+                linksDirectory = linksDir.getAbsolutePath();
+            }
+        }
 
         // IDML 로드
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
@@ -1107,8 +1124,11 @@ public class ConverterCLI {
         int lastSlash = Math.max(idmlPath.lastIndexOf('/'), idmlPath.lastIndexOf('\\'));
         if (lastSlash >= 0) fileName = idmlPath.substring(lastSlash + 1);
 
-        // 4단계 정규화 → AST
-        ConvertOptions options = ConvertOptions.defaults().useEventStream(true);
+        // 4단계 정규화 → AST (이미지 포함하여 마스터 페이지 객체도 처리)
+        ConvertOptions options = ConvertOptions.defaults().useEventStream(true).includeImages(true);
+        if (linksDirectory != null) {
+            options = options.linksDirectory(linksDirectory);
+        }
         ASTDocument ast = IDMLNormalizer.normalize(idmlDoc, options, fileName);
 
         // JSON 직렬화

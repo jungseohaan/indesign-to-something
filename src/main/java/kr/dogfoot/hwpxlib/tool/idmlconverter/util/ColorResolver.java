@@ -33,6 +33,7 @@ public class ColorResolver {
         }
 
         // 기본 색상 처리
+        if (colorRef.contains("Paper")) return "#FFFFFF";  // Paper = 용지 배경색 (흰색)
         if (colorRef.contains("Black")) return "#000000";
         if (colorRef.contains("White")) return "#FFFFFF";
         if (colorRef.contains("Red")) return "#FF0000";

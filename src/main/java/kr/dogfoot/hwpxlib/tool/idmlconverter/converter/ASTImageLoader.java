@@ -395,8 +395,10 @@ public class ASTImageLoader {
      * @param strokeColorHex 선 색상 HEX 또는 null
      */
     public ImageResult rasterizeShape(IDMLVectorShape shape, String fillColorHex, String strokeColorHex) {
-        double wPts = shape.widthPoints();
-        double hPts = shape.heightPoints();
+        double[] canvasBounds = shape.geometricBounds();
+        double wPts = canvasBounds[3] - canvasBounds[1];
+        double hPts = canvasBounds[2] - canvasBounds[0];
+
         // 선 도형(GraphicLine 등)은 한 축이 0일 수 있음: stroke weight를 최소 크기로 사용
         if ((wPts <= 0 || hPts <= 0) && shape.hasStroke() && shape.strokeWeight() > 0) {
             double minDim = shape.strokeWeight();
@@ -426,20 +428,52 @@ public class ASTImageLoader {
 
         // 클리핑 자식이 있으면 자식을 렌더링
         IDMLVectorShape renderTarget = shape.hasClippedChild() ? shape.clippedChild() : shape;
-        String actualFillHex = shape.hasClippedChild() ? null : fillColorHex; // 클리핑 프레임은 채우기 없음
+        String actualFillHex = shape.hasClippedChild() ? null : fillColorHex;
         String actualStrokeHex = shape.hasClippedChild() ? null : strokeColorHex;
+
+        Shape awtShape;
         if (shape.hasClippedChild()) {
-            // 클리핑: 부모 경계로 클립 설정
-            Shape clipShape = createAwtShape(shape, scale);
+            IDMLVectorShape child = shape.clippedChild();
+            double renderLeft = canvasBounds[1];
+            double renderTop = canvasBounds[0];
+
+            // 클리핑 프레임의 Raw Path → 렌더링 좌표계
+            AffineTransform clipAt = new AffineTransform();
+            clipAt.scale(scale, scale);
+            clipAt.translate(-renderLeft, -renderTop);
+            GeneralPath clipRawPath = buildRawPath(shape);
+            Shape clipShape;
+            if (clipRawPath.getBounds2D().getWidth() > 0) {
+                clipShape = clipAt.createTransformedShape(clipRawPath);
+            } else {
+                clipShape = new Rectangle2D.Double(0, 0, wPts * scale, hPts * scale);
+            }
             g.setClip(clipShape);
-            // 자식의 색상 사용 — Stage4에서 전달된 것이 아닌 자식 자체의 색상은 여기서 처리 불가
-            // → fillColorHex/strokeColorHex에 자식 색상이 이미 전달된다고 가정
+
+            // 자식 도형: 자식 ItemTransform 적용 → 렌더링 좌표계
+            double[] ct = child.itemTransform();
+            AffineTransform childAt = new AffineTransform();
+            childAt.scale(scale, scale);
+            childAt.translate(-renderLeft, -renderTop);
+            if (ct != null) {
+                childAt.concatenate(new AffineTransform(ct[0], ct[1], ct[2], ct[3], ct[4], ct[5]));
+            }
+            GeneralPath childRawPath = buildRawPath(child);
+            if (childRawPath.getBounds2D().getWidth() > 0 || childRawPath.getBounds2D().getHeight() > 0) {
+                awtShape = childAt.createTransformedShape(childRawPath);
+            } else {
+                Rectangle2D.Double childRect = new Rectangle2D.Double(
+                        child.geometricBounds()[1], child.geometricBounds()[0],
+                        child.widthPoints(), child.heightPoints());
+                awtShape = childAt.createTransformedShape(childRect);
+            }
+
             actualFillHex = fillColorHex;
             actualStrokeHex = strokeColorHex;
-            renderTarget = shape.clippedChild();
+            renderTarget = child;
+        } else {
+            awtShape = createAwtShape(renderTarget, scale);
         }
-
-        Shape awtShape = createAwtShape(renderTarget, scale);
 
         // 채우기
         if (actualFillHex != null && renderTarget.hasFill()) {
@@ -751,10 +785,6 @@ public class ASTImageLoader {
         }
     }
 
-    /**
-     * 도형의 경로를 좌표 정규화 없이 구축한다 (원래 IDML 좌표 그대로).
-     * 클리핑 프레임 좌표계 변환 시 사용.
-     */
     private GeneralPath buildRawPath(IDMLVectorShape shape) {
         GeneralPath path = new GeneralPath();
 
@@ -814,6 +844,10 @@ public class ASTImageLoader {
 
         switch (shape.shapeType()) {
             case RECTANGLE:
+                // IDML Rectangle can have non-rectangular PathGeometry (parallelogram, trapezoid, etc.)
+                if (hasNonRectangularPath(shape)) {
+                    return buildPathFromPoints(shape, scale);
+                }
                 if (shape.hasRoundedCorners()) {
                     double r = shape.cornerRadius() * scale;
                     return new RoundRectangle2D.Double(0, 0, w, h, r * 2, r * 2);
@@ -830,6 +864,43 @@ public class ASTImageLoader {
             default:
                 return new Rectangle2D.Double(0, 0, w, h);
         }
+    }
+
+    /**
+     * IDML Rectangle가 실제로는 비직사각형 PathGeometry를 가지는지 검사.
+     * (InDesign에서 Rectangle의 앵커를 이동하면 사다리꼴/평행사변형이 됨)
+     */
+    private boolean hasNonRectangularPath(IDMLVectorShape shape) {
+        List<IDMLVectorShape.PathPoint> points = shape.pathPoints();
+        if (shape.hasSubPaths()) {
+            for (IDMLVectorShape.SubPath sub : shape.subPaths()) {
+                if (sub.points().size() >= 3) return true;
+            }
+        }
+        if (points == null || points.size() < 3) return false;
+
+        double[] bounds = shape.geometricBounds();
+        if (bounds == null) return false;
+
+        double top = bounds[0], left = bounds[1], bottom = bounds[2], right = bounds[3];
+        double tol = 0.5; // 0.5pt 허용 오차
+
+        for (IDMLVectorShape.PathPoint pt : points) {
+            // 곡선 핸들이 있으면 비직사각형
+            if (!pt.isStraight()) return true;
+
+            // 앵커가 바운딩 박스 모서리가 아니면 비직사각형
+            boolean xAtEdge = Math.abs(pt.anchorX() - left) < tol
+                    || Math.abs(pt.anchorX() - right) < tol;
+            boolean yAtEdge = Math.abs(pt.anchorY() - top) < tol
+                    || Math.abs(pt.anchorY() - bottom) < tol;
+            if (!xAtEdge || !yAtEdge) return true;
+        }
+
+        // 꼭짓점이 4개가 아니면 비직사각형 (삼각형 등)
+        if (points.size() != 4) return true;
+
+        return false;
     }
 
     private Shape buildPathFromPoints(IDMLVectorShape shape, double scale) {

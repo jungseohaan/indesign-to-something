@@ -41,6 +41,9 @@ public class IDMLCharacterRun {
         private List<InlineGraphic> childGraphics;       // Group 내 자식 그래픽
         private List<IDMLTextFrame> childTextFrames;     // Group 내 자식 텍스트프레임
 
+        // 벡터 도형 정보 (Polygon/Rectangle 글리프 아웃라인 등, 래스터화용)
+        private IDMLVectorShape vectorShape;
+
         // 이미지 링크 정보 (Rectangle/Polygon/Oval 내부에 Image가 있는 경우)
         private String linkResourceURI;
         private String linkResourceFormat;
@@ -99,6 +102,10 @@ public class IDMLCharacterRun {
         public void graphicBounds(double[] v) { this.graphicBounds = v; }
 
         public boolean hasImage() { return linkResourceURI != null && !linkResourceURI.isEmpty(); }
+
+        public IDMLVectorShape vectorShape() { return vectorShape; }
+        public void vectorShape(IDMLVectorShape v) { this.vectorShape = v; }
+        public boolean hasVectorShape() { return vectorShape != null; }
     }
 
     public String appliedCharacterStyle() { return appliedCharacterStyle; }

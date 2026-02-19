@@ -1282,8 +1282,9 @@ public class IDMLLoader {
                 continue;
             }
 
-            IDMLParagraph para = parseParagraph(paraRange);
-            story.addParagraph(para);
+            for (IDMLParagraph para : parseParagraphs(paraRange)) {
+                story.addParagraph(para);
+            }
         }
 
         return story;
@@ -1455,16 +1456,18 @@ public class IDMLLoader {
         for (Element range : cellRanges) {
             List<Element> paraRanges = getChildElements(range, "ParagraphStyleRange");
             for (Element paraRange : paraRanges) {
-                IDMLParagraph para = parseParagraph(paraRange);
-                cell.addParagraph(para);
+                for (IDMLParagraph para : parseParagraphs(paraRange)) {
+                    cell.addParagraph(para);
+                }
             }
         }
 
         // Also check for direct ParagraphStyleRange children (alternative structure)
         List<Element> directParas = getChildElements(cellElem, "ParagraphStyleRange");
         for (Element paraRange : directParas) {
-            IDMLParagraph para = parseParagraph(paraRange);
-            cell.addParagraph(para);
+            for (IDMLParagraph para : parseParagraphs(paraRange)) {
+                cell.addParagraph(para);
+            }
         }
 
         return cell;
@@ -1506,7 +1509,77 @@ public class IDMLLoader {
         return border;
     }
 
-    private static IDMLParagraph parseParagraph(Element paraRange) {
+    /**
+     * ParagraphStyleRange → IDMLParagraph 리스트.
+     * IDML에서 &lt;Br/&gt;는 단락 구분자이므로, 하나의 ParagraphStyleRange 안에
+     * 여러 &lt;Br/&gt;가 있으면 같은 스타일의 복수 단락으로 분리한다.
+     */
+    private static List<IDMLParagraph> parseParagraphs(Element paraRange) {
+        List<IDMLParagraph> result = new ArrayList<>();
+        IDMLParagraph currentPara = createParagraphFromRange(paraRange);
+
+        List<Element> charRanges = getChildElements(paraRange, "CharacterStyleRange");
+        for (Element charRange : charRanges) {
+            // CharacterStyleRange 내부를 직접 순회하여 <Br/> 단위로 분리
+            IDMLCharacterRun currentRun = createRunBase(charRange);
+            StringBuilder contentBuilder = new StringBuilder();
+
+            NodeList children = charRange.getChildNodes();
+            for (int i = 0; i < children.getLength(); i++) {
+                Node node = children.item(i);
+                if (node.getNodeType() != Node.ELEMENT_NODE) continue;
+                Element elem = (Element) node;
+                String tag = elem.getTagName();
+
+                if ("Br".equals(tag)) {
+                    // 현재 런을 마무리하고 단락을 분리
+                    String text = contentBuilder.toString();
+                    if (!text.isEmpty()) {
+                        currentRun.content(text);
+                    }
+                    if (currentRun.content() != null || !currentRun.inlineFrames().isEmpty()
+                            || !currentRun.inlineGraphics().isEmpty()) {
+                        currentPara.addCharacterRun(currentRun);
+                    }
+                    result.add(currentPara);
+
+                    // 새 단락 + 새 런 시작
+                    currentPara = createParagraphFromRange(paraRange);
+                    currentRun = createRunBase(charRange);
+                    contentBuilder = new StringBuilder();
+                } else if ("Content".equals(tag)) {
+                    contentBuilder.append(elem.getTextContent());
+                } else if ("TextFrame".equals(tag)) {
+                    parseInlineTextFrame(elem, currentRun);
+                } else if ("Group".equals(tag)) {
+                    IDMLCharacterRun.InlineGraphic inlineGroup = parseInlineGroup(elem);
+                    currentRun.addInlineGraphic(inlineGroup);
+                } else if ("Rectangle".equals(tag) || "Polygon".equals(tag)
+                        || "Oval".equals(tag)) {
+                    IDMLCharacterRun.InlineGraphic graphic = parseInlineGraphicElement(elem);
+                    currentRun.addInlineGraphic(graphic);
+                }
+            }
+
+            // CharacterStyleRange 끝: 남은 내용을 현재 단락에 추가
+            String text = contentBuilder.toString();
+            if (!text.isEmpty()) {
+                currentRun.content(text);
+            }
+            if (currentRun.content() != null || !currentRun.inlineFrames().isEmpty()
+                    || !currentRun.inlineGraphics().isEmpty()) {
+                currentPara.addCharacterRun(currentRun);
+            }
+        }
+
+        result.add(currentPara);
+        return result;
+    }
+
+    /**
+     * ParagraphStyleRange에서 단락 속성만 파싱하여 IDMLParagraph 생성.
+     */
+    private static IDMLParagraph createParagraphFromRange(Element paraRange) {
         IDMLParagraph para = new IDMLParagraph();
         para.appliedParagraphStyle(getAttrOrNull(paraRange, "AppliedParagraphStyle"));
 
@@ -1554,16 +1627,13 @@ public class IDMLLoader {
             }
         }
 
-        List<Element> charRanges = getChildElements(paraRange, "CharacterStyleRange");
-        for (Element charRange : charRanges) {
-            IDMLCharacterRun run = parseCharacterRun(charRange);
-            para.addCharacterRun(run);
-        }
-
         return para;
     }
 
-    private static IDMLCharacterRun parseCharacterRun(Element charRange) {
+    /**
+     * CharacterStyleRange의 스타일 속성만으로 IDMLCharacterRun 생성 (Content 없이).
+     */
+    private static IDMLCharacterRun createRunBase(Element charRange) {
         IDMLCharacterRun run = new IDMLCharacterRun();
         run.appliedCharacterStyle(getAttrOrNull(charRange, "AppliedCharacterStyle"));
         run.fontStyle(getAttrOrNull(charRange, "FontStyle"));
@@ -1571,7 +1641,6 @@ public class IDMLLoader {
         run.position(getAttrOrNull(charRange, "Position"));
         run.fontSize(parseDoubleAttr(charRange, "PointSize"));
 
-        // Properties 안의 AppliedFont
         Element props = getFirstChildElement(charRange, "Properties");
         if (props != null) {
             String fontFamily = getPropertyText(props, "AppliedFont");
@@ -1579,54 +1648,27 @@ public class IDMLLoader {
                 run.fontFamily(fontFamily);
             }
         }
+        return run;
+    }
 
-        // Content 텍스트 수집
-        StringBuilder contentBuilder = new StringBuilder();
-        NodeList children = charRange.getChildNodes();
-        for (int i = 0; i < children.getLength(); i++) {
-            Node node = children.item(i);
-            if (node.getNodeType() != Node.ELEMENT_NODE) continue;
-            Element elem = (Element) node;
-
-            if ("Content".equals(elem.getTagName())) {
-                contentBuilder.append(elem.getTextContent());
-            } else if ("Br".equals(elem.getTagName())) {
-                contentBuilder.append("\n");
-            } else if ("TextFrame".equals(elem.getTagName())) {
-                // 인라인 TextFrame (분수, limit 등)
-                IDMLTextFrame inlineFrame = new IDMLTextFrame();
-                inlineFrame.selfId(elem.getAttribute("Self"));
-                inlineFrame.parentStoryId(getAttrOrNull(elem, "ParentStory"));
-                inlineFrame.appliedObjectStyle(getAttrOrNull(elem, "AppliedObjectStyle"));
-                inlineFrame.geometricBounds(resolveGeometricBounds(elem));
-                inlineFrame.itemTransform(IDMLGeometry.parseTransform(elem.getAttribute("ItemTransform")));
-                // AnchoredObjectSetting 파싱 (직접 자식 또는 후손)
-                List<Element> aosList = getDescendantElements(elem, "AnchoredObjectSetting");
-                if (!aosList.isEmpty()) {
-                    String anchoredPos = aosList.get(0).getAttribute("AnchoredPosition");
-                    if (anchoredPos != null && !anchoredPos.isEmpty()) {
-                        inlineFrame.anchoredPosition(anchoredPos);
-                    }
-                }
-                run.addInlineFrame(inlineFrame);
-            } else if ("Group".equals(elem.getTagName())) {
-                // 인라인 Group
-                IDMLCharacterRun.InlineGraphic inlineGroup = parseInlineGroup(elem);
-                run.addInlineGraphic(inlineGroup);
-            } else if ("Rectangle".equals(elem.getTagName()) || "Polygon".equals(elem.getTagName())
-                    || "Oval".equals(elem.getTagName())) {
-                // 인라인 그래픽
-                IDMLCharacterRun.InlineGraphic graphic = parseInlineGraphicElement(elem);
-                run.addInlineGraphic(graphic);
+    /**
+     * 인라인 TextFrame 파싱 → IDMLCharacterRun에 추가.
+     */
+    private static void parseInlineTextFrame(Element elem, IDMLCharacterRun run) {
+        IDMLTextFrame inlineFrame = new IDMLTextFrame();
+        inlineFrame.selfId(elem.getAttribute("Self"));
+        inlineFrame.parentStoryId(getAttrOrNull(elem, "ParentStory"));
+        inlineFrame.appliedObjectStyle(getAttrOrNull(elem, "AppliedObjectStyle"));
+        inlineFrame.geometricBounds(resolveGeometricBounds(elem));
+        inlineFrame.itemTransform(IDMLGeometry.parseTransform(elem.getAttribute("ItemTransform")));
+        List<Element> aosList = getDescendantElements(elem, "AnchoredObjectSetting");
+        if (!aosList.isEmpty()) {
+            String anchoredPos = aosList.get(0).getAttribute("AnchoredPosition");
+            if (anchoredPos != null && !anchoredPos.isEmpty()) {
+                inlineFrame.anchoredPosition(anchoredPos);
             }
         }
-
-        String content = contentBuilder.toString();
-        if (!content.isEmpty()) {
-            run.content(content);
-        }
-
-        return run;
+        run.addInlineFrame(inlineFrame);
     }
 
     /**
@@ -1653,6 +1695,14 @@ public class IDMLLoader {
         // Rectangle/Polygon/Oval 내부에 Image, TextFrame 등이 있을 수 있음
         collectInlineChildren(elem, graphic);
         collectInlineImageLink(elem, graphic);
+
+        // 이미지가 없는 경우 벡터 도형으로 파싱 (글리프 아웃라인 래스터화용)
+        if (!graphic.hasImage()) {
+            IDMLVectorShape vectorShape = tryParseVectorShape(elem);
+            if (vectorShape != null) {
+                graphic.vectorShape(vectorShape);
+            }
+        }
 
         return graphic;
     }
@@ -1904,9 +1954,10 @@ public class IDMLLoader {
                 double[] groupTransform = IDMLGeometry.parseTransform(elem.getAttribute("ItemTransform"));
                 double[] combinedTransform = CoordinateConverter.combineTransforms(parentTransform, groupTransform);
                 collectGraphicsFromGroup(elem, result, combinedTransform);
-            } else if ("Table".equals(tagName) || "Cell".equals(tagName) ||
+            } else if ("Table".equals(tagName)) {
+                // Table 셀 내부의 인라인 그래픽은 테이블 변환 파이프라인에서 처리 → 스킵
+            } else if ("Cell".equals(tagName) ||
                        "ParagraphStyleRange".equals(tagName) || "CharacterStyleRange".equals(tagName)) {
-                // Table, Cell, ParagraphStyleRange, CharacterStyleRange 내부도 탐색
                 collectGraphicsFromCharacterRange(elem, result, parentTransform);
             }
         }
@@ -2146,34 +2197,43 @@ public class IDMLLoader {
     }
 
     /**
-     * PathGeometry > GeometryPathType > PathPointArray > PathPointType
-     * 에서 bounding box를 계산한다.
+     * 요소 자신의 PathGeometry에서 bounding box를 계산한다.
+     * Properties/PathGeometry/GeometryPathType/PathPointArray/PathPointType 만 사용.
+     * (getDescendantElements를 사용하면 자식 도형의 PathPointType까지 포함되어
+     * 클리핑 프레임 등의 bounds가 비정상적으로 커지는 문제가 발생함)
+     *
      * Anchor, LeftDirection, RightDirection 모든 좌표를 포함하여
      * 베지에 곡선이 앵커 밖으로 확장되는 경우를 처리한다.
      */
     private static double[] computeBoundsFromPathGeometry(Element elem) {
-        List<Element> pathPoints = getDescendantElements(elem, "PathPointType");
-        if (pathPoints.isEmpty()) {
-            return new double[]{0, 0, 0, 0};
-        }
+        // 요소 자신의 Properties/PathGeometry 만 탐색 (자식 도형 제외)
+        Element props = getFirstChildElement(elem, "Properties");
+        if (props == null) return new double[]{0, 0, 0, 0};
+
+        Element pathGeom = getFirstChildElement(props, "PathGeometry");
+        if (pathGeom == null) return new double[]{0, 0, 0, 0};
 
         double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
         double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
 
-        for (Element pp : pathPoints) {
-            // Anchor, LeftDirection, RightDirection 모두 포함
-            String[] attrs = {"Anchor", "LeftDirection", "RightDirection"};
-            for (String attr : attrs) {
-                String val = pp.getAttribute(attr);
-                if (val == null || val.isEmpty()) continue;
-                String[] parts = val.trim().split("\\s+");
-                if (parts.length >= 2) {
-                    double x = Double.parseDouble(parts[0]);
-                    double y = Double.parseDouble(parts[1]);
-                    if (x < minX) minX = x;
-                    if (x > maxX) maxX = x;
-                    if (y < minY) minY = y;
-                    if (y > maxY) maxY = y;
+        for (Element pathType : getChildElements(pathGeom, "GeometryPathType")) {
+            Element ppa = getFirstChildElement(pathType, "PathPointArray");
+            if (ppa == null) continue;
+            for (Element pp : getChildElements(ppa, "PathPointType")) {
+                // Anchor, LeftDirection, RightDirection 모두 포함
+                String[] attrs = {"Anchor", "LeftDirection", "RightDirection"};
+                for (String attr : attrs) {
+                    String val = pp.getAttribute(attr);
+                    if (val == null || val.isEmpty()) continue;
+                    String[] parts = val.trim().split("\\s+");
+                    if (parts.length >= 2) {
+                        double x = Double.parseDouble(parts[0]);
+                        double y = Double.parseDouble(parts[1]);
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
                 }
             }
         }
