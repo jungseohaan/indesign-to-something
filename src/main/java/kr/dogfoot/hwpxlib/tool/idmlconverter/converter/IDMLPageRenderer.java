@@ -544,6 +544,11 @@ public class IDMLPageRenderer {
                 Graphics2D g2 = (Graphics2D) g.create();
                 g2.setClip(clipPath);
 
+                // 1.5. 외부 프레임에 fill이 있으면 클리핑 영역 내에 배경색 먼저 채우기
+                if (shape.hasFill()) {
+                    fillAndStroke(g2, shape, clipPath);
+                }
+
                 // 2. 합성 변환: parent * child
                 IDMLVectorShape child = shape.clippedChild();
                 double[] childT = child.itemTransform();
@@ -1084,15 +1089,7 @@ public class IDMLPageRenderer {
                     k = Double.parseDouble(part.substring(2)) / 100.0;
                 }
             }
-            // CMYK to RGB
-            int r = (int) (255 * (1 - c) * (1 - k));
-            int g = (int) (255 * (1 - m) * (1 - k));
-            int b = (int) (255 * (1 - y) * (1 - k));
-            return new Color(
-                    Math.max(0, Math.min(255, r)),
-                    Math.max(0, Math.min(255, g)),
-                    Math.max(0, Math.min(255, b))
-            );
+            return kr.dogfoot.hwpxlib.tool.idmlconverter.util.CMYKColorConverter.cmykToColor(c, m, y, k);
         } catch (Exception e) {
             return null;
         }

@@ -31,6 +31,10 @@ public class ASTInlineObject extends ASTInlineItem {
     // 프레임 스타일 (INLINE_TEXT_FRAME — 부모 Group의 배경 사각형에서 전달)
     private String fillColor;      // "#RRGGBB" hex
     private double fillTint = 100; // 0~100
+    private String strokeColor;    // "#RRGGBB" hex
+    private double strokeWeight;   // points
+    private double strokeTint = 100;
+    private double cornerRadius;   // points
 
     // 인라인 텍스트 프레임 데이터 (INLINE_TEXT_FRAME)
     private java.util.List<ASTParagraph> paragraphs;
@@ -88,6 +92,18 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public double fillTint() { return fillTint; }
     public void fillTint(double v) { this.fillTint = v; }
+
+    public String strokeColor() { return strokeColor; }
+    public void strokeColor(String v) { this.strokeColor = v; }
+
+    public double strokeWeight() { return strokeWeight; }
+    public void strokeWeight(double v) { this.strokeWeight = v; }
+
+    public double strokeTint() { return strokeTint; }
+    public void strokeTint(double v) { this.strokeTint = v; }
+
+    public double cornerRadius() { return cornerRadius; }
+    public void cornerRadius(double v) { this.cornerRadius = v; }
 
     public java.util.List<ASTParagraph> paragraphs() { return paragraphs; }
     public void paragraphs(java.util.List<ASTParagraph> v) { this.paragraphs = v; }

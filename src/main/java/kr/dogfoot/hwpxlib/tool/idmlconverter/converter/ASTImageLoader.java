@@ -49,6 +49,63 @@ public class ASTImageLoader {
         public int pixelWidth;
         public int pixelHeight;
         public boolean isPlaceholder;
+        public double widthPts;   // 원본 포인트 크기 (합성 래스터화 시 사용)
+        public double heightPts;
+    }
+
+    /**
+     * 벡터 도형 + 색상 정보 묶음 (합성 래스터화용).
+     * accTransform: 도형의 로컬 좌표를 그룹 루트 좌표로 변환하는 누적 변환.
+     * 중첩 그룹 내부의 도형이 서로 다른 로컬 좌표계를 가질 때 정확한 위치/크기를 계산한다.
+     */
+    public static class ShapeWithColor {
+        public final IDMLVectorShape shape;
+        public final String fillHex;
+        public final String strokeHex;
+        public final double[] accTransform; // null이면 변환 없음 (항등 변환)
+
+        public ShapeWithColor(IDMLVectorShape shape, String fillHex, String strokeHex) {
+            this(shape, fillHex, strokeHex, null);
+        }
+
+        public ShapeWithColor(IDMLVectorShape shape, String fillHex, String strokeHex,
+                              double[] accTransform) {
+            this.shape = shape;
+            this.fillHex = fillHex;
+            this.strokeHex = strokeHex;
+            this.accTransform = accTransform;
+        }
+
+        /**
+         * 도형의 geometricBounds를 누적 변환으로 변환한 결과를 반환한다.
+         * [top, left, bottom, right] → 변환 후 [minY, minX, maxY, maxX]
+         */
+        public double[] transformedBounds() {
+            double[] b = shape.geometricBounds();
+            if (b == null || b.length < 4) return b;
+            if (accTransform == null) return b;
+
+            double a = accTransform[0], bv = accTransform[1];
+            double c = accTransform[2], d = accTransform[3];
+            double tx = accTransform[4], ty = accTransform[5];
+
+            // 4 corners: (left, top), (right, top), (left, bottom), (right, bottom)
+            double[] xs = new double[4];
+            double[] ys = new double[4];
+            xs[0] = a * b[1] + c * b[0] + tx;  ys[0] = bv * b[1] + d * b[0] + ty;
+            xs[1] = a * b[3] + c * b[0] + tx;  ys[1] = bv * b[3] + d * b[0] + ty;
+            xs[2] = a * b[1] + c * b[2] + tx;  ys[2] = bv * b[1] + d * b[2] + ty;
+            xs[3] = a * b[3] + c * b[2] + tx;  ys[3] = bv * b[3] + d * b[2] + ty;
+
+            double minX = xs[0], maxX = xs[0], minY = ys[0], maxY = ys[0];
+            for (int i = 1; i < 4; i++) {
+                if (xs[i] < minX) minX = xs[i];
+                if (xs[i] > maxX) maxX = xs[i];
+                if (ys[i] < minY) minY = ys[i];
+                if (ys[i] > maxY) maxY = ys[i];
+            }
+            return new double[]{minY, minX, maxY, maxX};
+        }
     }
 
     /**
@@ -448,6 +505,18 @@ public class ASTImageLoader {
             } else {
                 clipShape = new Rectangle2D.Double(0, 0, wPts * scale, hPts * scale);
             }
+
+            // 외부 프레임에 fill이 있으면 클리핑 영역 내에 배경색 먼저 채우기
+            if (shape.hasFill()) {
+                Color frameFillColor = resolveFrameFillColor(shape.fillColor());
+                if (frameFillColor != null) {
+                    g.setClip(clipShape);
+                    float frameAlpha = alpha * (float) (shape.fillTint() / 100.0);
+                    g.setColor(withAlpha(frameFillColor, frameAlpha));
+                    g.fill(clipShape);
+                }
+            }
+
             g.setClip(clipShape);
 
             // 자식 도형: 자식 ItemTransform 적용 → 렌더링 좌표계
@@ -516,6 +585,11 @@ public class ASTImageLoader {
 
         g.dispose();
 
+        // GradientFeather 알파 마스크 적용
+        if (shape.hasGradientFeather()) {
+            applyGradientFeatherMask(image, shape, scale, strokePad);
+        }
+
         try {
             byte[] pngData = encodePng(image);
             ImageResult result = new ImageResult();
@@ -527,6 +601,216 @@ public class ASTImageLoader {
         } catch (IOException e) {
             return null;
         }
+    }
+
+    /**
+     * 여러 벡터 도형을 하나의 캔버스에 합성 래스터화한다.
+     * 인라인 그룹 내부의 글리프 아웃라인 등, 여러 Polygon으로 구성된 벡터 그래픽용.
+     *
+     * @param shapes         도형 + 색상 목록
+     * @param groupTransform 부모 Group의 ItemTransform (null 가능)
+     * @return 래스터화 결과 (widthPts, heightPts 포함)
+     */
+    public ImageResult rasterizeShapes(List<ShapeWithColor> shapes, double[] groupTransform) {
+        if (shapes == null || shapes.isEmpty()) return null;
+
+        // 1. 모든 도형의 합산 bounding box 계산 (변환 적용된 좌표)
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+        for (ShapeWithColor sc : shapes) {
+            double[] b = sc.transformedBounds();
+            if (b == null || b.length < 4) continue;
+            if (b[1] < minX) minX = b[1];
+            if (b[0] < minY) minY = b[0];
+            if (b[3] > maxX) maxX = b[3];
+            if (b[2] > maxY) maxY = b[2];
+        }
+        if (minX >= maxX || minY >= maxY) return null;
+
+        double wPts = maxX - minX;
+        double hPts = maxY - minY;
+
+        int targetDpi = options.imageDpi();
+        double scale = targetDpi / 72.0;
+        double strokePad = 1;
+
+        int pixW = Math.max(10, (int) Math.ceil(wPts * scale + strokePad * 2));
+        int pixH = Math.max(10, (int) Math.ceil(hPts * scale + strokePad * 2));
+
+        BufferedImage image = new BufferedImage(pixW, pixH, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g.translate(strokePad, strokePad);
+
+        // 2. 각 도형을 공통 좌표 기준으로 렌더링
+        for (ShapeWithColor sc : shapes) {
+            double[] tb = sc.transformedBounds();
+            if (tb == null || tb.length < 4) continue;
+
+            double offX = tb[1] - minX;
+            double offY = tb[0] - minY;
+            double sw = tb[3] - tb[1];
+            double sh = tb[2] - tb[0];
+            if (sw <= 0 || sh <= 0) continue;
+
+            Shape awtShape;
+            if (sc.accTransform != null) {
+                // 누적 변환이 있으면: path points에 변환을 적용하여 그룹 좌표계로 변환 후 렌더링
+                awtShape = buildTransformedPath(sc.shape, sc.accTransform, scale, minX, minY);
+            } else {
+                awtShape = buildPathFromPoints(sc.shape, scale, offX, offY);
+            }
+            if (awtShape == null) continue;
+
+            // 채우기
+            if (sc.fillHex != null) {
+                Color fillColor = hexToColor(sc.fillHex);
+                if (fillColor != null) {
+                    float fillAlpha = (float) (sc.shape.fillTint() / 100.0);
+                    g.setColor(withAlpha(fillColor, fillAlpha));
+                    g.fill(awtShape);
+                }
+            }
+
+            // 선
+            if (sc.strokeHex != null && sc.shape.hasStroke()) {
+                Color strokeColor = hexToColor(sc.strokeHex);
+                if (strokeColor != null) {
+                    float strokeAlpha = (float) (sc.shape.strokeTint() / 100.0);
+                    g.setColor(withAlpha(strokeColor, strokeAlpha));
+                    float strokeW = (float) (sc.shape.strokeWeight() * scale);
+                    g.setStroke(new BasicStroke(strokeW));
+                    g.draw(awtShape);
+                }
+            }
+        }
+
+        g.dispose();
+
+        try {
+            byte[] pngData = encodePng(image);
+            ImageResult result = new ImageResult();
+            result.imageData = pngData;
+            result.format = "png";
+            result.pixelWidth = pixW;
+            result.pixelHeight = pixH;
+            result.widthPts = wPts;
+            result.heightPts = hPts;
+            return result;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 벡터 도형의 PathPoints를 AWT Shape으로 변환 (합성 렌더링용).
+     * 지정된 오프셋을 적용하여 공통 캔버스 좌표계로 변환한다.
+     */
+    private Shape buildPathFromPoints(IDMLVectorShape shape, double scale,
+                                       double offX, double offY) {
+        double[] bounds = shape.geometricBounds();
+        double baseOffX = (bounds != null) ? -bounds[1] + offX : offX;
+        double baseOffY = (bounds != null) ? -bounds[0] + offY : offY;
+
+        int windingRule = shape.hasSubPaths()
+                ? GeneralPath.WIND_EVEN_ODD : GeneralPath.WIND_NON_ZERO;
+        GeneralPath path = new GeneralPath(windingRule);
+
+        if (shape.hasSubPaths()) {
+            for (IDMLVectorShape.SubPath sub : shape.subPaths()) {
+                appendSubPath(path, sub.points(), sub.isOpen(), scale, baseOffX, baseOffY);
+            }
+        } else if (!shape.pathPoints().isEmpty()) {
+            appendSubPath(path, shape.pathPoints(), shape.pathOpen(), scale, baseOffX, baseOffY);
+        }
+
+        return path;
+    }
+
+    /**
+     * 누적 변환을 적용하여 path points를 그룹 좌표계로 변환한 AWT Shape을 생성한다.
+     * 중첩 그룹 내부의 도형을 공통 캔버스에 정확히 배치하기 위해 사용.
+     *
+     * @param shape        벡터 도형
+     * @param accTransform 누적 아핀 변환 [a, b, c, d, tx, ty]
+     * @param scale        DPI 스케일
+     * @param canvasMinX   캔버스 원점 X (그룹 좌표계)
+     * @param canvasMinY   캔버스 원점 Y (그룹 좌표계)
+     */
+    private Shape buildTransformedPath(IDMLVectorShape shape, double[] accTransform,
+                                        double scale, double canvasMinX, double canvasMinY) {
+        double ta = accTransform[0], tb = accTransform[1];
+        double tc = accTransform[2], td = accTransform[3];
+        double ttx = accTransform[4], tty = accTransform[5];
+
+        int windingRule = shape.hasSubPaths()
+                ? GeneralPath.WIND_EVEN_ODD : GeneralPath.WIND_NON_ZERO;
+        GeneralPath path = new GeneralPath(windingRule);
+
+        java.util.List<java.util.List<IDMLVectorShape.PathPoint>> allPointSets = new java.util.ArrayList<>();
+        java.util.List<Boolean> allOpenFlags = new java.util.ArrayList<>();
+
+        if (shape.hasSubPaths()) {
+            for (IDMLVectorShape.SubPath sub : shape.subPaths()) {
+                allPointSets.add(sub.points());
+                allOpenFlags.add(sub.isOpen());
+            }
+        } else if (!shape.pathPoints().isEmpty()) {
+            allPointSets.add(shape.pathPoints());
+            allOpenFlags.add(shape.pathOpen());
+        }
+
+        for (int s = 0; s < allPointSets.size(); s++) {
+            java.util.List<IDMLVectorShape.PathPoint> points = allPointSets.get(s);
+            boolean isOpen = allOpenFlags.get(s);
+            if (points.isEmpty()) continue;
+
+            for (int i = 0; i < points.size(); i++) {
+                IDMLVectorShape.PathPoint pt = points.get(i);
+                // 로컬 좌표에 누적 변환 적용 → 그룹 좌표 → 캔버스 좌표
+                double ax = (ta * pt.anchorX() + tc * pt.anchorY() + ttx - canvasMinX) * scale;
+                double ay = (tb * pt.anchorX() + td * pt.anchorY() + tty - canvasMinY) * scale;
+
+                if (i == 0) {
+                    path.moveTo((float) ax, (float) ay);
+                } else {
+                    IDMLVectorShape.PathPoint prev = points.get(i - 1);
+                    double prx = (ta * prev.rightX() + tc * prev.rightY() + ttx - canvasMinX) * scale;
+                    double pry = (tb * prev.rightX() + td * prev.rightY() + tty - canvasMinY) * scale;
+                    double lx = (ta * pt.leftX() + tc * pt.leftY() + ttx - canvasMinX) * scale;
+                    double ly = (tb * pt.leftX() + td * pt.leftY() + tty - canvasMinY) * scale;
+
+                    boolean isBezier = (Math.abs(prx - ((ta * prev.anchorX() + tc * prev.anchorY() + ttx - canvasMinX) * scale)) > 0.01)
+                            || (Math.abs(lx - ax) > 0.01)
+                            || (Math.abs(pry - ((tb * prev.anchorX() + td * prev.anchorY() + tty - canvasMinY) * scale)) > 0.01)
+                            || (Math.abs(ly - ay) > 0.01);
+
+                    if (isBezier) {
+                        path.curveTo((float) prx, (float) pry, (float) lx, (float) ly, (float) ax, (float) ay);
+                    } else {
+                        path.lineTo((float) ax, (float) ay);
+                    }
+                }
+            }
+
+            // 닫힌 경로 처리
+            if (!isOpen && points.size() > 1) {
+                IDMLVectorShape.PathPoint last = points.get(points.size() - 1);
+                IDMLVectorShape.PathPoint first = points.get(0);
+                double lrx = (ta * last.rightX() + tc * last.rightY() + ttx - canvasMinX) * scale;
+                double lry = (tb * last.rightX() + td * last.rightY() + tty - canvasMinY) * scale;
+                double flx = (ta * first.leftX() + tc * first.leftY() + ttx - canvasMinX) * scale;
+                double fly = (tb * first.leftX() + td * first.leftY() + tty - canvasMinY) * scale;
+                double fax = (ta * first.anchorX() + tc * first.anchorY() + ttx - canvasMinX) * scale;
+                double fay = (tb * first.anchorX() + td * first.anchorY() + tty - canvasMinY) * scale;
+
+                path.curveTo((float) lrx, (float) lry, (float) flx, (float) fly, (float) fax, (float) fay);
+                path.closePath();
+            }
+        }
+
+        return path;
     }
 
     /**
@@ -601,6 +885,16 @@ public class ASTImageLoader {
 
         // 클리핑 설정
         if (transformedClip != null) {
+            // 외부 프레임에 fill이 있으면 클리핑 영역 내에 배경색 먼저 채우기
+            if (shape.hasFill()) {
+                Color frameFillColor = resolveFrameFillColor(shape.fillColor());
+                if (frameFillColor != null) {
+                    g.setClip(transformedClip);
+                    float frameAlpha = alpha * (float) (shape.fillTint() / 100.0);
+                    g.setColor(withAlpha(frameFillColor, frameAlpha));
+                    g.fill(transformedClip);
+                }
+            }
             g.setClip(transformedClip);
         }
 
@@ -644,6 +938,11 @@ public class ASTImageLoader {
         }
 
         g.dispose();
+
+        // GradientFeather 알파 마스크 적용
+        if (shape.hasGradientFeather()) {
+            applyGradientFeatherMask(image, shape, scale, strokePad, rotFlip, allBounds);
+        }
 
         try {
             byte[] pngData = encodePng(image);
@@ -785,8 +1084,108 @@ public class ASTImageLoader {
         }
     }
 
+    /**
+     * GradientFeather 알파 마스크를 이미지에 적용 (비회전 버전).
+     */
+    private void applyGradientFeatherMask(BufferedImage image, IDMLVectorShape shape,
+                                           double scale, double strokePad) {
+        applyGradientFeatherMask(image, shape, scale, strokePad, null, null);
+    }
+
+    /**
+     * GradientFeather 알파 마스크를 이미지에 적용.
+     * IDML GradientFeatherSetting의 각도, 길이, 시작점을 기반으로
+     * 선형 투명도 그라디언트를 기존 알파 채널에 곱한다.
+     *
+     * @param image         래스터화된 도형 이미지 (TYPE_INT_ARGB)
+     * @param shape         원본 벡터 도형 (GradientFeather 속성 포함)
+     * @param scale         DPI 스케일 (targetDpi / 72.0)
+     * @param strokePad     스트로크 패딩 (픽셀)
+     * @param rotFlip       회전/반전 변환 (composedTransform 사용 시), null이면 비회전
+     * @param allBounds     회전된 Shape의 바운딩 박스 (composedTransform 사용 시)
+     */
+    private void applyGradientFeatherMask(BufferedImage image, IDMLVectorShape shape,
+                                           double scale, double strokePad,
+                                           AffineTransform rotFlip, Rectangle2D allBounds) {
+        double angleDeg = shape.gradientFeatherAngle();
+        double lengthPts = shape.gradientFeatherLength();
+        double[] gs = shape.gradientFeatherStart();
+        double[] bounds = shape.geometricBounds();
+
+        if (bounds == null || lengthPts <= 0) return;
+
+        // 그라디언트 방향 벡터 (IDML: 0°=right, 90°=bottom-to-top, -90°=top-to-bottom)
+        // IDML은 수학 좌표계(Y↑)를 사용하므로 화면 좌표계(Y↓)에서는 Y축 반전 필요
+        double angleRad = Math.toRadians(angleDeg);
+        double dirX = Math.cos(angleRad);
+        double dirY = -Math.sin(angleRad);
+
+        // GradientStart를 도형 로컬 좌표에서 스케일된 로컬 좌표로 변환
+        double gsLocalX, gsLocalY;
+        if (gs != null && gs.length >= 2) {
+            gsLocalX = (gs[0] - bounds[1]) * scale;
+            gsLocalY = (gs[1] - bounds[0]) * scale;
+        } else {
+            gsLocalX = (bounds[3] - bounds[1]) * scale / 2.0;
+            gsLocalY = (bounds[2] - bounds[0]) * scale / 2.0;
+        }
+
+        double gsPixX, gsPixY;
+        double dirPixX = dirX, dirPixY = dirY;
+
+        if (rotFlip != null && allBounds != null) {
+            // composedTransform 적용: 로컬 좌표를 회전/반전하여 이미지 좌표로 변환
+            double[] gsTransformed = new double[2];
+            rotFlip.transform(new double[]{gsLocalX, gsLocalY}, 0, gsTransformed, 0, 1);
+            gsPixX = gsTransformed[0] - allBounds.getMinX() + strokePad;
+            gsPixY = gsTransformed[1] - allBounds.getMinY() + strokePad;
+
+            // 방향 벡터도 회전/반전 적용
+            double[] dirTransformed = new double[2];
+            rotFlip.deltaTransform(new double[]{dirX, dirY}, 0, dirTransformed, 0, 1);
+            dirPixX = dirTransformed[0];
+            dirPixY = dirTransformed[1];
+        } else {
+            // 비회전: 단순 오프셋
+            gsPixX = gsLocalX + strokePad;
+            gsPixY = gsLocalY + strokePad;
+        }
+
+        double lengthPx = lengthPts * scale;
+        if (lengthPx <= 0) return;
+
+        int w = image.getWidth();
+        int h = image.getHeight();
+        int[] pixels = image.getRGB(0, 0, w, h, null, 0, w);
+
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int idx = y * w + x;
+                int argb = pixels[idx];
+                int currentAlpha = (argb >>> 24) & 0xFF;
+                if (currentAlpha == 0) continue;
+
+                // GradientStart에서 현재 픽셀까지 벡터를 그라디언트 방향에 투영
+                double dx = x - gsPixX;
+                double dy = y - gsPixY;
+                double projection = dx * dirPixX + dy * dirPixY;
+
+                // 0 = 시작점(불투명), 1 = 끝점(투명)
+                double fraction = Math.max(0, Math.min(1, projection / lengthPx));
+
+                int newAlpha = (int) Math.round(currentAlpha * (1.0 - fraction));
+                pixels[idx] = (Math.max(0, Math.min(255, newAlpha)) << 24) | (argb & 0x00FFFFFF);
+            }
+        }
+
+        image.setRGB(0, 0, w, h, pixels, 0, w);
+    }
+
     private GeneralPath buildRawPath(IDMLVectorShape shape) {
-        GeneralPath path = new GeneralPath();
+        // 복합 경로(compound path)는 EVEN_ODD 규칙 사용 (IDML 기본)
+        int windingRule = shape.hasSubPaths()
+                ? GeneralPath.WIND_EVEN_ODD : GeneralPath.WIND_NON_ZERO;
+        GeneralPath path = new GeneralPath(windingRule);
 
         if (shape.hasSubPaths()) {
             for (IDMLVectorShape.SubPath sub : shape.subPaths()) {
@@ -908,7 +1307,10 @@ public class ASTImageLoader {
         double offX = (bounds != null) ? -bounds[1] : 0;
         double offY = (bounds != null) ? -bounds[0] : 0;
 
-        GeneralPath path = new GeneralPath();
+        // 복합 경로(compound path)는 EVEN_ODD 규칙 사용 (IDML 기본)
+        int windingRule = shape.hasSubPaths()
+                ? GeneralPath.WIND_EVEN_ODD : GeneralPath.WIND_NON_ZERO;
+        GeneralPath path = new GeneralPath(windingRule);
 
         if (shape.hasSubPaths()) {
             for (IDMLVectorShape.SubPath sub : shape.subPaths()) {
@@ -956,6 +1358,34 @@ public class ASTImageLoader {
                 path.closePath();
             }
         }
+    }
+
+    /**
+     * IDML fillColor 문자열에서 Color 객체를 직접 해석한다 (ColorResolver 없이).
+     * 클리핑 프레임의 배경색 렌더링용.
+     */
+    private static Color resolveFrameFillColor(String idmlFillColor) {
+        if (idmlFillColor == null) return null;
+        if ("Color/Black".equals(idmlFillColor)) return Color.BLACK;
+        if ("Color/Paper".equals(idmlFillColor) || "Color/White".equals(idmlFillColor))
+            return Color.WHITE;
+        // CMYK 패턴: "Color/C=0 M=80 Y=100 K=0"
+        if (idmlFillColor.startsWith("Color/C=")) {
+            try {
+                String[] parts = idmlFillColor.substring("Color/".length()).split("\\s+");
+                double c = 0, m = 0, y = 0, k = 0;
+                for (String part : parts) {
+                    if (part.startsWith("C=")) c = Double.parseDouble(part.substring(2)) / 100.0;
+                    else if (part.startsWith("M=")) m = Double.parseDouble(part.substring(2)) / 100.0;
+                    else if (part.startsWith("Y=")) y = Double.parseDouble(part.substring(2)) / 100.0;
+                    else if (part.startsWith("K=")) k = Double.parseDouble(part.substring(2)) / 100.0;
+                }
+                return kr.dogfoot.hwpxlib.tool.idmlconverter.util.CMYKColorConverter.cmykToColor(c, m, y, k);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static Color hexToColor(String hex) {

@@ -122,6 +122,11 @@ public class IDMLVectorShape {
     private double strokeTint = 100;   // 선 색 농도 (tint)
     private double opacity = 100;      // 전체 불투명도
 
+    // GradientFeather (투명도 그라디언트 마스크)
+    private double gradientFeatherAngle = Double.NaN;  // 각도 (degrees)
+    private double gradientFeatherLength;               // 길이 (points)
+    private double[] gradientFeatherStart;              // 시작점 [x, y] (로컬 좌표, points)
+
     // 인라인/앵커 객체 플래그
     private boolean isInline;          // Story 내 인라인 그래픽 여부
     private String parentStoryId;      // 인라인 그래픽의 부모 Story ID
@@ -218,6 +223,19 @@ public class IDMLVectorShape {
 
     public double opacity() { return opacity; }
     public void opacity(double v) { this.opacity = v; }
+
+    public double gradientFeatherAngle() { return gradientFeatherAngle; }
+    public void gradientFeatherAngle(double v) { this.gradientFeatherAngle = v; }
+
+    public double gradientFeatherLength() { return gradientFeatherLength; }
+    public void gradientFeatherLength(double v) { this.gradientFeatherLength = v; }
+
+    public double[] gradientFeatherStart() { return gradientFeatherStart; }
+    public void gradientFeatherStart(double[] v) { this.gradientFeatherStart = v; }
+
+    public boolean hasGradientFeather() {
+        return !Double.isNaN(gradientFeatherAngle) && gradientFeatherLength > 0;
+    }
 
     public boolean isInline() { return isInline; }
     public void isInline(boolean v) { this.isInline = v; }

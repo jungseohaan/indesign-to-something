@@ -1086,6 +1086,11 @@ public class ASTToHwpxConverter {
             if (mapped != null) charPrId = mapped;
         }
 
+        // 수식 폰트(NP_ prefix) → 밑줄 + 초록색 디버그 스타일
+        if (isEquationFont(textRun.fontFamily())) {
+            charPrId = createEquationFontCharPr(textRun, charPrId);
+        }
+
         Run run = para.addNewRun();
         run.charPrIDRef(charPrId);
 
@@ -1223,6 +1228,75 @@ public class ASTToHwpxConverter {
         return newId;
     }
 
+    private static boolean isEquationFont(String fontFamily) {
+        return fontFamily != null && fontFamily.startsWith("NP_");
+    }
+
+    private final Map<String, String> eqFontCharPrCache = new HashMap<>();
+
+    private String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId) {
+        String cacheKey = baseCharPrId + "|EQ|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "");
+        String cached = eqFontCharPrCache.get(cacheKey);
+        if (cached != null) return cached;
+
+        String newId = styleRegistry.nextCharPrId();
+        CharPr charPr = hwpxFile.headerXMLFile().refList().charProperties().addNew();
+
+        int height = textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : 1000;
+        String fontId = fontRegistry.resolveFontId(textRun.fontFamily());
+
+        charPr.idAnd(newId)
+                .heightAnd(height)
+                .textColorAnd("#008000")  // 초록색
+                .shadeColorAnd("none")
+                .useFontSpaceAnd(false)
+                .useKerningAnd(false)
+                .symMarkAnd(SymMarkSort.NONE)
+                .borderFillIDRef("2");
+
+        if (textRun.fontStyle() != null) {
+            String style = textRun.fontStyle().toLowerCase();
+            if (style.contains("bold")) charPr.createBold();
+            if (style.contains("italic")) charPr.createItalic();
+        }
+        if (textRun.superscript()) charPr.createSupscript();
+        if (textRun.subscript()) charPr.createSubscript();
+
+        charPr.createFontRef();
+        charPr.fontRef().set(fontId, fontId, fontId, fontId, fontId, fontId, fontId);
+
+        charPr.createRatio();
+        charPr.ratio().set((short) 90, (short) 90, (short) 90, (short) 90, (short) 90, (short) 90, (short) 90);
+
+        short baseSpacing = textRun.letterSpacing() != null ? textRun.letterSpacing() : 0;
+        short spacing = (short) (baseSpacing - 10);
+        charPr.createSpacing();
+        charPr.spacing().set(spacing, spacing, spacing, spacing, spacing, spacing, spacing);
+
+        charPr.createRelSz();
+        charPr.relSz().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
+
+        charPr.createOffset();
+        charPr.offset().set((short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0);
+
+        // 밑줄 (초록색 실선)
+        charPr.createUnderline();
+        charPr.underline().typeAnd(UnderlineType.BOTTOM).shapeAnd(LineType3.SOLID).color("#008000");
+
+        charPr.createStrikeout();
+        charPr.strikeout().shapeAnd(LineType2.NONE).color("#000000");
+
+        charPr.createOutline();
+        charPr.outline().type(LineType1.NONE);
+
+        charPr.createShadow();
+        charPr.shadow().typeAnd(CharShadowType.NONE).colorAnd("#B2B2B2")
+                .offsetXAnd((short) 10).offsetY((short) 10);
+
+        eqFontCharPrCache.put(cacheKey, newId);
+        return newId;
+    }
+
     // ── 인라인 객체 변환 ──
 
     private void addInlineObject(Para para, ASTInlineObject obj) {
@@ -1294,8 +1368,8 @@ public class ASTToHwpxConverter {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        // LineShape — 인라인 프레임은 테두리 없음
-        setupTextBoxLineShape(rect, null, 0, "Solid", 100);
+        // LineShape — 부모 Group 배경 사각형의 테두리
+        setupTextBoxLineShape(rect, obj.strokeColor(), obj.strokeWeight(), "Solid", obj.strokeTint());
 
         // FillBrush — 부모 Group 배경 사각형의 채우기 색상
         setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());

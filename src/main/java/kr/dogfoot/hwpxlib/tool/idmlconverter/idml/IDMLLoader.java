@@ -402,13 +402,7 @@ public class IDMLLoader {
             double m = Double.parseDouble(parts[1]) / 100.0;
             double y = Double.parseDouble(parts[2]) / 100.0;
             double k = Double.parseDouble(parts[3]) / 100.0;
-            int r = (int) Math.round(255 * (1 - c) * (1 - k));
-            int g = (int) Math.round(255 * (1 - m) * (1 - k));
-            int b = (int) Math.round(255 * (1 - y) * (1 - k));
-            r = Math.max(0, Math.min(255, r));
-            g = Math.max(0, Math.min(255, g));
-            b = Math.max(0, Math.min(255, b));
-            return String.format("#%02X%02X%02X", r, g, b);
+            return kr.dogfoot.hwpxlib.tool.idmlconverter.util.CMYKColorConverter.cmykToHex(c, m, y, k);
         } else if ("RGB".equals(space) && parts.length >= 3) {
             int r = Math.max(0, Math.min(255, (int) Math.round(Double.parseDouble(parts[0]))));
             int g = Math.max(0, Math.min(255, (int) Math.round(Double.parseDouble(parts[1]))));
@@ -747,8 +741,11 @@ public class IDMLLoader {
         shape.strokeColor(strokeColor);
         shape.strokeWeight(strokeWeight);
 
-        // 클리핑 프레임 패턴 감지: 외부 Rectangle(채우기 없음)이 내부 자식 도형을 클리핑
-        if (!shape.hasFill()) {
+        // 클리핑 프레임 패턴 감지:
+        // 1) 외부 Rectangle(채우기 없음)이 내부 자식 도형을 클리핑
+        // 2) ContentType=GraphicType인 프레임이 내부 자식 도형을 클리핑 (채우기 유무 무관)
+        boolean isGraphicFrame = "GraphicType".equals(shapeElem.getAttribute("ContentType"));
+        if (!shape.hasFill() || isGraphicFrame) {
             NodeList childNodes = shapeElem.getChildNodes();
             for (int i = 0; i < childNodes.getLength(); i++) {
                 Node child = childNodes.item(i);
@@ -855,7 +852,48 @@ public class IDMLLoader {
             }
         }
 
+        // GradientFeatherSetting 파싱 (TransparencySetting 하위)
+        parseGradientFeather(shapeElem, shape);
+
         return shape;
+    }
+
+    /**
+     * GradientFeatherSetting 파싱.
+     * TransparencySetting > GradientFeatherSetting에서 각도, 길이, 시작점을 추출.
+     */
+    private static void parseGradientFeather(Element shapeElem, IDMLVectorShape shape) {
+        NodeList children = shapeElem.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node node = children.item(i);
+            if (node.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element elem = (Element) node;
+            if (!"TransparencySetting".equals(elem.getTagName())) continue;
+
+            Element gfs = getFirstChildElement(elem, "GradientFeatherSetting");
+            if (gfs == null) continue;
+
+            double angle = parseDoubleAttrDef(gfs, "Angle", Double.NaN);
+            double length = parseDoubleAttrDef(gfs, "Length", 0);
+            if (Double.isNaN(angle) || length <= 0) continue;
+
+            shape.gradientFeatherAngle(angle);
+            shape.gradientFeatherLength(length);
+
+            String startStr = getAttrOrNull(gfs, "GradientStart");
+            if (startStr != null) {
+                String[] parts = startStr.trim().split("\\s+");
+                if (parts.length >= 2) {
+                    try {
+                        shape.gradientFeatherStart(new double[]{
+                                Double.parseDouble(parts[0]),
+                                Double.parseDouble(parts[1])
+                        });
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+            break;
+        }
     }
 
     /**

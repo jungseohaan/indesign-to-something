@@ -706,10 +706,10 @@ public class Stage4_BuildAST {
                     continue;
                 }
             }
-            // 부모 Group의 배경 사각형에서 채우기 색상 추출
-            String groupFillHex = extractGroupBackgroundFill(ig, colorResolver);
+            // 부모 Group의 배경 사각형에서 전체 스타일 추출 (fill, stroke, cornerRadius)
+            GroupBackground bg = extractGroupBackground(ig, colorResolver);
             // 인라인 그래픽 내부의 자식 텍스트프레임 처리 (중첩 Group 포함, 재귀)
-            collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, groupFillHex);
+            collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
         }
     }
 
@@ -747,20 +747,40 @@ public class Stage4_BuildAST {
                                                  IDMLDocument idmlDoc,
                                                  ColorResolver colorResolver,
                                                  ASTImageLoader imageLoader,
-                                                 String parentFillColor) {
+                                                 GroupBackground bg) {
         for (IDMLTextFrame childTf : ig.childTextFrames()) {
             ASTInlineObject childObj = createInlineObjectFromTextFrame(childTf, idmlDoc, colorResolver, imageLoader);
             if (childObj != null) {
-                if (parentFillColor != null && childObj.fillColor() == null) {
-                    childObj.fillColor(parentFillColor);
+                if (bg != null && childObj.fillColor() == null) {
+                    childObj.fillColor(bg.fillHex);
+                    childObj.fillTint(bg.fillTint);
+                    if (bg.strokeHex != null) {
+                        childObj.strokeColor(bg.strokeHex);
+                        childObj.strokeWeight(bg.strokeWeight);
+                        childObj.strokeTint(bg.strokeTint);
+                    }
+                    if (bg.cornerRadius > 0) {
+                        childObj.cornerRadius(bg.cornerRadius);
+                    }
                 }
                 para.addItem(childObj);
             }
         }
         // 중첩 그래픽(Group 등) 내부의 TextFrame도 재귀적으로 처리
         for (IDMLCharacterRun.InlineGraphic childIg : ig.childGraphics()) {
-            collectChildTextFrames(childIg, para, idmlDoc, colorResolver, imageLoader, parentFillColor);
+            collectChildTextFrames(childIg, para, idmlDoc, colorResolver, imageLoader, bg);
         }
+    }
+
+    /**
+     * 인라인 그래픽 계층에 자식 텍스트프레임이 있는지 재귀적으로 확인.
+     */
+    private static boolean hasChildTextFramesRecursive(IDMLCharacterRun.InlineGraphic ig) {
+        if (!ig.childTextFrames().isEmpty()) return true;
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            if (hasChildTextFramesRecursive(child)) return true;
+        }
+        return false;
     }
 
     /**
@@ -768,16 +788,70 @@ public class Stage4_BuildAST {
      * Group이 배경 사각형 + 텍스트 프레임으로 구성된 경우,
      * 배경 사각형의 fillColor를 텍스트 프레임에 전달하기 위해 사용.
      */
-    private static String extractGroupBackgroundFill(IDMLCharacterRun.InlineGraphic ig,
-                                                       ColorResolver colorResolver) {
+    /**
+     * 배경 사각형 스타일 정보.
+     */
+    private static class GroupBackground {
+        String fillHex;
+        double fillTint = 100;
+        String strokeHex;
+        double strokeWeight;
+        double strokeTint = 100;
+        double cornerRadius;
+    }
+
+    /**
+     * 인라인 Group의 자식 그래픽에서 배경 사각형의 전체 스타일을 추출.
+     * fill, stroke, cornerRadius 등을 포함.
+     */
+    private static GroupBackground extractGroupBackground(IDMLCharacterRun.InlineGraphic ig,
+                                                            ColorResolver colorResolver) {
         if (!"group".equals(ig.type())) return null;
         for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
-            if (child.hasVectorShape() && child.vectorShape().fillColor() != null) {
-                String hex = resolveColorHex(child.vectorShape().fillColor(), colorResolver);
-                if (hex != null) return hex;
+            if (child.hasVectorShape()) {
+                IDMLVectorShape shape = child.vectorShape();
+                if (shape.fillColor() != null) {
+                    String hex = resolveColorHex(shape.fillColor(), colorResolver);
+                    if (hex != null) {
+                        GroupBackground bg = new GroupBackground();
+                        // 틴트를 색상에 사전 블렌딩 (HWPX alpha 비호환 방지)
+                        bg.fillHex = blendColorWithWhite(hex, shape.fillTint() / 100.0);
+                        bg.fillTint = 100; // 이미 블렌딩됨
+                        String sHex = resolveColorHex(shape.strokeColor(), colorResolver);
+                        bg.strokeHex = sHex != null
+                                ? blendColorWithWhite(sHex, shape.strokeTint() / 100.0) : null;
+                        bg.strokeWeight = shape.strokeWeight();
+                        bg.strokeTint = 100;
+                        bg.cornerRadius = shape.cornerRadius();
+                        return bg;
+                    }
+                }
             }
         }
         return null;
+    }
+
+    /**
+     * 색상 hex를 fraction 비율로 흰색과 블렌딩.
+     * fraction=1.0 → 원래 색상, fraction=0.0 → 흰색.
+     */
+    private static String blendColorWithWhite(String hex, double fraction) {
+        if (hex == null || !hex.startsWith("#") || hex.length() < 7) return hex;
+        try {
+            int rgb = Integer.parseInt(hex.substring(1, 7), 16);
+            int r = (rgb >> 16) & 0xFF;
+            int g = (rgb >> 8) & 0xFF;
+            int b = rgb & 0xFF;
+            r = (int) Math.round(255 + (r - 255) * fraction);
+            g = (int) Math.round(255 + (g - 255) * fraction);
+            b = (int) Math.round(255 + (b - 255) * fraction);
+            return String.format("#%02X%02X%02X",
+                    Math.max(0, Math.min(255, r)),
+                    Math.max(0, Math.min(255, g)),
+                    Math.max(0, Math.min(255, b)));
+        } catch (Exception e) {
+            return hex;
+        }
     }
 
     /**
@@ -1231,6 +1305,29 @@ public class Stage4_BuildAST {
             } else {
                 obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
             }
+        } else if (imageLoader != null) {
+            // 그룹 내 자식 텍스트프레임이 있으면 래스터화하지 않고 텍스트 우선 처리
+            // (배경 사각형 + 텍스트프레임 구조는 스타일 적용된 글상자로 변환)
+            boolean hasChildTextFrames = hasChildTextFramesRecursive(ig);
+            List<ASTImageLoader.ShapeWithColor> childShapes = collectChildVectorShapes(ig, colorResolver);
+            if (!childShapes.isEmpty() && !hasChildTextFrames) {
+                obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+                ASTImageLoader.ImageResult result = imageLoader.rasterizeShapes(childShapes, ig.itemTransform());
+                if (result != null && result.imageData != null) {
+                    obj.imageData(result.imageData);
+                    obj.imageFormat(result.format);
+                    obj.pixelWidth(result.pixelWidth);
+                    obj.pixelHeight(result.pixelHeight);
+                    if (result.pixelWidth > 0 && result.pixelHeight > 0) {
+                        obj.width(CoordinateConverter.pointsToHwpunits(result.widthPts));
+                        obj.height(CoordinateConverter.pointsToHwpunits(result.heightPts));
+                    }
+                } else {
+                    obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
+                }
+            } else {
+                obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
+            }
         } else {
             obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
         }
@@ -1245,6 +1342,58 @@ public class Stage4_BuildAST {
         obj.textWrapRight(CoordinateConverter.pointsToHwpunits(ig.textWrapRight()));
 
         return obj;
+    }
+
+    /**
+     * 인라인 그룹의 자식 그래픽에서 벡터 도형(VectorShape)을 재귀적으로 수집한다.
+     * 각 도형에 누적 ItemTransform을 부여하여 그룹 루트 좌표계 기준으로 정확한
+     * 위치/크기를 계산할 수 있게 한다.
+     */
+    private static List<ASTImageLoader.ShapeWithColor> collectChildVectorShapes(
+            IDMLCharacterRun.InlineGraphic ig, ColorResolver colorResolver) {
+        List<ASTImageLoader.ShapeWithColor> result = new ArrayList<>();
+        collectChildVectorShapesRecursive(ig, colorResolver, result, null);
+        return result;
+    }
+
+    private static void collectChildVectorShapesRecursive(
+            IDMLCharacterRun.InlineGraphic ig, ColorResolver colorResolver,
+            List<ASTImageLoader.ShapeWithColor> result, double[] parentTransform) {
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            // 자식의 ItemTransform을 부모 누적 변환과 결합
+            double[] childTransform = child.itemTransform();
+            double[] accTransform = combineInlineTransforms(parentTransform, childTransform);
+
+            if (child.hasVectorShape()) {
+                IDMLVectorShape shape = child.vectorShape();
+                String fillHex = resolveColorHex(shape.fillColor(), colorResolver);
+                String strokeHex = resolveColorHex(shape.strokeColor(), colorResolver);
+                if (fillHex != null || strokeHex != null) {
+                    result.add(new ASTImageLoader.ShapeWithColor(shape, fillHex, strokeHex, accTransform));
+                }
+            }
+            // 재귀적으로 하위 그룹도 수집 (누적 변환 전달)
+            collectChildVectorShapesRecursive(child, colorResolver, result, accTransform);
+        }
+    }
+
+    /**
+     * 인라인 그래픽 계층의 누적 변환을 결합한다.
+     * parent가 null이면 child만 반환. child가 null이면 parent만 반환.
+     * 둘 다 null이면 null 반환 (변환 없음 = 항등 변환).
+     */
+    private static double[] combineInlineTransforms(double[] parent, double[] child) {
+        if (child == null && parent == null) return null;
+        if (child == null) return parent;
+        if (parent == null) {
+            // 항등 변환 여부 확인 — 항등이면 null 반환하여 불필요한 변환 비용 회피
+            if (child[0] == 1 && child[1] == 0 && child[2] == 0 && child[3] == 1
+                    && child[4] == 0 && child[5] == 0) {
+                return null;
+            }
+            return child;
+        }
+        return CoordinateConverter.combineTransforms(parent, child);
     }
 
     /**
