@@ -598,11 +598,12 @@ public class Stage4_BuildAST {
         }
 
         // Character Runs → 인라인 항목 (BT수식M 폰트 런은 그룹핑하여 ASTEquation으로 변환)
+        // NP 폰트는 인라인 주석(아래첨자, 근호 등)이므로 그룹핑하지 않고 텍스트 런으로 처리
         List<IDMLCharacterRun> runs = idmlPara.characterRuns();
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
 
         for (IDMLCharacterRun run : runs) {
-            if (run.isBTFont()) {
+            if (run.isBTFont() || run.grepMathFont()) {
                 mathGroup.add(run);
             } else {
                 // 수식 그룹 종료 → 변환
@@ -662,6 +663,12 @@ public class Stage4_BuildAST {
                                               ASTImageLoader imageLoader) {
         String text = run.content();
         if (text != null && !text.isEmpty()) {
+            // NP 폰트 글리프 → 유니코드 변환
+            if (run.isNPFont()) {
+                text = kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap
+                        .convertRunToUnicode(run.npFontName(), text);
+                if (text.isEmpty()) return; // 분수 괄호 등 변환 후 빈 텍스트
+            }
             // 연속 줄바꿈(\n\n+)을 하나로 머지
             text = text.replaceAll("\n{2,}", "\n");
             // 줄바꿈 분리
@@ -720,7 +727,7 @@ public class Stage4_BuildAST {
     private static void flushMathGroup(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
         String hwpScript = BTFontEquationConverter.convert(mathRuns);
         if (hwpScript != null) {
-            String sourceType = mathRuns.get(0).isBTFont() ? "BT_FONT" : "NP_FONT";
+            String sourceType = mathRuns.get(0).isBTFont() ? "BT_FONT" : "GREP_FONT";
             para.addItem(new ASTEquation(hwpScript, sourceType));
         } else {
             // 수식이 아닌 BT 폰트 텍스트 → 일반 텍스트 런으로 폴백
@@ -729,7 +736,12 @@ public class Stage4_BuildAST {
                 if (text != null && !text.isEmpty()) {
                     ASTTextRun textRun = new ASTTextRun();
                     textRun.text(text);
-                    if (run.fontFamily() != null) textRun.fontFamily(run.fontFamily());
+                    String ff = run.fontFamily();
+                    if (run.isBTFont() || run.grepMathFont()) {
+                        if (ff == null || !ff.contains("BT수식")) ff = "BT수식M";
+                    }
+                    textRun.fontFamily(ff);
+                    textRun.grepMathFont(run.grepMathFont());
                     if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
                     if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
                     para.addItem(textRun);
@@ -922,6 +934,7 @@ public class Stage4_BuildAST {
 
         textRun.subscript(run.isSubscript());
         textRun.superscript(run.isSuperscript());
+        textRun.grepMathFont(run.grepMathFont());
 
         return textRun;
     }

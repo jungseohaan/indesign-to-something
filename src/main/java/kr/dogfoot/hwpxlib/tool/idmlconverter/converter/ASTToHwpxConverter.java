@@ -26,6 +26,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.secpr.SecPr;
 import kr.dogfoot.hwpxlib.tool.blankfilemaker.BlankFileMaker;
 import kr.dogfoot.hwpxlib.tool.equationconverter.EquationBuilder;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertException;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertResult;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ProgressReporter;
@@ -1086,8 +1087,8 @@ public class ASTToHwpxConverter {
             if (mapped != null) charPrId = mapped;
         }
 
-        // 수식 폰트(NP_ prefix) → 밑줄 + 초록색 디버그 스타일
-        if (isEquationFont(textRun.fontFamily())) {
+        // 수식 폰트(NP_, BT수식, GREP 해석) → 밑줄 + 초록색 스타일
+        if (isEquationFont(textRun.fontFamily()) || textRun.grepMathFont()) {
             charPrId = createEquationFontCharPr(textRun, charPrId);
         }
 
@@ -1229,7 +1230,8 @@ public class ASTToHwpxConverter {
     }
 
     private static boolean isEquationFont(String fontFamily) {
-        return fontFamily != null && fontFamily.startsWith("NP_");
+        if (fontFamily == null) return false;
+        return fontFamily.startsWith("NP_") || BTFontGlyphMap.isBTFontFamily(fontFamily);
     }
 
     private final Map<String, String> eqFontCharPrCache = new HashMap<>();
@@ -1790,6 +1792,37 @@ public class ASTToHwpxConverter {
                     .baseUnitAnd(template.baseUnit())
                     .lineModeAnd(template.lineMode())
                     .fontAnd(template.font());
+
+            // ShapeObject 기본 속성
+            hwpxEq.numberingTypeAnd(NumberingType.EQUATION)
+                    .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
+                    .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                    .lockAnd(false);
+
+            // ShapeSize — 한글이 열 때 자동 계산하지만 초기값 필요
+            int baseUnit = template.baseUnit() != null ? template.baseUnit() : 1100;
+            String script = eq.hwpScript();
+            long estW = (long) (script.length() * baseUnit * 0.7);
+            long estH = (long) (baseUnit * 1.4);
+            hwpxEq.createSZ();
+            hwpxEq.sz().widthAnd(estW).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                    .heightAnd(estH).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                    .protectAnd(false);
+
+            // ShapePosition — 글자처럼 취급 (인라인)
+            hwpxEq.createPos();
+            hwpxEq.pos().treatAsCharAnd(true)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.BOTTOM)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(0L)
+                    .horzOffset(0L);
+
             hwpxEq.createScript();
             hwpxEq.script().addText(eq.hwpScript());
             equationsConverted++;

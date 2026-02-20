@@ -13,6 +13,7 @@ public class ASTTextRun extends ASTInlineItem {
     private Short letterSpacing;
     private boolean subscript;
     private boolean superscript;
+    private boolean grepMathFont;  // GREP 스타일에서 BT수식M이 동적 적용된 런
 
     public ItemType itemType() { return ItemType.TEXT_RUN; }
 
@@ -42,5 +43,8 @@ public class ASTTextRun extends ASTInlineItem {
 
     public boolean superscript() { return superscript; }
     public void superscript(boolean v) { this.superscript = v; }
+
+    public boolean grepMathFont() { return grepMathFont; }
+    public void grepMathFont(boolean v) { this.grepMathFont = v; }
 
 }

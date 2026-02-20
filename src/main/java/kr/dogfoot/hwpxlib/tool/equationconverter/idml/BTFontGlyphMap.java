@@ -28,6 +28,14 @@ public class BTFontGlyphMap {
     }
 
     /**
+     * fontFamily 문자열이 BT수식M 폰트인지 확인.
+     */
+    public static boolean isBTFontFamily(String fontFamily) {
+        if (fontFamily == null) return false;
+        return fontFamily.contains("BT수식") || fontFamily.contains("BTM");
+    }
+
+    /**
      * BT수식M 스타일에서 서브폰트 유형을 추출.
      * @return "Regular", "ltalic", "BoldItalic", "괄호Italic", "루트Italic", etc. 또는 null
      */

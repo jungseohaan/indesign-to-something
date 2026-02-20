@@ -19,11 +19,13 @@ import java.util.regex.Pattern;
  * - hap: ∪ (합집합, 한국어)
  * - cap: ∩ (교집합)
  * - div: ÷
- * - -<: ≤
- * - /<: ⊂
+ * - ^x: 위첨자 (superscript)
+ * - -<: ≤ (LEQ)
+ * - /<: ⊂ (SUBSET)
  * - not=: ≠
  * - ^-XX^-: bar (윗줄)
- * - r1par/r2par: 풀이 단계 번호 (변환하지 않음)
+ * - .c3: 가운데점 (CDOTS)
+ * - rNpar: 원기호 (①, ②, ...)
  */
 public class BTFontEquationConverter {
 
@@ -48,38 +50,97 @@ public class BTFontEquationConverter {
         String raw = rawBuilder.toString().trim();
         if (raw.isEmpty()) return null;
 
-        // 2. 원시 텍스트에 수식 마커가 있는지 확인 (순수 라틴 텍스트 필터링)
+        // 2. 영문 단어 필터링 (이름, 영단어 등 — 변환 전 원본 텍스트 기준)
+        if (looksLikeWord(raw)) return null;
+
+        // 3. 수식 콘텐츠 확인
         if (!hasMathContent(raw)) return null;
 
-        // 3. 키워드 + 마커 기반 변환
+        // 4. 키워드 + 마커 기반 변환
         String hwpScript = convertRawToHwpScript(raw);
 
-        // 4. 의미 없는 수식 필터링
+        // 5. 의미 없는 수식 필터링
         if (hwpScript == null || hwpScript.trim().isEmpty()) return null;
         String trimmed = hwpScript.trim();
-        if (trimmed.length() <= 1) return null;
-        if (trimmed.matches("[a-zA-Z]")) return null;
-        if (trimmed.matches("[<>=+\\-*/.,!?%]+")) return null;
+        // 글자나 숫자가 없는 순수 기호/공백 → 수식 아님
+        boolean hasLetterOrDigit = false;
+        for (int i = 0; i < trimmed.length(); i++) {
+            if (Character.isLetterOrDigit(trimmed.charAt(i))) { hasLetterOrDigit = true; break; }
+        }
+        if (!hasLetterOrDigit) return null;
 
         return trimmed;
     }
 
     /**
-     * 원시 BT수식M 텍스트에 수식 마커/키워드가 포함되어 있는지 확인.
-     * BT수식M 폰트가 수식이 아닌 라틴 텍스트(이름 등)에 사용된 경우를 필터링한다.
+     * BT수식M 텍스트가 수식 콘텐츠인지 확인.
+     * 연산자, 숫자+문자 혼합, 짧은 변수명, 콤마 구분 변수 목록, BT 마커를 포함하면 수식.
+     * 순수 영문 단어(이름 등)는 수식으로 취급하지 않는다.
      */
     private static boolean hasMathContent(String raw) {
+        // BT수식M 위치 마커 확인 (기존)
         for (int i = 0; i < raw.length(); i++) {
             char c = raw.charAt(i);
-            // BT수식M 위치 마커 및 특수 글리프
-            if (c == '_' || c == '&' || c == '\\' || c == '`' || c == '!') return true;
-            // ^- (overline 시작)
-            if (c == '^' && i + 1 < raw.length() && raw.charAt(i + 1) == '-') return true;
+            if (c == '_' || c == '&' || c == '\\' || c == '`') return true;
+            if (c == '^' && i + 1 < raw.length()) return true; // ^- (overline) 또는 ^x (superscript)
         }
         // 다문자 키워드
         if (raw.contains("cup") || raw.contains("hap") || raw.contains("cap")) return true;
         if (raw.contains("div")) return true;
         if (raw.contains("not=") || raw.contains("-<") || raw.contains("/<")) return true;
+
+        // 수학 연산자 포함 → 수식
+        boolean hasOperator = false;
+        boolean hasLetter = false;
+        boolean hasDigit = false;
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if ("+-*/=<>()[]{}|!".indexOf(c) >= 0) hasOperator = true;
+            if (Character.isLetter(c)) hasLetter = true;
+            if (Character.isDigit(c)) hasDigit = true;
+        }
+        if (hasOperator) return true;
+        // 문자+숫자 혼합 (e.g., "2x", "3n") → 수식
+        if (hasLetter && hasDigit) return true;
+
+        // 짧은 텍스트 (변수명 — A, B, xy 등) → 수식
+        String stripped = raw.replaceAll("[\\s,.]", "");
+        if (hasLetter && stripped.length() <= 3) return true;
+
+        // 콤마 구분 변수 목록 (e.g., "A, B") → 수식
+        if (raw.contains(",") && hasLetter) {
+            String[] parts = raw.split(",");
+            boolean allShort = true;
+            for (String p : parts) {
+                if (p.trim().length() > 3) { allShort = false; break; }
+            }
+            if (allShort) return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 텍스트 내에 영문 단어(4자 이상 연속 알파벳)가 포함되어 있는지 확인.
+     * "Arnold, 1874~1951)", "(Shakespeare", "Permutation(" 등 이름/영단어를 필터링.
+     */
+    private static boolean looksLikeWord(String text) {
+        // BT수식M 키워드와 마커를 제거한 후 확인 (원본 텍스트 기준)
+        String cleaned = text;
+        // 다문자 키워드 제거
+        cleaned = cleaned.replace(".c3", " ");
+        cleaned = cleaned.replace("not=", " ");
+        // 단어 키워드 제거 (cup, hap, cap, div 등이 단어에 포함될 수 있음)
+        for (String kw : new String[]{"cup", "hap", "cap", "div"}) {
+            cleaned = cleaned.replace(kw, " ");
+        }
+        // BT 마커 제거
+        cleaned = cleaned.replaceAll("[_&\\\\`^]", " ");
+        // 비알파벳 문자로 분리하여 각 부분이 4자 이상인지 확인
+        String[] words = cleaned.split("[^a-zA-Z]+");
+        for (String word : words) {
+            if (word.length() >= 4) return true;
+        }
         return false;
     }
 
@@ -87,8 +148,8 @@ public class BTFontEquationConverter {
      * 원시 BT수식M 텍스트를 HWP 수식 스크립트로 변환.
      */
     static String convertRawToHwpScript(String raw) {
-        // r1par, r2par 등 풀이 단계 번호는 제거
-        raw = raw.replaceAll("r\\d+par\\s*", "");
+        // r1par, r2par 등 → 원기호(①, ②, ...)로 변환
+        raw = convertCircledNumbers(raw);
 
         // 단계별 변환
         String result = raw;
@@ -133,7 +194,8 @@ public class BTFontEquationConverter {
     private static String replaceKeywords(String text) {
         // 순서 중요: 긴 키워드부터 (not= 전에 not 매칭 방지)
         text = text.replace("not=", " != ");
-        text = text.replace("-<", " <= ");
+        text = text.replace(".c3", " CDOTS ");
+        text = text.replace("-<", " LEQ ");
         text = text.replace("/<", " SUBSET ");
 
         // 단어 경계 기반 키워드 치환
@@ -168,18 +230,22 @@ public class BTFontEquationConverter {
 
     /**
      * 위치 마커를 HWP 수식 스크립트로 변환.
-     * _x → _{x} (아래첨자)
-     * & → (위치 리셋, 아래첨자 종료)
+     * _x... → _{x...} (아래첨자, &로 종료)
+     * ^x... → ^{x...} (위첨자, &로 종료)
+     * & → 위치 리셋 (첨자 종료)
      */
     private static String convertPositionMarkers(String text) {
         StringBuilder sb = new StringBuilder();
         boolean inSubscript = false;
+        boolean inSuperscript = false;
         int i = 0;
 
         while (i < text.length()) {
             char c = text.charAt(i);
 
             if (c == '_' && i + 1 < text.length()) {
+                // 위첨자 열려있으면 먼저 닫기
+                if (inSuperscript) { sb.append("}"); inSuperscript = false; }
                 // 아래첨자 시작
                 if (inSubscript) {
                     sb.append("} _{");
@@ -188,18 +254,15 @@ public class BTFontEquationConverter {
                     inSubscript = true;
                 }
                 i++;
-                // 아래첨자 내용 수집 (다음 & 또는 _ 또는 특수문자까지)
+                // 아래첨자 내용 수집 (다음 & 또는 _ 또는 ^ 또는 특수문자까지)
                 while (i < text.length()) {
                     char sc = text.charAt(i);
-                    if (sc == '&' || sc == '_') break;
-                    // 괄호, 연산자 등에서 아래첨자 종료
-                    if (sc == '(' || sc == ')' || sc == '=' || sc == '+' || sc == ' ') {
-                        break;
-                    }
+                    if (sc == '&' || sc == '_' || sc == '^') break;
+                    if (sc == '(' || sc == ')' || sc == '=' || sc == '+' || sc == ' ') break;
                     sb.append(sc);
                     i++;
                 }
-                // 아래첨자 닫기 (& 또는 다음 토큰에서 자동 처리)
+                // 아래첨자 닫기
                 if (i < text.length() && text.charAt(i) == '&') {
                     sb.append("}");
                     inSubscript = false;
@@ -210,12 +273,41 @@ public class BTFontEquationConverter {
                         inSubscript = false;
                     }
                 }
-            } else if (c == '&') {
-                // 위치 리셋 (아래첨자 종료)
-                if (inSubscript) {
-                    sb.append("}");
-                    inSubscript = false;
+            } else if (c == '^' && i + 1 < text.length()) {
+                // 아래첨자 열려있으면 먼저 닫기
+                if (inSubscript) { sb.append("}"); inSubscript = false; }
+                // 위첨자 시작
+                if (inSuperscript) {
+                    sb.append("} ^{");
+                } else {
+                    sb.append(" ^{");
+                    inSuperscript = true;
                 }
+                i++;
+                // 위첨자 내용 수집 (다음 & 또는 ^ 또는 _ 또는 특수문자까지)
+                while (i < text.length()) {
+                    char sc = text.charAt(i);
+                    if (sc == '&' || sc == '^' || sc == '_') break;
+                    if (sc == '(' || sc == ')' || sc == '=' || sc == '+' || sc == ' ') break;
+                    sb.append(sc);
+                    i++;
+                }
+                // 위첨자 닫기
+                if (i < text.length() && text.charAt(i) == '&') {
+                    sb.append("}");
+                    inSuperscript = false;
+                    i++; // & 건너뛰기
+                } else if (!inSuperscript || (i < text.length() && text.charAt(i) != '^')) {
+                    if (inSuperscript) {
+                        sb.append("}");
+                        inSuperscript = false;
+                    }
+                }
+            } else if (c == '&') {
+                // 위치 리셋 (공백 삽입)
+                if (inSubscript) { sb.append("}"); inSubscript = false; }
+                if (inSuperscript) { sb.append("}"); inSuperscript = false; }
+                sb.append(" ");
                 i++;
             } else {
                 sb.append(c);
@@ -223,10 +315,30 @@ public class BTFontEquationConverter {
             }
         }
 
-        if (inSubscript) {
-            sb.append("}");
-        }
+        if (inSubscript) sb.append("}");
+        if (inSuperscript) sb.append("}");
 
+        return sb.toString();
+    }
+
+    /**
+     * rNpar 패턴을 원기호(①②③...)로 변환.
+     */
+    private static String convertCircledNumbers(String text) {
+        Matcher m = Pattern.compile("r(\\d+)par").matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            int num = Integer.parseInt(m.group(1));
+            String replacement;
+            if (num >= 1 && num <= 20) {
+                // ① U+2460 ~ ⑳ U+2473
+                replacement = String.valueOf((char) (0x2460 + num - 1));
+            } else {
+                replacement = "(" + num + ")";
+            }
+            m.appendReplacement(sb, replacement);
+        }
+        m.appendTail(sb);
         return sb.toString();
     }
 
@@ -248,10 +360,10 @@ public class BTFontEquationConverter {
     private static String cleanHwpScript(String script) {
         // 연속 공백 정리
         script = script.replaceAll("\\s+", " ");
-        // _{a} _{b} → _{a b} (연속 아래첨자 병합)
-        script = script.replaceAll("\\} _\\{", " ");
-        // ^{a} ^{b} → ^{a b} (연속 위첨자 병합)
-        script = script.replaceAll("\\} \\^\\{", " ");
+        // _{a} _{b} → _{a b} (같은 타입 연속 아래첨자만 병합)
+        script = script.replaceAll("(_\\{[^}]*)\\} _\\{", "$1 ");
+        // ^{a} ^{b} → ^{a b} (같은 타입 연속 위첨자만 병합)
+        script = script.replaceAll("(\\^\\{[^}]*)\\} \\^\\{", "$1 ");
         return script.trim();
     }
 }

@@ -20,6 +20,7 @@ public class IDMLCharacterRun {
     private List<IDMLTextFrame> inlineFrames;
     private List<InlineGraphic> inlineGraphics;
     private Double tracking;
+    private boolean grepMathFont;  // GREP 스타일에서 BT수식M이 동적 적용된 런
 
     public IDMLCharacterRun() {
         this.inlineFrames = new ArrayList<IDMLTextFrame>();
@@ -177,10 +178,11 @@ public class IDMLCharacterRun {
     }
 
     /**
-     * BT수식M 폰트인지 확인.
+     * BT수식M 폰트인지 확인 (CharacterStyle 또는 fontFamily 기반).
      */
     public boolean isBTFont() {
-        return BTFontGlyphMap.isBTFontStyle(appliedCharacterStyle);
+        return BTFontGlyphMap.isBTFontStyle(appliedCharacterStyle)
+                || BTFontGlyphMap.isBTFontFamily(fontFamily);
     }
 
     /**
@@ -197,4 +199,7 @@ public class IDMLCharacterRun {
     public boolean isSuperscript() {
         return "Superscript".equals(position);
     }
+
+    public boolean grepMathFont() { return grepMathFont; }
+    public void grepMathFont(boolean v) { this.grepMathFont = v; }
 }

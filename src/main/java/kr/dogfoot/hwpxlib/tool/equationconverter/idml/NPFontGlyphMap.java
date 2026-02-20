@@ -41,6 +41,8 @@ public class NPFontGlyphMap {
 
     private static final Map<String, FontCategory> FONT_CATEGORY_MAP = new HashMap<String, FontCategory>();
     private static final Map<String, Map<String, String>> GLYPH_MAP = new HashMap<String, Map<String, String>>();
+    /** NP 폰트 ASCII → 유니코드 매핑 (텍스트 출력용) */
+    private static final Map<String, Map<String, String>> UNICODE_MAP = new HashMap<String, Map<String, String>>();
 
     static {
         // Font → Category 매핑
@@ -103,6 +105,77 @@ public class NPFontGlyphMap {
         GLYPH_MAP.put("NP_BISHS", ishsMap);
         GLYPH_MAP.put("NP_PSHS", ishsMap);
         GLYPH_MAP.put("NP_BSHS", ishsMap);
+
+        // ── 유니코드 매핑 (텍스트 출력용) ──
+
+        // NP_SUN/NP_SUNB → 유니코드 특수 기호
+        Map<String, String> sunUni = new HashMap<String, String>();
+        sunUni.put("!", "\u2192");  // → (화살표)
+        sunUni.put("@", "\u2192");  // → (화살표 변형)
+        sunUni.put("Z", "\u0305");  // ◌̅ (결합 윗줄 - overline, 앞 글자에 결합)
+        UNICODE_MAP.put("NP_SUN", sunUni);
+        UNICODE_MAP.put("NP_SUNB", sunUni);
+
+        // NP_YP/NP_YB → 유니코드
+        Map<String, String> ypUni = new HashMap<String, String>();
+        ypUni.put("E", "\u221E");   // ∞ (무한대)
+        ypUni.put("9", "{");        // { (중괄호)
+        ypUni.put("0", "}");        // } (중괄호)
+        ypUni.put("y", "\u22EF");   // ⋯ (가운데 말줄임)
+        ypUni.put("/", "\u2234");   // ∴ (따라서)
+        UNICODE_MAP.put("NP_YP", ypUni);
+        UNICODE_MAP.put("NP_YB", ypUni);
+
+        // NP_INTE/NP_INTEB → 유니코드
+        Map<String, String> inteUni = new HashMap<String, String>();
+        inteUni.put("@", "\u222B");  // ∫ (적분)
+        inteUni.put("N", "");        // 그룹핑 기호 — 텍스트에서는 생략
+        UNICODE_MAP.put("NP_INTE", inteUni);
+        UNICODE_MAP.put("NP_INTEB", inteUni);
+
+        // NP_RUT/NP_RUTB → 유니코드
+        Map<String, String> rutUni = new HashMap<String, String>();
+        rutUni.put("j", "\u221A");   // √ (근호)
+        // "!" "@" 등은 케이스 마커 — 소괄호로 대체하거나 생략
+        UNICODE_MAP.put("NP_RUT", rutUni);
+        UNICODE_MAP.put("NP_RUTB", rutUni);
+
+        // NP_SIG/NP_SIGB → 유니코드
+        Map<String, String> sigUni = new HashMap<String, String>();
+        sigUni.put("S", "\u03A3");   // Σ (시그마)
+        UNICODE_MAP.put("NP_SIG", sigUni);
+        UNICODE_MAP.put("NP_SIGB", sigUni);
+
+        // NP_SUSP/NP_SUSB → 유니코드 (삼각형 등)
+        Map<String, String> suspUni = new HashMap<String, String>();
+        suspUni.put("s", "\u25B3");  // △ (삼각형)
+        UNICODE_MAP.put("NP_SUSP", suspUni);
+        UNICODE_MAP.put("NP_SUSB", suspUni);
+
+        // NP_BUN/NP_BUNB → 분수 괄호 (텍스트에서는 생략)
+        Map<String, String> bunUni = new HashMap<String, String>();
+        bunUni.put("[", "");  // 분수 왼쪽 괄호 → 생략 (분수 내용은 인라인 TextFrame에 있음)
+        bunUni.put("]", "");  // 분수 오른쪽 괄호 → 생략
+        UNICODE_MAP.put("NP_BUN", bunUni);
+        UNICODE_MAP.put("NP_BUNB", bunUni);
+
+        // NP_ISHS 등 아래첨자: 유니코드 아래첨자 숫자 사용
+        Map<String, String> ishsUni = new HashMap<String, String>();
+        ishsUni.put("0", "\u2080"); ishsUni.put("1", "\u2081");
+        ishsUni.put("2", "\u2082"); ishsUni.put("3", "\u2083");
+        ishsUni.put("4", "\u2084"); ishsUni.put("5", "\u2085");
+        ishsUni.put("6", "\u2086"); ishsUni.put("7", "\u2087");
+        ishsUni.put("8", "\u2088"); ishsUni.put("9", "\u2089");
+        ishsUni.put("N", "n");      // 대문자 N → 소문자 n
+        ishsUni.put("n", "\u2099"); // n → ₙ
+        UNICODE_MAP.put("NP_ISHS", ishsUni);
+        UNICODE_MAP.put("NP_BISHS", ishsUni);
+        UNICODE_MAP.put("NP_ISHD", ishsUni);
+        UNICODE_MAP.put("NP_BISHD", ishsUni);
+        UNICODE_MAP.put("NP_PSHS", ishsUni);
+        UNICODE_MAP.put("NP_PSHD", ishsUni);
+        UNICODE_MAP.put("NP_BSHS", ishsUni);
+        UNICODE_MAP.put("NP_BSHD", ishsUni);
     }
 
     /**
@@ -123,6 +196,37 @@ public class NPFontGlyphMap {
             return map.get(text);
         }
         return text;
+    }
+
+    /**
+     * NP 폰트 ASCII 텍스트를 유니코드 문자열로 변환한다 (텍스트 출력용).
+     * 매핑이 없으면 원본 텍스트를 그대로 반환한다.
+     */
+    public static String mapToUnicode(String npFontName, String text) {
+        if (text == null || text.isEmpty()) return text;
+        Map<String, String> map = UNICODE_MAP.get(npFontName);
+        if (map == null) return text; // 매핑 테이블 없으면 원본 반환
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            String ch = String.valueOf(text.charAt(i));
+            String mapped = map.get(ch);
+            if (mapped != null) {
+                sb.append(mapped);
+            } else {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * NP 폰트 런의 전체 텍스트를 유니코드로 변환한다.
+     * 카테고리에 따라 적절한 매핑을 적용한다.
+     */
+    public static String convertRunToUnicode(String npFontName, String text) {
+        if (npFontName == null || text == null || text.isEmpty()) return text;
+        return mapToUnicode(npFontName, text);
     }
 
     /**

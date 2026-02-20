@@ -176,6 +176,9 @@ public class IDMLLoader {
             // 8. Story에서 인라인 그래픽(앵커 오브젝트) 추출 및 스프레드에 추가
             extractInlineGraphicsFromStories(doc, storiesDir, neededStoryIds);
 
+            // 9. GREP 스타일에서 BT수식M 폰트가 동적 적용되는 런 해석
+            resolveGrepMathStyles(doc);
+
         } catch (ConvertException ce) {
             throw ce;
         } catch (Exception e) {
@@ -334,6 +337,19 @@ public class IDMLLoader {
         // TabList (탭 정지점 목록)
         Element props2 = getFirstChildElement(styleElem, "Properties");
         if (props2 != null) {
+            // AllGREPStyles (GREP 스타일 규칙 — 단락 스타일에서만 존재)
+            Element allGrepStyles = getFirstChildElement(props2, "AllGREPStyles");
+            if (allGrepStyles != null) {
+                List<Element> grepItems = getChildElements(allGrepStyles, "ListItem");
+                for (Element item : grepItems) {
+                    String charStyle = getChildElementText(item, "AppliedCharacterStyle");
+                    String grepExpr = getChildElementText(item, "GrepExpression");
+                    if (charStyle != null && grepExpr != null) {
+                        def.addGrepStyle(new IDMLStyleDef.GrepStyleRule(grepExpr, charStyle));
+                    }
+                }
+            }
+
             Element tabList = getFirstChildElement(props2, "TabList");
             if (tabList != null) {
                 List<Element> listItems = getChildElements(tabList, "ListItem");
@@ -2461,6 +2477,268 @@ public class IDMLLoader {
         try {
             return Double.parseDouble(text);
         } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    // ===== GREP 스타일 해석 =====
+
+    /**
+     * GREP 스타일에서 BT수식M 폰트가 동적 적용되는 CharacterRun을 해석한다.
+     *
+     * InDesign 단락 스타일의 AllGREPStyles 규칙은 렌더링 시점에 문자 단위로
+     * 문자 스타일을 동적 적용하지만, Story XML에는 기록되지 않는다.
+     * 이 메서드는 BT수식M 폰트를 적용하는 GREP 규칙을 찾아
+     * 해당 텍스트 런에 fontFamily를 설정한다.
+     */
+    private static void resolveGrepMathStyles(IDMLDocument doc) {
+        // 1. BT수식M AppliedFont를 가진 문자 스타일 ID 셋 구축
+        Set<String> btMathCharStyleRefs = new HashSet<>();
+        for (Map.Entry<String, IDMLStyleDef> entry : doc.charStyles().entrySet()) {
+            IDMLStyleDef charStyle = entry.getValue();
+            String font = charStyle.fontFamily();
+            if (font != null && (font.contains("BT수식") || font.contains("BTM"))) {
+                btMathCharStyleRefs.add(entry.getKey());
+            }
+        }
+        if (btMathCharStyleRefs.isEmpty()) return;
+
+        // 2. 단락 스타일별 BT수식M GREP 규칙의 Java Pattern 캐시 구축
+        //    key: 단락 스타일 selfRef, value: 컴파일된 Pattern 목록
+        Map<String, List<java.util.regex.Pattern>> paraStyleGrepPatterns = new HashMap<>();
+
+        for (Map.Entry<String, IDMLStyleDef> entry : doc.paraStyles().entrySet()) {
+            IDMLStyleDef paraStyle = entry.getValue();
+            if (paraStyle.grepStyles() == null) continue;
+
+            List<java.util.regex.Pattern> patterns = new ArrayList<>();
+            for (IDMLStyleDef.GrepStyleRule rule : paraStyle.grepStyles()) {
+                // GREP 규칙이 BT수식M 문자 스타일을 적용하는지 확인
+                if (!btMathCharStyleRefs.contains(rule.appliedCharacterStyle())) continue;
+
+                java.util.regex.Pattern pat = convertIdGrepToJavaPattern(rule.grepExpression());
+                if (pat != null) {
+                    patterns.add(pat);
+                }
+            }
+            if (!patterns.isEmpty()) {
+                paraStyleGrepPatterns.put(entry.getKey(), patterns);
+            }
+        }
+        if (paraStyleGrepPatterns.isEmpty()) return;
+
+        // 3. 모든 Story의 CharacterRun을 순회하여 GREP 매칭 수행
+        //    한국어 혼합 런은 한국어/비한국어 구간으로 분리하여 처리
+        int resolvedCount = 0;
+        int splitCount = 0;
+        for (IDMLStory story : doc.stories().values()) {
+            for (IDMLParagraph para : story.paragraphs()) {
+                String paraStyleRef = para.appliedParagraphStyle();
+                List<java.util.regex.Pattern> patterns = paraStyleGrepPatterns.get(paraStyleRef);
+                if (patterns == null) continue;
+
+                // 런 목록을 복사 (분리 시 원본 리스트 수정이 필요하므로)
+                List<IDMLCharacterRun> originalRuns = new ArrayList<>(para.characterRuns());
+                List<IDMLCharacterRun> newRuns = new ArrayList<>();
+                boolean modified = false;
+
+                for (IDMLCharacterRun run : originalRuns) {
+                    if (run.isBTFont()) {
+                        newRuns.add(run);
+                        continue;
+                    }
+
+                    String text = run.content();
+                    if (text == null || text.isEmpty()) {
+                        newRuns.add(run);
+                        continue;
+                    }
+
+                    // 한국어가 없으면 직접 GREP 매칭
+                    if (!containsKorean(text)) {
+                        if (matchesGrepPattern(text, patterns)) {
+                            run.grepMathFont(true);
+                            resolvedCount++;
+                        }
+                        newRuns.add(run);
+                        continue;
+                    }
+
+                    // 한국어 혼합 런 → 한국어/비한국어 구간으로 분리
+                    List<String[]> segments = splitKoreanSegments(text);
+                    if (segments.size() <= 1) {
+                        // 전체가 한국어이거나 분리 불필요
+                        newRuns.add(run);
+                        continue;
+                    }
+
+                    // 분리된 세그먼트를 각각 별도 런으로 생성
+                    modified = true;
+                    splitCount++;
+                    for (String[] seg : segments) {
+                        // seg[0] = text, seg[1] = "korean" or "non-korean"
+                        IDMLCharacterRun subRun = cloneRunWithText(run, seg[0]);
+                        if ("non-korean".equals(seg[1]) && matchesGrepPattern(seg[0], patterns)) {
+                            subRun.grepMathFont(true);
+                            resolvedCount++;
+                        }
+                        newRuns.add(subRun);
+                    }
+                }
+
+                if (modified) {
+                    para.characterRuns().clear();
+                    para.characterRuns().addAll(newRuns);
+                }
+            }
+        }
+
+        if (resolvedCount > 0 || splitCount > 0) {
+            System.err.println("[IDMLLoader] GREP->BT math resolved: " + resolvedCount + " runs"
+                    + ", split: " + splitCount + " mixed runs"
+                    + " (BT charStyles: " + btMathCharStyleRefs.size()
+                    + ", paraStyles with GREP: " + paraStyleGrepPatterns.size() + ")");
+        }
+    }
+
+    /**
+     * 텍스트에 한국어 문자(가-힣)가 포함되어 있는지 확인.
+     */
+    private static boolean containsKorean(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 0xAC00 && c <= 0xD7AF) return true;
+        }
+        return false;
+    }
+
+    /**
+     * GREP 패턴 목록 중 하나라도 텍스트에 매칭되는지 확인.
+     */
+    private static boolean matchesGrepPattern(String text, List<java.util.regex.Pattern> patterns) {
+        for (java.util.regex.Pattern pat : patterns) {
+            try {
+                if (pat.matcher(text).find()) return true;
+            } catch (Exception e) {
+                // 런타임 매칭 에러 무시
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 텍스트를 한국어/비한국어 구간으로 분리한다.
+     * 중립 문자(공백, 일반 구두점)는 주변 문맥의 타입을 상속받는다.
+     * 예: "의 원소의 개수는 n(A)=n(B)이다." → ["의 원소의 개수는 ", "n(A)=n(B)", "이다."]
+     * @return [text, type] 배열 목록. type은 "korean" 또는 "non-korean"
+     */
+    private static List<String[]> splitKoreanSegments(String text) {
+        int len = text.length();
+        // 1단계: 각 문자를 KOREAN(1), LATIN_MATH(2), NEUTRAL(0)로 분류
+        int[] types = new int[len];
+        for (int i = 0; i < len; i++) {
+            char c = text.charAt(i);
+            if (isKoreanChar(c)) {
+                types[i] = 1; // KOREAN
+            } else if (isLatinOrMathChar(c)) {
+                types[i] = 2; // LATIN_MATH
+            } else {
+                types[i] = 0; // NEUTRAL (공백, 구두점 등)
+            }
+        }
+
+        // 2단계: 중립 문자에 주변 문맥 타입 할당 (이전 비중립 타입 → 다음 비중립 타입 순)
+        int lastNonNeutral = 0;
+        for (int i = 0; i < len; i++) {
+            if (types[i] != 0) {
+                lastNonNeutral = types[i];
+            } else {
+                // 이전 비중립 타입이 있으면 상속
+                if (lastNonNeutral != 0) {
+                    types[i] = lastNonNeutral;
+                } else {
+                    // 이전이 없으면 다음 비중립 타입을 탐색
+                    for (int j = i + 1; j < len; j++) {
+                        if (types[j] != 0) {
+                            types[i] = types[j];
+                            break;
+                        }
+                    }
+                    if (types[i] == 0) types[i] = 1; // 전부 중립이면 한국어로 기본 처리
+                }
+            }
+        }
+
+        // 3단계: 연속 동일 타입 구간을 세그먼트로 묶기
+        List<String[]> segments = new ArrayList<>();
+        int segStart = 0;
+        for (int i = 1; i <= len; i++) {
+            if (i == len || types[i] != types[segStart]) {
+                String segText = text.substring(segStart, i);
+                String segType = (types[segStart] == 1) ? "korean" : "non-korean";
+                segments.add(new String[]{segText, segType});
+                segStart = i;
+            }
+        }
+        return segments;
+    }
+
+    /**
+     * 한국어 음절 또는 한글 자모인지 확인.
+     */
+    private static boolean isKoreanChar(char c) {
+        return (c >= 0xAC00 && c <= 0xD7AF)   // 한글 음절
+                || (c >= 0x3130 && c <= 0x318F); // 한글 호환 자모
+    }
+
+    /**
+     * 라틴 문자, 숫자 또는 수학 기호인지 확인.
+     */
+    private static boolean isLatinOrMathChar(char c) {
+        if (Character.isLetter(c) && !isKoreanChar(c)) return true; // 라틴/그리스 등 비한국어 문자
+        if (Character.isDigit(c)) return true;
+        // 수학 기호 및 연산자
+        if ("+-*/=<>()[]{}|^~".indexOf(c) >= 0) return true;
+        // 유니코드 수학 기호 범위
+        if (c >= 0x2200 && c <= 0x22FF) return true; // Mathematical Operators
+        if (c >= 0x2100 && c <= 0x214F) return true; // Letterlike Symbols
+        return false;
+    }
+
+    /**
+     * 런의 스타일 속성을 복사하고 텍스트만 변경한 새 런을 생성한다.
+     */
+    private static IDMLCharacterRun cloneRunWithText(IDMLCharacterRun source, String newText) {
+        IDMLCharacterRun clone = new IDMLCharacterRun();
+        clone.appliedCharacterStyle(source.appliedCharacterStyle());
+        clone.fontFamily(source.fontFamily());
+        clone.fontSize(source.fontSize());
+        clone.fillColor(source.fillColor());
+        clone.fontStyle(source.fontStyle());
+        clone.position(source.position());
+        clone.tracking(source.tracking());
+        clone.content(newText);
+        return clone;
+    }
+
+    /**
+     * InDesign GREP 정규식을 Java Pattern으로 변환.
+     * InDesign GREP 전용 문자 클래스를 Java 유니코드 프로퍼티로 치환한다.
+     */
+    private static java.util.regex.Pattern convertIdGrepToJavaPattern(String idGrep) {
+        if (idGrep == null || idGrep.isEmpty()) return null;
+        try {
+            String javaRegex = idGrep;
+            // InDesign GREP uppercase class -> Java Unicode property
+            javaRegex = javaRegex.replace("\\u", "\\p{Lu}");
+            // InDesign GREP lowercase class -> Java Unicode property
+            javaRegex = javaRegex.replace("\\l", "\\p{Ll}");
+            java.util.regex.Pattern pat = java.util.regex.Pattern.compile(javaRegex);
+            // 런타임 매칭 에러 사전 검증 (일부 패턴은 compile은 되나 match에서 NPE 발생)
+            pat.matcher("test").find();
+            return pat;
+        } catch (Exception e) {
+            // 변환 불가한 InDesign 전용 문법은 무시
             return null;
         }
     }

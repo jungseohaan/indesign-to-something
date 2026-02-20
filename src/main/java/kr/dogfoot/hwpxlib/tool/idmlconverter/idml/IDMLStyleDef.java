@@ -33,6 +33,30 @@ public class IDMLStyleDef {
     // 탭 정지점 목록
     private java.util.List<TabStop> tabStops;
 
+    // GREP 스타일 규칙 (단락 스타일에서만 사용)
+    private java.util.List<GrepStyleRule> grepStyles;
+
+    /**
+     * GREP 스타일 규칙 — 단락 스타일의 AllGREPStyles에서 파싱.
+     * InDesign이 렌더링 시 GREP 패턴에 매칭되는 문자에 문자 스타일을 동적 적용.
+     */
+    public static class GrepStyleRule {
+        private String grepExpression;          // InDesign GREP 정규식
+        private String appliedCharacterStyle;   // 적용할 문자 스타일 참조 ID
+
+        public GrepStyleRule() {}
+        public GrepStyleRule(String grepExpression, String appliedCharacterStyle) {
+            this.grepExpression = grepExpression;
+            this.appliedCharacterStyle = appliedCharacterStyle;
+        }
+
+        public String grepExpression() { return grepExpression; }
+        public void grepExpression(String v) { this.grepExpression = v; }
+
+        public String appliedCharacterStyle() { return appliedCharacterStyle; }
+        public void appliedCharacterStyle(String v) { this.appliedCharacterStyle = v; }
+    }
+
     /**
      * 탭 정지점 정보.
      */
@@ -135,6 +159,16 @@ public class IDMLStyleDef {
             this.tabStops = new java.util.ArrayList<>();
         }
         this.tabStops.add(ts);
+    }
+
+    public java.util.List<GrepStyleRule> grepStyles() { return grepStyles; }
+    public void grepStyles(java.util.List<GrepStyleRule> v) { this.grepStyles = v; }
+
+    public void addGrepStyle(GrepStyleRule rule) {
+        if (this.grepStyles == null) {
+            this.grepStyles = new java.util.ArrayList<>();
+        }
+        this.grepStyles.add(rule);
     }
 
     /**
