@@ -50,11 +50,22 @@ public class BTFontEquationConverter {
         String raw = rawBuilder.toString().trim();
         if (raw.isEmpty()) return null;
 
-        // 2. 영문 단어 필터링 (이름, 영단어 등 — 변환 전 원본 텍스트 기준)
-        if (looksLikeWord(raw)) return null;
+        // BT수식 폰트 런이 하나라도 있으면 수식으로 확정 → 필터 건너뛰기
+        boolean hasMathFontRun = false;
+        for (IDMLCharacterRun run : runs) {
+            if (run.isBTFont() || run.grepMathFont()) {
+                hasMathFontRun = true;
+                break;
+            }
+        }
 
-        // 3. 수식 콘텐츠 확인
-        if (!hasMathContent(raw)) return null;
+        if (!hasMathFontRun) {
+            // 2. 영문 단어 필터링 (이름, 영단어 등 — 변환 전 원본 텍스트 기준)
+            if (looksLikeWord(raw)) return null;
+
+            // 3. 수식 콘텐츠 확인
+            if (!hasMathContent(raw)) return null;
+        }
 
         // 4. 키워드 + 마커 기반 변환
         String hwpScript = convertRawToHwpScript(raw);
@@ -65,7 +76,10 @@ public class BTFontEquationConverter {
         // 글자나 숫자가 없는 순수 기호/공백 → 수식 아님
         boolean hasLetterOrDigit = false;
         for (int i = 0; i < trimmed.length(); i++) {
-            if (Character.isLetterOrDigit(trimmed.charAt(i))) { hasLetterOrDigit = true; break; }
+            char ch = trimmed.charAt(i);
+            if (Character.isLetterOrDigit(ch)) { hasLetterOrDigit = true; break; }
+            // 원기호 ① U+2460 ~ ⑳ U+2473
+            if (ch >= 0x2460 && ch <= 0x2473) { hasLetterOrDigit = true; break; }
         }
         if (!hasLetterOrDigit) return null;
 
@@ -250,7 +264,11 @@ public class BTFontEquationConverter {
                 if (inSubscript) {
                     sb.append("} _{");
                 } else {
-                    sb.append(" _{");
+                    // 첨자 기저가 없으면 빈 그룹 추가
+                    if (!hasSubscriptBase(sb)) {
+                        sb.append("{}");
+                    }
+                    sb.append("_{");
                     inSubscript = true;
                 }
                 i++;
@@ -258,7 +276,7 @@ public class BTFontEquationConverter {
                 while (i < text.length()) {
                     char sc = text.charAt(i);
                     if (sc == '&' || sc == '_' || sc == '^') break;
-                    if (sc == '(' || sc == ')' || sc == '=' || sc == '+' || sc == ' ') break;
+                    if (sc == '(' || sc == ')' || sc == '=' || sc == '+' || sc == ',' || sc == ' ') break;
                     sb.append(sc);
                     i++;
                 }
@@ -280,7 +298,11 @@ public class BTFontEquationConverter {
                 if (inSuperscript) {
                     sb.append("} ^{");
                 } else {
-                    sb.append(" ^{");
+                    // 첨자 기저가 없으면 빈 그룹 추가
+                    if (!hasSubscriptBase(sb)) {
+                        sb.append("{}");
+                    }
+                    sb.append("^{");
                     inSuperscript = true;
                 }
                 i++;
@@ -288,7 +310,7 @@ public class BTFontEquationConverter {
                 while (i < text.length()) {
                     char sc = text.charAt(i);
                     if (sc == '&' || sc == '^' || sc == '_') break;
-                    if (sc == '(' || sc == ')' || sc == '=' || sc == '+' || sc == ' ') break;
+                    if (sc == '(' || sc == ')' || sc == '=' || sc == '+' || sc == ',' || sc == ' ') break;
                     sb.append(sc);
                     i++;
                 }
@@ -322,6 +344,16 @@ public class BTFontEquationConverter {
     }
 
     /**
+     * 첨자(_/^) 앞에 기저 문자가 있는지 확인.
+     * 문자, 숫자, 닫는 괄호/중괄호가 기저 역할을 한다.
+     */
+    private static boolean hasSubscriptBase(StringBuilder sb) {
+        if (sb.length() == 0) return false;
+        char last = sb.charAt(sb.length() - 1);
+        return Character.isLetterOrDigit(last) || last == '}' || last == ')';
+    }
+
+    /**
      * rNpar 패턴을 원기호(①②③...)로 변환.
      */
     private static String convertCircledNumbers(String text) {
@@ -348,6 +380,8 @@ public class BTFontEquationConverter {
     private static String convertGlyphs(String text) {
         // \ → TIMES (곱셈)
         text = text.replace("\\", " TIMES ");
+        // … (U+2026) → CDOTS (가운데점)
+        text = text.replace("\u2026", " CDOTS ");
         // ` → ~ (thin space in HWP script)
         text = text.replace("`", "~");
 

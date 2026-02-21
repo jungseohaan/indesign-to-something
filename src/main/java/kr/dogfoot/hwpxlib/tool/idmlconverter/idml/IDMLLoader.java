@@ -2529,75 +2529,91 @@ public class IDMLLoader {
 
         // 3. 모든 Story의 CharacterRun을 순회하여 GREP 매칭 수행
         //    한국어 혼합 런은 한국어/비한국어 구간으로 분리하여 처리
-        int resolvedCount = 0;
-        int splitCount = 0;
+        int[] counts = {0, 0}; // [resolvedCount, splitCount]
         for (IDMLStory story : doc.stories().values()) {
+            // 스토리 단락
             for (IDMLParagraph para : story.paragraphs()) {
-                String paraStyleRef = para.appliedParagraphStyle();
-                List<java.util.regex.Pattern> patterns = paraStyleGrepPatterns.get(paraStyleRef);
-                if (patterns == null) continue;
-
-                // 런 목록을 복사 (분리 시 원본 리스트 수정이 필요하므로)
-                List<IDMLCharacterRun> originalRuns = new ArrayList<>(para.characterRuns());
-                List<IDMLCharacterRun> newRuns = new ArrayList<>();
-                boolean modified = false;
-
-                for (IDMLCharacterRun run : originalRuns) {
-                    if (run.isBTFont()) {
-                        newRuns.add(run);
-                        continue;
-                    }
-
-                    String text = run.content();
-                    if (text == null || text.isEmpty()) {
-                        newRuns.add(run);
-                        continue;
-                    }
-
-                    // 한국어가 없으면 직접 GREP 매칭
-                    if (!containsKorean(text)) {
-                        if (matchesGrepPattern(text, patterns)) {
-                            run.grepMathFont(true);
-                            resolvedCount++;
+                resolveGrepForParagraph(para, paraStyleGrepPatterns, counts);
+            }
+            // 테이블 셀 단락
+            for (IDMLTable table : story.tables()) {
+                for (IDMLTableRow row : table.rows()) {
+                    for (IDMLTableCell cell : row.cells()) {
+                        for (IDMLParagraph para : cell.paragraphs()) {
+                            resolveGrepForParagraph(para, paraStyleGrepPatterns, counts);
                         }
-                        newRuns.add(run);
-                        continue;
                     }
-
-                    // 한국어 혼합 런 → 한국어/비한국어 구간으로 분리
-                    List<String[]> segments = splitKoreanSegments(text);
-                    if (segments.size() <= 1) {
-                        // 전체가 한국어이거나 분리 불필요
-                        newRuns.add(run);
-                        continue;
-                    }
-
-                    // 분리된 세그먼트를 각각 별도 런으로 생성
-                    modified = true;
-                    splitCount++;
-                    for (String[] seg : segments) {
-                        // seg[0] = text, seg[1] = "korean" or "non-korean"
-                        IDMLCharacterRun subRun = cloneRunWithText(run, seg[0]);
-                        if ("non-korean".equals(seg[1]) && matchesGrepPattern(seg[0], patterns)) {
-                            subRun.grepMathFont(true);
-                            resolvedCount++;
-                        }
-                        newRuns.add(subRun);
-                    }
-                }
-
-                if (modified) {
-                    para.characterRuns().clear();
-                    para.characterRuns().addAll(newRuns);
                 }
             }
         }
 
-        if (resolvedCount > 0 || splitCount > 0) {
-            System.err.println("[IDMLLoader] GREP->BT math resolved: " + resolvedCount + " runs"
-                    + ", split: " + splitCount + " mixed runs"
+        if (counts[0] > 0 || counts[1] > 0) {
+            System.err.println("[IDMLLoader] GREP->BT math resolved: " + counts[0] + " runs"
+                    + ", split: " + counts[1] + " mixed runs"
                     + " (BT charStyles: " + btMathCharStyleRefs.size()
                     + ", paraStyles with GREP: " + paraStyleGrepPatterns.size() + ")");
+        }
+    }
+
+    /**
+     * 단락 내 CharacterRun에 GREP 수식 스타일 매칭을 수행한다.
+     */
+    private static void resolveGrepForParagraph(IDMLParagraph para,
+                                                  Map<String, List<java.util.regex.Pattern>> paraStyleGrepPatterns,
+                                                  int[] counts) {
+        String paraStyleRef = para.appliedParagraphStyle();
+        List<java.util.regex.Pattern> patterns = paraStyleGrepPatterns.get(paraStyleRef);
+        if (patterns == null) return;
+
+        List<IDMLCharacterRun> originalRuns = new ArrayList<>(para.characterRuns());
+        List<IDMLCharacterRun> newRuns = new ArrayList<>();
+        boolean modified = false;
+
+        for (IDMLCharacterRun run : originalRuns) {
+            if (run.isBTFont()) {
+                newRuns.add(run);
+                continue;
+            }
+
+            String text = run.content();
+            if (text == null || text.isEmpty()) {
+                newRuns.add(run);
+                continue;
+            }
+
+            // 한국어가 없으면 직접 GREP 매칭
+            if (!containsKorean(text)) {
+                if (matchesGrepPattern(text, patterns)) {
+                    run.grepMathFont(true);
+                    counts[0]++;
+                }
+                newRuns.add(run);
+                continue;
+            }
+
+            // 한국어 혼합 런 → 한국어/비한국어 구간으로 분리
+            List<String[]> segments = splitKoreanSegments(text);
+            if (segments.size() <= 1) {
+                newRuns.add(run);
+                continue;
+            }
+
+            // 분리된 세그먼트를 각각 별도 런으로 생성
+            modified = true;
+            counts[1]++;
+            for (String[] seg : segments) {
+                IDMLCharacterRun subRun = cloneRunWithText(run, seg[0]);
+                if ("non-korean".equals(seg[1]) && matchesGrepPattern(seg[0], patterns)) {
+                    subRun.grepMathFont(true);
+                    counts[0]++;
+                }
+                newRuns.add(subRun);
+            }
+        }
+
+        if (modified) {
+            para.characterRuns().clear();
+            para.characterRuns().addAll(newRuns);
         }
     }
 
@@ -2698,7 +2714,7 @@ public class IDMLLoader {
         if (Character.isLetter(c) && !isKoreanChar(c)) return true; // 라틴/그리스 등 비한국어 문자
         if (Character.isDigit(c)) return true;
         // 수학 기호 및 연산자
-        if ("+-*/=<>()[]{}|^~".indexOf(c) >= 0) return true;
+        if ("+-*/=<>()[]{}|^~.".indexOf(c) >= 0) return true;
         // 유니코드 수학 기호 범위
         if (c >= 0x2200 && c <= 0x22FF) return true; // Mathematical Operators
         if (c >= 0x2100 && c <= 0x214F) return true; // Letterlike Symbols
