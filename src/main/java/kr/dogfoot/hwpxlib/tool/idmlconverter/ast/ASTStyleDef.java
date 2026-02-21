@@ -1,7 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.ast;
 
 /**
- * 스타일 정의 — IntermediateStyleDef와 호환.
+ * AST 스타일 정의 — 단락/문자 스타일 속성을 담는다.
  */
 public class ASTStyleDef {
     private String styleId;

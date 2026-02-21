@@ -6,8 +6,6 @@ import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.FontType;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.Fontface;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.fontface.Font;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.IntermediateDocument;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.IntermediateFontDef;
 
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -38,28 +36,6 @@ public class FontRegistry {
         registeredFonts.add("함초롬돋움");
         registeredFonts.add("함초롬바탕");
         nextFontId = 2;
-    }
-
-    /**
-     * IntermediateDocument의 폰트 정의를 HWPX에 등록한다.
-     */
-    public void registerFonts(IntermediateDocument doc) {
-        if (doc.fonts() == null || doc.fonts().isEmpty()) return;
-
-        for (IntermediateFontDef fontDef : doc.fonts()) {
-            String hwpxName = fontDef.hwpxMappedName();
-            if (hwpxName == null) {
-                hwpxName = FontMapper.DEFAULT_HWPX_FONT;
-            }
-
-            if (!registeredFonts.contains(hwpxName)) {
-                String fontId = String.valueOf(nextFontId);
-                addFontToAllLanguages(hwpxName, fontId);
-                fontNameToId.put(hwpxName, fontId);
-                registeredFonts.add(hwpxName);
-                nextFontId++;
-            }
-        }
     }
 
     /**

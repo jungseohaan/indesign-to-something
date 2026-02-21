@@ -18,6 +18,7 @@ public class IDMLPage {
     private double marginRight;
     private int columnCount;
     private double columnGutter;
+    private String sectionMarker;
 
     public String selfId() { return selfId; }
     public void selfId(String v) { this.selfId = v; }
@@ -54,6 +55,9 @@ public class IDMLPage {
 
     public double columnGutter() { return columnGutter; }
     public void columnGutter(double v) { this.columnGutter = v; }
+
+    public String sectionMarker() { return sectionMarker; }
+    public void sectionMarker(String v) { this.sectionMarker = v; }
 
     public double widthPoints() {
         return geometricBounds != null ? IDMLGeometry.width(geometricBounds) : 0;

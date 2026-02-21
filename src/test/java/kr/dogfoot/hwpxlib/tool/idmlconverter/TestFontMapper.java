@@ -1,12 +1,8 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLFontDef;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.IntermediateFontDef;
 import org.junit.Assert;
 import org.junit.Test;
-
-import java.util.*;
 
 public class TestFontMapper {
 
@@ -133,75 +129,5 @@ public class TestFontMapper {
     @Test
     public void testMapFontType_Unknown() {
         Assert.assertEquals("TTF", FontMapper.mapFontType("SomeOther"));
-    }
-
-    // ── mapFont ──
-
-    @Test
-    public void testMapFont() {
-        IDMLFontDef idmlFont = new IDMLFontDef();
-        idmlFont.fontFamily("Minion Pro");
-        idmlFont.fontStyleName("Regular");
-        idmlFont.fontType("OpenTypeCFF");
-
-        IntermediateFontDef result = FontMapper.mapFont(idmlFont, "font_0");
-        Assert.assertEquals("font_0", result.id());
-        Assert.assertEquals("Minion Pro", result.familyName());
-        Assert.assertEquals("Regular", result.styleName());
-        Assert.assertEquals("OTF", result.fontType());
-        Assert.assertEquals("함초롬바탕", result.hwpxMappedName());
-    }
-
-    // ── buildFontList ──
-
-    @Test
-    public void testBuildFontList_Dedup() {
-        Map<String, IDMLFontDef> idmlFonts = new LinkedHashMap<String, IDMLFontDef>();
-
-        IDMLFontDef font1 = new IDMLFontDef();
-        font1.fontFamily("Minion Pro");
-        font1.fontStyleName("Regular");
-        font1.fontType("OpenTypeCFF");
-        idmlFonts.put("font1", font1);
-
-        IDMLFontDef font2 = new IDMLFontDef();
-        font2.fontFamily("Minion Pro");
-        font2.fontStyleName("Bold");
-        font2.fontType("OpenTypeCFF");
-        idmlFonts.put("font2", font2);
-
-        IDMLFontDef font3 = new IDMLFontDef();
-        font3.fontFamily("Myriad Pro");
-        font3.fontStyleName("Regular");
-        font3.fontType("OpenTypeCFF");
-        idmlFonts.put("font3", font3);
-
-        List<IntermediateFontDef> result = FontMapper.buildFontList(idmlFonts);
-
-        // 중복 제거: Minion Pro + Myriad Pro = 2
-        Assert.assertEquals(2, result.size());
-        Assert.assertEquals("font_0", result.get(0).id());
-        Assert.assertEquals("Minion Pro", result.get(0).familyName());
-        Assert.assertEquals("font_1", result.get(1).id());
-        Assert.assertEquals("Myriad Pro", result.get(1).familyName());
-    }
-
-    @Test
-    public void testBuildFontList_Empty() {
-        Map<String, IDMLFontDef> idmlFonts = new LinkedHashMap<String, IDMLFontDef>();
-        List<IntermediateFontDef> result = FontMapper.buildFontList(idmlFonts);
-        Assert.assertTrue(result.isEmpty());
-    }
-
-    @Test
-    public void testBuildFontList_NullFamily() {
-        Map<String, IDMLFontDef> idmlFonts = new LinkedHashMap<String, IDMLFontDef>();
-
-        IDMLFontDef font = new IDMLFontDef();
-        font.fontFamily(null);
-        idmlFonts.put("font1", font);
-
-        List<IntermediateFontDef> result = FontMapper.buildFontList(idmlFonts);
-        Assert.assertTrue(result.isEmpty());
     }
 }

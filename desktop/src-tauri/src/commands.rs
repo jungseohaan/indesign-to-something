@@ -820,7 +820,6 @@ pub async fn convert_idml(
         input_path,
         output_path,
         "--progress".to_string(),
-        "--event-stream".to_string(),
     ];
 
     if options.spread_based {

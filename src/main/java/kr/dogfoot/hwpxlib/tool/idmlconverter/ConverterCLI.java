@@ -113,9 +113,6 @@ public class ConverterCLI {
                 case "--include-images":
                     options = options.includeImages(true);
                     break;
-                case "--event-stream":
-                    options = options.useEventStream(true);
-                    break;
                 case "--links-directory":
                     if (i + 1 < args.length) {
                         options = options.linksDirectory(args[++i]);
@@ -1125,7 +1122,7 @@ public class ConverterCLI {
         if (lastSlash >= 0) fileName = idmlPath.substring(lastSlash + 1);
 
         // 4단계 정규화 → AST (이미지 포함하여 마스터 페이지 객체도 처리)
-        ConvertOptions options = ConvertOptions.defaults().useEventStream(true).includeImages(true);
+        ConvertOptions options = ConvertOptions.defaults().includeImages(true);
         if (linksDirectory != null) {
             options = options.linksDirectory(linksDirectory);
         }
@@ -1157,7 +1154,6 @@ public class ConverterCLI {
         System.out.println("  --links-directory <path>  Directory for image links");
         System.out.println("  --start-page <num>   Start page number (1-based)");
         System.out.println("  --end-page <num>     End page number (1-based)");
-        System.out.println("  --event-stream       Use AST-based event stream pipeline");
         System.out.println();
         System.out.println("HWPX to IDML Options:");
         System.out.println("  --progress           Output progress as JSON");

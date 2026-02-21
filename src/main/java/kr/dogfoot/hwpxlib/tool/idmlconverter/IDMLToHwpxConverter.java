@@ -3,20 +3,19 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter;
 import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.writer.HWPXWriter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSerializer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IDMLToIntermediateConverter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IntermediateToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.IntermediateDocument;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.JsonDeserializer;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.JsonSerializer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
 
 import java.io.File;
 
 /**
- * IDML → HWPX 변환 메인 파사드.
+ * IDML -> HWPX 변환 메인 파사드.
+ *
+ * AST 파이프라인:
+ * IDMLLoader -> IDMLNormalizer (4단계) -> ASTDocument -> ASTToHwpxConverter -> HWPX
  *
  * 사용 예:
  * <pre>{@code
@@ -24,11 +23,8 @@ import java.io.File;
  * ConvertResult result = IDMLToHwpxConverter.convert("input.idml", "output.hwpx",
  *                                                     ConvertOptions.defaults());
  *
- * // IDML → JSON
+ * // IDML -> AST JSON
  * String json = IDMLToHwpxConverter.toJson("input.idml", ConvertOptions.defaults());
- *
- * // JSON → HWPX
- * IDMLToHwpxConverter.fromJson(json, "output.hwpx");
  * }</pre>
  *
  * CLI:
@@ -67,37 +63,15 @@ public class IDMLToHwpxConverter {
         reporter.reportProgress(0, 100, "IDML 파일 로딩 중...");
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
         try {
-            ConvertResult result;
             String sourceFileName = new File(idmlPath).getName();
 
-            if (options.useEventStream()) {
-                // === 새 파이프라인: 4단계 정규화 → AST → HWPX ===
-                System.err.println("[Pipeline] Using event-stream (AST) pipeline");
+            // Phase 2: IDML -> ASTDocument (4단계 정규화)
+            reporter.reportProgress(5, 100, "IDML 구조 분석 중...");
+            ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
 
-                // Phase 2: IDML → ASTDocument (4단계 정규화)
-                reporter.reportProgress(5, 100, "IDML 구조 분석 중...");
-                ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
-
-                // Phase 3: AST → HWPX (페이지별 진행률: 10~90)
-                int totalPages = astDoc.sections().size();
-                result = ASTToHwpxConverter.convert(astDoc, reporter, 10, totalPages);
-            } else {
-                // === 기존 파이프라인: Intermediate → HWPX ===
-                // Phase 2: IDML → Intermediate
-                reporter.reportProgress(5, 100, "IDML 구조 분석 중...");
-                IDMLToIntermediateConverter.Result intermediateResult =
-                        IDMLToIntermediateConverter.convert(idmlDoc, options, sourceFileName);
-                IntermediateDocument intermediate = intermediateResult.document();
-
-                // Phase 3: Intermediate → HWPX
-                reporter.reportProgress(50, 100, "HWPX 변환 중...");
-                result = IntermediateToHwpxConverter.convert(intermediate);
-
-                // 중간 변환 경고 전파
-                for (String warning : intermediateResult.warnings()) {
-                    result.addWarning(warning);
-                }
-            }
+            // Phase 3: AST -> HWPX (페이지별 진행률: 10~90)
+            int totalPages = astDoc.sections().size();
+            ConvertResult result = ASTToHwpxConverter.convert(astDoc, reporter, 10, totalPages);
 
             // Phase 4: HWPX 파일 저장
             reporter.reportProgress(95, 100, "HWPX 파일 저장 중...");
@@ -129,9 +103,8 @@ public class IDMLToHwpxConverter {
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
         try {
             String sourceFileName = new File(idmlPath).getName();
-            IDMLToIntermediateConverter.Result intermediateResult =
-                    IDMLToIntermediateConverter.convert(idmlDoc, options, sourceFileName);
-            ConvertResult result = IntermediateToHwpxConverter.convert(intermediateResult.document());
+            ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
+            ConvertResult result = ASTToHwpxConverter.convert(astDoc, ProgressReporter.NONE, 0, 0);
             return result.hwpxFile();
         } finally {
             idmlDoc.cleanup();
@@ -139,7 +112,7 @@ public class IDMLToHwpxConverter {
     }
 
     /**
-     * IDML 파일을 중간 JSON 문자열로 변환한다.
+     * IDML 파일을 AST JSON 문자열로 변환한다.
      *
      * @param idmlPath IDML 파일 경로
      * @param options  변환 옵션
@@ -149,39 +122,10 @@ public class IDMLToHwpxConverter {
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
         try {
             String sourceFileName = new File(idmlPath).getName();
-            IDMLToIntermediateConverter.Result intermediateResult =
-                    IDMLToIntermediateConverter.convert(idmlDoc, options, sourceFileName);
-            return JsonSerializer.toJson(intermediateResult.document());
+            ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
+            return ASTSerializer.toJson(astDoc);
         } finally {
             idmlDoc.cleanup();
-        }
-    }
-
-    /**
-     * 중간 JSON 문자열을 HWPXFile로 변환한다.
-     *
-     * @param json JSON 문자열
-     * @return HWPXFile 객체
-     */
-    public static HWPXFile fromJson(String json) throws ConvertException {
-        IntermediateDocument intermediate = JsonDeserializer.fromJson(json);
-        ConvertResult result = IntermediateToHwpxConverter.convert(intermediate);
-        return result.hwpxFile();
-    }
-
-    /**
-     * 중간 JSON 문자열을 HWPX 파일로 변환하여 저장한다.
-     *
-     * @param json     JSON 문자열
-     * @param hwpxPath 출력 HWPX 파일 경로
-     */
-    public static void fromJson(String json, String hwpxPath) throws ConvertException {
-        HWPXFile hwpxFile = fromJson(json);
-        try {
-            HWPXWriter.toFilepath(hwpxFile, hwpxPath);
-        } catch (Exception e) {
-            throw new ConvertException(ConvertException.Phase.HWPX_GENERATION,
-                    "Failed to write HWPX file: " + e.getMessage(), e);
         }
     }
 

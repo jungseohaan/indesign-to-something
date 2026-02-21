@@ -9,7 +9,7 @@ import kr.dogfoot.hwpxlib.object.content.header_xml.references.TabPr;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.tabpr.TabItem;
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.LineType2;
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.TabItemType;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.IntermediateStyleDef;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTStyleDef;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,12 +28,6 @@ public class StyleRegistry {
 
     // 문자 스타일 ID → HWPX CharPr ID (단락 스타일의 CharPr도 포함)
     private final Map<String, String> charStyleIdToCharPrId = new LinkedHashMap<>();
-
-    // 단락 스타일 ID → IntermediateStyleDef
-    private final Map<String, IntermediateStyleDef> paraStyleIdToStyleDef = new LinkedHashMap<>();
-
-    // 문자 스타일 ID → IntermediateStyleDef
-    private final Map<String, IntermediateStyleDef> charStyleIdToStyleDef = new LinkedHashMap<>();
 
     // 단락 스타일 ID → TabPr ID
     private final Map<String, String> paraStyleIdToTabPrId = new LinkedHashMap<>();
@@ -66,52 +60,43 @@ public class StyleRegistry {
     /**
      * 단락 스타일을 등록한다.
      */
-    public void registerParagraphStyle(IntermediateStyleDef styleDef) {
-        // CharPr 생성
+    public void registerParagraphStyle(ASTStyleDef styleDef) {
         String charPrId = String.valueOf(nextCharPrIndex++);
         CharPr charPr = hwpxFile.headerXMLFile().refList().charProperties().addNew();
         buildCharPr(charPr, charPrId, styleDef);
 
-        // TabPr 생성 (탭 정지점이 있는 경우)
         String tabPrId = "0";
-        if (styleDef.tabStops() != null && !styleDef.tabStops().isEmpty()) {
-            tabPrId = createTabPr(styleDef);
-            paraStyleIdToTabPrId.put(styleDef.id(), tabPrId);
-        }
 
-        // ParaPr 생성
         String paraPrId = String.valueOf(nextParaPrIndex++);
         ParaPr paraPr = hwpxFile.headerXMLFile().refList().paraProperties().addNew();
         buildParaPr(paraPr, paraPrId, styleDef, tabPrId);
 
-        // Style 생성
         String styleId = String.valueOf(nextStyleIndex++);
         Style style = hwpxFile.headerXMLFile().refList().styles().addNew();
+        String name = styleDef.styleName() != null ? styleDef.styleName() : "Style_" + styleId;
         style.idAnd(styleId)
                 .typeAnd(StyleType.PARA)
-                .nameAnd(styleDef.name() != null ? styleDef.name() : "Style_" + styleId)
-                .engNameAnd(styleDef.name() != null ? styleDef.name() : "Style_" + styleId)
+                .nameAnd(name)
+                .engNameAnd(name)
                 .paraPrIDRefAnd(paraPrId)
                 .charPrIDRefAnd(charPrId)
                 .nextStyleIDRefAnd(styleId)
                 .langIDAnd("1042")
                 .lockForm(false);
 
-        paraStyleIdToParaPrId.put(styleDef.id(), paraPrId);
-        paraStyleIdToStyleId.put(styleDef.id(), styleId);
-        charStyleIdToCharPrId.put(styleDef.id(), charPrId);
-        paraStyleIdToStyleDef.put(styleDef.id(), styleDef);
+        paraStyleIdToParaPrId.put(styleDef.styleId(), paraPrId);
+        paraStyleIdToStyleId.put(styleDef.styleId(), styleId);
+        charStyleIdToCharPrId.put(styleDef.styleId(), charPrId);
     }
 
     /**
      * 문자 스타일을 등록한다.
      */
-    public void registerCharacterStyle(IntermediateStyleDef styleDef) {
+    public void registerCharacterStyle(ASTStyleDef styleDef) {
         String charPrId = String.valueOf(nextCharPrIndex++);
         CharPr charPr = hwpxFile.headerXMLFile().refList().charProperties().addNew();
         buildCharPr(charPr, charPrId, styleDef);
-        charStyleIdToCharPrId.put(styleDef.id(), charPrId);
-        charStyleIdToStyleDef.put(styleDef.id(), styleDef);
+        charStyleIdToCharPrId.put(styleDef.styleId(), charPrId);
     }
 
     // ── Getters ──
@@ -142,14 +127,6 @@ public class StyleRegistry {
 
     public String getCharPrId(String styleId) {
         return charStyleIdToCharPrId.get(styleId);
-    }
-
-    public IntermediateStyleDef getParagraphStyleDef(String styleId) {
-        return paraStyleIdToStyleDef.get(styleId);
-    }
-
-    public IntermediateStyleDef getCharacterStyleDef(String styleId) {
-        return charStyleIdToStyleDef.get(styleId);
     }
 
     public String getTabPrId(String styleId) {
@@ -191,24 +168,6 @@ public class StyleRegistry {
 
     // ── Private helpers ──
 
-    private String createTabPr(IntermediateStyleDef styleDef) {
-        String tabPrId = String.valueOf(nextTabPrIndex++);
-        TabPr tabPr = hwpxFile.headerXMLFile().refList().tabProperties().addNew();
-        tabPr.idAnd(tabPrId)
-                .autoTabLeftAnd(false)
-                .autoTabRightAnd(false);
-
-        for (IntermediateStyleDef.TabStop ts : styleDef.tabStops()) {
-            TabItem item = tabPr.addNewTabItem();
-            item.posAnd((int) ts.position())
-                    .typeAnd(mapTabItemType(ts.alignment()))
-                    .leaderAnd(mapTabLeader(ts.leader()))
-                    .unitAnd(ValueUnit2.HWPUNIT);
-        }
-
-        return tabPrId;
-    }
-
     private TabItemType mapTabItemType(String alignment) {
         if (alignment == null) return TabItemType.LEFT;
         switch (alignment) {
@@ -228,62 +187,24 @@ public class StyleRegistry {
         return LineType2.NONE;
     }
 
-    private void buildCharPr(CharPr charPr, String id, IntermediateStyleDef styleDef) {
+    private void buildCharPr(CharPr charPr, String id, ASTStyleDef styleDef) {
         int height = styleDef.fontSizeHwpunits() != null ? styleDef.fontSizeHwpunits() : 1000;
         String textColor = styleDef.textColor() != null ? styleDef.textColor() : "#000000";
-
-        charPr.idAnd(id)
-                .heightAnd(height)
-                .textColorAnd(textColor)
-                .shadeColorAnd("none")
-                .useFontSpaceAnd(false)
-                .useKerningAnd(false)
-                .symMarkAnd(SymMarkSort.NONE)
-                .borderFillIDRef("2");
-
-        // Bold/Italic 설정
-        if (Boolean.TRUE.equals(styleDef.bold())) {
-            charPr.createBold();
+        boolean bold = false, italic = false;
+        if (styleDef.fontStyle() != null) {
+            String fs = styleDef.fontStyle().toLowerCase();
+            bold = fs.contains("bold");
+            italic = fs.contains("italic");
         }
-        if (Boolean.TRUE.equals(styleDef.italic())) {
-            charPr.createItalic();
-        }
-
-        // 폰트 참조
-        String fontId = fontRegistry.resolveFontId(styleDef.fontFamily());
-        charPr.createFontRef();
-        charPr.fontRef().set(fontId, fontId, fontId, fontId, fontId, fontId, fontId);
-
-        charPr.createRatio();
-        charPr.ratio().set((short) 90, (short) 90, (short) 90, (short) 90, (short) 90, (short) 90, (short) 90);
-
-        // 자간 (letterSpacing) — 전역 -10% 적용
-        short baseSpacing = styleDef.letterSpacing() != null ? styleDef.letterSpacing() : 0;
-        short spacing = (short) (baseSpacing - 10);
-        charPr.createSpacing();
-        charPr.spacing().set(spacing, spacing, spacing, spacing, spacing, spacing, spacing);
-
-        charPr.createRelSz();
-        charPr.relSz().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
-
-        charPr.createOffset();
-        charPr.offset().set((short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0);
-
-        charPr.createUnderline();
-        charPr.underline().typeAnd(UnderlineType.NONE).shapeAnd(LineType3.SOLID).color("#000000");
-
-        charPr.createStrikeout();
-        charPr.strikeout().shapeAnd(LineType2.NONE).color("#000000");
-
-        charPr.createOutline();
-        charPr.outline().type(LineType1.NONE);
-
-        charPr.createShadow();
-        charPr.shadow().typeAnd(CharShadowType.NONE).colorAnd("#B2B2B2")
-                .offsetXAnd((short) 10).offsetY((short) 10);
+        CharPrBuilder.build(charPr, id, height, textColor,
+                styleDef.fontFamily(), fontRegistry,
+                styleDef.letterSpacing(),
+                bold, italic,
+                false, false,
+                UnderlineType.NONE, "#000000");
     }
 
-    private void buildParaPr(ParaPr paraPr, String id, IntermediateStyleDef styleDef, String tabPrId) {
+    private void buildParaPr(ParaPr paraPr, String id, ASTStyleDef styleDef, String tabPrId) {
         paraPr.idAnd(id)
                 .tabPrIDRefAnd(tabPrId)
                 .condenseAnd((byte) 0)
@@ -292,7 +213,6 @@ public class StyleRegistry {
                 .suppressLineNumbersAnd(false)
                 .checked(false);
 
-        // 정렬
         HorizontalAlign2 hAlign = mapAlignment(styleDef.alignment());
         paraPr.createAlign();
         paraPr.align().horizontalAnd(hAlign).vertical(VerticalAlign1.BASELINE);
@@ -313,7 +233,6 @@ public class StyleRegistry {
         paraPr.createAutoSpacing();
         paraPr.autoSpacing().eAsianEngAnd(false).eAsianNum(false);
 
-        // 마진
         int indent = styleDef.firstLineIndent() != null ? styleDef.firstLineIndent().intValue() : 0;
         int left = styleDef.leftMargin() != null ? styleDef.leftMargin().intValue() : 0;
         int right = styleDef.rightMargin() != null ? styleDef.rightMargin().intValue() : 0;
@@ -332,7 +251,6 @@ public class StyleRegistry {
         paraPr.margin().createNext();
         paraPr.margin().next().valueAnd(next).unit(ValueUnit2.HWPUNIT);
 
-        // 줄 간격
         LineSpacingType lsType = LineSpacingType.PERCENT;
         int lsValue = 130;
         if (styleDef.lineSpacingType() != null) {
@@ -340,8 +258,8 @@ public class StyleRegistry {
                 lsType = LineSpacingType.FIXED;
             }
         }
-        if (styleDef.lineSpacingPercent() != null) {
-            lsValue = styleDef.lineSpacingPercent();
+        if (styleDef.lineSpacing() != null) {
+            lsValue = styleDef.lineSpacing();
         }
 
         paraPr.createLineSpacing();
@@ -355,18 +273,6 @@ public class StyleRegistry {
     }
 
     private static HorizontalAlign2 mapAlignment(String alignment) {
-        if (alignment == null) return HorizontalAlign2.JUSTIFY;
-        switch (alignment.toLowerCase()) {
-            case "left": case "leftalign":
-                return HorizontalAlign2.LEFT;
-            case "center": case "centeralign":
-                return HorizontalAlign2.CENTER;
-            case "right": case "rightalign":
-                return HorizontalAlign2.RIGHT;
-            case "justify": case "leftjustified": case "fullyjustified":
-                return HorizontalAlign2.JUSTIFY;
-            default:
-                return HorizontalAlign2.JUSTIFY;
-        }
+        return kr.dogfoot.hwpxlib.tool.idmlconverter.converter.HwpxEnumMapper.mapAlignment(alignment);
     }
 }

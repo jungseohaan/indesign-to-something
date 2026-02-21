@@ -54,6 +54,20 @@ public final class ConverterConstants {
     /** 벡터 렌더링 시 픽셀-HWPUNIT 비율 (300 DPI 기준) */
     public static final double PIXEL_TO_HWPUNIT_RATIO_300DPI = 7200.0 / 300.0; // = 24
 
+    // ===== 글상자 최소 크기 =====
+    /** 글상자 최소 너비 (HWPUNIT) */
+    public static final long MIN_TEXT_BOX_WIDTH = 142;
+
+    /** 글상자 최소 높이 — 한 줄 (HWPUNIT) */
+    public static final long MIN_TEXT_BOX_HEIGHT = 1600;
+
+    // ===== 인라인 객체 임계값 =====
+    /**
+     * 인라인 이미지 높이가 이 값(HWPUNIT)을 초과하면 자리차지(TOP_AND_BOTTOM)로 전환.
+     * 5000 HWPUNIT = 50pt ≈ 17.6mm (약 4줄 높이).
+     */
+    public static final long INLINE_IMAGE_HEIGHT_THRESHOLD = 5000;
+
     // ===== 기본값 =====
     /** 기본 폰트 크기 (HWPUNIT) */
     public static final int DEFAULT_FONT_SIZE_HWPUNIT = 1000;

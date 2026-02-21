@@ -1,8 +1,5 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
-import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLFontDef;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.IntermediateFontDef;
-
 import java.util.*;
 
 /**
@@ -136,40 +133,6 @@ public class FontMapper {
 
     /** 기본 대체 폰트 */
     public static final String DEFAULT_HWPX_FONT = "함초롬바탕";
-
-    /**
-     * IDML 폰트 정의를 Intermediate 폰트 정의로 변환한다.
-     */
-    public static IntermediateFontDef mapFont(IDMLFontDef idmlFont, String id) {
-        IntermediateFontDef font = new IntermediateFontDef();
-        font.id(id);
-        font.familyName(idmlFont.fontFamily());
-        font.styleName(idmlFont.fontStyleName());
-        font.fontType(mapFontType(idmlFont.fontType()));
-        font.hwpxMappedName(mapToHwpxFont(idmlFont.fontFamily()));
-        return font;
-    }
-
-    /**
-     * IDML 폰트명 컬렉션을 Intermediate 목록으로 변환한다.
-     * 중복 폰트 패밀리를 제거하고 고유한 목록을 반환한다.
-     */
-    public static List<IntermediateFontDef> buildFontList(Map<String, IDMLFontDef> idmlFonts) {
-        List<IntermediateFontDef> result = new ArrayList<IntermediateFontDef>();
-        Set<String> seenFamilies = new LinkedHashSet<String>();
-        int idx = 0;
-
-        for (IDMLFontDef idmlFont : idmlFonts.values()) {
-            String family = idmlFont.fontFamily();
-            if (family != null && !seenFamilies.contains(family)) {
-                seenFamilies.add(family);
-                result.add(mapFont(idmlFont, "font_" + idx));
-                idx++;
-            }
-        }
-
-        return result;
-    }
 
     /**
      * IDML 폰트 패밀리명을 HWPX 폰트명으로 매핑한다.
