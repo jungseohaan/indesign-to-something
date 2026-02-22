@@ -174,6 +174,10 @@ public class BTFontEquationConverter {
         // 키워드 치환 (긴 것부터)
         result = replaceKeywords(result);
 
+        // 중괄호 → lbrace/rbrace (위치 마커 전에 처리해야 _{} ^{} 구문과 충돌 방지)
+        result = result.replace("{", " lbrace ");
+        result = result.replace("}", " rbrace ");
+
         // 위치 마커 파싱: _x → _{x}, & → 리셋
         result = convertPositionMarkers(result);
 

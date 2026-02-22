@@ -149,6 +149,15 @@ public class Stage4_BuildAST {
                             .map(shape -> ASTInlineObjectBuilder.createFigureFromVectorShape(shape, finalPage2, finalImageLoader2, colorResolver))
                             .filter(Objects::nonNull)
                             .collect(Collectors.toList());
+                    // 콘텐츠 영역으로 클리핑 (HWPX 뷰어는 페이지 경계 자동 클리핑이 없으므로
+                    // InDesign처럼 보이려면 여백을 제외한 콘텐츠 영역까지만 표시)
+                    long fullPageW = CoordinateConverter.pointsToHwpunits(
+                            IDMLGeometry.width(page.geometricBounds()));
+                    long fullPageH = CoordinateConverter.pointsToHwpunits(
+                            IDMLGeometry.height(page.geometricBounds()));
+                    long vecClipW = fullPageW - CoordinateConverter.pointsToHwpunits(page.marginRight());
+                    long vecClipH = fullPageH - CoordinateConverter.pointsToHwpunits(page.marginBottom());
+                    vectorFigures.removeIf(fig -> !clipFigureToPage(fig, vecClipW, vecClipH));
                     vectorFigures.forEach(section::addBlock);
                 }
 
@@ -761,7 +770,8 @@ public class Stage4_BuildAST {
             if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
                 String text = ((ASTTextRun) item).text();
                 if (text != null && !text.trim().isEmpty()) return false;
-            } else if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+            } else if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT
+                    || item.itemType() == ASTInlineItem.ItemType.EQUATION) {
                 return false;
             }
             // BREAK만 있는 단락도 빈 단락으로 취급

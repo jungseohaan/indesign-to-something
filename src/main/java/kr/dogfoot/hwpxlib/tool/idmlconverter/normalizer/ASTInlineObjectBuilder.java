@@ -25,6 +25,222 @@ class ASTInlineObjectBuilder {
                                         ColorResolver colorResolver,
                                         ASTImageLoader imageLoader,
                                         GroupBackground bg) {
+        collectChildTextFramesInternal(ig, para, null, idmlDoc, colorResolver, imageLoader, bg,
+                false, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+
+    /**
+     * IMAGE 그룹 내부의 TextFrame을 오버레이 프레임으로 수집하여 이미지 객체에 첨부.
+     * 각 텍스트프레임은 이미지 컨테이너 내부에 중첩되어 이미지 위에 올바르게 배치된다.
+     *
+     * @param imageObj 오버레이 프레임을 첨부할 IMAGE 인라인 객체
+     */
+    static void collectOverlayFrames(IDMLCharacterRun.InlineGraphic ig,
+                                      ASTInlineObject imageObj,
+                                      IDMLDocument idmlDoc,
+                                      ColorResolver colorResolver,
+                                      ASTImageLoader imageLoader,
+                                      GroupBackground bg) {
+        // 이미지 프레임을 찾고 그룹 내 위치 계산
+        IDMLCharacterRun.InlineGraphic imageFrame = findImageFrame(ig);
+        double[] imgPos = findImagePositionInGroup(ig, imageFrame);
+
+        // 콘텐츠 바운딩 박스: 이미지 프레임 + 텍스트 프레임만 (배경 사각형 등 장식용 그래픽 제외)
+        // computeGroupVisualBounds()는 모든 자식을 포함하여 컨테이너가 불필요하게 커지는 문제가 있음
+        double[] contentBBox = computeContentBounds(ig, imgPos);
+        double rootLeft = contentBBox[0];   // minX
+        double rootTop = contentBBox[1];    // minY
+        double contentWidthPts = contentBBox[2] - contentBBox[0];
+        double contentHeightPts = contentBBox[3] - contentBBox[1];
+
+        long containerW, containerH, imgOffX, imgOffY;
+        if (imgPos != null && imgPos[2] > 0 && imgPos[3] > 0
+                && contentWidthPts > 0 && contentHeightPts > 0) {
+            double imgFrameWPts = imgPos[2];
+            double imgFrameHPts = imgPos[3];
+            // 컨테이너 = 콘텐츠 바운딩 박스 표시 크기 (이미지 표시 크기에서 비율로 확대)
+            containerW = Math.round((double) imageObj.width() * contentWidthPts / imgFrameWPts);
+            containerH = Math.round((double) imageObj.height() * contentHeightPts / imgFrameHPts);
+            // 이미지의 컨테이너 내 오프셋
+            double imgOffXPts = imgPos[0] - rootLeft;
+            double imgOffYPts = imgPos[1] - rootTop;
+            imgOffX = Math.round((double) containerW * imgOffXPts / contentWidthPts);
+            imgOffY = Math.round((double) containerH * imgOffYPts / contentHeightPts);
+        } else {
+            // 폴백: 이미지 프레임 위치를 찾을 수 없으면 기존 동작 유지
+            containerW = imageObj.width();
+            containerH = imageObj.height();
+            imgOffX = 0;
+            imgOffY = 0;
+        }
+
+        imageObj.containerWidth(containerW);
+        imageObj.containerHeight(containerH);
+        imageObj.imageOffsetX(imgOffX);
+        imageObj.imageOffsetY(imgOffY);
+
+        // 오버레이 위치 스케일링은 컨테이너(콘텐츠 bbox) 표시 크기 기준으로 수행
+        collectChildTextFramesInternal(ig, null, imageObj, idmlDoc, colorResolver, imageLoader, bg,
+                true, containerW, containerH,
+                contentWidthPts, contentHeightPts, rootLeft, rootTop, 0, 0);
+    }
+
+    /**
+     * 이미지 프레임 + 텍스트 프레임만으로 콘텐츠 바운딩 박스를 계산.
+     * 배경 사각형 등 장식용 그래픽은 제외하여 컨테이너가 불필요하게 커지는 것을 방지.
+     * @param imgPos 이미지 프레임의 그룹 내 위치 [left, top, width, height] (null 가능)
+     * @return [minX, minY, maxX, maxY] (points, 그룹 로컬 좌표계)
+     */
+    private static double[] computeContentBounds(IDMLCharacterRun.InlineGraphic ig,
+                                                   double[] imgPos) {
+        double[] bounds = {Double.MAX_VALUE, Double.MAX_VALUE, -Double.MAX_VALUE, -Double.MAX_VALUE};
+
+        // 1. 이미지 프레임
+        if (imgPos != null) {
+            bounds[0] = Math.min(bounds[0], imgPos[0]);
+            bounds[1] = Math.min(bounds[1], imgPos[1]);
+            bounds[2] = Math.max(bounds[2], imgPos[0] + imgPos[2]);
+            bounds[3] = Math.max(bounds[3], imgPos[1] + imgPos[3]);
+        }
+
+        // 2. 텍스트 프레임 (직접 + 중첩 그룹 내 재귀)
+        includeTextFrameBoundsRecursive(ig, bounds, 0, 0);
+
+        if (bounds[0] == Double.MAX_VALUE) {
+            // 폴백: 콘텐츠가 없으면 전체 그룹 바운드 사용
+            return computeGroupVisualBounds(ig);
+        }
+        return bounds;
+    }
+
+    private static void includeTextFrameBoundsRecursive(IDMLCharacterRun.InlineGraphic ig,
+                                                          double[] bounds,
+                                                          double accTx, double accTy) {
+        for (IDMLTextFrame childTf : ig.childTextFrames()) {
+            double[] tb = childTf.geometricBounds();
+            double[] tt = childTf.itemTransform();
+            if (tb != null && tt != null) {
+                double left = tb[1] + tt[4] + accTx;
+                double top = tb[0] + tt[5] + accTy;
+                double right = tb[3] + tt[4] + accTx;
+                double bottom = tb[2] + tt[5] + accTy;
+                bounds[0] = Math.min(bounds[0], left);
+                bounds[1] = Math.min(bounds[1], top);
+                bounds[2] = Math.max(bounds[2], right);
+                bounds[3] = Math.max(bounds[3], bottom);
+            }
+        }
+        for (IDMLCharacterRun.InlineGraphic childIg : ig.childGraphics()) {
+            double[] ct = childIg.itemTransform();
+            double childAccTx = accTx + (ct != null ? ct[4] : 0);
+            double childAccTy = accTy + (ct != null ? ct[5] : 0);
+            includeTextFrameBoundsRecursive(childIg, bounds, childAccTx, childAccTy);
+        }
+    }
+
+    /**
+     * 이미지 프레임의 루트 그룹 좌표계 내 위치를 재귀적으로 찾는다.
+     * @return [left, top, width, height] (points, 그룹 로컬 좌표계) 또는 null
+     */
+    private static double[] findImagePositionInGroup(
+            IDMLCharacterRun.InlineGraphic group,
+            IDMLCharacterRun.InlineGraphic target) {
+        if (target == null) return null;
+        return findImagePosRecursive(group, target, 0, 0);
+    }
+
+    private static double[] findImagePosRecursive(
+            IDMLCharacterRun.InlineGraphic current,
+            IDMLCharacterRun.InlineGraphic target,
+            double accTx, double accTy) {
+        for (IDMLCharacterRun.InlineGraphic child : current.childGraphics()) {
+            double[] ct = child.itemTransform();
+            double childAccTx = accTx + (ct != null ? ct[4] : 0);
+            double childAccTy = accTy + (ct != null ? ct[5] : 0);
+
+            if (child == target) {
+                double[] cb = child.geometricBounds();
+                if (cb != null) {
+                    return new double[]{
+                            cb[1] + childAccTx,   // left in group space
+                            cb[0] + childAccTy,   // top in group space
+                            cb[3] - cb[1],         // width
+                            cb[2] - cb[0]          // height
+                    };
+                }
+                return new double[]{childAccTx, childAccTy,
+                        child.widthPoints(), child.heightPoints()};
+            }
+
+            double[] found = findImagePosRecursive(child, target, childAccTx, childAccTy);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    /**
+     * 그룹의 시각적 바운딩 박스를 모든 직접 자식에서 계산.
+     * @return [minX, minY, maxX, maxY] (points, 그룹 로컬 좌표계)
+     */
+    private static double[] computeGroupVisualBounds(IDMLCharacterRun.InlineGraphic ig) {
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            double[] cb = child.geometricBounds();
+            double[] ct = child.itemTransform();
+            if (cb != null && ct != null) {
+                double left = cb[1] + ct[4];
+                double top = cb[0] + ct[5];
+                double right = cb[3] + ct[4];
+                double bottom = cb[2] + ct[5];
+                minX = Math.min(minX, left);
+                minY = Math.min(minY, top);
+                maxX = Math.max(maxX, right);
+                maxY = Math.max(maxY, bottom);
+            }
+        }
+        for (IDMLTextFrame childTf : ig.childTextFrames()) {
+            double[] tb = childTf.geometricBounds();
+            double[] tt = childTf.itemTransform();
+            if (tb != null && tt != null) {
+                double left = tb[1] + tt[4];
+                double top = tb[0] + tt[5];
+                double right = tb[3] + tt[4];
+                double bottom = tb[2] + tt[5];
+                minX = Math.min(minX, left);
+                minY = Math.min(minY, top);
+                maxX = Math.max(maxX, right);
+                maxY = Math.max(maxY, bottom);
+            }
+        }
+
+        if (minX == Double.MAX_VALUE) {
+            return new double[]{0, 0, 0, 0};
+        }
+        return new double[]{minX, minY, maxX, maxY};
+    }
+
+    /**
+     * @param para            비-오버레이 모드에서 결과를 추가할 단락 (오버레이 시 null)
+     * @param targetImageObj  오버레이 모드에서 결과를 첨부할 이미지 객체 (비-오버레이 시 null)
+     */
+    private static void collectChildTextFramesInternal(IDMLCharacterRun.InlineGraphic ig,
+                                                         ASTParagraph para,
+                                                         ASTInlineObject targetImageObj,
+                                                         IDMLDocument idmlDoc,
+                                                         ColorResolver colorResolver,
+                                                         ASTImageLoader imageLoader,
+                                                         GroupBackground bg,
+                                                         boolean isOverlay,
+                                                         long imageDisplayWidth,
+                                                         long imageDisplayHeight,
+                                                         double groupWidthPts,
+                                                         double groupHeightPts,
+                                                         double rootLeft,
+                                                         double rootTop,
+                                                         double accTx,
+                                                         double accTy) {
         for (IDMLTextFrame childTf : ig.childTextFrames()) {
             ASTInlineObject childObj = ASTStoryConverter.createInlineObjectFromTextFrame(childTf, idmlDoc, colorResolver, imageLoader);
             if (childObj != null) {
@@ -39,14 +255,122 @@ class ASTInlineObjectBuilder {
                     if (bg.cornerRadius > 0) {
                         childObj.cornerRadius(bg.cornerRadius);
                     }
+                    // 배경 사각형과 텍스트 프레임의 위치 차이 → 암묵적 텍스트 여백
+                    if (bg.hasBounds) {
+                        applyImplicitTextMargin(childObj, childTf, bg);
+                    }
                 }
-                para.addItem(childObj);
+
+                if (isOverlay && targetImageObj != null) {
+                    // 오버레이 모드: 부모 이미지 내 상대 위치 계산 후 이미지 객체에 첨부
+                    applyOverlayPosition(childObj, childTf, accTx, accTy,
+                            imageDisplayWidth, imageDisplayHeight,
+                            groupWidthPts, groupHeightPts, rootLeft, rootTop);
+                    targetImageObj.addOverlayFrame(childObj);
+                } else {
+                    para.addItem(childObj);
+                }
             }
         }
         // 중첩 그래픽(Group 등) 내부의 TextFrame도 재귀적으로 처리
+        // 자식 그래픽의 itemTransform 번역 오프셋을 누적
         for (IDMLCharacterRun.InlineGraphic childIg : ig.childGraphics()) {
-            collectChildTextFrames(childIg, para, idmlDoc, colorResolver, imageLoader, bg);
+            double childAccTx = accTx;
+            double childAccTy = accTy;
+            double[] childTransform = childIg.itemTransform();
+            if (childTransform != null) {
+                childAccTx += childTransform[4];
+                childAccTy += childTransform[5];
+            }
+            collectChildTextFramesInternal(childIg, para, targetImageObj, idmlDoc, colorResolver, imageLoader, bg,
+                    isOverlay, imageDisplayWidth, imageDisplayHeight,
+                    groupWidthPts, groupHeightPts, rootLeft, rootTop,
+                    childAccTx, childAccTy);
         }
+    }
+
+    /**
+     * 오버레이 위치 계산: 텍스트프레임의 루트 그룹 내 상대 위치를 ASTInlineObject에 설정.
+     * 누적 번역 오프셋(accTx, accTy)으로 중첩 Group 내 텍스트프레임도 처리.
+     * 이미지 표시 크기와 그룹 바운드의 비율로 스케일링.
+     */
+    private static void applyOverlayPosition(ASTInlineObject obj, IDMLTextFrame tf,
+                                               double accTx, double accTy,
+                                               long imageDisplayWidth, long imageDisplayHeight,
+                                               double groupWidthPts, double groupHeightPts,
+                                               double rootLeft, double rootTop) {
+        double[] tfBounds = tf.geometricBounds();
+        double[] tfTransform = tf.itemTransform();
+        if (tfBounds == null || tfTransform == null) return;
+
+        // 텍스트프레임의 루트 그룹 좌표계 위치 (비회전 가정)
+        double tfX = tfBounds[1] + tfTransform[4] + accTx;
+        double tfY = tfBounds[0] + tfTransform[5] + accTy;
+
+        // 루트 그룹의 시각적 원점(minX, minY) 기준 상대 위치 (points)
+        double relX = tfX - rootLeft;
+        double relY = tfY - rootTop;
+        if (relX < 0) relX = 0;
+        if (relY < 0) relY = 0;
+
+        // 그룹 바운드(points) → 이미지 표시 크기(HWPUNIT) 비율로 스케일
+        long overlayX, overlayY;
+        if (groupWidthPts > 0 && groupHeightPts > 0) {
+            overlayX = Math.round(relX / groupWidthPts * imageDisplayWidth);
+            overlayY = Math.round(relY / groupHeightPts * imageDisplayHeight);
+        } else {
+            overlayX = CoordinateConverter.pointsToHwpunits(relX);
+            overlayY = CoordinateConverter.pointsToHwpunits(relY);
+        }
+
+        obj.isOverlay(true);
+        obj.overlayX(overlayX);
+        obj.overlayY(overlayY);
+        obj.overlayParentWidth(imageDisplayWidth);
+        obj.overlayParentHeight(imageDisplayHeight);
+    }
+
+    /**
+     * 배경 사각형과 텍스트 프레임의 위치 차이를 암묵적 텍스트 여백으로 적용.
+     * InDesign에서는 배경 사각형 안에 텍스트 프레임이 offset으로 배치되어 시각적 여백을 만들지만,
+     * HWPX에서는 글상자 크기를 배경 크기로 확장하고 textMargin으로 여백을 표현한다.
+     */
+    private static void applyImplicitTextMargin(ASTInlineObject obj, IDMLTextFrame tf,
+                                                 GroupBackground bg) {
+        double[] tfBounds = tf.geometricBounds();
+        double[] tfTransform = tf.itemTransform();
+        if (tfBounds == null || tfTransform == null) return;
+
+        // 텍스트 프레임의 Group 내 바운드 (비회전 가정)
+        double tfLeft = tfBounds[1] + tfTransform[4];
+        double tfTop = tfBounds[0] + tfTransform[5];
+        double tfRight = tfBounds[3] + tfTransform[4];
+        double tfBottom = tfBounds[2] + tfTransform[5];
+
+        double insetLeft = tfLeft - bg.bgLeft;
+        double insetTop = tfTop - bg.bgTop;
+        double insetRight = bg.bgRight - tfRight;
+        double insetBottom = bg.bgBottom - tfBottom;
+
+        // 음수 여백은 0으로 보정 (텍스트 프레임이 배경보다 클 수 없으므로)
+        if (insetLeft < 0) insetLeft = 0;
+        if (insetTop < 0) insetTop = 0;
+        if (insetRight < 0) insetRight = 0;
+        if (insetBottom < 0) insetBottom = 0;
+
+        // 유의미한 여백이 있을 때만 적용 (1pt 이상)
+        if (insetLeft + insetTop + insetRight + insetBottom < 1.0) return;
+
+        obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(insetLeft));
+        obj.textMarginTop(CoordinateConverter.pointsToHwpunits(insetTop));
+        obj.textMarginRight(CoordinateConverter.pointsToHwpunits(insetRight));
+        obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(insetBottom));
+
+        // 글상자 크기를 배경 사각형 크기로 확장
+        double bgW = bg.bgRight - bg.bgLeft;
+        double bgH = bg.bgBottom - bg.bgTop;
+        obj.width(CoordinateConverter.pointsToHwpunits(bgW));
+        obj.height(CoordinateConverter.pointsToHwpunits(bgH));
     }
 
     /**
@@ -70,6 +394,9 @@ class ASTInlineObjectBuilder {
         double strokeWeight;
         double strokeTint = 100;
         double cornerRadius;
+        // 배경 사각형의 Group 내 변환 후 바운드 (points)
+        double bgLeft, bgTop, bgRight, bgBottom;
+        boolean hasBounds;
     }
 
     /**
@@ -95,6 +422,16 @@ class ASTInlineObjectBuilder {
                         bg.strokeWeight = shape.strokeWeight();
                         bg.strokeTint = 100;
                         bg.cornerRadius = shape.cornerRadius();
+                        // 배경 사각형의 Group 내 바운드 계산 (비회전 가정)
+                        double[] gb = child.geometricBounds();
+                        double[] ct = child.itemTransform();
+                        if (gb != null && ct != null) {
+                            bg.bgLeft = gb[1] + ct[4];
+                            bg.bgTop = gb[0] + ct[5];
+                            bg.bgRight = gb[3] + ct[4];
+                            bg.bgBottom = gb[2] + ct[5];
+                            bg.hasBounds = true;
+                        }
                         return bg;
                     }
                 }

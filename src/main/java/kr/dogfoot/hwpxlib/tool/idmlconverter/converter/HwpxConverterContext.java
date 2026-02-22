@@ -32,6 +32,9 @@ public class HwpxConverterContext {
     // HwpxTextBoxBuilder.addInlineTextFrame() 에서 인라인 테이블 처리를 위한 참조
     HwpxTableBuilder tableBuilderRef;
 
+    // 현재 섹션의 컬럼 너비 (HWPUNIT) — 오버레이 위치 계산에 사용
+    long currentColumnWidth;
+
     // 변환 통계
     int imagesConverted;
     int equationsConverted;

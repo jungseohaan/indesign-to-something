@@ -193,6 +193,11 @@ public class ASTToHwpxConverter {
         ASTPageLayout layout = section.layout();
         if (layout == null) return;
 
+        // 현재 섹션의 컬럼 너비 계산 (오버레이 위치 계산용)
+        long mLeft = layout.marginLeft() > 0 ? layout.marginLeft() : 1417;
+        long mRight = layout.marginRight() > 0 ? layout.marginRight() : 1417;
+        ctx.currentColumnWidth = layout.pageWidth() - mLeft - mRight;
+
         // TEXT_FRAME_BLOCK 수집
         List<ASTTextFrameBlock> textFrameBlocks = new ArrayList<>();
         List<ASTBlock> otherBlocks = new ArrayList<>();

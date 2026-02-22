@@ -206,16 +206,26 @@ class ASTStoryConverter {
                 if (!isEmptyWrapper) {
                     para.addItem(inlineObj);
                 }
-                // IMAGE로 처리된 Group은 자식 텍스트프레임을 별도 추출하지 않음
-                // (이미지와 텍스트 오버레이가 하나의 시각 단위이므로 분리하면 겹침)
-                if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE) {
+                // IMAGE로 처리된 Group 중 자식 텍스트프레임이 없는 경우만 스킵
+                // 자식 텍스트프레임이 있으면 이미지와 함께 텍스트도 추출 (약도+교통편 등)
+                if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
+                        && !ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig)) {
                     continue;
                 }
             }
             // 부모 Group의 배경 사각형에서 전체 스타일 추출 (fill, stroke, cornerRadius)
             ASTInlineObjectBuilder.GroupBackground bg = ASTInlineObjectBuilder.extractGroupBackground(ig, colorResolver);
             // 인라인 그래픽 내부의 자식 텍스트프레임 처리 (중첩 Group 포함, 재귀)
-            ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
+            // IMAGE 그룹인 경우: 자식 텍스트프레임을 이미지 위 오버레이로 배치
+            boolean isImageGroup = inlineObj != null
+                    && inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
+                    && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig);
+            if (isImageGroup) {
+                ASTInlineObjectBuilder.collectOverlayFrames(
+                        ig, inlineObj, idmlDoc, colorResolver, imageLoader, bg);
+            } else {
+                ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
+            }
         }
     }
 

@@ -124,7 +124,11 @@ class HwpxParagraphBuilder {
                 imageBuilder.addInlineImage(para, obj);
             }
         } else if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE) {
-            imageBuilder.addInlineImage(para, obj);
+            if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) {
+                imageBuilder.addInlineImageWithOverlays(para, obj, textBoxBuilder, this);
+            } else {
+                imageBuilder.addInlineImage(para, obj);
+            }
         }
     }
 
@@ -444,6 +448,10 @@ class HwpxParagraphBuilder {
                     .horzAlignAnd(HorzAlign.LEFT)
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
+
+            // OutMargin — 수식과 주변 텍스트 사이 여백 (좌우 100 HWPUNIT = 1pt)
+            hwpxEq.createOutMargin();
+            hwpxEq.outMargin().leftAnd(100L).rightAnd(100L).topAnd(0L).bottomAnd(0L);
 
             hwpxEq.createScript();
             hwpxEq.script().addText(eq.hwpScript());

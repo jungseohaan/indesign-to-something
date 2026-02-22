@@ -424,8 +424,19 @@ class HwpxTextBoxBuilder {
         String wrapMode = obj.textWrapMode();
         boolean useWrapping = isAnchored && wrapMode != null && !"None".equals(wrapMode);
 
-        TextWrapMethod twm = useWrapping ? HwpxImageBuilder.mapTextWrapMethod(wrapMode) : TextWrapMethod.TOP_AND_BOTTOM;
-        TextFlowSide tfs = useWrapping ? HwpxImageBuilder.mapTextFlowSide(obj.textWrapSide()) : TextFlowSide.BOTH_SIDES;
+        TextWrapMethod twm;
+        TextFlowSide tfs;
+        if (obj.isOverlay()) {
+            // 오버레이: 이미지 위에 겹쳐서 표시, 텍스트 흐름에 영향 없음
+            twm = TextWrapMethod.IN_FRONT_OF_TEXT;
+            tfs = TextFlowSide.BOTH_SIDES;
+        } else if (useWrapping) {
+            twm = HwpxImageBuilder.mapTextWrapMethod(wrapMode);
+            tfs = HwpxImageBuilder.mapTextFlowSide(obj.textWrapSide());
+        } else {
+            twm = TextWrapMethod.TOP_AND_BOTTOM;
+            tfs = TextFlowSide.BOTH_SIDES;
+        }
 
         Run run = para.addNewRun();
         run.charPrIDRef("0");
@@ -473,7 +484,8 @@ class HwpxTextBoxBuilder {
         DrawText dt = rect.drawText();
         dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
         dt.createTextMargin();
-        dt.textMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        dt.textMargin().leftAnd(obj.textMarginLeft()).rightAnd(obj.textMarginRight())
+                .topAnd(obj.textMarginTop()).bottomAnd(obj.textMarginBottom());
 
         dt.createSubList();
         SubList subList = dt.subList();
@@ -523,7 +535,21 @@ class HwpxTextBoxBuilder {
 
         // ShapePosition
         rect.createPos();
-        if (useWrapping) {
+        if (obj.isOverlay()) {
+            // 오버레이 모드 — 이미지 컨테이너(rect+imgBrush) 내부의 drawText 단락 기준
+            // PARA 기준 상대 좌표로 배치 (컨테이너 내부이므로 PARA = 이미지 영역)
+            rect.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(true)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(obj.overlayY())
+                    .horzOffset(obj.overlayX());
+        } else if (useWrapping) {
             // 어울리기/자리차지 — 단락 기준 플로팅
             rect.pos().treatAsCharAnd(false)
                     .affectLSpacingAnd(false)
@@ -553,7 +579,10 @@ class HwpxTextBoxBuilder {
 
         // OutMargin — IDML TextWrapOffset 반영
         rect.createOutMargin();
-        if (useWrapping) {
+        if (obj.isOverlay()) {
+            // 오버레이: 겹침 허용, 마진 없음
+            rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        } else if (useWrapping) {
             rect.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
                     .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
         } else {
