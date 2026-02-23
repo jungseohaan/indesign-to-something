@@ -50,6 +50,11 @@ public class FontRegistry {
             String directId = fontNameToId.get(fontFamily);
             if (directId != null) return directId;
 
+            // BT수식 폰트는 FontMapper를 거치지 않고 직접 등록
+            if (fontFamily.contains("BT수식")) {
+                return registerDirectFont(fontFamily);
+            }
+
             // FontMapper 매핑
             String hwpxName = FontMapper.mapToHwpxFont(fontFamily);
             String id = fontNameToId.get(hwpxName);

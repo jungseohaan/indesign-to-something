@@ -6,7 +6,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.ast;
  * 자식 노드를 가질 수 없음 (Stage3에서 축소 완료).
  */
 public class ASTInlineObject extends ASTInlineItem {
-    public enum ObjectKind { IMAGE, RENDERED_GROUP, INLINE_TEXT_FRAME }
+    public enum ObjectKind { IMAGE, RENDERED_GROUP, INLINE_TEXT_FRAME, SPACER_RECT }
 
     private ObjectKind kind;
     private String sourceId;
@@ -23,7 +23,7 @@ public class ASTInlineObject extends ASTInlineItem {
     private int pixelHeight;
 
     // 앵커/래핑 속성 (IDML 원본값)
-    private String anchoredPosition;   // "InlinePosition", "AboveLinePosition", "Anchored"
+    private String anchoredPosition;   // "InlinePosition", "AboveLine", "Anchored"
     private String textWrapMode;       // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap"
     private String textWrapSide;       // "BothSides", "LeftSide", "RightSide", "LargestArea"
     private long textWrapTop, textWrapLeft, textWrapBottom, textWrapRight; // HWPUNIT

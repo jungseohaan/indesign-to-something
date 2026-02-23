@@ -120,8 +120,11 @@ class HwpxParagraphBuilder {
             // 단락 콘텐츠가 있는 그룹은 글상자로, 없으면 이미지로
             if (obj.paragraphs() != null && !obj.paragraphs().isEmpty()) {
                 textBoxBuilder.addInlineTextFrame(para, obj);
-            } else {
+            } else if (obj.imageData() != null && obj.imageData().length > 0) {
                 imageBuilder.addInlineImage(para, obj);
+            } else if (obj.width() > 0 || obj.height() > 0) {
+                // 내용 없는 빈 인라인 사각형 → 스페이서 rect (공간 확보)
+                textBoxBuilder.addSpacerRect(para, obj);
             }
         } else if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE) {
             if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) {
@@ -129,6 +132,8 @@ class HwpxParagraphBuilder {
             } else {
                 imageBuilder.addInlineImage(para, obj);
             }
+        } else if (obj.kind() == ASTInlineObject.ObjectKind.SPACER_RECT) {
+            textBoxBuilder.addSpacerRect(para, obj);
         }
     }
 
@@ -374,7 +379,9 @@ class HwpxParagraphBuilder {
     }
 
     String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId) {
-        String cacheKey = baseCharPrId + "|EQ|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "");
+        String cacheKey = baseCharPrId + "|EQ|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "")
+                + "|" + (textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : "")
+                + "|" + (textRun.textColor() != null ? textRun.textColor() : "");
         String cached = ctx.eqFontCharPrCache.get(cacheKey);
         if (cached != null) return cached;
 
@@ -382,15 +389,16 @@ class HwpxParagraphBuilder {
         CharPr charPr = ctx.hwpxFile.headerXMLFile().refList().charProperties().addNew();
 
         int height = textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : 1000;
+        String textColor = textRun.textColor() != null ? textRun.textColor() : "#000000";
         String fontStyle = textRun.fontStyle() != null ? textRun.fontStyle().toLowerCase() : "";
 
-        CharPrBuilder.build(charPr, newId, height, "#008000",
+        CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), ctx.fontRegistry,
                 textRun.letterSpacing(),
                 fontStyle.contains("bold"),
                 fontStyle.contains("italic"),
                 textRun.superscript(), textRun.subscript(),
-                UnderlineType.BOTTOM, "#008000");
+                UnderlineType.NONE, textColor);
 
         ctx.eqFontCharPrCache.put(cacheKey, newId);
         return newId;
@@ -429,7 +437,9 @@ class HwpxParagraphBuilder {
             int baseUnit = template.baseUnit() != null ? template.baseUnit() : 1100;
             String script = eq.hwpScript();
             long estW = (long) (script.length() * baseUnit * 0.7);
-            long estH = (long) (baseUnit * 1.4);
+            // 분수(over) 수식은 분자+분수선+분모로 높이가 크므로 별도 추정
+            boolean hasFraction = script.contains(" over ");
+            long estH = hasFraction ? (long) (baseUnit * 3.5) : (long) (baseUnit * 1.4);
             hwpxEq.createSZ();
             hwpxEq.sz().widthAnd(estW).widthRelToAnd(WidthRelTo.ABSOLUTE)
                     .heightAnd(estH).heightRelToAnd(HeightRelTo.ABSOLUTE)
@@ -450,8 +460,11 @@ class HwpxParagraphBuilder {
                     .horzOffset(0L);
 
             // OutMargin — 수식과 주변 텍스트 사이 여백 (좌우 100 HWPUNIT = 1pt)
+            // 분수 수식은 상하 여백 추가 (고정 줄간격에서 겹침 방지)
             hwpxEq.createOutMargin();
-            hwpxEq.outMargin().leftAnd(100L).rightAnd(100L).topAnd(0L).bottomAnd(0L);
+            long topMargin = hasFraction ? 200L : 0L;
+            long bottomMargin = hasFraction ? 200L : 0L;
+            hwpxEq.outMargin().leftAnd(100L).rightAnd(100L).topAnd(topMargin).bottomAnd(bottomMargin);
 
             hwpxEq.createScript();
             hwpxEq.script().addText(eq.hwpScript());

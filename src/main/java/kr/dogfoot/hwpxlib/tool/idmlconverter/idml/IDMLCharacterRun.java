@@ -46,7 +46,7 @@ public class IDMLCharacterRun {
         private IDMLVectorShape vectorShape;
 
         // 앵커/래핑 속성 (AnchoredObjectSetting, TextWrapPreference)
-        private String anchoredPosition;    // "InlinePosition", "AboveLinePosition", "Anchored"
+        private String anchoredPosition;    // "InlinePosition", "AboveLine", "Anchored"
         private String textWrapMode;        // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap"
         private String textWrapSide;        // "BothSides", "LeftSide", "RightSide", "LargestArea"
         private double textWrapTop, textWrapLeft, textWrapBottom, textWrapRight; // TextWrapOffset (points)

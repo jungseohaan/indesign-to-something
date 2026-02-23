@@ -37,7 +37,10 @@ public class IDMLTextFrame {
     private boolean ignoreWrap;
 
     // 앵커 위치 (AnchoredObjectSetting)
-    private String anchoredPosition;  // InlinePosition, AboveLinePosition, Anchored
+    private String anchoredPosition;  // InlinePosition, AboveLine, Anchored
+
+    // 텍스트 감싸기 (TextWrapPreference)
+    private String textWrapMode;     // None, BoundingBoxTextWrap, JumpObjectTextWrap
 
     // 그룹 소속 정보
     private String parentGroupId;
@@ -122,6 +125,9 @@ public class IDMLTextFrame {
 
     public String anchoredPosition() { return anchoredPosition; }
     public void anchoredPosition(String v) { this.anchoredPosition = v; }
+
+    public String textWrapMode() { return textWrapMode; }
+    public void textWrapMode(String v) { this.textWrapMode = v; }
 
     public String parentGroupId() { return parentGroupId; }
     public void parentGroupId(String v) { this.parentGroupId = v; }

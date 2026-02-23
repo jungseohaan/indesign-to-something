@@ -109,7 +109,7 @@ public class Stage2_InlineDetect {
                 IDMLTextFrame tf = (IDMLTextFrame) fo.sourceObject();
                 String anchored = tf.anchoredPosition();
                 if (anchored != null) {
-                    if ("InlinePosition".equals(anchored) || "AboveLinePosition".equals(anchored)) {
+                    if ("InlinePosition".equals(anchored) || anchored.startsWith("AboveLine")) {
                         fo.isInline(true);
                         // parentStoryId는 Story에서 이 프레임을 참조하는 곳에서 결정됨
                         // 여기서는 anchoredPosition만 기반으로 마킹

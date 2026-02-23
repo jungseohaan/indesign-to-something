@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
@@ -69,9 +70,19 @@ class ASTStoryConverter {
             para.shadingTint(idmlPara.shadingTint());
         }
 
-        // 탭 정지점 (인라인 오버라이드)
-        if (idmlPara.tabStops() != null) {
-            for (IDMLStyleDef.TabStop ts : idmlPara.tabStops()) {
+        // 탭 정지점 (인라인 오버라이드 → 단락 스타일 → basedOn 체인)
+        java.util.List<IDMLStyleDef.TabStop> tabStops = idmlPara.tabStops();
+        if (tabStops == null || tabStops.isEmpty()) {
+            // 인라인 오버라이드가 없으면 단락 스타일에서 상속
+            if (paraStyleRef != null) {
+                IDMLStyleDef paraStyle = resolveStyle(paraStyleRef, idmlDoc.paraStyles());
+                if (paraStyle != null) {
+                    tabStops = paraStyle.tabStops();
+                }
+            }
+        }
+        if (tabStops != null) {
+            for (IDMLStyleDef.TabStop ts : tabStops) {
                 long posHwpunits = CoordinateConverter.pointsToHwpunits(ts.position());
                 String alignment = mapTabAlignment(ts.alignment());
                 para.addTabStop(new ASTTabStop(posHwpunits, alignment, ts.leader()));
@@ -84,7 +95,16 @@ class ASTStoryConverter {
 
         // 전처리: 한국어+수식마커 혼합 런을 분리 (예: "_r를 구해" → "_r" + "를 구해")
         List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(idmlPara.characterRuns());
+
+        // "Indent to Here" (ACE 7, U+0008) 처리
+        // 원시 런 콘텐츠에서 U+0008 마커를 찾아 indent 계산 후 제거 (수식 그룹 변환 전에 처리)
+        boolean hasIndentToHere = applyIndentToHere(para, runs, idmlPara, idmlDoc);
+
+        // r\d+par → 원문자(①②③...) 전처리 (수식 그룹화 전에 실행)
+        convertCircledNumberRuns(runs);
+
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
+        List<ASTEquation> mathGroupFractions = new ArrayList<>(); // 수식 그룹 런의 인라인 분수
 
         // 단락 또는 스토리에 BT 수식 폰트 런이 하나라도 있는지 확인
         boolean paraHasBTRuns = storyHasBTRuns;
@@ -96,41 +116,64 @@ class ASTStoryConverter {
 
         for (int idx = 0; idx < runs.size(); idx++) {
             IDMLCharacterRun run = runs.get(idx);
-            if ((run.isBTFont() || run.grepMathFont()) && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())) {
-                mathGroup.add(run);
+            // 명시적으로 비BT 폰트가 지정된 순수 알파벳/숫자 런만 GREP 플래그 해제
+            // 예: "1" (Helvetica Neue) → 해제, "y" (폰트 미지정, GREP으로 BT수식M 적용) → 유지
+            if (run.grepMathFont() && ASTMathGrouper.isPlainAlphanumericRun(run)) {
+                String ff = run.fontFamily();
+                if (ff != null && !ff.contains("BT수식")) {
+                    run.grepMathFont(false);
+                }
+            }
+
+            // 수식 그룹 진입 여부 판단
+            boolean enterMathGroup = false;
+            if ((run.isBTFont() || run.grepMathFont())
+                    && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())
+                    && !ASTMathGrouper.isPlainAlphanumericRun(run)) {
+                enterMathGroup = true;
             } else if (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx)) {
-                // BT 런 사이 또는 뒤의 비한국어 텍스트 → 수식 그룹에 포함
-                mathGroup.add(run);
+                enterMathGroup = true;
             } else if (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content())) {
-                // 단락에 BT 런이 있고 이 런에 BT 마커(_^&\) 포함 → 수식 그룹 시작/계속
+                enterMathGroup = true;
+            }
+
+            if (enterMathGroup) {
+                // 수식 그룹에 들어가는 런의 인라인 분수 TextFrame 추출
+                // (flushMathGroup은 텍스트만 처리하므로 인라인 프레임은 여기서 별도 수집)
+                extractFractionFrames(run, idmlDoc, mathGroupFractions);
                 mathGroup.add(run);
             } else {
                 // 수식 그룹 종료 → 변환
                 if (!mathGroup.isEmpty()) {
-                    ASTMathGrouper.flushMathGroup(mathGroup, para);
+                    flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere);
+                    emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
                     mathGroup.clear();
+                    mathGroupFractions.clear();
                 }
                 convertCharacterRun(run, idmlPara, para, pool, idmlDoc, colorResolver, imageLoader);
             }
         }
         // 마지막 수식 그룹 처리
         if (!mathGroup.isEmpty()) {
-            ASTMathGrouper.flushMathGroup(mathGroup, para);
+            flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere);
+            emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
         }
 
         // 단락 끝의 trailing lineBreak 제거
-        // 인라인 객체(InlineObject)가 뒤에 있어도, 마지막 텍스트런 이후의 break를 제거
+        // 단락 맨 끝에 연속된 BREAK만 제거 (중간의 BREAK는 보존 — 수식 분할 줄바꿈 등)
         List<ASTInlineItem> items = para.items();
-        int lastTextIdx = -1;
-        for (int i = items.size() - 1; i >= 0; i--) {
-            if (items.get(i).itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
-                lastTextIdx = i;
-                break;
-            }
+        while (!items.isEmpty()
+                && items.get(items.size() - 1).itemType() == ASTInlineItem.ItemType.BREAK) {
+            items.remove(items.size() - 1);
         }
-        for (int i = items.size() - 1; i > lastTextIdx; i--) {
-            if (items.get(i).itemType() == ASTInlineItem.ItemType.BREAK) {
-                items.remove(i);
+
+        // 분수 수식(FRACTION_FRAME) 포함 단락: 줄간격을 PERCENT로 변경하고 여백 추가
+        // 고정 줄간격에서 분수 수식이 다음 텍스트와 겹치는 것을 방지
+        if (hasFractionEquation(para)) {
+            para.lineSpacingType("percent");
+            para.lineSpacing(200);
+            if (para.spaceAfter() == null || para.spaceAfter() < 400) {
+                para.spaceAfter(400L);
             }
         }
 
@@ -152,6 +195,73 @@ class ASTStoryConverter {
     }
 
     /**
+     * "Indent to Here" (U+0008) 마커를 원시 IDMLCharacterRun에서 제거한다.
+     * U+0008은 XML에서 허용되지 않는 제어 문자이므로 반드시 제거해야 한다.
+     * 수식 그룹 변환 전에 호출해야 한다 (U+0008이 수식 경로로 들어가는 것을 방지).
+     *
+     * 참고: HWPX의 leftMargin/firstLineIndent로 InDesign의 "Indent to Here"를
+     * 재현하면 탭 정지점이 margin 기준으로 이동하여 첫 줄이 밀리는 문제가 있어,
+     * 현재는 마커 제거만 수행한다.
+     *
+     * @return true if any U+0008 marker was found (수식 분할 여부 결정에 사용)
+     */
+    private static boolean applyIndentToHere(ASTParagraph para,
+                                            List<IDMLCharacterRun> runs,
+                                            IDMLParagraph idmlPara,
+                                            IDMLDocument idmlDoc) {
+        boolean found = false;
+        for (IDMLCharacterRun run : runs) {
+            String text = run.content();
+            if (text == null) continue;
+            if (text.indexOf('\u0008') >= 0) {
+                found = true;
+                run.content(text.replace("\u0008", ""));
+            }
+        }
+        return found;
+    }
+
+    /**
+     * BT수식M 글리프 코드 r\d+par를 원문자(①②③...)로 변환한다.
+     * 수식 그룹화 전에 호출해야 한다 (원문자는 수식이 아닌 일반 텍스트로 처리).
+     */
+    private static final java.util.regex.Pattern R_N_PAR = java.util.regex.Pattern.compile("r(\\d+)par");
+
+    private static void convertCircledNumberRuns(List<IDMLCharacterRun> runs) {
+        for (IDMLCharacterRun run : runs) {
+            String text = run.content();
+            if (text == null || !text.contains("par")) continue;
+            if (!run.isBTFont() && !run.grepMathFont()) continue;
+
+            java.util.regex.Matcher m = R_N_PAR.matcher(text);
+            if (!m.find()) continue;
+
+            StringBuffer sb = new StringBuffer();
+            m.reset();
+            while (m.find()) {
+                int num = Integer.parseInt(m.group(1));
+                String repl = (num >= 1 && num <= 20)
+                        ? String.valueOf((char) (0x2460 + num - 1))
+                        : "(" + num + ")";
+                m.appendReplacement(sb, repl);
+            }
+            m.appendTail(sb);
+            run.content(sb.toString());
+
+            // 원문자만 남았으면 수식폰트 해제 (라틴 문자/숫자가 없으면)
+            String newText = sb.toString();
+            boolean hasLatinOrDigit = false;
+            for (int i = 0; i < newText.length(); i++) {
+                char c = newText.charAt(i);
+                if (Character.isLetterOrDigit(c)) { hasLatinOrDigit = true; break; }
+            }
+            if (!hasLatinOrDigit) {
+                run.grepMathFont(false);
+            }
+        }
+    }
+
+    /**
      * IDMLCharacterRun → ASTTextRun + ASTInlineObject + ASTBreak 변환.
      */
     static void convertCharacterRun(IDMLCharacterRun run, IDMLParagraph parentPara,
@@ -161,6 +271,9 @@ class ASTStoryConverter {
                                      ColorResolver colorResolver,
                                      ASTImageLoader imageLoader) {
         String text = run.content();
+        List<IDMLTextFrame> frames = run.inlineFrames();
+        int frameIdx = 0;
+
         if (text != null && !text.isEmpty()) {
             // NP 폰트 글리프 → 유니코드 변환
             if (run.isNPFont()) {
@@ -177,22 +290,33 @@ class ASTStoryConverter {
                     para.addItem(new ASTBreak(ASTBreak.BreakType.LINE));
                 }
                 String seg = segments[i];
-                if (!seg.isEmpty()) {
-                    ASTTextRun textRun = createTextRun(run, seg, parentPara, idmlDoc, colorResolver);
-                    para.addItem(textRun);
+                // FFFC 위치에서 텍스트를 분할하여 인라인 프레임과 인터리빙
+                int start = 0;
+                for (int j = 0; j <= seg.length(); j++) {
+                    if (j == seg.length() || seg.charAt(j) == '\uFFFC') {
+                        // FFFC 이전 (또는 세그먼트 끝) 텍스트 추가
+                        if (j > start) {
+                            String part = seg.substring(start, j);
+                            para.addItem(createTextRun(run, part, parentPara, idmlDoc, colorResolver));
+                        }
+                        // FFFC 위치에 해당 인라인 프레임 삽입
+                        if (j < seg.length() && frameIdx < frames.size()) {
+                            IDMLTextFrame inlineTf = frames.get(frameIdx++);
+                            if (!Stage4_BuildAST.shouldDeferInlineFrame(inlineTf)) {
+                                addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
+                            }
+                        }
+                        start = j + 1;
+                    }
                 }
             }
         }
 
-        // 인라인 텍스트 프레임 (Anchored 위치의 프레임은 본문 뒤로 이동하므로 건너뜀)
-        for (IDMLTextFrame inlineTf : run.inlineFrames()) {
-            if (Stage4_BuildAST.shouldDeferInlineFrame(inlineTf)) {
-                continue;
-            }
-            ASTInlineObject inlineObj = createInlineObjectFromTextFrame(inlineTf, idmlDoc, colorResolver, imageLoader);
-            if (inlineObj != null) {
-                para.addItem(inlineObj);
-            }
+        // FFFC에 매칭되지 않은 나머지 인라인 프레임 (텍스트 없는 런 등)
+        for (int i = frameIdx; i < frames.size(); i++) {
+            IDMLTextFrame inlineTf = frames.get(i);
+            if (Stage4_BuildAST.shouldDeferInlineFrame(inlineTf)) continue;
+            addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
         }
 
         // 인라인 그래픽
@@ -227,6 +351,90 @@ class ASTStoryConverter {
                 ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
             }
         }
+    }
+
+    /**
+     * 인라인 TextFrame을 분수 수식 또는 일반 인라인 오브젝트로 변환하여 단락에 추가.
+     */
+    private static void addInlineFrame(IDMLTextFrame inlineTf, ASTParagraph para,
+                                        IDMLDocument idmlDoc, ColorResolver colorResolver,
+                                        ASTImageLoader imageLoader) {
+        ASTEquation fractionEq = tryConvertFractionTextFrame(inlineTf, idmlDoc);
+        if (fractionEq != null) {
+            para.addItem(fractionEq);
+            return;
+        }
+        ASTInlineObject inlineObj = createInlineObjectFromTextFrame(inlineTf, idmlDoc, colorResolver, imageLoader);
+        if (inlineObj == null) {
+            // 분수 스타일이지만 내용 없는 빈 답안 상자 → 테두리 있는 빈 사각형
+            inlineObj = createAnswerBox(inlineTf, colorResolver);
+        }
+        if (inlineObj == null) {
+            // 채색된 도형 (불릿 아이콘 등) → 색칠된 인라인 사각형
+            inlineObj = createColoredShape(inlineTf, colorResolver);
+        }
+        if (inlineObj != null) {
+            para.addItem(inlineObj);
+        }
+    }
+
+    /**
+     * 빈 답안 상자(분수 스타일 TextFrame, 내용 없음) → 테두리 있는 인라인 사각형.
+     */
+    private static ASTInlineObject createAnswerBox(IDMLTextFrame tf, ColorResolver colorResolver) {
+        String objStyle = tf.appliedObjectStyle();
+        if (objStyle == null || !objStyle.contains("분수")) return null;
+
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.SPACER_RECT);
+        obj.sourceId(tf.selfId());
+
+        double w = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
+        double h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+        obj.width(CoordinateConverter.pointsToHwpunits(w));
+        obj.height(CoordinateConverter.pointsToHwpunits(h));
+
+        if (tf.strokeColor() != null) {
+            obj.strokeColor(colorResolver.resolve(tf.strokeColor()));
+        }
+        obj.strokeWeight(tf.strokeWeight());
+        if (tf.fillColor() != null) {
+            obj.fillColor(colorResolver.resolve(tf.fillColor()));
+        }
+        obj.cornerRadius(tf.cornerRadius());
+
+        return obj;
+    }
+
+    /**
+     * 채색된 인라인 도형 (불릿 아이콘, 장식 도형 등) → 색칠된 인라인 사각형.
+     * FillColor가 있고 스토리 내용이 없는 TextFrame을 변환.
+     */
+    private static ASTInlineObject createColoredShape(IDMLTextFrame tf, ColorResolver colorResolver) {
+        if (tf.fillColor() == null) return null;
+        // "Swatch/None" 또는 "Color/Paper"이면 실질적 색상 없음
+        String fc = tf.fillColor();
+        if (fc.contains("None") || fc.contains("Paper")) return null;
+
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.SPACER_RECT);
+        obj.sourceId(tf.selfId());
+
+        double w = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
+        double h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+        obj.width(CoordinateConverter.pointsToHwpunits(w));
+        obj.height(CoordinateConverter.pointsToHwpunits(h));
+
+        obj.fillColor(colorResolver.resolve(tf.fillColor()));
+        if (tf.fillTint() > 0) {
+            obj.fillTint(tf.fillTint());
+        }
+        if (tf.strokeColor() != null && !tf.strokeColor().contains("None")) {
+            obj.strokeColor(colorResolver.resolve(tf.strokeColor()));
+        }
+        obj.strokeWeight(tf.strokeWeight());
+
+        return obj;
     }
 
     /**
@@ -279,6 +487,12 @@ class ASTStoryConverter {
             }
         }
 
+        // GREP 수식 폰트가 적용된 런: 스타일 상속 대신 BT수식M Italic 적용
+        if (run.grepMathFont() && (fontFamily == null || !fontFamily.contains("BT수식"))) {
+            fontFamily = "BT수식M";
+            fontStyle = "Italic";
+        }
+
         textRun.fontFamily(fontFamily);
         textRun.fontStyle(fontStyle);
 
@@ -328,6 +542,7 @@ class ASTStoryConverter {
         merged.leading(style.leading() != null ? style.leading() : parent.leading());
         merged.leadingType(style.leadingType() != null ? style.leadingType() : parent.leadingType());
         merged.autoLeading(style.autoLeading() != null ? style.autoLeading() : parent.autoLeading());
+        merged.tabStops(style.tabStops() != null ? style.tabStops() : parent.tabStops());
         return merged;
     }
 
@@ -405,9 +620,238 @@ class ASTStoryConverter {
             }
         }
 
+        // 앵커/래핑 속성 전달
+        obj.anchoredPosition(tf.anchoredPosition());
+        obj.textWrapMode(tf.textWrapMode());
+
         boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
         boolean hasTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
         return (hasParagraphs || hasTables) ? obj : null;
+    }
+
+    /**
+     * 수식 그룹을 플러시하고, 수집된 분수 수식을 FFFC 위치에 통합.
+     * hasIndentToHere가 true이면 첫 번째 FFFC 위치에서 줄바꿈하여 분수를 다음 줄에 배치.
+     * hasIndentToHere가 false이면 분수를 인라인으로 통합 (줄바꿈 없음).
+     * 분수가 없는 경우에도 잔존 \uFFFC를 제거한다.
+     */
+    private static void flushMathGroupWithFractions(List<IDMLCharacterRun> mathGroup,
+                                                      ASTParagraph para,
+                                                      List<ASTEquation> fractions,
+                                                      boolean hasIndentToHere) {
+        ASTMathGrouper.flushMathGroup(mathGroup, para);
+
+        // flushMathGroup이 방금 추가한 마지막 수식 항목 찾기
+        List<ASTInlineItem> items = para.items();
+        ASTEquation lastEq = null;
+        for (int i = items.size() - 1; i >= 0; i--) {
+            if (items.get(i).itemType() == ASTInlineItem.ItemType.EQUATION) {
+                lastEq = (ASTEquation) items.get(i);
+                break;
+            }
+        }
+
+        if (lastEq == null) {
+            for (ASTEquation eq : fractions) {
+                para.addItem(eq);
+            }
+            return;
+        }
+
+        String script = lastEq.hwpScript();
+        if (script == null || script.indexOf('\uFFFC') < 0) {
+            for (ASTEquation eq : fractions) {
+                para.addItem(eq);
+            }
+            return;
+        }
+
+        if (!fractions.isEmpty()) {
+            if (hasIndentToHere) {
+                // Indent to Here가 있는 경우: 첫 번째 \uFFFC에서 줄바꿈 분할
+                int firstFffc = script.indexOf('\uFFFC');
+                String beforeFrac = script.substring(0, firstFffc).replace("\uFFFC", "").trim();
+                String afterFrac = script.substring(firstFffc);
+
+                lastEq.hwpScript(beforeFrac);
+                para.addItem(new ASTBreak(ASTBreak.BreakType.LINE));
+
+                String fracLine = replaceFffcWithFractions(afterFrac, fractions);
+                if (!fracLine.isEmpty()) {
+                    para.addItem(new ASTEquation(fracLine, "FRACTION_FRAME"));
+                }
+            } else {
+                // Indent to Here가 없는 경우: 인라인으로 분수 통합 (줄바꿈 없음)
+                String merged = replaceFffcWithFractions(script, fractions);
+                lastEq.hwpScript(merged);
+            }
+        } else {
+            // 분수 없이 \uFFFC만 있는 경우 → 제거
+            lastEq.hwpScript(script.replace("\uFFFC", ""));
+        }
+    }
+
+    /**
+     * 문자열 내 \uFFFC를 분수 스크립트로 순서대로 교체하고, 남은 \uFFFC는 제거.
+     */
+    private static String replaceFffcWithFractions(String text, List<ASTEquation> fractions) {
+        StringBuilder sb = new StringBuilder();
+        int fracIdx = 0;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == '\uFFFC') {
+                if (fracIdx < fractions.size()) {
+                    sb.append(fractions.get(fracIdx).hwpScript());
+                    fracIdx++;
+                }
+            } else {
+                sb.append(text.charAt(i));
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * 단락에 분수 수식(FRACTION_FRAME 또는 over 포함)이 있는지 확인.
+     */
+    private static boolean hasFractionEquation(ASTParagraph para) {
+        for (ASTInlineItem item : para.items()) {
+            if (item.itemType() == ASTInlineItem.ItemType.EQUATION) {
+                ASTEquation eq = (ASTEquation) item;
+                if ("FRACTION_FRAME".equals(eq.sourceType())) return true;
+                if (eq.hwpScript() != null && eq.hwpScript().contains(" over ")) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 런의 인라인 TextFrame 중 분수 TextFrame을 찾아 ASTEquation으로 변환하여 리스트에 추가.
+     * 수식 그룹에 들어가는 런에서 호출 (flushMathGroup은 텍스트만 처리하므로).
+     */
+    private static void extractFractionFrames(IDMLCharacterRun run, IDMLDocument idmlDoc,
+                                               List<ASTEquation> fractionList) {
+        for (IDMLTextFrame tf : run.inlineFrames()) {
+            ASTEquation eq = tryConvertFractionTextFrame(tf, idmlDoc);
+            if (eq != null) {
+                fractionList.add(eq);
+            }
+        }
+    }
+
+    /**
+     * 수식 그룹에 속한 런들의 인라인 그래픽을 수식 뒤에 출력.
+     * flushMathGroup은 텍스트만 처리하므로, 수식 런에 포함된 인라인 그래픽(Group 등)은
+     * 여기서 별도로 처리한다.
+     */
+    private static void emitMathGroupInlineGraphics(List<IDMLCharacterRun> mathGroup,
+                                                      ASTParagraph para,
+                                                      IDMLDocument idmlDoc,
+                                                      ColorResolver colorResolver,
+                                                      ASTImageLoader imageLoader) {
+        for (IDMLCharacterRun run : mathGroup) {
+            if (run.inlineGraphics().isEmpty()) continue;
+            for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
+                ASTInlineObject inlineObj = ASTInlineObjectBuilder.createInlineObjectFromGraphic(ig, imageLoader, colorResolver);
+                if (inlineObj != null) {
+                    boolean isEmptyWrapper = inlineObj.kind() == ASTInlineObject.ObjectKind.RENDERED_GROUP
+                            && inlineObj.width() <= 0 && inlineObj.height() <= 0
+                            && (inlineObj.imageData() == null || inlineObj.imageData().length == 0);
+                    if (!isEmptyWrapper) {
+                        para.addItem(inlineObj);
+                    }
+                    if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
+                            && !ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig)) {
+                        continue;
+                    }
+                }
+                ASTInlineObjectBuilder.GroupBackground bg = ASTInlineObjectBuilder.extractGroupBackground(ig, colorResolver);
+                boolean isImageGroup = inlineObj != null
+                        && inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
+                        && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig);
+                if (isImageGroup) {
+                    ASTInlineObjectBuilder.collectOverlayFrames(
+                            ig, inlineObj, idmlDoc, colorResolver, imageLoader, bg);
+                } else {
+                    ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
+                }
+            }
+        }
+    }
+
+    /**
+     * 인라인 TextFrame을 분수 HWP 수식으로 변환.
+     * 감지 조건:
+     *   (1) ObjectStyle에 "분수" 포함 (명시적 분수 스타일), 또는
+     *   (2) 첫 단락에 RuleBelow가 설정됨 (단락 아래선 = 분수선)
+     * 2개 단락 구조: 분자(para1) / 분모(para2).
+     */
+    static ASTEquation tryConvertFractionTextFrame(IDMLTextFrame tf, IDMLDocument idmlDoc) {
+        // 1. ObjectStyle 확인
+        String objStyle = tf.appliedObjectStyle();
+        boolean hasFractionStyle = objStyle != null && objStyle.contains("분수");
+
+        // 간격용 스타일 제외 (#간격, 0_분수-보기간격 등)
+        if (hasFractionStyle && objStyle.contains("간격")) return null;
+
+        // 2. 인라인 스토리 로드
+        if (tf.parentStoryId() == null) return null;
+        IDMLStory story = idmlDoc.getStory(tf.parentStoryId());
+        if (story == null) return null;
+
+        List<IDMLParagraph> paras = story.paragraphs();
+
+        // 3. ObjectStyle이 분수가 아닌 경우 → 첫 단락의 RuleBelow로 분수 감지
+        if (!hasFractionStyle) {
+            boolean hasRuleBelow = false;
+            for (IDMLParagraph p : paras) {
+                if (p.ruleBelowOn()) { hasRuleBelow = true; break; }
+            }
+            if (!hasRuleBelow) return null;
+        }
+
+        // 4. 비어 있지 않은 단락을 찾아 분자/분모 추출
+        // IDML에서 <Br/>로 인해 빈 단락이 중간에 생길 수 있으므로 건너뜀
+        String numText = null;
+        String denText = null;
+        for (IDMLParagraph p : paras) {
+            String text = extractParagraphText(p);
+            if (text.isEmpty()) continue;
+            if (numText == null) {
+                numText = text;
+            } else {
+                denText = text;
+                break;
+            }
+        }
+        if (numText == null || denText == null) {
+            // 분수 스타일이지만 내용 없음 → 빈 답안 상자 (□)
+            if (hasFractionStyle) {
+                return new ASTEquation("\u25A1", "ANSWER_BOX");
+            }
+            return null;
+        }
+
+        // 5. BT 수식 텍스트 → HWP 스크립트 변환
+        String numScript = BTFontEquationConverter.convertRawToHwpScript(numText);
+        String denScript = BTFontEquationConverter.convertRawToHwpScript(denText);
+
+        // 6. 분수 수식 조립
+        String hwpScript = "{" + numScript + "} over {" + denScript + "}";
+        return new ASTEquation(hwpScript, "FRACTION_FRAME");
+    }
+
+    /**
+     * 단락의 모든 런 텍스트를 연결하여 반환.
+     */
+    private static String extractParagraphText(IDMLParagraph para) {
+        StringBuilder sb = new StringBuilder();
+        for (IDMLCharacterRun run : para.characterRuns()) {
+            if (run.content() != null) {
+                // \uFFFC (Object Replacement Char) → □ (빈 답안 상자 등 인라인 오브젝트 자리)
+                sb.append(run.content().replace('\uFFFC', '\u25A1'));
+            }
+        }
+        return sb.toString().trim();
     }
 
     /**

@@ -23,6 +23,9 @@ public class IDMLParagraph {
     // 탭 정지점 (인라인 오버라이드)
     private java.util.List<IDMLStyleDef.TabStop> tabStops;
 
+    // 단락 아래선 (RuleBelow) — 분수 TextFrame 감지용
+    private boolean ruleBelowOn;
+
     // 단락 음영 (Paragraph Shading)
     private boolean shadingOn;         // 음영 사용 여부
     private String shadingColor;       // 음영 색상 (Color 참조)
@@ -63,6 +66,9 @@ public class IDMLParagraph {
 
     public Double tracking() { return tracking; }
     public void tracking(Double v) { this.tracking = v; }
+
+    public boolean ruleBelowOn() { return ruleBelowOn; }
+    public void ruleBelowOn(boolean v) { this.ruleBelowOn = v; }
 
     public boolean shadingOn() { return shadingOn; }
     public void shadingOn(boolean v) { this.shadingOn = v; }

@@ -70,10 +70,18 @@ class ASTMathGrouper {
             }
             // 연속 동일 타입 구간을 분리
             int segStart = 0;
+            boolean first = true;
             for (int i = 1; i <= len; i++) {
                 if (i == len || types[i] != types[segStart]) {
                     String segText = text.substring(segStart, i);
                     IDMLCharacterRun subRun = cloneRunForSplit(run, segText);
+                    // 첫 번째 분할 런에 인라인 프레임/그래픽을 보존
+                    if (first) {
+                        for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
+                            subRun.addInlineGraphic(ig);
+                        }
+                        first = false;
+                    }
                     result.add(subRun);
                     segStart = i;
                 }
@@ -121,6 +129,26 @@ class ASTMathGrouper {
     }
 
     /**
+     * 수식 폰트가 적용되지 않은 순수 알파벳/숫자 런인지 확인.
+     * GREP 매칭으로 grepMathFont=true가 되었더라도, 실제 폰트가 BT수식M이 아니고
+     * 내용이 알파벳/숫자/공백만으로 구성되면 수식이 아닌 일반 텍스트로 처리.
+     * 예: "1", "2" (문항 번호) 등이 수식으로 잘못 변환되는 것을 방지.
+     */
+    static boolean isPlainAlphanumericRun(IDMLCharacterRun run) {
+        // BT 폰트가 직접 적용된 런은 수식으로 간주
+        if (run.isBTFont()) return false;
+        String text = run.content();
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == ' ' || c == ',') continue;
+            // 수식 마커나 연산자가 있으면 순수 알파벳/숫자가 아님
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * BT 폰트 런의 내용이 한국어만 포함하는지 확인.
      * 한국어 + 공백/구두점만 있고 라틴 문자, 숫자, 수식 마커/연산자가 없으면 true.
      * BT 폰트 런이라도 한국어만 있으면 수식이 아닌 일반 텍스트로 처리하기 위해 사용.
@@ -150,17 +178,27 @@ class ASTMathGrouper {
     static boolean isMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
-        // 한국어 포함 → 브릿지 아님
+        // 한국어 포함 또는 탭 포함 → 브릿지 아님 (탭은 열 구분자)
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c >= 0xAC00 && c <= 0xD7AF) return false; // 한글 음절
             if (c >= 0x3131 && c <= 0x318E) return false; // 한글 자모
+            if (c == '\t') return false; // 탭은 수식 그룹 구분자
         }
         // BT수식M 마커 포함 → 수식 그룹의 연속으로 직접 포함 (look-ahead 불필요)
+        boolean onlyAlphanumeric = true; // 알파벳/숫자/공백만으로 구성된지 확인
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c == '_' || c == '^' || c == '&' || c == '\\') return true;
+            if ("+-*/=<>()[]{}|".indexOf(c) >= 0) {
+                onlyAlphanumeric = false;
+            } else if (c != ' ' && !Character.isLetterOrDigit(c)) {
+                onlyAlphanumeric = false;
+            }
         }
+        // 수식 폰트가 적용되지 않은 순수 알파벳/숫자는 브릿지하지 않음
+        // 예: "1" (번호), "n" (일반 변수명) 등이 수식으로 잘못 검출되는 것을 방지
+        if (onlyAlphanumeric && !run.isBTFont() && !run.grepMathFont()) return false;
         // 뒤에 BT 수식 런이 있는지 확인 (비한국어 런은 건너뜀)
         for (int j = idx + 1; j < runs.size(); j++) {
             IDMLCharacterRun next = runs.get(j);

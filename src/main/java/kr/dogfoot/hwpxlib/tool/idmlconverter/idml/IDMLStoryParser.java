@@ -287,6 +287,7 @@ class IDMLStoryParser {
             // CharacterStyleRange 내부를 직접 순회하여 <Br/> 단위로 분리
             IDMLCharacterRun currentRun = createRunBase(charRange);
             StringBuilder contentBuilder = new StringBuilder();
+            int pendingAce8 = 0; // ACE 8이 삽입한 \uFFFC 중 아직 TextFrame과 매칭되지 않은 수
 
             NodeList children = charRange.getChildNodes();
             for (int i = 0; i < children.getLength(); i++) {
@@ -311,9 +312,20 @@ class IDMLStoryParser {
                     currentPara = createParagraphFromRange(paraRange);
                     currentRun = createRunBase(charRange);
                     contentBuilder = new StringBuilder();
+                    pendingAce8 = 0;
                 } else if ("Content".equals(tag)) {
+                    int lenBefore = contentBuilder.length();
                     appendContentWithPIs(elem, contentBuilder);
+                    // ACE 8이 추가한 \uFFFC 개수 카운트
+                    for (int ci = lenBefore; ci < contentBuilder.length(); ci++) {
+                        if (contentBuilder.charAt(ci) == '\uFFFC') pendingAce8++;
+                    }
                 } else if ("TextFrame".equals(tag)) {
+                    if (pendingAce8 > 0) {
+                        pendingAce8--; // ACE 8이 이미 \uFFFC를 삽입했으므로 중복 삽입 안 함
+                    } else {
+                        contentBuilder.append('\uFFFC'); // ACE 8 없는 인라인 TextFrame → 앵커 삽입
+                    }
                     parseInlineTextFrame(elem, currentRun);
                 } else if ("Group".equals(tag)) {
                     IDMLCharacterRun.InlineGraphic inlineGroup = parseInlineGroup(elem);
@@ -353,7 +365,11 @@ class IDMLStoryParser {
                 String target = node.getNodeName();
                 String data = node.getNodeValue() != null ? node.getNodeValue().trim() : "";
                 if ("ACE".equals(target)) {
-                    if ("18".equals(data)) {
+                    if ("7".equals(data)) {
+                        builder.append('\u0008'); // Indent to Here
+                    } else if ("8".equals(data)) {
+                        builder.append('\uFFFC'); // Object Replacement Character (인라인 오브젝트 앵커)
+                    } else if ("18".equals(data)) {
                         builder.append('\uFFFE'); // Auto Page Number
                     } else if ("19".equals(data)) {
                         builder.append('\uFFFF'); // Section Marker
@@ -378,6 +394,9 @@ class IDMLStoryParser {
         para.spaceBefore(parseDoubleAttr(paraRange, "SpaceBefore"));
         para.spaceAfter(parseDoubleAttr(paraRange, "SpaceAfter"));
         para.tracking(parseDoubleAttr(paraRange, "Tracking"));
+
+        // 단락 아래선 (RuleBelow) — 분수 TextFrame 감지용
+        para.ruleBelowOn("true".equalsIgnoreCase(paraRange.getAttribute("RuleBelow")));
 
         // 단락 음영 (Paragraph Shading)
         para.shadingOn("true".equalsIgnoreCase(paraRange.getAttribute("ParagraphShadingOn")));
@@ -455,6 +474,20 @@ class IDMLStoryParser {
                 inlineFrame.anchoredPosition(anchoredPos);
             }
         }
+        // TextWrapPreference 파싱
+        List<Element> twpList = getDescendantElements(elem, "TextWrapPreference");
+        if (!twpList.isEmpty()) {
+            String wrapMode = twpList.get(0).getAttribute("TextWrapMode");
+            if (wrapMode != null && !wrapMode.isEmpty() && !"None".equals(wrapMode)) {
+                inlineFrame.textWrapMode(wrapMode);
+            }
+        }
+        // 테두리/채우기 속성
+        inlineFrame.fillColor(getAttrOrNull(elem, "FillColor"));
+        inlineFrame.fillTint(parseDoubleAttrDef(elem, "FillTint", 100));
+        inlineFrame.strokeColor(getAttrOrNull(elem, "StrokeColor"));
+        inlineFrame.strokeWeight(parseDoubleAttrDef(elem, "StrokeWeight", 0));
+        inlineFrame.cornerRadius(parseDoubleAttrDef(elem, "CornerRadius", 0));
         run.addInlineFrame(inlineFrame);
     }
 
@@ -973,6 +1006,21 @@ class IDMLStoryParser {
         }
         if (paraStyleGrepPatterns.isEmpty()) return;
 
+        // 2-1. 기본 패턴: 모든 스타일의 BT수식M GREP 패턴 합집합
+        // GREP 규칙이 없는 단락 스타일에도 수식폰트 적용하기 위한 폴백
+        Set<String> allPatternStrings = new LinkedHashSet<>();
+        List<java.util.regex.Pattern> defaultPatterns = new ArrayList<>();
+        for (List<java.util.regex.Pattern> pats : paraStyleGrepPatterns.values()) {
+            for (java.util.regex.Pattern pat : pats) {
+                if (allPatternStrings.add(pat.pattern())) {
+                    defaultPatterns.add(pat);
+                }
+            }
+        }
+        if (!defaultPatterns.isEmpty()) {
+            paraStyleGrepPatterns.put("__default__", defaultPatterns);
+        }
+
         // 3. 모든 Story의 CharacterRun을 순회하여 GREP 매칭 수행
         int[] counts = {0, 0}; // [resolvedCount, splitCount]
         for (IDMLStory story : doc.stories().values()) {
@@ -1006,9 +1054,10 @@ class IDMLStoryParser {
     static void resolveGrepForParagraph(IDMLParagraph para,
                                         Map<String, List<java.util.regex.Pattern>> paraStyleGrepPatterns,
                                         int[] counts) {
-        String paraStyleRef = para.appliedParagraphStyle();
-        List<java.util.regex.Pattern> patterns = paraStyleGrepPatterns.get(paraStyleRef);
-        if (patterns == null) return;
+        // 모든 단락에 전체 BT수식M GREP 패턴 합집합(default) 적용
+        // 스타일별 고유 패턴만으로는 일부 매칭이 누락되므로 (예: 01 개념열기-지문의 2\3=6)
+        List<java.util.regex.Pattern> patterns = paraStyleGrepPatterns.get("__default__");
+        if (patterns == null || patterns.isEmpty()) return;
 
         List<IDMLCharacterRun> originalRuns = new ArrayList<>(para.characterRuns());
         List<IDMLCharacterRun> newRuns = new ArrayList<>();
@@ -1026,33 +1075,71 @@ class IDMLStoryParser {
                 continue;
             }
 
-            // 한국어가 없으면 직접 GREP 매칭
-            if (!containsKorean(text)) {
-                if (matchesGrepPattern(text, patterns)) {
-                    run.grepMathFont(true);
-                    counts[0]++;
-                }
+            // 문자 단위 GREP 매칭 (한국어 포함 여부와 무관하게 동일 처리)
+            boolean[] isMatch = new boolean[text.length()];
+            boolean anyMatch = false;
+            boolean allMatch = true;
+            for (java.util.regex.Pattern pat : patterns) {
+                try {
+                    java.util.regex.Matcher m = pat.matcher(text);
+                    while (m.find()) {
+                        for (int i = m.start(); i < m.end(); i++) {
+                            if (!isMatch[i]) { isMatch[i] = true; anyMatch = true; }
+                        }
+                    }
+                } catch (Exception e) { /* ignore */ }
+            }
+            if (!anyMatch) {
                 newRuns.add(run);
                 continue;
             }
-
-            // 한국어 혼합 런 → 한국어/비한국어 구간으로 분리
-            List<String[]> segments = splitKoreanSegments(text);
-            if (segments.size() <= 1) {
+            for (boolean b : isMatch) { if (!b) { allMatch = false; break; } }
+            if (allMatch) {
+                run.grepMathFont(true);
+                counts[0]++;
                 newRuns.add(run);
                 continue;
             }
-
-            // 분리된 세그먼트를 각각 별도 런으로 생성
+            // 매칭/비매칭 경계에서 분리
             modified = true;
             counts[1]++;
-            for (String[] seg : segments) {
-                IDMLCharacterRun subRun = cloneRunWithText(run, seg[0]);
-                if ("non-korean".equals(seg[1]) && matchesGrepPattern(seg[0], patterns)) {
-                    subRun.grepMathFont(true);
-                    counts[0]++;
+            // 인라인 프레임/그래픽의 \uFFFC 앵커 위치별 배분 준비
+            List<IDMLTextFrame> srcFrames = run.inlineFrames();
+            List<IDMLCharacterRun.InlineGraphic> srcGraphics = run.inlineGraphics();
+            int frameIdx = 0; // \uFFFC 순서 = 인라인 프레임 순서
+            int segStart = 0;
+            for (int i = 1; i <= text.length(); i++) {
+                if (i == text.length() || isMatch[i] != isMatch[segStart]) {
+                    String segText = text.substring(segStart, i);
+                    IDMLCharacterRun subRun = cloneRunWithText(run, segText);
+                    if (isMatch[segStart]) {
+                        subRun.grepMathFont(true);
+                        counts[0]++;
+                    }
+                    // 이 세그먼트에 포함된 \uFFFC 개수만큼 인라인 프레임 배분
+                    for (int ci = 0; ci < segText.length(); ci++) {
+                        if (segText.charAt(ci) == '\uFFFC' && frameIdx < srcFrames.size()) {
+                            subRun.addInlineFrame(srcFrames.get(frameIdx));
+                            frameIdx++;
+                        }
+                    }
+                    newRuns.add(subRun);
+                    segStart = i;
                 }
-                newRuns.add(subRun);
+            }
+            // \uFFFC가 없는 경우 (ACE 8 미지원 시) 마지막 서브런에 남은 인라인 프레임 전달
+            if (frameIdx < srcFrames.size() && !newRuns.isEmpty()) {
+                IDMLCharacterRun lastSub = newRuns.get(newRuns.size() - 1);
+                for (int fi = frameIdx; fi < srcFrames.size(); fi++) {
+                    lastSub.addInlineFrame(srcFrames.get(fi));
+                }
+            }
+            // 인라인 그래픽은 마지막 서브런에 전달 (그래픽은 앵커 매핑 불필요)
+            if (!srcGraphics.isEmpty() && !newRuns.isEmpty()) {
+                IDMLCharacterRun lastSub = newRuns.get(newRuns.size() - 1);
+                for (IDMLCharacterRun.InlineGraphic ig : srcGraphics) {
+                    lastSub.addInlineGraphic(ig);
+                }
             }
         }
 

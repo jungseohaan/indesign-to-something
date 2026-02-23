@@ -244,6 +244,10 @@ class ASTInlineObjectBuilder {
         for (IDMLTextFrame childTf : ig.childTextFrames()) {
             ASTInlineObject childObj = ASTStoryConverter.createInlineObjectFromTextFrame(childTf, idmlDoc, colorResolver, imageLoader);
             if (childObj != null) {
+                // 부모 그룹의 anchoredPosition을 자식에 전달
+                if (childObj.anchoredPosition() == null && ig.anchoredPosition() != null) {
+                    childObj.anchoredPosition(ig.anchoredPosition());
+                }
                 if (bg != null && childObj.fillColor() == null) {
                     childObj.fillColor(bg.fillHex);
                     childObj.fillTint(bg.fillTint);
@@ -366,11 +370,13 @@ class ASTInlineObjectBuilder {
         obj.textMarginRight(CoordinateConverter.pointsToHwpunits(insetRight));
         obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(insetBottom));
 
-        // 글상자 크기를 배경 사각형 크기로 확장
+        // 글상자 크기를 배경 사각형 크기로 확장 (축소는 하지 않음)
         double bgW = bg.bgRight - bg.bgLeft;
         double bgH = bg.bgBottom - bg.bgTop;
-        obj.width(CoordinateConverter.pointsToHwpunits(bgW));
-        obj.height(CoordinateConverter.pointsToHwpunits(bgH));
+        long bgWHwp = CoordinateConverter.pointsToHwpunits(bgW);
+        long bgHHwp = CoordinateConverter.pointsToHwpunits(bgH);
+        if (bgWHwp > obj.width()) obj.width(bgWHwp);
+        if (bgHHwp > obj.height()) obj.height(bgHHwp);
     }
 
     /**

@@ -421,8 +421,14 @@ class HwpxTextBoxBuilder {
 
         // IDML 속성 기반 래핑 모드 결정 (크기 기반 폴백은 이미지에만 적용, 텍스트프레임은 인라인 유지)
         boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
+        boolean isAboveLine = obj.anchoredPosition() != null
+                && obj.anchoredPosition().startsWith("AboveLine");
         String wrapMode = obj.textWrapMode();
-        boolean useWrapping = isAnchored && wrapMode != null && !"None".equals(wrapMode);
+        boolean hasExplicitWrap = wrapMode != null && !"None".equals(wrapMode);
+        // anchoredPosition이 있는 경우에만 어울림 적용
+        // anchoredPosition 없는 순수 인라인 TextFrame은 treatAsChar=true로 유지 (나란히 배치)
+        boolean useWrapping = isAboveLine
+                || (isAnchored && hasExplicitWrap);
 
         TextWrapMethod twm;
         TextFlowSide tfs;
@@ -588,5 +594,87 @@ class HwpxTextBoxBuilder {
         } else {
             rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
         }
+    }
+
+    // ── 스페이서 인라인 사각형 (빈 인라인 Rectangle, 글자 취급) ──
+
+    /**
+     * 빈 인라인 Rectangle → hp:rect (내용 없음, treatAsChar="1")
+     * InDesign에서 항목 사이 공간 확보 역할.
+     */
+    void addSpacerRect(Para para, ASTInlineObject obj) {
+        long w = obj.width() > 0 ? obj.width() : 100;
+        long h = obj.height() > 0 ? obj.height() : 100;
+
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+
+        Rectangle rect = run.addNewRectangle();
+        String shapeId = ASTToHwpxConverter.nextShapeId();
+
+        rect.idAnd(shapeId)
+                .zOrderAnd(0)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+        rect.createCurSz();
+        rect.curSz().set(w, h);
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        // 테두리 / 채우기 (답안 상자 등 strokeColor 설정 시 테두리 표시)
+        setupTextBoxLineShape(rect, obj.strokeColor(), obj.strokeWeight(), "Solid", 100);
+        setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());
+
+        // 꼭짓점
+        rect.ratioAnd((short) 0);
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        // ShapeSize
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        // ShapePosition — 글자처럼 취급 (인라인)
+        rect.createPos();
+        rect.pos().treatAsCharAnd(true)
+                .affectLSpacingAnd(true)
+                .flowWithTextAnd(true)
+                .allowOverlapAnd(false)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PARA)
+                .horzRelToAnd(HorzRelTo.PARA)
+                .vertAlignAnd(VertAlign.BOTTOM)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(0L)
+                .horzOffset(0L);
+
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
     }
 }

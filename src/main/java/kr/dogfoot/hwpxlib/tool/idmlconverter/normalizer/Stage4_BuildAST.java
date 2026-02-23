@@ -557,16 +557,19 @@ public class Stage4_BuildAST {
     }
 
     /**
-     * ACE 플레이스홀더 문자(\uFFFE, \uFFFF)를 제거한다.
+     * ACE 플레이스홀더 문자(\uFFFC, \uFFFE, \uFFFF)를 제거한다.
+     * \uFFFC = Object Replacement Character (인라인 오브젝트 앵커, ACE 8)
+     * \uFFFE = Auto Page Number (ACE 18)
+     * \uFFFF = Section Marker (ACE 19)
      * 이 문자들은 XML에서 허용되지 않으므로 일반 텍스트 런에서 반드시 제거해야 한다.
      */
     static String stripACEPlaceholders(String text) {
         if (text == null) return null;
-        if (text.indexOf('\uFFFE') < 0 && text.indexOf('\uFFFF') < 0) return text;
+        if (text.indexOf('\uFFFC') < 0 && text.indexOf('\uFFFE') < 0 && text.indexOf('\uFFFF') < 0) return text;
         StringBuilder sb = new StringBuilder(text.length());
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (c != '\uFFFE' && c != '\uFFFF') {
+            if (c != '\uFFFC' && c != '\uFFFE' && c != '\uFFFF') {
                 sb.append(c);
             }
         }
@@ -611,8 +614,8 @@ public class Stage4_BuildAST {
 
         // 푸터 텍스트를 단락으로 추가
         ASTParagraph para = new ASTParagraph();
-        // 짝수 페이지 → 우측 정렬, 홀수 페이지 → 좌측 정렬
-        if (docPage.pageNumber() % 2 == 0) {
+        // 홀수 페이지(우측) → 우측 정렬, 짝수 페이지(좌측) → 좌측 정렬
+        if (docPage.pageNumber() % 2 == 1) {
             para.alignment("right");
         } else {
             para.alignment("left");

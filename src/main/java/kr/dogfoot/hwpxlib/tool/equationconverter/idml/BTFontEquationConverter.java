@@ -59,11 +59,16 @@ public class BTFontEquationConverter {
             }
         }
 
-        if (!hasMathFontRun) {
-            // 2. 영문 단어 필터링 (이름, 영단어 등 — 변환 전 원본 텍스트 기준)
-            if (looksLikeWord(raw)) return null;
+        // 문자/숫자/콤마/공백만으로 구성된 단순 텍스트는 수식이 아님 (폰트 여부 무관)
+        // 예: "A", "B", "m,", "400" → 수식폰트 텍스트 런으로 폴백
+        if (isPlainText(raw)) return null;
 
-            // 3. 수식 콘텐츠 확인
+        // 영문 단어 필터링 (이름, 영단어 등 — 변환 전 원본 텍스트 기준, 폰트 무관)
+        // 예: "Permutation(", "Combination(", "Shakespeare, W., 1564~1616)"
+        if (looksLikeWord(raw)) return null;
+
+        if (!hasMathFontRun) {
+            // 수식 콘텐츠 확인
             if (!hasMathContent(raw)) return null;
         }
 
@@ -84,6 +89,19 @@ public class BTFontEquationConverter {
         if (!hasLetterOrDigit) return null;
 
         return trimmed;
+    }
+
+    /**
+     * 문자/숫자/콤마/공백만으로 구성된 단순 텍스트인지 확인.
+     * 수식 마커나 연산자가 없으면 수식이 아닌 수식폰트 텍스트로 처리.
+     */
+    private static boolean isPlainText(String raw) {
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (Character.isLetterOrDigit(c) || Character.isWhitespace(c) || c == ',') continue;
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -161,7 +179,7 @@ public class BTFontEquationConverter {
     /**
      * 원시 BT수식M 텍스트를 HWP 수식 스크립트로 변환.
      */
-    static String convertRawToHwpScript(String raw) {
+    public static String convertRawToHwpScript(String raw) {
         // r1par, r2par 등 → 원기호(①, ②, ...)로 변환
         raw = convertCircledNumbers(raw);
 
@@ -276,14 +294,9 @@ public class BTFontEquationConverter {
                     inSubscript = true;
                 }
                 i++;
-                // 아래첨자 내용 수집 (다음 & 또는 _ 또는 ^ 또는 특수문자까지)
-                while (i < text.length()) {
-                    char sc = text.charAt(i);
-                    if (sc == '&' || sc == '_' || sc == '^') break;
-                    if (sc == '(' || sc == ')' || sc == '=' || sc == '+' || sc == ',' || sc == ' ') break;
-                    sb.append(sc);
-                    i++;
-                }
+                // 아래첨자 내용 수집: 한 글자(letter) 또는 연속 숫자
+                // BT수식M에서 _x는 단일 문자 첨자, 다중 문자는 &로 종료
+                i = collectScriptContent(text, i, sb);
                 // 아래첨자 닫기
                 if (i < text.length() && text.charAt(i) == '&') {
                     sb.append("}");
@@ -310,14 +323,8 @@ public class BTFontEquationConverter {
                     inSuperscript = true;
                 }
                 i++;
-                // 위첨자 내용 수집 (다음 & 또는 ^ 또는 _ 또는 특수문자까지)
-                while (i < text.length()) {
-                    char sc = text.charAt(i);
-                    if (sc == '&' || sc == '^' || sc == '_') break;
-                    if (sc == '(' || sc == ')' || sc == '=' || sc == '+' || sc == ',' || sc == ' ') break;
-                    sb.append(sc);
-                    i++;
-                }
+                // 위첨자 내용 수집: 한 글자(letter) 또는 연속 숫자
+                i = collectScriptContent(text, i, sb);
                 // 위첨자 닫기
                 if (i < text.length() && text.charAt(i) == '&') {
                     sb.append("}");
@@ -345,6 +352,38 @@ public class BTFontEquationConverter {
         if (inSuperscript) sb.append("}");
 
         return sb.toString();
+    }
+
+    /**
+     * 첨자 내용 수집: 한 글자(letter) 또는 연속 숫자.
+     * BT수식M에서 _x는 단일 문자 첨자이며, 다중 문자 첨자는 &로 종료.
+     * 런 경계 정보가 없는 연결 텍스트에서 _nP_r → _{n}P_{r} 올바르게 처리.
+     *
+     * @return 수집 후 다음 읽을 인덱스
+     */
+    private static int collectScriptContent(String text, int i, StringBuilder sb) {
+        if (i >= text.length()) return i;
+        char first = text.charAt(i);
+        // 특수문자/마커이면 수집 없이 반환
+        if (first == '&' || first == '_' || first == '^') return i;
+        if (first == '(' || first == ')' || first == '=' || first == '+' || first == ',' || first == ' ') return i;
+
+        if (Character.isLetter(first)) {
+            // 글자 하나만 수집
+            sb.append(first);
+            i++;
+        } else if (Character.isDigit(first)) {
+            // 연속 숫자 수집
+            while (i < text.length() && Character.isDigit(text.charAt(i))) {
+                sb.append(text.charAt(i));
+                i++;
+            }
+        } else {
+            // 기타 문자: 하나만 수집
+            sb.append(first);
+            i++;
+        }
+        return i;
     }
 
     /**
@@ -386,6 +425,7 @@ public class BTFontEquationConverter {
         text = text.replace("\\", " TIMES ");
         // … (U+2026) → CDOTS (가운데점)
         text = text.replace("\u2026", " CDOTS ");
+        // □ (U+25A1) — 빈 답안 상자 자리, 그대로 유지
         // ` → ~ (thin space in HWP script)
         text = text.replace("`", "~");
 
