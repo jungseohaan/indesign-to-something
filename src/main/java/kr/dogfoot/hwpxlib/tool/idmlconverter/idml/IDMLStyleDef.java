@@ -24,11 +24,17 @@ public class IDMLStyleDef {
     private Double autoLeading;
     private Double horizontalScale;
     private Double tracking;
+    private Boolean underline;     // 밑줄
+    private Boolean strikeThrough; // 취소선
 
     // 어절 간격 (Word Spacing)
     private Double desiredWordSpacing;    // 기본값 100%
     private Double minimumWordSpacing;
     private Double maximumWordSpacing;
+
+    // 두문자 (DropCap)
+    private Integer dropCapLines;       // 두문자 줄 수 (0이면 비활성)
+    private Integer dropCapCharacters;  // 두문자 글자 수
 
     // 탭 정지점 목록
     private java.util.List<TabStop> tabStops;
@@ -141,6 +147,18 @@ public class IDMLStyleDef {
 
     public Double tracking() { return tracking; }
     public void tracking(Double v) { this.tracking = v; }
+
+    public Boolean underline() { return underline; }
+    public void underline(Boolean v) { this.underline = v; }
+
+    public Boolean strikeThrough() { return strikeThrough; }
+    public void strikeThrough(Boolean v) { this.strikeThrough = v; }
+
+    public Integer dropCapLines() { return dropCapLines; }
+    public void dropCapLines(Integer v) { this.dropCapLines = v; }
+
+    public Integer dropCapCharacters() { return dropCapCharacters; }
+    public void dropCapCharacters(Integer v) { this.dropCapCharacters = v; }
 
     public Double desiredWordSpacing() { return desiredWordSpacing; }
     public void desiredWordSpacing(Double v) { this.desiredWordSpacing = v; }

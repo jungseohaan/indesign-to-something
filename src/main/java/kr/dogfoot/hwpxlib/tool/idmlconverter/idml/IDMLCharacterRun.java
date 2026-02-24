@@ -19,12 +19,38 @@ public class IDMLCharacterRun {
     private String content;
     private List<IDMLTextFrame> inlineFrames;
     private List<InlineGraphic> inlineGraphics;
+    private List<InlineAnchor> inlineAnchors; // FFFC 위치 기반 인터리빙 순서
     private Double tracking;
     private boolean grepMathFont;  // GREP 스타일에서 BT수식M이 동적 적용된 런
+    private Boolean underline;     // 밑줄 (IDML Underline="true")
+    private Boolean strikeThrough; // 취소선 (IDML StrikeThru="true")
+
+    /**
+     * 인라인 앵커 타입 — FFFC 위치에 TextFrame 또는 InlineGraphic 중 어느 것이 오는지 구분.
+     */
+    public enum InlineAnchorType { FRAME, GRAPHIC }
+
+    /**
+     * 인라인 앵커 — CharacterStyleRange 내 인라인 항목의 문서 순서를 추적한다.
+     * TextFrame과 InlineGraphic 모두 FFFC 위치 기반 인터리빙에 참여하도록 한다.
+     */
+    public static class InlineAnchor {
+        private final InlineAnchorType type;
+        private final int index; // inlineFrames 또는 inlineGraphics 내 인덱스
+
+        public InlineAnchor(InlineAnchorType type, int index) {
+            this.type = type;
+            this.index = index;
+        }
+
+        public InlineAnchorType type() { return type; }
+        public int index() { return index; }
+    }
 
     public IDMLCharacterRun() {
         this.inlineFrames = new ArrayList<IDMLTextFrame>();
         this.inlineGraphics = new ArrayList<InlineGraphic>();
+        this.inlineAnchors = new ArrayList<InlineAnchor>();
     }
 
     /**
@@ -160,6 +186,11 @@ public class IDMLCharacterRun {
     public List<InlineGraphic> inlineGraphics() { return inlineGraphics; }
     public void addInlineGraphic(InlineGraphic graphic) { this.inlineGraphics.add(graphic); }
 
+    public List<InlineAnchor> inlineAnchors() { return inlineAnchors; }
+    public void addInlineAnchor(InlineAnchorType type, int index) {
+        this.inlineAnchors.add(new InlineAnchor(type, index));
+    }
+
     public Double tracking() { return tracking; }
     public void tracking(Double v) { this.tracking = v; }
 
@@ -202,4 +233,10 @@ public class IDMLCharacterRun {
 
     public boolean grepMathFont() { return grepMathFont; }
     public void grepMathFont(boolean v) { this.grepMathFont = v; }
+
+    public Boolean underline() { return underline; }
+    public void underline(Boolean v) { this.underline = v; }
+
+    public Boolean strikeThrough() { return strikeThrough; }
+    public void strikeThrough(Boolean v) { this.strikeThrough = v; }
 }

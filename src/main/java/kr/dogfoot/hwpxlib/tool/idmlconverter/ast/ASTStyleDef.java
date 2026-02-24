@@ -29,6 +29,12 @@ public class ASTStyleDef {
     private Short horizontalScale;    // 장평 (%)
     private Double wordSpacing;       // 어간 desired (%)
     private Double autoLeading;       // 자동 줄간격 비율 (%)
+    private Boolean underline;        // 밑줄
+    private Boolean strikeThrough;    // 취소선
+
+    // 두문자 (DropCap)
+    private Integer dropCapLines;       // 두문자 줄 수 (0이면 비활성)
+    private Integer dropCapCharacters;  // 두문자 글자 수
 
     // 단락 속성 — 탭 정지점
     private java.util.List<ASTTabStop> tabStops;
@@ -95,6 +101,18 @@ public class ASTStyleDef {
 
     public Double autoLeading() { return autoLeading; }
     public void autoLeading(Double v) { this.autoLeading = v; }
+
+    public Boolean underline() { return underline; }
+    public void underline(Boolean v) { this.underline = v; }
+
+    public Boolean strikeThrough() { return strikeThrough; }
+    public void strikeThrough(Boolean v) { this.strikeThrough = v; }
+
+    public Integer dropCapLines() { return dropCapLines; }
+    public void dropCapLines(Integer v) { this.dropCapLines = v; }
+
+    public Integer dropCapCharacters() { return dropCapCharacters; }
+    public void dropCapCharacters(Integer v) { this.dropCapCharacters = v; }
 
     public java.util.List<ASTTabStop> tabStops() { return tabStops; }
     public void tabStops(java.util.List<ASTTabStop> v) { this.tabStops = v; }

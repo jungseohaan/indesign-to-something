@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -73,19 +74,55 @@ class ASTMathGrouper {
             // 연속 동일 타입 구간을 분리
             int segStart = 0;
             boolean first = true;
+            List<IDMLCharacterRun.InlineAnchor> srcAnchors = run.inlineAnchors();
+            List<IDMLCharacterRun.InlineGraphic> srcGraphics = run.inlineGraphics();
+            List<IDMLTextFrame> srcFrames = run.inlineFrames();
+            int anchorIdx = 0;
             for (int i = 1; i <= len; i++) {
                 if (i == len || types[i] != types[segStart]) {
                     String segText = text.substring(segStart, i);
                     IDMLCharacterRun subRun = cloneRunForSplit(run, segText);
-                    // 첫 번째 분할 런에 인라인 프레임/그래픽을 보존
-                    if (first) {
-                        for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
+                    // FFFC 기반 인라인 항목 배분 (앵커가 있는 경우)
+                    if (!srcAnchors.isEmpty()) {
+                        for (int ci = 0; ci < segText.length(); ci++) {
+                            if (segText.charAt(ci) == '\uFFFC' && anchorIdx < srcAnchors.size()) {
+                                IDMLCharacterRun.InlineAnchor anchor = srcAnchors.get(anchorIdx++);
+                                if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                                        && anchor.index() < srcFrames.size()) {
+                                    int newIdx = subRun.inlineFrames().size();
+                                    subRun.addInlineFrame(srcFrames.get(anchor.index()));
+                                    subRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.FRAME, newIdx);
+                                } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
+                                        && anchor.index() < srcGraphics.size()) {
+                                    int newIdx = subRun.inlineGraphics().size();
+                                    subRun.addInlineGraphic(srcGraphics.get(anchor.index()));
+                                    subRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, newIdx);
+                                }
+                            }
+                        }
+                    } else if (first) {
+                        // 레거시: 첫 번째 분할 런에 인라인 그래픽을 보존
+                        for (IDMLCharacterRun.InlineGraphic ig : srcGraphics) {
                             subRun.addInlineGraphic(ig);
                         }
-                        first = false;
                     }
+                    first = false;
                     result.add(subRun);
                     segStart = i;
+                }
+            }
+            // 앵커 기반: 나머지 미처리 앵커를 마지막 서브런에 전달
+            if (!srcAnchors.isEmpty() && !result.isEmpty()) {
+                IDMLCharacterRun lastSub = result.get(result.size() - 1);
+                for (int ai = anchorIdx; ai < srcAnchors.size(); ai++) {
+                    IDMLCharacterRun.InlineAnchor anchor = srcAnchors.get(ai);
+                    if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                            && anchor.index() < srcFrames.size()) {
+                        lastSub.addInlineFrame(srcFrames.get(anchor.index()));
+                    } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
+                            && anchor.index() < srcGraphics.size()) {
+                        lastSub.addInlineGraphic(srcGraphics.get(anchor.index()));
+                    }
                 }
             }
         }

@@ -521,6 +521,12 @@ public class ASTSerializer {
         if (run.superscript()) {
             first = writeBooleanField(sb, "superscript", true, first);
         }
+        if (run.underline()) {
+            first = writeBooleanField(sb, "underline", true, first);
+        }
+        if (run.strikeThrough()) {
+            first = writeBooleanField(sb, "strikeThrough", true, first);
+        }
         sb.append('}');
     }
 
@@ -632,6 +638,18 @@ public class ASTSerializer {
         }
         if (style.italic() != null && style.italic()) {
             first = writeBooleanField(sb, "italic", true, first);
+        }
+        if (style.underline() != null && style.underline()) {
+            first = writeBooleanField(sb, "underline", true, first);
+        }
+        if (style.strikeThrough() != null && style.strikeThrough()) {
+            first = writeBooleanField(sb, "strikeThrough", true, first);
+        }
+        if (style.dropCapLines() != null && style.dropCapLines() > 0) {
+            first = writeBoxedIntField(sb, "dropCapLines", style.dropCapLines(), first);
+            if (style.dropCapCharacters() != null) {
+                first = writeBoxedIntField(sb, "dropCapCharacters", style.dropCapCharacters(), first);
+            }
         }
         if (style.horizontalScale() != null) {
             first = writeBoxedShortField(sb, "horizontalScale", style.horizontalScale(), first);

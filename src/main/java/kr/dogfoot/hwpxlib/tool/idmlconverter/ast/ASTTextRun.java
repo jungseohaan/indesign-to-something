@@ -14,6 +14,8 @@ public class ASTTextRun extends ASTInlineItem {
     private boolean subscript;
     private boolean superscript;
     private boolean grepMathFont;  // GREP 스타일에서 BT수식M이 동적 적용된 런
+    private boolean underline;     // 밑줄
+    private boolean strikeThrough; // 취소선
 
     public ItemType itemType() { return ItemType.TEXT_RUN; }
 
@@ -46,5 +48,11 @@ public class ASTTextRun extends ASTInlineItem {
 
     public boolean grepMathFont() { return grepMathFont; }
     public void grepMathFont(boolean v) { this.grepMathFont = v; }
+
+    public boolean underline() { return underline; }
+    public void underline(boolean v) { this.underline = v; }
+
+    public boolean strikeThrough() { return strikeThrough; }
+    public void strikeThrough(boolean v) { this.strikeThrough = v; }
 
 }

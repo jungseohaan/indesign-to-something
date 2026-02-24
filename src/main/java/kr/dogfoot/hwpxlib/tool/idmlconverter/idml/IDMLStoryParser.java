@@ -326,14 +326,30 @@ class IDMLStoryParser {
                     } else {
                         contentBuilder.append('\uFFFC'); // ACE 8 없는 인라인 TextFrame → 앵커 삽입
                     }
+                    int frameIdx = currentRun.inlineFrames().size();
                     parseInlineTextFrame(elem, currentRun);
+                    currentRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.FRAME, frameIdx);
                 } else if ("Group".equals(tag)) {
+                    if (pendingAce8 > 0) {
+                        pendingAce8--;
+                    } else {
+                        contentBuilder.append('\uFFFC');
+                    }
+                    int graphicIdx = currentRun.inlineGraphics().size();
                     IDMLCharacterRun.InlineGraphic inlineGroup = parseInlineGroup(elem);
                     currentRun.addInlineGraphic(inlineGroup);
+                    currentRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, graphicIdx);
                 } else if ("Rectangle".equals(tag) || "Polygon".equals(tag)
-                        || "Oval".equals(tag)) {
+                        || "Oval".equals(tag) || "GraphicLine".equals(tag)) {
+                    if (pendingAce8 > 0) {
+                        pendingAce8--;
+                    } else {
+                        contentBuilder.append('\uFFFC');
+                    }
+                    int graphicIdx = currentRun.inlineGraphics().size();
                     IDMLCharacterRun.InlineGraphic graphic = parseInlineGraphicElement(elem);
                     currentRun.addInlineGraphic(graphic);
+                    currentRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, graphicIdx);
                 }
             }
 
@@ -446,6 +462,12 @@ class IDMLStoryParser {
         run.fillColor(getAttrOrNull(charRange, "FillColor"));
         run.position(getAttrOrNull(charRange, "Position"));
         run.fontSize(parseDoubleAttr(charRange, "PointSize"));
+
+        // 밑줄 / 취소선
+        String underline = getAttrOrNull(charRange, "Underline");
+        if ("true".equalsIgnoreCase(underline)) run.underline(true);
+        String strikeThru = getAttrOrNull(charRange, "StrikeThru");
+        if ("true".equalsIgnoreCase(strikeThru)) run.strikeThrough(true);
 
         Element props = getFirstChildElement(charRange, "Properties");
         if (props != null) {
@@ -1106,7 +1128,9 @@ class IDMLStoryParser {
             // 인라인 프레임/그래픽의 \uFFFC 앵커 위치별 배분 준비
             List<IDMLTextFrame> srcFrames = run.inlineFrames();
             List<IDMLCharacterRun.InlineGraphic> srcGraphics = run.inlineGraphics();
-            int frameIdx = 0; // \uFFFC 순서 = 인라인 프레임 순서
+            List<IDMLCharacterRun.InlineAnchor> srcAnchors = run.inlineAnchors();
+            int anchorIdx = 0;  // anchor mode
+            int frameIdx = 0;   // legacy mode
             int segStart = 0;
             for (int i = 1; i <= text.length(); i++) {
                 if (i == text.length() || isMatch[i] != isMatch[segStart]) {
@@ -1116,29 +1140,57 @@ class IDMLStoryParser {
                         subRun.grepMathFont(true);
                         counts[0]++;
                     }
-                    // 이 세그먼트에 포함된 \uFFFC 개수만큼 인라인 프레임 배분
+                    // 이 세그먼트에 포함된 \uFFFC 개수만큼 인라인 항목 배분
                     for (int ci = 0; ci < segText.length(); ci++) {
-                        if (segText.charAt(ci) == '\uFFFC' && frameIdx < srcFrames.size()) {
-                            subRun.addInlineFrame(srcFrames.get(frameIdx));
-                            frameIdx++;
+                        if (segText.charAt(ci) == '\uFFFC') {
+                            if (!srcAnchors.isEmpty() && anchorIdx < srcAnchors.size()) {
+                                // 앵커 기반: 타입에 따라 프레임 또는 그래픽 배분
+                                IDMLCharacterRun.InlineAnchor anchor = srcAnchors.get(anchorIdx++);
+                                if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                                        && anchor.index() < srcFrames.size()) {
+                                    int newIdx = subRun.inlineFrames().size();
+                                    subRun.addInlineFrame(srcFrames.get(anchor.index()));
+                                    subRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.FRAME, newIdx);
+                                } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
+                                        && anchor.index() < srcGraphics.size()) {
+                                    int newIdx = subRun.inlineGraphics().size();
+                                    subRun.addInlineGraphic(srcGraphics.get(anchor.index()));
+                                    subRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, newIdx);
+                                }
+                            } else if (frameIdx < srcFrames.size()) {
+                                // 레거시: FFFC → TextFrame 순서 매핑
+                                subRun.addInlineFrame(srcFrames.get(frameIdx));
+                                frameIdx++;
+                            }
                         }
                     }
                     newRuns.add(subRun);
                     segStart = i;
                 }
             }
-            // \uFFFC가 없는 경우 (ACE 8 미지원 시) 마지막 서브런에 남은 인라인 프레임 전달
-            if (frameIdx < srcFrames.size() && !newRuns.isEmpty()) {
+            // 나머지 항목을 마지막 서브런에 전달
+            if (!newRuns.isEmpty()) {
                 IDMLCharacterRun lastSub = newRuns.get(newRuns.size() - 1);
-                for (int fi = frameIdx; fi < srcFrames.size(); fi++) {
-                    lastSub.addInlineFrame(srcFrames.get(fi));
-                }
-            }
-            // 인라인 그래픽은 마지막 서브런에 전달 (그래픽은 앵커 매핑 불필요)
-            if (!srcGraphics.isEmpty() && !newRuns.isEmpty()) {
-                IDMLCharacterRun lastSub = newRuns.get(newRuns.size() - 1);
-                for (IDMLCharacterRun.InlineGraphic ig : srcGraphics) {
-                    lastSub.addInlineGraphic(ig);
+                if (!srcAnchors.isEmpty()) {
+                    // 앵커 기반: 미처리 앵커를 마지막 서브런에 전달
+                    for (int ai = anchorIdx; ai < srcAnchors.size(); ai++) {
+                        IDMLCharacterRun.InlineAnchor anchor = srcAnchors.get(ai);
+                        if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                                && anchor.index() < srcFrames.size()) {
+                            lastSub.addInlineFrame(srcFrames.get(anchor.index()));
+                        } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
+                                && anchor.index() < srcGraphics.size()) {
+                            lastSub.addInlineGraphic(srcGraphics.get(anchor.index()));
+                        }
+                    }
+                } else {
+                    // 레거시: 남은 프레임 + 모든 그래픽을 마지막 서브런에 전달
+                    for (int fi = frameIdx; fi < srcFrames.size(); fi++) {
+                        lastSub.addInlineFrame(srcFrames.get(fi));
+                    }
+                    for (IDMLCharacterRun.InlineGraphic ig : srcGraphics) {
+                        lastSub.addInlineGraphic(ig);
+                    }
                 }
             }
         }
@@ -1262,6 +1314,8 @@ class IDMLStoryParser {
         clone.fontStyle(source.fontStyle());
         clone.position(source.position());
         clone.tracking(source.tracking());
+        clone.underline(source.underline());
+        clone.strikeThrough(source.strikeThrough());
         clone.content(newText);
         return clone;
     }

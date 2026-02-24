@@ -202,13 +202,17 @@ public class StyleRegistry {
             bold = fs.contains("bold");
             italic = fs.contains("italic") || fs.contains("oblique");
         }
+        boolean underline = Boolean.TRUE.equals(styleDef.underline());
+        boolean strikeThrough = Boolean.TRUE.equals(styleDef.strikeThrough());
         CharPrBuilder.build(charPr, id, height, textColor,
                 styleDef.fontFamily(), fontRegistry,
                 styleDef.letterSpacing(),
                 bold, italic,
                 false, false,
-                UnderlineType.NONE, "#000000",
-                styleDef.horizontalScale());
+                underline ? UnderlineType.BOTTOM : UnderlineType.NONE,
+                underline ? textColor : "#000000",
+                styleDef.horizontalScale(),
+                strikeThrough);
     }
 
     private void buildParaPr(ParaPr paraPr, String id, ASTStyleDef styleDef, String tabPrId) {

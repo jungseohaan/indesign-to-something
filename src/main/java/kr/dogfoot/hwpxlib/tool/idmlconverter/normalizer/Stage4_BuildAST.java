@@ -431,6 +431,14 @@ public class Stage4_BuildAST {
             }
             // autoLeading 비율 보존
             if (s.autoLeading() != null) sd.autoLeading(s.autoLeading());
+            // 밑줄 / 취소선
+            sd.underline(s.underline());
+            sd.strikeThrough(s.strikeThrough());
+            // 두문자 (DropCap)
+            if (s.dropCapLines() != null && s.dropCapLines() > 0) {
+                sd.dropCapLines(s.dropCapLines());
+                sd.dropCapCharacters(s.dropCapCharacters());
+            }
             // 스타일 내 탭 정지점
             if (s.tabStops() != null && !s.tabStops().isEmpty()) {
                 java.util.List<ASTTabStop> astTabs = new java.util.ArrayList<>();
@@ -461,6 +469,8 @@ public class Stage4_BuildAST {
             sd.bold(s.bold());
             sd.italic(s.italic());
             if (s.horizontalScale() != null) sd.horizontalScale((short) Math.round(s.horizontalScale()));
+            sd.underline(s.underline());
+            sd.strikeThrough(s.strikeThrough());
             doc.addCharacterStyle(sd);
         }
 

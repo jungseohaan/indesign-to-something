@@ -315,6 +315,8 @@ ASTDocument
 | `letterSpacing` | short | 자간. null이면 생략 |
 | `subscript` | boolean | 아래첨자. true일 때만 출력 |
 | `superscript` | boolean | 위첨자. true일 때만 출력 |
+| `underline` | boolean | 밑줄. true일 때만 출력 |
+| `strikeThrough` | boolean | 취소선. true일 때만 출력 |
 
 **예시**:
 ```json
@@ -481,8 +483,13 @@ BT수식M 또는 NP 커스텀 폰트에서 추출된 인라인 수식입니다.
 | `letterSpacing` | short | 자간 |
 | `bold` | boolean | 볼드. true일 때만 출력 |
 | `italic` | boolean | 이탤릭. true일 때만 출력 |
+| `underline` | boolean | 밑줄. true일 때만 출력. HWPX UnderlineType.BOTTOM |
+| `strikeThrough` | boolean | 취소선. true일 때만 출력. HWPX LineType2.SOLID |
 | `horizontalScale` | short | 장평 (%). null이면 생략. HWPX CharPr ratio에 반영 |
 | `wordSpacing` | double | 어간 desired (%). HWPX 직접 대응 없음 |
+| **두문자** (null이면 생략) |
+| `dropCapLines` | int | 두문자 줄 수 (2 이상일 때만 출력). HWPX DropCapStyle에 반영 |
+| `dropCapCharacters` | int | 두문자 글자 수. dropCapLines와 함께 출력 |
 
 ---
 

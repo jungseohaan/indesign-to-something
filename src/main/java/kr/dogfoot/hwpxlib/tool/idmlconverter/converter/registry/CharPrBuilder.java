@@ -30,6 +30,7 @@ public final class CharPrBuilder {
      * @param subscript      아래첨자 여부
      * @param underlineType  밑줄 타입 (예: NONE, BOTTOM)
      * @param underlineColor 밑줄 색상 (예: "#000000", "#008000")
+     * @param strikethrough  취소선 여부
      */
     public static void build(CharPr charPr, String id, int height, String textColor,
                               String fontFamily, FontRegistry fontRegistry,
@@ -37,7 +38,8 @@ public final class CharPrBuilder {
                               boolean bold, boolean italic,
                               boolean superscript, boolean subscript,
                               UnderlineType underlineType, String underlineColor,
-                              Short horizontalScale) {
+                              Short horizontalScale,
+                              boolean strikethrough) {
         // 기본 속성
         charPr.idAnd(id)
                 .heightAnd(height)
@@ -92,7 +94,7 @@ public final class CharPrBuilder {
         charPr.underline().typeAnd(underlineType).shapeAnd(LineType3.SOLID).color(underlineColor);
 
         charPr.createStrikeout();
-        charPr.strikeout().shapeAnd(LineType2.NONE).color("#000000");
+        charPr.strikeout().shapeAnd(strikethrough ? LineType2.SOLID : LineType2.NONE).color("#000000");
 
         charPr.createOutline();
         charPr.outline().type(LineType1.NONE);

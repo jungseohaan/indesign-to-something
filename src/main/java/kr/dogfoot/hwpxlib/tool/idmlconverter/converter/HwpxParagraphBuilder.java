@@ -336,7 +336,9 @@ class HwpxParagraphBuilder {
                 || run.textColor() != null
                 || run.letterSpacing() != null
                 || run.subscript()
-                || run.superscript();
+                || run.superscript()
+                || run.underline()
+                || run.strikeThrough();
     }
 
     String charPrCacheKey(ASTTextRun textRun) {
@@ -346,7 +348,9 @@ class HwpxParagraphBuilder {
                 + "|" + (textRun.fontStyle() != null ? textRun.fontStyle() : "")
                 + "|" + (textRun.letterSpacing() != null ? textRun.letterSpacing() : "")
                 + "|" + textRun.superscript()
-                + "|" + textRun.subscript();
+                + "|" + textRun.subscript()
+                + "|" + textRun.underline()
+                + "|" + textRun.strikeThrough();
     }
 
     String createOverrideCharPr(ASTTextRun textRun) {
@@ -367,8 +371,10 @@ class HwpxParagraphBuilder {
                 fontStyle.contains("bold"),
                 fontStyle.contains("italic"),
                 textRun.superscript(), textRun.subscript(),
-                UnderlineType.NONE, "#000000",
-                null);
+                textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
+                textRun.underline() ? textColor : "#000000",
+                null,
+                textRun.strikeThrough());
 
         ctx.charPrCache.put(cacheKey, newId);
         return newId;
@@ -400,7 +406,8 @@ class HwpxParagraphBuilder {
                 fontStyle.contains("italic"),
                 textRun.superscript(), textRun.subscript(),
                 UnderlineType.NONE, textColor,
-                null);
+                null,
+                false);
 
         ctx.eqFontCharPrCache.put(cacheKey, newId);
         return newId;

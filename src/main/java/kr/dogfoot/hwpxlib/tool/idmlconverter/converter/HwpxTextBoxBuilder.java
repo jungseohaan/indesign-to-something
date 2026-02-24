@@ -59,7 +59,7 @@ class HwpxTextBoxBuilder {
                 .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
-                .dropcapstyleAnd(DropCapStyle.None);
+                .dropcapstyleAnd(resolveDropCapStyle(block.paragraphs()));
 
         // ShapeComponent
         rect.hrefAnd("");
@@ -254,7 +254,7 @@ class HwpxTextBoxBuilder {
                 .textWrapAnd(wrapMethod)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
-                .dropcapstyleAnd(DropCapStyle.None);
+                .dropcapstyleAnd(resolveDropCapStyle(block.paragraphs()));
 
         // 테이블 속성 — 1행 1열
         table.pageBreakAnd(TablePageBreak.CELL)
@@ -457,7 +457,7 @@ class HwpxTextBoxBuilder {
                 .textWrapAnd(twm)
                 .textFlowAnd(tfs)
                 .lockAnd(false)
-                .dropcapstyleAnd(DropCapStyle.None);
+                .dropcapstyleAnd(resolveDropCapStyle(obj.paragraphs()));
 
         // ShapeComponent
         rect.hrefAnd("");
@@ -676,5 +676,24 @@ class HwpxTextBoxBuilder {
 
         rect.createOutMargin();
         rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+    }
+
+    // ── DropCap 해석 ──
+
+    /**
+     * 단락 목록의 첫 번째 단락 스타일에서 DropCapStyle을 결정한다.
+     * IDML DropCapLines → HWPX DropCapStyle 매핑:
+     *   2 → DoubleLine, 3+ → TripleLine
+     */
+    DropCapStyle resolveDropCapStyle(java.util.List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return DropCapStyle.None;
+        ASTParagraph firstPara = paragraphs.get(0);
+        String styleRef = firstPara.paragraphStyleRef();
+        if (styleRef == null) return DropCapStyle.None;
+        ASTStyleDef style = paragraphBuilder.findParagraphStyle(styleRef);
+        if (style == null || style.dropCapLines() == null) return DropCapStyle.None;
+        if (style.dropCapLines() >= 3) return DropCapStyle.TripleLine;
+        if (style.dropCapLines() >= 2) return DropCapStyle.DoubleLine;
+        return DropCapStyle.None;
     }
 }

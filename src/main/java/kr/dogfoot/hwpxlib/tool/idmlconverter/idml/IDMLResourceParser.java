@@ -116,6 +116,20 @@ class IDMLResourceParser {
         def.horizontalScale(parseDoubleAttr(styleElem, "HorizontalScale"));
         def.tracking(parseDoubleAttr(styleElem, "Tracking"));
 
+        // 밑줄 / 취소선
+        String underline = getAttrOrNull(styleElem, "Underline");
+        if ("true".equalsIgnoreCase(underline)) def.underline(true);
+        String strikeThru = getAttrOrNull(styleElem, "StrikeThru");
+        if ("true".equalsIgnoreCase(strikeThru)) def.strikeThrough(true);
+
+        // 두문자 (DropCap)
+        Integer dropCapLines = parseIntAttrNullable(styleElem, "DropCapLines");
+        Integer dropCapChars = parseIntAttrNullable(styleElem, "DropCapCharacters");
+        if (dropCapLines != null && dropCapLines > 0) {
+            def.dropCapLines(dropCapLines);
+            def.dropCapCharacters(dropCapChars != null ? dropCapChars : 1);
+        }
+
         // Properties 안의 값들
         Element props = getFirstChildElement(styleElem, "Properties");
         if (props != null) {

@@ -330,6 +330,8 @@ class ASTStoryConverter {
 
     /**
      * IDMLCharacterRun → ASTTextRun + ASTInlineObject + ASTBreak 변환.
+     * 인라인 앵커(InlineAnchor)를 사용하여 TextFrame과 InlineGraphic을
+     * 문서 순서(FFFC 위치)에 맞게 인터리빙한다.
      */
     static void convertCharacterRun(IDMLCharacterRun run, IDMLParagraph parentPara,
                                      ASTParagraph para,
@@ -338,8 +340,13 @@ class ASTStoryConverter {
                                      ColorResolver colorResolver,
                                      ASTImageLoader imageLoader) {
         String text = run.content();
+        List<IDMLCharacterRun.InlineAnchor> anchors = run.inlineAnchors();
+        boolean useAnchors = !anchors.isEmpty();
+
         List<IDMLTextFrame> frames = run.inlineFrames();
-        int frameIdx = 0;
+        int frameIdx = 0;   // legacy mode: frame-only FFFC 인덱스
+        int anchorIdx = 0;  // anchor mode: 통합 FFFC 인덱스
+        Set<Integer> processedGraphicIndices = useAnchors ? new java.util.HashSet<>() : null;
 
         if (text != null && !text.isEmpty()) {
             // NP 폰트 글리프 → 유니코드 변환
@@ -357,7 +364,7 @@ class ASTStoryConverter {
                     para.addItem(new ASTBreak(ASTBreak.BreakType.LINE));
                 }
                 String seg = segments[i];
-                // FFFC 위치에서 텍스트를 분할하여 인라인 프레임과 인터리빙
+                // FFFC 위치에서 텍스트를 분할하여 인라인 항목과 인터리빙
                 int start = 0;
                 for (int j = 0; j <= seg.length(); j++) {
                     if (j == seg.length() || seg.charAt(j) == '\uFFFC') {
@@ -366,11 +373,17 @@ class ASTStoryConverter {
                             String part = seg.substring(start, j);
                             para.addItem(createTextRun(run, part, parentPara, idmlDoc, colorResolver));
                         }
-                        // FFFC 위치에 해당 인라인 프레임 삽입
-                        if (j < seg.length() && frameIdx < frames.size()) {
-                            IDMLTextFrame inlineTf = frames.get(frameIdx++);
-                            if (!Stage4_BuildAST.shouldDeferInlineFrame(inlineTf)) {
-                                addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
+                        // FFFC 위치에 인라인 항목 삽입 (앵커 모드 또는 레거시 모드)
+                        if (j < seg.length()) {
+                            if (useAnchors && anchorIdx < anchors.size()) {
+                                IDMLCharacterRun.InlineAnchor anchor = anchors.get(anchorIdx++);
+                                insertAnchoredItem(anchor, run, para, idmlDoc, colorResolver,
+                                        imageLoader, processedGraphicIndices);
+                            } else if (!useAnchors && frameIdx < frames.size()) {
+                                IDMLTextFrame inlineTf = frames.get(frameIdx++);
+                                if (!Stage4_BuildAST.shouldDeferInlineFrame(inlineTf)) {
+                                    addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
+                                }
                             }
                         }
                         start = j + 1;
@@ -379,44 +392,91 @@ class ASTStoryConverter {
             }
         }
 
-        // FFFC에 매칭되지 않은 나머지 인라인 프레임 (텍스트 없는 런 등)
-        for (int i = frameIdx; i < frames.size(); i++) {
-            IDMLTextFrame inlineTf = frames.get(i);
-            if (Stage4_BuildAST.shouldDeferInlineFrame(inlineTf)) continue;
-            addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
+        // 텍스트에서 소비되지 않은 나머지 앵커 / 프레임
+        if (useAnchors) {
+            for (int i = anchorIdx; i < anchors.size(); i++) {
+                insertAnchoredItem(anchors.get(i), run, para, idmlDoc, colorResolver,
+                        imageLoader, processedGraphicIndices);
+            }
+        } else {
+            for (int i = frameIdx; i < frames.size(); i++) {
+                IDMLTextFrame inlineTf = frames.get(i);
+                if (Stage4_BuildAST.shouldDeferInlineFrame(inlineTf)) continue;
+                addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
+            }
         }
 
-        // 인라인 그래픽
-        for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
-            ASTInlineObject inlineObj = ASTInlineObjectBuilder.createInlineObjectFromGraphic(ig, imageLoader, colorResolver);
-            if (inlineObj != null) {
-                // 크기 0인 RENDERED_GROUP 래퍼는 추가하지 않음 (배경 사각형+텍스트프레임 구조의 Group)
-                boolean isEmptyWrapper = inlineObj.kind() == ASTInlineObject.ObjectKind.RENDERED_GROUP
-                        && inlineObj.width() <= 0 && inlineObj.height() <= 0
-                        && (inlineObj.imageData() == null || inlineObj.imageData().length == 0);
-                if (!isEmptyWrapper) {
-                    para.addItem(inlineObj);
-                }
-                // IMAGE로 처리된 Group 중 자식 텍스트프레임이 없는 경우만 스킵
-                // 자식 텍스트프레임이 있으면 이미지와 함께 텍스트도 추출 (약도+교통편 등)
-                if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
-                        && !ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig)) {
-                    continue;
+        // 앵커로 처리되지 않은 나머지 인라인 그래픽 (앵커 없는 레거시 런, GREP 분할 런 등)
+        for (int i = 0; i < run.inlineGraphics().size(); i++) {
+            if (processedGraphicIndices != null && processedGraphicIndices.contains(i)) continue;
+            processInlineGraphic(run.inlineGraphics().get(i), para, idmlDoc, colorResolver, imageLoader);
+        }
+    }
+
+    /**
+     * 앵커 타입에 따라 인라인 프레임 또는 인라인 그래픽을 단락에 삽입.
+     */
+    private static void insertAnchoredItem(IDMLCharacterRun.InlineAnchor anchor,
+                                            IDMLCharacterRun run,
+                                            ASTParagraph para,
+                                            IDMLDocument idmlDoc,
+                                            ColorResolver colorResolver,
+                                            ASTImageLoader imageLoader,
+                                            Set<Integer> processedGraphicIndices) {
+        if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME) {
+            if (anchor.index() < run.inlineFrames().size()) {
+                IDMLTextFrame inlineTf = run.inlineFrames().get(anchor.index());
+                if (!Stage4_BuildAST.shouldDeferInlineFrame(inlineTf)) {
+                    addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
                 }
             }
-            // 부모 Group의 배경 사각형에서 전체 스타일 추출 (fill, stroke, cornerRadius)
-            ASTInlineObjectBuilder.GroupBackground bg = ASTInlineObjectBuilder.extractGroupBackground(ig, colorResolver);
-            // 인라인 그래픽 내부의 자식 텍스트프레임 처리 (중첩 Group 포함, 재귀)
-            // IMAGE 그룹인 경우: 자식 텍스트프레임을 이미지 위 오버레이로 배치
-            boolean isImageGroup = inlineObj != null
-                    && inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
-                    && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig);
-            if (isImageGroup) {
-                ASTInlineObjectBuilder.collectOverlayFrames(
-                        ig, inlineObj, idmlDoc, colorResolver, imageLoader, bg);
-            } else {
-                ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
+        } else {
+            if (anchor.index() < run.inlineGraphics().size()) {
+                processInlineGraphic(run.inlineGraphics().get(anchor.index()),
+                        para, idmlDoc, colorResolver, imageLoader);
+                if (processedGraphicIndices != null) {
+                    processedGraphicIndices.add(anchor.index());
+                }
             }
+        }
+    }
+
+    /**
+     * 인라인 그래픽을 처리하여 단락에 추가.
+     */
+    private static void processInlineGraphic(IDMLCharacterRun.InlineGraphic ig,
+                                              ASTParagraph para,
+                                              IDMLDocument idmlDoc,
+                                              ColorResolver colorResolver,
+                                              ASTImageLoader imageLoader) {
+        ASTInlineObject inlineObj = ASTInlineObjectBuilder.createInlineObjectFromGraphic(ig, imageLoader, colorResolver);
+        if (inlineObj != null) {
+            // 크기 0인 RENDERED_GROUP 래퍼는 추가하지 않음 (배경 사각형+텍스트프레임 구조의 Group)
+            boolean isEmptyWrapper = inlineObj.kind() == ASTInlineObject.ObjectKind.RENDERED_GROUP
+                    && inlineObj.width() <= 0 && inlineObj.height() <= 0
+                    && (inlineObj.imageData() == null || inlineObj.imageData().length == 0);
+            if (!isEmptyWrapper) {
+                para.addItem(inlineObj);
+            }
+            // IMAGE로 처리된 Group 중 자식 텍스트프레임이 없는 경우만 스킵
+            // 자식 텍스트프레임이 있으면 이미지와 함께 텍스트도 추출 (약도+교통편 등)
+            if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
+                    && !ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig)) {
+                return;
+            }
+        }
+        // 부모 Group의 배경 사각형에서 전체 스타일 추출 (fill, stroke, cornerRadius)
+        ASTInlineObjectBuilder.GroupBackground bg = ASTInlineObjectBuilder.extractGroupBackground(ig, colorResolver);
+        // 인라인 그래픽 내부의 자식 텍스트프레임 처리 (중첩 Group 포함, 재귀)
+        // IMAGE 그룹인 경우: 자식 텍스트프레임을 이미지 위 오버레이로 배치
+        boolean isImageGroup = inlineObj != null
+                && inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
+                && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig);
+        if (isImageGroup) {
+            ASTInlineObjectBuilder.collectOverlayFrames(
+                    ig, inlineObj, idmlDoc, colorResolver, imageLoader, bg);
+        } else {
+            ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
         }
     }
 
@@ -528,6 +588,8 @@ class ASTStoryConverter {
         String fillColor = run.fillColor();
         String fontStyle = run.fontStyle();
         Double tracking = run.tracking();
+        Boolean underline = run.underline();
+        Boolean strikeThrough = run.strikeThrough();
 
         // CharacterStyle에서 빈 속성 채우기
         if (charStyleRef != null) {
@@ -538,6 +600,8 @@ class ASTStoryConverter {
                 if (fillColor == null) fillColor = charStyle.fillColor();
                 if (fontStyle == null) fontStyle = charStyle.fontStyle();
                 if (tracking == null) tracking = charStyle.tracking();
+                if (underline == null) underline = charStyle.underline();
+                if (strikeThrough == null) strikeThrough = charStyle.strikeThrough();
             }
         }
 
@@ -551,6 +615,8 @@ class ASTStoryConverter {
                 if (fillColor == null) fillColor = paraStyle.fillColor();
                 if (fontStyle == null) fontStyle = paraStyle.fontStyle();
                 if (tracking == null) tracking = paraStyle.tracking();
+                if (underline == null) underline = paraStyle.underline();
+                if (strikeThrough == null) strikeThrough = paraStyle.strikeThrough();
             }
         }
 
@@ -579,6 +645,8 @@ class ASTStoryConverter {
         textRun.subscript(run.isSubscript());
         textRun.superscript(run.isSuperscript());
         textRun.grepMathFont(run.grepMathFont());
+        textRun.underline(Boolean.TRUE.equals(underline));
+        textRun.strikeThrough(Boolean.TRUE.equals(strikeThrough));
 
         return textRun;
     }
@@ -606,6 +674,8 @@ class ASTStoryConverter {
         merged.bold(style.bold() != null ? style.bold() : parent.bold());
         merged.italic(style.italic() != null ? style.italic() : parent.italic());
         merged.tracking(style.tracking() != null ? style.tracking() : parent.tracking());
+        merged.underline(style.underline() != null ? style.underline() : parent.underline());
+        merged.strikeThrough(style.strikeThrough() != null ? style.strikeThrough() : parent.strikeThrough());
         merged.leading(style.leading() != null ? style.leading() : parent.leading());
         merged.leadingType(style.leadingType() != null ? style.leadingType() : parent.leadingType());
         merged.autoLeading(style.autoLeading() != null ? style.autoLeading() : parent.autoLeading());
@@ -861,29 +931,7 @@ class ASTStoryConverter {
         for (IDMLCharacterRun run : mathGroup) {
             if (run.inlineGraphics().isEmpty()) continue;
             for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
-                ASTInlineObject inlineObj = ASTInlineObjectBuilder.createInlineObjectFromGraphic(ig, imageLoader, colorResolver);
-                if (inlineObj != null) {
-                    boolean isEmptyWrapper = inlineObj.kind() == ASTInlineObject.ObjectKind.RENDERED_GROUP
-                            && inlineObj.width() <= 0 && inlineObj.height() <= 0
-                            && (inlineObj.imageData() == null || inlineObj.imageData().length == 0);
-                    if (!isEmptyWrapper) {
-                        para.addItem(inlineObj);
-                    }
-                    if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
-                            && !ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig)) {
-                        continue;
-                    }
-                }
-                ASTInlineObjectBuilder.GroupBackground bg = ASTInlineObjectBuilder.extractGroupBackground(ig, colorResolver);
-                boolean isImageGroup = inlineObj != null
-                        && inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
-                        && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig);
-                if (isImageGroup) {
-                    ASTInlineObjectBuilder.collectOverlayFrames(
-                            ig, inlineObj, idmlDoc, colorResolver, imageLoader, bg);
-                } else {
-                    ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
-                }
+                processInlineGraphic(ig, para, idmlDoc, colorResolver, imageLoader);
             }
         }
     }

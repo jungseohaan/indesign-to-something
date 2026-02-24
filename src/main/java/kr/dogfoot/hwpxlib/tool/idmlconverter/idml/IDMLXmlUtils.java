@@ -179,6 +179,16 @@ public class IDMLXmlUtils {
         }
     }
 
+    public static Integer parseIntAttrNullable(Element elem, String attrName) {
+        String val = elem.getAttribute(attrName);
+        if (val == null || val.isEmpty()) return null;
+        try {
+            return Integer.parseInt(val);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     /**
      * 자식 엘리먼트의 텍스트 내용을 반환한다.
      * IDML TabList 등에서 &lt;Position type="unit"&gt;215.4&lt;/Position&gt; 형태를 파싱할 때 사용.
