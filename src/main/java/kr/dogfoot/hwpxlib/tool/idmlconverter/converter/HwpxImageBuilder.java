@@ -1,14 +1,11 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
-import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
@@ -183,9 +180,10 @@ class HwpxImageBuilder {
     // ── 오버레이 텍스트를 포함하는 인라인 이미지 ──
 
     /**
-     * IMAGE 그룹에서 추출된 오버레이 텍스트프레임을 이미지와 함께 컨테이너 글상자에 중첩하여 변환.
-     * 투명 컨테이너 rect(drawText) 안에 표준 hp:pic + 오버레이 hp:rect를 배치하여
-     * 오버레이가 이미지 영역 내에서 PARA 기준 상대 좌표로 정확히 위치하게 한다.
+     * IMAGE 그룹에서 추출된 오버레이 텍스트프레임을 이미지와 함께 변환.
+     * 컨테이너 없이 이미지(hp:pic)를 인라인으로 직접 배치하고,
+     * 오버레이 텍스트프레임을 같은 단락에 IN_FRONT_OF_TEXT로 배치한다.
+     * 이렇게 하면 단락 높이가 이미지 높이와 정확히 일치하여 불필요한 간격이 생기지 않는다.
      */
     void addInlineImageWithOverlays(Para para, ASTInlineObject obj,
                                      HwpxTextBoxBuilder textBoxBuilder,
@@ -203,139 +201,24 @@ class HwpxImageBuilder {
         if (clipW <= 0) clipW = displayW;
         if (clipH <= 0) clipH = displayH;
 
-        // 컨테이너 크기 = 콘텐츠 바운딩 박스 표시 크기 (이미지보다 클 수 있음)
-        long containerW = obj.containerWidth() > 0 ? obj.containerWidth() : displayW;
-        long containerH = obj.containerHeight() > 0 ? obj.containerHeight() : displayH;
+        // ── 1. 이미지 (hp:pic) — 인라인 (treatAsChar=true) ──
+        addInlinePicture(para, itemId, displayW, displayH, clipW, clipH);
 
-        // 일반 대형 인라인 이미지와 동일한 래핑 모드
-        TextWrapMethod twm = TextWrapMethod.TOP_AND_BOTTOM;
-        TextFlowSide tfs = TextFlowSide.BOTH_SIDES;
-
-        Run run = para.addNewRun();
-        run.charPrIDRef("0");
-
-        // ── 1. 투명 컨테이너 rect (테두리 없음, 채우기 없음) ──
-        //     크기 = 그룹 바운딩 박스 (이미지 + 오버레이 텍스트프레임 전체를 포함)
-
-        Rectangle rect = run.addNewRectangle();
-        String shapeId = ASTToHwpxConverter.nextShapeId();
-
-        // ShapeObject
-        rect.idAnd(shapeId)
-                .zOrderAnd(0)
-                .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(twm)
-                .textFlowAnd(tfs)
-                .lockAnd(false)
-                .dropcapstyleAnd(DropCapStyle.None);
-
-        // ShapeComponent
-        rect.hrefAnd("");
-        rect.groupLevelAnd((short) 0);
-        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
-        rect.createOffset();
-        rect.offset().set(0L, 0L);
-        rect.createOrgSz();
-        rect.orgSz().set(containerW, containerH);
-        rect.createCurSz();
-        rect.curSz().set(containerW, containerH);
-        rect.createFlip();
-        rect.flip().horizontalAnd(false).verticalAnd(false);
-        rect.createRotationInfo();
-        rect.rotationInfo().angleAnd((short) 0)
-                .centerXAnd(containerW / 2).centerYAnd(containerH / 2).rotateimageAnd(true);
-        rect.createRenderingInfo();
-        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-
-        // LineShape — 테두리 없음
-        textBoxBuilder.setupTextBoxLineShape(rect, null, 0, "Solid", 100);
-
-        // FillBrush — 없음 (투명 컨테이너)
-
-        // ── 2. DrawText → SubList → 내부 단락 ──
-
-        rect.createDrawText();
-        DrawText dt = rect.drawText();
-        dt.lastWidthAnd(containerW).nameAnd("").editableAnd(false);
-        dt.createTextMargin();
-        dt.textMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
-
-        dt.createSubList();
-        SubList subList = dt.subList();
-        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
-                .lineWrapAnd(LineWrapMethod.BREAK)
-                .vertAlignAnd(VerticalAlign2.TOP);
-
-        Para innerPara = subList.addNewPara();
-        innerPara.idAnd(ASTToHwpxConverter.nextParaId())
-                .paraPrIDRefAnd("3")
-                .styleIDRefAnd("0")
-                .pageBreakAnd(false)
-                .columnBreakAnd(false)
-                .merged(false);
-
-        // ── 3. 인라인 이미지 (hp:pic) ──
-        //     이미지가 그룹 원점에서 오프셋이 있으면 부유 배치 (BEHIND_TEXT)
-
-        addPictureToContainer(innerPara, itemId, displayW, displayH, clipW, clipH);
-
-        // ── 4. 오버레이 텍스트 박스 (IN_FRONT_OF_TEXT, PARA 기준) ──
-
+        // ── 2. 오버레이 텍스트 박스 (IN_FRONT_OF_TEXT, PARA 기준) ──
         for (ASTInlineObject overlay : obj.overlayFrames()) {
-            textBoxBuilder.addInlineTextFrame(innerPara, overlay);
+            textBoxBuilder.addInlineTextFrame(para, overlay);
         }
-
-        // Rectangle 꼭짓점
-        rect.ratioAnd((short) 0);
-        rect.createPt0();
-        rect.pt0().set(0L, 0L);
-        rect.createPt1();
-        rect.pt1().set(containerW, 0L);
-        rect.createPt2();
-        rect.pt2().set(containerW, containerH);
-        rect.createPt3();
-        rect.pt3().set(0L, containerH);
-
-        // ShapeSize
-        rect.createSZ();
-        rect.sz().widthAnd(containerW).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(containerH).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
-
-        // ShapePosition — 자리 차지 (TOP_AND_BOTTOM)
-        // 컨테이너를 단락 기준 플로팅으로 배치하여 후속 텍스트가 아래로 밀려남
-        // (내부 hp:pic가 treatAsChar=true이므로 DrawText 내부에 실제 높이가 있어 렌더링됨)
-        rect.createPos();
-        rect.pos().treatAsCharAnd(false)
-                .affectLSpacingAnd(false)
-                .flowWithTextAnd(true)
-                .allowOverlapAnd(false)
-                .holdAnchorAndSOAnd(false)
-                .vertRelToAnd(VertRelTo.PARA)
-                .horzRelToAnd(HorzRelTo.PARA)
-                .vertAlignAnd(VertAlign.TOP)
-                .horzAlignAnd(HorzAlign.CENTER)
-                .vertOffsetAnd(0L)
-                .horzOffset(0L);
-
-        // OutMargin
-        rect.createOutMargin();
-        rect.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
-                .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
 
         ctx.imagesConverted++;
     }
 
     /**
-     * 컨테이너 글상자 내부에 이미지(hp:pic)를 추가한다.
-     * 항상 treatAsChar=true (인라인)으로 배치하여 단락에 실제 높이를 부여한다.
-     * (floating 이미지는 단락이 비어있으면 렌더링되지 않는 문제 방지)
+     * 이미지(hp:pic)를 단락에 인라인으로 추가한다.
+     * treatAsChar=true로 배치하여 단락 높이가 이미지 높이와 일치한다.
      */
-    private void addPictureToContainer(Para para, String itemId,
-                                        long displayW, long displayH,
-                                        long clipW, long clipH) {
+    private void addInlinePicture(Para para, String itemId,
+                                   long displayW, long displayH,
+                                   long clipW, long clipH) {
         Run run = para.addNewRun();
         run.charPrIDRef("0");
 
@@ -377,7 +260,6 @@ class HwpxImageBuilder {
                 .protectAnd(false);
 
         pic.createPos();
-        // 항상 인라인 (글자처럼 취급) — 단락에 실제 높이를 부여
         pic.pos().treatAsCharAnd(true)
                 .affectLSpacingAnd(true)
                 .flowWithTextAnd(true)
