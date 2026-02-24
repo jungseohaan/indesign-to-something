@@ -75,6 +75,12 @@ public class NPFontGlyphMap {
         FONT_CATEGORY_MAP.put("NP_IE", FontCategory.ITALIC);
         FONT_CATEGORY_MAP.put("NP_BIE", FontCategory.ITALIC);
 
+        // NP_PE/NP_BE 연산자 글리프 매핑
+        Map<String, String> peMap = new HashMap<String, String>();
+        peMap.put("@", "^{2}");  // ² (제곱) — 연산자 폰트에서 @ = 제곱
+        GLYPH_MAP.put("NP_PE", peMap);
+        GLYPH_MAP.put("NP_BE", peMap);
+
         // NP_SUN/NP_SUNB 특수 글리프 매핑
         Map<String, String> sunMap = new HashMap<String, String>();
         sunMap.put("!", " -> ");  // → (화살표)
@@ -85,26 +91,72 @@ public class NPFontGlyphMap {
 
         // NP_YP/NP_YB 특수 글리프 매핑
         Map<String, String> ypMap = new HashMap<String, String>();
-        ypMap.put("E", "inf");    // ∞ (무한대) - subscript context에서
+        ypMap.put("E", "inf ");   // ∞ (무한대)
         ypMap.put("9", "left lbrace ");   // { (중괄호 열기 - HWP 수식 표시용)
-        ypMap.put("0", " right rbrace");  // } (중괄호 닫기 - HWP 수식 표시용)
-        ypMap.put("y", "cdots");  // ⋯ (말줄임표)
+        ypMap.put("0", " right rbrace ");  // } (중괄호 닫기 - HWP 수식 표시용)
+        ypMap.put("y", "cdots ");  // ⋯ (말줄임표)
+        ypMap.put("/", "therefore ");  // ∴ (따라서)
+        ypMap.put("<", " LEQ ");   // ≤
+        ypMap.put(">", " GEQ ");   // ≥
+        ypMap.put("p", "pi ");     // π
         GLYPH_MAP.put("NP_YP", ypMap);
         GLYPH_MAP.put("NP_YB", ypMap);
 
         // NP_INTE/NP_INTEB 특수 글리프 매핑
         Map<String, String> inteMap = new HashMap<String, String>();
-        inteMap.put("@", "int");  // ∫ (적분)
+        inteMap.put("@", "int ");  // ∫ (적분)
         GLYPH_MAP.put("NP_INTE", inteMap);
         GLYPH_MAP.put("NP_INTEB", inteMap);
 
         // NP_ISHS/NP_BISHS 아래첨자 글리프 매핑
         Map<String, String> ishsMap = new HashMap<String, String>();
         ishsMap.put("N", "n");  // N → n (아래첨자 폰트에서 대문자 N은 소문자 n으로 렌더링)
+        ishsMap.put("_", "-");  // _ → 음수 부호
+        ishsMap.put("@", "");   // 그룹핑 마커 (무시)
         GLYPH_MAP.put("NP_ISHS", ishsMap);
         GLYPH_MAP.put("NP_BISHS", ishsMap);
         GLYPH_MAP.put("NP_PSHS", ishsMap);
+        GLYPH_MAP.put("NP_PSHD", ishsMap);
         GLYPH_MAP.put("NP_BSHS", ishsMap);
+        GLYPH_MAP.put("NP_BSHD", ishsMap);
+        GLYPH_MAP.put("NP_ISHD", ishsMap);
+        GLYPH_MAP.put("NP_BISHD", ishsMap);
+
+        // NP_RUT/NP_RUTB 근호 글리프 매핑
+        Map<String, String> rutMap = new HashMap<String, String>();
+        rutMap.put("j", "sqrt{");  // √ 시작
+        rutMap.put("k", "}");      // 근호 바 확장 → 닫기
+        rutMap.put("!", "\u2460"); // ① 원기호
+        rutMap.put("@", "\u2461"); // ② 원기호
+        GLYPH_MAP.put("NP_RUT", rutMap);
+        GLYPH_MAP.put("NP_RUTB", rutMap);
+
+        // NP_BUN/NP_BUNB 분수 글리프 매핑
+        Map<String, String> bunMap = new HashMap<String, String>();
+        bunMap.put("[", "{");       // 분수 시작
+        bunMap.put("-", " over ");  // 분수선
+        bunMap.put("]", "}");       // 분수 끝
+        GLYPH_MAP.put("NP_BUN", bunMap);
+        GLYPH_MAP.put("NP_BUNB", bunMap);
+
+        // NP_SIG/NP_SIGB 시그마 글리프 매핑
+        Map<String, String> sigMap = new HashMap<String, String>();
+        sigMap.put("S", "sum ");    // Σ
+        GLYPH_MAP.put("NP_SIG", sigMap);
+        GLYPH_MAP.put("NP_SIGB", sigMap);
+
+        // NP_LIM/NP_LIMB 극한 글리프 매핑
+        Map<String, String> limMap = new HashMap<String, String>();
+        limMap.put("l", "lim ");    // lim
+        GLYPH_MAP.put("NP_LIM", limMap);
+        GLYPH_MAP.put("NP_LIMB", limMap);
+
+        // NP_SUSP/NP_SUSB 위첨자 글리프 매핑
+        Map<String, String> suspMap = new HashMap<String, String>();
+        suspMap.put("s", "TRIANGLE "); // △
+        suspMap.put("@", "2");       // 위첨자 2 (제곱)
+        GLYPH_MAP.put("NP_SUSP", suspMap);
+        GLYPH_MAP.put("NP_SUSB", suspMap);
 
         // ── 유니코드 매핑 (텍스트 출력용) ──
 

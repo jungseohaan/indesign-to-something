@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
@@ -89,9 +90,10 @@ class ASTStoryConverter {
             }
         }
 
-        // Character Runs → 인라인 항목 (BT수식M 폰트 런은 그룹핑하여 ASTEquation으로 변환)
-        // NP 폰트는 인라인 주석(아래첨자, 근호 등)이므로 그룹핑하지 않고 텍스트 런으로 처리
-        // BT 런 사이에 끼인 짧은 일반 텍스트(변수명 등)는 "브릿지"로 수식 그룹에 포함
+        // Character Runs → 인라인 항목
+        // BT수식M 폰트 런은 그룹핑하여 ASTEquation으로 변환
+        // NP 폰트 런도 그룹핑하여 NPFontEquationConverter로 ASTEquation 변환
+        // BT/NP 런 사이에 끼인 짧은 일반 텍스트(변수명 등)는 "브릿지"로 수식 그룹에 포함
 
         // 전처리: 한국어+수식마커 혼합 런을 분리 (예: "_r를 구해" → "_r" + "를 구해")
         List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(idmlPara.characterRuns());
@@ -105,12 +107,33 @@ class ASTStoryConverter {
 
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
         List<ASTEquation> mathGroupFractions = new ArrayList<>(); // 수식 그룹 런의 인라인 분수
+        List<IDMLCharacterRun> npMathGroup = new ArrayList<>(); // NP 폰트 수식 그룹
+        List<ASTEquation> npMathGroupFractions = new ArrayList<>(); // NP 수식 그룹의 인라인 분수
 
         // 단락 또는 스토리에 BT 수식 폰트 런이 하나라도 있는지 확인
         boolean paraHasBTRuns = storyHasBTRuns;
         if (!paraHasBTRuns) {
             for (IDMLCharacterRun r : runs) {
                 if (r.isBTFont() || r.grepMathFont()) { paraHasBTRuns = true; break; }
+            }
+        }
+
+        // 단락에 NP 구조 런(아래첨자, 근호, 분수 등)이 있는지 확인
+        boolean paraHasNPStructuralRuns = false;
+        for (IDMLCharacterRun r : runs) {
+            if (r.isNPFont()) {
+                NPFontGlyphMap.FontCategory cat = NPFontGlyphMap.getCategory(r.npFontName());
+                if (cat == NPFontGlyphMap.FontCategory.SUBSCRIPT_INDEX
+                        || cat == NPFontGlyphMap.FontCategory.SUPERSCRIPT_INDEX
+                        || cat == NPFontGlyphMap.FontCategory.ROOT
+                        || cat == NPFontGlyphMap.FontCategory.FRACTION_BAR
+                        || cat == NPFontGlyphMap.FontCategory.INTEGRAL
+                        || cat == NPFontGlyphMap.FontCategory.SUMMATION
+                        || cat == NPFontGlyphMap.FontCategory.LIMIT
+                        || cat == NPFontGlyphMap.FontCategory.SPECIAL_SYMBOL) {
+                    paraHasNPStructuralRuns = true;
+                    break;
+                }
             }
         }
 
@@ -125,30 +148,70 @@ class ASTStoryConverter {
                 }
             }
 
-            // 수식 그룹 진입 여부 판단
-            boolean enterMathGroup = false;
-            if ((run.isBTFont() || run.grepMathFont())
-                    && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())
-                    && !ASTMathGrouper.isPlainAlphanumericRun(run)) {
-                enterMathGroup = true;
-            } else if (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx)) {
-                enterMathGroup = true;
-            } else if (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content())) {
-                enterMathGroup = true;
+            // NP 수식 그룹 진입 여부 판단
+            boolean enterNPMathGroup = false;
+            if (run.isNPFont()) {
+                enterNPMathGroup = true;
+            } else if (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx)) {
+                enterNPMathGroup = true;
+            } else if (npMathGroup.isEmpty() && ASTMathGrouper.isPreNPMathRun(run, runs, idx)) {
+                // NP 그룹 시작 전 비NP 수학 텍스트 (예: "y=log" 뒤에 NP_ISHS:"2" 올 때)
+                enterNPMathGroup = true;
+            } else if (paraHasNPStructuralRuns && !run.isNPFont() && !run.isBTFont()
+                    && !run.grepMathFont() && ASTMathGrouper.isStandaloneMathRun(run)) {
+                // 단락에 NP 구조 런이 있으면, 독립 수학 텍스트(x=k, 0<k<8)도 수식으로 변환
+                enterNPMathGroup = true;
             }
 
-            if (enterMathGroup) {
-                // 수식 그룹에 들어가는 런의 인라인 분수 TextFrame 추출
-                // (flushMathGroup은 텍스트만 처리하므로 인라인 프레임은 여기서 별도 수집)
-                extractFractionFrames(run, idmlDoc, mathGroupFractions);
-                mathGroup.add(run);
-            } else {
-                // 수식 그룹 종료 → 변환
+            // BT 수식 그룹 진입 여부 판단
+            boolean enterMathGroup = false;
+            if (!enterNPMathGroup) {
+                if ((run.isBTFont() || run.grepMathFont())
+                        && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())
+                        && !ASTMathGrouper.isPlainAlphanumericRun(run)) {
+                    enterMathGroup = true;
+                } else if (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx)) {
+                    enterMathGroup = true;
+                } else if (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content())) {
+                    enterMathGroup = true;
+                }
+            }
+
+            if (enterNPMathGroup) {
+                // BT 그룹이 열려있으면 먼저 flush
                 if (!mathGroup.isEmpty()) {
                     flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere);
                     emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
                     mathGroup.clear();
                     mathGroupFractions.clear();
+                }
+                extractFractionFrames(run, idmlDoc, npMathGroupFractions);
+                npMathGroup.add(run);
+            } else if (enterMathGroup) {
+                // NP 그룹이 열려있으면 먼저 flush
+                if (!npMathGroup.isEmpty()) {
+                    flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere);
+                    emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    npMathGroup.clear();
+                    npMathGroupFractions.clear();
+                }
+                // 수식 그룹에 들어가는 런의 인라인 분수 TextFrame 추출
+                // (flushMathGroup은 텍스트만 처리하므로 인라인 프레임은 여기서 별도 수집)
+                extractFractionFrames(run, idmlDoc, mathGroupFractions);
+                mathGroup.add(run);
+            } else {
+                // 둘 다 종료 → 변환
+                if (!mathGroup.isEmpty()) {
+                    flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere);
+                    emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    mathGroup.clear();
+                    mathGroupFractions.clear();
+                }
+                if (!npMathGroup.isEmpty()) {
+                    flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere);
+                    emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    npMathGroup.clear();
+                    npMathGroupFractions.clear();
                 }
                 convertCharacterRun(run, idmlPara, para, pool, idmlDoc, colorResolver, imageLoader);
             }
@@ -157,6 +220,10 @@ class ASTStoryConverter {
         if (!mathGroup.isEmpty()) {
             flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere);
             emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
+        }
+        if (!npMathGroup.isEmpty()) {
+            flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere);
+            emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
         }
 
         // 단락 끝의 trailing lineBreak 제거
@@ -687,6 +754,49 @@ class ASTStoryConverter {
             }
         } else {
             // 분수 없이 \uFFFC만 있는 경우 → 제거
+            lastEq.hwpScript(script.replace("\uFFFC", ""));
+        }
+    }
+
+    /**
+     * NP 수식 그룹을 flush하면서 인라인 분수 TextFrame을 통합.
+     * flushMathGroupWithFractions의 NP 버전.
+     */
+    private static void flushNPMathGroupWithFractions(List<IDMLCharacterRun> npGroup,
+                                                       ASTParagraph para,
+                                                       List<ASTEquation> fractions,
+                                                       boolean hasIndentToHere) {
+        ASTMathGrouper.flushNPMathGroup(npGroup, para);
+
+        // flushNPMathGroup이 방금 추가한 마지막 수식 항목 찾기
+        List<ASTInlineItem> items = para.items();
+        ASTEquation lastEq = null;
+        for (int i = items.size() - 1; i >= 0; i--) {
+            if (items.get(i).itemType() == ASTInlineItem.ItemType.EQUATION) {
+                lastEq = (ASTEquation) items.get(i);
+                break;
+            }
+        }
+
+        if (lastEq == null) {
+            for (ASTEquation eq : fractions) {
+                para.addItem(eq);
+            }
+            return;
+        }
+
+        String script = lastEq.hwpScript();
+        if (script == null || script.indexOf('\uFFFC') < 0) {
+            for (ASTEquation eq : fractions) {
+                para.addItem(eq);
+            }
+            return;
+        }
+
+        if (!fractions.isEmpty()) {
+            String merged = replaceFffcWithFractions(script, fractions);
+            lastEq.hwpScript(merged);
+        } else {
             lastEq.hwpScript(script.replace("\uFFFC", ""));
         }
     }

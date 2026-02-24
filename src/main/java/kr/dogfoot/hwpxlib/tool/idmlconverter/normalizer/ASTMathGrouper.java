@@ -1,6 +1,8 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontEquationConverter;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
@@ -213,6 +215,132 @@ class ASTMathGrouper {
                 }
             }
             if (hasKorean) return false;
+        }
+        return false;
+    }
+
+    /**
+     * NP 폰트 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
+     * 수식으로 변환할 수 없는 경우 유니코드 변환 후 일반 텍스트 런으로 폴백.
+     */
+    static void flushNPMathGroup(List<IDMLCharacterRun> npRuns, ASTParagraph para) {
+        String hwpScript = NPFontEquationConverter.convert(npRuns);
+        if (hwpScript != null) {
+            para.addItem(new ASTEquation(hwpScript, "NP_FONT"));
+        } else {
+            // 수식이 아닌 NP 텍스트 → 유니코드 변환 후 텍스트 런으로 폴백
+            for (IDMLCharacterRun run : npRuns) {
+                String npFont = run.npFontName();
+                String text = run.content();
+                if (npFont != null && text != null && !text.isEmpty()) {
+                    text = NPFontGlyphMap.convertRunToUnicode(npFont, text);
+                }
+                if (text != null && !text.isEmpty()) {
+                    ASTTextRun textRun = new ASTTextRun();
+                    textRun.text(Stage4_BuildAST.stripACEPlaceholders(text));
+                    if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
+                    if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
+                    para.addItem(textRun);
+                }
+            }
+        }
+    }
+
+    /**
+     * 독립적인 수학 표현식인지 확인 (NP 구조 런이 있는 단락 내에서).
+     * 한국어 없음, 수학 연산자(=, <, >, ±) 포함, 문자/숫자 존재 시 수식으로 인정.
+     * 예: "x=k", "0<k<8", "A+B"
+     */
+    static boolean isStandaloneMathRun(IDMLCharacterRun run) {
+        String text = run.content();
+        if (text == null || text.isEmpty()) return false;
+        // 한국어/탭 포함 → 불가
+        boolean hasOperator = false;
+        boolean hasLetterOrDigit = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 0xAC00 && c <= 0xD7AF) return false;
+            if (c >= 0x3131 && c <= 0x318E) return false;
+            if (c == '\t') return false;
+            if (c == '=' || c == '<' || c == '>') hasOperator = true;
+            if (Character.isLetterOrDigit(c)) hasLetterOrDigit = true;
+        }
+        // 수학 연산자 + 문자/숫자 → 수식
+        return hasOperator && hasLetterOrDigit;
+    }
+
+    /**
+     * NP 그룹이 아직 시작되지 않았을 때, 비NP 런이 곧 올 NP 런과 합쳐져야 하는지 확인.
+     * "y=log" [NoStyle] + "2" [NP_ISHS] → "y=log_{2}" 로 합치기 위함.
+     * 조건: 한국어 없음, 수학 연산자/변수 포함, 바로 뒤에 NP 런이 있음.
+     */
+    static boolean isPreNPMathRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+        if (run.isNPFont() || run.isBTFont() || run.grepMathFont()) return false;
+        String text = run.content();
+        if (text == null || text.isEmpty()) return false;
+
+        // 한국어/탭 포함 → 불가
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 0xAC00 && c <= 0xD7AF) return false;
+            if (c >= 0x3131 && c <= 0x318E) return false;
+            if (c == '\t') return false;
+        }
+
+        // 수학 관련 내용이어야 함 (연산자, 함수명, 변수 등)
+        boolean hasMathContent = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ("=<>+-".indexOf(c) >= 0) { hasMathContent = true; break; }
+            if (Character.isLetterOrDigit(c)) hasMathContent = true;
+        }
+        if (!hasMathContent) return false;
+
+        // 바로 다음(비한국어 런 건너뛰며) NP 런이 오는지 확인
+        for (int j = idx + 1; j < runs.size(); j++) {
+            IDMLCharacterRun next = runs.get(j);
+            if (next.isNPFont()) return true;
+            // 한국어 만나면 중단
+            String nextText = next.content();
+            if (nextText != null) {
+                for (int i = 0; i < nextText.length(); i++) {
+                    char c = nextText.charAt(i);
+                    if ((c >= 0xAC00 && c <= 0xD7AF) || (c >= 0x3131 && c <= 0x318E)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * NP 수식 그룹 사이의 비NP 런이 브릿지될 수 있는지 확인.
+     * 한국어/탭 포함 → 브릿지 아님. 뒤에 NP 런이 이어지면 → 브릿지.
+     */
+    static boolean isNPMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+        String text = run.content();
+        if (text == null || text.isEmpty()) return false;
+        // 한국어 포함 또는 탭 포함 → 브릿지 아님
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 0xAC00 && c <= 0xD7AF) return false;
+            if (c >= 0x3131 && c <= 0x318E) return false;
+            if (c == '\t') return false;
+        }
+        // 뒤에 NP 수식 런이 있는지 확인
+        for (int j = idx + 1; j < runs.size(); j++) {
+            IDMLCharacterRun next = runs.get(j);
+            if (next.isNPFont()) return true;
+            String nextText = next.content();
+            if (nextText == null || nextText.isEmpty()) continue;
+            // 한국어 만나면 중단
+            for (int i = 0; i < nextText.length(); i++) {
+                char c = nextText.charAt(i);
+                if ((c >= 0xAC00 && c <= 0xD7AF) || (c >= 0x3131 && c <= 0x318E)) {
+                    return false;
+                }
+            }
         }
         return false;
     }
