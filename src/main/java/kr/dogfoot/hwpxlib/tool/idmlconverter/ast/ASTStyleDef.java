@@ -24,6 +24,14 @@ public class ASTStyleDef {
     private Integer fontSizeHwpunits;
     private String textColor;
     private Short letterSpacing;
+    private Boolean bold;
+    private Boolean italic;
+    private Short horizontalScale;    // 장평 (%)
+    private Double wordSpacing;       // 어간 desired (%)
+    private Double autoLeading;       // 자동 줄간격 비율 (%)
+
+    // 단락 속성 — 탭 정지점
+    private java.util.List<ASTTabStop> tabStops;
 
     public String styleId() { return styleId; }
     public void styleId(String v) { this.styleId = v; }
@@ -72,4 +80,26 @@ public class ASTStyleDef {
 
     public Short letterSpacing() { return letterSpacing; }
     public void letterSpacing(Short v) { this.letterSpacing = v; }
+
+    public Boolean bold() { return bold; }
+    public void bold(Boolean v) { this.bold = v; }
+
+    public Boolean italic() { return italic; }
+    public void italic(Boolean v) { this.italic = v; }
+
+    public Short horizontalScale() { return horizontalScale; }
+    public void horizontalScale(Short v) { this.horizontalScale = v; }
+
+    public Double wordSpacing() { return wordSpacing; }
+    public void wordSpacing(Double v) { this.wordSpacing = v; }
+
+    public Double autoLeading() { return autoLeading; }
+    public void autoLeading(Double v) { this.autoLeading = v; }
+
+    public java.util.List<ASTTabStop> tabStops() { return tabStops; }
+    public void tabStops(java.util.List<ASTTabStop> v) { this.tabStops = v; }
+
+    public boolean hasTabStops() {
+        return tabStops != null && !tabStops.isEmpty();
+    }
 }

@@ -470,12 +470,19 @@ BT수식M 또는 NP 커스텀 폰트에서 추출된 인라인 수식입니다.
 | `spaceBefore` | long | 단락 앞 간격 |
 | `spaceAfter` | long | 단락 뒤 간격 |
 | `lineSpacing` | int | 줄간격 값 |
+| `lineSpacingType` | string | `"percent"` 또는 `"fixed"` |
+| `autoLeading` | double | 자동 줄간격 비율 (%). null이면 생략 |
+| `tabStops` | ASTTabStop[] | 스타일 내 탭 정지점 |
 | **문자 속성** (null이면 생략) |
 | `fontFamily` | string | 폰트 패밀리 |
 | `fontStyle` | string | 폰트 스타일 |
 | `fontSizeHwpunits` | int | 폰트 크기 (HWPUNIT) |
 | `textColor` | string | 글자색 |
 | `letterSpacing` | short | 자간 |
+| `bold` | boolean | 볼드. true일 때만 출력 |
+| `italic` | boolean | 이탤릭. true일 때만 출력 |
+| `horizontalScale` | short | 장평 (%). null이면 생략. HWPX CharPr ratio에 반영 |
+| `wordSpacing` | double | 어간 desired (%). HWPX 직접 대응 없음 |
 
 ---
 

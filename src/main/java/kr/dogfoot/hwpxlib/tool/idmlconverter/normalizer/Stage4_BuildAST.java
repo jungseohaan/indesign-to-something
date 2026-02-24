@@ -413,14 +413,35 @@ public class Stage4_BuildAST {
             if (s.spaceBefore() != null) sd.spaceBefore((long)(s.spaceBefore() * 100));
             if (s.spaceAfter() != null) sd.spaceAfter((long)(s.spaceAfter() * 100));
             if (s.tracking() != null) sd.letterSpacing((short) Math.round(s.tracking() / 10.0));
+            // bold / italic
+            sd.bold(s.bold());
+            sd.italic(s.italic());
+            // 장평
+            if (s.horizontalScale() != null) sd.horizontalScale((short) Math.round(s.horizontalScale()));
+            // 어간
+            if (s.desiredWordSpacing() != null) sd.wordSpacing(s.desiredWordSpacing());
             // leading → lineSpacing
             if (s.leading() != null) {
                 sd.lineSpacingType("fixed");
                 sd.lineSpacing((int) CoordinateConverter.pointsToHwpunits(s.leading()));
             } else if ("Auto".equals(s.leadingType())) {
                 sd.lineSpacingType("percent");
-                double autoLeading = s.autoLeading() != null ? s.autoLeading() : 120;
-                sd.lineSpacing((int) Math.round(autoLeading));
+                double autoLd = s.autoLeading() != null ? s.autoLeading() : 120;
+                sd.lineSpacing((int) Math.round(autoLd));
+            }
+            // autoLeading 비율 보존
+            if (s.autoLeading() != null) sd.autoLeading(s.autoLeading());
+            // 스타일 내 탭 정지점
+            if (s.tabStops() != null && !s.tabStops().isEmpty()) {
+                java.util.List<ASTTabStop> astTabs = new java.util.ArrayList<>();
+                for (IDMLStyleDef.TabStop ts : s.tabStops()) {
+                    ASTTabStop at = new ASTTabStop();
+                    at.position((long)(ts.position() * 100));
+                    at.alignment(ASTStoryConverter.mapTabAlignment(ts.alignment()));
+                    at.leader(ts.leader());
+                    astTabs.add(at);
+                }
+                sd.tabStops(astTabs);
             }
             doc.addParagraphStyle(sd);
         }
@@ -437,6 +458,9 @@ public class Stage4_BuildAST {
             if (s.fontSize() != null) sd.fontSizeHwpunits((int)(s.fontSize() * 100));
             if (s.fillColor() != null) sd.textColor(colorResolver.resolve(s.fillColor()));
             if (s.tracking() != null) sd.letterSpacing((short) Math.round(s.tracking() / 10.0));
+            sd.bold(s.bold());
+            sd.italic(s.italic());
+            if (s.horizontalScale() != null) sd.horizontalScale((short) Math.round(s.horizontalScale()));
             doc.addCharacterStyle(sd);
         }
 

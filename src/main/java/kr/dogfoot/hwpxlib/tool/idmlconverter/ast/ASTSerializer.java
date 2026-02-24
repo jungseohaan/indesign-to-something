@@ -627,6 +627,41 @@ public class ASTSerializer {
         if (style.letterSpacing() != null) {
             first = writeBoxedShortField(sb, "letterSpacing", style.letterSpacing(), first);
         }
+        if (style.bold() != null && style.bold()) {
+            first = writeBooleanField(sb, "bold", true, first);
+        }
+        if (style.italic() != null && style.italic()) {
+            first = writeBooleanField(sb, "italic", true, first);
+        }
+        if (style.horizontalScale() != null) {
+            first = writeBoxedShortField(sb, "horizontalScale", style.horizontalScale(), first);
+        }
+        if (style.wordSpacing() != null) {
+            first = writeBoxedDoubleField(sb, "wordSpacing", style.wordSpacing(), first);
+        }
+        if (style.autoLeading() != null) {
+            first = writeBoxedDoubleField(sb, "autoLeading", style.autoLeading(), first);
+        }
+        first = writeStringField(sb, "lineSpacingType", style.lineSpacingType(), first);
+        if (style.hasTabStops()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append("\"tabStops\":[");
+            for (int i = 0; i < style.tabStops().size(); i++) {
+                if (i > 0) sb.append(',');
+                ASTTabStop ts = style.tabStops().get(i);
+                sb.append('{');
+                sb.append("\"position\":").append(ts.position());
+                if (ts.alignment() != null) {
+                    sb.append(",\"alignment\":\"").append(escapeJson(ts.alignment())).append('"');
+                }
+                if (ts.leader() != null) {
+                    sb.append(",\"leader\":\"").append(escapeJson(ts.leader())).append('"');
+                }
+                sb.append('}');
+            }
+            sb.append(']');
+        }
         sb.append('}');
     }
 

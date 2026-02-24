@@ -36,7 +36,8 @@ public final class CharPrBuilder {
                               Short letterSpacing,
                               boolean bold, boolean italic,
                               boolean superscript, boolean subscript,
-                              UnderlineType underlineType, String underlineColor) {
+                              UnderlineType underlineType, String underlineColor,
+                              Short horizontalScale) {
         // 기본 속성
         charPr.idAnd(id)
                 .heightAnd(height)
@@ -68,8 +69,12 @@ public final class CharPrBuilder {
         charPr.createFontRef();
         charPr.fontRef().set(fontId, fontId, fontId, fontId, fontId, fontId, fontId);
 
+        short ratio = 90;
+        if (horizontalScale != null) {
+            ratio = (short)(90 * horizontalScale / 100);
+        }
         charPr.createRatio();
-        charPr.ratio().set((short) 90, (short) 90, (short) 90, (short) 90, (short) 90, (short) 90, (short) 90);
+        charPr.ratio().set(ratio, ratio, ratio, ratio, ratio, ratio, ratio);
 
         // 자간 — 전역 -10% 적용
         short baseSpacing = letterSpacing != null ? letterSpacing : 0;

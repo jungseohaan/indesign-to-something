@@ -367,7 +367,8 @@ class HwpxParagraphBuilder {
                 fontStyle.contains("bold"),
                 fontStyle.contains("italic"),
                 textRun.superscript(), textRun.subscript(),
-                UnderlineType.NONE, "#000000");
+                UnderlineType.NONE, "#000000",
+                null);
 
         ctx.charPrCache.put(cacheKey, newId);
         return newId;
@@ -398,7 +399,8 @@ class HwpxParagraphBuilder {
                 fontStyle.contains("bold"),
                 fontStyle.contains("italic"),
                 textRun.superscript(), textRun.subscript(),
-                UnderlineType.NONE, textColor);
+                UnderlineType.NONE, textColor,
+                null);
 
         ctx.eqFontCharPrCache.put(cacheKey, newId);
         return newId;

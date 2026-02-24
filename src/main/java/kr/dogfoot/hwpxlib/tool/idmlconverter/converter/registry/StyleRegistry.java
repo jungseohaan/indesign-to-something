@@ -65,7 +65,11 @@ public class StyleRegistry {
         CharPr charPr = hwpxFile.headerXMLFile().refList().charProperties().addNew();
         buildCharPr(charPr, charPrId, styleDef);
 
+        // 스타일 내 탭 정지점 → TabPr 생성
         String tabPrId = "0";
+        if (styleDef.hasTabStops()) {
+            tabPrId = createInlineTabPr(styleDef.tabStops());
+        }
 
         String paraPrId = String.valueOf(nextParaPrIndex++);
         ParaPr paraPr = hwpxFile.headerXMLFile().refList().paraProperties().addNew();
@@ -190,18 +194,21 @@ public class StyleRegistry {
     private void buildCharPr(CharPr charPr, String id, ASTStyleDef styleDef) {
         int height = styleDef.fontSizeHwpunits() != null ? styleDef.fontSizeHwpunits() : 1000;
         String textColor = styleDef.textColor() != null ? styleDef.textColor() : "#000000";
-        boolean bold = false, italic = false;
-        if (styleDef.fontStyle() != null) {
+        // bold/italic: 명시적 플래그 우선, 없으면 fontStyle 파싱
+        boolean bold = Boolean.TRUE.equals(styleDef.bold());
+        boolean italic = Boolean.TRUE.equals(styleDef.italic());
+        if (!bold && !italic && styleDef.fontStyle() != null) {
             String fs = styleDef.fontStyle().toLowerCase();
             bold = fs.contains("bold");
-            italic = fs.contains("italic");
+            italic = fs.contains("italic") || fs.contains("oblique");
         }
         CharPrBuilder.build(charPr, id, height, textColor,
                 styleDef.fontFamily(), fontRegistry,
                 styleDef.letterSpacing(),
                 bold, italic,
                 false, false,
-                UnderlineType.NONE, "#000000");
+                UnderlineType.NONE, "#000000",
+                styleDef.horizontalScale());
     }
 
     private void buildParaPr(ParaPr paraPr, String id, ASTStyleDef styleDef, String tabPrId) {
