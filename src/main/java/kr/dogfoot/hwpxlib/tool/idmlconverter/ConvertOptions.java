@@ -19,6 +19,7 @@ public class ConvertOptions {
     private boolean drawPageBoundary;
     private String layoutMode;
     private String imageCacheDir;
+    private String resolvedJsonPath;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -215,6 +216,20 @@ public class ConvertOptions {
 
     public ConvertOptions imageCacheDir(String imageCacheDir) {
         this.imageCacheDir = imageCacheDir;
+        return this;
+    }
+
+    /**
+     * resolved.json 경로.
+     * InDesign ExtendScript에서 수집한 resolved 데이터 (색상 hex, per-run 속성 등).
+     * 설정하면 AST 빌드 후 resolved 데이터로 보강한다.
+     */
+    public String resolvedJsonPath() {
+        return resolvedJsonPath;
+    }
+
+    public ConvertOptions resolvedJsonPath(String resolvedJsonPath) {
+        this.resolvedJsonPath = resolvedJsonPath;
         return this;
     }
 }

@@ -141,6 +141,11 @@ public class ConverterCLI {
                         options = options.layoutMode(args[++i]);
                     }
                     break;
+                case "--resolved":
+                    if (i + 1 < args.length) {
+                        options = options.resolvedJsonPath(args[++i]);
+                    }
+                    break;
                 default:
                     System.err.println("Unknown option: " + arg);
             }

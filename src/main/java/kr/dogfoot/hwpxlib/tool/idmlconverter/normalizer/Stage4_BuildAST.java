@@ -70,11 +70,17 @@ public class Stage4_BuildAST {
                     String storyId = tf.parentStoryId();
                     if (storyId == null) continue;
 
-                    // 연결 프레임 체인에서 첫 프레임이 아닌 경우
-                    // IDML에서 "n"은 "없음"을 의미 (no previous frame)
+                    // 연결 프레임 체인에서 첫 프레임이 아닌 경우 → 빈 블록만 생성 (연결 글상자용)
                     String prevFrame = tf.previousTextFrame();
-                    if (prevFrame != null && !prevFrame.isEmpty()
-                            && !"n".equals(prevFrame) && !"null".equalsIgnoreCase(prevFrame)) {
+                    boolean isLinkedContinuation = prevFrame != null && !prevFrame.isEmpty()
+                            && !"n".equals(prevFrame) && !"null".equalsIgnoreCase(prevFrame);
+                    if (isLinkedContinuation) {
+                        // 빈 블록(geometry only) 생성 — 텍스트는 첫 프레임에만
+                        ASTTextFrameBlock emptyBlock = createTextFrameBlock(tf, page, fo.zOrder(), colorResolver);
+                        if (emptyBlock != null) {
+                            emptyBlock.storyId(storyId);
+                            section.addBlock(emptyBlock);
+                        }
                         continue;
                     }
 
@@ -581,6 +587,21 @@ public class Stage4_BuildAST {
         block.zOrder(zOrder);
         block.columnCount(tf.columnCount());
         block.columnGutter(CoordinateConverter.pointsToHwpunits(tf.columnGutter()));
+
+        // 컬럼 폭 정보 (FixedWidth / FlexibleWidth인 경우)
+        if ("FixedWidth".equals(tf.columnType())) {
+            long fw = CoordinateConverter.pointsToHwpunits(tf.columnFixedWidth());
+            long[] widths = new long[tf.columnCount()];
+            java.util.Arrays.fill(widths, fw);
+            block.columnWidths(widths);
+        } else if ("FlexibleWidth".equals(tf.columnType()) && tf.columnWidths() != null) {
+            double[] srcWidths = tf.columnWidths();
+            long[] widths = new long[srcWidths.length];
+            for (int cw = 0; cw < srcWidths.length; cw++) {
+                widths[cw] = CoordinateConverter.pointsToHwpunits(srcWidths[cw]);
+            }
+            block.columnWidths(widths);
+        }
 
         if (tf.insetSpacing() != null) {
             double[] inset = tf.insetSpacing();

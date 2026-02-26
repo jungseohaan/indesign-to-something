@@ -335,6 +335,7 @@ class HwpxParagraphBuilder {
                 || run.fontSizeHwpunits() != null
                 || run.textColor() != null
                 || run.letterSpacing() != null
+                || run.horizontalScale() != null
                 || run.subscript()
                 || run.superscript()
                 || run.underline()
@@ -347,6 +348,7 @@ class HwpxParagraphBuilder {
                 + "|" + (textRun.textColor() != null ? textRun.textColor() : "")
                 + "|" + (textRun.fontStyle() != null ? textRun.fontStyle() : "")
                 + "|" + (textRun.letterSpacing() != null ? textRun.letterSpacing() : "")
+                + "|" + (textRun.horizontalScale() != null ? textRun.horizontalScale() : "")
                 + "|" + textRun.superscript()
                 + "|" + textRun.subscript()
                 + "|" + textRun.underline()
@@ -373,7 +375,7 @@ class HwpxParagraphBuilder {
                 textRun.superscript(), textRun.subscript(),
                 textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
                 textRun.underline() ? textColor : "#000000",
-                null,
+                textRun.horizontalScale(),
                 textRun.strikeThrough());
 
         ctx.charPrCache.put(cacheKey, newId);

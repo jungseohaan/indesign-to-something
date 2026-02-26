@@ -16,6 +16,7 @@ public class ASTTextRun extends ASTInlineItem {
     private boolean grepMathFont;  // GREP 스타일에서 BT수식M이 동적 적용된 런
     private boolean underline;     // 밑줄
     private boolean strikeThrough; // 취소선
+    private Short horizontalScale; // 장평 (%, 100 = normal)
 
     public ItemType itemType() { return ItemType.TEXT_RUN; }
 
@@ -54,5 +55,8 @@ public class ASTTextRun extends ASTInlineItem {
 
     public boolean strikeThrough() { return strikeThrough; }
     public void strikeThrough(boolean v) { this.strikeThrough = v; }
+
+    public Short horizontalScale() { return horizontalScale; }
+    public void horizontalScale(Short v) { this.horizontalScale = v; }
 
 }

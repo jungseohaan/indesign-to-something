@@ -229,6 +229,9 @@ public class ASTSerializer {
         first = writeIntField(sb, "zOrder", tf.zOrder(), first);
         first = writeIntField(sb, "columnCount", tf.columnCount(), first);
         first = writeLongField(sb, "columnGutter", tf.columnGutter(), first);
+        if (tf.columnWidths() != null) {
+            first = writeLongArrayField(sb, "columnWidths", tf.columnWidths(), first);
+        }
         if (tf.verticalText()) {
             first = writeBooleanField(sb, "verticalText", true, first);
         }
@@ -595,6 +598,9 @@ public class ASTSerializer {
         if (run.strikeThrough()) {
             first = writeBooleanField(sb, "strikeThrough", true, first);
         }
+        if (run.horizontalScale() != null) {
+            first = writeBoxedShortField(sb, "horizontalScale", run.horizontalScale(), first);
+        }
         if (run.grepMathFont()) {
             first = writeBooleanField(sb, "grepMathFont", true, first);
         }
@@ -838,6 +844,18 @@ public class ASTSerializer {
     private static boolean writeBooleanField(StringBuilder sb, String key, boolean value, boolean first) {
         if (!first) sb.append(',');
         sb.append('"').append(key).append("\":").append(value);
+        return false;
+    }
+
+    private static boolean writeLongArrayField(StringBuilder sb, String key, long[] value, boolean first) {
+        if (value == null) return first;
+        if (!first) sb.append(',');
+        sb.append('"').append(key).append("\":[");
+        for (int i = 0; i < value.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(value[i]);
+        }
+        sb.append(']');
         return false;
     }
 

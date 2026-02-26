@@ -229,14 +229,40 @@ class HwpxTextBoxBuilder {
      * 글상자(rect+drawText) 대신 1x1 테이블을 사용하여 클릭만으로 텍스트 편집 가능.
      */
     void convertTextFrameBlock(Para framePara, ASTTextFrameBlock block) {
-        long x = block.x();
-        long y = block.y();
         long w = block.width();
         long h = block.height();
 
         // 음수 또는 0 크기 블록 건너뜀 (페이지 밖 객체)
         if (w <= 0 || h <= 0) return;
 
+        int colCount = Math.max(block.columnCount(), 1);
+        if (colCount <= 1) {
+            // 단일 컬럼 — 기존 1×1 테이블
+            convertSingleColumnTable(framePara, block, block.x(), block.y(), w, h,
+                    block.paragraphs());
+        } else {
+            // 다단 — N개 독립 글상자(1×1 테이블)를 수평 배치
+            long[] colWidths = computeColumnWidths(block, colCount);
+            java.util.List<java.util.List<ASTParagraph>> distributed =
+                    distributeParagraphs(block.paragraphs(), colCount);
+
+            long xCursor = block.x();
+            long gutter = block.columnGutter();
+            for (int c = 0; c < colCount; c++) {
+                convertSingleColumnTable(framePara, block, xCursor, block.y(),
+                        colWidths[c], h, distributed.get(c));
+                xCursor += colWidths[c] + gutter;
+            }
+        }
+    }
+
+    /**
+     * 단일 1×1 테이블(글상자) 생성.
+     * 다단인 경우 각 컬럼마다 호출된다.
+     */
+    private void convertSingleColumnTable(Para framePara, ASTTextFrameBlock block,
+                                           long x, long y, long w, long h,
+                                           java.util.List<ASTParagraph> paragraphs) {
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
 
@@ -254,7 +280,7 @@ class HwpxTextBoxBuilder {
                 .textWrapAnd(wrapMethod)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
-                .dropcapstyleAnd(resolveDropCapStyle(block.paragraphs()));
+                .dropcapstyleAnd(resolveDropCapStyle(paragraphs));
 
         // 테이블 속성 — 1행 1열
         table.pageBreakAnd(TablePageBreak.CELL)
@@ -335,8 +361,11 @@ class HwpxTextBoxBuilder {
                 .lineWrapAnd(LineWrapMethod.BREAK)
                 .vertAlignAnd(cellVAlign);
 
+        // 연결 글상자 링크 설정
+        applySubListLink(subList, block.storyId());
+
         // 단락 추가
-        for (ASTParagraph para : block.paragraphs()) {
+        for (ASTParagraph para : paragraphs) {
             paragraphBuilder.addParagraphToSubList(subList, para);
         }
         HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
@@ -345,6 +374,126 @@ class HwpxTextBoxBuilder {
         if (subList.countOfPara() == 0) {
             paragraphBuilder.addEmptySubListPara(subList);
         }
+    }
+
+    /**
+     * SubList에 연결 글상자 링크를 설정한다.
+     * storyId가 2개 이상의 블록을 공유하면, 사전 할당된 linkId로 체인을 구성.
+     */
+    private void applySubListLink(SubList subList, String storyId) {
+        if (storyId == null) {
+            subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+            return;
+        }
+
+        java.util.List<String> linkIds = ctx.storyLinkIds.get(storyId);
+        if (linkIds == null) {
+            // 연결 글상자 아님 — 단독 프레임
+            subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+            return;
+        }
+
+        int idx = ctx.storyLinkIndex.getOrDefault(storyId, 0);
+        String myLinkId = (idx < linkIds.size()) ? linkIds.get(idx) : "0";
+        String nextLinkId = (idx + 1 < linkIds.size()) ? linkIds.get(idx + 1) : "0";
+
+        subList.linkListIDRefAnd(myLinkId).linkListNextIDRefAnd(nextLinkId);
+
+        // 인덱스 진행
+        ctx.storyLinkIndex.put(storyId, idx + 1);
+    }
+
+    // ── 다단 글상자 헬퍼 ──
+
+    /**
+     * 각 컬럼의 폭을 계산한다.
+     * columnWidths가 지정되어 있으면 비율 기반으로 테이블 폭에 맞게 조정,
+     * 아니면 (전체폭 - 거터합) / N으로 균등 분할.
+     */
+    private long[] computeColumnWidths(ASTTextFrameBlock block, int colCount) {
+        long totalWidth = block.width();
+        long gutter = block.columnGutter();
+        long totalGutter = gutter * (colCount - 1);
+        long contentWidth = totalWidth - totalGutter;
+
+        long[] result = new long[colCount];
+
+        if (block.columnWidths() != null && block.columnWidths().length == colCount) {
+            // FlexibleWidth / FixedWidth: 비율 기반 분배
+            long specSum = 0;
+            for (long w : block.columnWidths()) specSum += w;
+            if (specSum > 0) {
+                long assigned = 0;
+                for (int i = 0; i < colCount - 1; i++) {
+                    result[i] = contentWidth * block.columnWidths()[i] / specSum;
+                    assigned += result[i];
+                }
+                result[colCount - 1] = contentWidth - assigned; // 나머지 보정
+            } else {
+                java.util.Arrays.fill(result, contentWidth / colCount);
+                result[colCount - 1] = contentWidth - (contentWidth / colCount) * (colCount - 1);
+            }
+        } else {
+            // FixedNumber (균등 분할)
+            long baseWidth = contentWidth / colCount;
+            java.util.Arrays.fill(result, baseWidth);
+            result[colCount - 1] = contentWidth - baseWidth * (colCount - 1);
+        }
+
+        return result;
+    }
+
+    /**
+     * 단락들을 N개 컬럼에 문자 수 기반으로 균등 분배한다.
+     * 그리디 방식: 왼쪽 컬럼부터 채우고, 할당량 초과 시 다음 컬럼으로.
+     */
+    private java.util.List<java.util.List<ASTParagraph>> distributeParagraphs(
+            java.util.List<ASTParagraph> paragraphs, int colCount) {
+        java.util.List<java.util.List<ASTParagraph>> result = new java.util.ArrayList<>();
+        for (int i = 0; i < colCount; i++) result.add(new java.util.ArrayList<>());
+
+        if (paragraphs.isEmpty() || colCount <= 1) {
+            result.get(0).addAll(paragraphs);
+            return result;
+        }
+
+        // 전체 문자 수 계산
+        int totalChars = 0;
+        int[] paraChars = new int[paragraphs.size()];
+        for (int i = 0; i < paragraphs.size(); i++) {
+            paraChars[i] = countParagraphChars(paragraphs.get(i));
+            totalChars += paraChars[i];
+        }
+
+        int charsPerCol = Math.max(totalChars / colCount, 1);
+        int currentCol = 0;
+        int currentChars = 0;
+
+        for (int i = 0; i < paragraphs.size(); i++) {
+            result.get(currentCol).add(paragraphs.get(i));
+            currentChars += paraChars[i];
+
+            if (currentChars >= charsPerCol && currentCol < colCount - 1) {
+                currentCol++;
+                currentChars = 0;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * 단락 내 텍스트 런의 문자 수 합계.
+     */
+    private int countParagraphChars(ASTParagraph para) {
+        int count = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null) count += text.length();
+            }
+        }
+        return Math.max(count, 1); // 빈 단락도 최소 1로 카운트
     }
 
     /**

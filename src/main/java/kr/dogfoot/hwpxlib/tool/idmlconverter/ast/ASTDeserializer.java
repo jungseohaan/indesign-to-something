@@ -169,6 +169,7 @@ public class ASTDeserializer {
         tf.zOrder(getInt(o, "zOrder"));
         tf.columnCount(getInt(o, "columnCount"));
         tf.columnGutter(getLong(o, "columnGutter"));
+        tf.columnWidths(getLongArray(o, "columnWidths"));
         tf.verticalText(getBool(o, "verticalText"));
         tf.verticalJustification(getString(o, "verticalJustification"));
         tf.insetTop(getLong(o, "insetTop"));
@@ -389,6 +390,7 @@ public class ASTDeserializer {
         run.superscript(getBool(o, "superscript"));
         run.underline(getBool(o, "underline"));
         run.strikeThrough(getBool(o, "strikeThrough"));
+        run.horizontalScale(getBoxedShort(o, "horizontalScale"));
         run.grepMathFont(getBool(o, "grepMathFont"));
         return run;
     }
@@ -570,6 +572,16 @@ public class ASTDeserializer {
     private static boolean getBool(JsonObject o, String key) {
         if (!o.has(key) || o.get(key).isJsonNull()) return false;
         return o.get(key).getAsBoolean();
+    }
+
+    private static long[] getLongArray(JsonObject o, String key) {
+        if (!o.has(key) || o.get(key).isJsonNull() || !o.get(key).isJsonArray()) return null;
+        com.google.gson.JsonArray arr = o.getAsJsonArray(key);
+        long[] result = new long[arr.size()];
+        for (int i = 0; i < arr.size(); i++) {
+            result[i] = arr.get(i).getAsLong();
+        }
+        return result;
     }
 
     private static Integer getBoxedInt(JsonObject o, String key) {

@@ -69,6 +69,20 @@ public class IDMLToHwpxConverter {
             reporter.reportProgress(5, 100, "IDML 구조 분석 중...");
             ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
 
+            // Phase 2.5: Resolved 데이터 보강 (선택적 — 없으면 기존 파이프라인 그대로)
+            if (options.resolvedJsonPath() != null) {
+                try {
+                    reporter.reportProgress(8, 100, "resolved 데이터 병합 중...");
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolved =
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedDataReader.read(
+                                    options.resolvedJsonPath());
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedMerger.enrich(
+                            astDoc, resolved);
+                } catch (Exception e) {
+                    System.err.println("Warning: resolved.json 로드/병합 실패 (무시): " + e.getMessage());
+                }
+            }
+
             // Phase 3: AST -> HWPX (페이지별 진행률: 10~90)
             int totalPages = astDoc.sections().size();
             ConvertResult result = ASTToHwpxConverter.convert(astDoc, reporter, 10, totalPages);

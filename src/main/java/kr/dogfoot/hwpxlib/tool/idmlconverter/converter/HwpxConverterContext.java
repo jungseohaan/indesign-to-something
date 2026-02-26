@@ -35,6 +35,12 @@ public class HwpxConverterContext {
     // 현재 섹션의 컬럼 너비 (HWPUNIT) — 오버레이 위치 계산에 사용
     long currentColumnWidth;
 
+    // 연결 글상자 링크 추적
+    // storyId → 사전 할당된 linkListIDRef 배열 (블록 순서대로)
+    final Map<String, java.util.List<String>> storyLinkIds = new LinkedHashMap<>();
+    // storyId → 현재까지 변환된 블록 인덱스
+    final Map<String, Integer> storyLinkIndex = new LinkedHashMap<>();
+
     // 변환 통계
     int imagesConverted;
     int equationsConverted;

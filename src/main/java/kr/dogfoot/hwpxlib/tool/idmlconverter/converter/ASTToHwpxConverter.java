@@ -24,7 +24,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -123,7 +125,10 @@ public class ASTToHwpxConverter {
         // 5. 스타일 등록
         registerStyles();
 
-        // 6. 섹션/블록 변환
+        // 6. 연결 글상자 사전 스캔 — 같은 storyId를 공유하는 블록들에 linkId 사전 할당
+        buildStoryLinkMap();
+
+        // 7. 섹션/블록 변환
         SectionXMLFile section0 = hwpxFile.sectionXMLFileList().get(0);
         section0.removeAllParas();
 
@@ -184,6 +189,38 @@ public class ASTToHwpxConverter {
         }
         for (ASTStyleDef astStyle : doc.characterStyles()) {
             ctx.styleRegistry.registerCharacterStyle(astStyle);
+        }
+    }
+
+    /**
+     * 연결 글상자 사전 스캔.
+     * 같은 storyId를 공유하는 TextFrameBlock이 2개 이상이면 linkId를 할당한다.
+     */
+    private void buildStoryLinkMap() {
+        // storyId → 블록 수 카운트
+        Map<String, Integer> storyBlockCount = new LinkedHashMap<>();
+        for (ASTSection section : doc.sections()) {
+            for (ASTBlock block : section.blocks()) {
+                if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
+                    String sid = ((ASTTextFrameBlock) block).storyId();
+                    if (sid != null) {
+                        storyBlockCount.merge(sid, 1, Integer::sum);
+                    }
+                }
+            }
+        }
+
+        // 2개 이상인 storyId에 대해 linkId 사전 할당
+        int linkIdCounter = 1;
+        for (Map.Entry<String, Integer> entry : storyBlockCount.entrySet()) {
+            if (entry.getValue() > 1) {
+                List<String> linkIds = new ArrayList<>();
+                for (int i = 0; i < entry.getValue(); i++) {
+                    linkIds.add(String.valueOf(linkIdCounter++));
+                }
+                ctx.storyLinkIds.put(entry.getKey(), linkIds);
+                ctx.storyLinkIndex.put(entry.getKey(), 0);
+            }
         }
     }
 

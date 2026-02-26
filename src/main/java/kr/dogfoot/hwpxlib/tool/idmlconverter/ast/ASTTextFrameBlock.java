@@ -15,6 +15,7 @@ public class ASTTextFrameBlock extends ASTBlock {
     private long height;
     private int columnCount;
     private long columnGutter;
+    private long[] columnWidths; // 각 컬럼의 콘텐츠 폭 (hwpunits), null이면 균등 분할
     private int zOrder;
     private boolean verticalText;
     private String verticalJustification;
@@ -61,6 +62,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public long columnGutter() { return columnGutter; }
     public void columnGutter(long v) { this.columnGutter = v; }
+
+    public long[] columnWidths() { return columnWidths; }
+    public void columnWidths(long[] v) { this.columnWidths = v; }
 
     public int zOrder() { return zOrder; }
     public void zOrder(int v) { this.zOrder = v; }
