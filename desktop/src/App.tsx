@@ -13,6 +13,7 @@ type Tab = "playground" | "extract" | "converter";
 function App() {
   const initJarPath = useAppStore((state) => state.initJarPath);
   const selectFile = useAppStore((state) => state.selectFile);
+  const selectInddFile = useAppStore((state) => state.selectInddFile);
   const selectHwpxFile = useAppStore((state) => state.selectHwpxFile);
   const [showAbout, setShowAbout] = useState(false);
   const [currentTab, setCurrentTab] = useState<Tab>("playground");
@@ -23,6 +24,11 @@ function App() {
     const unlistenOpenIdml = listen("menu-open-idml", () => {
       setCurrentTab("converter");
       selectFile();
+    });
+
+    const unlistenOpenIndd = listen("menu-open-indd", () => {
+      setCurrentTab("converter");
+      selectInddFile();
     });
 
     const unlistenOpenHwpx = listen("menu-open-hwpx", () => {
@@ -44,12 +50,13 @@ function App() {
 
     return () => {
       unlistenOpenIdml.then((f) => f());
+      unlistenOpenIndd.then((f) => f());
       unlistenOpenHwpx.then((f) => f());
       unlistenAbout.then((f) => f());
       unlistenPlayground.then((f) => f());
       unlistenExtract.then((f) => f());
     };
-  }, [initJarPath, selectFile, selectHwpxFile]);
+  }, [initJarPath, selectFile, selectInddFile, selectHwpxFile]);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "playground", label: "Playground - 자동조판기" },

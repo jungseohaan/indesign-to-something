@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useAstStore } from "../stores/useAstStore";
+import type { ResolvedFont, ResolvedParagraphStyle, ResolvedCharacterStyle } from "../types";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -162,13 +163,28 @@ function renderValue(key: string, value: any): React.ReactNode {
       }
     }
     // Color swatch
-    if (COLOR_KEYS.has(key) && value.startsWith("#")) {
-      return (
-        <span>
-          <span className="text-amber-700">"{value}"</span>
-          <ColorSwatch color={value} />
-        </span>
-      );
+    if (COLOR_KEYS.has(key)) {
+      if (value.startsWith("#")) {
+        return (
+          <span>
+            <span className="text-amber-700">"{value}"</span>
+            <ColorSwatch color={value} />
+          </span>
+        );
+      }
+      // Swatch name — try resolved hex lookup
+      const resolvedHex = useAstStore.getState().getResolvedColorHex(value);
+      if (resolvedHex) {
+        return (
+          <span>
+            <span className="text-amber-700">"{value}"</span>
+            <span className="inline-flex items-center gap-0.5 ml-1 text-[9px] text-indigo-600">
+              <ColorSwatch color={resolvedHex} />
+              {resolvedHex}
+            </span>
+          </span>
+        );
+      }
     }
     return <span className="text-amber-700">"{value}"</span>;
   }
@@ -259,9 +275,136 @@ function ExpandableObject({ obj }: { obj: any }) {
   );
 }
 
+// ─── Resolved Overlay Components ─────────────────────────────────────
+
+function FontStatusBadge({ fontFamily }: { fontFamily: string }) {
+  const resolved = useAstStore.getState().getResolvedFont(fontFamily);
+  if (!resolved) return null;
+
+  const status = resolved.status;
+  if (status.includes("INSTALLED")) {
+    return (
+      <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded text-[9px] bg-green-50 text-green-700 border border-green-200">
+        OK
+      </span>
+    );
+  }
+  if (status.includes("NOT_AVAILABLE")) {
+    return (
+      <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded text-[9px] bg-red-50 text-red-700 border border-red-200">
+        MISSING
+      </span>
+    );
+  }
+  if (status.includes("SUBSTITUTED")) {
+    return (
+      <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded text-[9px] bg-amber-50 text-amber-700 border border-amber-200">
+        SUBST
+      </span>
+    );
+  }
+  return null;
+}
+
+function ResolvedColorHex({ colorName }: { colorName: string }) {
+  const hex = useAstStore.getState().getResolvedColorHex(colorName);
+  if (!hex) return null;
+  return (
+    <span className="inline-flex items-center gap-0.5 ml-1 text-[9px] text-indigo-600">
+      <span
+        className="inline-block w-3 h-3 rounded-sm border border-gray-300"
+        style={{ backgroundColor: hex }}
+      />
+      {hex}
+    </span>
+  );
+}
+
+function OverflowBadge({ storyId }: { storyId: string }) {
+  const frame = useAstStore.getState().getResolvedTextFrame(storyId);
+  if (!frame) return null;
+  if (!frame.overflows) return null;
+  return (
+    <span className="inline-flex items-center gap-0.5 px-1 py-0 rounded text-[9px] bg-red-50 text-red-700 border border-red-200">
+      OVERFLOW
+    </span>
+  );
+}
+
+function ResolvedStyleCompare({ styleName, type }: { styleName: string; type: "paragraph" | "character" }) {
+  const store = useAstStore.getState();
+  const resolved = type === "paragraph"
+    ? store.getResolvedParagraphStyle(styleName)
+    : store.getResolvedCharacterStyle(styleName);
+  if (!resolved || resolved.error) return null;
+
+  const entries: [string, any][] = [];
+  if (type === "paragraph") {
+    const ps = resolved as ResolvedParagraphStyle;
+    if (ps.fontFamily) entries.push(["font", `${ps.fontFamily} ${ps.fontStyle || ""}`]);
+    if (ps.fontSize) entries.push(["size", `${ps.fontSize}pt`]);
+    if (ps.leading != null) {
+      const leadingStr = ps.leading === "auto"
+        ? `auto${ps.autoLeading ? ` (${ps.autoLeading}%)` : ""}`
+        : `${ps.leading}pt`;
+      entries.push(["leading", leadingStr]);
+    }
+    if (ps.justification) entries.push(["align", ps.justification.replace("Justification.", "")]);
+    if (ps.spaceBefore != null) entries.push(["spaceBefore", `${ps.spaceBefore}pt`]);
+    if (ps.spaceAfter != null) entries.push(["spaceAfter", `${ps.spaceAfter}pt`]);
+    if (ps.firstLineIndent != null) entries.push(["indent", `${ps.firstLineIndent}pt`]);
+    if (ps.dropCapLines && ps.dropCapLines > 0) entries.push(["dropCap", `${ps.dropCapLines}L/${ps.dropCapCharacters || 1}C`]);
+    if (ps.hyphenation != null) entries.push(["hyphen", ps.hyphenation ? "on" : "off"]);
+  } else {
+    const cs = resolved as ResolvedCharacterStyle;
+    if (cs.fontFamily) entries.push(["font", `${cs.fontFamily} ${cs.fontStyle || ""}`]);
+    if (cs.fontSize) entries.push(["size", `${cs.fontSize}pt`]);
+    if (cs.underline) entries.push(["underline", "on"]);
+    if (cs.strikeThru) entries.push(["strikeThru", "on"]);
+  }
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="px-3 py-1.5 bg-indigo-50 border-b text-[10px]">
+      <div className="text-indigo-400 mb-0.5">resolved ({type})</div>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-indigo-700">
+        {entries.map(([k, v]) => (
+          <span key={k}><span className="text-indigo-400">{k}:</span> {v}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ResolvedFontSummary() {
+  const resolvedData = useAstStore((s) => s.resolvedData);
+  if (!resolvedData) return null;
+
+  const missing = resolvedData.fonts.filter(f => f.status.includes("NOT_AVAILABLE"));
+  const substituted = resolvedData.fonts.filter(f => f.status.includes("SUBSTITUTED"));
+  if (missing.length === 0 && substituted.length === 0) return null;
+
+  return (
+    <div className="px-3 py-1.5 bg-red-50 border-b text-[10px]">
+      <div className="text-red-400 mb-0.5">Font Issues</div>
+      {missing.length > 0 && (
+        <div className="text-red-700">
+          MISSING ({missing.length}): {missing.map(f => f.fontFamily).join(", ")}
+        </div>
+      )}
+      {substituted.length > 0 && (
+        <div className="text-amber-700">
+          SUBSTITUTED ({substituted.length}): {substituted.map(f => f.fontFamily).join(", ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Preview Sections ───────────────────────────────────────────────
 
 function TextRunPreview({ node }: { node: any }) {
+  const hasResolved = useAstStore((s) => !!s.resolvedData);
   return (
     <div className="px-3 py-2 bg-gray-50 border-b text-xs">
       <div className="text-[10px] text-gray-400 mb-1">미리보기</div>
@@ -269,12 +412,18 @@ function TextRunPreview({ node }: { node: any }) {
         "{node.text}"
       </div>
       <div className="text-gray-500 mt-0.5">
-        {node.fontFamily || ""} {node.fontSizeHwpunits ? `${(node.fontSizeHwpunits / 100).toFixed(1)}pt` : ""}
+        {node.fontFamily || ""}{" "}
+        {hasResolved && node.fontFamily && <FontStatusBadge fontFamily={node.fontFamily} />}{" "}
+        {node.fontSizeHwpunits ? `${(node.fontSizeHwpunits / 100).toFixed(1)}pt` : ""}
         {node.fontStyle && node.fontStyle !== "normal" ? ` ${node.fontStyle}` : ""}
         {node.textColor && (
           <span className="ml-1">
             {node.textColor}
-            <ColorSwatch color={node.textColor} />
+            {node.textColor.startsWith("#") ? (
+              <ColorSwatch color={node.textColor} />
+            ) : (
+              hasResolved && <ResolvedColorHex colorName={node.textColor} />
+            )}
           </span>
         )}
         {node.underline && " underline"}
@@ -352,6 +501,8 @@ function ParagraphPreview({ node }: { node: any }) {
 }
 
 function StylePreview({ node, doc }: { node: any; doc: any }) {
+  const hasResolved = useAstStore((s) => !!s.resolvedData);
+
   if (!node.basedOnStyleRef && !node.styleId) return null;
 
   // Trace inheritance chain
@@ -369,15 +520,27 @@ function StylePreview({ node, doc }: { node: any; doc: any }) {
     current = allStyles.find((s: any) => s.styleId === current.basedOnStyleRef);
   }
 
-  if (chain.length <= 1) return null;
+  const styleName = node.styleName || node.styleId || "";
+  const isParagraph = !!(node.fontSizeHwpunits !== undefined || node.alignment || node.spaceBefore !== undefined);
+  const isCharacter = !!(node.underline !== undefined || node.strikeThrough !== undefined) && !isParagraph;
 
   return (
-    <div className="px-3 py-2 bg-gray-50 border-b text-xs">
-      <div className="text-[10px] text-gray-400 mb-1">스타일 상속 체인</div>
-      <div className="text-gray-800 font-medium">
-        {chain.join(" → ")}
-      </div>
-    </div>
+    <>
+      {chain.length > 1 && (
+        <div className="px-3 py-2 bg-gray-50 border-b text-xs">
+          <div className="text-[10px] text-gray-400 mb-1">스타일 상속 체인</div>
+          <div className="text-gray-800 font-medium">
+            {chain.join(" → ")}
+          </div>
+        </div>
+      )}
+      {hasResolved && styleName && (
+        <ResolvedStyleCompare
+          styleName={styleName}
+          type={isCharacter ? "character" : "paragraph"}
+        />
+      )}
+    </>
   );
 }
 
@@ -410,6 +573,7 @@ function ColorGroupPreview({ node }: { node: any }) {
 
 function StoryContentView({ storyView, doc }: { storyView: any; doc: any }) {
   const sv = storyView as { storyId: string; storyMeta: any; paragraphs: any[]; frames: any[] };
+  const hasResolved = useAstStore((s) => !!s.resolvedData);
 
   return (
     <div className="text-xs overflow-auto h-full">
@@ -420,6 +584,7 @@ function StoryContentView({ storyView, doc }: { storyView: any; doc: any }) {
           <span className="text-[10px] text-gray-400">
             {sv.paragraphs.length}¶ · {sv.frames.length} frames
           </span>
+          {hasResolved && <OverflowBadge storyId={sv.storyId} />}
         </div>
         {sv.storyMeta?.pages && (
           <div className="text-[10px] text-gray-400 mt-0.5">
@@ -493,6 +658,12 @@ function StoryItem({ item, doc }: { item: any; doc: any }) {
   if (item.itemType === "TEXT_RUN") {
     const styleTag = buildStyleTag(item);
     const hasStyle = styleTag.length > 0;
+    // Resolve swatch color to hex for rendering
+    const textColorHex = item.textColor
+      ? item.textColor.startsWith("#")
+        ? item.textColor
+        : useAstStore.getState().getResolvedColorHex(item.textColor) || undefined
+      : undefined;
     return (
       <span className="inline">
         {hasStyle && (
@@ -509,12 +680,17 @@ function StoryItem({ item, doc }: { item: any; doc: any }) {
               item.underline ? "underline" : "",
               item.strikeThrough ? "line-through" : "",
             ].filter(Boolean).join(" ") || undefined,
+            color: textColorHex,
           }}
         >
           {item.text}
         </span>
         {item.textColor && (
-          <ColorSwatch color={item.textColor} />
+          item.textColor.startsWith("#")
+            ? <ColorSwatch color={item.textColor} />
+            : textColorHex
+              ? <ColorSwatch color={textColorHex} />
+              : null
         )}
       </span>
     );
@@ -569,6 +745,8 @@ function StoryItem({ item, doc }: { item: any; doc: any }) {
 // ─── Detail Content ─────────────────────────────────────────────────
 
 function DetailContent({ node, doc }: { node: any; doc: any }) {
+  const hasResolved = useAstStore((s) => !!s.resolvedData);
+
   if (!node) {
     return (
       <div className="p-4 text-gray-400 text-sm">
@@ -581,6 +759,9 @@ function DetailContent({ node, doc }: { node: any; doc: any }) {
   if (node._storyView) {
     return <StoryContentView storyView={node._storyView} doc={doc} />;
   }
+
+  // Root doc — show resolved font summary if available
+  const isRoot = !!(node.sections && node.fonts && node.paragraphStyles);
 
   // Preview based on node type
   let preview: React.ReactNode = null;
@@ -599,6 +780,7 @@ function DetailContent({ node, doc }: { node: any; doc: any }) {
 
   return (
     <div className="text-xs overflow-auto h-full">
+      {isRoot && hasResolved && <ResolvedFontSummary />}
       {preview}
       <div className="p-2">
         <table className="w-full">
@@ -643,6 +825,21 @@ function DetailContent({ node, doc }: { node: any; doc: any }) {
                         <span className="text-blue-600">{value}</span>
                         <span className="text-gray-400 ml-1">({hwpuToPt(value)}pt)</span>
                       </span>
+                    ) : key === "fontFamily" && typeof value === "string" && hasResolved ? (
+                      <span>
+                        {renderValue(key, value)}
+                        <span className="ml-1"><FontStatusBadge fontFamily={value} /></span>
+                      </span>
+                    ) : key === "storyId" && typeof value === "string" && hasResolved ? (
+                      <span>
+                        {renderValue(key, value)}
+                        <span className="ml-1"><OverflowBadge storyId={value} /></span>
+                      </span>
+                    ) : COLOR_KEYS.has(key) && typeof value === "string" && !value.startsWith("#") && hasResolved ? (
+                      <span>
+                        {renderValue(key, value)}
+                        <ResolvedColorHex colorName={value} />
+                      </span>
                     ) : (
                       renderValue(key, value)
                     )}
@@ -661,6 +858,7 @@ function DetailContent({ node, doc }: { node: any; doc: any }) {
 
 export function ASTDetailPanel() {
   const { astDoc, selectedPath } = useAstStore();
+  const hasResolved = useAstStore((s) => !!s.resolvedData);
 
   const selectedNode = useMemo(
     () => resolveNode(astDoc, selectedPath || ""),
@@ -669,8 +867,20 @@ export function ASTDetailPanel() {
 
   return (
     <div className="h-full flex flex-col min-h-0">
-      <div className="px-2 py-1 border-b bg-gray-50 text-[10px] text-gray-500 font-medium shrink-0">
-        {selectedPath ? <Breadcrumb path={selectedPath} /> : "No selection"}
+      <div className="px-2 py-1 border-b bg-gray-50 text-[10px] text-gray-500 font-medium shrink-0 flex items-center justify-between">
+        <div>
+          {selectedPath ? <Breadcrumb path={selectedPath} /> : "No selection"}
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="px-1.5 py-0 rounded bg-gray-100 text-gray-500 border border-gray-200">
+            IDML
+          </span>
+          {hasResolved && (
+            <span className="px-1.5 py-0 rounded bg-indigo-50 text-indigo-600 border border-indigo-200">
+              Resolved
+            </span>
+          )}
+        </div>
       </div>
       <div className="flex-1 overflow-auto min-h-0">
         <DetailContent node={selectedNode} doc={astDoc} />

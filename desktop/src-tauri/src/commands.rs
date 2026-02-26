@@ -1329,6 +1329,67 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
 }
 
 // ─────────────────────────────────────────────────────────────────
+// InDesign (.indd) Extraction
+// ─────────────────────────────────────────────────────────────────
+
+/// Extract IDML + resolved.json from an InDesign (.indd) file.
+/// InDesign Desktop이 설치되어 있어야 한다 (macOS).
+/// 흐름: osascript → InDesign do javascript → ExtendScript → IDML + resolved.json
+#[tauri::command]
+pub async fn extract_indd(
+    app: AppHandle,
+    indd_path: String,
+    _jar_path: String,
+) -> Result<crate::indesign::InddExtractResult, String> {
+    use std::time::Duration;
+
+    // 1. InDesign 설치 확인
+    let indesign_app_path = crate::indesign::find_indesign_app()?;
+
+    // 2. 임시 디렉토리 생성
+    let output_dir = crate::indesign::create_extraction_temp_dir()?;
+
+    // 3. ExtendScript 경로 찾기
+    let jsx_path = crate::indesign::find_extendscript(&app)?;
+
+    // 4. 추출 실행 (120초 타임아웃)
+    let result = tokio::time::timeout(
+        Duration::from_secs(120),
+        crate::indesign::run_extraction(
+            &app,
+            &indd_path,
+            &output_dir,
+            &jsx_path,
+            &indesign_app_path,
+        ),
+    )
+    .await
+    .map_err(|_| {
+        // 타임아웃 시 임시 디렉토리 정리
+        let _ = std::fs::remove_dir_all(&output_dir);
+        "InDesign 추출 시간 초과 (120초). InDesign이 응답하지 않습니다.".to_string()
+    })?
+    .map_err(|e| {
+        // 추출 실패 시 임시 디렉토리 정리
+        let _ = std::fs::remove_dir_all(&output_dir);
+        e
+    })?;
+
+    Ok(result)
+}
+
+/// resolved.json 파일 읽기.
+/// InDesign 추출 시 생성된 resolved.json을 프론트엔드로 전달한다.
+#[tauri::command]
+pub async fn read_resolved_json(path: String) -> Result<serde_json::Value, String> {
+    let content = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| format!("resolved.json 읽기 실패: {}", e))?;
+    serde_json::from_str(&content)
+        .map_err(|e| format!("resolved.json 파싱 실패: {}", e))
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Question Extraction (Python-based)
 // ─────────────────────────────────────────────────────────────────
 

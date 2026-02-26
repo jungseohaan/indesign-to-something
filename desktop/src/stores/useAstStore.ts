@@ -1,5 +1,14 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import type {
+  ResolvedData,
+  ResolvedFont,
+  ResolvedColor,
+  ResolvedStory,
+  ResolvedParagraphStyle,
+  ResolvedCharacterStyle,
+  ResolvedTextFrame,
+} from "../types";
 
 interface AstStore {
   astDoc: any | null;
@@ -11,7 +20,19 @@ interface AstStore {
   searchQuery: string;
   filterType: string | null;
 
+  // Resolved 사이드카
+  resolvedData: ResolvedData | null;
+  resolvedStoryMap: Map<string, ResolvedStory> | null;
+  resolvedFontMap: Map<string, ResolvedFont> | null;
+  resolvedColorMap: Map<string, ResolvedColor> | null;
+  resolvedColorHexMap: Map<string, string> | null;  // colorName → hex
+  resolvedPStyleMap: Map<string, ResolvedParagraphStyle> | null;
+  resolvedCStyleMap: Map<string, ResolvedCharacterStyle> | null;
+  resolvedFrameMap: Map<string, ResolvedTextFrame> | null;  // storyId → frame
+
   loadAST: (idmlPath: string, jarPath: string) => Promise<void>;
+  loadResolved: (path: string) => Promise<void>;
+  clearResolved: () => void;
   selectPath: (path: string | null) => void;
   toggleExpand: (path: string) => void;
   setSection: (index: number) => void;
@@ -20,6 +41,15 @@ interface AstStore {
   expandAll: () => void;
   collapseAll: () => void;
   reset: () => void;
+
+  // 룩업 헬퍼
+  getResolvedFont: (fontFamily: string) => ResolvedFont | null;
+  getResolvedColor: (colorName: string) => ResolvedColor | null;
+  getResolvedColorHex: (colorName: string) => string | null;
+  getResolvedStory: (storyId: string) => ResolvedStory | null;
+  getResolvedParagraphStyle: (styleName: string) => ResolvedParagraphStyle | null;
+  getResolvedCharacterStyle: (styleName: string) => ResolvedCharacterStyle | null;
+  getResolvedTextFrame: (storyId: string) => ResolvedTextFrame | null;
 }
 
 function collectAllPaths(node: any, path: string, paths: Set<string>) {
@@ -102,6 +132,52 @@ function collectAllPaths(node: any, path: string, paths: Set<string>) {
   }
 }
 
+function buildResolvedMaps(data: ResolvedData) {
+  const storyMap = new Map<string, ResolvedStory>();
+  for (const s of data.stories) {
+    storyMap.set(s.id, s);
+  }
+
+  const fontMap = new Map<string, ResolvedFont>();
+  for (const f of data.fonts) {
+    fontMap.set(f.fontFamily, f);
+    // name은 "Family\tStyle" 형식일 수 있어서 family로도 검색 가능하게
+    if (f.name && f.name !== f.fontFamily) {
+      fontMap.set(f.name, f);
+    }
+  }
+
+  const colorMap = new Map<string, ResolvedColor>();
+  const colorHexMap = new Map<string, string>();
+  for (const c of data.colors) {
+    colorMap.set(c.name, c);
+    if (c.hex) {
+      colorHexMap.set(c.name, c.hex);
+    }
+  }
+
+  const pStyleMap = new Map<string, ResolvedParagraphStyle>();
+  for (const ps of data.paragraphStyles) {
+    pStyleMap.set(ps.name, ps);
+  }
+
+  const cStyleMap = new Map<string, ResolvedCharacterStyle>();
+  for (const cs of data.characterStyles) {
+    cStyleMap.set(cs.name, cs);
+  }
+
+  const frameMap = new Map<string, ResolvedTextFrame>();
+  if (data.textFrames) {
+    for (const tf of data.textFrames) {
+      if (tf.storyId) {
+        frameMap.set(tf.storyId, tf);
+      }
+    }
+  }
+
+  return { storyMap, fontMap, colorMap, colorHexMap, pStyleMap, cStyleMap, frameMap };
+}
+
 export const useAstStore = create<AstStore>((set, get) => ({
   astDoc: null,
   isLoading: false,
@@ -111,6 +187,16 @@ export const useAstStore = create<AstStore>((set, get) => ({
   currentSectionIndex: 0,
   searchQuery: "",
   filterType: null,
+
+  // Resolved 사이드카
+  resolvedData: null,
+  resolvedStoryMap: null,
+  resolvedFontMap: null,
+  resolvedColorMap: null,
+  resolvedColorHexMap: null,
+  resolvedPStyleMap: null,
+  resolvedCStyleMap: null,
+  resolvedFrameMap: null,
 
   loadAST: async (idmlPath: string, jarPath: string) => {
     set({ isLoading: true, error: null });
@@ -132,6 +218,38 @@ export const useAstStore = create<AstStore>((set, get) => ({
       set({ isLoading: false, error: String(e) });
     }
   },
+
+  loadResolved: async (path: string) => {
+    try {
+      const data = await invoke<ResolvedData>("read_resolved_json", { path });
+      const { storyMap, fontMap, colorMap, colorHexMap, pStyleMap, cStyleMap, frameMap } = buildResolvedMaps(data);
+      set({
+        resolvedData: data,
+        resolvedStoryMap: storyMap,
+        resolvedFontMap: fontMap,
+        resolvedColorMap: colorMap,
+        resolvedColorHexMap: colorHexMap,
+        resolvedPStyleMap: pStyleMap,
+        resolvedCStyleMap: cStyleMap,
+        resolvedFrameMap: frameMap,
+      });
+    } catch (e: any) {
+      console.warn("resolved.json 로드 실패 (무시):", e);
+      // resolved 로드 실패는 치명적이지 않음 — AST만으로 계속 진행
+    }
+  },
+
+  clearResolved: () =>
+    set({
+      resolvedData: null,
+      resolvedStoryMap: null,
+      resolvedFontMap: null,
+      resolvedColorMap: null,
+      resolvedColorHexMap: null,
+      resolvedPStyleMap: null,
+      resolvedCStyleMap: null,
+      resolvedFrameMap: null,
+    }),
 
   selectPath: (path) => set({ selectedPath: path }),
 
@@ -172,5 +290,42 @@ export const useAstStore = create<AstStore>((set, get) => ({
       currentSectionIndex: 0,
       searchQuery: "",
       filterType: null,
+      resolvedData: null,
+      resolvedStoryMap: null,
+      resolvedFontMap: null,
+      resolvedColorMap: null,
+      resolvedColorHexMap: null,
+      resolvedPStyleMap: null,
+      resolvedCStyleMap: null,
+      resolvedFrameMap: null,
     }),
+
+  // 룩업 헬퍼
+  getResolvedFont: (fontFamily: string) => {
+    return get().resolvedFontMap?.get(fontFamily) ?? null;
+  },
+
+  getResolvedColor: (colorName: string) => {
+    return get().resolvedColorMap?.get(colorName) ?? null;
+  },
+
+  getResolvedColorHex: (colorName: string) => {
+    return get().resolvedColorHexMap?.get(colorName) ?? null;
+  },
+
+  getResolvedStory: (storyId: string) => {
+    return get().resolvedStoryMap?.get(storyId) ?? null;
+  },
+
+  getResolvedParagraphStyle: (styleName: string) => {
+    return get().resolvedPStyleMap?.get(styleName) ?? null;
+  },
+
+  getResolvedCharacterStyle: (styleName: string) => {
+    return get().resolvedCStyleMap?.get(styleName) ?? null;
+  },
+
+  getResolvedTextFrame: (storyId: string) => {
+    return get().resolvedFrameMap?.get(storyId) ?? null;
+  },
 }));

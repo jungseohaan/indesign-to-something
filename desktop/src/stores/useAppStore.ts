@@ -12,6 +12,8 @@ import type {
   ProgressEvent,
   TextFrameDetail,
   MasterSpreadInfo,
+  InddExtractResult,
+  InddExtractionProgress,
 } from "../types";
 import { useAstStore } from "./useAstStore";
 
@@ -23,6 +25,12 @@ interface AppState {
   idmlPath: string | null;
   isAnalyzing: boolean;
   structure: IDMLStructure | null;
+
+  // INDD Extraction
+  sourceType: "idml" | "indd" | null;
+  inddPath: string | null;
+  isExtracting: boolean;
+  extractionPhase: string | null;
 
   // Selection
   selectedSpread: SpreadInfo | null;
@@ -51,6 +59,7 @@ interface AppState {
   // Actions
   initJarPath: () => Promise<void>;
   selectFile: () => Promise<void>;
+  selectInddFile: () => Promise<void>;
   selectHwpxFile: () => Promise<void>;
   selectSpread: (spread: SpreadInfo) => void;
   selectPage: (page: PageInfo) => void;
@@ -69,6 +78,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   idmlPath: null,
   isAnalyzing: false,
   structure: null,
+  sourceType: null,
+  inddPath: null,
+  isExtracting: false,
+  extractionPhase: null,
   selectedSpread: null,
   selectedPage: null,
   selectedImage: null,
@@ -104,6 +117,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!path) return;
     set({
       idmlPath: path,
+      sourceType: "idml",
+      inddPath: null,
+      isExtracting: false,
+      extractionPhase: null,
       isAnalyzing: true,
       structure: null,
       selectedSpread: null,
@@ -130,8 +147,85 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (jarPath) {
         useAstStore.getState().loadAST(path, jarPath);
       }
+      // IDML 직접 열기: resolved 사이드카 없음
+      useAstStore.getState().clearResolved();
     } catch (e: any) {
       set({ isAnalyzing: false, error: String(e) });
+    }
+  },
+
+  selectInddFile: async () => {
+    const path = await open({
+      filters: [{ name: "InDesign", extensions: ["indd"] }],
+    });
+    if (!path) return;
+
+    set({
+      inddPath: path,
+      sourceType: "indd",
+      idmlPath: null,
+      isExtracting: true,
+      extractionPhase: "launching",
+      isAnalyzing: false,
+      structure: null,
+      selectedSpread: null,
+      selectedPage: null,
+      selectedImage: null,
+      selectedTextFrame: null,
+      selectedMaster: null,
+      previewImages: [],
+      textFrameDetail: null,
+      masterPreview: null,
+      result: null,
+      error: null,
+    });
+
+    // 추출 진행률 이벤트 리스너
+    const unlisten = await listen<InddExtractionProgress>(
+      "indd-extraction-progress",
+      (event) => {
+        set({ extractionPhase: event.payload.phase });
+      }
+    );
+
+    try {
+      // Step 1: InDesign으로 IDML 추출
+      const result = await invoke<InddExtractResult>("extract_indd", {
+        inddPath: path,
+        jarPath: get().jarPath,
+      });
+
+      // Step 2: 추출된 IDML로 기존 분석 파이프라인 실행
+      set({
+        idmlPath: result.idml_path,
+        isExtracting: false,
+        isAnalyzing: true,
+      });
+
+      const structure = await invoke<IDMLStructure>("analyze_idml", {
+        path: result.idml_path,
+        jarPath: get().jarPath,
+      });
+      set({ structure, isAnalyzing: false });
+
+      // Step 3: AST 자동 로드
+      const jarPath = get().jarPath;
+      if (jarPath) {
+        useAstStore.getState().loadAST(result.idml_path, jarPath);
+      }
+
+      // Step 4: resolved.json 로드 (있으면 — AST 사이드카로 활용)
+      if (result.resolved_json_path) {
+        useAstStore.getState().loadResolved(result.resolved_json_path);
+      }
+    } catch (e: any) {
+      set({
+        isExtracting: false,
+        isAnalyzing: false,
+        error: String(e),
+      });
+    } finally {
+      unlisten();
     }
   },
 

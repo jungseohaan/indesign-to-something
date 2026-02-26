@@ -201,6 +201,143 @@ export interface CharacterRun {
   anchors: string[];
 }
 
+// InDesign (.indd) Extraction Types
+export interface InddExtractResult {
+  idml_path: string;
+  resolved_json_path: string | null;
+  preview_pdf_path: string | null;
+  temp_dir: string;
+}
+
+export interface InddExtractionProgress {
+  phase: string;
+  message: string;
+}
+
+// Resolved Data Types (InDesign DOM에서 추출한 계산된 속성)
+export interface ResolvedData {
+  documentInfo: {
+    name: string;
+    fullName: string;
+    pageCount: number;
+    spreadCount: number;
+    storyCount: number;
+    pageWidth: number;
+    pageHeight: number;
+    facingPages: boolean;
+  };
+  paragraphStyles: ResolvedParagraphStyle[];
+  characterStyles: ResolvedCharacterStyle[];
+  colors: ResolvedColor[];
+  fonts: ResolvedFont[];
+  stories: ResolvedStory[];
+  textFrames: ResolvedTextFrame[];
+}
+
+export interface ResolvedParagraphStyle {
+  name: string;
+  basedOn: string | null;
+  fontFamily: string | null;
+  fontStyle: string | null;
+  fontSize: number | null;
+  leading: string | number | null;  // "auto" or number (pt)
+  autoLeading: number | null;       // auto-leading percentage (e.g., 120)
+  justification: string | null;
+  spaceBefore: number | null;
+  spaceAfter: number | null;
+  firstLineIndent: number | null;
+  leftIndent: number | null;
+  rightIndent: number | null;
+  hyphenation: boolean | null;
+  dropCapLines: number | null;
+  dropCapCharacters: number | null;
+  keepWithNext: string | null;
+  keepAllLinesTogether: string | null;
+  tabStops?: { position: number; alignment: string; leader: string }[];
+  error?: string;
+}
+
+export interface ResolvedCharacterStyle {
+  name: string;
+  basedOn: string | null;
+  fontFamily: string | null;
+  fontStyle: string | null;
+  fontSize: number | null;
+  underline: boolean | null;
+  strikeThru: boolean | null;
+  error?: string;
+}
+
+export interface ResolvedColor {
+  name: string;
+  model: string;         // "ColorModel.PROCESS" etc.
+  space: string;         // "ColorSpace.CMYK" etc.
+  colorValue: number[];
+  hex: string | null;    // "#RRGGBB" 변환값
+  error?: string;
+}
+
+export interface ResolvedFont {
+  name: string;
+  fontFamily: string;
+  fontStyleName: string;
+  fontType: string;
+  status: string;  // "FontStatus.INSTALLED" | "FontStatus.NOT_AVAILABLE" etc.
+  error?: string;
+}
+
+export interface ResolvedStory {
+  id: string;
+  length: number;
+  paragraphCount: number;
+  paragraphs: ResolvedStoryParagraph[];
+  tables: ResolvedTable[];
+}
+
+export interface ResolvedStoryParagraph {
+  styleName: string;
+  leading: string | number | null;
+  autoLeading: number | null;
+  justification: string | null;
+  spaceBefore: number | null;
+  spaceAfter: number | null;
+  firstLineIndent: number | null;
+  leftIndent: number | null;
+  runs: ResolvedRun[];
+}
+
+export interface ResolvedRun {
+  text: string;
+  fontFamily: string | null;
+  fontSize: number | null;
+  fontStyle: string | null;
+  fillColor: string | null;
+  charStyle: string | null;
+  // 확장 속성
+  tracking: number | null;
+  horizontalScale: number | null;
+  verticalScale: number | null;
+  baselineShift: number | null;
+  position: string | null;  // "Position.NORMAL" | "Position.SUPERSCRIPT" etc.
+  underline: boolean | null;
+  strikeThru: boolean | null;
+}
+
+export interface ResolvedTable {
+  id: string;
+  rowCount: number;
+  columnCount: number;
+  columnWidths: number[];
+  rowHeights: number[];
+}
+
+export interface ResolvedTextFrame {
+  id: string;
+  storyId: string | null;
+  overflows: boolean;
+  lineCount: number;
+}
+
 // Template Schema Types
 export interface TemplateSchema {
   version: string;

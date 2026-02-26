@@ -1,4 +1,5 @@
 mod commands;
+mod indesign;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
@@ -20,6 +21,12 @@ pub fn run() {
                     // HWPX 파일 열기 이벤트 (HWPX → IDML 변환)
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.emit("menu-open-hwpx", ());
+                    }
+                }
+                "open-indd" => {
+                    // InDesign (.indd) 파일 열기 이벤트
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.emit("menu-open-indd", ());
                     }
                 }
                 "quit" => {
@@ -61,6 +68,8 @@ pub fn run() {
             commands::write_text_file,
             commands::extract_questions,
             commands::export_ast,
+            commands::extract_indd,
+            commands::read_resolved_json,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -91,6 +100,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
 
     // File 메뉴
     let open_idml = MenuItem::with_id(handle, "open-idml", "Open IDML...", true, Some("CmdOrCtrl+O"))?;
+    let open_indd = MenuItem::with_id(handle, "open-indd", "Open InDesign...", true, Some("CmdOrCtrl+Shift+I"))?;
     let open_hwpx = MenuItem::with_id(handle, "open-hwpx", "Open HWPX...", true, Some("CmdOrCtrl+Shift+O"))?;
 
     #[cfg(not(target_os = "macos"))]
@@ -103,6 +113,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         true,
         &[
             &open_idml,
+            &open_indd,
             &open_hwpx,
             &PredefinedMenuItem::separator(handle)?,
             &PredefinedMenuItem::close_window(handle, Some("Close Window"))?,
@@ -116,6 +127,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         true,
         &[
             &open_idml,
+            &open_indd,
             &open_hwpx,
             &PredefinedMenuItem::separator(handle)?,
             &quit,
