@@ -34,6 +34,7 @@ public class ASTTextFrameBlock extends ASTBlock {
     private double strokeTint = 100;     // 0~100
     private double cornerRadius;
     private boolean fromGroup;
+    private String storyId;
 
     private List<ASTParagraph> paragraphs;
 
@@ -105,6 +106,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean fromGroup() { return fromGroup; }
     public void fromGroup(boolean v) { this.fromGroup = v; }
+
+    public String storyId() { return storyId; }
+    public void storyId(String v) { this.storyId = v; }
 
     public List<ASTParagraph> paragraphs() { return paragraphs; }
     public void addParagraph(ASTParagraph p) { paragraphs.add(p); }

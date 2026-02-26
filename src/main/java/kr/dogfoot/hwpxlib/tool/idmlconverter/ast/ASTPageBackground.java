@@ -10,6 +10,7 @@ public class ASTPageBackground {
     private byte[] pngData;
     private int pixelWidth;
     private int pixelHeight;
+    private String bundlePath;
 
     public int pageNumber() { return pageNumber; }
     public void pageNumber(int v) { this.pageNumber = v; }
@@ -28,4 +29,7 @@ public class ASTPageBackground {
 
     public int pixelHeight() { return pixelHeight; }
     public void pixelHeight(int v) { this.pixelHeight = v; }
+
+    public String bundlePath() { return bundlePath; }
+    public void bundlePath(String v) { this.bundlePath = v; }
 }

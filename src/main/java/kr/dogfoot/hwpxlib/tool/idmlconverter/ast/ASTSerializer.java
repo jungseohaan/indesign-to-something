@@ -26,6 +26,18 @@ public class ASTSerializer {
         first = writeStringField(sb, "sourceFile", doc.sourceFile(), first);
         first = writeStringField(sb, "sourceFormat", doc.sourceFormat(), first);
 
+        // stories
+        if (doc.stories() != null && !doc.stories().isEmpty()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append("\"stories\":[");
+            for (int i = 0; i < doc.stories().size(); i++) {
+                if (i > 0) sb.append(',');
+                writeStory(sb, doc.stories().get(i));
+            }
+            sb.append(']');
+        }
+
         // sections
         if (doc.sections() != null && !doc.sections().isEmpty()) {
             if (!first) sb.append(',');
@@ -157,6 +169,7 @@ public class ASTSerializer {
         first = writeIntField(sb, "pixelWidth", bg.pixelWidth(), first);
         first = writeIntField(sb, "pixelHeight", bg.pixelHeight(), first);
         first = writeBooleanField(sb, "hasPngData", bg.pngData() != null, first);
+        first = writeStringField(sb, "bundlePath", bg.bundlePath(), first);
         sb.append('}');
     }
 
@@ -170,11 +183,45 @@ public class ASTSerializer {
         }
     }
 
+    private static void writeStory(StringBuilder sb, ASTStory story) {
+        sb.append('{');
+        boolean first = true;
+        first = writeStringField(sb, "storyId", story.storyId(), first);
+        first = writeStringField(sb, "orientation", story.orientation(), first);
+        first = writeIntField(sb, "paragraphCount", story.paragraphCount(), first);
+        first = writeIntField(sb, "tableCount", story.tableCount(), first);
+
+        if (story.linkedFrameIds() != null && !story.linkedFrameIds().isEmpty()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append("\"linkedFrameIds\":[");
+            for (int i = 0; i < story.linkedFrameIds().size(); i++) {
+                if (i > 0) sb.append(',');
+                sb.append('"').append(escapeJson(story.linkedFrameIds().get(i))).append('"');
+            }
+            sb.append(']');
+        }
+
+        if (story.pages() != null && !story.pages().isEmpty()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append("\"pages\":[");
+            for (int i = 0; i < story.pages().size(); i++) {
+                if (i > 0) sb.append(',');
+                sb.append(story.pages().get(i));
+            }
+            sb.append(']');
+        }
+
+        sb.append('}');
+    }
+
     private static void writeTextFrameBlock(StringBuilder sb, ASTTextFrameBlock tf) {
         sb.append('{');
         boolean first = true;
         first = writeStringField(sb, "blockType", "TEXT_FRAME_BLOCK", first);
         first = writeStringField(sb, "sourceId", tf.sourceId(), first);
+        first = writeStringField(sb, "storyId", tf.storyId(), first);
         first = writeLongField(sb, "x", tf.x(), first);
         first = writeLongField(sb, "y", tf.y(), first);
         first = writeLongField(sb, "width", tf.width(), first);
@@ -400,6 +447,15 @@ public class ASTSerializer {
             first = writeIntField(sb, "pixelHeight", fig.pixelHeight(), first);
         }
         first = writeBooleanField(sb, "hasImageData", fig.imageData() != null, first);
+        if (fig.hasCrop()) {
+            first = writeDoubleField(sb, "cropLeftFraction", fig.cropLeftFraction(), first);
+            first = writeDoubleField(sb, "cropTopFraction", fig.cropTopFraction(), first);
+            first = writeDoubleField(sb, "cropRightFraction", fig.cropRightFraction(), first);
+            first = writeDoubleField(sb, "cropBottomFraction", fig.cropBottomFraction(), first);
+        }
+        if (fig.flipHorizontal()) first = writeBooleanField(sb, "flipHorizontal", true, first);
+        if (fig.flipVertical()) first = writeBooleanField(sb, "flipVertical", true, first);
+        first = writeStringField(sb, "bundlePath", fig.bundlePath(), first);
 
         sb.append('}');
     }
@@ -557,17 +613,71 @@ public class ASTSerializer {
         if (obj.fillTint() != 100.0) {
             first = writeDoubleField(sb, "fillTint", obj.fillTint(), first);
         }
+        first = writeStringField(sb, "strokeColor", obj.strokeColor(), first);
+        if (obj.strokeWeight() != 0.0) first = writeDoubleField(sb, "strokeWeight", obj.strokeWeight(), first);
+        if (obj.strokeTint() != 100.0) first = writeDoubleField(sb, "strokeTint", obj.strokeTint(), first);
+        if (obj.cornerRadius() != 0.0) first = writeDoubleField(sb, "cornerRadius", obj.cornerRadius(), first);
+
+        if (obj.textWrapTop() != 0) first = writeLongField(sb, "textWrapTop", obj.textWrapTop(), first);
+        if (obj.textWrapLeft() != 0) first = writeLongField(sb, "textWrapLeft", obj.textWrapLeft(), first);
+        if (obj.textWrapBottom() != 0) first = writeLongField(sb, "textWrapBottom", obj.textWrapBottom(), first);
+        if (obj.textWrapRight() != 0) first = writeLongField(sb, "textWrapRight", obj.textWrapRight(), first);
+
+        if (obj.textMarginTop() != 0) first = writeLongField(sb, "textMarginTop", obj.textMarginTop(), first);
+        if (obj.textMarginLeft() != 0) first = writeLongField(sb, "textMarginLeft", obj.textMarginLeft(), first);
+        if (obj.textMarginBottom() != 0) first = writeLongField(sb, "textMarginBottom", obj.textMarginBottom(), first);
+        if (obj.textMarginRight() != 0) first = writeLongField(sb, "textMarginRight", obj.textMarginRight(), first);
+
+        if (obj.isOverlay()) {
+            first = writeBooleanField(sb, "isOverlay", true, first);
+            first = writeLongField(sb, "overlayX", obj.overlayX(), first);
+            first = writeLongField(sb, "overlayY", obj.overlayY(), first);
+            first = writeLongField(sb, "overlayParentWidth", obj.overlayParentWidth(), first);
+            first = writeLongField(sb, "overlayParentHeight", obj.overlayParentHeight(), first);
+        }
+
+        if (obj.containerWidth() != 0) first = writeLongField(sb, "containerWidth", obj.containerWidth(), first);
+        if (obj.containerHeight() != 0) first = writeLongField(sb, "containerHeight", obj.containerHeight(), first);
+        if (obj.imageOffsetX() != 0) first = writeLongField(sb, "imageOffsetX", obj.imageOffsetX(), first);
+        if (obj.imageOffsetY() != 0) first = writeLongField(sb, "imageOffsetY", obj.imageOffsetY(), first);
+
+        // overlayFrames (재귀)
+        if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append("\"overlayFrames\":[");
+            for (int i = 0; i < obj.overlayFrames().size(); i++) {
+                if (i > 0) sb.append(',');
+                writeInlineObject(sb, obj.overlayFrames().get(i));
+            }
+            sb.append(']');
+        }
+
         // 인라인 텍스트 프레임 단락
         if (obj.paragraphs() != null && !obj.paragraphs().isEmpty()) {
             if (!first) sb.append(',');
+            first = false;
             sb.append("\"paragraphs\":[");
             for (int i = 0; i < obj.paragraphs().size(); i++) {
                 if (i > 0) sb.append(',');
                 writeParagraph(sb, obj.paragraphs().get(i));
             }
             sb.append(']');
-            first = false;
         }
+
+        // inlineTables
+        if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append("\"inlineTables\":[");
+            for (int i = 0; i < obj.inlineTables().size(); i++) {
+                if (i > 0) sb.append(',');
+                writeTable(sb, obj.inlineTables().get(i));
+            }
+            sb.append(']');
+        }
+
+        first = writeStringField(sb, "bundlePath", obj.bundlePath(), first);
         sb.append('}');
     }
 

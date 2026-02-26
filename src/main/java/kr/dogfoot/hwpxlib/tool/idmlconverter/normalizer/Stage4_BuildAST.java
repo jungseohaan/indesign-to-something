@@ -87,9 +87,29 @@ public class Stage4_BuildAST {
                             && !tf.fillColor().contains("Paper");
                     if (story == null || (story.isEmpty() && !hasFill)) continue;
 
+                    // Story 메타데이터 수집
+                    ASTStory astStory = new ASTStory();
+                    astStory.storyId(storyId);
+                    astStory.orientation(story.storyOrientation());
+                    astStory.paragraphCount(story.paragraphs().size());
+                    astStory.tableCount(story.tables().size());
+
+                    List<String> frameChain = new ArrayList<>();
+                    frameChain.add(tf.selfId());
+                    collectLinkedFrames(tf, pool, frameChain);
+                    astStory.linkedFrameIds(frameChain);
+
+                    List<Integer> storyPages = new ArrayList<>();
+                    storyPages.add(page.pageNumber());
+                    collectLinkedFramePages(frameChain, pool, storyPages);
+                    astStory.pages(storyPages);
+
+                    doc.addStory(astStory);
+
                     // 텍스트 프레임 블록 생성
                     ASTTextFrameBlock block = createTextFrameBlock(tf, page, fo.zOrder(), colorResolver);
                     if (block == null) continue; // 페이지 밖 객체 건너뜀
+                    block.storyId(storyId);
 
                     // 스토리 → 단락 변환
                     convertStoryToParagraphs(story, block, pool, idmlDoc, colorResolver, imageLoader);
@@ -268,6 +288,42 @@ public class Stage4_BuildAST {
 
         System.err.println("[Stage4_BuildAST] Built " + doc.sections().size() + " sections.");
         return doc;
+    }
+
+    /**
+     * 연결 프레임 체인 수집: 시작 프레임의 nextTextFrame을 따라가며 체인 구축.
+     */
+    private static void collectLinkedFrames(IDMLTextFrame startFrame,
+                                             FlattenedObjectPool pool,
+                                             List<String> frameChain) {
+        String nextId = startFrame.nextTextFrame();
+        Set<String> visited = new HashSet<>(frameChain);
+        while (nextId != null && !nextId.isEmpty()
+                && !"n".equals(nextId) && !"null".equalsIgnoreCase(nextId)
+                && !visited.contains(nextId)) {
+            visited.add(nextId);
+            frameChain.add(nextId);
+            FlatObject nextFo = pool.get(nextId);
+            if (nextFo == null || !(nextFo.sourceObject() instanceof IDMLTextFrame)) break;
+            IDMLTextFrame nextTf = (IDMLTextFrame) nextFo.sourceObject();
+            nextId = nextTf.nextTextFrame();
+        }
+    }
+
+    /**
+     * 프레임 체인의 페이지 번호 수집 (중복 제거, 순서 유지).
+     */
+    private static void collectLinkedFramePages(List<String> frameIds,
+                                                 FlattenedObjectPool pool,
+                                                 List<Integer> pages) {
+        Set<Integer> seen = new HashSet<>(pages);
+        for (int i = 1; i < frameIds.size(); i++) {
+            FlatObject fo = pool.get(frameIds.get(i));
+            if (fo != null && !seen.contains(fo.pageNumber())) {
+                seen.add(fo.pageNumber());
+                pages.add(fo.pageNumber());
+            }
+        }
     }
 
     /**

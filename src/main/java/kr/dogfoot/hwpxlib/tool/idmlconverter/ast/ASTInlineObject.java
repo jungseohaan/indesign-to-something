@@ -63,6 +63,9 @@ public class ASTInlineObject extends ASTInlineItem {
     // 이미지 컨테이너 내부에 중첩하여 이미지 위에 올바르게 배치
     private java.util.List<ASTInlineObject> overlayFrames;
 
+    // 번들 내 이미지 경로 (예: "images/inline_001.png")
+    private String bundlePath;
+
     // 인라인 텍스트 프레임 데이터 (INLINE_TEXT_FRAME)
     private java.util.List<ASTParagraph> paragraphs;
     private java.util.List<ASTTable> inlineTables;
@@ -167,6 +170,9 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public long imageOffsetY() { return imageOffsetY; }
     public void imageOffsetY(long v) { this.imageOffsetY = v; }
+
+    public String bundlePath() { return bundlePath; }
+    public void bundlePath(String v) { this.bundlePath = v; }
 
     public java.util.List<ASTInlineObject> overlayFrames() { return overlayFrames; }
     public void addOverlayFrame(ASTInlineObject f) {

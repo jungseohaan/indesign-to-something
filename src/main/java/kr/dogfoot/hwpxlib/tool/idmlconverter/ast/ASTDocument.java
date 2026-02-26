@@ -12,6 +12,7 @@ public class ASTDocument {
     private String sourceFile;
     private String sourceFormat = "IDML";
 
+    private List<ASTStory> stories;
     private List<ASTSection> sections;
     private List<ASTPageBackground> backgrounds;
     private List<ASTFontDef> fonts;
@@ -20,6 +21,7 @@ public class ASTDocument {
     private Map<String, String> colors;
 
     public ASTDocument() {
+        this.stories = new ArrayList<>();
         this.sections = new ArrayList<>();
         this.backgrounds = new ArrayList<>();
         this.fonts = new ArrayList<>();
@@ -33,6 +35,9 @@ public class ASTDocument {
 
     public String sourceFormat() { return sourceFormat; }
     public void sourceFormat(String v) { this.sourceFormat = v; }
+
+    public List<ASTStory> stories() { return stories; }
+    public void addStory(ASTStory s) { stories.add(s); }
 
     public List<ASTSection> sections() { return sections; }
     public void addSection(ASTSection s) { sections.add(s); }

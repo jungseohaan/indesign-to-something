@@ -31,6 +31,9 @@ public class ASTFigure extends ASTBlock {
     private double cropRightFraction;
     private double cropBottomFraction;
 
+    // 번들 내 이미지 경로 (예: "images/fig_001.png")
+    private String bundlePath;
+
     public BlockType blockType() { return BlockType.FIGURE; }
 
     public FigureKind kind() { return kind; }
@@ -86,6 +89,9 @@ public class ASTFigure extends ASTBlock {
 
     public double cropBottomFraction() { return cropBottomFraction; }
     public void cropBottomFraction(double v) { this.cropBottomFraction = v; }
+
+    public String bundlePath() { return bundlePath; }
+    public void bundlePath(String v) { this.bundlePath = v; }
 
     public boolean hasCrop() {
         return cropLeftFraction > 0 || cropTopFraction > 0

@@ -1,8 +1,12 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter;
 
+import kr.dogfoot.hwpxlib.writer.HWPXWriter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.analyzer.IDMLAnalyzer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBundleReader;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBundleWriter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSerializer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IDMLPageRenderer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
@@ -70,6 +74,10 @@ public class ConverterCLI {
                 runSpreadTree(args);
             } else if ("--export-ast".equals(command)) {
                 runExportAst(args);
+            } else if ("--extract-ast".equals(command)) {
+                runExtractAst(args);
+            } else if ("--convert-ast".equals(command)) {
+                runConvertAst(args);
             } else {
                 printUsage();
                 System.exit(1);
@@ -1136,6 +1144,105 @@ public class ConverterCLI {
         idmlDoc.cleanup();
     }
 
+    /**
+     * IDML → AST 번들 디렉토리 추출.
+     * --extract-ast <idml-path> <output-dir> [options]
+     */
+    private static void runExtractAst(String[] args) throws Exception {
+        if (args.length < 3) {
+            System.err.println("Error: Missing IDML path or output directory");
+            printUsage();
+            System.exit(1);
+        }
+
+        String idmlPath = args[1];
+        String outputDirPath = args[2];
+        String linksDirectory = null;
+        int vectorDpi = 150;
+        int startPage = 0;
+        int endPage = 0;
+
+        for (int i = 3; i < args.length; i++) {
+            switch (args[i]) {
+                case "--links-directory":
+                    if (i + 1 < args.length) linksDirectory = args[++i];
+                    break;
+                case "--vector-dpi":
+                    if (i + 1 < args.length) vectorDpi = Integer.parseInt(args[++i]);
+                    break;
+                case "--start-page":
+                    if (i + 1 < args.length) startPage = Integer.parseInt(args[++i]);
+                    break;
+                case "--end-page":
+                    if (i + 1 < args.length) endPage = Integer.parseInt(args[++i]);
+                    break;
+            }
+        }
+
+        // Links 디렉토리 자동 감지
+        if (linksDirectory == null) {
+            java.io.File idmlFile = new java.io.File(idmlPath);
+            java.io.File linksDir = new java.io.File(idmlFile.getParentFile(), "Links");
+            if (linksDir.isDirectory()) {
+                linksDirectory = linksDir.getAbsolutePath();
+            }
+        }
+
+        // IDML 로드
+        IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
+        if (idmlDoc == null) {
+            outputJsonError("Failed to load IDML file: " + idmlPath);
+            System.exit(1);
+        }
+
+        String fileName = idmlPath;
+        int lastSlash = Math.max(idmlPath.lastIndexOf('/'), idmlPath.lastIndexOf('\\'));
+        if (lastSlash >= 0) fileName = idmlPath.substring(lastSlash + 1);
+
+        ConvertOptions options = ConvertOptions.defaults()
+                .includeImages(true)
+                .vectorDpi(vectorDpi);
+        if (linksDirectory != null) options = options.linksDirectory(linksDirectory);
+        if (startPage > 0) options = options.startPage(startPage);
+        if (endPage > 0) options = options.endPage(endPage);
+
+        ASTDocument ast = IDMLNormalizer.normalize(idmlDoc, options, fileName);
+
+        // 번들 디렉토리로 저장
+        java.io.File outputDir = new java.io.File(outputDirPath);
+        ASTBundleWriter.write(ast, outputDir);
+
+        System.out.println("AST bundle written to: " + outputDir.getAbsolutePath());
+        idmlDoc.cleanup();
+    }
+
+    /**
+     * AST 번들 디렉토리 → HWPX 변환.
+     * --convert-ast <ast-dir> <output-hwpx>
+     */
+    private static void runConvertAst(String[] args) throws Exception {
+        if (args.length < 3) {
+            System.err.println("Error: Missing AST directory or output HWPX path");
+            printUsage();
+            System.exit(1);
+        }
+
+        String astDirPath = args[1];
+        String hwpxPath = args[2];
+
+        java.io.File astDir = new java.io.File(astDirPath);
+        if (!new java.io.File(astDir, "ast.json").exists()) {
+            System.err.println("Error: ast.json not found in " + astDirPath);
+            System.exit(1);
+        }
+
+        ASTDocument ast = ASTBundleReader.read(astDir);
+        ConvertResult result = ASTToHwpxConverter.convert(ast);
+
+        HWPXWriter.toFilepath(result.hwpxFile(), hwpxPath);
+        System.out.println("Conversion completed: " + result.summary());
+    }
+
     private static void printUsage() {
         System.out.println("IDML / HWPX Converter");
         System.out.println();
@@ -1144,6 +1251,8 @@ public class ConverterCLI {
         System.out.println("  java -jar converter.jar --convert <input-idml> <output-hwpx> [options]");
         System.out.println("  java -jar converter.jar --hwpx-to-idml <input-hwpx> <output-idml> [--progress]");
         System.out.println("  java -jar converter.jar --export-ast <idml-path>");
+        System.out.println("  java -jar converter.jar --extract-ast <input-idml> <output-dir> [options]");
+        System.out.println("  java -jar converter.jar --convert-ast <ast-dir> <output-hwpx>");
         System.out.println("  java -jar converter.jar --render-vector <idml-path> <frame-id> [--dpi <dpi>]");
         System.out.println();
         System.out.println("IDML to HWPX Options:");
