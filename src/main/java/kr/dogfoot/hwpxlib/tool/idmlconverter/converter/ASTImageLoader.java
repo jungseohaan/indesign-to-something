@@ -145,7 +145,7 @@ public class ASTImageLoader {
 
             if (isDesignFormat(format)) {
                 boolean isCacheable = "psd".equals(format) || "ai".equals(format) || "eps".equals(format);
-                File cacheFile = isCacheable ? new File(imageFile.getAbsolutePath() + ".png") : null;
+                File cacheFile = isCacheable ? resolveCacheFile(imageFile, filename) : null;
 
                 if (isCacheable && cacheFile != null && cacheFile.exists() && cacheFile.length() > 0) {
                     imageData = Files.readAllBytes(cacheFile.toPath());
@@ -157,6 +157,7 @@ public class ASTImageLoader {
                     }
                     if (isCacheable && cacheFile != null && imageData != null && imageData.length > 0) {
                         try {
+                            cacheFile.getParentFile().mkdirs();
                             Files.write(cacheFile.toPath(), imageData);
                         } catch (Exception ignored) {}
                     }
@@ -212,6 +213,18 @@ public class ASTImageLoader {
             System.err.println("[ASTImageLoader] Failed to load: " + filename + " - " + e.getMessage());
             return createPlaceholderResult(displayWidthHwp, displayHeightHwp, filename);
         }
+    }
+
+    /**
+     * 디자인 파일 PNG 변환 캐시 파일 경로를 결정한다.
+     * imageCacheDir이 설정되어 있으면 그 디렉토리에, 아니면 원본 파일 옆에 저장.
+     */
+    private File resolveCacheFile(File imageFile, String filename) {
+        String cacheDir = options.imageCacheDir();
+        if (cacheDir != null) {
+            return new File(cacheDir, filename + ".png");
+        }
+        return new File(imageFile.getAbsolutePath() + ".png");
     }
 
     private String resolveImagePath(String path, String filename) {

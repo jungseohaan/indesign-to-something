@@ -6,6 +6,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,6 +16,15 @@ import java.util.List;
  * Stage4_BuildAST에서 분리됨.
  */
 class ASTInlineObjectBuilder {
+
+    private static String decodeURI(String uri) {
+        if (uri == null) return null;
+        try {
+            return URLDecoder.decode(uri, StandardCharsets.UTF_8.name());
+        } catch (Exception e) {
+            return uri;
+        }
+    }
 
     /**
      * InlineGraphic 내부의 TextFrame을 재귀적으로 수집하여 ASTParagraph에 추가.
@@ -966,7 +977,7 @@ class ASTInlineObjectBuilder {
         figure.imageFormat(result.format);
         figure.pixelWidth(result.pixelWidth);
         figure.pixelHeight(result.pixelHeight);
-        figure.imagePath(imgFrame.linkResourceURI());
+        figure.imagePath(decodeURI(imgFrame.linkResourceURI()));
 
         if (!hasRotOrFlip) {
             // 비회전 경로에서만 기존 flip 처리

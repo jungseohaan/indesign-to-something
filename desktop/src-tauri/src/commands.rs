@@ -259,7 +259,7 @@ pub struct ImagePreview {
 #[tauri::command]
 pub async fn get_jar_path(app: AppHandle) -> Result<String, String> {
     // JAR file name pattern (cli jar has Main-Class manifest)
-    let jar_names = ["hwpxlib-1.0.9-cli.jar", "hwpxlib-cli.jar", "idml-converter.jar"];
+    let jar_names = ["idml-to-something-1.0.9-cli.jar", "hwpxlib-1.0.9-cli.jar", "hwpxlib-cli.jar", "idml-converter.jar"];
 
     // Try bundled resource first
     if let Ok(resource_dir) = app.path().resource_dir() {
@@ -297,7 +297,7 @@ pub async fn get_jar_path(app: AppHandle) -> Result<String, String> {
     // Also try absolute path for development (use $HOME to avoid hardcoding username)
     if let Ok(home) = std::env::var("HOME") {
         let absolute_path = std::path::PathBuf::from(&home)
-            .join("works/indesign-to-something/target/hwpxlib-1.0.9-cli.jar");
+            .join("works/indesign-to-something/target/idml-to-something-1.0.9-cli.jar");
         if absolute_path.exists() {
             return Ok(absolute_path.to_string_lossy().to_string());
         }

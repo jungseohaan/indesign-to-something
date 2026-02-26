@@ -1,5 +1,116 @@
-import { useEffect, useRef, useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { useAstStore } from "../stores/useAstStore";
+
+// ─── Helpers ────────────────────────────────────────────────────────
+
+function hwpuToMm(v: number): string {
+  return (v / 7200 * 25.4).toFixed(1);
+}
+
+function dimMm(w: number, h: number): string {
+  return `${hwpuToMm(w)}×${hwpuToMm(h)}mm`;
+}
+
+function nodeMatchesSearch(node: any, label: string, sub: string | undefined, query: string): boolean {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  if (label.toLowerCase().includes(q)) return true;
+  if (sub && sub.toLowerCase().includes(q)) return true;
+  if (node?.text && node.text.toLowerCase().includes(q)) return true;
+  if (node?.hwpScript && node.hwpScript.toLowerCase().includes(q)) return true;
+  if (node?.sourceId && node.sourceId.toLowerCase().includes(q)) return true;
+  if (node?.fontFamily && node.fontFamily.toLowerCase().includes(q)) return true;
+  if (node?.styleName && node.styleName.toLowerCase().includes(q)) return true;
+  if (node?.storyId && node.storyId.toLowerCase().includes(q)) return true;
+  return false;
+}
+
+function nodeMatchesFilter(node: any, filterType: string | null): boolean {
+  if (!filterType) return true;
+  if (node?.itemType === filterType) return true;
+  if (node?.blockType === filterType) return true;
+  return false;
+}
+
+function highlightText(text: string, query: string): React.ReactNode {
+  if (!query) return text;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return text;
+  return (
+    <>
+      {text.substring(0, idx)}
+      <mark className="bg-yellow-200 rounded px-0.5">{text.substring(idx, idx + query.length)}</mark>
+      {text.substring(idx + query.length)}
+    </>
+  );
+}
+
+// ─── Story data builder ─────────────────────────────────────────────
+
+interface StoryView {
+  storyId: string;
+  storyMeta: any;
+  paragraphs: any[];
+  frames: { block: any; pageNumber: number; sectionIdx: number; blockIdx: number }[];
+  tables: { block: any; pageNumber: number; sectionIdx: number; blockIdx: number }[];
+}
+
+function buildStoryViews(astDoc: any): {
+  stories: StoryView[];
+  standaloneTables: { block: any; pageNumber: number; sectionIdx: number; blockIdx: number }[];
+  figures: { block: any; pageNumber: number; sectionIdx: number; blockIdx: number }[];
+} {
+  const storyMap = new Map<string, StoryView>();
+  const standaloneTables: { block: any; pageNumber: number; sectionIdx: number; blockIdx: number }[] = [];
+  const figures: { block: any; pageNumber: number; sectionIdx: number; blockIdx: number }[] = [];
+
+  // Initialize from story metadata
+  if (astDoc.stories) {
+    for (const story of astDoc.stories) {
+      storyMap.set(story.storyId, {
+        storyId: story.storyId,
+        storyMeta: story,
+        paragraphs: [],
+        frames: [],
+        tables: [],
+      });
+    }
+  }
+
+  // Collect blocks from all sections
+  if (astDoc.sections) {
+    astDoc.sections.forEach((sec: any, si: number) => {
+      const pageNum = sec.pageNumber || si + 1;
+      if (sec.blocks) {
+        sec.blocks.forEach((block: any, bi: number) => {
+          const info = { block, pageNumber: pageNum, sectionIdx: si, blockIdx: bi };
+          if (block.blockType === "TEXT_FRAME_BLOCK") {
+            const sid = block.storyId || "";
+            let sv = storyMap.get(sid);
+            if (!sv) {
+              sv = { storyId: sid, storyMeta: null, paragraphs: [], frames: [], tables: [] };
+              storyMap.set(sid, sv);
+            }
+            sv.frames.push(info);
+            // Collect paragraphs (avoid duplicates from linked frames)
+            if (block.paragraphs?.length > 0 && sv.paragraphs.length === 0) {
+              sv.paragraphs = block.paragraphs;
+            }
+          } else if (block.blockType === "TABLE") {
+            // Check if this table belongs to a story (via parent text frame context)
+            // Tables at block level are standalone
+            standaloneTables.push(info);
+          } else if (block.blockType === "FIGURE") {
+            figures.push(info);
+          }
+        });
+      }
+    });
+  }
+
+  const stories = Array.from(storyMap.values()).filter(s => s.paragraphs.length > 0 || s.frames.length > 0);
+  return { stories, standaloneTables, figures };
+}
 
 // ─── Tree View ──────────────────────────────────────────────────────
 
@@ -9,14 +120,16 @@ function TreeNode({
   label,
   icon,
   sub,
+  badge,
 }: {
   node: any;
   path: string;
   label: string;
   icon: string;
   sub?: string;
+  badge?: string;
 }) {
-  const { selectedPath, selectPath, expandedPaths, toggleExpand } =
+  const { selectedPath, selectPath, expandedPaths, toggleExpand, searchQuery, filterType } =
     useAstStore();
   const isSelected = selectedPath === path;
   const isExpanded = expandedPaths.has(path);
@@ -24,12 +137,16 @@ function TreeNode({
   const hasChildren = children.length > 0;
   const depth = path.split(".").length - 1;
 
+  const isMatch = nodeMatchesSearch(node, label, sub, searchQuery);
+  const isFilterMatch = nodeMatchesFilter(node, filterType);
+  const dimmed = (searchQuery && !isMatch) || (filterType && !isFilterMatch);
+
   return (
     <div>
       <div
         className={`flex items-center gap-1 px-1 py-0.5 cursor-pointer text-xs hover:bg-blue-50 ${
           isSelected ? "bg-blue-100 text-blue-800" : ""
-        }`}
+        } ${dimmed ? "opacity-30" : ""}`}
         style={{ paddingLeft: depth * 14 + 4 }}
         onClick={() => {
           selectPath(path);
@@ -40,10 +157,17 @@ function TreeNode({
           {hasChildren ? (isExpanded ? "▾" : "▸") : " "}
         </span>
         <span className="shrink-0 w-4 text-center">{icon}</span>
-        <span className="truncate font-medium">{label}</span>
+        <span className="truncate font-medium">
+          {searchQuery ? highlightText(label, searchQuery) : label}
+        </span>
+        {badge && (
+          <span className="shrink-0 px-1 py-0 rounded text-[9px] bg-gray-200 text-gray-600">
+            {badge}
+          </span>
+        )}
         {sub && (
           <span className="text-gray-400 truncate ml-1 text-[10px]">
-            {sub}
+            {searchQuery ? highlightText(sub, searchQuery) : sub}
           </span>
         )}
       </div>
@@ -56,348 +180,420 @@ function getChildren(node: any, path: string): React.ReactNode[] {
   if (!node || typeof node !== "object") return [];
   const items: React.ReactNode[] = [];
 
-  // Document level
-  if (node.sections) {
-    node.sections.forEach((sec: any, i: number) => {
-      const p = `${path}.sections[${i}]`;
+  // ── Document root: story-centric view ──
+  if (node._docView) {
+    const view = node._docView as ReturnType<typeof buildStoryViews>;
+    const doc = node._doc;
+
+    // Stories
+    view.stories.forEach((sv, i) => {
+      const p = `${path}.story[${i}]`;
+      const paraCount = sv.paragraphs.length;
+      const frameCount = sv.frames.length;
+      const pageList = sv.storyMeta?.pages?.join(",") || sv.frames.map((f: any) => f.pageNumber).join(",");
       items.push(
         <TreeNode
           key={p}
-          node={sec}
+          node={{ _storyView: sv, _doc: doc }}
           path={p}
-          label={`Page ${sec.pageNumber || i + 1}`}
-          icon="📃"
-          sub={`${sec.blocks?.length || 0} blocks`}
+          label={sv.storyId}
+          icon="📖"
+          badge={`${paraCount}¶ ${frameCount}F`}
+          sub={pageList ? `p.${pageList}` : ""}
         />
       );
     });
+
+    // Standalone tables
+    if (view.standaloneTables.length > 0) {
+      const gp = `${path}._tables`;
+      items.push(
+        <TreeNode
+          key={gp}
+          node={{ _tableList: view.standaloneTables }}
+          path={gp}
+          label="Tables"
+          icon="#"
+          sub={`${view.standaloneTables.length}`}
+        />
+      );
+    }
+
+    // Figures
+    if (view.figures.length > 0) {
+      const gp = `${path}._figures`;
+      items.push(
+        <TreeNode
+          key={gp}
+          node={{ _figureList: view.figures }}
+          path={gp}
+          label="Figures"
+          icon="🖼"
+          sub={`${view.figures.length}`}
+        />
+      );
+    }
+
+    // Metadata groups
+    if (doc.fonts?.length > 0) {
+      items.push(
+        <TreeNode key={`${path}._fonts`}
+          node={{ _group: "fonts", items: doc.fonts }} path={`${path}._fonts`}
+          label="Fonts" icon="🔤" sub={`${doc.fonts.length}`} />
+      );
+    }
+    if (doc.paragraphStyles?.length > 0) {
+      items.push(
+        <TreeNode key={`${path}._paragraphStyles`}
+          node={{ _group: "paragraphStyles", items: doc.paragraphStyles }} path={`${path}._paragraphStyles`}
+          label="Paragraph Styles" icon="📝" sub={`${doc.paragraphStyles.length}`} />
+      );
+    }
+    if (doc.characterStyles?.length > 0) {
+      items.push(
+        <TreeNode key={`${path}._characterStyles`}
+          node={{ _group: "characterStyles", items: doc.characterStyles }} path={`${path}._characterStyles`}
+          label="Character Styles" icon="🅰" sub={`${doc.characterStyles.length}`} />
+      );
+    }
+    if (doc.colors && Object.keys(doc.colors).length > 0) {
+      items.push(
+        <TreeNode key={`${path}._colors`}
+          node={{ _group: "colors", colorMap: doc.colors }} path={`${path}._colors`}
+          label="Colors" icon="🎨" sub={`${Object.keys(doc.colors).length}`} />
+      );
+    }
+    if (doc.backgrounds?.length > 0) {
+      items.push(
+        <TreeNode key={`${path}._backgrounds`}
+          node={{ _group: "backgrounds", items: doc.backgrounds }} path={`${path}._backgrounds`}
+          label="Backgrounds" icon="🖼" sub={`${doc.backgrounds.length}`} />
+      );
+    }
+    return items;
   }
 
-  // Section level → blocks
-  if (node.blocks) {
-    node.blocks.forEach((block: any, i: number) => {
-      const p = `${path}.blocks[${i}]`;
-      const bt = block.blockType;
-      if (bt === "TEXT_FRAME_BLOCK") {
-        items.push(
-          <TreeNode
-            key={p}
-            node={block}
-            path={p}
-            label="TextFrame"
-            icon="T"
-            sub={`${block.sourceId} ${block.paragraphs?.length || 0}¶`}
-          />
-        );
-      } else if (bt === "TABLE") {
-        items.push(
-          <TreeNode
-            key={p}
-            node={block}
-            path={p}
-            label="Table"
-            icon="#"
-            sub={`${block.rowCount}×${block.colCount}`}
-          />
-        );
-      } else if (bt === "FIGURE") {
-        items.push(
-          <TreeNode
-            key={p}
-            node={block}
-            path={p}
-            label={`Figure ${block.kind || ""}`}
-            icon="🖼"
-            sub={`${block.sourceId}`}
-          />
-        );
-      }
-    });
-  }
+  // ── Story view: paragraphs first, then linked frames ──
+  if (node._storyView) {
+    const sv = node._storyView as StoryView;
 
-  // TextFrameBlock → paragraphs
-  if (node.blockType === "TEXT_FRAME_BLOCK" && node.paragraphs) {
-    node.paragraphs.forEach((para: any, i: number) => {
-      const p = `${path}.paragraphs[${i}]`;
+    // Paragraphs (content)
+    sv.paragraphs.forEach((para: any, i: number) => {
+      const p = `${path}.para[${i}]`;
       const preview = getParaPreview(para);
+      const align = para.alignment ? para.alignment.charAt(0).toUpperCase() : "";
+      const itemCounts = countItems(para);
       items.push(
         <TreeNode
           key={p}
           node={para}
           path={p}
-          label={`¶ ${i}`}
+          label={`P${i}`}
           icon="¶"
-          sub={preview}
+          badge={itemCounts}
+          sub={align ? `${align} ${preview}` : preview}
         />
       );
     });
+
+    // Linked frames (container info)
+    if (sv.frames.length > 0) {
+      const fp = `${path}._frames`;
+      items.push(
+        <TreeNode
+          key={fp}
+          node={{ _frameList: sv.frames }}
+          path={fp}
+          label="Frames"
+          icon="📦"
+          sub={`${sv.frames.length} linked`}
+        />
+      );
+    }
+
+    return items;
   }
 
-  // Table → rows
-  if (node.blockType === "TABLE" && node.rows) {
-    node.rows.forEach((row: any, i: number) => {
-      const p = `${path}.rows[${i}]`;
+  // ── Frame list ──
+  if (node._frameList) {
+    (node._frameList as any[]).forEach((fi: any, i: number) => {
+      const block = fi.block;
+      const p = `${path}.frame[${i}]`;
+      const pos = block.x && block.y ? `(${hwpuToMm(block.x)},${hwpuToMm(block.y)})` : "";
+      const dim = block.width && block.height ? dimMm(block.width, block.height) : "";
+      const cols = block.columnCount > 1 ? ` ${block.columnCount}col` : "";
       items.push(
         <TreeNode
           key={p}
-          node={row}
+          node={block}
           path={p}
-          label={`Row ${row.rowIndex}`}
-          icon="─"
-          sub={`h=${row.rowHeight}`}
+          label={`Frame p.${fi.pageNumber}`}
+          icon="T"
+          sub={`${block.sourceId || ""} ${dim} ${pos}${cols}`}
         />
       );
     });
+    return items;
   }
 
-  // TableRow → cells
-  if (node.cells) {
-    node.cells.forEach((cell: any, i: number) => {
-      const p = `${path}.cells[${i}]`;
+  // ── Table list ──
+  if (node._tableList) {
+    (node._tableList as any[]).forEach((ti: any, i: number) => {
+      const block = ti.block;
+      const p = `${path}.table[${i}]`;
       items.push(
         <TreeNode
           key={p}
-          node={cell}
+          node={{ ...block, blockType: "TABLE" }}
           path={p}
-          label={`Cell(${cell.rowIndex},${cell.columnIndex})`}
-          icon="□"
-          sub={
-            cell.rowSpan > 1 || cell.columnSpan > 1
-              ? `span ${cell.rowSpan}×${cell.columnSpan}`
-              : undefined
-          }
+          label={`Table p.${ti.pageNumber}`}
+          icon="#"
+          sub={`${block.rowCount}×${block.colCount} ${block.width && block.height ? dimMm(block.width, block.height) : ""}`}
         />
       );
     });
+    return items;
   }
 
-  // TableCell → paragraphs
-  if (node.cells === undefined && node.paragraphs && !node.blockType) {
-    node.paragraphs.forEach((para: any, i: number) => {
-      const p = `${path}.paragraphs[${i}]`;
-      const preview = getParaPreview(para);
+  // ── Figure list ──
+  if (node._figureList) {
+    (node._figureList as any[]).forEach((fi: any, i: number) => {
+      const block = fi.block;
+      const p = `${path}.figure[${i}]`;
       items.push(
         <TreeNode
           key={p}
-          node={para}
+          node={block}
           path={p}
-          label={`¶ ${i}`}
-          icon="¶"
-          sub={preview}
+          label={`Figure p.${fi.pageNumber}`}
+          icon="🖼"
+          sub={`${block.kind || ""} ${block.width && block.height ? dimMm(block.width, block.height) : ""}`}
         />
+      );
+    });
+    return items;
+  }
+
+  // ── Metadata groups ──
+  if (node._group === "fonts") {
+    node.items.forEach((font: any, i: number) => {
+      const p = path.replace("._fonts", `.fonts[${i}]`);
+      items.push(
+        <TreeNode key={p} node={font} path={p}
+          label={font.fontFamily || `font_${i}`} icon="🔤" sub={font.fontType || ""} />
+      );
+    });
+  }
+  if (node._group === "paragraphStyles") {
+    node.items.forEach((style: any, i: number) => {
+      const p = path.replace("._paragraphStyles", `.paragraphStyles[${i}]`);
+      items.push(
+        <TreeNode key={p} node={style} path={p}
+          label={style.styleName || style.styleId || `style_${i}`} icon="📝"
+          sub={style.basedOnStyleRef ? `← ${style.basedOnStyleRef}` : ""} />
+      );
+    });
+  }
+  if (node._group === "characterStyles") {
+    node.items.forEach((style: any, i: number) => {
+      const p = path.replace("._characterStyles", `.characterStyles[${i}]`);
+      items.push(
+        <TreeNode key={p} node={style} path={p}
+          label={style.styleName || style.styleId || `style_${i}`} icon="🅰"
+          sub={style.fontFamily || ""} />
+      );
+    });
+  }
+  if (node._group === "colors") {
+    Object.entries(node.colorMap).forEach(([ref, hex]: [string, any]) => {
+      const p = `${path}.${ref}`;
+      items.push(
+        <TreeNode key={p} node={{ colorRef: ref, hex }} path={p}
+          label={ref} icon="🎨" sub={String(hex)} />
+      );
+    });
+  }
+  if (node._group === "backgrounds") {
+    node.items.forEach((bg: any, i: number) => {
+      const p = path.replace("._backgrounds", `.backgrounds[${i}]`);
+      items.push(
+        <TreeNode key={p} node={bg} path={p}
+          label={`Page ${bg.pageNumber || i + 1}`} icon="🖼"
+          sub={bg.pixelWidth && bg.pixelHeight ? `${bg.pixelWidth}×${bg.pixelHeight}px` : ""} />
       );
     });
   }
 
-  // Paragraph → items
-  if (node.items) {
+  // ── Paragraph → items ──
+  if (node.items && !node._group) {
     node.items.forEach((item: any, i: number) => {
       const p = `${path}.items[${i}]`;
       const it = item.itemType;
       if (it === "TEXT_RUN") {
-        const text =
-          item.text?.length > 30
-            ? item.text.substring(0, 30) + "…"
-            : item.text || "";
+        const text = item.text?.length > 40
+          ? item.text.substring(0, 40) + "…"
+          : item.text || "";
+        const fontInfo = item.fontFamily || "";
+        const sizeInfo = item.fontSizeHwpunits ? `${(item.fontSizeHwpunits / 100).toFixed(1)}pt` : "";
+        const colorInfo = item.textColor || "";
+        const styleFlags = [
+          item.fontStyle && item.fontStyle !== "normal" ? item.fontStyle : "",
+          item.underline ? "U" : "",
+          item.strikeThrough ? "S" : "",
+          item.superscript ? "sup" : "",
+          item.subscript ? "sub" : "",
+          item.grepMathFont ? "math" : "",
+        ].filter(Boolean).join(" ");
         items.push(
-          <TreeNode
-            key={p}
-            node={item}
-            path={p}
-            label={`"${text}"`}
-            icon="—"
-            sub={`${item.fontFamily || ""} ${item.fontSizeHwpunits ? item.fontSizeHwpunits / 100 + "pt" : ""}`}
-          />
+          <TreeNode key={p} node={item} path={p}
+            label={`"${text}"`} icon="—"
+            badge={styleFlags || undefined}
+            sub={`${fontInfo} ${sizeInfo} ${colorInfo}`.trim()} />
         );
       } else if (it === "INLINE_OBJECT") {
+        const kind = item.kind || "INLINE";
+        let sub = "";
+        if (kind === "INLINE_TEXT_FRAME") {
+          sub = `${item.paragraphs?.length || 0}¶`;
+        } else if (item.width && item.height) {
+          sub = dimMm(item.width, item.height);
+        }
+        if (item.sourceId) sub = `${item.sourceId} ${sub}`;
         items.push(
-          <TreeNode
-            key={p}
-            node={item}
-            path={p}
-            label={item.kind || "INLINE"}
-            icon="◆"
-            sub={`${item.sourceId || ""}`}
-          />
+          <TreeNode key={p} node={item} path={p}
+            label={kind} icon="◆" badge={item.anchoredPosition || undefined}
+            sub={sub.trim()} />
         );
       } else if (it === "BREAK") {
         items.push(
-          <TreeNode
-            key={p}
-            node={item}
-            path={p}
-            label={item.breakType || "BREAK"}
-            icon="↵"
-          />
+          <TreeNode key={p} node={item} path={p}
+            label={item.breakType || "BREAK"} icon="↵" />
+        );
+      } else if (it === "EQUATION") {
+        const script = item.hwpScript?.length > 40
+          ? item.hwpScript.substring(0, 40) + "…"
+          : item.hwpScript || "";
+        items.push(
+          <TreeNode key={p} node={item} path={p}
+            label={script || "equation"} icon="∑"
+            badge={item.sourceType || undefined} />
         );
       }
     });
   }
+
+  // ── InlineObject → overlayFrames ──
+  if (node.itemType === "INLINE_OBJECT" && node.overlayFrames?.length > 0) {
+    node.overlayFrames.forEach((frame: any, i: number) => {
+      const p = `${path}.overlayFrames[${i}]`;
+      const kind = frame.kind || "OVERLAY";
+      let sub = frame.sourceId || "";
+      if (frame.width && frame.height) sub += ` ${dimMm(frame.width, frame.height)}`;
+      items.push(
+        <TreeNode key={p} node={frame} path={p}
+          label={kind} icon="◇" sub={sub.trim()} />
+      );
+    });
+  }
+
+  // ── InlineObject → paragraphs (INLINE_TEXT_FRAME) ──
+  if (node.itemType === "INLINE_OBJECT" && node.paragraphs?.length > 0) {
+    node.paragraphs.forEach((para: any, i: number) => {
+      const p = `${path}.paragraphs[${i}]`;
+      const preview = getParaPreview(para);
+      items.push(
+        <TreeNode key={p} node={para} path={p}
+          label={`P${i}`} icon="¶" sub={preview} />
+      );
+    });
+  }
+
+  // ── InlineObject → inlineTables ──
+  if (node.itemType === "INLINE_OBJECT" && node.inlineTables?.length > 0) {
+    node.inlineTables.forEach((tbl: any, i: number) => {
+      const p = `${path}.inlineTables[${i}]`;
+      items.push(
+        <TreeNode key={p} node={{ ...tbl, blockType: "TABLE" }} path={p}
+          label="Table" icon="#" sub={`${tbl.rowCount}×${tbl.colCount}`} />
+      );
+    });
+  }
+
+  // ── Table → rows ──
+  if (node.blockType === "TABLE" && node.rows) {
+    node.rows.forEach((row: any, i: number) => {
+      const p = `${path}.rows[${i}]`;
+      items.push(
+        <TreeNode key={p} node={row} path={p}
+          label={`Row ${row.rowIndex ?? i}`} icon="─"
+          sub={row.rowHeight ? `h=${hwpuToMm(row.rowHeight)}mm` : ""} />
+      );
+    });
+  }
+
+  // ── TableRow → cells ──
+  if (node.cells) {
+    node.cells.forEach((cell: any, i: number) => {
+      const p = `${path}.cells[${i}]`;
+      const spanInfo = (cell.rowSpan > 1 || cell.columnSpan > 1)
+        ? `span ${cell.rowSpan}×${cell.columnSpan}`
+        : undefined;
+      items.push(
+        <TreeNode key={p} node={cell} path={p}
+          label={`Cell(${cell.rowIndex},${cell.columnIndex})`} icon="□"
+          sub={spanInfo} />
+      );
+    });
+  }
+
+  // ── TableCell → paragraphs ──
+  if (node.cells === undefined && node.paragraphs && !node.blockType && !node.itemType && !node._group && !node._storyView) {
+    node.paragraphs.forEach((para: any, i: number) => {
+      const p = `${path}.paragraphs[${i}]`;
+      const preview = getParaPreview(para);
+      items.push(
+        <TreeNode key={p} node={para} path={p}
+          label={`P${i}`} icon="¶" sub={preview} />
+      );
+    });
+  }
+
+  // TextFrameBlock as linked frame → container info only (no paragraphs, those are in Story)
 
   return items;
 }
 
 function getParaPreview(para: any): string {
   if (!para.items) return "";
-  const texts: string[] = [];
+  const parts: string[] = [];
   for (const item of para.items) {
     if (item.itemType === "TEXT_RUN" && item.text) {
-      texts.push(item.text);
+      parts.push(item.text);
+    } else if (item.itemType === "EQUATION") {
+      parts.push("[EQ]");
+    } else if (item.itemType === "INLINE_OBJECT") {
+      parts.push(`[${item.kind || "OBJ"}]`);
+    } else if (item.itemType === "BREAK") {
+      parts.push(`[${item.breakType || "BR"}]`);
     }
   }
-  const joined = texts.join("");
-  return joined.length > 40 ? joined.substring(0, 40) + "…" : joined;
+  const joined = parts.join("");
+  return joined.length > 50 ? joined.substring(0, 50) + "…" : joined;
 }
 
-// ─── Page Canvas ────────────────────────────────────────────────────
-
-function PageCanvas({
-  section,
-  selectedPath,
-  onSelectBlock,
-}: {
-  section: any;
-  selectedPath: string | null;
-  onSelectBlock: (path: string) => void;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !section?.layout) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const layout = section.layout;
-    const pw = layout.pageWidth;
-    const ph = layout.pageHeight;
-
-    const maxW = canvas.parentElement?.clientWidth || 400;
-    const maxH = canvas.parentElement?.clientHeight || 300;
-    const scale = Math.min((maxW - 20) / (pw / 100), (maxH - 20) / (ph / 100));
-
-    canvas.width = maxW;
-    canvas.height = maxH;
-
-    const toX = (v: number) => 10 + (v / 100) * scale;
-    const toY = (v: number) => 10 + (v / 100) * scale;
-    const toW = (v: number) => (v / 100) * scale;
-
-    ctx.fillStyle = "#f8f8f8";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Page border
-    ctx.strokeStyle = "#999";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(toX(0), toY(0), toW(pw), toW(ph));
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(toX(0), toY(0), toW(pw), toW(ph));
-
-    // Margins (dashed)
-    ctx.setLineDash([3, 3]);
-    ctx.strokeStyle = "#ccc";
-    ctx.strokeRect(
-      toX(layout.marginLeft),
-      toY(layout.marginTop),
-      toW(pw - layout.marginLeft - layout.marginRight),
-      toW(ph - layout.marginTop - layout.marginBottom)
-    );
-    ctx.setLineDash([]);
-
-    // Blocks
-    if (section.blocks) {
-      section.blocks.forEach((block: any, i: number) => {
-        const bx = toX(block.x || 0);
-        const by = toY(block.y || 0);
-        const bw = toW(block.width || 0);
-        const bh = toW(block.height || 0);
-
-        const blockPath = `root.sections[${section._idx}].blocks[${i}]`;
-        const isSel = selectedPath?.startsWith(blockPath);
-
-        const bt = block.blockType;
-        if (bt === "TEXT_FRAME_BLOCK") {
-          ctx.strokeStyle = isSel ? "#2563eb" : "#93c5fd";
-          ctx.lineWidth = isSel ? 2 : 1;
-          ctx.strokeRect(bx, by, bw, bh);
-          ctx.fillStyle = "#93c5fd";
-          ctx.font = "9px sans-serif";
-          ctx.fillText(`T ${block.sourceId || ""}`, bx + 2, by + 10);
-        } else if (bt === "TABLE") {
-          ctx.strokeStyle = isSel ? "#d97706" : "#fbbf24";
-          ctx.lineWidth = isSel ? 2 : 1;
-          ctx.strokeRect(bx, by, bw, bh);
-          ctx.fillStyle = "#fbbf24";
-          ctx.font = "9px sans-serif";
-          ctx.fillText(
-            `Table ${block.rowCount}×${block.colCount}`,
-            bx + 2,
-            by + 10
-          );
-        } else if (bt === "FIGURE") {
-          ctx.strokeStyle = isSel ? "#059669" : "#6ee7b7";
-          ctx.lineWidth = isSel ? 2 : 1;
-          ctx.strokeRect(bx, by, bw, bh);
-          ctx.fillStyle = "#6ee7b7";
-          ctx.font = "9px sans-serif";
-          ctx.fillText(`Fig ${block.kind || ""}`, bx + 2, by + 10);
-        }
-      });
-    }
-  }, [section, selectedPath]);
-
-  useEffect(() => {
-    draw();
-  }, [draw]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas?.parentElement) return;
-    const ro = new ResizeObserver(() => draw());
-    ro.observe(canvas.parentElement);
-    return () => ro.disconnect();
-  }, [draw]);
-
-  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!section?.layout || !section.blocks) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-
-    const layout = section.layout;
-    const pw = layout.pageWidth;
-    const ph = layout.pageHeight;
-    const maxW = canvas.width;
-    const maxH = canvas.height;
-    const scale = Math.min((maxW - 20) / (pw / 100), (maxH - 20) / (ph / 100));
-    const toX = (v: number) => 10 + (v / 100) * scale;
-    const toY = (v: number) => 10 + (v / 100) * scale;
-    const toW = (v: number) => (v / 100) * scale;
-
-    for (let i = section.blocks.length - 1; i >= 0; i--) {
-      const b = section.blocks[i];
-      const bx = toX(b.x || 0);
-      const by = toY(b.y || 0);
-      const bw = toW(b.width || 0);
-      const bh = toW(b.height || 0);
-      if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
-        onSelectBlock(`root.sections[${section._idx}].blocks[${i}]`);
-        return;
-      }
-    }
-  };
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="w-full h-full"
-      onClick={handleClick}
-    />
-  );
+function countItems(para: any): string {
+  if (!para.items) return "";
+  let t = 0, eq = 0, obj = 0;
+  for (const item of para.items) {
+    if (item.itemType === "TEXT_RUN") t++;
+    else if (item.itemType === "EQUATION") eq++;
+    else if (item.itemType === "INLINE_OBJECT") obj++;
+  }
+  const parts: string[] = [];
+  if (t > 0) parts.push(`${t}T`);
+  if (eq > 0) parts.push(`${eq}EQ`);
+  if (obj > 0) parts.push(`${obj}OBJ`);
+  return parts.join(" ");
 }
 
 // ─── Main Panel ─────────────────────────────────────────────────────
@@ -408,17 +604,21 @@ export function ASTTreePanel() {
     isLoading,
     error,
     selectedPath,
-    selectPath,
-    currentSectionIndex,
-    setSection,
+    searchQuery,
+    setSearchQuery,
+    filterType,
+    setFilterType,
+    expandAll,
+    collapseAll,
   } = useAstStore();
 
-  const currentSection = useMemo(() => {
-    if (!astDoc?.sections?.[currentSectionIndex]) return null;
-    return { ...astDoc.sections[currentSectionIndex], _idx: currentSectionIndex };
-  }, [astDoc, currentSectionIndex]);
+  const docView = useMemo(() => {
+    if (!astDoc) return null;
+    return buildStoryViews(astDoc);
+  }, [astDoc]);
 
   const sectionCount = astDoc?.sections?.length || 0;
+  const storyCount = docView?.stories.length || 0;
 
   if (!astDoc) {
     return (
@@ -442,55 +642,73 @@ export function ASTTreePanel() {
 
   return (
     <div className="h-full flex flex-col min-h-0">
-      {/* Header: page selector + summary */}
+      {/* Header */}
       <div className="flex items-center gap-2 px-2 py-1 border-b bg-gray-50 shrink-0 text-xs">
-        {sectionCount > 0 && (
-          <>
-            <span className="text-gray-500">Page:</span>
-            <select
-              value={currentSectionIndex}
-              onChange={(e) => setSection(parseInt(e.target.value))}
-              className="border rounded px-1 py-0.5 text-xs"
-            >
-              {astDoc.sections.map((sec: any, i: number) => (
-                <option key={i} value={i}>
-                  {sec.pageNumber || i + 1}
-                </option>
-              ))}
-            </select>
-            <span className="text-gray-400">
-              ({sectionCount}p)
-            </span>
-          </>
-        )}
-        <span className="text-gray-400 ml-auto">
-          {astDoc.fonts?.length || 0}F {astDoc.paragraphStyles?.length || 0}PS
+        <span className="font-medium text-gray-700">
+          {storyCount} stories
+        </span>
+        <span className="text-gray-400">|</span>
+        <span className="text-gray-500">
+          {sectionCount}p {astDoc.fonts?.length || 0}F {astDoc.paragraphStyles?.length || 0}PS
         </span>
       </div>
 
-      {/* Canvas: 40% height */}
-      <div className="h-[40%] border-b overflow-hidden bg-gray-50 shrink-0">
-        {currentSection ? (
-          <PageCanvas
-            section={currentSection}
-            selectedPath={selectedPath}
-            onSelectBlock={(path) => selectPath(path)}
+      {/* Toolbar */}
+      <div className="flex items-center gap-1.5 px-2 py-1 border-b bg-gray-50 shrink-0 text-xs">
+        <button
+          onClick={expandAll}
+          className="px-1.5 py-0.5 border rounded hover:bg-gray-100 text-gray-600"
+          title="전체 펼침"
+        >
+          펼침
+        </button>
+        <button
+          onClick={collapseAll}
+          className="px-1.5 py-0.5 border rounded hover:bg-gray-100 text-gray-600"
+          title="전체 접기"
+        >
+          접기
+        </button>
+        <div className="flex-1 relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="검색..."
+            className="w-full border rounded px-2 py-0.5 text-xs pl-5"
           />
-        ) : (
-          <div className="flex items-center justify-center h-full text-gray-400 text-xs">
-            No section
-          </div>
-        )}
+          <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-gray-400 text-[10px]">🔍</span>
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-[10px]"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <select
+          value={filterType || ""}
+          onChange={(e) => setFilterType(e.target.value || null)}
+          className="border rounded px-1 py-0.5 text-xs"
+        >
+          <option value="">All</option>
+          <option value="TEXT_RUN">TEXT_RUN</option>
+          <option value="EQUATION">EQUATION</option>
+          <option value="INLINE_OBJECT">INLINE_OBJ</option>
+          <option value="FIGURE">FIGURE</option>
+          <option value="TABLE">TABLE</option>
+        </select>
       </div>
 
-      {/* Tree: 60% height */}
+      {/* Tree */}
       <div className="flex-1 overflow-auto min-h-0">
         <TreeNode
-          node={astDoc}
+          node={{ _docView: docView, _doc: astDoc }}
           path="root"
           label="Document"
           icon="📄"
-          sub={`${sectionCount} sections`}
+          sub={`${sectionCount}p ${storyCount} stories`}
         />
       </div>
     </div>

@@ -30,6 +30,78 @@ import java.util.regex.Pattern;
 public class BTFontEquationConverter {
 
     /**
+     * HWP 수식 스크립트에서 인식되는 그리스 문자 키워드.
+     * 길이 내림차순 정렬 — greedy 매칭 시 theta가 th+eta로 분리되지 않도록.
+     */
+    private static final String[] GREEK_KEYWORDS = {
+            "upsilon", "epsilon", "omicron",   // 7
+            "lambda",                           // 6
+            "alpha", "gamma", "delta", "theta", "kappa", "sigma", "omega",  // 5
+            "beta", "zeta", "iota",            // 4
+            "eta", "phi", "chi", "psi", "rho", // 3
+    };
+
+    /**
+     * 텍스트에 그리스 문자 키워드가 포함되어 있는지 확인.
+     */
+    public static boolean containsGreekKeyword(String text) {
+        for (String kw : GREEK_KEYWORDS) {
+            if (text.contains(kw)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 그리스 문자 키워드를 공백으로 대체 (looksLikeWord 판정용).
+     * greedy longest-first 매칭으로 theta→eta 오분할 방지.
+     */
+    private static String removeGreekKeywords(String text) {
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        while (i < text.length()) {
+            boolean matched = false;
+            for (String kw : GREEK_KEYWORDS) {
+                if (text.regionMatches(i, kw, 0, kw.length())) {
+                    sb.append(' ');
+                    i += kw.length();
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                sb.append(text.charAt(i));
+                i++;
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 그리스 문자 키워드 사이에 공백을 삽입 (alphabeta → alpha beta).
+     * greedy longest-first 매칭으로 theta→eta 오분할 방지.
+     */
+    private static String separateGreekKeywords(String text) {
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        while (i < text.length()) {
+            boolean matched = false;
+            for (String kw : GREEK_KEYWORDS) {
+                if (text.regionMatches(i, kw, 0, kw.length())) {
+                    sb.append(' ').append(kw).append(' ');
+                    i += kw.length();
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                sb.append(text.charAt(i));
+                i++;
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
      * 연속된 BT수식M 런 그룹을 HWP 수식 스크립트로 변환한다.
      * 일반 텍스트 런도 같은 그룹에 포함될 수 있다 (수식 내 비수식폰트 부분).
      *
@@ -94,6 +166,7 @@ public class BTFontEquationConverter {
     /**
      * 문자/숫자/콤마/공백만으로 구성된 단순 텍스트인지 확인.
      * 수식 마커나 연산자가 없으면 수식이 아닌 수식폰트 텍스트로 처리.
+     * 단, 그리스 문자 키워드(alpha, beta 등)가 포함되면 수식으로 간주.
      */
     private static boolean isPlainText(String raw) {
         for (int i = 0; i < raw.length(); i++) {
@@ -101,6 +174,8 @@ public class BTFontEquationConverter {
             if (Character.isLetterOrDigit(c) || Character.isWhitespace(c) || c == ',') continue;
             return false;
         }
+        // 문자/숫자/콤마/공백만으로 구성되었더라도 그리스 문자 키워드가 있으면 수식
+        if (containsGreekKeyword(raw)) return false;
         return true;
     }
 
@@ -159,6 +234,8 @@ public class BTFontEquationConverter {
     private static boolean looksLikeWord(String text) {
         // BT수식M 키워드와 마커를 제거한 후 확인 (원본 텍스트 기준)
         String cleaned = text;
+        // 그리스 문자 키워드 제거 (greedy longest-first로 theta→eta 오분할 방지)
+        cleaned = removeGreekKeywords(cleaned);
         // 다문자 키워드 제거
         cleaned = cleaned.replace(".c3", " ");
         cleaned = cleaned.replace("not=", " ");
@@ -228,6 +305,9 @@ public class BTFontEquationConverter {
      * 키워드를 HWP 수식 스크립트 명령어로 치환.
      */
     private static String replaceKeywords(String text) {
+        // 그리스 문자 키워드 분리 (alphabeta → alpha beta)
+        text = separateGreekKeywords(text);
+
         // 순서 중요: 긴 키워드부터 (not= 전에 not 매칭 방지)
         text = text.replace("not=", " != ");
         text = text.replace(".c3", " CDOTS ");

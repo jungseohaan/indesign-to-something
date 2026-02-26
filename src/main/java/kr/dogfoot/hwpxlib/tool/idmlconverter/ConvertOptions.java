@@ -18,6 +18,7 @@ public class ConvertOptions {
     private boolean spreadBasedConversion;
     private boolean drawPageBoundary;
     private String layoutMode;
+    private String imageCacheDir;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -201,6 +202,19 @@ public class ConvertOptions {
 
     public ConvertOptions layoutMode(String layoutMode) {
         this.layoutMode = layoutMode;
+        return this;
+    }
+
+    /**
+     * 디자인 파일(PSD/AI/EPS) PNG 변환 캐시 디렉토리.
+     * 설정하면 Links 폴더 대신 이 디렉토리에 캐시 파일을 저장한다.
+     */
+    public String imageCacheDir() {
+        return imageCacheDir;
+    }
+
+    public ConvertOptions imageCacheDir(String imageCacheDir) {
+        this.imageCacheDir = imageCacheDir;
         return this;
     }
 }

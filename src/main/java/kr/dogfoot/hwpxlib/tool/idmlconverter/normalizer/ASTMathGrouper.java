@@ -184,6 +184,8 @@ class ASTMathGrouper {
             // 수식 마커나 연산자가 있으면 순수 알파벳/숫자가 아님
             return false;
         }
+        // 그리스 문자 키워드(alpha, beta 등)가 포함되면 수식으로 간주
+        if (BTFontEquationConverter.containsGreekKeyword(text)) return false;
         return true;
     }
 

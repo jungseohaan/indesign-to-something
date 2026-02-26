@@ -146,6 +146,15 @@ public class ConverterCLI {
             }
         }
 
+        // Links 디렉토리 자동 감지
+        if (options.linksDirectory() == null) {
+            java.io.File inputFile = new java.io.File(inputPath);
+            java.io.File linksDir = new java.io.File(inputFile.getParentFile(), "Links");
+            if (linksDir.isDirectory()) {
+                options = options.linksDirectory(linksDir.getAbsolutePath());
+            }
+        }
+
         // Run conversion
         ConvertResult result = IDMLToHwpxConverter.convert(inputPath, outputPath, options, reporter);
 
@@ -1199,17 +1208,19 @@ public class ConverterCLI {
         int lastSlash = Math.max(idmlPath.lastIndexOf('/'), idmlPath.lastIndexOf('\\'));
         if (lastSlash >= 0) fileName = idmlPath.substring(lastSlash + 1);
 
+        java.io.File outputDir = new java.io.File(outputDirPath);
+        java.io.File imagesDir = new java.io.File(outputDir, "images");
+        imagesDir.mkdirs();
+
         ConvertOptions options = ConvertOptions.defaults()
                 .includeImages(true)
-                .vectorDpi(vectorDpi);
+                .vectorDpi(vectorDpi)
+                .imageCacheDir(imagesDir.getAbsolutePath());
         if (linksDirectory != null) options = options.linksDirectory(linksDirectory);
         if (startPage > 0) options = options.startPage(startPage);
         if (endPage > 0) options = options.endPage(endPage);
 
         ASTDocument ast = IDMLNormalizer.normalize(idmlDoc, options, fileName);
-
-        // 번들 디렉토리로 저장
-        java.io.File outputDir = new java.io.File(outputDirPath);
         ASTBundleWriter.write(ast, outputDir);
 
         System.out.println("AST bundle written to: " + outputDir.getAbsolutePath());

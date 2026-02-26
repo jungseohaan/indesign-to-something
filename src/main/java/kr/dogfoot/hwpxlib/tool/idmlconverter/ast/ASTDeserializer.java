@@ -179,6 +179,10 @@ public class ASTDeserializer {
         tf.strokeColor(getString(o, "strokeColor"));
         tf.strokeWeight(getDouble(o, "strokeWeight"));
         tf.cornerRadius(getDouble(o, "cornerRadius"));
+        if (o.has("strokeType")) tf.strokeType(getString(o, "strokeType"));
+        if (o.has("fillTint")) tf.fillTint(getDouble(o, "fillTint"));
+        if (o.has("strokeTint")) tf.strokeTint(getDouble(o, "strokeTint"));
+        tf.fromGroup(getBool(o, "fromGroup"));
 
         if (o.has("paragraphs")) {
             for (JsonElement e : o.getAsJsonArray("paragraphs")) {
@@ -385,6 +389,7 @@ public class ASTDeserializer {
         run.superscript(getBool(o, "superscript"));
         run.underline(getBool(o, "underline"));
         run.strikeThrough(getBool(o, "strikeThrough"));
+        run.grepMathFont(getBool(o, "grepMathFont"));
         return run;
     }
 

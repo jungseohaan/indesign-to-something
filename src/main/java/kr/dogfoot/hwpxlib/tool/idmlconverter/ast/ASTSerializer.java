@@ -245,6 +245,18 @@ public class ASTSerializer {
         if (tf.cornerRadius() != 0.0) {
             first = writeDoubleField(sb, "cornerRadius", tf.cornerRadius(), first);
         }
+        if (!"Solid".equals(tf.strokeType())) {
+            first = writeStringField(sb, "strokeType", tf.strokeType(), first);
+        }
+        if (tf.fillTint() != 100.0) {
+            first = writeDoubleField(sb, "fillTint", tf.fillTint(), first);
+        }
+        if (tf.strokeTint() != 100.0) {
+            first = writeDoubleField(sb, "strokeTint", tf.strokeTint(), first);
+        }
+        if (tf.fromGroup()) {
+            first = writeBooleanField(sb, "fromGroup", true, first);
+        }
 
         // paragraphs
         if (tf.paragraphs() != null && !tf.paragraphs().isEmpty()) {
@@ -582,6 +594,9 @@ public class ASTSerializer {
         }
         if (run.strikeThrough()) {
             first = writeBooleanField(sb, "strikeThrough", true, first);
+        }
+        if (run.grepMathFont()) {
+            first = writeBooleanField(sb, "grepMathFont", true, first);
         }
         sb.append('}');
     }
