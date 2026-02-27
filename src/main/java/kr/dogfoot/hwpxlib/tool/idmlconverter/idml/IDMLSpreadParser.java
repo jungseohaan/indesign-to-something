@@ -305,6 +305,30 @@ class IDMLSpreadParser {
             frame.linkResourceFormat(getAttrOrNull(link, "LinkResourceFormat"));
         }
 
+        // TextWrapPreference 파싱
+        List<Element> twpList = getDescendantElements(shapeElem, "TextWrapPreference");
+        if (!twpList.isEmpty()) {
+            Element twp = twpList.get(0);
+            String mode = twp.getAttribute("TextWrapMode");
+            if (mode != null && !mode.isEmpty()) {
+                frame.textWrapMode(mode);
+            }
+            String side = twp.getAttribute("TextWrapSide");
+            if (side != null && !side.isEmpty()) {
+                frame.textWrapSide(side);
+            }
+            Element props = getFirstChildElement(twp, "Properties");
+            if (props != null) {
+                Element offset = getFirstChildElement(props, "TextWrapOffset");
+                if (offset != null) {
+                    frame.textWrapTop(parseDoubleAttrDef(offset, "Top", 0));
+                    frame.textWrapLeft(parseDoubleAttrDef(offset, "Left", 0));
+                    frame.textWrapBottom(parseDoubleAttrDef(offset, "Bottom", 0));
+                    frame.textWrapRight(parseDoubleAttrDef(offset, "Right", 0));
+                }
+            }
+        }
+
         return frame;
     }
 

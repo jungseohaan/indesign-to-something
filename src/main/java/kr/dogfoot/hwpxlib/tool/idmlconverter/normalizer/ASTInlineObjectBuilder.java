@@ -979,6 +979,14 @@ class ASTInlineObjectBuilder {
         figure.pixelHeight(result.pixelHeight);
         figure.imagePath(decodeURI(imgFrame.linkResourceURI()));
 
+        // textWrap 속성 전파 (IDMLImageFrame → ASTFigure)
+        figure.textWrapMode(imgFrame.textWrapMode());
+        figure.textWrapSide(imgFrame.textWrapSide());
+        figure.textWrapTop(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapTop()));
+        figure.textWrapLeft(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapLeft()));
+        figure.textWrapBottom(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapBottom()));
+        figure.textWrapRight(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapRight()));
+
         if (!hasRotOrFlip) {
             // 비회전 경로에서만 기존 flip 처리
             // 프레임과 이미지 양쪽 flip을 XOR: 둘 다 flip이면 상쇄

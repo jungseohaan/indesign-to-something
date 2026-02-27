@@ -31,6 +31,14 @@ public class ASTFigure extends ASTBlock {
     private double cropRightFraction;
     private double cropBottomFraction;
 
+    // 텍스트 감싸기 (TextWrapPreference → HWPUNIT)
+    private String textWrapMode;
+    private String textWrapSide;
+    private long textWrapTop;
+    private long textWrapLeft;
+    private long textWrapBottom;
+    private long textWrapRight;
+
     // 번들 내 이미지 경로 (예: "images/fig_001.png")
     private String bundlePath;
 
@@ -92,6 +100,24 @@ public class ASTFigure extends ASTBlock {
 
     public String bundlePath() { return bundlePath; }
     public void bundlePath(String v) { this.bundlePath = v; }
+
+    public String textWrapMode() { return textWrapMode; }
+    public void textWrapMode(String v) { this.textWrapMode = v; }
+
+    public String textWrapSide() { return textWrapSide; }
+    public void textWrapSide(String v) { this.textWrapSide = v; }
+
+    public long textWrapTop() { return textWrapTop; }
+    public void textWrapTop(long v) { this.textWrapTop = v; }
+
+    public long textWrapLeft() { return textWrapLeft; }
+    public void textWrapLeft(long v) { this.textWrapLeft = v; }
+
+    public long textWrapBottom() { return textWrapBottom; }
+    public void textWrapBottom(long v) { this.textWrapBottom = v; }
+
+    public long textWrapRight() { return textWrapRight; }
+    public void textWrapRight(long v) { this.textWrapRight = v; }
 
     public boolean hasCrop() {
         return cropLeftFraction > 0 || cropTopFraction > 0

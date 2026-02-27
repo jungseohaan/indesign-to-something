@@ -22,6 +22,14 @@ public class IDMLImageFrame {
     private double[] graphicBounds;      // 원본 이미지 크기 [left, top, right, bottom]
     private boolean fromGroup;           // Group 내에서 추출된 요소 여부
 
+    // 텍스트 감싸기 (TextWrapPreference)
+    private String textWrapMode;         // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap", "Contour"
+    private String textWrapSide;         // "BothSides", "LeftSide", "RightSide", "LargestArea"
+    private double textWrapTop;          // offset (points)
+    private double textWrapLeft;
+    private double textWrapBottom;
+    private double textWrapRight;
+
     public String selfId() { return selfId; }
     public void selfId(String v) { this.selfId = v; }
 
@@ -66,4 +74,22 @@ public class IDMLImageFrame {
     public boolean isEmbedded() {
         return "Embedded".equals(linkStoredState);
     }
+
+    public String textWrapMode() { return textWrapMode; }
+    public void textWrapMode(String v) { this.textWrapMode = v; }
+
+    public String textWrapSide() { return textWrapSide; }
+    public void textWrapSide(String v) { this.textWrapSide = v; }
+
+    public double textWrapTop() { return textWrapTop; }
+    public void textWrapTop(double v) { this.textWrapTop = v; }
+
+    public double textWrapLeft() { return textWrapLeft; }
+    public void textWrapLeft(double v) { this.textWrapLeft = v; }
+
+    public double textWrapBottom() { return textWrapBottom; }
+    public void textWrapBottom(double v) { this.textWrapBottom = v; }
+
+    public double textWrapRight() { return textWrapRight; }
+    public void textWrapRight(double v) { this.textWrapRight = v; }
 }

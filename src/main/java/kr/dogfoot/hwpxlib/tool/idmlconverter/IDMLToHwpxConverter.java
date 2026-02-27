@@ -85,6 +85,9 @@ public class IDMLToHwpxConverter {
                 }
             }
 
+            // Phase 2.7: 플로팅 이미지 → 인라인 머지 (textWrap 자리차지)
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FloatingImageMerger.merge(astDoc);
+
             // Phase 3: AST -> HWPX (페이지별 진행률: 10~90)
             int totalPages = astDoc.sections().size();
             ConvertResult result = ASTToHwpxConverter.convert(astDoc, reporter, 10, totalPages);
