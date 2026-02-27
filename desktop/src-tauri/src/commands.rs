@@ -202,6 +202,8 @@ pub struct ConvertOptions {
     pub include_images: bool,
     pub links_directory: Option<String>,
     #[serde(default)]
+    pub resolved_json_path: Option<String>,
+    #[serde(default)]
     pub start_page: Option<i32>,
     #[serde(default)]
     pub end_page: Option<i32>,
@@ -862,6 +864,11 @@ pub async fn convert_idml(
         args.push(options.layout_mode.clone());
     }
 
+    if let Some(resolved) = &options.resolved_json_path {
+        args.push("--resolved".to_string());
+        args.push(resolved.clone());
+    }
+
     println!("Convert args: {:?}", args);
     println!("spread_based option: {}", options.spread_based);
 
@@ -1343,6 +1350,25 @@ pub async fn extract_indd(
 ) -> Result<crate::indesign::InddExtractResult, String> {
     use std::time::Duration;
 
+    // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵
+    let indd = std::path::Path::new(&indd_path);
+    if let Some(indd_parent) = indd.parent() {
+        let sibling_idml = indd_parent
+            .join(indd.file_stem().unwrap_or_default())
+            .with_extension("idml");
+        let sibling_resolved = indd_parent.join("resolved.json");
+
+        if sibling_idml.exists() && sibling_resolved.exists() {
+            crate::indesign::emit_progress_pub(&app, "cached", "기존 IDML/resolved 사용 중...");
+            return Ok(crate::indesign::InddExtractResult {
+                idml_path: sibling_idml.to_string_lossy().to_string(),
+                resolved_json_path: Some(sibling_resolved.to_string_lossy().to_string()),
+                preview_pdf_path: None,
+                temp_dir: indd_parent.to_string_lossy().to_string(),
+            });
+        }
+    }
+
     // 1. InDesign 설치 확인
     let indesign_app_path = crate::indesign::find_indesign_app()?;
 
@@ -1374,6 +1400,19 @@ pub async fn extract_indd(
         let _ = std::fs::remove_dir_all(&output_dir);
         e
     })?;
+
+    // 5. 원본 INDD 파일 옆 Links/ 폴더를 temp 디렉토리에 심볼릭 링크
+    //    → 이미지 프리뷰/변환 시 IDML 옆 Links/ 폴더를 자동으로 찾을 수 있도록
+    if let Some(indd_parent) = std::path::Path::new(&indd_path).parent() {
+        let source_links = indd_parent.join("Links");
+        let target_links = output_dir.join("Links");
+        if source_links.is_dir() && !target_links.exists() {
+            #[cfg(unix)]
+            {
+                let _ = std::os::unix::fs::symlink(&source_links, &target_links);
+            }
+        }
+    }
 
     Ok(result)
 }

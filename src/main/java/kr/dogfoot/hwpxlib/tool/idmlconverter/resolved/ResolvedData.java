@@ -1,6 +1,8 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -10,6 +12,7 @@ import java.util.Map;
 public class ResolvedData {
     private final Map<String, ResolvedStory> storyMap = new HashMap<>();
     private final Map<String, String> colorHexMap = new HashMap<>();  // colorName → "#RRGGBB"
+    private final List<ResolvedTextFrame> textFrames = new ArrayList<>();
 
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
@@ -37,6 +40,24 @@ public class ResolvedData {
         return colorHexMap.get(colorName);
     }
 
+    public void addTextFrame(ResolvedTextFrame frame) {
+        textFrames.add(frame);
+    }
+
+    /**
+     * 특정 storyId(10진수)에 속하는 textFrame 목록 조회.
+     */
+    public List<ResolvedTextFrame> getTextFramesForStory(String storyId) {
+        List<ResolvedTextFrame> result = new ArrayList<>();
+        for (ResolvedTextFrame tf : textFrames) {
+            if (storyId.equals(tf.storyId())) {
+                result.add(tf);
+            }
+        }
+        return result;
+    }
+
     public int storyCount() { return storyMap.size(); }
     public int colorCount() { return colorHexMap.size(); }
+    public int textFrameCount() { return textFrames.size(); }
 }

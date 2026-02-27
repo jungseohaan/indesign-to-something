@@ -116,6 +116,7 @@ export interface ConvertOptions {
   vector_dpi: number;
   include_images: boolean;
   links_directory: string | null;
+  resolved_json_path: string | null;
   start_page: number | null;
   end_page: number | null;
   layout_mode: "preserve" | "editable";

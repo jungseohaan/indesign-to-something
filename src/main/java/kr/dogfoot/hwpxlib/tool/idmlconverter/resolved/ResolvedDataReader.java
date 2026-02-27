@@ -3,8 +3,10 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
 
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 
@@ -23,7 +25,10 @@ public class ResolvedDataReader {
     }
 
     public static ResolvedData fromJson(String json) {
-        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+        // ExtendScript JSON 폴리필이 제어 문자를 이스케이프하지 못할 수 있으므로 lenient 모드 사용
+        JsonReader reader = new JsonReader(new StringReader(json));
+        reader.setLenient(true);
+        JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
         ResolvedData data = new ResolvedData();
 
         // colors → colorHexMap
@@ -45,7 +50,25 @@ public class ResolvedDataReader {
             }
         }
 
+        // textFrames
+        if (root.has("textFrames")) {
+            for (JsonElement e : root.getAsJsonArray("textFrames")) {
+                data.addTextFrame(parseTextFrame(e.getAsJsonObject()));
+            }
+        }
+
         return data;
+    }
+
+    private static ResolvedTextFrame parseTextFrame(JsonObject o) {
+        ResolvedTextFrame tf = new ResolvedTextFrame();
+        tf.id(getString(o, "id"));
+        tf.storyId(getString(o, "storyId"));
+        tf.paragraphStart(getInt(o, "paragraphStart", -1));
+        tf.paragraphEnd(getInt(o, "paragraphEnd", -1));
+        tf.lineCount(getInt(o, "lineCount", 0));
+        tf.overflows(getBool(o, "overflows", false));
+        return tf;
     }
 
     private static ResolvedStory parseStory(JsonObject o) {
@@ -122,6 +145,16 @@ public class ResolvedDataReader {
 
     private static Boolean getBoxedBool(JsonObject o, String key) {
         if (!o.has(key) || o.get(key).isJsonNull()) return null;
+        return o.get(key).getAsBoolean();
+    }
+
+    private static int getInt(JsonObject o, String key, int defaultValue) {
+        if (!o.has(key) || o.get(key).isJsonNull()) return defaultValue;
+        return o.get(key).getAsInt();
+    }
+
+    private static boolean getBool(JsonObject o, String key, boolean defaultValue) {
+        if (!o.has(key) || o.get(key).isJsonNull()) return defaultValue;
         return o.get(key).getAsBoolean();
     }
 }

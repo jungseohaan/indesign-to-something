@@ -29,6 +29,7 @@ interface AppState {
   // INDD Extraction
   sourceType: "idml" | "indd" | null;
   inddPath: string | null;
+  resolvedJsonPath: string | null;
   isExtracting: boolean;
   extractionPhase: string | null;
 
@@ -80,6 +81,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   structure: null,
   sourceType: null,
   inddPath: null,
+  resolvedJsonPath: null,
   isExtracting: false,
   extractionPhase: null,
   selectedSpread: null,
@@ -119,6 +121,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       idmlPath: path,
       sourceType: "idml",
       inddPath: null,
+      resolvedJsonPath: null,
       isExtracting: false,
       extractionPhase: null,
       isAnalyzing: true,
@@ -164,6 +167,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       inddPath: path,
       sourceType: "indd",
       idmlPath: null,
+      resolvedJsonPath: null,
       isExtracting: true,
       extractionPhase: "launching",
       isAnalyzing: false,
@@ -198,6 +202,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Step 2: 추출된 IDML로 기존 분석 파이프라인 실행
       set({
         idmlPath: result.idml_path,
+        resolvedJsonPath: result.resolved_json_path ?? null,
         isExtracting: false,
         isAnalyzing: true,
       });
@@ -349,7 +354,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   startConversion: async () => {
-    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode } = get();
+    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, inddPath, resolvedJsonPath } = get();
     if (!idmlPath) return;
 
     const outputPath = await save({
@@ -366,6 +371,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     );
 
+    // INDD 원본 경로가 있으면 해당 디렉토리의 Links/ 폴더를 links_directory로 지정
+    let linksDir: string | null = null;
+    if (inddPath) {
+      const inddDir = inddPath.replace(/[/\\][^/\\]+$/, "");
+      linksDir = inddDir + "/Links";
+    }
+
     try {
       const result = await invoke<ConvertResult>("convert_idml", {
         inputPath: idmlPath,
@@ -374,7 +386,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           spread_based: spreadBased,
           vector_dpi: vectorDpi,
           include_images: true,
-          links_directory: null,
+          links_directory: linksDir,
+          resolved_json_path: resolvedJsonPath,
           start_page: null,
           end_page: null,
           layout_mode: layoutMode,

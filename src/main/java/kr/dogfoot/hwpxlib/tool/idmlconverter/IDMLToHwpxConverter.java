@@ -78,6 +78,8 @@ public class IDMLToHwpxConverter {
                                     options.resolvedJsonPath());
                     kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedMerger.enrich(
                             astDoc, resolved);
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedFrameDistributor.distribute(
+                            astDoc, resolved);
                 } catch (Exception e) {
                     System.err.println("Warning: resolved.json 로드/병합 실패 (무시): " + e.getMessage());
                 }

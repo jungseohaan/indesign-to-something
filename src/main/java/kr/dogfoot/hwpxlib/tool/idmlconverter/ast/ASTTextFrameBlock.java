@@ -36,6 +36,7 @@ public class ASTTextFrameBlock extends ASTBlock {
     private double cornerRadius;
     private boolean fromGroup;
     private String storyId;
+    private boolean distributed; // resolved 기반 문단 재배치 완료 → 연결 글상자 링크 해제
 
     private List<ASTParagraph> paragraphs;
 
@@ -113,6 +114,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public String storyId() { return storyId; }
     public void storyId(String v) { this.storyId = v; }
+
+    public boolean distributed() { return distributed; }
+    public void distributed(boolean v) { this.distributed = v; }
 
     public List<ASTParagraph> paragraphs() { return paragraphs; }
     public void addParagraph(ASTParagraph p) { paragraphs.add(p); }

@@ -454,11 +454,28 @@ function collectTextFrames(doc) {
                 id: tf.id.toString(),
                 storyId: null,
                 overflows: false,
-                lineCount: 0
+                lineCount: 0,
+                paragraphStart: -1,
+                paragraphEnd: -1
             };
             try { fData.storyId = tf.parentStory.id.toString(); } catch (e) {}
             try { fData.overflows = tf.overflows; } catch (e) {}
             try { fData.lineCount = tf.lines.length; } catch (e) {}
+
+            // 이 프레임에 표시되는 문단의 Story 내 인덱스 범위
+            try {
+                var frameParas = tf.paragraphs.everyItem().getElements();
+                if (frameParas.length > 0) {
+                    var storyParas = tf.parentStory.paragraphs.everyItem().getElements();
+                    var firstIdx = frameParas[0].index;
+                    var lastIdx = frameParas[frameParas.length - 1].index;
+                    for (var sp = 0; sp < storyParas.length; sp++) {
+                        if (storyParas[sp].index === firstIdx) fData.paragraphStart = sp;
+                        if (storyParas[sp].index === lastIdx) fData.paragraphEnd = sp;
+                    }
+                }
+            } catch (e) {}
+
             frames.push(fData);
         }
     } catch (e) {

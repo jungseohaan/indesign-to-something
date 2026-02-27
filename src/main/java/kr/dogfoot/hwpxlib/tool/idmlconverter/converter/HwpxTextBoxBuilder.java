@@ -362,7 +362,12 @@ class HwpxTextBoxBuilder {
                 .vertAlignAnd(cellVAlign);
 
         // 연결 글상자 링크 설정
-        applySubListLink(subList, block.storyId());
+        // resolved 기반 문단 재배치가 완료된 프레임은 링크 해제 (각 프레임이 독립적으로 표시)
+        if (block.distributed()) {
+            subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+        } else {
+            applySubListLink(subList, block.storyId());
+        }
 
         // 단락 추가
         for (ASTParagraph para : paragraphs) {

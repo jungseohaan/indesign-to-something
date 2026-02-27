@@ -192,6 +192,11 @@ end tell"#,
     })
 }
 
+/// 추출 진행률 이벤트를 프론트엔드로 emit한다 (공개 버전).
+pub fn emit_progress_pub(app: &AppHandle, phase: &str, message: &str) {
+    emit_progress(app, phase, message);
+}
+
 /// 추출 진행률 이벤트를 프론트엔드로 emit한다.
 fn emit_progress(app: &AppHandle, phase: &str, message: &str) {
     let _ = app.emit(
@@ -217,6 +222,15 @@ pub fn find_extendscript(app: &AppHandle) -> Result<String, String> {
         let bundled_flat = resource_dir.join("extract_indd.jsx");
         if bundled_flat.exists() {
             return Ok(bundled_flat.to_string_lossy().to_string());
+        }
+        // tauri가 상대경로 ../../를 _up_/_up_/로 변환
+        let bundled_up = resource_dir
+            .join("_up_")
+            .join("_up_")
+            .join("scripts")
+            .join("extract_indd.jsx");
+        if bundled_up.exists() {
+            return Ok(bundled_up.to_string_lossy().to_string());
         }
     }
 
