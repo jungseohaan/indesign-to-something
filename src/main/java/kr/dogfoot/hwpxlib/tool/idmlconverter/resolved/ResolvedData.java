@@ -37,7 +37,13 @@ public class ResolvedData {
      */
     public String resolveColorHex(String colorName) {
         if (colorName == null) return null;
-        return colorHexMap.get(colorName);
+        String hex = colorHexMap.get(colorName);
+        if (hex != null) return hex;
+        // 기본 색상 폴백 (resolved.json colors 배열에 누락된 경우)
+        if ("Paper".equals(colorName)) return "#FFFFFF";
+        if ("Black".equals(colorName)) return "#000000";
+        if ("White".equals(colorName)) return "#FFFFFF";
+        return null;
     }
 
     public void addTextFrame(ResolvedTextFrame frame) {

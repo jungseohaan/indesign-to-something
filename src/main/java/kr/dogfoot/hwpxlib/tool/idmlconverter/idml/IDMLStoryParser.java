@@ -449,6 +449,24 @@ class IDMLStoryParser {
             }
         }
 
+        // ParagraphStyleRange에 Leading이 없으면 첫 번째 CharacterStyleRange에서 폴백.
+        // InDesign에서 Leading은 character-level 속성이므로 CharacterStyleRange/Properties에
+        // 지정되는 경우가 많다.
+        if (para.leading() == null) {
+            Element firstCharRange = getFirstChildElement(paraRange, "CharacterStyleRange");
+            if (firstCharRange != null) {
+                Element charProps = getFirstChildElement(firstCharRange, "Properties");
+                if (charProps != null) {
+                    String charLeading = getPropertyText(charProps, "Leading");
+                    if (charLeading != null && !"Auto".equalsIgnoreCase(charLeading)) {
+                        try {
+                            para.leading(Double.parseDouble(charLeading));
+                        } catch (NumberFormatException ignored) {}
+                    }
+                }
+            }
+        }
+
         return para;
     }
 

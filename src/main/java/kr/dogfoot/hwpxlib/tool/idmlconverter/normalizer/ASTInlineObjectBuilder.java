@@ -9,6 +9,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -914,7 +916,8 @@ class ASTInlineObjectBuilder {
                                                  IDMLPage page,
                                                  ASTImageLoader imageLoader) {
         double[] t = imgFrame.itemTransform();
-        boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001);
+        boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001
+                || t[0] < 0 || t[3] < 0);
 
         long wHwp, hHwp, xHwp, yHwp;
 
@@ -951,9 +954,16 @@ class ASTInlineObjectBuilder {
         // 프레임 bounds (points) — 클리핑용
         double[] frameBounds = imgFrame.geometricBounds();
 
+        // PSD 레이어 가시성 오버라이드
+        java.util.List<Integer> visibleLayers = imgFrame.hasLayerOverrides()
+                ? imgFrame.visibleLayerIndices() : null;
+        String layerSig = imgFrame.hasLayerOverrides()
+                ? imgFrame.layerSignature() : null;
+
         ASTImageLoader.ImageResult result = imageLoader.loadImage(
                 imgFrame.linkResourceURI(), wHwp, hHwp,
-                imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds());
+                imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds(),
+                visibleLayers, layerSig);
 
         if (result == null || result.imageData == null) return null;
 
@@ -987,24 +997,9 @@ class ASTInlineObjectBuilder {
         figure.textWrapBottom(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapBottom()));
         figure.textWrapRight(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapRight()));
 
-        if (!hasRotOrFlip) {
-            // 비회전 경로에서만 기존 flip 처리
-            // 프레임과 이미지 양쪽 flip을 XOR: 둘 다 flip이면 상쇄
-            boolean frameFlip = IDMLGeometry.hasFlip(imgFrame.itemTransform());
-            boolean imageFlip = IDMLGeometry.hasFlip(imgFrame.imageTransform());
-            boolean netFlip = frameFlip ^ imageFlip;
-            if (netFlip) {
-                double rotation = IDMLGeometry.extractRotation(imgFrame.itemTransform());
-                if (Math.abs(Math.abs(rotation) - 180) < 0.5) {
-                    result.imageData = ASTImageLoader.flipVertically(result.imageData);
-                    figure.imageData(result.imageData);
-                } else if (Math.abs(rotation) < 0.5) {
-                    result.imageData = ASTImageLoader.flipHorizontally(result.imageData);
-                    figure.imageData(result.imageData);
-                }
-            }
-        }
-        // hasRotOrFlip: 회전/반전이 preRenderRotation에서 이미 처리됨
+        // 이미지의 flip은 applyClippingSimple에서 목적지 좌표 반전으로 이미 처리됨.
+        // 프레임의 flip은 hasRotOrFlip=true인 경우 preRenderRotation에서 처리됨.
+        // 여기서 추가 flip을 적용하면 이중 flip 버그 발생.
 
         // 페이지 경계를 벗어나는 이미지의 크롭 비율 계산 (스프레드 걸침 이미지 처리)
         // bleed(인쇄 여백 넘침, ~1%)는 무시하고, 실제 페이지 걸침(>5%)만 크롭
@@ -1052,11 +1047,14 @@ class ASTInlineObjectBuilder {
         String strokeHex = resolveColorHex(renderTarget.strokeColor(), colorResolver);
 
         // 보이지 않는 도형 스킵
-        if (fillHex == null && strokeHex == null) return null;
+        if (fillHex == null && strokeHex == null) {
+            return null;
+        }
 
         double[] effectiveBounds = shape.geometricBounds();
         double[] t = shape.itemTransform();
-        boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001);
+        boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001
+                || t[0] < 0 || t[3] < 0);
 
         long wHwp, hHwp, xHwp, yHwp;
         ASTImageLoader.ImageResult result;
@@ -1090,7 +1088,10 @@ class ASTInlineObjectBuilder {
             // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
             long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
             long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-            if (wHwp > pageW * 2 || hHwp > pageH * 2) return null;
+
+            if (wHwp > pageW * 3 || hHwp > pageH * 3) {
+                return null;
+            }
 
             // 회전 사전 렌더링된 래스터
             result = imageLoader.rasterizeShape(shape, fillHex, strokeHex, shape.itemTransform());
@@ -1124,12 +1125,16 @@ class ASTInlineObjectBuilder {
             // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
             long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
             long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-            if (wHwp > pageW * 2 || hHwp > pageH * 2) return null;
+            if (wHwp > pageW * 3 || hHwp > pageH * 3) {
+                return null;
+            }
 
             result = imageLoader.rasterizeShape(shape, fillHex, strokeHex);
         }
 
-        if (result == null || result.imageData == null) return null;
+        if (result == null || result.imageData == null) {
+            return null;
+        }
 
         ASTFigure figure = new ASTFigure();
         figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
@@ -1178,12 +1183,17 @@ class ASTInlineObjectBuilder {
                                                    IDMLPage page,
                                                    ASTImageLoader imageLoader,
                                                    ColorResolver colorResolver) {
-        // 자식 중 하나라도 보이는 색상이 있는지 확인
+        // 클리핑 프레임 자체 또는 자식 중 하나라도 보이는 색상이 있는지 확인
         boolean anyVisible = false;
-        for (IDMLVectorShape child : clipFrame.clippedChildren()) {
-            String fh = resolveColorHex(child.fillColor(), colorResolver);
-            String sh = resolveColorHex(child.strokeColor(), colorResolver);
-            if (fh != null || sh != null) { anyVisible = true; break; }
+        // 클리핑 프레임 자체의 채우기 확인
+        String clipFillHex = resolveColorHex(clipFrame.fillColor(), colorResolver);
+        if (clipFillHex != null) anyVisible = true;
+        if (!anyVisible) {
+            for (IDMLVectorShape child : clipFrame.clippedChildren()) {
+                String fh = resolveColorHex(child.fillColor(), colorResolver);
+                String sh = resolveColorHex(child.strokeColor(), colorResolver);
+                if (fh != null || sh != null) { anyVisible = true; break; }
+            }
         }
         if (!anyVisible) return null;
 
@@ -1209,11 +1219,21 @@ class ASTInlineObjectBuilder {
             }
         }
 
-        // 클리핑 프레임과 교차 → 유효 영역
-        double eLeft = Math.max(uLeft, clipLeft);
-        double eTop = Math.max(uTop, clipTop);
-        double eRight = Math.min(uRight, clipRight);
-        double eBottom = Math.min(uBottom, clipBottom);
+        // 유효 영역 계산
+        double eLeft, eTop, eRight, eBottom;
+        if (clipFillHex != null) {
+            // 클리핑 프레임 자체에 채우기가 있으면 프레임 전체를 유효 영역으로 사용
+            eLeft = clipLeft;
+            eTop = clipTop;
+            eRight = clipRight;
+            eBottom = clipBottom;
+        } else {
+            // 채우기 없으면 자식 바운딩 박스와 클리핑 프레임의 교차 영역만 사용
+            eLeft = Math.max(uLeft, clipLeft);
+            eTop = Math.max(uTop, clipTop);
+            eRight = Math.min(uRight, clipRight);
+            eBottom = Math.min(uBottom, clipBottom);
+        }
 
         if (eRight <= eLeft || eBottom <= eTop) return null;
 
@@ -1238,7 +1258,7 @@ class ASTInlineObjectBuilder {
         // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
         long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
         long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-        if (wHwp > pageW * 2 || hHwp > pageH * 2) return null;
+        if (wHwp > pageW * 3 || hHwp > pageH * 3) return null;
 
         // 유효 영역만 합성 래스터화
         ASTImageLoader.ImageResult result = imageLoader.rasterizeClippedGroup(
@@ -1252,6 +1272,84 @@ class ASTInlineObjectBuilder {
         figure.width(wHwp);
         figure.height(hHwp);
         figure.zOrder(clipFrame.zOrder());
+        figure.imageData(result.imageData);
+        figure.imageFormat(result.format);
+        figure.pixelWidth(result.pixelWidth);
+        figure.pixelHeight(result.pixelHeight);
+
+        return figure;
+    }
+
+    /**
+     * 같은 그룹(parentGroupId)에 속한 벡터 도형들을 하나의 복합 이미지로 래스터화.
+     * 그룹 내 도형들의 공간 관계를 유지하여 하나의 ASTFigure를 생성한다.
+     */
+    static ASTFigure createFigureFromVectorGroup(List<IDMLVectorShape> shapes,
+                                                   IDMLPage page,
+                                                   ASTImageLoader imageLoader,
+                                                   ColorResolver colorResolver) {
+        if (shapes == null || shapes.isEmpty()) return null;
+
+        // z-order 정렬 (낮은 값 = 뒤쪽, 먼저 렌더링)
+        List<IDMLVectorShape> sorted = new ArrayList<>(shapes);
+        Collections.sort(sorted, new Comparator<IDMLVectorShape>() {
+            public int compare(IDMLVectorShape a, IDMLVectorShape b) {
+                return Integer.compare(a.zOrder(), b.zOrder());
+            }
+        });
+
+        // ShapeWithColor 목록 구성 + 보이는 도형 필터
+        List<ASTImageLoader.ShapeWithColor> swcList = new ArrayList<>();
+        for (IDMLVectorShape s : sorted) {
+            String fillHex = resolveColorHex(s.fillColor(), colorResolver);
+            String strokeHex = resolveColorHex(s.strokeColor(), colorResolver);
+            if (fillHex == null && strokeHex == null) continue;
+            swcList.add(new ASTImageLoader.ShapeWithColor(s, fillHex, strokeHex, s.itemTransform()));
+        }
+        if (swcList.isEmpty()) return null;
+
+        // 합성 래스터화
+        ASTImageLoader.ImageResult result = imageLoader.rasterizeShapes(swcList, null);
+        if (result == null || result.imageData == null) return null;
+
+        // 그룹 전체 바운딩 박스 → 페이지 상대 좌표
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+        for (ASTImageLoader.ShapeWithColor sc : swcList) {
+            double[] tb = sc.transformedBounds();
+            if (tb == null) continue;
+            if (tb[1] < minX) minX = tb[1];
+            if (tb[0] < minY) minY = tb[0];
+            if (tb[3] > maxX) maxX = tb[3];
+            if (tb[2] > maxY) maxY = tb[2];
+        }
+        double groupCX = (minX + maxX) / 2.0;
+        double groupCY = (minY + maxY) / 2.0;
+
+        double[] pageAbs = IDMLGeometry.absoluteTopLeft(
+                page.geometricBounds(), page.itemTransform());
+        double relCX = groupCX - pageAbs[0];
+        double relCY = groupCY - pageAbs[1];
+
+        long wHwp = CoordinateConverter.pointsToHwpunits(result.widthPts);
+        long hHwp = CoordinateConverter.pointsToHwpunits(result.heightPts);
+        long xHwp = CoordinateConverter.pointsToHwpunits(relCX) - wHwp / 2;
+        long yHwp = CoordinateConverter.pointsToHwpunits(relCY) - hHwp / 2;
+
+        if (wHwp <= 0 || hHwp <= 0) return null;
+
+        // 페이지보다 훨씬 큰 그룹은 스킵
+        long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
+        long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
+        if (wHwp > pageW * 3 || hHwp > pageH * 3) return null;
+
+        ASTFigure figure = new ASTFigure();
+        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
+        figure.x(xHwp);
+        figure.y(yHwp);
+        figure.width(wHwp);
+        figure.height(hHwp);
+        figure.zOrder(shapes.get(0).zOrder());
         figure.imageData(result.imageData);
         figure.imageFormat(result.format);
         figure.pixelWidth(result.pixelWidth);

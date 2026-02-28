@@ -274,7 +274,25 @@ class IDMLSpreadParser {
 
         IDMLImageFrame frame = new IDMLImageFrame();
         frame.selfId(shapeElem.getAttribute("Self"));
-        frame.geometricBounds(resolveGeometricBounds(shapeElem));
+        // 이미지 프레임은 항상 local-space bounds를 사용해야 한다.
+        // - imageTransform: 이미지 → local-space 매핑 (클리핑용)
+        // - scaledWidth/Height: |scale| × localWidth → 올바른 표시 크기
+        // GeometricBounds 속성은 parent-space (post-transform)이므로:
+        // - 클리핑: 좌표계 불일치 → 오프셋 오류
+        // - 크기: scaledWidth = |scale| × (이미 scaled된 width) → 이중 스케일 오류
+        double[] localBounds = computeBoundsFromPathGeometry(shapeElem);
+        if (localBounds[0] == 0 && localBounds[1] == 0
+                && localBounds[2] == 0 && localBounds[3] == 0) {
+            // PathGeometry가 없으면 GeometricBounds 속성을 역변환하여 local-space로 변환
+            String boundsAttr = shapeElem.getAttribute("GeometricBounds");
+            if (boundsAttr != null && !boundsAttr.isEmpty()) {
+                double[] parentBounds = IDMLGeometry.parseBounds(boundsAttr);
+                double[] transform = IDMLGeometry.parseTransform(
+                        shapeElem.getAttribute("ItemTransform"));
+                localBounds = IDMLGeometry.inverseTransformBounds(parentBounds, transform);
+            }
+        }
+        frame.geometricBounds(localBounds);
         frame.itemTransform(IDMLGeometry.parseTransform(
                 shapeElem.getAttribute("ItemTransform")));
         frame.appliedObjectStyle(getAttrOrNull(shapeElem, "AppliedObjectStyle"));
@@ -303,6 +321,31 @@ class IDMLSpreadParser {
             frame.linkResourceURI(getAttrOrNull(link, "LinkResourceURI"));
             frame.linkStoredState(getAttrOrNull(link, "StoredState"));
             frame.linkResourceFormat(getAttrOrNull(link, "LinkResourceFormat"));
+        }
+
+        // GraphicLayerOption 파싱 (PSD 레이어 가시성 오버라이드)
+        List<Element> gloList = getDescendantElements(imageElem, "GraphicLayerOption");
+        if (!gloList.isEmpty()) {
+            Element glo = gloList.get(0);
+            List<Element> layers = getChildElements(glo, "GraphicLayer");
+            if (!layers.isEmpty()) {
+                boolean hasOverride = false;
+                java.util.ArrayList<int[]> layerEntries = new java.util.ArrayList<>();
+                for (Element gl : layers) {
+                    int id = (int) parseDoubleAttrDef(gl, "Id", -1);
+                    if (id < 0) continue;
+                    String origVis = gl.getAttribute("OriginalVisibility");
+                    String curVis = gl.getAttribute("CurrentVisibility");
+                    boolean visible = "true".equals(curVis);
+                    layerEntries.add(new int[]{id, visible ? 1 : 0});
+                    if (!origVis.equals(curVis)) {
+                        hasOverride = true;
+                    }
+                }
+                if (hasOverride) {
+                    frame.graphicLayers(layerEntries);
+                }
+            }
         }
 
         // TextWrapPreference 파싱
@@ -716,6 +759,7 @@ class IDMLSpreadParser {
 
                         vectorShape.itemTransform(combinedTransform);
                         vectorShape.fromGroup(true);
+                        vectorShape.parentGroupId(groupSelfId);
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
@@ -731,6 +775,7 @@ class IDMLSpreadParser {
                     vectorShape.itemTransform(CoordinateConverter.combineTransforms(
                             accumulatedTransform, vectorShape.itemTransform()));
                     vectorShape.fromGroup(true);
+                    vectorShape.parentGroupId(groupSelfId);
                     vectorShape.zOrder(zOrderCounter[0]++);
                     spread.addVectorShape(vectorShape);
                 }

@@ -1,5 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.idml;
 
+import java.util.List;
+
 /**
  * IDML 이미지 프레임 (Rectangle + Image + Link).
  *
@@ -21,6 +23,11 @@ public class IDMLImageFrame {
     private double[] imageTransform;     // 이미지의 transform (프레임 내 위치/스케일)
     private double[] graphicBounds;      // 원본 이미지 크기 [left, top, right, bottom]
     private boolean fromGroup;           // Group 내에서 추출된 요소 여부
+
+    // PSD 레이어 가시성 오버라이드 (GraphicLayerOption)
+    // InDesign에서 같은 PSD를 여러 프레임에 배치할 때 프레임별로 다른 레이어를 보여줄 수 있다.
+    // null이면 오버라이드 없음 (PSD 컴포지트 사용).
+    private List<int[]> graphicLayers;   // [{id, visible(0/1)}, ...] — null이면 오버라이드 없음
 
     // 텍스트 감싸기 (TextWrapPreference)
     private String textWrapMode;         // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap", "Contour"
@@ -92,4 +99,50 @@ public class IDMLImageFrame {
 
     public double textWrapRight() { return textWrapRight; }
     public void textWrapRight(double v) { this.textWrapRight = v; }
+
+    public List<int[]> graphicLayers() { return graphicLayers; }
+    public void graphicLayers(List<int[]> v) { this.graphicLayers = v; }
+
+    /**
+     * 레이어 오버라이드가 있는지 확인한다.
+     * OriginalVisibility와 CurrentVisibility가 하나라도 다르면 오버라이드가 있는 것.
+     */
+    public boolean hasLayerOverrides() {
+        return graphicLayers != null && !graphicLayers.isEmpty();
+    }
+
+    /**
+     * 가시 레이어의 ImageMagick 인덱스 목록을 반환한다.
+     * PSD에서 [0]=composite, [1]=bottom layer(Id=0), [2]=Id=1, ...
+     * 즉, ImageMagick index = layerId + 1.
+     */
+    public List<Integer> visibleLayerIndices() {
+        if (graphicLayers == null) return null;
+        java.util.ArrayList<Integer> indices = new java.util.ArrayList<>();
+        for (int[] entry : graphicLayers) {
+            if (entry[1] == 1) {
+                indices.add(entry[0] + 1); // PSD layer Id → ImageMagick index
+            }
+        }
+        return indices.isEmpty() ? null : indices;
+    }
+
+    /**
+     * 캐시 키용 레이어 서명 문자열을 반환한다.
+     * 예: "L4,6" (layer Id 4,6만 보이는 경우)
+     * 오버라이드 없으면 null.
+     */
+    public String layerSignature() {
+        if (graphicLayers == null) return null;
+        StringBuilder sb = new StringBuilder("L");
+        boolean first = true;
+        for (int[] entry : graphicLayers) {
+            if (entry[1] == 1) {
+                if (!first) sb.append(',');
+                sb.append(entry[0]);
+                first = false;
+            }
+        }
+        return first ? null : sb.toString();
+    }
 }

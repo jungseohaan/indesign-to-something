@@ -14,6 +14,7 @@ public class ResolvedTextFrame {
     private int paragraphEnd;       // Story 내 끝 문단 인덱스
     private int lineCount;
     private boolean overflows;
+    private double[] paragraphYOffsets;  // 프레임 내 각 단락의 Y오프셋 (points, 프레임 상단 기준)
 
     public String id() { return id; }
     public void id(String v) { this.id = v; }
@@ -32,4 +33,7 @@ public class ResolvedTextFrame {
 
     public boolean overflows() { return overflows; }
     public void overflows(boolean v) { this.overflows = v; }
+
+    public double[] paragraphYOffsets() { return paragraphYOffsets; }
+    public void paragraphYOffsets(double[] v) { this.paragraphYOffsets = v; }
 }

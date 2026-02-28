@@ -34,6 +34,14 @@ public class ResolvedFrameDistributor {
         for (Map.Entry<String, List<ASTTextFrameBlock>> entry : blocksByStory.entrySet()) {
             String idmlStoryId = entry.getKey();       // IDML hex: "u1735"
             List<ASTTextFrameBlock> blocks = entry.getValue();
+
+            // 배경 전용 블록을 분배 대상에서 제외 (fillColor만 있고 실질 텍스트 없는 장식 블록)
+            int beforeSize = blocks.size();
+            blocks.removeIf(ASTTextFrameBlock::isBackgroundOnly);
+            if (blocks.size() < beforeSize) {
+                System.out.println("[FrameDistributor] Story " + idmlStoryId
+                        + ": filtered " + (beforeSize - blocks.size()) + " background-only block(s)");
+            }
             if (blocks.size() < 2) continue;           // 단독 프레임은 건너뜀
 
             // IDML hex storyId → decimal storyId for resolved lookup
@@ -98,6 +106,18 @@ public class ResolvedFrameDistributor {
                 for (int i = astStart; i <= astEnd; i++) {
                     block.addParagraph(allParas.get(i));
                 }
+
+                // resolved Y좌표를 각 단락에 전파
+                double[] yOffsets = rtf.paragraphYOffsets();
+                if (yOffsets != null) {
+                    for (int i = astStart; i <= astEnd; i++) {
+                        int frameParaIdx = i - astStart;
+                        if (frameParaIdx < yOffsets.length && yOffsets[frameParaIdx] >= 0) {
+                            allParas.get(i).yOffsetInFrame(yOffsets[frameParaIdx]);
+                        }
+                    }
+                }
+
                 block.distributed(true);
                 distributed = true;
             }
@@ -310,7 +330,7 @@ public class ResolvedFrameDistributor {
             for (ASTBlock block : section.blocks()) {
                 if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
                     ASTTextFrameBlock tfb = (ASTTextFrameBlock) block;
-                    if (tfb.distributed() && tfb.storyId() != null) {
+                    if (tfb.distributed() && tfb.storyId() != null && !tfb.isBackgroundOnly()) {
                         storyBlocks.computeIfAbsent(tfb.storyId(), k -> new ArrayList<>()).add(tfb);
                     }
                 }

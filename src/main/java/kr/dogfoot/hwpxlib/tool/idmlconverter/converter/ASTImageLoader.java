@@ -124,6 +124,28 @@ public class ASTImageLoader {
                                   long displayWidthHwp, long displayHeightHwp,
                                   double[] imageTransform, double[] frameBoundsPoints,
                                   double[] graphicBounds) {
+        return loadImage(linkResourceURI, displayWidthHwp, displayHeightHwp,
+                imageTransform, frameBoundsPoints, graphicBounds, null, null);
+    }
+
+    /**
+     * 이미지 URI에서 바이너리 데이터를 로드한다 (PSD 레이어 가시성 오버라이드 지원).
+     *
+     * @param linkResourceURI    이미지 링크 URI
+     * @param displayWidthHwp    표시 너비 (HWPUNIT)
+     * @param displayHeightHwp   표시 높이 (HWPUNIT)
+     * @param imageTransform     이미지 내부 transform (클리핑용, null 가능)
+     * @param frameBoundsPoints  프레임 bounds in points (클리핑용, null 가능)
+     * @param graphicBounds      원본 이미지 크기 bounds (클리핑용, null 가능)
+     * @param visibleLayerIndices PSD 가시 레이어의 ImageMagick 인덱스 목록 (null이면 컴포지트 사용)
+     * @param layerSignature     캐시 키용 레이어 서명 (null이면 기본 캐시)
+     * @return 이미지 로드 결과
+     */
+    public ImageResult loadImage(String linkResourceURI,
+                                  long displayWidthHwp, long displayHeightHwp,
+                                  double[] imageTransform, double[] frameBoundsPoints,
+                                  double[] graphicBounds,
+                                  List<Integer> visibleLayerIndices, String layerSignature) {
         if (linkResourceURI == null || linkResourceURI.isEmpty()) {
             return createPlaceholderResult(displayWidthHwp, displayHeightHwp, null);
         }
@@ -144,13 +166,21 @@ public class ASTImageLoader {
             String outputFormat = format;
 
             if (isDesignFormat(format)) {
-                boolean isCacheable = "psd".equals(format) || "ai".equals(format) || "eps".equals(format);
-                File cacheFile = isCacheable ? resolveCacheFile(imageFile, filename) : null;
+                boolean isPsd = "psd".equals(format);
+                boolean hasLayerOverride = isPsd && visibleLayerIndices != null && !visibleLayerIndices.isEmpty();
+                boolean isCacheable = isPsd || "ai".equals(format) || "eps".equals(format);
+
+                // 레이어 오버라이드가 있으면 레이어 서명을 캐시 키에 포함
+                String cacheFilename = hasLayerOverride && layerSignature != null
+                        ? filename + "." + layerSignature : filename;
+                File cacheFile = isCacheable ? resolveCacheFile(imageFile, cacheFilename) : null;
 
                 if (isCacheable && cacheFile != null && cacheFile.exists() && cacheFile.length() > 0) {
                     imageData = Files.readAllBytes(cacheFile.toPath());
                 } else {
-                    if ("ai".equals(format) || "pdf".equals(format) || "eps".equals(format)) {
+                    if (hasLayerOverride) {
+                        imageData = DesignFileConverter.convertPsdWithLayers(imageFile, visibleLayerIndices);
+                    } else if ("ai".equals(format) || "pdf".equals(format) || "eps".equals(format)) {
                         imageData = DesignFileConverter.convertToPng(imageFile, options.imageDpi());
                     } else {
                         imageData = DesignFileConverter.convertToPng(imageFile);
@@ -373,12 +403,14 @@ public class ASTImageLoader {
         Graphics2D g = clipped.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
 
-        // Flip 처리: 음수 스케일 = 이미지 반전
-        int ax1 = sx1, ax2 = sx2, ay1 = sy1, ay2 = sy2;
-        if (imgScaleX < 0) { ax1 = srcImage.getWidth() - sx2; ax2 = srcImage.getWidth() - sx1; }
-        if (imgScaleY < 0) { ay1 = srcImage.getHeight() - sy2; ay2 = srcImage.getHeight() - sy1; }
+        // Flip 처리: 음수 스케일 = 목적지 좌표를 반전하여 출력을 뒤집는다.
+        // 소스 픽셀은 역변환으로 이미 올바른 영역이 선택되었으므로 변경하지 않는다.
+        // (소스를 변경하면 다른 픽셀이 읽히는 이중 flip 버그 발생)
+        int fdx1 = dx1, fdx2 = dx2, fdy1 = dy1, fdy2 = dy2;
+        if (imgScaleX < 0) { fdx1 = dx2; fdx2 = dx1; }
+        if (imgScaleY < 0) { fdy1 = dy2; fdy2 = dy1; }
 
-        g.drawImage(srcImage, dx1, dy1, dx2, dy2, ax1, ay1, ax2, ay2, null);
+        g.drawImage(srcImage, fdx1, fdy1, fdx2, fdy2, sx1, sy1, sx2, sy2, null);
         g.dispose();
 
         return encodePng(clipped);
@@ -386,7 +418,12 @@ public class ASTImageLoader {
 
     /**
      * 회전된 이미지 클리핑.
-     * imageTransform에 회전 성분(b, c ≠ 0)이 있는 경우 2×2 역행렬을 사용.
+     * imageTransform에 회전 성분(b, c ≠ 0)이 있는 경우 AffineTransform을 사용하여
+     * 프레임 사각형 영역만 정확히 클리핑한다.
+     *
+     * 이전 방식(바운딩 박스)은 회전된 프레임 코너의 AABB를 추출하여 프레임 밖의
+     * 이미지 영역까지 포함시키는 문제가 있었다. AffineTransform 방식은 프레임 클립을
+     * 정확히 적용하여 원본과 동일한 영역만 렌더링한다.
      */
     private byte[] applyClippingRotated(BufferedImage srcImage, double[] imageTransform,
                                          double fLeft, double fTop, double fRight, double fBottom,
@@ -397,60 +434,38 @@ public class ASTImageLoader {
         double c = imageTransform[2], d = imageTransform[3];
         double tx = imageTransform[4], ty = imageTransform[5];
 
-        // 2×2 역행렬: [a b; c d]^-1 = (1/det) * [d -b; -c a]
-        double det = a * d - b * c;
-        if (Math.abs(det) < 1e-10) return encodePng(srcImage);
-
-        double invA = d / det, invB = -b / det;
-        double invC = -c / det, invD = a / det;
-
-        // 프레임 4코너를 그래픽 좌표로 역변환
-        // graphicPt = inv * (framePt - [tx, ty]) + [gLeft, gTop]
-        double[][] frameCorners = {
-            {fLeft, fTop}, {fRight, fTop}, {fLeft, fBottom}, {fRight, fBottom}
-        };
-        double minGX = Double.MAX_VALUE, maxGX = -Double.MAX_VALUE;
-        double minGY = Double.MAX_VALUE, maxGY = -Double.MAX_VALUE;
-        for (double[] corner : frameCorners) {
-            double dx = corner[0] - tx;
-            double dy = corner[1] - ty;
-            double gx = invA * dx + invC * dy + gLeft;
-            double gy = invB * dx + invD * dy + gTop;
-            minGX = Math.min(minGX, gx);
-            maxGX = Math.max(maxGX, gx);
-            minGY = Math.min(minGY, gy);
-            maxGY = Math.max(maxGY, gy);
-        }
-
-        // 그래픽 좌표를 픽셀 좌표로 변환 (클램프 전 원본 보존)
-        double rawSrcL = (minGX - gLeft) * pxPerPtX;
-        double rawSrcT = (minGY - gTop) * pxPerPtY;
-        double rawSrcR = (maxGX - gLeft) * pxPerPtX;
-        double rawSrcB = (maxGY - gTop) * pxPerPtY;
-
-        int sx1 = Math.max(0, (int) Math.floor(rawSrcL));
-        int sy1 = Math.max(0, (int) Math.floor(rawSrcT));
-        int sx2 = Math.min(srcImage.getWidth(), (int) Math.ceil(rawSrcR));
-        int sy2 = Math.min(srcImage.getHeight(), (int) Math.ceil(rawSrcB));
-
-        if (sx1 >= sx2 || sy1 >= sy2) return encodePng(srcImage);
-
         int targetDpi = options.imageDpi();
         int pixW = Math.max(10, (int) Math.ceil(frameW * targetDpi / 72.0));
         int pixH = Math.max(10, (int) Math.ceil(frameH * targetDpi / 72.0));
 
-        // 클램프에 의해 잘린 영역을 반영한 목적지 좌표 계산
-        double rawW = rawSrcR - rawSrcL;
-        double rawH = rawSrcB - rawSrcT;
-        int dx1 = (rawW > 0) ? (int) Math.round((sx1 - rawSrcL) / rawW * pixW) : 0;
-        int dy1 = (rawH > 0) ? (int) Math.round((sy1 - rawSrcT) / rawH * pixH) : 0;
-        int dx2 = (rawW > 0) ? (int) Math.round((sx2 - rawSrcL) / rawW * pixW) : pixW;
-        int dy2 = (rawH > 0) ? (int) Math.round((sy2 - rawSrcT) / rawH * pixH) : pixH;
+        // Transform chain: source pixels → graphic pts → frame local → canvas pixels
+        // Step 1: srcPx → graphicPt
+        //   gx = srcPx / pxPerPtX + gLeft
+        AffineTransform step1 = new AffineTransform();
+        step1.translate(gLeft, gTop);
+        step1.scale(1.0 / pxPerPtX, 1.0 / pxPerPtY);
+
+        // Step 2: graphicPt → framePt (imageTransform)
+        AffineTransform step2 = new AffineTransform(a, b, c, d, tx, ty);
+
+        // Step 3: framePt → canvasPx
+        //   cpx = (fx - fLeft) * pixW / frameW
+        AffineTransform step3 = new AffineTransform();
+        step3.scale((double) pixW / frameW, (double) pixH / frameH);
+        step3.translate(-fLeft, -fTop);
+
+        // Combined: step3 ∘ step2 ∘ step1
+        AffineTransform combined = new AffineTransform();
+        combined.concatenate(step3);
+        combined.concatenate(step2);
+        combined.concatenate(step1);
 
         BufferedImage clipped = new BufferedImage(pixW, pixH, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = clipped.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.drawImage(srcImage, dx1, dy1, dx2, dy2, sx1, sy1, sx2, sy2, null);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        // 캔버스 크기 = 프레임 크기이므로 자연스럽게 프레임 영역만 클리핑
+        g.drawImage(srcImage, combined, null);
         g.dispose();
 
         return encodePng(clipped);
@@ -668,7 +683,14 @@ public class ASTImageLoader {
             if (sw <= 0 || sh <= 0) continue;
 
             Shape awtShape;
-            if (sc.accTransform != null) {
+            // 둥근 사각형은 PathPoints에 코너 정보가 없으므로 RoundRectangle2D 사용
+            if (sc.shape.shapeType() == IDMLVectorShape.ShapeType.RECTANGLE
+                    && sc.shape.hasRoundedCorners()
+                    && !hasNonRectangularPath(sc.shape)) {
+                double r = sc.shape.cornerRadius() * scale;
+                awtShape = new RoundRectangle2D.Double(
+                        offX * scale, offY * scale, sw * scale, sh * scale, r * 2, r * 2);
+            } else if (sc.accTransform != null) {
                 // 누적 변환이 있으면: path points에 변환을 적용하여 그룹 좌표계로 변환 후 렌더링
                 awtShape = buildTransformedPath(sc.shape, sc.accTransform, scale, minX, minY);
             } else {
@@ -1025,6 +1047,21 @@ public class ASTImageLoader {
         }
         g.setClip(clipShape);
 
+        // 클리핑 프레임 자체의 채우기 (배경색)
+        if (clipFrame.hasFill()) {
+            String fillRef = clipFrame.fillColor();
+            if (fillRef != null) {
+                String fillHex = colorResolver.resolve(fillRef);
+                Color frameFillColor = hexToColor(fillHex);
+                if (frameFillColor != null) {
+                    float frameAlpha = (float) (clipFrame.opacity() / 100.0);
+                    float frameFillAlpha = frameAlpha * (float) (clipFrame.fillTint() / 100.0);
+                    g.setColor(withAlpha(frameFillColor, frameFillAlpha));
+                    g.fill(clipShape);
+                }
+            }
+        }
+
         // 각 자식 도형을 렌더링 좌표계에서 개별 렌더링
         for (IDMLVectorShape child : clipFrame.clippedChildren()) {
             double[] ct = child.itemTransform();
@@ -1267,6 +1304,10 @@ public class ASTImageLoader {
                 return new Rectangle2D.Double(0, 0, w, h);
 
             case OVAL:
+                // IDML Oval can have non-standard PathGeometry (modified anchors, partial arcs, etc.)
+                if (hasNonEllipticalPath(shape)) {
+                    return buildPathFromPoints(shape, scale);
+                }
                 return new Ellipse2D.Double(0, 0, w, h);
 
             case POLYGON:
@@ -1312,6 +1353,39 @@ public class ASTImageLoader {
         // 꼭짓점이 4개가 아니면 비직사각형 (삼각형 등)
         if (points.size() != 4) return true;
 
+        return false;
+    }
+
+    /**
+     * IDML Oval이 표준 타원이 아닌 수정된 PathGeometry를 가지는지 검사.
+     * 표준 Oval은 정확히 4개의 PathPoint가 cardinal position(상하좌우 중점)에 위치.
+     * InDesign에서 별/반짝거림 등 커스텀 도형은 Oval 프리미티브에 변형된 앵커를 적용.
+     */
+    private boolean hasNonEllipticalPath(IDMLVectorShape shape) {
+        if (shape.hasSubPaths()) return true;
+        List<IDMLVectorShape.PathPoint> points = shape.pathPoints();
+        if (points == null || points.isEmpty()) return false;
+        if (points.size() != 4) return true;
+
+        // 4점이라도 앵커가 표준 타원의 cardinal position에서 벗어나면 비표준
+        double[] bounds = shape.geometricBounds();
+        if (bounds == null) return false;
+
+        double top = bounds[0], left = bounds[1], bottom = bounds[2], right = bounds[3];
+        double cx = (left + right) / 2.0;
+        double cy = (top + bottom) / 2.0;
+        double tol = 0.5; // 0.5pt 허용 오차
+
+        // 표준 타원의 4개 cardinal point: (cx,top), (right,cy), (cx,bottom), (left,cy)
+        boolean[] matched = new boolean[4];
+        for (IDMLVectorShape.PathPoint pt : points) {
+            double ax = pt.anchorX(), ay = pt.anchorY();
+            if (Math.abs(ax - cx) < tol && Math.abs(ay - top) < tol) matched[0] = true;
+            else if (Math.abs(ax - right) < tol && Math.abs(ay - cy) < tol) matched[1] = true;
+            else if (Math.abs(ax - cx) < tol && Math.abs(ay - bottom) < tol) matched[2] = true;
+            else if (Math.abs(ax - left) < tol && Math.abs(ay - cy) < tol) matched[3] = true;
+            else return true; // cardinal position 아님 → 비표준
+        }
         return false;
     }
 

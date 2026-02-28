@@ -221,6 +221,68 @@ public class DesignFileConverter {
     }
 
     /**
+     * PSD 파일의 특정 레이어만 합성하여 PNG로 변환한다.
+     * InDesign의 GraphicLayerOption에서 지정한 가시 레이어만 렌더링한다.
+     *
+     * @param psdFile      PSD 파일
+     * @param layerIndices 합성할 레이어의 ImageMagick 인덱스 목록
+     *                     (PSD [0]=composite, [1]=bottom layer, ...)
+     * @return PNG 이미지 데이터
+     * @throws IOException ImageMagick 미설치 또는 변환 실패
+     */
+    public static byte[] convertPsdWithLayers(File psdFile, java.util.List<Integer> layerIndices)
+            throws IOException {
+        if (!psdFile.exists()) {
+            throw new IOException("PSD file not found: " + psdFile.getAbsolutePath());
+        }
+        if (!isImageMagickAvailable()) {
+            throw new IOException("ImageMagick is not installed.");
+        }
+        if (layerIndices == null || layerIndices.isEmpty()) {
+            return convertPsdToPng(psdFile);
+        }
+
+        File tempPng = File.createTempFile("hwpxlib_psd_layers_", ".png");
+        tempPng.deleteOnExit();
+
+        try {
+            // magick -background none psd[idx1] psd[idx2] ... -layers flatten PNG32:out.png
+            java.util.ArrayList<String> cmd = new java.util.ArrayList<>();
+            cmd.add(imageMagickCommand);
+            cmd.add("-background");
+            cmd.add("none");
+            for (int idx : layerIndices) {
+                cmd.add(psdFile.getAbsolutePath() + "[" + idx + "]");
+            }
+            cmd.add("-layers");
+            cmd.add("flatten");
+            cmd.add("-colorspace");
+            cmd.add("sRGB");
+            cmd.add("-depth");
+            cmd.add("8");
+            cmd.add("PNG32:" + tempPng.getAbsolutePath());
+
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            executeProcess(pb, "PSD layer composition");
+
+            byte[] result = Files.readAllBytes(tempPng.toPath());
+            if (result.length == 0) {
+                // 레이어 합성 실패 시 컴포지트 폴백
+                System.err.println("[DesignFileConverter] Layer composition produced empty result, falling back to composite");
+                return convertPsdToPng(psdFile);
+            }
+            return result;
+        } catch (IOException e) {
+            // 레이어 합성 실패 시 컴포지트 폴백
+            System.err.println("[DesignFileConverter] Layer composition failed: " + e.getMessage()
+                    + ", falling back to composite");
+            return convertPsdToPng(psdFile);
+        } finally {
+            tempPng.delete();
+        }
+    }
+
+    /**
      * AI (Adobe Illustrator) 파일을 PNG로 변환한다.
      * Ghostscript을 사용하며 기본 300 DPI로 래스터화한다.
      *

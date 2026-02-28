@@ -10,6 +10,7 @@ import type {
   ImagePreview,
   ConvertResult,
   ProgressEvent,
+  LogEvent,
   TextFrameDetail,
   MasterSpreadInfo,
   InddExtractResult,
@@ -53,6 +54,7 @@ interface AppState {
   progress: ProgressEvent | null;
   result: ConvertResult | null;
   error: string | null;
+  conversionLogs: LogEvent[];
   spreadBased: boolean;
   vectorDpi: 96 | 150;
   layoutMode: "preserve" | "editable";
@@ -99,6 +101,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   progress: null,
   result: null,
   error: null,
+  conversionLogs: [],
   spreadBased: false,
   vectorDpi: 150,
   layoutMode: "preserve",
@@ -362,12 +365,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     if (!outputPath) return;
 
-    set({ isConverting: true, progress: null, result: null, error: null });
+    set({ isConverting: true, progress: null, result: null, error: null, conversionLogs: [] });
 
     const unlisten = await listen<ProgressEvent>(
       "conversion-progress",
       (event) => {
         set({ progress: event.payload });
+      }
+    );
+
+    const unlistenLog = await listen<LogEvent>(
+      "conversion-log",
+      (event) => {
+        set((state) => ({ conversionLogs: [...state.conversionLogs, event.payload] }));
       }
     );
 
@@ -399,6 +409,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: String(e), isConverting: false });
     } finally {
       unlisten();
+      unlistenLog();
     }
   },
 

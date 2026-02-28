@@ -284,7 +284,8 @@ public class ASTToHwpxConverter {
                     ctx.framesConverted++;
                     break;
                 case FIGURE:
-                    imageBuilder.convertFigure(secPrPara, (ASTFigure) block);
+                    ASTFigure fig = (ASTFigure) block;
+                    imageBuilder.convertFigure(secPrPara, fig);
                     ctx.framesConverted++;
                     break;
             }

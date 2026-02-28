@@ -75,12 +75,20 @@ class HwpxTextBoxBuilder {
         rect.createFlip();
         rect.flip().horizontalAnd(false).verticalAnd(false);
         rect.createRotationInfo();
-        rect.rotationInfo().angleAnd((short) 0)
+        short rotAngle = (short) Math.round(block.rotationAngle());
+        rect.rotationInfo().angleAnd(rotAngle)
                 .centerXAnd(w / 2).centerYAnd(textBoxMinH / 2).rotateimageAnd(true);
         rect.createRenderingInfo();
         rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        if (rotAngle != 0) {
+            double radians = Math.toRadians(rotAngle);
+            float cos = (float) Math.cos(radians);
+            float sin = (float) Math.sin(radians);
+            rect.renderingInfo().addNewRotMatrix().set(cos, -sin, 0f, sin, cos, 0f);
+        } else {
+            rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        }
 
         // LineShape (테두리)
         setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
@@ -127,7 +135,7 @@ class HwpxTextBoxBuilder {
         }
 
         // Rectangle 꼭짓점 — 최소 높이, curSz height=0 으로 내용에 맞게 자동 확장
-        rect.ratioAnd((short) 0);
+        rect.ratioAnd(computeCornerRatio(block.cornerRadius(), w, block.height()));
         rect.createPt0();
         rect.pt0().set(0L, 0L);
         rect.createPt1();
@@ -226,6 +234,7 @@ class HwpxTextBoxBuilder {
 
     /**
      * 플로팅 TEXT_FRAME_BLOCK → 1x1 Table (PAPER 기준 절대 좌표).
+     * 회전이 있는 경우 Table은 회전을 지원하지 않으므로 Rectangle(DrawTextBox)을 사용.
      * 글상자(rect+drawText) 대신 1x1 테이블을 사용하여 클릭만으로 텍스트 편집 가능.
      */
     void convertTextFrameBlock(Para framePara, ASTTextFrameBlock block) {
@@ -234,6 +243,13 @@ class HwpxTextBoxBuilder {
 
         // 음수 또는 0 크기 블록 건너뜀 (페이지 밖 객체)
         if (w <= 0 || h <= 0) return;
+
+        // 회전이 있는 블록은 Table 대신 Rectangle(DrawTextBox)로 변환
+        short rotAngle = (short) Math.round(block.rotationAngle());
+        if (rotAngle != 0) {
+            convertRotatedFloatingBlock(framePara, block, w, h, rotAngle);
+            return;
+        }
 
         int colCount = Math.max(block.columnCount(), 1);
         if (colCount <= 1) {
@@ -254,6 +270,123 @@ class HwpxTextBoxBuilder {
                 xCursor += colWidths[c] + gutter;
             }
         }
+    }
+
+    /**
+     * 회전이 있는 플로팅 텍스트 프레임 → Rectangle(DrawTextBox)로 변환.
+     * HWPX Table은 회전을 지원하지 않으므로, 회전이 필요한 블록은 DrawTextBox를 사용한다.
+     */
+    private void convertRotatedFloatingBlock(Para framePara, ASTTextFrameBlock block,
+                                              long w, long h, short rotAngle) {
+        Run anchorRun = framePara.addNewRun();
+        anchorRun.charPrIDRef("0");
+
+        Rectangle rect = anchorRun.addNewRectangle();
+        String shapeId = ASTToHwpxConverter.nextShapeId();
+
+        TextWrapMethod wrapMethod = block.isBackgroundOnly()
+                ? TextWrapMethod.BEHIND_TEXT
+                : TextWrapMethod.IN_FRONT_OF_TEXT;
+        int zOrder = block.isBackgroundOnly() ? 0 : block.zOrder();
+
+        rect.idAnd(shapeId)
+                .zOrderAnd(zOrder)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(wrapMethod)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(resolveDropCapStyle(block.paragraphs()));
+
+        // ShapeComponent
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+        rect.createCurSz();
+        rect.curSz().set(w, 0L);
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd(rotAngle)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        double radians = Math.toRadians(rotAngle);
+        float cos = (float) Math.cos(radians);
+        float sin = (float) Math.sin(radians);
+        rect.renderingInfo().addNewRotMatrix().set(cos, -sin, 0f, sin, cos, 0f);
+
+        // LineShape (테두리)
+        setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
+                block.strokeType(), block.strokeTint());
+
+        // FillBrush (배경색)
+        setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint());
+
+        // DrawText (글상자 내용)
+        rect.createDrawText();
+        DrawText dt = rect.drawText();
+        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
+
+        dt.createTextMargin();
+        dt.textMargin().leftAnd(block.insetLeft())
+                .rightAnd(block.insetRight())
+                .topAnd(block.insetTop())
+                .bottomAnd(block.insetBottom());
+
+        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
+        VerticalAlign2 cellVAlign = mapVerticalJustification(block.verticalJustification());
+        dt.createSubList();
+        SubList subList = dt.subList();
+        subList.idAnd("").textDirectionAnd(textDir)
+                .lineWrapAnd(LineWrapMethod.BREAK)
+                .vertAlignAnd(cellVAlign);
+        subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+
+        for (ASTParagraph para : block.paragraphs()) {
+            paragraphBuilder.addParagraphToSubList(subList, para);
+        }
+        HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
+        if (subList.countOfPara() == 0) {
+            paragraphBuilder.addEmptySubListPara(subList);
+        }
+
+        // Rectangle 꼭짓점 (필수 요소)
+        rect.ratioAnd((short) 0);
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        // ShapeSize — PAPER 기준 절대 좌표
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(block.y())
+                .horzOffset(block.x());
+
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
     }
 
     /**
@@ -677,7 +810,7 @@ class HwpxTextBoxBuilder {
         }
 
         // Rectangle 꼭짓점
-        rect.ratioAnd((short) 0);
+        rect.ratioAnd(computeCornerRatio(obj.cornerRadius(), w, h));
         rect.createPt0();
         rect.pt0().set(0L, 0L);
         rect.createPt1();
@@ -798,7 +931,7 @@ class HwpxTextBoxBuilder {
         setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());
 
         // 꼭짓점
-        rect.ratioAnd((short) 0);
+        rect.ratioAnd(computeCornerRatio(obj.cornerRadius(), w, h));
         rect.createPt0();
         rect.pt0().set(0L, 0L);
         rect.createPt1();
@@ -849,5 +982,18 @@ class HwpxTextBoxBuilder {
         if (style.dropCapLines() >= 3) return DropCapStyle.TripleLine;
         if (style.dropCapLines() >= 2) return DropCapStyle.DoubleLine;
         return DropCapStyle.None;
+    }
+
+    /**
+     * IDML cornerRadius (pts) → HWPX 둥근 사각형 ratio (0~50).
+     * ratio: 0=직각, 20=둥근 모양, 50=반원.
+     */
+    private static short computeCornerRatio(double cornerRadiusPts, long widthHwp, long heightHwp) {
+        if (cornerRadiusPts <= 0) return 0;
+        long minSide = Math.min(widthHwp, heightHwp);
+        if (minSide <= 0) return 0;
+        long cornerHwp = Math.round(cornerRadiusPts * 100); // 1pt = 100 HWPUNIT
+        short ratio = (short) Math.min(50, Math.round(cornerHwp * 100.0 / minSide));
+        return ratio > 0 ? ratio : 1;
     }
 }

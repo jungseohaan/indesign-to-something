@@ -40,19 +40,19 @@ class ASTStoryConverter {
         if (idmlPara.justification() != null) {
             para.alignment(idmlPara.justification());
         }
-        if (idmlPara.firstLineIndent() != null && idmlPara.firstLineIndent() != 0) {
+        if (idmlPara.firstLineIndent() != null) {
             para.firstLineIndent(CoordinateConverter.pointsToHwpunits(idmlPara.firstLineIndent()));
         }
-        if (idmlPara.leftIndent() != null && idmlPara.leftIndent() != 0) {
+        if (idmlPara.leftIndent() != null) {
             para.leftMargin(CoordinateConverter.pointsToHwpunits(idmlPara.leftIndent()));
         }
-        if (idmlPara.rightIndent() != null && idmlPara.rightIndent() != 0) {
+        if (idmlPara.rightIndent() != null) {
             para.rightMargin(CoordinateConverter.pointsToHwpunits(idmlPara.rightIndent()));
         }
-        if (idmlPara.spaceBefore() != null && idmlPara.spaceBefore() != 0) {
+        if (idmlPara.spaceBefore() != null) {
             para.spaceBefore(CoordinateConverter.pointsToHwpunits(idmlPara.spaceBefore()));
         }
-        if (idmlPara.spaceAfter() != null && idmlPara.spaceAfter() != 0) {
+        if (idmlPara.spaceAfter() != null) {
             para.spaceAfter(CoordinateConverter.pointsToHwpunits(idmlPara.spaceAfter()));
         }
         // 줄간격 (leading)

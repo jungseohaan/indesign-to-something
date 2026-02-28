@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "../stores/useAppStore";
 
 export function ConversionPanel() {
@@ -11,6 +11,7 @@ export function ConversionPanel() {
     spreadBased,
     vectorDpi,
     layoutMode,
+    conversionLogs,
     startConversion,
     setSpreadBased,
     setVectorDpi,
@@ -19,6 +20,15 @@ export function ConversionPanel() {
   } = useAppStore();
 
   const [showWarnings, setShowWarnings] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new logs arrive
+  useEffect(() => {
+    if (showLogs && logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [conversionLogs, showLogs]);
 
   return (
     <div className="px-4 py-3 border-t bg-gray-50">
@@ -110,6 +120,26 @@ export function ConversionPanel() {
               {result.warnings.map((w, i) => (
                 <div key={i} className="py-0.5">• {w}</div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Conversion Logs */}
+      {conversionLogs.length > 0 && (
+        <div className="mb-2">
+          <button
+            onClick={() => setShowLogs(!showLogs)}
+            className="text-xs text-gray-500 hover:text-gray-700"
+          >
+            로그 {conversionLogs.length}건 {showLogs ? "▲" : "▼"}
+          </button>
+          {showLogs && (
+            <div className="mt-1 max-h-48 overflow-y-auto text-xs font-mono bg-gray-900 text-gray-200 rounded p-2 border border-gray-700">
+              {conversionLogs.map((log, i) => (
+                <div key={i} className="py-0.5 whitespace-pre-wrap">{log.message}</div>
+              ))}
+              <div ref={logEndRef} />
             </div>
           )}
         </div>

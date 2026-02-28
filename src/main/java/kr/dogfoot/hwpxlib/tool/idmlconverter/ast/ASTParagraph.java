@@ -33,6 +33,9 @@ public class ASTParagraph {
     // 탭 정지점 (인라인 오버라이드, HWPUNIT 단위)
     private List<ASTTabStop> tabStops;
 
+    // 프레임 내 Y 오프셋 (points, resolved.json에서 전파, -1 = 미설정)
+    private double yOffsetInFrame = -1;
+
     // 인라인 항목 (읽기 순서)
     private List<ASTInlineItem> items;
 
@@ -99,6 +102,9 @@ public class ASTParagraph {
         }
         this.tabStops.add(ts);
     }
+
+    public double yOffsetInFrame() { return yOffsetInFrame; }
+    public void yOffsetInFrame(double v) { this.yOffsetInFrame = v; }
 
     public List<ASTInlineItem> items() { return items; }
     public void addItem(ASTInlineItem item) { items.add(item); }

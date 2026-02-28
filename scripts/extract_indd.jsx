@@ -462,7 +462,7 @@ function collectTextFrames(doc) {
             try { fData.overflows = tf.overflows; } catch (e) {}
             try { fData.lineCount = tf.lines.length; } catch (e) {}
 
-            // 이 프레임에 표시되는 문단의 Story 내 인덱스 범위
+            // 이 프레임에 표시되는 문단의 Story 내 인덱스 범위 + Y좌표
             try {
                 var frameParas = tf.paragraphs.everyItem().getElements();
                 if (frameParas.length > 0) {
@@ -473,6 +473,26 @@ function collectTextFrames(doc) {
                         if (storyParas[sp].index === firstIdx) fData.paragraphStart = sp;
                         if (storyParas[sp].index === lastIdx) fData.paragraphEnd = sp;
                     }
+
+                    // 각 단락의 첫 줄 Y좌표 (프레임 상단 기준 오프셋, points)
+                    var frameBounds = tf.geometricBounds; // [top, left, bottom, right]
+                    var frameTop = frameBounds[0];
+                    var paraYOffsets = [];
+                    for (var fp = 0; fp < frameParas.length; fp++) {
+                        try {
+                            var lines = frameParas[fp].lines.everyItem().getElements();
+                            if (lines.length > 0) {
+                                // 첫 줄의 baseline을 사용하되, ascent 보정을 위해 bounds 사용
+                                var lineBounds = lines[0].geometricBounds; // [top, left, bottom, right]
+                                paraYOffsets.push(Math.round((lineBounds[0] - frameTop) * 100) / 100);
+                            } else {
+                                paraYOffsets.push(-1);
+                            }
+                        } catch (e2) {
+                            paraYOffsets.push(-1);
+                        }
+                    }
+                    fData.paragraphYOffsets = paraYOffsets;
                 }
             } catch (e) {}
 

@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -68,6 +69,16 @@ public class ResolvedDataReader {
         tf.paragraphEnd(getInt(o, "paragraphEnd", -1));
         tf.lineCount(getInt(o, "lineCount", 0));
         tf.overflows(getBool(o, "overflows", false));
+
+        if (o.has("paragraphYOffsets")) {
+            JsonArray arr = o.getAsJsonArray("paragraphYOffsets");
+            double[] offsets = new double[arr.size()];
+            for (int i = 0; i < arr.size(); i++) {
+                offsets[i] = arr.get(i).getAsDouble();
+            }
+            tf.paragraphYOffsets(offsets);
+        }
+
         return tf;
     }
 

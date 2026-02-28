@@ -207,6 +207,57 @@ public class IDMLGeometry {
     }
 
     /**
+     * parent-space bounds를 ItemTransform의 역변환으로 local-space로 되돌린다.
+     * GeometricBounds 속성(parent-space)을 local-space로 변환할 때 사용.
+     *
+     * transform: [a, b, c, d, tx, ty]
+     * parent_point = transform * local_point
+     * local_point = inverse(transform) * parent_point
+     *
+     * @param parentBounds parent-space bounds [top, left, bottom, right]
+     * @param transform    ItemTransform [a, b, c, d, tx, ty]
+     * @return local-space bounds [top, left, bottom, right]
+     */
+    public static double[] inverseTransformBounds(double[] parentBounds, double[] transform) {
+        if (transform == null || parentBounds == null) return parentBounds;
+
+        double a = transform[0], b = transform[1];
+        double c = transform[2], d = transform[3];
+        double tx = transform[4], ty = transform[5];
+
+        double det = a * d - b * c;
+        if (Math.abs(det) < 1e-10) return parentBounds; // singular
+
+        double invA = d / det, invB = -b / det;
+        double invC = -c / det, invD = a / det;
+        double invTx = -(invA * tx + invC * ty);
+        double invTy = -(invB * tx + invD * ty);
+
+        // 4 corners of parent bounds
+        double pLeft = parentBounds[1], pTop = parentBounds[0];
+        double pRight = parentBounds[3], pBottom = parentBounds[2];
+
+        double[][] corners = {
+                {pLeft, pTop}, {pRight, pTop},
+                {pLeft, pBottom}, {pRight, pBottom}
+        };
+
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+
+        for (double[] corner : corners) {
+            double lx = invA * corner[0] + invC * corner[1] + invTx;
+            double ly = invB * corner[0] + invD * corner[1] + invTy;
+            if (lx < minX) minX = lx;
+            if (lx > maxX) maxX = lx;
+            if (ly < minY) minY = ly;
+            if (ly > maxY) maxY = ly;
+        }
+
+        return new double[]{minY, minX, maxY, maxX}; // [top, left, bottom, right]
+    }
+
+    /**
      * 프레임이 특정 페이지에 속하는지 판별.
      * 프레임의 바운딩 박스와 페이지 영역이 교차(overlap)하는지 확인.
      * 스프레드에 걸친 대형 이미지도 양쪽 페이지 모두에 포함된다.

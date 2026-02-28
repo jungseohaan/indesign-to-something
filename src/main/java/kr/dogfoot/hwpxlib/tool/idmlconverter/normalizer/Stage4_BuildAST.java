@@ -169,21 +169,42 @@ public class Stage4_BuildAST {
                     List<IDMLVectorShape> vectorShapes = spread.getVectorShapesOnPage(page);
                     // 양면 스프레드에서 페이지 경계 근처 도형 중복 방지: 중심점 기준 필터
                     vectorShapes.removeIf(s -> !isShapeCenterOnPage(s, page));
+
+                    // 그룹 소속 도형과 개별 도형 분리
+                    Map<String, List<IDMLVectorShape>> groupedShapes = new LinkedHashMap<>();
+                    List<IDMLVectorShape> ungrouped = new ArrayList<>();
+                    for (IDMLVectorShape s : vectorShapes) {
+                        if (s.fromGroup() && s.parentGroupId() != null) {
+                            groupedShapes.computeIfAbsent(s.parentGroupId(), k -> new ArrayList<>()).add(s);
+                        } else {
+                            ungrouped.add(s);
+                        }
+                    }
+
                     ASTImageLoader finalImageLoader2 = imageLoader;
                     IDMLPage finalPage2 = page;
-                    List<ASTFigure> vectorFigures = vectorShapes.parallelStream()
+
+                    // 개별 도형 래스터화 (기존 로직)
+                    List<ASTFigure> vectorFigures = ungrouped.parallelStream()
                             .map(shape -> ASTInlineObjectBuilder.createFigureFromVectorShape(shape, finalPage2, finalImageLoader2, colorResolver))
                             .filter(Objects::nonNull)
                             .collect(Collectors.toList());
-                    // 콘텐츠 영역으로 클리핑 (HWPX 뷰어는 페이지 경계 자동 클리핑이 없으므로
-                    // InDesign처럼 보이려면 여백을 제외한 콘텐츠 영역까지만 표시)
+
+                    // 그룹별 합성 래스터화
+                    for (List<IDMLVectorShape> group : groupedShapes.values()) {
+                        ASTFigure fig = ASTInlineObjectBuilder.createFigureFromVectorGroup(
+                                group, finalPage2, finalImageLoader2, colorResolver);
+                        if (fig != null) {
+                            vectorFigures.add(fig);
+                        }
+                    }
+
+                    // 페이지 경계로 클리핑 (bleed/pasteboard 밖 도형 제거)
                     long fullPageW = CoordinateConverter.pointsToHwpunits(
                             IDMLGeometry.width(page.geometricBounds()));
                     long fullPageH = CoordinateConverter.pointsToHwpunits(
                             IDMLGeometry.height(page.geometricBounds()));
-                    long vecClipW = fullPageW - CoordinateConverter.pointsToHwpunits(page.marginRight());
-                    long vecClipH = fullPageH - CoordinateConverter.pointsToHwpunits(page.marginBottom());
-                    vectorFigures.removeIf(fig -> !clipFigureToPage(fig, vecClipW, vecClipH));
+                    vectorFigures.removeIf(fig -> !clipFigureToPage(fig, fullPageW, fullPageH));
                     vectorFigures.forEach(section::addBlock);
                 }
 
@@ -355,16 +376,16 @@ public class Stage4_BuildAST {
     /**
      * 도형의 중심점이 페이지 영역 안에 있는지 확인.
      * 양면 스프레드에서 페이지 경계 근처 도형이 양쪽 페이지에 중복 포함되는 것을 방지한다.
+     * 스프레드 전체를 덮는 배경 도형은 양쪽 페이지에 모두 포함시킨다.
      */
     private static boolean isShapeCenterOnPage(IDMLVectorShape shape, IDMLPage page) {
         double[] bounds = shape.geometricBounds();
         double[] transform = shape.itemTransform();
         if (bounds == null || transform == null) return true;
 
-        // 도형 중심점 (스프레드 좌표)
-        double cx = (bounds[1] + bounds[3]) / 2.0;
-        double cy = (bounds[0] + bounds[2]) / 2.0;
-        double[] absCenter = CoordinateConverter.applyTransform(transform, cx, cy);
+        // 도형의 변환 후 바운딩 박스
+        double[] shapeBox = IDMLGeometry.getTransformedBoundingBox(bounds, transform);
+        // shapeBox: [minX, minY, maxX, maxY]
 
         // 페이지 영역 (스프레드 좌표)
         double[] pageBounds = page.geometricBounds();
@@ -378,8 +399,26 @@ public class Stage4_BuildAST {
         double pageMinY = Math.min(pageTL[1], pageBR[1]);
         double pageMaxY = Math.max(pageTL[1], pageBR[1]);
 
-        return absCenter[0] >= pageMinX && absCenter[0] <= pageMaxX
-                && absCenter[1] >= pageMinY && absCenter[1] <= pageMaxY;
+        double pageW = pageMaxX - pageMinX;
+        double pageH = pageMaxY - pageMinY;
+
+        // 스프레드 전체를 덮는 도형(배경 등)만 양쪽 페이지에 모두 포함
+        // 2x 이상이면 전체 스프레드 배경으로 간주 (예: u1517 = 2.03x)
+        double shapeW = shapeBox[2] - shapeBox[0];
+        double shapeH = shapeBox[3] - shapeBox[1];
+        if (shapeW > pageW * 2.0 || shapeH > pageH * 2.0) {
+            return true;
+        }
+
+        // 도형 중심점 (스프레드 좌표)
+        double cx = (bounds[1] + bounds[3]) / 2.0;
+        double cy = (bounds[0] + bounds[2]) / 2.0;
+        double[] absCenter = CoordinateConverter.applyTransform(transform, cx, cy);
+
+        // 1pt 여유 (부동소수점 오차 보정)
+        double tolerance = 1.0;
+        return absCenter[0] >= pageMinX - tolerance && absCenter[0] <= pageMaxX + tolerance
+                && absCenter[1] >= pageMinY - tolerance && absCenter[1] <= pageMaxY + tolerance;
     }
 
     /**
@@ -550,34 +589,53 @@ public class Stage4_BuildAST {
         block.sourceId(tf.selfId());
 
         // 페이지 상대 좌표 계산
-        double[] relPos = IDMLGeometry.pageRelativePosition(
-                tf.geometricBounds(), tf.itemTransform(),
-                page.geometricBounds(), page.itemTransform());
-        double w = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
-        double h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+        double rotation = IDMLGeometry.extractRotation(tf.itemTransform());
+        boolean hasRotation = Math.abs(rotation) > 0.5;
 
-        long xHwp = CoordinateConverter.pointsToHwpunits(relPos[0]);
-        long yHwp = CoordinateConverter.pointsToHwpunits(relPos[1]);
-        long wHwp = CoordinateConverter.pointsToHwpunits(w);
-        long hHwp = CoordinateConverter.pointsToHwpunits(h);
+        double w, h;
+        long xHwp, yHwp, wHwp, hHwp;
+
+        if (hasRotation) {
+            // 회전 있는 프레임: 실제 크기(scaledWidth/Height) 사용 + 중심 기준 위치
+            w = IDMLGeometry.scaledWidth(tf.geometricBounds(), tf.itemTransform());
+            h = IDMLGeometry.scaledHeight(tf.geometricBounds(), tf.itemTransform());
+            wHwp = CoordinateConverter.pointsToHwpunits(w);
+            hHwp = CoordinateConverter.pointsToHwpunits(h);
+            double[] relCenter = IDMLGeometry.pageRelativeCenter(
+                    tf.geometricBounds(), tf.itemTransform(),
+                    page.geometricBounds(), page.itemTransform());
+            xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
+            yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
+        } else {
+            // 비회전: 기존 방식 (바운딩 박스)
+            double[] relPos = IDMLGeometry.pageRelativePosition(
+                    tf.geometricBounds(), tf.itemTransform(),
+                    page.geometricBounds(), page.itemTransform());
+            w = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
+            h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+            xHwp = CoordinateConverter.pointsToHwpunits(relPos[0]);
+            yHwp = CoordinateConverter.pointsToHwpunits(relPos[1]);
+            wHwp = CoordinateConverter.pointsToHwpunits(w);
+            hHwp = CoordinateConverter.pointsToHwpunits(h);
+        }
 
         // 페이지 경계 클리핑: 양쪽 페이지에 걸친 배경 사각형 등을 페이지 내로 제한
-        long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
-        long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-        if (xHwp < 0) { wHwp += xHwp; xHwp = 0; }
-        if (yHwp < 0) { hHwp += yHwp; yHwp = 0; }
-        if (xHwp + wHwp > pageW) { wHwp = pageW - xHwp; }
-        if (yHwp + hHwp > pageH) { hHwp = pageH - yHwp; }
-        // 클리핑 결과 크기가 0 이하 → 페이지 밖 객체이므로 건너뜀
-        if (wHwp <= 0 || hHwp <= 0) {
-            System.err.println("[CLIP-SKIP] TextFrame id=" + tf.selfId()
-                    + " clipped to w=" + wHwp + " h=" + hHwp
-                    + " (orig x=" + CoordinateConverter.pointsToHwpunits(relPos[0])
-                    + " y=" + CoordinateConverter.pointsToHwpunits(relPos[1])
-                    + " w=" + CoordinateConverter.pointsToHwpunits(w)
-                    + " h=" + CoordinateConverter.pointsToHwpunits(h)
-                    + " pageW=" + pageW + " pageH=" + pageH + ")");
-            return null;
+        // 회전된 프레임은 AABB 클리핑이 의미 없으므로 건너뜀
+        if (!hasRotation) {
+            long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
+            long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
+            if (xHwp < 0) { wHwp += xHwp; xHwp = 0; }
+            if (yHwp < 0) { hHwp += yHwp; yHwp = 0; }
+            if (xHwp + wHwp > pageW) { wHwp = pageW - xHwp; }
+            if (yHwp + hHwp > pageH) { hHwp = pageH - yHwp; }
+            if (wHwp <= 0 || hHwp <= 0) {
+                System.err.println("[CLIP-SKIP] TextFrame id=" + tf.selfId()
+                        + " clipped to w=" + wHwp + " h=" + hHwp
+                        + " w_orig=" + CoordinateConverter.pointsToHwpunits(w)
+                        + " h_orig=" + CoordinateConverter.pointsToHwpunits(h)
+                        + " pageW=" + pageW + " pageH=" + pageH);
+                return null;
+            }
         }
 
         block.x(xHwp);
@@ -619,6 +677,7 @@ public class Stage4_BuildAST {
         block.fillTint(tf.fillTint());
         block.strokeTint(tf.strokeTint());
         block.cornerRadius(tf.cornerRadius());
+        block.rotationAngle(rotation);
 
         return block;
     }
@@ -798,16 +857,11 @@ public class Stage4_BuildAST {
     /**
      * 인라인 텍스트 프레임을 본문 뒤로 이동해야 하는지 판별.
      * - 교사용프레임: 해설 내용이 문제 앞에 인라인으로 삽입되어 있으므로 뒤로 이동
-     * - AnchoredPosition="Anchored": 커스텀 위치 지정된 프레임
      */
     static boolean shouldDeferInlineFrame(IDMLTextFrame inlineTf) {
         // 교사용프레임 오브젝트 스타일 체크
         String style = inlineTf.appliedObjectStyle();
         if (style != null && style.contains("교사용프레임")) {
-            return true;
-        }
-        // AnchoredPosition="Anchored" 체크
-        if ("Anchored".equals(inlineTf.anchoredPosition())) {
             return true;
         }
         return false;

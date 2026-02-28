@@ -7,11 +7,11 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * textWrap이 있는 플로팅 이미지(ASTFigure)를 본문 글상자(ASTTextFrameBlock) 안의
- * 인라인 이미지(ASTInlineObject)로 변환한다.
+ * textWrap이 있는 플로팅 이미지(ASTFigure)의 자리차지 효과를 구현한다.
  *
  * HWPX에서 플로팅 이미지의 textWrap은 동작하지 않으므로,
- * 이미지를 글상자 문단 안에 넣어 "자리차지" 효과를 구현한다.
+ * 글상자 안에 투명 스페이서를 삽입하여 공간만 확보하고
+ * 원본 이미지는 BEHIND_TEXT 플로팅으로 그대로 유지한다.
  *
  * 호출 시점: Stage4_BuildAST 이후, HWPX 변환 이전.
  */
@@ -43,27 +43,26 @@ public class FloatingImageMerger {
         // Y좌표 순 정렬
         wrappingFigures.sort(Comparator.comparingLong(ASTFigure::y));
 
-        List<ASTFigure> merged = new ArrayList<>();
+        int count = 0;
         for (ASTFigure fig : wrappingFigures) {
             ASTTextFrameBlock target = findTargetFrame(fig, textFrames);
             if (target == null) continue;
 
-            ASTInlineObject inlineObj = convertToInline(fig);
+            // 투명 스페이서로 공간만 확보
+            ASTInlineObject spacer = createSpacer(fig, target.width());
             int insertIdx = findInsertionIndex(target, fig);
+            ASTParagraph spacerPara = new ASTParagraph();
+            spacerPara.addItem(spacer);
+            target.paragraphs().add(insertIdx, spacerPara);
 
-            // 이미지 전용 문단 생성 & 삽입
-            ASTParagraph imgPara = new ASTParagraph();
-            imgPara.addItem(inlineObj);
-            target.paragraphs().add(insertIdx, imgPara);
-
-            merged.add(fig);
+            // 원본 figure는 섹션 블록에 유지, textWrap만 클리어 → BEHIND_TEXT 플로팅
+            fig.textWrapMode(null);
+            count++;
         }
 
-        // 머지된 figure를 섹션 블록에서 제거
-        if (!merged.isEmpty()) {
-            section.blocks().removeAll(merged);
-            System.out.println("[FloatingImageMerger] Page " + section.pageNumber()
-                    + ": merged " + merged.size() + " wrapping image(s) into text frames");
+        if (count > 0) {
+            System.err.println("[FloatingImageMerger] Page " + section.pageNumber()
+                    + ": inserted " + count + " spacer(s), kept figures as floating");
         }
     }
 
@@ -113,45 +112,53 @@ public class FloatingImageMerger {
 
     /**
      * 글상자 내 문단 삽입 위치를 결정한다.
-     * figure의 Y 좌표를 글상자 높이에 대한 비율로 환산하여
-     * 문단 목록의 해당 비율 위치에 삽입.
+     * resolved.json에서 전파된 단락별 Y좌표가 있으면 정확한 위치,
+     * 없으면 글상자 높이 비율 기반 폴백.
      */
     private static int findInsertionIndex(ASTTextFrameBlock frame, ASTFigure fig) {
-        if (frame.paragraphs().isEmpty()) return 0;
-        if (frame.height() <= 0) return frame.paragraphs().size();
+        List<ASTParagraph> paragraphs = frame.paragraphs();
+        if (paragraphs.isEmpty()) return 0;
 
+        // 이미지 Y를 글상자 로컬 좌표로 변환 (points)
+        double figYInFrame = (fig.y() - frame.y()) / 100.0; // HWPUNIT → points
+
+        // resolved Y좌표가 있는 단락이 있으면 정확한 위치 결정
+        boolean hasYOffsets = false;
+        for (ASTParagraph p : paragraphs) {
+            if (p.yOffsetInFrame() >= 0) { hasYOffsets = true; break; }
+        }
+
+        if (hasYOffsets) {
+            // 이미지 Y보다 뒤에 시작하는 첫 단락 앞에 삽입
+            for (int i = 0; i < paragraphs.size(); i++) {
+                double paraY = paragraphs.get(i).yOffsetInFrame();
+                if (paraY >= 0 && paraY > figYInFrame) {
+                    return i;
+                }
+            }
+            return paragraphs.size();
+        }
+
+        // 폴백: 글상자 높이 비율 기반
+        if (frame.height() <= 0) return paragraphs.size();
         double relY = (double) (fig.y() - frame.y()) / frame.height();
         relY = Math.max(0.0, Math.min(1.0, relY));
-
-        int idx = (int) Math.round(relY * frame.paragraphs().size());
-        return Math.max(0, Math.min(idx, frame.paragraphs().size()));
+        int idx = (int) Math.round(relY * paragraphs.size());
+        return Math.max(0, Math.min(idx, paragraphs.size()));
     }
 
     /**
-     * ASTFigure → ASTInlineObject 변환.
-     * 이미지 데이터와 textWrap 속성을 그대로 이전.
+     * 투명 스페이서 생성 — 글상자 내 공간 확보용.
+     * 이미지 높이만큼의 빈 사각형을 삽입하여 텍스트를 밀어낸다.
      */
-    private static ASTInlineObject convertToInline(ASTFigure fig) {
+    private static ASTInlineObject createSpacer(ASTFigure fig, long frameWidth) {
         ASTInlineObject obj = new ASTInlineObject();
-        obj.kind(ASTInlineObject.ObjectKind.IMAGE);
-        obj.width(fig.width());
+        obj.kind(ASTInlineObject.ObjectKind.SPACER_RECT);
+        obj.width(Math.min(fig.width(), frameWidth));
         obj.height(fig.height());
-        obj.imageData(fig.imageData());
-        obj.imageFormat(fig.imageFormat());
-        obj.imagePath(fig.imagePath());
-        obj.pixelWidth(fig.pixelWidth());
-        obj.pixelHeight(fig.pixelHeight());
-        obj.bundlePath(fig.bundlePath());
-
-        // 자리차지: Anchored 모드 + textWrap 속성
+        // fillColor, strokeColor → null (투명)
         obj.anchoredPosition("Anchored");
         obj.textWrapMode(fig.textWrapMode());
-        obj.textWrapSide(fig.textWrapSide());
-        obj.textWrapTop(fig.textWrapTop());
-        obj.textWrapLeft(fig.textWrapLeft());
-        obj.textWrapBottom(fig.textWrapBottom());
-        obj.textWrapRight(fig.textWrapRight());
-
         return obj;
     }
 }
