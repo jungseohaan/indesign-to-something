@@ -44,10 +44,17 @@ public class ResolvedDataReader {
             }
         }
 
-        // stories
+        // stories (+ tables within stories)
         if (root.has("stories")) {
             for (JsonElement e : root.getAsJsonArray("stories")) {
-                data.addStory(parseStory(e.getAsJsonObject()));
+                JsonObject storyObj = e.getAsJsonObject();
+                data.addStory(parseStory(storyObj));
+                // tables within story
+                if (storyObj.has("tables")) {
+                    for (JsonElement te : storyObj.getAsJsonArray("tables")) {
+                        data.addTable(parseTable(te.getAsJsonObject()));
+                    }
+                }
             }
         }
 
@@ -79,7 +86,33 @@ public class ResolvedDataReader {
             tf.paragraphYOffsets(offsets);
         }
 
+        // Phase 3: 프레임 메타데이터
+        if (o.has("geometricBounds")) {
+            tf.geometricBounds(parseDoubleArray(o.getAsJsonArray("geometricBounds")));
+        }
+        tf.columnCount(getInt(o, "columnCount", 1));
+        tf.columnGutter(getDouble(o, "columnGutter", 0));
+        if (o.has("insetSpacing")) {
+            tf.insetSpacing(parseDoubleArray(o.getAsJsonArray("insetSpacing")));
+        }
+        tf.verticalJustification(getString(o, "verticalJustification"));
+        tf.rotationAngle(getDouble(o, "rotationAngle", 0));
+
         return tf;
+    }
+
+    private static ResolvedTable parseTable(JsonObject o) {
+        ResolvedTable table = new ResolvedTable();
+        table.id(getString(o, "id"));
+        table.rowCount(getInt(o, "rowCount", 0));
+        table.columnCount(getInt(o, "columnCount", 0));
+        if (o.has("columnWidths")) {
+            table.columnWidths(parseDoubleArray(o.getAsJsonArray("columnWidths")));
+        }
+        if (o.has("rowHeights")) {
+            table.rowHeights(parseDoubleArray(o.getAsJsonArray("rowHeights")));
+        }
+        return table;
     }
 
     private static ResolvedStory parseStory(JsonObject o) {
@@ -102,6 +135,10 @@ public class ResolvedDataReader {
         para.spaceAfter(getBoxedDouble(o, "spaceAfter"));
         para.firstLineIndent(getBoxedDouble(o, "firstLineIndent"));
         para.leftIndent(getBoxedDouble(o, "leftIndent"));
+        para.rightIndent(getBoxedDouble(o, "rightIndent"));
+        para.shadingOn(getBoxedBool(o, "shadingOn"));
+        para.shadingColor(getString(o, "shadingColor"));
+        para.shadingTint(getBoxedDouble(o, "shadingTint"));
         para.justification(getString(o, "justification"));
 
         // leading: can be number or string "Auto"
@@ -113,6 +150,17 @@ public class ResolvedDataReader {
                 } else {
                     para.leading(leadingEl.getAsString());
                 }
+            }
+        }
+
+        if (o.has("tabStops")) {
+            for (JsonElement e : o.getAsJsonArray("tabStops")) {
+                JsonObject ts = e.getAsJsonObject();
+                ResolvedTabStop tab = new ResolvedTabStop();
+                tab.position(getBoxedDouble(ts, "position"));
+                tab.alignment(getString(ts, "alignment"));
+                tab.leader(getString(ts, "leader"));
+                para.addTabStop(tab);
             }
         }
 
@@ -167,5 +215,18 @@ public class ResolvedDataReader {
     private static boolean getBool(JsonObject o, String key, boolean defaultValue) {
         if (!o.has(key) || o.get(key).isJsonNull()) return defaultValue;
         return o.get(key).getAsBoolean();
+    }
+
+    private static double getDouble(JsonObject o, String key, double defaultValue) {
+        if (!o.has(key) || o.get(key).isJsonNull()) return defaultValue;
+        return o.get(key).getAsDouble();
+    }
+
+    private static double[] parseDoubleArray(JsonArray arr) {
+        double[] result = new double[arr.size()];
+        for (int i = 0; i < arr.size(); i++) {
+            result[i] = arr.get(i).getAsDouble();
+        }
+        return result;
     }
 }

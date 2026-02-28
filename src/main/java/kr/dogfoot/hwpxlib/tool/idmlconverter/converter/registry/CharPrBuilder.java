@@ -31,6 +31,8 @@ public final class CharPrBuilder {
      * @param underlineType  밑줄 타입 (예: NONE, BOTTOM)
      * @param underlineColor 밑줄 색상 (예: "#000000", "#008000")
      * @param strikethrough  취소선 여부
+     * @param verticalScale  세로 비율 (nullable, %, 100 = normal)
+     * @param baselineShift  기준선 이동 (nullable, %, 양수=위)
      */
     public static void build(CharPr charPr, String id, int height, String textColor,
                               String fontFamily, FontRegistry fontRegistry,
@@ -39,7 +41,9 @@ public final class CharPrBuilder {
                               boolean superscript, boolean subscript,
                               UnderlineType underlineType, String underlineColor,
                               Short horizontalScale,
-                              boolean strikethrough) {
+                              boolean strikethrough,
+                              Short verticalScale,
+                              Short baselineShift) {
         // 기본 속성
         charPr.idAnd(id)
                 .heightAnd(height)
@@ -84,11 +88,13 @@ public final class CharPrBuilder {
         charPr.createSpacing();
         charPr.spacing().set(spacing, spacing, spacing, spacing, spacing, spacing, spacing);
 
+        short relSzVal = (verticalScale != null) ? verticalScale : 100;
         charPr.createRelSz();
-        charPr.relSz().set((short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100, (short) 100);
+        charPr.relSz().set(relSzVal, relSzVal, relSzVal, relSzVal, relSzVal, relSzVal, relSzVal);
 
+        short offsetVal = (baselineShift != null) ? baselineShift : 0;
         charPr.createOffset();
-        charPr.offset().set((short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0, (short) 0);
+        charPr.offset().set(offsetVal, offsetVal, offsetVal, offsetVal, offsetVal, offsetVal, offsetVal);
 
         charPr.createUnderline();
         charPr.underline().typeAnd(underlineType).shapeAnd(LineType3.SOLID).color(underlineColor);

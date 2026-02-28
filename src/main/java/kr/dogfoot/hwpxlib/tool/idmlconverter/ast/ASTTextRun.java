@@ -17,6 +17,8 @@ public class ASTTextRun extends ASTInlineItem {
     private boolean underline;     // 밑줄
     private boolean strikeThrough; // 취소선
     private Short horizontalScale; // 장평 (%, 100 = normal)
+    private Short verticalScale;   // 세로 비율 (%, 100 = normal)
+    private Short baselineShift;   // 기준선 이동 (%, 양수=위)
 
     public ItemType itemType() { return ItemType.TEXT_RUN; }
 
@@ -58,5 +60,11 @@ public class ASTTextRun extends ASTInlineItem {
 
     public Short horizontalScale() { return horizontalScale; }
     public void horizontalScale(Short v) { this.horizontalScale = v; }
+
+    public Short verticalScale() { return verticalScale; }
+    public void verticalScale(Short v) { this.verticalScale = v; }
+
+    public Short baselineShift() { return baselineShift; }
+    public void baselineShift(Short v) { this.baselineShift = v; }
 
 }

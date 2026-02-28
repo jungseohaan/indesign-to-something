@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.BorderFill;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.CharPr;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.ParaPr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
@@ -147,7 +148,8 @@ class HwpxParagraphBuilder {
                 || para.spaceBefore() != null
                 || para.spaceAfter() != null
                 || para.lineSpacing() != null
-                || para.hasTabStops();
+                || para.hasTabStops()
+                || para.shadingOn();
     }
 
     ASTStyleDef findParagraphStyle(String styleRef) {
@@ -176,6 +178,12 @@ class HwpxParagraphBuilder {
             tabPrId = ctx.styleRegistry.createInlineTabPr(astPara.tabStops());
         }
 
+        // 문단 배경 → BorderFill 생성
+        String borderFillRef = "2";
+        if (astPara.shadingOn() && astPara.shadingColor() != null) {
+            borderFillRef = createParaShadingBorderFill(astPara.shadingColor(), astPara.shadingTint());
+        }
+
         paraPr.idAnd(newId)
                 .tabPrIDRefAnd(tabPrId)
                 .condenseAnd((byte) 0)
@@ -183,6 +191,12 @@ class HwpxParagraphBuilder {
                 .snapToGridAnd(true)
                 .suppressLineNumbersAnd(false)
                 .checked(false);
+
+        // 문단 배경이 있으면 border에 borderFillIDRef 설정
+        if (!"2".equals(borderFillRef)) {
+            paraPr.createBorder();
+            paraPr.border().borderFillIDRefAnd(borderFillRef);
+        }
 
         // 정렬: 단락 오버라이드 → 스타일 → JUSTIFY
         String alignStr = astPara.alignment();
@@ -256,6 +270,50 @@ class HwpxParagraphBuilder {
         }
 
         return newId;
+    }
+
+    /**
+     * 문단 배경색용 BorderFill 생성.
+     */
+    String createParaShadingBorderFill(String color, Double tint) {
+        String bfId = String.valueOf(ctx.borderFillIdCounter.getAndIncrement());
+        BorderFill bf = ctx.hwpxFile.headerXMLFile().refList().borderFills().addNew();
+
+        bf.idAnd(bfId)
+                .threeDAnd(false)
+                .shadowAnd(false)
+                .centerLineAnd(CenterLineSort.NONE)
+                .breakCellSeparateLine(false);
+
+        bf.createSlash();
+        bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+        bf.createBackSlash();
+        bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+
+        bf.createLeftBorder();
+        bf.leftBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createRightBorder();
+        bf.rightBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createTopBorder();
+        bf.topBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createBottomBorder();
+        bf.bottomBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        bf.createDiagonal();
+        bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+
+        // tint 적용: InDesign tint는 -1(100%)이 기본, 0~100 범위
+        float alpha = 0f;
+        if (tint != null && tint >= 0 && tint < 100) {
+            alpha = (float) ((100.0 - tint) / 100.0);
+        }
+        bf.createFillBrush();
+        bf.fillBrush().createWinBrush();
+        bf.fillBrush().winBrush()
+                .faceColorAnd(color)
+                .hatchColorAnd("#FF000000")
+                .alpha(alpha);
+
+        return bfId;
     }
 
     static int resolveParaLong(Long paraOverride, Long styleValue) {
@@ -336,6 +394,8 @@ class HwpxParagraphBuilder {
                 || run.textColor() != null
                 || run.letterSpacing() != null
                 || run.horizontalScale() != null
+                || run.verticalScale() != null
+                || run.baselineShift() != null
                 || run.subscript()
                 || run.superscript()
                 || run.underline()
@@ -349,6 +409,8 @@ class HwpxParagraphBuilder {
                 + "|" + (textRun.fontStyle() != null ? textRun.fontStyle() : "")
                 + "|" + (textRun.letterSpacing() != null ? textRun.letterSpacing() : "")
                 + "|" + (textRun.horizontalScale() != null ? textRun.horizontalScale() : "")
+                + "|" + (textRun.verticalScale() != null ? textRun.verticalScale() : "")
+                + "|" + (textRun.baselineShift() != null ? textRun.baselineShift() : "")
                 + "|" + textRun.superscript()
                 + "|" + textRun.subscript()
                 + "|" + textRun.underline()
@@ -376,7 +438,9 @@ class HwpxParagraphBuilder {
                 textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
                 textRun.underline() ? textColor : "#000000",
                 textRun.horizontalScale(),
-                textRun.strikeThrough());
+                textRun.strikeThrough(),
+                textRun.verticalScale(),
+                textRun.baselineShift());
 
         ctx.charPrCache.put(cacheKey, newId);
         return newId;
@@ -409,7 +473,8 @@ class HwpxParagraphBuilder {
                 textRun.superscript(), textRun.subscript(),
                 UnderlineType.NONE, textColor,
                 null,
-                false);
+                false,
+                null, null);
 
         ctx.eqFontCharPrCache.put(cacheKey, newId);
         return newId;

@@ -212,7 +212,8 @@ public class StyleRegistry {
                 underline ? UnderlineType.BOTTOM : UnderlineType.NONE,
                 underline ? textColor : "#000000",
                 styleDef.horizontalScale(),
-                strikeThrough);
+                strikeThrough,
+                null, null);
     }
 
     private void buildParaPr(ParaPr paraPr, String id, ASTStyleDef styleDef, String tabPrId) {

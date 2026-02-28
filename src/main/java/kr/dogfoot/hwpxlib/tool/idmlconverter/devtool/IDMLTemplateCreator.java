@@ -1,4 +1,4 @@
-package kr.dogfoot.hwpxlib.tool.idmlconverter;
+package kr.dogfoot.hwpxlib.tool.idmlconverter.devtool;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader;

@@ -16,6 +16,14 @@ public class ResolvedTextFrame {
     private boolean overflows;
     private double[] paragraphYOffsets;  // 프레임 내 각 단락의 Y오프셋 (points, 프레임 상단 기준)
 
+    // Phase 3 보강 필드
+    private double[] geometricBounds;   // [top, left, bottom, right] (pts)
+    private int columnCount;
+    private double columnGutter;
+    private double[] insetSpacing;      // [top, left, bottom, right] (pts)
+    private String verticalJustification;
+    private double rotationAngle;
+
     public String id() { return id; }
     public void id(String v) { this.id = v; }
 
@@ -36,4 +44,22 @@ public class ResolvedTextFrame {
 
     public double[] paragraphYOffsets() { return paragraphYOffsets; }
     public void paragraphYOffsets(double[] v) { this.paragraphYOffsets = v; }
+
+    public double[] geometricBounds() { return geometricBounds; }
+    public void geometricBounds(double[] v) { this.geometricBounds = v; }
+
+    public int columnCount() { return columnCount; }
+    public void columnCount(int v) { this.columnCount = v; }
+
+    public double columnGutter() { return columnGutter; }
+    public void columnGutter(double v) { this.columnGutter = v; }
+
+    public double[] insetSpacing() { return insetSpacing; }
+    public void insetSpacing(double[] v) { this.insetSpacing = v; }
+
+    public String verticalJustification() { return verticalJustification; }
+    public void verticalJustification(String v) { this.verticalJustification = v; }
+
+    public double rotationAngle() { return rotationAngle; }
+    public void rotationAngle(double v) { this.rotationAngle = v; }
 }

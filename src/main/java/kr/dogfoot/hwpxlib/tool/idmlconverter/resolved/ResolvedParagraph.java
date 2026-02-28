@@ -16,6 +16,11 @@ public class ResolvedParagraph {
     private Double spaceAfter;
     private Double firstLineIndent;
     private Double leftIndent;
+    private Double rightIndent;
+    private Boolean shadingOn;
+    private String shadingColor;   // 색상 이름 (hex 아님)
+    private Double shadingTint;
+    private List<ResolvedTabStop> tabStops;
     private final List<ResolvedRun> runs = new ArrayList<>();
 
     public String styleName() { return styleName; }
@@ -53,6 +58,27 @@ public class ResolvedParagraph {
 
     public Double leftIndent() { return leftIndent; }
     public void leftIndent(Double v) { this.leftIndent = v; }
+
+    public Double rightIndent() { return rightIndent; }
+    public void rightIndent(Double v) { this.rightIndent = v; }
+
+    public Boolean shadingOn() { return shadingOn; }
+    public void shadingOn(Boolean v) { this.shadingOn = v; }
+
+    public String shadingColor() { return shadingColor; }
+    public void shadingColor(String v) { this.shadingColor = v; }
+
+    public Double shadingTint() { return shadingTint; }
+    public void shadingTint(Double v) { this.shadingTint = v; }
+
+    public List<ResolvedTabStop> tabStops() { return tabStops; }
+    public boolean hasTabStops() { return tabStops != null && !tabStops.isEmpty(); }
+    public void addTabStop(ResolvedTabStop ts) {
+        if (this.tabStops == null) {
+            this.tabStops = new ArrayList<>();
+        }
+        this.tabStops.add(ts);
+    }
 
     public List<ResolvedRun> runs() { return runs; }
     public void addRun(ResolvedRun r) { runs.add(r); }

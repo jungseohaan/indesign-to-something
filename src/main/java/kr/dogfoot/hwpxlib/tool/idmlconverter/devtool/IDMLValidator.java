@@ -1,4 +1,4 @@
-package kr.dogfoot.hwpxlib.tool.idmlconverter;
+package kr.dogfoot.hwpxlib.tool.idmlconverter.devtool;
 
 import org.w3c.dom.*;
 import javax.xml.parsers.DocumentBuilder;

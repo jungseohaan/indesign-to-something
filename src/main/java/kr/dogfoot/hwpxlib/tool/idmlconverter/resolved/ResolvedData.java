@@ -13,6 +13,7 @@ public class ResolvedData {
     private final Map<String, ResolvedStory> storyMap = new HashMap<>();
     private final Map<String, String> colorHexMap = new HashMap<>();  // colorName → "#RRGGBB"
     private final List<ResolvedTextFrame> textFrames = new ArrayList<>();
+    private final Map<String, ResolvedTable> tableMap = new HashMap<>();
 
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
@@ -63,7 +64,16 @@ public class ResolvedData {
         return result;
     }
 
+    public void addTable(ResolvedTable table) {
+        tableMap.put(table.id(), table);
+    }
+
+    public ResolvedTable getTable(String tableId) {
+        return tableMap.get(tableId);
+    }
+
     public int storyCount() { return storyMap.size(); }
     public int colorCount() { return colorHexMap.size(); }
     public int textFrameCount() { return textFrames.size(); }
+    public int tableCount() { return tableMap.size(); }
 }

@@ -350,6 +350,11 @@ function collectStories(doc) {
                 spaceAfter: null,
                 firstLineIndent: null,
                 leftIndent: null,
+                rightIndent: null,
+                shadingOn: false,
+                shadingColor: null,
+                shadingTint: null,
+                tabStops: [],
                 runs: []
             };
 
@@ -361,6 +366,20 @@ function collectStories(doc) {
             try { paraData.spaceAfter = para.spaceAfter; } catch (e) {}
             try { paraData.firstLineIndent = para.firstLineIndent; } catch (e) {}
             try { paraData.leftIndent = para.leftIndent; } catch (e) {}
+            try { paraData.rightIndent = para.rightIndent; } catch (e) {}
+            try { paraData.shadingOn = para.paragraphShadingOn; } catch (e) {}
+            try { if (paraData.shadingOn && para.paragraphShadingColor) { paraData.shadingColor = para.paragraphShadingColor.name; } } catch (e) {}
+            try { if (paraData.shadingOn) { paraData.shadingTint = para.paragraphShadingTint; } } catch (e) {}
+            try {
+                var ts = para.tabStops.everyItem().getElements();
+                for (var ti = 0; ti < ts.length; ti++) {
+                    paraData.tabStops.push({
+                        position: ts[ti].position,
+                        alignment: ts[ti].alignment.toString(),
+                        leader: ts[ti].leader || null
+                    });
+                }
+            } catch (e) {}
 
             // textStyleRanges 사용 (성능 최적화 — architecture.md 섹션 10)
             try {
@@ -495,6 +514,14 @@ function collectTextFrames(doc) {
                     fData.paragraphYOffsets = paraYOffsets;
                 }
             } catch (e) {}
+
+            // Phase 3: 프레임 메타데이터 보강
+            try { fData.geometricBounds = [tf.geometricBounds[0], tf.geometricBounds[1], tf.geometricBounds[2], tf.geometricBounds[3]]; } catch (e) {}
+            try { fData.columnCount = tf.textFramePreferences.textColumnCount; } catch (e) {}
+            try { fData.columnGutter = tf.textFramePreferences.textColumnGutter; } catch (e) {}
+            try { var is = tf.textFramePreferences.insetSpacing; fData.insetSpacing = [is[0], is[1], is[2], is[3]]; } catch (e) {}
+            try { fData.verticalJustification = tf.textFramePreferences.verticalJustification.toString(); } catch (e) {}
+            try { fData.rotationAngle = tf.absoluteRotationAngle; } catch (e) {}
 
             frames.push(fData);
         }

@@ -71,14 +71,15 @@ public class ResolvedMerger {
                                          ResolvedParagraph resPara,
                                          ResolvedData resolved) {
         // 문단 속성 보강
-        enrichParagraphProperties(astPara, resPara);
+        enrichParagraphProperties(astPara, resPara, resolved);
 
         // 런 매칭 및 보강
         enrichRuns(astPara, resPara, resolved);
     }
 
     private static void enrichParagraphProperties(ASTParagraph astPara,
-                                                    ResolvedParagraph resPara) {
+                                                    ResolvedParagraph resPara,
+                                                    ResolvedData resolved) {
         // leading
         Double fixedLeading = resPara.fixedLeading();
         if (fixedLeading != null) {
@@ -104,6 +105,33 @@ public class ResolvedMerger {
         if (resPara.leftIndent() != null) {
             astPara.leftMargin((long) (resPara.leftIndent() * 100));
         }
+        if (resPara.rightIndent() != null) {
+            astPara.rightMargin((long) (resPara.rightIndent() * 100));
+        }
+
+        // shading (문단 배경)
+        if (Boolean.TRUE.equals(resPara.shadingOn()) && resPara.shadingColor() != null) {
+            astPara.shadingOn(true);
+            String hex = resolved.resolveColorHex(resPara.shadingColor());
+            if (hex != null) {
+                astPara.shadingColor(hex);
+            }
+            if (resPara.shadingTint() != null) {
+                astPara.shadingTint(resPara.shadingTint());
+            }
+        }
+
+        // tabStops (인라인 오버라이드)
+        if (resPara.hasTabStops() && !astPara.hasTabStops()) {
+            for (ResolvedTabStop rts : resPara.tabStops()) {
+                if (rts.position() != null) {
+                    long posHwp = (long) (rts.position() * 100); // pts → hwpunits
+                    String align = mapTabAlignment(rts.alignment());
+                    String leader = rts.leader();
+                    astPara.addTabStop(new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop(posHwp, align, leader));
+                }
+            }
+        }
 
         // justification → alignment
         String justification = resPara.justification();
@@ -128,6 +156,18 @@ public class ResolvedMerger {
         if (upper.contains("FULLY_JUSTIFIED") || upper.contains("FULL_JUSTIFY")) return "justify";
         if (upper.contains("JUSTIFY") || upper.contains("LEFT_JUSTIFIED")) return "justify";
         return null;
+    }
+
+    /**
+     * InDesign TabStopAlignment enum → AST tab alignment 매핑.
+     */
+    private static String mapTabAlignment(String alignment) {
+        if (alignment == null) return "left";
+        String upper = alignment.toUpperCase();
+        if (upper.contains("CENTER")) return "center";
+        if (upper.contains("RIGHT")) return "right";
+        if (upper.contains("DECIMAL") || upper.contains("CHARACTER")) return "decimal";
+        return "left";
     }
 
     // ─── 런 보강 ──────────────────────────────────────────
@@ -245,6 +285,23 @@ public class ResolvedMerger {
         // strikeThru
         if (resRun.strikeThru() != null) {
             astRun.strikeThrough(resRun.strikeThru());
+        }
+
+        // verticalScale (세로 비율, %)
+        if (resRun.verticalScale() != null) {
+            astRun.verticalScale((short) Math.round(resRun.verticalScale()));
+        }
+
+        // baselineShift (pts → % of fontSize)
+        if (resRun.baselineShift() != null && resRun.fontSize() != null && resRun.fontSize() > 0) {
+            double pct = (resRun.baselineShift() / resRun.fontSize()) * 100.0;
+            astRun.baselineShift((short) Math.round(pct));
+        }
+
+        // charStyle (InDesign GREP 해소 후 최종 문자 스타일)
+        if (resRun.charStyle() != null && !resRun.charStyle().isEmpty()
+                && !"[None]".equals(resRun.charStyle())) {
+            astRun.characterStyleRef(resRun.charStyle());
         }
 
         // position → subscript/superscript
