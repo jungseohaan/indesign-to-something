@@ -38,7 +38,14 @@ class IDMLStoryParser {
             }
         }
 
+        // 테이블 selfId → IDMLTable 매핑 (위치 추적용)
+        Map<String, IDMLTable> tableById = new HashMap<String, IDMLTable>();
+        for (IDMLTable t : story.tables()) {
+            tableById.put(t.selfId(), t);
+        }
+
         // Story 루트에서 직접 하위의 ParagraphStyleRange만 파싱 (Table 내부 제외)
+        int storyParaCount = 0;
         NodeList paraRanges = storyDoc.getElementsByTagName("ParagraphStyleRange");
         for (int i = 0; i < paraRanges.getLength(); i++) {
             Element paraRange = (Element) paraRanges.item(i);
@@ -48,9 +55,27 @@ class IDMLStoryParser {
                 continue;
             }
 
-            for (IDMLParagraph para : parseParagraphs(paraRange)) {
+            // 이 ParagraphStyleRange에 포함된 Table의 스토리 내 위치 기록
+            // PSR 내부의 <Br/> 개수를 세어 정확한 문단 인덱스 계산
+            List<Element> inlineTables = getDescendantElements(paraRange, "Table");
+            if (!inlineTables.isEmpty()) {
+                Map<String, Integer> brCounts = countBrsBeforeTables(paraRange);
+                for (Element tableElem : inlineTables) {
+                    String tableSelfId = tableElem.getAttribute("Self");
+                    IDMLTable matchedTable = tableById.get(tableSelfId);
+                    if (matchedTable != null) {
+                        Integer localBrs = brCounts.get(tableSelfId);
+                        int idx = storyParaCount + (localBrs != null ? localBrs : 0);
+                        matchedTable.paragraphIndexBefore(idx);
+                    }
+                }
+            }
+
+            List<IDMLParagraph> parsedParas = parseParagraphs(paraRange);
+            for (IDMLParagraph para : parsedParas) {
                 story.addParagraph(para);
             }
+            storyParaCount += parsedParas.size();
         }
 
         return story;
@@ -364,7 +389,10 @@ class IDMLStoryParser {
             }
         }
 
-        result.add(currentPara);
+        // Br가 마지막이면 빈 단락이 생성됨 — 내용이 있을 때만 추가
+        if (!currentPara.characterRuns().isEmpty()) {
+            result.add(currentPara);
+        }
         return result;
     }
 
@@ -591,6 +619,10 @@ class IDMLStoryParser {
         collectInlineChildren(groupElem, group);
         collectInlineImageLink(groupElem, group);
 
+        // Group 레벨 stroke/fill 색상 (자식 도형 색상 상속용)
+        group.groupStrokeColor(getAttrOrNull(groupElem, "StrokeColor"));
+        group.groupFillColor(getAttrOrNull(groupElem, "FillColor"));
+
         return group;
     }
 
@@ -648,7 +680,8 @@ class IDMLStoryParser {
                 tf.geometricBounds(IDMLSpreadParser.resolveGeometricBounds(child));
                 tf.itemTransform(IDMLGeometry.parseTransform(child.getAttribute("ItemTransform")));
                 target.addChildTextFrame(tf);
-            } else if ("Rectangle".equals(tag) || "Polygon".equals(tag) || "Oval".equals(tag)) {
+            } else if ("Rectangle".equals(tag) || "Polygon".equals(tag)
+                    || "Oval".equals(tag) || "GraphicLine".equals(tag)) {
                 target.addChildGraphic(parseInlineGraphicElement(child));
             } else if ("Group".equals(tag)) {
                 target.addChildGraphic(parseInlineGroup(child));
@@ -1004,6 +1037,34 @@ class IDMLStoryParser {
             parent = parent.getParentNode();
         }
         return false;
+    }
+
+    /**
+     * ParagraphStyleRange 내부에서 각 Table 앞에 있는 &lt;Br/&gt; 개수를 계산한다.
+     * CharacterStyleRange 자식을 문서 순서대로 순회하며 Br과 Table을 추적한다.
+     * @return Table Self ID → 해당 Table 앞의 Br 개수
+     */
+    static Map<String, Integer> countBrsBeforeTables(Element paraRange) {
+        Map<String, Integer> result = new HashMap<String, Integer>();
+        int brCount = 0;
+
+        List<Element> charRanges = getChildElements(paraRange, "CharacterStyleRange");
+        for (Element charRange : charRanges) {
+            NodeList children = charRange.getChildNodes();
+            for (int i = 0; i < children.getLength(); i++) {
+                Node node = children.item(i);
+                if (node.getNodeType() != Node.ELEMENT_NODE) continue;
+                Element elem = (Element) node;
+                String tag = elem.getTagName();
+
+                if ("Br".equals(tag)) {
+                    brCount++;
+                } else if ("Table".equals(tag)) {
+                    result.put(elem.getAttribute("Self"), brCount);
+                }
+            }
+        }
+        return result;
     }
 
     // ===== GREP 스타일 해석 =====

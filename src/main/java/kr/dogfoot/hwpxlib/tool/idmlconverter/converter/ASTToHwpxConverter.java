@@ -3,17 +3,10 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
-import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Ctrl;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.RunItem;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawingObject;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.secpr.SecPr;
 import kr.dogfoot.hwpxlib.tool.blankfilemaker.BlankFileMaker;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertException;
@@ -155,9 +148,6 @@ public class ASTToHwpxConverter {
         }
 
         hwpxFile.headerXMLFile().secCnt((short) 1);
-
-        // 최종 정리: 모든 SubList에서 마지막 빈 단락 제거
-        cleanupTrailingEmptyParas(section0);
 
         result.hwpxFile(hwpxFile);
         result.pagesConverted(pagesConverted);
@@ -521,47 +511,6 @@ public class ASTToHwpxConverter {
         Run run = emptyPara.addNewRun();
         run.charPrIDRef("0");
         run.addNewT();
-    }
-
-    // ── 최종 정리: 빈 단락 제거 ──
-
-    private static void cleanupTrailingEmptyParas(SectionXMLFile section) {
-        for (int i = 0; i < section.countOfPara(); i++) {
-            cleanupParaRecursive(section.getPara(i));
-        }
-    }
-
-    private static void cleanupParaRecursive(Para para) {
-        for (Run run : para.runs()) {
-            for (int i = 0; i < run.countOfRunItem(); i++) {
-                RunItem item = run.getRunItem(i);
-                if (item instanceof Table) {
-                    Table table = (Table) item;
-                    for (Tr tr : table.trs()) {
-                        for (Tc tc : tr.tcs()) {
-                            SubList subList = tc.subList();
-                            if (subList != null) {
-                                cleanupSubListRecursive(subList);
-                            }
-                        }
-                    }
-                } else if (item instanceof DrawingObject) {
-                    DrawText dt = ((DrawingObject<?>) item).drawText();
-                    if (dt != null && dt.subList() != null) {
-                        cleanupSubListRecursive(dt.subList());
-                    }
-                }
-            }
-        }
-    }
-
-    private static void cleanupSubListRecursive(SubList subList) {
-        // 먼저 자식 요소를 재귀 순회
-        for (int i = 0; i < subList.countOfPara(); i++) {
-            cleanupParaRecursive(subList.getPara(i));
-        }
-        // 마지막 빈 단락 제거
-        HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
     }
 
     // ── 정적 유틸리티 (다른 Builder에서 호출) ──

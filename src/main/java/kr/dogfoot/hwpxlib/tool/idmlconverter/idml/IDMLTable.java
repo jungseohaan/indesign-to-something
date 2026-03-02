@@ -20,6 +20,7 @@ public class IDMLTable {
     private String fillColor;
     private double spaceBefore;  // points
     private double spaceAfter;   // points
+    private int paragraphIndexBefore = -1;  // 스토리 내 이 테이블 앞의 문단 수 (-1 = 미설정)
 
     public IDMLTable() {
         this.rows = new ArrayList<>();
@@ -58,6 +59,9 @@ public class IDMLTable {
 
     public double spaceAfter() { return spaceAfter; }
     public void spaceAfter(double v) { this.spaceAfter = v; }
+
+    public int paragraphIndexBefore() { return paragraphIndexBefore; }
+    public void paragraphIndexBefore(int v) { this.paragraphIndexBefore = v; }
 
     /**
      * Calculate total table width from column widths.

@@ -59,6 +59,9 @@ public class HwpxConverterContext {
     long blockInsetLeft, blockInsetTop;
     long cellContentYCursor; // 셀 내 처리된 단락의 누적 높이
 
+    // 스페이서 이미지 캐시 (1x1 투명 PNG, 한 번 등록 후 재사용)
+    String spacerImageId;
+
     // 변환 통계
     int imagesConverted;
     int equationsConverted;

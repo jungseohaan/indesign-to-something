@@ -374,9 +374,18 @@ public class BTFontEquationConverter {
                     inSubscript = true;
                 }
                 i++;
-                // 아래첨자 내용 수집: 한 글자(letter) 또는 연속 숫자
-                // BT수식M에서 _x는 단일 문자 첨자, 다중 문자는 &로 종료
-                i = collectScriptContent(text, i, sb);
+                // & 종료자까지의 거리 확인 — 다중문자 첨자 감지
+                int ampIdx = findTerminator(text, i, '&');
+                int nextSub = findTerminator(text, i, '_');
+                int nextSup = findTerminator(text, i, '^');
+                if (ampIdx > i && (nextSub < 0 || ampIdx < nextSub) && (nextSup < 0 || ampIdx < nextSup)) {
+                    // & 종료자가 다음 _/^ 보다 먼저 → 그 사이 전체가 첨자 내용
+                    sb.append(text, i, ampIdx);
+                    i = ampIdx;
+                } else {
+                    // 기존 동작: 단일 문자 수집
+                    i = collectScriptContent(text, i, sb);
+                }
                 // 아래첨자 닫기
                 if (i < text.length() && text.charAt(i) == '&') {
                     sb.append("}");
@@ -403,8 +412,16 @@ public class BTFontEquationConverter {
                     inSuperscript = true;
                 }
                 i++;
-                // 위첨자 내용 수집: 한 글자(letter) 또는 연속 숫자
-                i = collectScriptContent(text, i, sb);
+                // & 종료자까지의 거리 확인 — 다중문자 첨자 감지
+                int ampIdx2 = findTerminator(text, i, '&');
+                int nextSub2 = findTerminator(text, i, '_');
+                int nextSup2 = findTerminator(text, i, '^');
+                if (ampIdx2 > i && (nextSub2 < 0 || ampIdx2 < nextSub2) && (nextSup2 < 0 || ampIdx2 < nextSup2)) {
+                    sb.append(text, i, ampIdx2);
+                    i = ampIdx2;
+                } else {
+                    i = collectScriptContent(text, i, sb);
+                }
                 // 위첨자 닫기
                 if (i < text.length() && text.charAt(i) == '&') {
                     sb.append("}");
@@ -464,6 +481,17 @@ public class BTFontEquationConverter {
             i++;
         }
         return i;
+    }
+
+    /**
+     * 텍스트에서 특정 종료 문자를 찾는다.
+     * @return 종료 문자의 인덱스, 없으면 -1
+     */
+    private static int findTerminator(String text, int from, char termChar) {
+        for (int j = from; j < text.length(); j++) {
+            if (text.charAt(j) == termChar) return j;
+        }
+        return -1;
     }
 
     /**

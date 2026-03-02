@@ -10,8 +10,6 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Ctrl;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.LineSeg;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.RunItem;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.T;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Equation;
 import kr.dogfoot.hwpxlib.tool.equationconverter.EquationBuilder;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
@@ -73,6 +71,18 @@ class HwpxParagraphBuilder {
             paraCharPrId = getOrCreateTinyCharPr();
         }
 
+        // 인라인 텍스트 프레임이 줄 간격보다 크면 줄 간격 확장
+        long maxInlineH = maxInlineObjectHeight(astPara);
+        if (maxInlineH > 2000) {
+            paraPrId = ensureLineSpacingForInline(paraPrId, maxInlineH);
+        }
+
+        // 분수 수식이 줄 간격보다 크면 줄 간격 확장
+        long maxEqH = maxFractionEquationHeight(astPara);
+        if (maxEqH > maxInlineH && maxEqH > 2000) {
+            paraPrId = ensureLineSpacingForInline(paraPrId, maxEqH);
+        }
+
         Para para = subList.addNewPara();
         para.idAnd(ASTToHwpxConverter.nextParaId())
                 .paraPrIDRefAnd(paraPrId)
@@ -106,11 +116,6 @@ class HwpxParagraphBuilder {
             run.addNewT();
         }
 
-        // 빈 단락이 SubList 끝에 추가된 경우 제거 (앞에 다른 단락이 있을 때만)
-        if (subList.countOfPara() > 1 && isHwpxParaEmpty(para)) {
-            subList.removePara(para);
-        }
-
         // 셀 내 Y 커서 업데이트 (오버레이 좌표 계산용)
         ctx.cellContentYCursor += estimateParagraphHeight(astPara);
     }
@@ -142,8 +147,10 @@ class HwpxParagraphBuilder {
         if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) {
             textBoxBuilder.addInlineTextFrame(para, obj);
         } else if (obj.kind() == ASTInlineObject.ObjectKind.RENDERED_GROUP) {
-            // 단락 콘텐츠가 있는 그룹은 글상자로, 없으면 이미지로
-            if (obj.paragraphs() != null && !obj.paragraphs().isEmpty()) {
+            // 단락 콘텐츠 또는 인라인 테이블이 있는 그룹은 글상자로, 없으면 이미지로
+            boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
+            boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
+            if (hasParagraphs || hasInlineTables) {
                 textBoxBuilder.addInlineTextFrame(para, obj);
             } else if (obj.imageData() != null && obj.imageData().length > 0) {
                 imageBuilder.addInlineImage(para, obj);
@@ -160,6 +167,75 @@ class HwpxParagraphBuilder {
         } else if (obj.kind() == ASTInlineObject.ObjectKind.SPACER_RECT) {
             textBoxBuilder.addSpacerRect(para, obj);
         }
+    }
+
+    // ── 인라인 객체 높이 기반 줄 간격 확장 ──
+
+    private long maxInlineObjectHeight(ASTParagraph astPara) {
+        long max = 0;
+        for (ASTInlineItem item : astPara.items()) {
+            if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (obj.height() > max) {
+                    max = obj.height();
+                }
+            }
+        }
+        return max;
+    }
+
+    private long maxFractionEquationHeight(ASTParagraph astPara) {
+        long max = 0;
+        for (ASTInlineItem item : astPara.items()) {
+            if (item.itemType() == ASTInlineItem.ItemType.EQUATION) {
+                ASTEquation eq = (ASTEquation) item;
+                String script = eq.hwpScript();
+                if (script != null && script.contains(" over ")) {
+                    // addEquationRun과 동일한 높이 추정 (baseUnit * 3.5)
+                    long estH = (long) (1100 * 3.5);  // 3850 HWPUNIT
+                    if (estH > max) max = estH;
+                }
+            }
+        }
+        return max;
+    }
+
+    private String ensureLineSpacingForInline(String paraPrId, long inlineHeight) {
+        ParaPr basePr = findParaPrById(paraPrId);
+        if (basePr == null) return paraPrId;
+
+        boolean needsExpand = false;
+        if (basePr.lineSpacing() == null) {
+            // lineSpacing 미지정 → 기본값(PERCENT 160 등)은 큰 인라인 객체를 수용 못함
+            needsExpand = true;
+        } else if (basePr.lineSpacing().type() == LineSpacingType.FIXED
+                && basePr.lineSpacing().value() < (int) inlineHeight) {
+            // FIXED 줄 간격이 인라인 객체보다 작으면 확장
+            needsExpand = true;
+        } else if (basePr.lineSpacing().type() == LineSpacingType.PERCENT) {
+            // PERCENT는 글꼴 크기 기준이라 큰 인라인 객체를 수용 못할 수 있음
+            needsExpand = true;
+        }
+
+        if (needsExpand) {
+            String newId = ctx.styleRegistry.nextParaPrId();
+            ParaPr newPr = ctx.hwpxFile.headerXMLFile().refList().paraProperties().addNew();
+            newPr.copyFrom(basePr);
+            newPr.id(newId);
+            if (newPr.lineSpacing() == null) {
+                newPr.createLineSpacing();
+            }
+            newPr.lineSpacing().typeAnd(LineSpacingType.FIXED).valueAnd((int) inlineHeight);
+            return newId;
+        }
+        return paraPrId;
+    }
+
+    private ParaPr findParaPrById(String id) {
+        for (ParaPr pr : ctx.hwpxFile.headerXMLFile().refList().paraProperties().items()) {
+            if (id.equals(pr.id())) return pr;
+        }
+        return null;
     }
 
     // ── 단락 속성 오버라이드 ──
@@ -613,54 +689,6 @@ class HwpxParagraphBuilder {
         Run run = emptyPara.addNewRun();
         run.charPrIDRef(charPrId);
         run.addNewT();
-    }
-
-    /**
-     * SubList의 마지막 단락이 빈 단락이면 제거.
-     * HWPX 글상자/셀 끝에 불필요한 줄바꿈이 생기지 않도록 한다.
-     */
-    static void removeTrailingEmptyHwpxPara(SubList subList) {
-        while (subList.countOfPara() > 1) {
-            Para last = subList.getPara(subList.countOfPara() - 1);
-            boolean empty = isHwpxParaEmpty(last);
-            if (empty) {
-                subList.removePara(subList.countOfPara() - 1);
-            } else {
-                break;
-            }
-        }
-    }
-
-    static boolean isHwpxParaEmpty(Para para) {
-        for (Run run : para.runs()) {
-            for (int i = 0; i < run.countOfRunItem(); i++) {
-                RunItem item = run.getRunItem(i);
-                if (item instanceof T) {
-                    T t = (T) item;
-                    if (!t.isEmpty()) {
-                        if (t.isOnlyText() && t.onlyText().strip().isEmpty()) continue;
-                        // itemList 방식: 모든 아이템이 공백 텍스트이면 빈 것으로 간주
-                        if (!t.isOnlyText() && t.countOfItems() > 0) {
-                            boolean allBlank = true;
-                            for (int j = 0; j < t.countOfItems(); j++) {
-                                Object ti = t.getItem(j);
-                                if (ti instanceof kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.t.NormalText) {
-                                    String s = ((kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.t.NormalText) ti).text();
-                                    if (s != null && !s.strip().isEmpty()) { allBlank = false; break; }
-                                } else {
-                                    allBlank = false; break;
-                                }
-                            }
-                            if (allBlank) continue;
-                        }
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            }
-        }
-        return true;
     }
 
     // ── Tiny CharPr / ParaPr ──

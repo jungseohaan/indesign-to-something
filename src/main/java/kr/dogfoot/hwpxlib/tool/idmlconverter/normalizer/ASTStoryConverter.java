@@ -479,7 +479,24 @@ class ASTStoryConverter {
             ASTInlineObjectBuilder.collectOverlayFrames(
                     ig, inlineObj, idmlDoc, colorResolver, imageLoader, bg);
         } else {
-            ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
+            // 그리드 테이블 감지 시도 (2×2 이상의 TextFrame 그리드 → ASTTable)
+            ASTTable gridTable = ASTInlineObjectBuilder.tryBuildGridTable(
+                    ig, idmlDoc, colorResolver, imageLoader, bg);
+            if (gridTable != null) {
+                if (inlineObj == null) {
+                    inlineObj = new ASTInlineObject();
+                    inlineObj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
+                }
+                // 래퍼 크기를 그리드 테이블 크기로 설정
+                if (inlineObj.width() <= 0) inlineObj.width(gridTable.width());
+                if (inlineObj.height() <= 0) inlineObj.height(gridTable.height());
+                inlineObj.addInlineTable(gridTable);
+                if (!para.items().contains(inlineObj)) {
+                    para.addItem(inlineObj);
+                }
+            } else {
+                ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
+            }
         }
     }
 

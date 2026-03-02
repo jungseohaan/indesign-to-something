@@ -36,6 +36,9 @@ public class ASTParagraph {
     // 프레임 내 Y 오프셋 (points, resolved.json에서 전파, -1 = 미설정)
     private double yOffsetInFrame = -1;
 
+    // 인라인 테이블 (이 문단이 테이블 자리표시자인 경우)
+    private ASTTable inlineTable;
+
     // 인라인 항목 (읽기 순서)
     private List<ASTInlineItem> items;
 
@@ -105,6 +108,9 @@ public class ASTParagraph {
 
     public double yOffsetInFrame() { return yOffsetInFrame; }
     public void yOffsetInFrame(double v) { this.yOffsetInFrame = v; }
+
+    public ASTTable inlineTable() { return inlineTable; }
+    public void inlineTable(ASTTable v) { this.inlineTable = v; }
 
     public List<ASTInlineItem> items() { return items; }
     public void addItem(ASTInlineItem item) { items.add(item); }

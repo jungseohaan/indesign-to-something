@@ -216,8 +216,6 @@ class HwpxTableBuilder {
                 for (ASTParagraph astPara : astCell.paragraphs()) {
                     paragraphBuilder.addParagraphToSubList(subList, astPara, astCell.height());
                 }
-                HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
-
                 // 빈 셀 방지
                 if (subList.countOfPara() == 0) {
                     paragraphBuilder.addEmptySubListPara(subList, astCell.height());

@@ -6,8 +6,10 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
+import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
@@ -128,8 +130,6 @@ class HwpxTextBoxBuilder {
         for (ASTParagraph para : block.paragraphs()) {
             paragraphBuilder.addParagraphToSubList(subList, para);
         }
-        HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
-
         if (subList.countOfPara() == 0) {
             paragraphBuilder.addEmptySubListPara(subList);
         }
@@ -350,7 +350,6 @@ class HwpxTextBoxBuilder {
         for (ASTParagraph para : block.paragraphs()) {
             paragraphBuilder.addParagraphToSubList(subList, para);
         }
-        HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
         if (subList.countOfPara() == 0) {
             paragraphBuilder.addEmptySubListPara(subList);
         }
@@ -509,12 +508,14 @@ class HwpxTextBoxBuilder {
         ctx.blockInsetTop = block.insetTop();
         ctx.cellContentYCursor = 0;
 
-        // 단락 추가
+        // 단락 추가 (인라인 테이블 포함)
         for (ASTParagraph para : paragraphs) {
-            paragraphBuilder.addParagraphToSubList(subList, para);
+            if (para.inlineTable() != null && ctx.tableBuilderRef != null) {
+                ctx.tableBuilderRef.addInlineTableToSubList(subList, para.inlineTable());
+            } else {
+                paragraphBuilder.addParagraphToSubList(subList, para);
+            }
         }
-        HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
-
         // 빈 텍스트 프레임 방지
         if (subList.countOfPara() == 0) {
             paragraphBuilder.addEmptySubListPara(subList);
@@ -707,12 +708,14 @@ class HwpxTextBoxBuilder {
      * 인라인 텍스트 프레임 / 그룹 → hp:rect + hp:drawText (글상자, treatAsChar="1")
      */
     void addInlineTextFrame(Para para, ASTInlineObject obj) {
-        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return;
+        boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
+        boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
+        if (!hasParagraphs && !hasInlineTables) return;
 
         long w = obj.width() > 0 ? obj.width() : 5000;
         if (w < ConverterConstants.MIN_TEXT_BOX_WIDTH) w = ConverterConstants.MIN_TEXT_BOX_WIDTH;
-        long inlineMinH = ConverterConstants.MIN_TEXT_BOX_HEIGHT;
-        long h = obj.height() > inlineMinH ? obj.height() : inlineMinH;
+        // IDML에서 높이가 명시된 경우 그대로 사용 (최소값 강제 안 함)
+        long h = obj.height() > 0 ? obj.height() : ConverterConstants.MIN_TEXT_BOX_HEIGHT;
 
         // IDML 속성 기반 래핑 모드 결정 (크기 기반 폴백은 이미지에만 적용, 텍스트프레임은 인라인 유지)
         boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
@@ -763,7 +766,7 @@ class HwpxTextBoxBuilder {
         rect.createOrgSz();
         rect.orgSz().set(w, h);
         rect.createCurSz();
-        rect.curSz().set(w, 0L); // height=0: 내용에 맞게 자동 확장
+        rect.curSz().set(w, h); // treatAsChar=true일 때 줄 높이에 반영되도록 명시적 높이 설정
         rect.createFlip();
         rect.flip().horizontalAnd(false).verticalAnd(false);
         rect.createRotationInfo();
@@ -801,8 +804,10 @@ class HwpxTextBoxBuilder {
                 .hasNumRefAnd(false);
 
         // 내용 단락 (풀 버전 — 인라인 객체도 재귀 처리)
-        for (ASTParagraph astPara : obj.paragraphs()) {
-            paragraphBuilder.addParagraphToSubList(subList, astPara);
+        if (obj.paragraphs() != null) {
+            for (ASTParagraph astPara : obj.paragraphs()) {
+                paragraphBuilder.addParagraphToSubList(subList, astPara);
+            }
         }
 
         // 인라인 테이블 → SubList 내 인라인 테이블
@@ -811,8 +816,6 @@ class HwpxTextBoxBuilder {
                 ctx.tableBuilderRef.addInlineTableToSubList(subList, astTable);
             }
         }
-        HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
-
         if (subList.countOfPara() == 0) {
             paragraphBuilder.addEmptySubListPara(subList);
         }
@@ -962,7 +965,6 @@ class HwpxTextBoxBuilder {
         for (ASTParagraph astPara : obj.paragraphs()) {
             paragraphBuilder.addParagraphToSubList(subList, astPara);
         }
-        HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
         if (subList.countOfPara() == 0) {
             paragraphBuilder.addEmptySubListPara(subList);
         }
@@ -1008,17 +1010,23 @@ class HwpxTextBoxBuilder {
      * 빈 인라인 Rectangle → hp:rect (내용 없음, treatAsChar="1")
      * InDesign에서 항목 사이 공간 확보 역할.
      */
+    /**
+     * 스페이서를 1x1 투명 PNG 이미지로 추가.
+     * 빈 Rectangle 대신 이미지를 사용하여 한컴 편집기에서 안정적으로 간격 유지.
+     */
     void addSpacerRect(Para para, ASTInlineObject obj) {
         long w = obj.width() > 0 ? obj.width() : 100;
         long h = obj.height() > 0 ? obj.height() : 100;
 
+        String itemId = getOrCreateSpacerImage();
+
         Run run = para.addNewRun();
         run.charPrIDRef("0");
 
-        Rectangle rect = run.addNewRectangle();
-        String shapeId = ASTToHwpxConverter.nextShapeId();
+        Picture pic = run.addNewPicture();
+        String picId = ASTToHwpxConverter.nextShapeId();
 
-        rect.idAnd(shapeId)
+        pic.idAnd(picId)
                 .zOrderAnd(0)
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(TextWrapMethod.TOP_AND_BOTTOM)
@@ -1026,49 +1034,34 @@ class HwpxTextBoxBuilder {
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None);
 
-        rect.hrefAnd("");
-        rect.groupLevelAnd((short) 0);
-        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
-        rect.createOffset();
-        rect.offset().set(0L, 0L);
-        rect.createOrgSz();
-        rect.orgSz().set(w, h);
-        rect.createCurSz();
-        rect.curSz().set(w, h);
-        rect.createFlip();
-        rect.flip().horizontalAnd(false).verticalAnd(false);
-        rect.createRotationInfo();
-        rect.rotationInfo().angleAnd((short) 0)
+        pic.hrefAnd("");
+        pic.groupLevelAnd((short) 0);
+        pic.instidAnd(ASTToHwpxConverter.nextShapeId());
+        pic.createOffset();
+        pic.offset().set(0L, 0L);
+        pic.createOrgSz();
+        pic.orgSz().set(w, h);
+        pic.createCurSz();
+        pic.curSz().set(w, h);
+        pic.createFlip();
+        pic.flip().horizontalAnd(false).verticalAnd(false);
+        pic.createRotationInfo();
+        pic.rotationInfo().angleAnd((short) 0)
                 .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
-        rect.createRenderingInfo();
-        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-
-        // 테두리 / 채우기 (답안 상자 등 strokeColor 설정 시 테두리 표시)
-        setupTextBoxLineShape(rect, obj.strokeColor(), obj.strokeWeight(), "Solid", 100);
-        setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());
-
-        // 꼭짓점
-        rect.ratioAnd(computeCornerRatio(obj.cornerRadius(), w, h));
-        rect.createPt0();
-        rect.pt0().set(0L, 0L);
-        rect.createPt1();
-        rect.pt1().set(w, 0L);
-        rect.createPt2();
-        rect.pt2().set(w, h);
-        rect.createPt3();
-        rect.pt3().set(0L, h);
+        pic.createRenderingInfo();
+        pic.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        pic.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        pic.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
         // ShapeSize
-        rect.createSZ();
-        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+        pic.createSZ();
+        pic.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
                 .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
         // ShapePosition — 글자처럼 취급 (인라인)
-        rect.createPos();
-        rect.pos().treatAsCharAnd(true)
+        pic.createPos();
+        pic.pos().treatAsCharAnd(true)
                 .affectLSpacingAnd(true)
                 .flowWithTextAnd(true)
                 .allowOverlapAnd(false)
@@ -1080,8 +1073,59 @@ class HwpxTextBoxBuilder {
                 .vertOffsetAnd(0L)
                 .horzOffset(0L);
 
-        rect.createOutMargin();
-        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        pic.createOutMargin();
+        pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        // ImageRect
+        pic.createImgRect();
+        pic.imgRect().createPt0();
+        pic.imgRect().pt0().set(0L, 0L);
+        pic.imgRect().createPt1();
+        pic.imgRect().pt1().set(w, 0L);
+        pic.imgRect().createPt2();
+        pic.imgRect().pt2().set(w, h);
+        pic.imgRect().createPt3();
+        pic.imgRect().pt3().set(0L, h);
+
+        // ImageClip/Dim — 1x1 픽셀 원본
+        pic.createImgClip();
+        pic.imgClip().leftAnd(0L).rightAnd(75L).topAnd(0L).bottomAnd(75L);
+        pic.createInMargin();
+        pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        pic.createImgDim();
+        pic.imgDim().dimwidthAnd(75L).dimheightAnd(75L);
+
+        // Image 참조
+        pic.createImg();
+        pic.img().binaryItemIDRefAnd(itemId)
+                .brightAnd(0).contrastAnd(0)
+                .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
+    }
+
+    /** 1x1 투명 PNG를 한 번만 생성하여 재사용 */
+    private String getOrCreateSpacerImage() {
+        if (ctx.spacerImageId != null) return ctx.spacerImageId;
+        ctx.spacerImageId = ImageInserter.registerImage(ctx.hwpxFile, SPACER_PNG_1x1, "png");
+        return ctx.spacerImageId;
+    }
+
+    /** 1x1 투명 PNG (67 bytes) */
+    private static final byte[] SPACER_PNG_1x1;
+    static {
+        // Minimal valid 1x1 transparent PNG
+        int[] raw = {
+            0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A, // PNG signature
+            0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52, // IHDR chunk
+            0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01, // 1x1
+            0x08,0x06,0x00,0x00,0x00,0x1F,0x15,0xC4, // RGBA, CRC
+            0x89,0x00,0x00,0x00,0x0A,0x49,0x44,0x41, // IDAT chunk
+            0x54,0x78,0x9C,0x62,0x00,0x00,0x00,0x02, // deflated data
+            0x00,0x01,0xE5,0x27,0xDE,0xFC,0x00,0x00, // CRC
+            0x00,0x00,0x49,0x45,0x4E,0x44,0xAE,0x42, // IEND chunk
+            0x60,0x82
+        };
+        SPACER_PNG_1x1 = new byte[raw.length];
+        for (int i = 0; i < raw.length; i++) SPACER_PNG_1x1[i] = (byte) raw[i];
     }
 
     // ── DropCap 해석 ──

@@ -714,7 +714,9 @@ public class ASTImageLoader {
             double offY = tb[0] - minY;
             double sw = tb[3] - tb[1];
             double sh = tb[2] - tb[0];
-            if (sw <= 0 || sh <= 0) continue;
+            // 변환 적용된 도형은 PathPoints에서 직접 경로를 빌드하므로 zero-dimension 허용
+            // (예: 수평/수직 GraphicLine은 한 축이 0)
+            if ((sw <= 0 || sh <= 0) && sc.accTransform == null) continue;
 
             Shape awtShape;
             // 둥근 사각형은 PathPoints에 코너 정보가 없으므로 RoundRectangle2D 사용
@@ -741,8 +743,9 @@ public class ASTImageLoader {
                 }
             }
 
-            // 선
-            if (sc.strokeHex != null && sc.shape.hasStroke()) {
+            // 선 (strokeHex가 Group 폴백으로 설정된 경우 shape 자체에 색상이 없을 수 있으므로
+            // hasStroke() 대신 strokeWeight > 0만 확인)
+            if (sc.strokeHex != null && sc.shape.strokeWeight() > 0) {
                 Color strokeColor = hexToColor(sc.strokeHex);
                 if (strokeColor != null) {
                     float strokeAlpha = (float) (sc.shape.strokeTint() / 100.0);

@@ -140,10 +140,10 @@ public class Stage4_BuildAST {
                     if (block == null) continue; // 페이지 밖 객체 건너뜀
                     block.storyId(storyId);
 
-                    // 스토리 → 단락 변환
-                    convertStoryToParagraphs(story, block, pool, idmlDoc, colorResolver, imageLoader);
+                    // 스토리 → 단락 변환 (테이블도 문단 흐름에 인라인 삽입)
+                    convertStoryToParagraphs(story, block, pool, tf, page, fo.zOrder(), idmlDoc, colorResolver, imageLoader);
 
-                    // 테이블 처리
+                    // 인라인 처리되지 않은 테이블만 별도 블록으로 추가
                     convertStoryTables(story, section, tf, page, fo.zOrder(), idmlDoc, colorResolver, imageLoader);
 
                     if (hasContent(block)) {
@@ -341,7 +341,6 @@ public class Stage4_BuildAST {
                         + " tables=" + tableBlocks
                         + " imgFrames=" + (imageLoader != null ? spread.getImageFramesOnPage(page).size() : 0)
                         + " vectors=" + (imageLoader != null ? spread.getVectorShapesOnPage(page).size() : 0));
-
                 // Cross-frame textwrap 시뮬레이션: 인라인 이미지/페이지 이미지의 텍스트 감싸기가
                 // 다른 텍스트 프레임의 콘텐츠를 밀어내는 효과를 재현
                 simulateTextWrap(section);
@@ -858,15 +857,17 @@ public class Stage4_BuildAST {
 
     /**
      * IDMLStory → ASTParagraph 리스트 변환.
+     * 스토리 내 테이블은 문단 흐름의 올바른 위치에 인라인으로 삽입.
      * 교사용프레임(해설) 인라인 텍스트 프레임은 본문 뒤에 배치.
      */
     private static void convertStoryToParagraphs(IDMLStory story, ASTTextFrameBlock block,
                                                    FlattenedObjectPool pool,
+                                                   IDMLTextFrame tf, IDMLPage page,
+                                                   int zOrder,
                                                    IDMLDocument idmlDoc,
                                                    ColorResolver colorResolver,
                                                    ASTImageLoader imageLoader) {
         // 스토리 전체에 BT 수식 폰트 런이 있는지 미리 확인
-        // (하나의 스토리 안에서 한 단락만 BT 런이 있어도 다른 단락에도 수식이 있을 수 있음)
         boolean storyHasBTRuns = false;
         for (IDMLParagraph p : story.paragraphs()) {
             for (IDMLCharacterRun r : p.characterRuns()) {
@@ -875,10 +876,38 @@ public class Stage4_BuildAST {
             if (storyHasBTRuns) break;
         }
 
+        // 테이블을 paragraphIndexBefore 기준으로 매핑
+        Map<Integer, List<IDMLTable>> tablesByParaIdx = new HashMap<>();
+        for (IDMLTable t : story.tables()) {
+            if (t.paragraphIndexBefore() >= 0) {
+                List<IDMLTable> list = tablesByParaIdx.get(t.paragraphIndexBefore());
+                if (list == null) {
+                    list = new ArrayList<>();
+                    tablesByParaIdx.put(t.paragraphIndexBefore(), list);
+                }
+                list.add(t);
+            }
+        }
+
         // 본문 뒤로 이동할 인라인 프레임 수집
         List<IDMLTextFrame> deferredFrames = new ArrayList<>();
+        int paraIdx = 0;
 
         for (IDMLParagraph idmlPara : story.paragraphs()) {
+            // 이 문단 앞에 삽입할 테이블이 있는지 확인
+            List<IDMLTable> tablesHere = tablesByParaIdx.get(paraIdx);
+            if (tablesHere != null) {
+                for (IDMLTable idmlTable : tablesHere) {
+                    ASTTable astTable = ASTInlineObjectBuilder.convertTable(
+                            idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader);
+                    if (astTable != null) {
+                        ASTParagraph tablePara = new ASTParagraph();
+                        tablePara.inlineTable(astTable);
+                        block.addParagraph(tablePara);
+                    }
+                }
+            }
+
             // 교사용프레임 등 뒤로 이동할 인라인 프레임 수집
             for (IDMLCharacterRun run : idmlPara.characterRuns()) {
                 for (IDMLTextFrame inlineTf : run.inlineFrames()) {
@@ -890,6 +919,21 @@ public class Stage4_BuildAST {
             ASTParagraph astPara = ASTStoryConverter.convertParagraph(idmlPara, pool, idmlDoc, colorResolver, imageLoader, storyHasBTRuns);
             if (astPara != null) {
                 block.addParagraph(astPara);
+            }
+            paraIdx++;
+        }
+
+        // 마지막 문단 뒤에 삽입할 테이블 처리
+        List<IDMLTable> tablesAfterLast = tablesByParaIdx.get(paraIdx);
+        if (tablesAfterLast != null) {
+            for (IDMLTable idmlTable : tablesAfterLast) {
+                ASTTable astTable = ASTInlineObjectBuilder.convertTable(
+                        idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader);
+                if (astTable != null) {
+                    ASTParagraph tablePara = new ASTParagraph();
+                    tablePara.inlineTable(astTable);
+                    block.addParagraph(tablePara);
+                }
             }
         }
 
@@ -927,6 +971,7 @@ public class Stage4_BuildAST {
 
     /**
      * 스토리의 테이블 → ASTTable 변환.
+     * paragraphIndexBefore가 설정된 테이블은 이미 인라인 처리되었으므로 스킵.
      */
     private static void convertStoryTables(IDMLStory story, ASTSection section,
                                              IDMLTextFrame tf, IDMLPage page,
@@ -934,6 +979,9 @@ public class Stage4_BuildAST {
                                              ColorResolver colorResolver,
                                              ASTImageLoader imageLoader) {
         for (IDMLTable idmlTable : story.tables()) {
+            if (idmlTable.paragraphIndexBefore() >= 0) {
+                continue; // 인라인 처리됨
+            }
             ASTTable table = ASTInlineObjectBuilder.convertTable(idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader);
             if (table != null) {
                 section.addBlock(table);
