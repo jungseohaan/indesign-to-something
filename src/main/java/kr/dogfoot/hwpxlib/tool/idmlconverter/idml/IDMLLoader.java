@@ -104,15 +104,11 @@ public class IDMLLoader {
                 IDMLResourceParser.parseGraphic(parseXML(graphicFile), doc);
             }
 
-            // 4.5. 마스터 스프레드 로드 (마진 정보 수집 + IDMLSpread 객체 생성)
-            Map<String, MasterPageMargins> masterMargins = new HashMap<String, MasterPageMargins>();
+            // 4.5. 마스터 스프레드 로드 (IDMLSpread 객체 생성)
             for (String masterSrc : masterSpreadSources) {
                 File masterFile = new File(dir, masterSrc);
                 if (masterFile.exists()) {
                     Document masterDoc = parseXML(masterFile);
-                    IDMLResourceParser.parseMasterSpreadForMargins(masterDoc, masterMargins);
-
-                    // 마스터 스프레드를 IDMLSpread 객체로도 로드
                     IDMLSpread masterSpread = IDMLSpreadParser.parseSpread(masterDoc, doc.hiddenLayerIds());
                     if (masterSpread.selfId() != null) {
                         doc.addMasterSpread(masterSpread.selfId(), masterSpread);
@@ -133,17 +129,32 @@ public class IDMLLoader {
                         page.pageNumber(pageNum);
                         page.sectionMarker(resolveSectionMarker(pageIndex, sections));
 
-                        // 마스터 마진 상속 (로컬 마진이 모두 0인 경우)
-                        if (page.appliedMasterSpread() != null && IDMLResourceParser.isAllMarginsZero(page)) {
-                            MasterPageMargins master = masterMargins.get(page.appliedMasterSpread());
-                            if (master != null) {
-                                page.marginTop(master.marginTop);
-                                page.marginBottom(master.marginBottom);
-                                page.marginLeft(master.marginLeft);
-                                page.marginRight(master.marginRight);
-                                if (page.columnCount() <= 1 && master.columnCount > 1) {
-                                    page.columnCount(master.columnCount);
-                                    page.columnGutter(master.columnGutter);
+                        // 마스터 스프레드 기반 마진/컬럼 상속
+                        if (page.appliedMasterSpread() != null) {
+                            IDMLSpread masterSpread = doc.getMasterSpread(page.appliedMasterSpread());
+                            if (masterSpread != null && !masterSpread.pages().isEmpty()) {
+                                // 스프레드 내 페이지 인덱스로 좌/우 마스터 페이지 매칭
+                                int pageIdxInSpread = spread.pages().indexOf(page);
+                                int masterPageIdx = Math.min(pageIdxInSpread, masterSpread.pages().size() - 1);
+                                masterPageIdx = Math.max(0, masterPageIdx);
+                                IDMLPage masterPage = masterSpread.pages().get(masterPageIdx);
+
+                                page.marginTop(masterPage.marginTop());
+                                page.marginBottom(masterPage.marginBottom());
+                                page.marginLeft(masterPage.marginLeft());
+                                page.marginRight(masterPage.marginRight());
+                                if (masterPage.columnCount() > 1) {
+                                    page.columnCount(masterPage.columnCount());
+                                    page.columnGutter(masterPage.columnGutter());
+                                }
+
+                                // Facing pages: 왼쪽 페이지(idx=0)는 Inside/Outside가 반전
+                                // IDML Left=Inside, Right=Outside → 왼쪽 페이지는 Inside가 오른쪽
+                                if (spread.pages().size() == 2 && pageIdxInSpread == 0
+                                        && page.marginLeft() != page.marginRight()) {
+                                    double tmpL = page.marginLeft();
+                                    page.marginLeft(page.marginRight());
+                                    page.marginRight(tmpL);
                                 }
                             }
                         }
@@ -259,15 +270,4 @@ public class IDMLLoader {
         String marker;
     }
 
-    /**
-     * 마스터 페이지의 마진 정보.
-     */
-    static class MasterPageMargins {
-        double marginTop;
-        double marginBottom;
-        double marginLeft;
-        double marginRight;
-        int columnCount = 1;
-        double columnGutter = 12.0;
-    }
 }

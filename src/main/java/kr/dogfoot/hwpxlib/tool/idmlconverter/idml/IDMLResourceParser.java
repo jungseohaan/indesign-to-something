@@ -263,35 +263,4 @@ class IDMLResourceParser {
         return null;
     }
 
-    // ===== 마스터 스프레드 마진 파싱 =====
-
-    static void parseMasterSpreadForMargins(Document masterSpreadDoc,
-                                            Map<String, IDMLLoader.MasterPageMargins> masterMargins) {
-        Element root = masterSpreadDoc.getDocumentElement();
-        String masterSpreadId = root.getAttribute("Self");
-
-        // 마스터 스프레드의 첫 번째 페이지에서 마진 정보를 가져온다
-        NodeList pages = root.getElementsByTagName("Page");
-        if (pages.getLength() > 0) {
-            Element pageElem = (Element) pages.item(0);
-            Element marginPref = getFirstChildElement(pageElem, "MarginPreference");
-            if (marginPref != null) {
-                IDMLLoader.MasterPageMargins margins = new IDMLLoader.MasterPageMargins();
-                margins.marginTop = parseDoubleAttrDef(marginPref, "Top", 0);
-                margins.marginBottom = parseDoubleAttrDef(marginPref, "Bottom", 0);
-                margins.marginLeft = parseDoubleAttrDef(marginPref, "Left", 0);
-                margins.marginRight = parseDoubleAttrDef(marginPref, "Right", 0);
-                margins.columnCount = parseIntAttr(marginPref, "ColumnCount", 1);
-                margins.columnGutter = parseDoubleAttrDef(marginPref, "ColumnGutter", 12.0);
-                masterMargins.put(masterSpreadId, margins);
-            }
-        }
-    }
-
-    static boolean isAllMarginsZero(IDMLPage page) {
-        return page.marginTop() == 0 &&
-               page.marginBottom() == 0 &&
-               page.marginLeft() == 0 &&
-               page.marginRight() == 0;
-    }
 }

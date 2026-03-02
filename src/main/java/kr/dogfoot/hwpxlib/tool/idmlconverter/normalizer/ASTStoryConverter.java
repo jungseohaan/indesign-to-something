@@ -384,6 +384,9 @@ class ASTStoryConverter {
                                 if (!Stage4_BuildAST.shouldDeferInlineFrame(inlineTf)) {
                                     addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
                                 }
+                            } else {
+                                // \uFFFC without inline object = forced line break (ACE 8)
+                                para.addItem(new ASTBreak(ASTBreak.BreakType.LINE));
                             }
                         }
                         start = j + 1;

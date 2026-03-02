@@ -38,6 +38,7 @@ public class ASTTextFrameBlock extends ASTBlock {
     private String storyId;
     private boolean distributed; // resolved 기반 문단 재배치 완료 → 연결 글상자 링크 해제
     private double rotationAngle; // 프레임 회전 각도 (도 단위)
+    private long narrowedWidth;   // side-by-side 이미지로 축소된 폭 (0 = 미적용)
 
     // 폴리곤 경로 (비사각형 프레임용, 페이지 상대 HWPUNIT 좌표)
     private long[] pathPointsX; // null이면 사각형
@@ -125,6 +126,14 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public double rotationAngle() { return rotationAngle; }
     public void rotationAngle(double v) { this.rotationAngle = v; }
+
+    public long narrowedWidth() { return narrowedWidth; }
+    public void narrowedWidth(long v) { this.narrowedWidth = v; }
+
+    /** 실제 렌더링에 사용할 폭. narrowedWidth가 설정되면 그 값, 아니면 원래 width. */
+    public long effectiveWidth() {
+        return narrowedWidth > 0 ? narrowedWidth : width;
+    }
 
     public long[] pathPointsX() { return pathPointsX; }
     public long[] pathPointsY() { return pathPointsY; }

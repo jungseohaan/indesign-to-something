@@ -2,9 +2,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 
 /**
  * textWrap이 있는 플로팅 이미지(ASTFigure)의 자리차지 효과를 구현한다.
@@ -43,27 +41,73 @@ public class FloatingImageMerger {
         // Y좌표 순 정렬
         wrappingFigures.sort(Comparator.comparingLong(ASTFigure::y));
 
-        int count = 0;
+        // ── Pass 1: side-by-side 감지 → 텍스트 프레임 폭 축소 ──
+        Map<ASTTextFrameBlock, Long> frameNarrowedRight = new HashMap<>();
+        List<ASTFigure> remainingFigures = new ArrayList<>();
+        int sideBySideCount = 0;
+
         for (ASTFigure fig : wrappingFigures) {
+            ASTTextFrameBlock target = findTargetFrame(fig, textFrames);
+            if (target == null) {
+                remainingFigures.add(fig);
+                continue;
+            }
+
+            if (isSideBySide(fig, target)) {
+                // 이미지 왼쪽 경계에서 gap을 뺀 값으로 프레임 폭 축소
+                long gap = 283; // ~1mm
+                long narrowRight = fig.x() - gap;
+
+                // 같은 프레임에 여러 side-by-side 이미지 → 가장 왼쪽 기준
+                Long prev = frameNarrowedRight.get(target);
+                if (prev == null || narrowRight < prev) {
+                    frameNarrowedRight.put(target, narrowRight);
+                }
+                fig.textWrapMode(null); // BEHIND_TEXT 플로팅
+                sideBySideCount++;
+            } else {
+                remainingFigures.add(fig);
+            }
+        }
+
+        // narrowedWidth 적용
+        for (Map.Entry<ASTTextFrameBlock, Long> e : frameNarrowedRight.entrySet()) {
+            long nw = e.getValue() - e.getKey().x();
+            if (nw > 0) {
+                e.getKey().narrowedWidth(nw);
+            }
+        }
+
+        // ── Pass 2: 나머지(위/아래) 이미지 → 기존 스페이서 삽입 ──
+        int spacerCount = 0;
+        for (ASTFigure fig : remainingFigures) {
             ASTTextFrameBlock target = findTargetFrame(fig, textFrames);
             if (target == null) continue;
 
-            // 투명 스페이서로 공간만 확보
             ASTInlineObject spacer = createSpacer(fig, target.width());
             int insertIdx = findInsertionIndex(target, fig);
             ASTParagraph spacerPara = new ASTParagraph();
             spacerPara.addItem(spacer);
             target.paragraphs().add(insertIdx, spacerPara);
 
-            // 원본 figure는 섹션 블록에 유지, textWrap만 클리어 → BEHIND_TEXT 플로팅
             fig.textWrapMode(null);
-            count++;
+            spacerCount++;
         }
 
-        if (count > 0) {
+        if (sideBySideCount + spacerCount > 0) {
             System.err.println("[FloatingImageMerger] Page " + section.pageNumber()
-                    + ": inserted " + count + " spacer(s), kept figures as floating");
+                    + ": " + sideBySideCount + " side-by-side (narrowed), "
+                    + spacerCount + " spacer(s), kept figures as floating");
         }
+    }
+
+    /**
+     * 이미지가 텍스트 프레임 오른쪽에 나란히(side-by-side) 배치된 경우 true.
+     * 이미지의 X가 프레임 중간점 이상이면 수평 병렬로 판단.
+     */
+    private static boolean isSideBySide(ASTFigure fig, ASTTextFrameBlock frame) {
+        long threshold = frame.x() + frame.width() / 2;
+        return fig.x() >= threshold;
     }
 
     /**

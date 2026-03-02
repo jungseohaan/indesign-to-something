@@ -46,7 +46,7 @@ class HwpxTextBoxBuilder {
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
 
-        long w = block.width();
+        long w = block.effectiveWidth();
         if (w < ConverterConstants.MIN_TEXT_BOX_WIDTH) w = ConverterConstants.MIN_TEXT_BOX_WIDTH;
 
         Rectangle rect = anchorRun.addNewRectangle();
@@ -238,7 +238,7 @@ class HwpxTextBoxBuilder {
      * 글상자(rect+drawText) 대신 1x1 테이블을 사용하여 클릭만으로 텍스트 편집 가능.
      */
     void convertTextFrameBlock(Para framePara, ASTTextFrameBlock block) {
-        long w = block.width();
+        long w = block.effectiveWidth();
         long h = block.height();
 
         // 음수 또는 0 크기 블록 건너뜀 (페이지 밖 객체)
@@ -556,7 +556,7 @@ class HwpxTextBoxBuilder {
      * 아니면 (전체폭 - 거터합) / N으로 균등 분할.
      */
     private long[] computeColumnWidths(ASTTextFrameBlock block, int colCount) {
-        long totalWidth = block.width();
+        long totalWidth = block.effectiveWidth();
         long gutter = block.columnGutter();
         long totalGutter = gutter * (colCount - 1);
         long contentWidth = totalWidth - totalGutter;
