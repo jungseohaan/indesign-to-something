@@ -613,10 +613,9 @@ public class ASTImageLoader {
 
         g.dispose();
 
-        // GradientFeather 알파 마스크 적용
-        if (shape.hasGradientFeather()) {
-            applyGradientFeatherMask(image, shape, scale, strokePad);
-        }
+        // GradientFeather 알파 마스크 비활성:
+        // 개별 도형을 독립 래스터화하면 투명 영역이 배경 없이 흰색으로 나타나
+        // 원본 InDesign과 다른 결과물이 생성됨. 솔리드 채우기로 렌더링.
 
         try {
             byte[] pngData = encodePng(image);
@@ -640,6 +639,20 @@ public class ASTImageLoader {
      * @return 래스터화 결과 (widthPts, heightPts 포함)
      */
     public ImageResult rasterizeShapes(List<ShapeWithColor> shapes, double[] groupTransform) {
+        return rasterizeShapes(shapes, groupTransform, null);
+    }
+
+    /**
+     * 여러 벡터 도형을 하나의 캔버스에 합성 래스터화한다.
+     * pageClipBounds가 지정되면 페이지 경계로 클리핑하여 도형이 페이지 밖으로 넘치지 않도록 한다.
+     *
+     * @param shapes         도형 + 색상 목록
+     * @param groupTransform 부모 Group의 ItemTransform (null 가능)
+     * @param pageClipBounds 페이지 절대좌표 [top, left, bottom, right] (null이면 클리핑 없음)
+     * @return 래스터화 결과 (widthPts, heightPts 포함)
+     */
+    public ImageResult rasterizeShapes(List<ShapeWithColor> shapes, double[] groupTransform,
+                                       double[] pageClipBounds) {
         if (shapes == null || shapes.isEmpty()) return null;
 
         // 1. 모든 도형의 합산 bounding box 계산 (변환 적용된 좌표)
@@ -654,6 +667,17 @@ public class ASTImageLoader {
             if (b[2] > maxY) maxY = b[2];
         }
         if (minX >= maxX || minY >= maxY) return null;
+
+        // 페이지 클리핑: 합산 bounding box를 페이지 경계로 제한
+        if (pageClipBounds != null) {
+            double pageTop = pageClipBounds[0], pageLeft = pageClipBounds[1];
+            double pageBottom = pageClipBounds[2], pageRight = pageClipBounds[3];
+            minX = Math.max(minX, pageLeft);
+            minY = Math.max(minY, pageTop);
+            maxX = Math.min(maxX, pageRight);
+            maxY = Math.min(maxY, pageBottom);
+            if (minX >= maxX || minY >= maxY) return null;
+        }
 
         double wPts = maxX - minX;
         double hPts = maxY - minY;
@@ -670,6 +694,16 @@ public class ASTImageLoader {
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
         g.translate(strokePad, strokePad);
+
+        // 페이지 클리핑 영역 설정: 도형이 페이지 밖으로 넘치는 스트로크를 잘라냄
+        if (pageClipBounds != null) {
+            double clipX = (pageClipBounds[1] - minX) * scale;
+            double clipY = (pageClipBounds[0] - minY) * scale;
+            double clipW = (pageClipBounds[3] - pageClipBounds[1]) * scale;
+            double clipH = (pageClipBounds[2] - pageClipBounds[0]) * scale;
+            g.setClip((int) Math.floor(clipX), (int) Math.floor(clipY),
+                    (int) Math.ceil(clipW) + 1, (int) Math.ceil(clipH) + 1);
+        }
 
         // 2. 각 도형을 공통 좌표 기준으로 렌더링
         for (ShapeWithColor sc : shapes) {
@@ -691,7 +725,6 @@ public class ASTImageLoader {
                 awtShape = new RoundRectangle2D.Double(
                         offX * scale, offY * scale, sw * scale, sh * scale, r * 2, r * 2);
             } else if (sc.accTransform != null) {
-                // 누적 변환이 있으면: path points에 변환을 적용하여 그룹 좌표계로 변환 후 렌더링
                 awtShape = buildTransformedPath(sc.shape, sc.accTransform, scale, minX, minY);
             } else {
                 awtShape = buildPathFromPoints(sc.shape, scale, offX, offY);
@@ -974,10 +1007,7 @@ public class ASTImageLoader {
 
         g.dispose();
 
-        // GradientFeather 알파 마스크 적용
-        if (shape.hasGradientFeather()) {
-            applyGradientFeatherMask(image, shape, scale, strokePad, rotFlip, allBounds);
-        }
+        // GradientFeather 알파 마스크 비활성 (위 주석 참조)
 
         try {
             byte[] pngData = encodePng(image);
@@ -1131,6 +1161,138 @@ public class ASTImageLoader {
             return result;
         } catch (IOException e) {
             return null;
+        }
+    }
+
+    // ===== 목표 크기 래스터화 (resolved geometry 통합용) =====
+
+    /**
+     * 단일 벡터 도형을 목표 크기(points)로 래스터화.
+     * IDML path 데이터를 목표 비율에 맞춰 비균일 스케일링하여 캔버스를 생성한다.
+     * resolved geometricBounds의 w/h와 일치하는 PNG를 생성하므로 찌그러짐이 없다.
+     *
+     * @param shape           벡터 도형
+     * @param fillColorHex    채우기 색상 HEX 또는 null
+     * @param strokeColorHex  선 색상 HEX 또는 null
+     * @param targetWidthPts  목표 너비 (points)
+     * @param targetHeightPts 목표 높이 (points)
+     */
+    public ImageResult rasterizeShapeAtSize(IDMLVectorShape shape,
+                                             String fillColorHex, String strokeColorHex,
+                                             double targetWidthPts, double targetHeightPts) {
+        if (targetWidthPts <= 0 || targetHeightPts <= 0) return null;
+
+        // IDML 네이티브 비율로 래스터화 후, resolved 목표 크기로 리사이즈.
+        // 비균일 스케일(path 왜곡)을 피하기 위해 render-then-resize 전략 사용.
+        ImageResult idmlResult = rasterizeShape(shape, fillColorHex, strokeColorHex);
+        if (idmlResult == null) return null;
+
+        double srcW = shape.widthPoints();
+        double srcH = shape.heightPoints();
+
+        // IDML 크기와 목표 크기가 거의 같으면 리사이즈 불필요
+        if (Math.abs(targetWidthPts - srcW) < 0.5 && Math.abs(targetHeightPts - srcH) < 0.5) {
+            return idmlResult;
+        }
+
+        // 목표 크기로 리사이즈
+        return resizeResult(idmlResult, targetWidthPts, targetHeightPts);
+    }
+
+    /**
+     * 클리핑 프레임 + 복수 자식 도형을 목표 크기(points)로 래스터화.
+     * IDML 크기로 렌더링 후 목표 크기로 리사이즈 (복합 렌더링의 비균일 스케일은 복잡).
+     *
+     * @param clipFrame        클리핑 프레임
+     * @param colorResolver    색상 해석기
+     * @param renderLeft       렌더링 영역 좌측 (points)
+     * @param renderTop        렌더링 영역 상단 (points)
+     * @param renderW          렌더링 영역 너비 (points)
+     * @param renderH          렌더링 영역 높이 (points)
+     * @param targetWidthPts   목표 너비 (points)
+     * @param targetHeightPts  목표 높이 (points)
+     */
+    public ImageResult rasterizeClippedGroupAtSize(IDMLVectorShape clipFrame,
+                                                    kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver colorResolver,
+                                                    double renderLeft, double renderTop,
+                                                    double renderW, double renderH,
+                                                    double targetWidthPts, double targetHeightPts) {
+        // IDML 크기로 렌더링
+        ImageResult idmlResult = rasterizeClippedGroup(clipFrame, colorResolver,
+                renderLeft, renderTop, renderW, renderH);
+        if (idmlResult == null) return null;
+
+        // 목표 크기와 IDML 크기가 거의 같으면 리사이즈 불필요
+        if (Math.abs(targetWidthPts - renderW) < 0.5 && Math.abs(targetHeightPts - renderH) < 0.5) {
+            return idmlResult;
+        }
+
+        // 목표 크기로 리사이즈
+        return resizeResult(idmlResult, targetWidthPts, targetHeightPts);
+    }
+
+    /**
+     * 벡터 그룹(복수 도형)을 목표 크기(points)로 래스터화.
+     * IDML 크기로 렌더링 후 목표 크기로 리사이즈.
+     *
+     * @param shapes           도형 + 색상 목록
+     * @param groupTransform   부모 Group의 ItemTransform (null 가능)
+     * @param pageClipBounds   페이지 절대좌표 [top, left, bottom, right] (null이면 클리핑 없음)
+     * @param targetWidthPts   목표 너비 (points)
+     * @param targetHeightPts  목표 높이 (points)
+     */
+    public ImageResult rasterizeShapesAtSize(List<ShapeWithColor> shapes,
+                                              double[] groupTransform, double[] pageClipBounds,
+                                              double targetWidthPts, double targetHeightPts) {
+        // IDML 크기로 렌더링
+        ImageResult idmlResult = rasterizeShapes(shapes, groupTransform, pageClipBounds);
+        if (idmlResult == null) return null;
+
+        // 목표 크기와 IDML 크기가 거의 같으면 리사이즈 불필요
+        if (idmlResult.widthPts > 0 && idmlResult.heightPts > 0
+                && Math.abs(targetWidthPts - idmlResult.widthPts) < 0.5
+                && Math.abs(targetHeightPts - idmlResult.heightPts) < 0.5) {
+            return idmlResult;
+        }
+
+        // 목표 크기로 리사이즈
+        return resizeResult(idmlResult, targetWidthPts, targetHeightPts);
+    }
+
+    /**
+     * ImageResult의 PNG를 목표 크기(points)로 리사이즈.
+     */
+    private ImageResult resizeResult(ImageResult src, double targetWidthPts, double targetHeightPts) {
+        if (src == null || src.imageData == null) return src;
+        try {
+            BufferedImage srcImg = ImageIO.read(new ByteArrayInputStream(src.imageData));
+            if (srcImg == null) return src;
+
+            int targetDpi = options.imageDpi();
+            double dpiScale = targetDpi / 72.0;
+            int newPixW = Math.max(10, (int) Math.ceil(targetWidthPts * dpiScale));
+            int newPixH = Math.max(10, (int) Math.ceil(targetHeightPts * dpiScale));
+
+            BufferedImage resized = new BufferedImage(newPixW, newPixH, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = resized.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                    RenderingHints.VALUE_RENDER_QUALITY);
+            g.drawImage(srcImg, 0, 0, newPixW, newPixH, null);
+            g.dispose();
+
+            byte[] pngData = encodePng(resized);
+            ImageResult result = new ImageResult();
+            result.imageData = pngData;
+            result.format = "png";
+            result.pixelWidth = newPixW;
+            result.pixelHeight = newPixH;
+            result.widthPts = targetWidthPts;
+            result.heightPts = targetHeightPts;
+            return result;
+        } catch (IOException e) {
+            return src;
         }
     }
 
@@ -1743,5 +1905,82 @@ public class ASTImageLoader {
         });
         File found = listing.get(filename.toLowerCase());
         return found != null ? found.getAbsolutePath() : null;
+    }
+
+    /**
+     * 그레이스케일 이미지를 InDesign 스타일로 채색한다.
+     * InDesign에서 그레이스케일 이미지에 FillColor를 지정하면:
+     * - 흰색(255) → 투명
+     * - 검정(0) → FillTint% 불투명의 FillColor
+     * - 중간 회색 → 비례적 알파
+     *
+     * @param pngData    원본 PNG 데이터
+     * @param fillColor  IDML FillColor 문자열 (예: "Color/Black")
+     * @param fillTint   FillTint 0~100 (100=완전 불투명)
+     * @return 채색된 PNG 데이터, 실패 시 원본 반환
+     */
+    /**
+     * 그레이스케일 이미지를 InDesign 스타일로 채색한다.
+     * InDesign에서 그레이스케일 이미지에 FillColor를 지정하면:
+     * - 흰색(255) → 투명 (흰 배경에 합성)
+     * - 검정(0) → FillTint% 불투명의 FillColor (흰 배경에 합성)
+     * - 중간 회색 → 비례적 블렌딩
+     *
+     * HWPX(한글)에서 PNG alpha 투명도를 지원하지 않을 수 있으므로,
+     * 흰 배경 위에 합성한 불투명 이미지를 출력한다.
+     *
+     * @param pngData    원본 PNG 데이터
+     * @param fillColor  IDML FillColor 문자열 (예: "Color/Black")
+     * @param fillTint   FillTint 0~100 (100=완전 불투명)
+     * @return 채색된 PNG 데이터, 실패 시 원본 반환
+     */
+    public static byte[] colorizeGrayscaleImage(byte[] pngData, String fillColor, double fillTint) {
+        if (pngData == null || fillColor == null) return pngData;
+
+        Color color = resolveFrameFillColor(fillColor);
+        if (color == null) return pngData;
+
+        double tintFactor = Math.max(0, Math.min(1, fillTint / 100.0));
+
+        try {
+            BufferedImage src = ImageIO.read(new ByteArrayInputStream(pngData));
+            if (src == null) return pngData;
+
+            int w = src.getWidth();
+            int h = src.getHeight();
+            // 흰 배경 위에 합성 (한글이 alpha 투명도를 무시할 수 있으므로)
+            BufferedImage dst = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+
+            int cr = color.getRed();
+            int cg = color.getGreen();
+            int cb = color.getBlue();
+
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int pixel = src.getRGB(x, y);
+                    int srcAlpha = (pixel >> 24) & 0xFF;
+                    // 그레이스케일 값 (R=G=B)
+                    int gray = (pixel >> 16) & 0xFF;
+                    // InDesign 규칙: 흰색=투명, 검정=불투명
+                    double opacity = (255.0 - gray) / 255.0 * tintFactor * (srcAlpha / 255.0);
+                    // 흰 배경(255) 위에 fillColor를 opacity로 합성
+                    int outR = (int) Math.round(cr * opacity + 255 * (1 - opacity));
+                    int outG = (int) Math.round(cg * opacity + 255 * (1 - opacity));
+                    int outB = (int) Math.round(cb * opacity + 255 * (1 - opacity));
+                    outR = Math.max(0, Math.min(255, outR));
+                    outG = Math.max(0, Math.min(255, outG));
+                    outB = Math.max(0, Math.min(255, outB));
+                    // 불투명 픽셀로 출력 (흰 부분은 완전 투명으로 처리)
+                    int outAlpha = opacity > 0.001 ? 255 : 0;
+                    dst.setRGB(x, y, (outAlpha << 24) | (outR << 16) | (outG << 8) | outB);
+                }
+            }
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(dst, "png", baos);
+            return baos.toByteArray();
+        } catch (IOException e) {
+            return pngData;
+        }
     }
 }

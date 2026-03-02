@@ -5,7 +5,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
+
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -40,6 +44,20 @@ public class HwpxConverterContext {
     final Map<String, java.util.List<String>> storyLinkIds = new LinkedHashMap<>();
     // storyId → 현재까지 변환된 블록 인덱스
     final Map<String, Integer> storyLinkIndex = new LinkedHashMap<>();
+
+    // ── 오버레이 페이지 레벨 승격 ──
+    // 테이블 셀 내부의 오버레이 rect는 한글에서 정상 렌더링되지 않으므로
+    // 페이지 레벨(PAPER-relative)로 승격하여 렌더링한다.
+    static class DeferredOverlay {
+        ASTInlineObject overlay;
+        long pageX, pageY;
+    }
+    final List<DeferredOverlay> deferredOverlays = new ArrayList<>();
+
+    // 현재 처리 중인 블록의 페이지 좌표 (오버레이 좌표 계산용)
+    long blockPageX, blockPageY;
+    long blockInsetLeft, blockInsetTop;
+    long cellContentYCursor; // 셀 내 처리된 단락의 누적 높이
 
     // 변환 통계
     int imagesConverted;

@@ -59,6 +59,13 @@ public class ASTInlineObject extends ASTInlineItem {
     private long imageOffsetX;
     private long imageOffsetY;
 
+    // resolved.json에서 가져온 페이지 기준 절대 좌표 (HWPUNIT)
+    // 설정된 경우 IDML transform 계산 대신 이 좌표를 사용
+    private long resolvedPageX = -1;  // -1 = 미설정
+    private long resolvedPageY = -1;
+    private long resolvedWidth = -1;
+    private long resolvedHeight = -1;
+
     // IMAGE 그룹 내 오버레이 텍스트프레임 목록 (IMAGE kind 전용)
     // 이미지 컨테이너 내부에 중첩하여 이미지 위에 올바르게 배치
     private java.util.List<ASTInlineObject> overlayFrames;
@@ -170,6 +177,18 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public long imageOffsetY() { return imageOffsetY; }
     public void imageOffsetY(long v) { this.imageOffsetY = v; }
+
+    public long resolvedPageX() { return resolvedPageX; }
+    public void resolvedPageX(long v) { this.resolvedPageX = v; }
+
+    public long resolvedPageY() { return resolvedPageY; }
+    public void resolvedPageY(long v) { this.resolvedPageY = v; }
+
+    public long resolvedWidth() { return resolvedWidth; }
+    public void resolvedWidth(long v) { this.resolvedWidth = v; }
+
+    public long resolvedHeight() { return resolvedHeight; }
+    public void resolvedHeight(long v) { this.resolvedHeight = v; }
 
     public String bundlePath() { return bundlePath; }
     public void bundlePath(String v) { this.bundlePath = v; }

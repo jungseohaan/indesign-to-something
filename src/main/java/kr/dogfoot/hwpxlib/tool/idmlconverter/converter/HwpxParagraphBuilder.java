@@ -110,6 +110,30 @@ class HwpxParagraphBuilder {
         if (subList.countOfPara() > 1 && isHwpxParaEmpty(para)) {
             subList.removePara(para);
         }
+
+        // 셀 내 Y 커서 업데이트 (오버레이 좌표 계산용)
+        ctx.cellContentYCursor += estimateParagraphHeight(astPara);
+    }
+
+    /**
+     * AST 단락의 높이를 추정한다.
+     * 인라인 객체 중 가장 큰 높이를 사용하고, 텍스트만 있으면 기본 행높이(500 hwpunit ≈ 5pt).
+     */
+    private long estimateParagraphHeight(ASTParagraph para) {
+        long maxInlineH = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+                ASTInlineObject obj = (ASTInlineObject) item;
+                long h = obj.height();
+                // IMAGE with container: 컨테이너 높이 사용
+                if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE
+                        && obj.containerHeight() > 0) {
+                    h = obj.containerHeight();
+                }
+                if (h > maxInlineH) maxInlineH = h;
+            }
+        }
+        return maxInlineH > 0 ? maxInlineH : 500;
     }
 
     // ── 인라인 객체 디스패치 ──

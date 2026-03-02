@@ -122,7 +122,7 @@ public class IDMLVectorShape {
     private double strokeTint = 100;   // 선 색 농도 (tint)
     private double opacity = 100;      // 전체 불투명도
 
-    // GradientFeather (투명도 그라디언트 마스크)
+    // GradientFeather (투명도 그라디언트 마스크 — 전체)
     private double gradientFeatherAngle = Double.NaN;  // 각도 (degrees)
     private double gradientFeatherLength;               // 길이 (points)
     private double[] gradientFeatherStart;              // 시작점 [x, y] (로컬 좌표, points)

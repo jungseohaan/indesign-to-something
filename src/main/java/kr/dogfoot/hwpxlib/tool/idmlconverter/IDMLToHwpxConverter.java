@@ -7,9 +7,13 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSerializer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedDataReader;
 
 import java.io.File;
+import java.util.List;
 
 /**
  * IDML -> HWPX 변환 메인 파사드.
@@ -65,23 +69,51 @@ public class IDMLToHwpxConverter {
         try {
             String sourceFileName = new File(idmlPath).getName();
 
-            // Phase 2: IDML -> ASTDocument (4단계 정규화)
-            reporter.reportProgress(5, 100, "IDML 구조 분석 중...");
-            ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
-
-            // Phase 2.5: Resolved 데이터 보강 (선택적 — 없으면 기존 파이프라인 그대로)
+            // Phase 1.5: Resolved 데이터 조기 로딩 (Stage4 래스터화에서 사용)
+            ResolvedData resolvedData = null;
             if (options.resolvedJsonPath() != null) {
                 try {
-                    reporter.reportProgress(8, 100, "resolved 데이터 병합 중...");
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolved =
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedDataReader.read(
-                                    options.resolvedJsonPath());
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedMerger.enrich(
-                            astDoc, resolved);
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedFrameDistributor.distribute(
-                            astDoc, resolved);
+                    reporter.reportProgress(3, 100, "resolved 데이터 로딩 중...");
+                    resolvedData = ResolvedDataReader.read(options.resolvedJsonPath());
                 } catch (Exception e) {
-                    System.err.println("Warning: resolved.json 로드/병합 실패 (무시): " + e.getMessage());
+                    System.err.println("Warning: resolved.json 로드 실패 (무시): " + e.getMessage());
+                }
+            }
+
+            // Phase 1.6: resolved 좌표 단위 정규화 (mm/in → pt)
+            // InDesign DOM은 문서 측정 단위로 좌표를 반환하므로,
+            // IDML 페이지 치수(항상 pt)와 비교하여 스케일 팩터를 계산한다.
+            if (resolvedData != null) {
+                List<IDMLPage> idmlPages = idmlDoc.getAllPages();
+                if (!idmlPages.isEmpty()) {
+                    resolvedData.normalizeToPoints(idmlPages.get(0).widthPoints());
+                }
+            }
+
+            // Phase 2: IDML -> ASTDocument (4단계 정규화, resolved 좌표 활용)
+            reporter.reportProgress(5, 100, "IDML 구조 분석 중...");
+            ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData);
+
+            // Phase 2.5: Resolved 텍스트/스타일 보강 (선택적)
+            if (resolvedData != null) {
+                try {
+                    reporter.reportProgress(8, 100, "resolved 데이터 병합 중...");
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedMerger.enrich(
+                            astDoc, resolvedData);
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedFrameDistributor.distribute(
+                            astDoc, resolvedData);
+                } catch (Exception e) {
+                    System.err.println("Warning: resolved.json 병합 실패 (무시): " + e.getMessage());
+                }
+            }
+
+            // Phase 2.6: Resolved 오버레이 좌표 보강 (선택적)
+            if (resolvedData != null) {
+                try {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedOverlayEnricher.enrich(
+                            astDoc, resolvedData);
+                } catch (Exception e) {
+                    System.err.println("Warning: resolved overlay 보강 실패 (무시): " + e.getMessage());
                 }
             }
 

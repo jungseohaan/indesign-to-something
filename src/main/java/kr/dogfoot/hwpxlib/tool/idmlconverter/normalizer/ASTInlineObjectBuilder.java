@@ -5,6 +5,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -96,6 +99,9 @@ class ASTInlineObjectBuilder {
         collectChildTextFramesInternal(ig, null, imageObj, idmlDoc, colorResolver, imageLoader, bg,
                 true, containerW, containerH,
                 contentWidthPts, contentHeightPts, rootLeft, rootTop, 0, 0);
+
+        // 오버레이 좌표는 컨테이너 기준 유지 — HWPX에서 인라인 picture를
+        // 컨테이너 크기로 렌더링하므로 PARA-relative 좌표가 컨테이너 기준과 일치
     }
 
     /**
@@ -324,13 +330,12 @@ class ASTInlineObjectBuilder {
         double tfX = tfBounds[1] + tfTransform[4] + accTx;
         double tfY = tfBounds[0] + tfTransform[5] + accTy;
 
-        // 루트 그룹의 시각적 원점(minX, minY) 기준 상대 위치 (points)
+        // 콘텐츠 bbox 원점(minX, minY) 기준 상대 위치 (points)
+        // 음수 클램핑 제거 — 이미지보다 왼쪽/위에 있는 텍스트프레임도 올바르게 배치
         double relX = tfX - rootLeft;
         double relY = tfY - rootTop;
-        if (relX < 0) relX = 0;
-        if (relY < 0) relY = 0;
 
-        // 그룹 바운드(points) → 이미지 표시 크기(HWPUNIT) 비율로 스케일
+        // 콘텐츠 bbox 크기(points) → 컨테이너 표시 크기(HWPUNIT) 비율로 스케일
         long overlayX, overlayY;
         if (groupWidthPts > 0 && groupHeightPts > 0) {
             overlayX = Math.round(relX / groupWidthPts * imageDisplayWidth);
@@ -967,6 +972,14 @@ class ASTInlineObjectBuilder {
 
         if (result == null || result.imageData == null) return null;
 
+        // 그레이스케일 모노톤 이미지 스킵 (장식용 그림자 등)
+        // InDesign에서 그레이스케일 이미지에 FillColor를 지정하면 모노톤으로 채색한다.
+        // 이런 이미지는 대부분 장식용 그림자/효과이며, HWPX에서 z-order가 다르게
+        // 동작하여 원본과 다르게 보이므로 스킵한다.
+        if (imgFrame.needsGrayscaleColorization()) {
+            return null;
+        }
+
         // 회전/반전이 있으면 이미지를 픽셀 레벨에서 회전
         if (hasRotOrFlip) {
             ASTImageLoader.ImageResult rotated =
@@ -1026,19 +1039,35 @@ class ASTInlineObjectBuilder {
             if (frac > minCropThreshold) figure.cropBottomFraction(frac);
         }
 
+        figure.sourceId(imgFrame.selfId());
         return figure;
     }
 
     /**
-     * IDMLVectorShape → ASTFigure 변환 (플로팅 벡터 도형 → PNG 래스터화).
+     * IDMLVectorShape → ASTFigure 변환 (기존 호환용 오버로드).
      */
     static ASTFigure createFigureFromVectorShape(IDMLVectorShape shape,
                                                   IDMLPage page,
                                                   ASTImageLoader imageLoader,
                                                   ColorResolver colorResolver) {
+        return createFigureFromVectorShape(shape, page, imageLoader, colorResolver, null, null);
+    }
+
+    /**
+     * IDMLVectorShape → ASTFigure 변환 (플로팅 벡터 도형 → PNG 래스터화).
+     * resolved 데이터가 있으면 geometricBounds로 위치+크기 모두 결정하고
+     * 래스터화도 resolved 크기에 맞춰 수행하여 찌그러짐 없이 일관성을 보장한다.
+     */
+    static ASTFigure createFigureFromVectorShape(IDMLVectorShape shape,
+                                                  IDMLPage page,
+                                                  ASTImageLoader imageLoader,
+                                                  ColorResolver colorResolver,
+                                                  ResolvedData resolvedData,
+                                                  ResolvedPage resolvedPage) {
         // === 복수 클리핑 자식 (clippedChildren) 처리 ===
         if (shape.hasClippedChildren()) {
-            return createFigureFromClippedGroup(shape, page, imageLoader, colorResolver);
+            return createFigureFromClippedGroup(shape, page, imageLoader, colorResolver,
+                    resolvedData, resolvedPage);
         }
 
         // 채우기/선 색상 해석
@@ -1051,6 +1080,20 @@ class ASTInlineObjectBuilder {
             return null;
         }
 
+        // === Resolved geometry path ===
+        // resolved geometricBounds로 위치+크기 모두 결정, 래스터화도 resolved 크기로 수행
+        ResolvedPageItem resolvedItem = null;
+        if (resolvedData != null && shape.selfId() != null) {
+            resolvedItem = resolvedData.getPageItemByIdmlId(shape.selfId());
+        }
+        if (resolvedItem != null && resolvedItem.geometricBounds() != null
+                && resolvedPage != null && resolvedPage.bounds() != null) {
+            ASTFigure resolved = createFigureResolvedShape(shape, resolvedItem, resolvedPage,
+                    imageLoader, fillHex, strokeHex);
+            if (resolved != null) return resolved;
+        }
+
+        // === IDML fallback (resolved 없을 때) ===
         double[] effectiveBounds = shape.geometricBounds();
         double[] t = shape.itemTransform();
         boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001
@@ -1060,7 +1103,6 @@ class ASTInlineObjectBuilder {
         ASTImageLoader.ImageResult result;
 
         if (hasRotOrFlip) {
-            // === 회전/반전 사전 렌더링 경로 ===
             double w = IDMLGeometry.transformedWidth(effectiveBounds, shape.itemTransform());
             double h = IDMLGeometry.transformedHeight(effectiveBounds, shape.itemTransform());
             wHwp = CoordinateConverter.pointsToHwpunits(w);
@@ -1073,7 +1115,6 @@ class ASTInlineObjectBuilder {
             xHwp = CoordinateConverter.pointsToHwpunits(bbox[0] - pageAbs[0]);
             yHwp = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
 
-            // 선 도형(GraphicLine 등)은 한 축이 0일 수 있음: stroke weight를 최소 크기로 사용
             if (wHwp <= 0 || hHwp <= 0) {
                 if (shape.hasStroke() && shape.strokeWeight() > 0) {
                     long minDim = CoordinateConverter.pointsToHwpunits(shape.strokeWeight());
@@ -1085,18 +1126,32 @@ class ASTInlineObjectBuilder {
                 }
             }
 
-            // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
             long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
             long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-
             if (wHwp > pageW * 3 || hHwp > pageH * 3) {
                 return null;
             }
 
-            // 회전 사전 렌더링된 래스터
             result = imageLoader.rasterizeShape(shape, fillHex, strokeHex, shape.itemTransform());
+
+            // 래스터화 결과의 실제 픽셀 비율로 표시 크기 보정
+            // (geometricBounds 기반 transformedWidth/Height와 실제 path 기반 allBounds가 다를 수 있음)
+            if (result != null && result.pixelWidth > 0 && result.pixelHeight > 0) {
+                double pixelAR = (double) result.pixelWidth / result.pixelHeight;
+                double displayAR = (double) wHwp / Math.max(1, hHwp);
+                if (Math.abs(pixelAR - displayAR) / Math.max(0.001, displayAR) > 0.03) {
+                    // 표시 영역 면적(대각선 기준)을 유지하면서 비율만 보정
+                    double area = (double) wHwp * hHwp;
+                    long newH = (long) Math.sqrt(area / pixelAR);
+                    long newW = (long) (newH * pixelAR);
+                    // 위치를 중심 기준으로 보정
+                    xHwp += (wHwp - newW) / 2;
+                    yHwp += (hHwp - newH) / 2;
+                    wHwp = newW;
+                    hHwp = newH;
+                }
+            }
         } else {
-            // === 기존 비회전 경로 ===
             double w = IDMLGeometry.scaledWidth(effectiveBounds, shape.itemTransform());
             double h = IDMLGeometry.scaledHeight(effectiveBounds, shape.itemTransform());
 
@@ -1122,7 +1177,6 @@ class ASTInlineObjectBuilder {
                 }
             }
 
-            // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
             long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
             long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
             if (wHwp > pageW * 3 || hHwp > pageH * 3) {
@@ -1149,7 +1203,6 @@ class ASTInlineObjectBuilder {
         figure.pixelHeight(result.pixelHeight);
 
         if (!hasRotOrFlip) {
-            // 비회전 경로에서만 HWPX rotation/flip 처리
             if (IDMLGeometry.hasFlip(shape.itemTransform())) {
                 double rotation = IDMLGeometry.extractRotation(shape.itemTransform());
                 if (Math.abs(Math.abs(rotation) - 180) < 0.5) {
@@ -1170,22 +1223,94 @@ class ASTInlineObjectBuilder {
                 }
             }
         }
-        // hasRotOrFlip인 경우: 회전/반전이 이미 래스터에 포함됨 → rotationAngle 기본값 0
 
+        figure.sourceId(shape.selfId());
         return figure;
     }
 
     /**
-     * 클리핑 프레임 + 복수 자식 도형을 합성 래스터화하여 ASTFigure로 변환.
-     * 유효 영역(자식 바운딩 박스 ∩ 클리핑 프레임)만 렌더링하고 배치한다.
+     * Resolved geometry로 단일 벡터 도형 → ASTFigure 변환.
+     * resolved geometricBounds로 위치+크기를 결정한다.
+     *
+     * 래스터화 전략:
+     * - 비회전: resolved 크기에 맞춰 래스터화 (local ≈ resolved aspect ratio)
+     * - 회전/플립: 기존 사전 렌더링(rotation baked into image) 사용.
+     *   로컬 path의 aspect ratio ≠ resolved AABB이므로 비균일 스케일 → 찌그러짐.
+     *   대신 회전을 이미지에 구워넣고 resolved bounds에 맞춰 표시.
+     */
+    private static ASTFigure createFigureResolvedShape(IDMLVectorShape shape,
+                                                         ResolvedPageItem ri,
+                                                         ResolvedPage resolvedPage,
+                                                         ASTImageLoader imageLoader,
+                                                         String fillHex, String strokeHex) {
+        double[] gb = ri.geometricBounds();     // [top, left, bottom, right] pasteboard 좌표
+        double[] pb = resolvedPage.bounds();     // [top, left, bottom, right] 페이지 bounds
+
+        double rW = gb[3] - gb[1];
+        double rH = gb[2] - gb[0];
+        if (rW <= 0 || rH <= 0) return null;
+
+        // 페이지 상대 좌표
+        double rLeft = gb[1] - pb[1];
+        double rTop = gb[0] - pb[0];
+
+        double pageW = pb[3] - pb[1];
+        double pageH = pb[2] - pb[0];
+
+        long wHwp = CoordinateConverter.pointsToHwpunits(rW);
+        long hHwp = CoordinateConverter.pointsToHwpunits(rH);
+        long xHwp = CoordinateConverter.pointsToHwpunits(rLeft);
+        long yHwp = CoordinateConverter.pointsToHwpunits(rTop);
+
+        // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
+        long pageWHwp = CoordinateConverter.pointsToHwpunits(pageW);
+        long pageHHwp = CoordinateConverter.pointsToHwpunits(pageH);
+        if (wHwp > pageWHwp * 3 || hHwp > pageHHwp * 3) return null;
+
+        // IDML 네이티브 비율로 래스터화 후 resolved 크기로 리사이즈
+        ASTImageLoader.ImageResult result = imageLoader.rasterizeShapeAtSize(
+                shape, fillHex, strokeHex, rW, rH);
+        if (result == null || result.imageData == null) return null;
+
+        ASTFigure figure = new ASTFigure();
+        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
+        figure.x(xHwp);
+        figure.y(yHwp);
+        figure.width(wHwp);
+        figure.height(hHwp);
+        figure.zOrder(shape.zOrder());
+        figure.imageData(result.imageData);
+        figure.imageFormat(result.format);
+        figure.pixelWidth(result.pixelWidth);
+        figure.pixelHeight(result.pixelHeight);
+        figure.sourceId(shape.selfId());
+        return figure;
+    }
+
+    /**
+     * 클리핑 프레임 변환 (기존 호환용 오버로드).
      */
     static ASTFigure createFigureFromClippedGroup(IDMLVectorShape clipFrame,
                                                    IDMLPage page,
                                                    ASTImageLoader imageLoader,
                                                    ColorResolver colorResolver) {
+        return createFigureFromClippedGroup(clipFrame, page, imageLoader, colorResolver, null, null);
+    }
+
+    /**
+     * 클리핑 프레임 + 복수 자식 도형을 합성 래스터화하여 ASTFigure로 변환.
+     * 유효 영역(자식 바운딩 박스 ∩ 클리핑 프레임)만 렌더링하고 배치한다.
+     * resolved 데이터가 있으면 geometricBounds로 위치+크기를 결정하고
+     * 래스터화 결과를 resolved 크기로 리사이즈한다.
+     */
+    static ASTFigure createFigureFromClippedGroup(IDMLVectorShape clipFrame,
+                                                   IDMLPage page,
+                                                   ASTImageLoader imageLoader,
+                                                   ColorResolver colorResolver,
+                                                   ResolvedData resolvedData,
+                                                   ResolvedPage resolvedPage) {
         // 클리핑 프레임 자체 또는 자식 중 하나라도 보이는 색상이 있는지 확인
         boolean anyVisible = false;
-        // 클리핑 프레임 자체의 채우기 확인
         String clipFillHex = resolveColorHex(clipFrame.fillColor(), colorResolver);
         if (clipFillHex != null) anyVisible = true;
         if (!anyVisible) {
@@ -1197,6 +1322,19 @@ class ASTInlineObjectBuilder {
         }
         if (!anyVisible) return null;
 
+        // === Resolved geometry path ===
+        ResolvedPageItem resolvedItem = null;
+        if (resolvedData != null && clipFrame.selfId() != null) {
+            resolvedItem = resolvedData.getPageItemByIdmlId(clipFrame.selfId());
+        }
+        if (resolvedItem != null && resolvedItem.geometricBounds() != null
+                && resolvedPage != null && resolvedPage.bounds() != null) {
+            ASTFigure resolved = createFigureResolvedClippedGroup(clipFrame, resolvedItem,
+                    resolvedPage, imageLoader, colorResolver, clipFillHex);
+            if (resolved != null) return resolved;
+        }
+
+        // === IDML fallback ===
         double[] clipBounds = clipFrame.geometricBounds(); // [top, left, bottom, right]
         double clipTop = clipBounds[0], clipLeft = clipBounds[1];
         double clipBottom = clipBounds[2], clipRight = clipBounds[3];
@@ -1207,7 +1345,6 @@ class ASTInlineObjectBuilder {
         for (IDMLVectorShape child : clipFrame.clippedChildren()) {
             double[] ct = child.itemTransform();
             double[] cb = child.geometricBounds();
-            // 자식 bounds의 4개 꼭짓점을 클리핑 프레임 공간으로 변환
             double[][] corners = {{cb[1], cb[0]}, {cb[3], cb[0]}, {cb[1], cb[2]}, {cb[3], cb[2]}};
             for (double[] c : corners) {
                 double tx = ct[0] * c[0] + ct[2] * c[1] + ct[4];
@@ -1219,16 +1356,11 @@ class ASTInlineObjectBuilder {
             }
         }
 
-        // 유효 영역 계산
         double eLeft, eTop, eRight, eBottom;
         if (clipFillHex != null) {
-            // 클리핑 프레임 자체에 채우기가 있으면 프레임 전체를 유효 영역으로 사용
-            eLeft = clipLeft;
-            eTop = clipTop;
-            eRight = clipRight;
-            eBottom = clipBottom;
+            eLeft = clipLeft; eTop = clipTop;
+            eRight = clipRight; eBottom = clipBottom;
         } else {
-            // 채우기 없으면 자식 바운딩 박스와 클리핑 프레임의 교차 영역만 사용
             eLeft = Math.max(uLeft, clipLeft);
             eTop = Math.max(uTop, clipTop);
             eRight = Math.min(uRight, clipRight);
@@ -1242,7 +1374,6 @@ class ASTInlineObjectBuilder {
         double effectiveCX = (eLeft + eRight) / 2.0;
         double effectiveCY = (eTop + eBottom) / 2.0;
 
-        // 유효 영역 중심을 절대 좌표로 변환
         double[] tt = clipFrame.itemTransform();
         double[] absCenter = CoordinateConverter.applyTransform(tt, effectiveCX, effectiveCY);
         double[] pageAbs = IDMLGeometry.absoluteTopLeft(
@@ -1255,12 +1386,10 @@ class ASTInlineObjectBuilder {
 
         if (wHwp <= 0 || hHwp <= 0) return null;
 
-        // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
         long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
         long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
         if (wHwp > pageW * 3 || hHwp > pageH * 3) return null;
 
-        // 유효 영역만 합성 래스터화
         ASTImageLoader.ImageResult result = imageLoader.rasterizeClippedGroup(
                 clipFrame, colorResolver, eLeft, eTop, effectiveW, effectiveH);
         if (result == null || result.imageData == null) return null;
@@ -1276,18 +1405,133 @@ class ASTInlineObjectBuilder {
         figure.imageFormat(result.format);
         figure.pixelWidth(result.pixelWidth);
         figure.pixelHeight(result.pixelHeight);
+        figure.sourceId(clipFrame.selfId());
 
         return figure;
     }
 
     /**
-     * 같은 그룹(parentGroupId)에 속한 벡터 도형들을 하나의 복합 이미지로 래스터화.
-     * 그룹 내 도형들의 공간 관계를 유지하여 하나의 ASTFigure를 생성한다.
+     * Resolved geometry로 클리핑 그룹 → ASTFigure 변환.
+     * IDML 크기로 렌더링 후 resolved 크기로 리사이즈한다.
+     */
+    private static ASTFigure createFigureResolvedClippedGroup(IDMLVectorShape clipFrame,
+                                                                ResolvedPageItem ri,
+                                                                ResolvedPage resolvedPage,
+                                                                ASTImageLoader imageLoader,
+                                                                ColorResolver colorResolver,
+                                                                String clipFillHex) {
+        double[] gb = ri.geometricBounds();
+        double[] pb = resolvedPage.bounds();
+
+        double rW = gb[3] - gb[1];
+        double rH = gb[2] - gb[0];
+        if (rW <= 0 || rH <= 0) return null;
+
+        double pageW = pb[3] - pb[1];
+        double pageH = pb[2] - pb[0];
+
+        // IDML 유효 영역 계산 (클리핑 프레임 ∩ 자식 유니온)
+        double[] clipBounds = clipFrame.geometricBounds();
+        double clipTop = clipBounds[0], clipLeft = clipBounds[1];
+        double clipBottom = clipBounds[2], clipRight = clipBounds[3];
+        double clipW = clipRight - clipLeft;
+        double clipH = clipBottom - clipTop;
+
+        double uLeft = Double.MAX_VALUE, uTop = Double.MAX_VALUE;
+        double uRight = -Double.MAX_VALUE, uBottom = -Double.MAX_VALUE;
+        for (IDMLVectorShape child : clipFrame.clippedChildren()) {
+            double[] ct = child.itemTransform();
+            double[] cb = child.geometricBounds();
+            double[][] corners = {{cb[1], cb[0]}, {cb[3], cb[0]}, {cb[1], cb[2]}, {cb[3], cb[2]}};
+            for (double[] c : corners) {
+                double tx = ct[0] * c[0] + ct[2] * c[1] + ct[4];
+                double ty = ct[1] * c[0] + ct[3] * c[1] + ct[5];
+                uLeft = Math.min(uLeft, tx);
+                uTop = Math.min(uTop, ty);
+                uRight = Math.max(uRight, tx);
+                uBottom = Math.max(uBottom, ty);
+            }
+        }
+
+        double eLeft, eTop, eRight, eBottom;
+        if (clipFillHex != null) {
+            eLeft = clipLeft; eTop = clipTop;
+            eRight = clipRight; eBottom = clipBottom;
+        } else {
+            eLeft = Math.max(uLeft, clipLeft);
+            eTop = Math.max(uTop, clipTop);
+            eRight = Math.min(uRight, clipRight);
+            eBottom = Math.min(uBottom, clipBottom);
+        }
+        if (eRight <= eLeft || eBottom <= eTop) return null;
+
+        double effectiveW = eRight - eLeft;
+        double effectiveH = eBottom - eTop;
+
+        // resolved 크기를 유효 영역 비율로 보정
+        // resolved는 클립 프레임 전체 바운드 → 유효 영역만큼 축소
+        double scaleW = (clipW > 0) ? effectiveW / clipW : 1.0;
+        double scaleH = (clipH > 0) ? effectiveH / clipH : 1.0;
+        double adjW = rW * scaleW;
+        double adjH = rH * scaleH;
+
+        // 유효 영역의 클립 프레임 내 상대 오프셋 → resolved 좌표로 보정
+        double offsetFracX = (clipW > 0) ? (eLeft - clipLeft) / clipW : 0;
+        double offsetFracY = (clipH > 0) ? (eTop - clipTop) / clipH : 0;
+        double rLeft = gb[1] - pb[1] + rW * offsetFracX;
+        double rTop = gb[0] - pb[0] + rH * offsetFracY;
+
+        long wHwp = CoordinateConverter.pointsToHwpunits(adjW);
+        long hHwp = CoordinateConverter.pointsToHwpunits(adjH);
+        long xHwp = CoordinateConverter.pointsToHwpunits(rLeft);
+        long yHwp = CoordinateConverter.pointsToHwpunits(rTop);
+
+        long pageWHwp = CoordinateConverter.pointsToHwpunits(pageW);
+        long pageHHwp = CoordinateConverter.pointsToHwpunits(pageH);
+        if (wHwp > pageWHwp * 3 || hHwp > pageHHwp * 3) return null;
+
+        // 유효 영역 크기로 렌더링 후 보정된 resolved 크기로 리사이즈
+        ASTImageLoader.ImageResult result = imageLoader.rasterizeClippedGroupAtSize(
+                clipFrame, colorResolver, eLeft, eTop, effectiveW, effectiveH, adjW, adjH);
+        if (result == null || result.imageData == null) return null;
+
+        ASTFigure figure = new ASTFigure();
+        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
+        figure.x(xHwp);
+        figure.y(yHwp);
+        figure.width(wHwp);
+        figure.height(hHwp);
+        figure.zOrder(clipFrame.zOrder());
+        figure.imageData(result.imageData);
+        figure.imageFormat(result.format);
+        figure.pixelWidth(result.pixelWidth);
+        figure.pixelHeight(result.pixelHeight);
+        figure.sourceId(clipFrame.selfId());
+        return figure;
+    }
+
+    /**
+     * 벡터 그룹 변환 (기존 호환용 오버로드).
      */
     static ASTFigure createFigureFromVectorGroup(List<IDMLVectorShape> shapes,
                                                    IDMLPage page,
                                                    ASTImageLoader imageLoader,
                                                    ColorResolver colorResolver) {
+        return createFigureFromVectorGroup(shapes, page, imageLoader, colorResolver, null, null);
+    }
+
+    /**
+     * 같은 그룹(parentGroupId)에 속한 벡터 도형들을 하나의 복합 이미지로 래스터화.
+     * 그룹 내 도형들의 공간 관계를 유지하여 하나의 ASTFigure를 생성한다.
+     * resolved 데이터가 있으면 geometricBounds로 위치+크기를 결정하고
+     * 래스터화 결과를 resolved 크기로 리사이즈한다.
+     */
+    static ASTFigure createFigureFromVectorGroup(List<IDMLVectorShape> shapes,
+                                                   IDMLPage page,
+                                                   ASTImageLoader imageLoader,
+                                                   ColorResolver colorResolver,
+                                                   ResolvedData resolvedData,
+                                                   ResolvedPage resolvedPage) {
         if (shapes == null || shapes.isEmpty()) return null;
 
         // z-order 정렬 (낮은 값 = 뒤쪽, 먼저 렌더링)
@@ -1308,11 +1552,22 @@ class ASTInlineObjectBuilder {
         }
         if (swcList.isEmpty()) return null;
 
-        // 합성 래스터화
-        ASTImageLoader.ImageResult result = imageLoader.rasterizeShapes(swcList, null);
+        // 페이지 절대 좌표 계산 (도형 클리핑용)
+        double[] pageAbs = IDMLGeometry.absoluteTopLeft(
+                page.geometricBounds(), page.itemTransform());
+        double pageW = IDMLGeometry.width(page.geometricBounds());
+        double pageH = IDMLGeometry.height(page.geometricBounds());
+        double[] pageClipBounds = {pageAbs[1], pageAbs[0],
+                pageAbs[1] + pageH, pageAbs[0] + pageW}; // [top, left, bottom, right]
+
+        // 벡터 그룹은 resolved bounds를 사용하지 않는다.
+        // InDesign DOM의 Group geometricBounds는 모든 자식(비가시 포함)의 바운딩 박스이므로
+        // 실제 가시 영역보다 크다. IDML 래스터라이저가 보이는 도형만 렌더링하여 정확한 크기를 계산.
+        String groupId = shapes.get(0).parentGroupId();
+
+        ASTImageLoader.ImageResult result = imageLoader.rasterizeShapes(swcList, null, pageClipBounds);
         if (result == null || result.imageData == null) return null;
 
-        // 그룹 전체 바운딩 박스 → 페이지 상대 좌표
         double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
         double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
         for (ASTImageLoader.ShapeWithColor sc : swcList) {
@@ -1323,11 +1578,14 @@ class ASTInlineObjectBuilder {
             if (tb[3] > maxX) maxX = tb[3];
             if (tb[2] > maxY) maxY = tb[2];
         }
+        minX = Math.max(minX, pageAbs[0]);
+        minY = Math.max(minY, pageAbs[1]);
+        maxX = Math.min(maxX, pageAbs[0] + pageW);
+        maxY = Math.min(maxY, pageAbs[1] + pageH);
+
         double groupCX = (minX + maxX) / 2.0;
         double groupCY = (minY + maxY) / 2.0;
 
-        double[] pageAbs = IDMLGeometry.absoluteTopLeft(
-                page.geometricBounds(), page.itemTransform());
         double relCX = groupCX - pageAbs[0];
         double relCY = groupCY - pageAbs[1];
 
@@ -1338,10 +1596,9 @@ class ASTInlineObjectBuilder {
 
         if (wHwp <= 0 || hHwp <= 0) return null;
 
-        // 페이지보다 훨씬 큰 그룹은 스킵
-        long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
-        long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-        if (wHwp > pageW * 3 || hHwp > pageH * 3) return null;
+        long pageWHwp = CoordinateConverter.pointsToHwpunits(pageW);
+        long pageHHwp = CoordinateConverter.pointsToHwpunits(pageH);
+        if (wHwp > pageWHwp * 3 || hHwp > pageHHwp * 3) return null;
 
         ASTFigure figure = new ASTFigure();
         figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
@@ -1354,7 +1611,7 @@ class ASTInlineObjectBuilder {
         figure.imageFormat(result.format);
         figure.pixelWidth(result.pixelWidth);
         figure.pixelHeight(result.pixelHeight);
-
+        figure.sourceId(groupId);
         return figure;
     }
 

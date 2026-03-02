@@ -25,7 +25,9 @@ public class ResolvedMerger {
 
         for (Map.Entry<String, List<ASTParagraph>> entry : parasByStory.entrySet()) {
             String storyId = entry.getKey();
-            ResolvedStory resolvedStory = resolved.getStory(storyId);
+            // AST storyId는 IDML hex 형식 ("u4f1"), resolved는 decimal ("1265")
+            String decimalId = idmlIdToDecimal(storyId);
+            ResolvedStory resolvedStory = resolved.getStory(decimalId);
             if (resolvedStory == null) continue;
 
             List<ASTParagraph> astParas = entry.getValue();
@@ -145,16 +147,28 @@ public class ResolvedMerger {
 
     /**
      * InDesign Justification enum → AST alignment 매핑.
+     *
+     * InDesign 값 (Justification prefix 제거):
+     *   FULLY_JUSTIFIED → "justify" (완전 균등)
+     *   CENTER_JUSTIFIED, RIGHT_JUSTIFIED → "justify"
+     *   LEFT_JUSTIFIED → "left" (양쪽 정렬이지만 한글에서 LEFT 정렬이 시각적으로 근접)
+     *   LEFT_ALIGN → "left"
+     *   CENTER_ALIGN → "center"
+     *   RIGHT_ALIGN → "right"
      */
     private static String mapJustification(String justification) {
         if (justification == null) return null;
-        // InDesign enum 값: "Justification.LEFT_ALIGN", "Justification.CENTER_ALIGN" 등
         String upper = justification.toUpperCase();
+        // 구체적 패턴 먼저 (FULLY_JUSTIFIED가 LEFT보다 먼저 매칭되어야 함)
+        if (upper.contains("FULLY_JUSTIFIED") || upper.contains("FULL_JUSTIFY")) return "justify";
+        if (upper.contains("CENTER_JUSTIFIED")) return "justify";
+        if (upper.contains("RIGHT_JUSTIFIED")) return "justify";
+        // LEFT_JUSTIFIED: InDesign 양쪽 정렬이지만, 한글 JUSTIFY와 시각 차이 존재
+        // → LEFT로 매핑하여 원본에 가까운 시각적 결과 유지
         if (upper.contains("LEFT")) return "left";
         if (upper.contains("CENTER")) return "center";
         if (upper.contains("RIGHT")) return "right";
-        if (upper.contains("FULLY_JUSTIFIED") || upper.contains("FULL_JUSTIFY")) return "justify";
-        if (upper.contains("JUSTIFY") || upper.contains("LEFT_JUSTIFIED")) return "justify";
+        if (upper.contains("JUSTIFY")) return "justify";
         return null;
     }
 
@@ -168,6 +182,19 @@ public class ResolvedMerger {
         if (upper.contains("RIGHT")) return "right";
         if (upper.contains("DECIMAL") || upper.contains("CHARACTER")) return "decimal";
         return "left";
+    }
+
+    /**
+     * IDML hex ID ("u4f1") → decimal 문자열 ("1265") 변환.
+     * resolved.json의 story id는 InDesign DOM decimal 형식.
+     */
+    private static String idmlIdToDecimal(String idmlId) {
+        if (idmlId == null || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return idmlId;
+        try {
+            return String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
+        } catch (NumberFormatException e) {
+            return idmlId;
+        }
     }
 
     // ─── 런 보강 ──────────────────────────────────────────

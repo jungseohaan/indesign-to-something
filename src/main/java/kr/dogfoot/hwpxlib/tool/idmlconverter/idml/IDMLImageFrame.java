@@ -29,6 +29,14 @@ public class IDMLImageFrame {
     // null이면 오버라이드 없음 (PSD 컴포지트 사용).
     private List<int[]> graphicLayers;   // [{id, visible(0/1)}, ...] — null이면 오버라이드 없음
 
+    // 이미지 채색 (Grayscale/Monotone 이미지의 InDesign 컬러링)
+    // InDesign에서 그레이스케일 이미지에 FillColor를 지정하면
+    // 그레이스케일 값을 알파 마스크로 사용하여 해당 색으로 채색한다.
+    // (흰색=투명, 검정=FillTint% 불투명)
+    private String imageFillColor;       // Image 요소의 FillColor (예: "Color/Black")
+    private double imageFillTint = -1;   // Image 요소의 FillTint (0~100, -1=미지정)
+    private String imageColorSpace;      // Image 요소의 Space (예: "$ID/#Links_Grayscale")
+
     // 텍스트 감싸기 (TextWrapPreference)
     private String textWrapMode;         // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap", "Contour"
     private String textWrapSide;         // "BothSides", "LeftSide", "RightSide", "LargestArea"
@@ -99,6 +107,26 @@ public class IDMLImageFrame {
 
     public double textWrapRight() { return textWrapRight; }
     public void textWrapRight(double v) { this.textWrapRight = v; }
+
+    public String imageFillColor() { return imageFillColor; }
+    public void imageFillColor(String v) { this.imageFillColor = v; }
+
+    public double imageFillTint() { return imageFillTint; }
+    public void imageFillTint(double v) { this.imageFillTint = v; }
+
+    public String imageColorSpace() { return imageColorSpace; }
+    public void imageColorSpace(String v) { this.imageColorSpace = v; }
+
+    /**
+     * 그레이스케일 이미지에 채색이 필요한지 판단한다.
+     * InDesign에서 그레이스케일 이미지에 FillColor가 지정되어 있으면 true.
+     */
+    public boolean needsGrayscaleColorization() {
+        return imageColorSpace != null
+                && imageColorSpace.contains("Grayscale")
+                && imageFillColor != null
+                && !imageFillColor.isEmpty();
+    }
 
     public List<int[]> graphicLayers() { return graphicLayers; }
     public void graphicLayers(List<int[]> v) { this.graphicLayers = v; }

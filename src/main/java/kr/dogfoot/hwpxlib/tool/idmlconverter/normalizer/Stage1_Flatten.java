@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -18,26 +19,30 @@ public class Stage1_Flatten {
         for (IDMLSpread spread : idmlDoc.spreads()) {
             List<IDMLPage> pages = spread.pages();
 
-            // TextFrames
+            // TextFrames — 스프레드 양쪽 페이지에 걸친 프레임은 각 페이지에 복제
             for (IDMLTextFrame tf : spread.textFrames()) {
                 if (tf.geometricBounds() == null || tf.itemTransform() == null) continue;
 
-                FlatObject fo = new FlatObject();
-                fo.selfId(tf.selfId());
-                fo.contentType(FlatObject.ContentType.TEXT_FRAME);
-                fo.storyId(tf.parentStoryId());
-                fo.geometricBounds(tf.geometricBounds());
-                fo.itemTransform(tf.itemTransform());
-                fo.absoluteBbox(IDMLGeometry.getTransformedBoundingBox(
-                        tf.geometricBounds(), tf.itemTransform()));
-                fo.sourceObject(tf);
-                fo.zOrder(zOrderCounter++);
-                fo.pageNumber(assignPage(tf.geometricBounds(), tf.itemTransform(), pages));
-                if (tf.parentGroupId() != null) {
-                    fo.fromGroup(true);
-                    fo.parentGroupId(tf.parentGroupId());
+                int z = zOrderCounter++;
+                List<Integer> overlapping = assignPages(tf.geometricBounds(), tf.itemTransform(), pages);
+                for (int pageNum : overlapping) {
+                    FlatObject fo = new FlatObject();
+                    fo.selfId(tf.selfId());
+                    fo.contentType(FlatObject.ContentType.TEXT_FRAME);
+                    fo.storyId(tf.parentStoryId());
+                    fo.geometricBounds(tf.geometricBounds());
+                    fo.itemTransform(tf.itemTransform());
+                    fo.absoluteBbox(IDMLGeometry.getTransformedBoundingBox(
+                            tf.geometricBounds(), tf.itemTransform()));
+                    fo.sourceObject(tf);
+                    fo.zOrder(z);
+                    fo.pageNumber(pageNum);
+                    if (tf.parentGroupId() != null) {
+                        fo.fromGroup(true);
+                        fo.parentGroupId(tf.parentGroupId());
+                    }
+                    pool.add(fo);
                 }
-                pool.add(fo);
             }
 
             // ImageFrames
@@ -138,5 +143,23 @@ public class Stage1_Flatten {
         }
         // 폴백: 첫 페이지
         return pages.isEmpty() ? 1 : pages.get(0).pageNumber();
+    }
+
+    /**
+     * 객체가 겹치는 모든 페이지 번호 반환 (스프레드 양쪽 페이지 지원).
+     */
+    private static List<Integer> assignPages(double[] bounds, double[] transform, List<IDMLPage> pages) {
+        List<Integer> result = new ArrayList<>();
+        for (IDMLPage page : pages) {
+            if (page.geometricBounds() == null || page.itemTransform() == null) continue;
+            if (IDMLGeometry.isFrameOnPage(bounds, transform,
+                    page.geometricBounds(), page.itemTransform())) {
+                result.add(page.pageNumber());
+            }
+        }
+        if (result.isEmpty()) {
+            result.add(pages.isEmpty() ? 1 : pages.get(0).pageNumber());
+        }
+        return result;
     }
 }

@@ -155,7 +155,9 @@ function collectResolved(doc) {
         colors: collectColors(doc),
         fonts: collectFonts(doc),
         stories: collectStories(doc),
-        textFrames: collectTextFrames(doc)
+        textFrames: collectTextFrames(doc),
+        pages: collectPages(doc),
+        pageItems: collectPageItems(doc)
     };
 }
 
@@ -529,6 +531,141 @@ function collectTextFrames(doc) {
         // 텍스트 프레임 접근 실패 시 무시
     }
     return frames;
+}
+
+// --- 페이지 수집 ---
+
+function collectPages(doc) {
+    var pages = [];
+    for (var i = 0; i < doc.pages.length; i++) {
+        var pg = doc.pages[i];
+        var data = {
+            index: i,
+            name: pg.name
+        };
+        try { data.bounds = arrCopy(pg.bounds); } catch (e) {}
+        try {
+            data.marginPreferences = {
+                top: pg.marginPreferences.top,
+                bottom: pg.marginPreferences.bottom,
+                left: pg.marginPreferences.left,
+                right: pg.marginPreferences.right
+            };
+        } catch (e) {}
+        pages.push(data);
+    }
+    return pages;
+}
+
+// --- 페이지 아이템 수집 (벡터/이미지/그룹 속성 평탄화) ---
+
+function collectPageItems(doc) {
+    var items = [];
+    var allItems = doc.allPageItems;
+    for (var i = 0; i < allItems.length; i++) {
+        var pi = allItems[i];
+        var data = {
+            id: pi.id.toString(),
+            type: pi.constructor.name,
+            name: null,
+            parentId: null,
+            pageIndex: -1
+        };
+
+        // 이름
+        try { data.name = pi.name; } catch (e) {}
+
+        // 부모 관계 (Spread/Page 직속은 null)
+        try {
+            if (pi.parent && pi.parent.constructor.name !== "Spread"
+                && pi.parent.constructor.name !== "Page"
+                && pi.parent.constructor.name !== "MasterSpread") {
+                data.parentId = pi.parent.id.toString();
+            }
+        } catch (e) {}
+
+        // 페이지 귀속
+        try {
+            var parentPage = pi.parentPage;
+            if (parentPage) data.pageIndex = parentPage.documentOffset;
+        } catch (e) {}
+
+        // 기하 — InDesign이 모든 변환 적용한 절대 좌표 (pt)
+        try { data.geometricBounds = arrCopy(pi.geometricBounds); } catch (e) {}
+        try { data.visibleBounds = arrCopy(pi.visibleBounds); } catch (e) {}
+
+        // 절대 변환
+        try { data.absoluteRotationAngle = pi.absoluteRotationAngle; } catch (e) {}
+        try { data.absoluteShearAngle = pi.absoluteShearAngle; } catch (e) {}
+        try { data.absoluteHorizontalScale = pi.absoluteHorizontalScale; } catch (e) {}
+        try { data.absoluteVerticalScale = pi.absoluteVerticalScale; } catch (e) {}
+        try { data.absoluteFlip = pi.absoluteFlip.toString(); } catch (e) {}
+
+        // 채우기
+        try {
+            if (pi.fillColor && pi.fillColor.name !== "None") {
+                data.fillColorName = pi.fillColor.name;
+                data.fillTint = pi.fillTint;
+            }
+        } catch (e) {}
+
+        // 스트로크
+        try {
+            if (pi.strokeColor && pi.strokeColor.name !== "None") {
+                data.strokeColorName = pi.strokeColor.name;
+                data.strokeTint = pi.strokeTint;
+                data.strokeWeight = pi.strokeWeight;
+                data.strokeAlignment = pi.strokeAlignment.toString();
+            }
+        } catch (e) {}
+
+        // 투명도
+        try { data.opacity = pi.transparencySettings.blendingSettings.opacity; } catch (e) {}
+
+        // 그라디언트 페더
+        try {
+            var gfs = pi.transparencySettings.gradientFeatherSettings;
+            if (gfs && gfs.applied) {
+                data.gradientFeather = {
+                    applied: true,
+                    angle: gfs.angle,
+                    length: gfs.length,
+                    type: gfs.type.toString()
+                };
+            }
+        } catch (e) {}
+
+        // 드롭 섀도우
+        try {
+            var ds = pi.transparencySettings.dropShadowSettings;
+            if (ds) {
+                var dsMode = ds.mode.toString();
+                if (dsMode !== "ShadowMode.NONE") {
+                    data.dropShadow = {
+                        angle: ds.angle,
+                        distance: ds.distance,
+                        size: ds.size,
+                        opacity: ds.opacity
+                    };
+                    try { data.dropShadow.colorName = ds.effectColor ? ds.effectColor.name : null; } catch (e2) {}
+                }
+            }
+        } catch (e) {}
+
+        // 코너 반경
+        try {
+            if (pi.cornerRadius > 0) {
+                data.cornerRadius = pi.cornerRadius;
+            }
+        } catch (e) {}
+
+        items.push(data);
+    }
+    return items;
+}
+
+function arrCopy(a) {
+    return [a[0], a[1], a[2], a[3]];
 }
 
 // --- 유틸리티 ---

@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 
 /**
  * IDML 정규화 진입점 — 4단계 파이프라인 오케스트레이션.
@@ -17,6 +18,13 @@ public class IDMLNormalizer {
     public static ASTDocument normalize(IDMLDocument idmlDoc,
                                          ConvertOptions options,
                                          String sourceFileName) {
+        return normalize(idmlDoc, options, sourceFileName, null);
+    }
+
+    public static ASTDocument normalize(IDMLDocument idmlDoc,
+                                         ConvertOptions options,
+                                         String sourceFileName,
+                                         ResolvedData resolvedData) {
         System.err.println("[IDMLNormalizer] Starting 4-stage normalization...");
 
         // Stage 1: 컨테이너 평탄화
@@ -28,8 +36,8 @@ public class IDMLNormalizer {
         // Stage 3: 인라인 서브트리 축소
         Stage3_CollapseInlines.collapse(pool, idmlDoc, options);
 
-        // Stage 4: 스토리 우선 AST 구축
-        ASTDocument ast = Stage4_BuildAST.build(pool, idmlDoc, options, sourceFileName);
+        // Stage 4: 스토리 우선 AST 구축 (resolved 좌표 활용)
+        ASTDocument ast = Stage4_BuildAST.build(pool, idmlDoc, options, sourceFileName, resolvedData);
 
         System.err.println("[IDMLNormalizer] Normalization complete. Sections: " + ast.sections().size());
         return ast;

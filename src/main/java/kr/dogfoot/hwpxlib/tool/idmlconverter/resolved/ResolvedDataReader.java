@@ -65,6 +65,20 @@ public class ResolvedDataReader {
             }
         }
 
+        // pages
+        if (root.has("pages")) {
+            for (JsonElement e : root.getAsJsonArray("pages")) {
+                data.addPage(parsePage(e.getAsJsonObject()));
+            }
+        }
+
+        // pageItems
+        if (root.has("pageItems")) {
+            for (JsonElement e : root.getAsJsonArray("pageItems")) {
+                data.addPageItem(parsePageItem(e.getAsJsonObject()));
+            }
+        }
+
         return data;
     }
 
@@ -190,6 +204,86 @@ public class ResolvedDataReader {
         return run;
     }
 
+    private static ResolvedPage parsePage(JsonObject o) {
+        ResolvedPage page = new ResolvedPage();
+        page.index(getInt(o, "index", -1));
+        page.name(getString(o, "name"));
+        if (o.has("bounds")) {
+            page.bounds(parseDoubleArray(o.getAsJsonArray("bounds")));
+        }
+        if (o.has("marginPreferences")) {
+            JsonObject mp = o.getAsJsonObject("marginPreferences");
+            page.marginTop(getDouble(mp, "top", 0));
+            page.marginBottom(getDouble(mp, "bottom", 0));
+            page.marginLeft(getDouble(mp, "left", 0));
+            page.marginRight(getDouble(mp, "right", 0));
+        }
+        return page;
+    }
+
+    private static ResolvedPageItem parsePageItem(JsonObject o) {
+        ResolvedPageItem item = new ResolvedPageItem();
+        item.id(getString(o, "id"));
+        item.type(getString(o, "type"));
+        item.name(getString(o, "name"));
+        item.parentId(getString(o, "parentId"));
+        item.pageIndex(getInt(o, "pageIndex", -1));
+
+        // 기하
+        if (o.has("geometricBounds")) {
+            item.geometricBounds(parseDoubleArray(o.getAsJsonArray("geometricBounds")));
+        }
+        if (o.has("visibleBounds")) {
+            item.visibleBounds(parseDoubleArray(o.getAsJsonArray("visibleBounds")));
+        }
+
+        // 변환
+        item.absoluteRotationAngle(getDouble(o, "absoluteRotationAngle", 0));
+        item.absoluteShearAngle(getDouble(o, "absoluteShearAngle", 0));
+        item.absoluteHorizontalScale(getDouble(o, "absoluteHorizontalScale", 100));
+        item.absoluteVerticalScale(getDouble(o, "absoluteVerticalScale", 100));
+
+        // 채우기
+        item.fillColorName(getString(o, "fillColorName"));
+        item.fillTint(getDouble(o, "fillTint", 100));
+
+        // 스트로크
+        item.strokeColorName(getString(o, "strokeColorName"));
+        item.strokeTint(getDouble(o, "strokeTint", 100));
+        item.strokeWeight(getDouble(o, "strokeWeight", 0));
+        item.strokeAlignment(getString(o, "strokeAlignment"));
+
+        // 효과
+        item.opacity(getDouble(o, "opacity", 100));
+
+        // 그라디언트 페더
+        if (o.has("gradientFeather")) {
+            JsonObject gf = o.getAsJsonObject("gradientFeather");
+            item.gradientFeatherApplied(getBool(gf, "applied", false));
+            item.gradientFeatherAngle(getDouble(gf, "angle", 0));
+            item.gradientFeatherLength(getDouble(gf, "length", 0));
+            item.gradientFeatherType(getString(gf, "type"));
+        }
+
+        // 드롭 섀도우
+        if (o.has("dropShadow")) {
+            JsonObject ds = o.getAsJsonObject("dropShadow");
+            item.dropShadowAngle(getDouble(ds, "angle", 0));
+            item.dropShadowDistance(getDouble(ds, "distance", 0));
+            item.dropShadowSize(getDouble(ds, "size", 0));
+            item.dropShadowOpacity(getDouble(ds, "opacity", 0));
+            item.dropShadowColorName(getString(ds, "colorName"));
+        }
+
+        // 코너
+        item.cornerRadius(getDouble(o, "cornerRadius", 0));
+
+        // 플립
+        item.absoluteFlip(getString(o, "absoluteFlip"));
+
+        return item;
+    }
+
     // ─── JSON helpers ────────────────────────────────────────
 
     private static String getString(JsonObject o, String key) {
@@ -225,7 +319,8 @@ public class ResolvedDataReader {
     private static double[] parseDoubleArray(JsonArray arr) {
         double[] result = new double[arr.size()];
         for (int i = 0; i < arr.size(); i++) {
-            result[i] = arr.get(i).getAsDouble();
+            JsonElement el = arr.get(i);
+            result[i] = (el == null || el.isJsonNull()) ? 0 : el.getAsDouble();
         }
         return result;
     }

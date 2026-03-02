@@ -45,6 +45,10 @@ public class IDMLTextFrame {
     // 그룹 소속 정보
     private String parentGroupId;
 
+    // 폴리곤 경로 포인트 (local 좌표, non-rectangular 프레임 감지용)
+    private double[] localPathX;
+    private double[] localPathY;
+
     // 단 경계선 (Column Rule)
     private boolean useColumnRule;              // 경계선 삽입 여부
     private double columnRuleWidth;             // 획 두께 (points)
@@ -152,6 +156,13 @@ public class IDMLTextFrame {
 
     public double columnRuleInsetWidth() { return columnRuleInsetWidth; }
     public void columnRuleInsetWidth(double v) { this.columnRuleInsetWidth = v; }
+
+    public double[] localPathX() { return localPathX; }
+    public double[] localPathY() { return localPathY; }
+    public void localPath(double[] px, double[] py) {
+        this.localPathX = px;
+        this.localPathY = py;
+    }
 
     /**
      * 조판지시서 (편집 지시) 프레임인지 확인한다.

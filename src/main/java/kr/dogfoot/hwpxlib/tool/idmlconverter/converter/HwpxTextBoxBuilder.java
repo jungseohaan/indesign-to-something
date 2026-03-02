@@ -502,6 +502,13 @@ class HwpxTextBoxBuilder {
             applySubListLink(subList, block.storyId());
         }
 
+        // 블록 위치 추적 (오버레이 좌표 계산용)
+        ctx.blockPageX = x;
+        ctx.blockPageY = y;
+        ctx.blockInsetLeft = block.insetLeft();
+        ctx.blockInsetTop = block.insetTop();
+        ctx.cellContentYCursor = 0;
+
         // 단락 추가
         for (ASTParagraph para : paragraphs) {
             paragraphBuilder.addParagraphToSubList(subList, para);
@@ -679,15 +686,16 @@ class HwpxTextBoxBuilder {
         bf.createDiagonal();
         bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
 
-        // 배경 채우기
+        // 배경 채우기 (fillTint: 100=불투명, 0=투명 → alpha: 0=불투명, 1=투명)
         String fill = block.fillColor();
         if (fill != null && fill.startsWith("#")) {
+            float alpha = (float) ((100.0 - block.fillTint()) / 100.0);
             bf.createFillBrush();
             bf.fillBrush().createWinBrush();
             bf.fillBrush().winBrush()
                     .faceColorAnd(fill)
                     .hatchColorAnd("#FF000000")
-                    .alpha(0f);
+                    .alphaAnd(alpha);
         }
 
         return bfId;
@@ -881,6 +889,117 @@ class HwpxTextBoxBuilder {
         } else {
             rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
         }
+    }
+
+    // ── 페이지 레벨 오버레이 (셀 내부에서 승격된 플로팅 텍스트박스) ──
+
+    /**
+     * 셀 내부 오버레이를 페이지 레벨 PAPER 기준 절대 좌표 rect로 변환한다.
+     * 한글(HWPX 렌더러)이 테이블 셀 SubList 내부의 플로팅 객체를 지원하지 않으므로,
+     * 오버레이 텍스트프레임을 페이지 레벨 IN_FRONT_OF_TEXT로 승격한다.
+     */
+    void addPageLevelOverlay(Para anchorPara, ASTInlineObject obj, long pageX, long pageY) {
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return;
+
+        long w = obj.width() > 0 ? obj.width() : 5000;
+        if (w < ConverterConstants.MIN_TEXT_BOX_WIDTH) w = ConverterConstants.MIN_TEXT_BOX_WIDTH;
+        long h = obj.height() > 0 ? obj.height() : 1000;
+
+        Run run = anchorPara.addNewRun();
+        run.charPrIDRef("0");
+
+        Rectangle rect = run.addNewRectangle();
+        String shapeId = ASTToHwpxConverter.nextShapeId();
+
+        rect.idAnd(shapeId)
+                .zOrderAnd(10)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(resolveDropCapStyle(obj.paragraphs()));
+
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+        rect.createCurSz();
+        rect.curSz().set(w, 0L);
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        // 테두리/배경
+        setupTextBoxLineShape(rect, obj.strokeColor(), obj.strokeWeight(), "Solid", obj.strokeTint());
+        setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());
+
+        // DrawText
+        rect.createDrawText();
+        DrawText dt = rect.drawText();
+        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
+        dt.createTextMargin();
+        dt.textMargin().leftAnd(obj.textMarginLeft()).rightAnd(obj.textMarginRight())
+                .topAnd(obj.textMarginTop()).bottomAnd(obj.textMarginBottom());
+
+        dt.createSubList();
+        SubList subList = dt.subList();
+        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
+                .lineWrapAnd(LineWrapMethod.BREAK)
+                .vertAlignAnd(VerticalAlign2.TOP)
+                .linkListIDRefAnd("0").linkListNextIDRefAnd("0")
+                .textWidthAnd(0).textHeightAnd(0)
+                .hasTextRefAnd(false).hasNumRefAnd(false);
+
+        for (ASTParagraph astPara : obj.paragraphs()) {
+            paragraphBuilder.addParagraphToSubList(subList, astPara);
+        }
+        HwpxParagraphBuilder.removeTrailingEmptyHwpxPara(subList);
+        if (subList.countOfPara() == 0) {
+            paragraphBuilder.addEmptySubListPara(subList);
+        }
+
+        // Rectangle 꼭짓점
+        rect.ratioAnd(computeCornerRatio(obj.cornerRadius(), w, h));
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        // ShapeSize
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        // ShapePosition — PAPER 기준 절대 좌표
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(pageY)
+                .horzOffset(pageX);
+
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
     }
 
     // ── 스페이서 인라인 사각형 (빈 인라인 Rectangle, 글자 취급) ──

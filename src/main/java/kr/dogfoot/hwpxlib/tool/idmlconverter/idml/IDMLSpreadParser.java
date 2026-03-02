@@ -129,6 +129,9 @@ class IDMLSpreadParser {
                 frameElem.getAttribute("ItemTransform")));
         frame.appliedObjectStyle(getAttrOrNull(frameElem, "AppliedObjectStyle"));
         frame.fillColor(getAttrOrNull(frameElem, "FillColor"));
+
+        // 폴리곤 경로 추출 (비사각형 프레임 감지용)
+        extractTextFramePath(frameElem, frame);
         frame.previousTextFrame(getAttrOrNull(frameElem, "PreviousTextFrame"));
         frame.nextTextFrame(getAttrOrNull(frameElem, "NextTextFrame"));
 
@@ -255,6 +258,16 @@ class IDMLSpreadParser {
             frame.columnRuleInsetWidth(parseDoubleAttrDef(tfPref, "ColumnRuleInsetWidth", 0));
         }
 
+        // TextWrapPreference 파싱
+        List<Element> twpList = getDescendantElements(frameElem, "TextWrapPreference");
+        if (!twpList.isEmpty()) {
+            Element twp = twpList.get(0);
+            String mode = twp.getAttribute("TextWrapMode");
+            if (mode != null && !mode.isEmpty()) {
+                frame.textWrapMode(mode);
+            }
+        }
+
         return frame;
     }
 
@@ -296,6 +309,19 @@ class IDMLSpreadParser {
         frame.itemTransform(IDMLGeometry.parseTransform(
                 shapeElem.getAttribute("ItemTransform")));
         frame.appliedObjectStyle(getAttrOrNull(shapeElem, "AppliedObjectStyle"));
+
+        // 이미지 채색 정보 (그레이스케일 이미지의 InDesign 컬러링)
+        // InDesign에서 그레이스케일 이미지에 FillColor를 지정하면
+        // 그레이스케일 값을 알파 마스크로 사용하여 해당 색으로 채색한다.
+        String imgFillColor = getAttrOrNull(imageElem, "FillColor");
+        if (imgFillColor != null && !"Swatch/None".equals(imgFillColor)) {
+            frame.imageFillColor(imgFillColor);
+            frame.imageFillTint(parseDoubleAttrDef(imageElem, "FillTint", 100));
+        }
+        String imgSpace = getAttrOrNull(imageElem, "Space");
+        if (imgSpace != null) {
+            frame.imageColorSpace(imgSpace);
+        }
 
         // 이미지의 ItemTransform (클리핑을 위한 이미지 위치/스케일)
         String imgTransformStr = imageElem.getAttribute("ItemTransform");
@@ -533,31 +559,31 @@ class IDMLSpreadParser {
             Node node = children.item(i);
             if (node.getNodeType() != Node.ELEMENT_NODE) continue;
             Element elem = (Element) node;
-            if (!"TransparencySetting".equals(elem.getTagName())) continue;
+            String tag = elem.getTagName();
 
-            Element gfs = getFirstChildElement(elem, "GradientFeatherSetting");
-            if (gfs == null) continue;
-
-            double angle = parseDoubleAttrDef(gfs, "Angle", Double.NaN);
-            double length = parseDoubleAttrDef(gfs, "Length", 0);
-            if (Double.isNaN(angle) || length <= 0) continue;
-
-            shape.gradientFeatherAngle(angle);
-            shape.gradientFeatherLength(length);
-
-            String startStr = getAttrOrNull(gfs, "GradientStart");
-            if (startStr != null) {
-                String[] parts = startStr.trim().split("\\s+");
-                if (parts.length >= 2) {
-                    try {
-                        shape.gradientFeatherStart(new double[]{
-                                Double.parseDouble(parts[0]),
-                                Double.parseDouble(parts[1])
-                        });
-                    } catch (NumberFormatException ignored) {}
+            if ("TransparencySetting".equals(tag)) {
+                // 메인 TransparencySetting > GradientFeatherSetting
+                Element gfs = getFirstChildElement(elem, "GradientFeatherSetting");
+                if (gfs != null) {
+                    double angle = parseDoubleAttrDef(gfs, "Angle", Double.NaN);
+                    double length = parseDoubleAttrDef(gfs, "Length", 0);
+                    if (!Double.isNaN(angle) && length > 0) {
+                        shape.gradientFeatherAngle(angle);
+                        shape.gradientFeatherLength(length);
+                        String startStr = getAttrOrNull(gfs, "GradientStart");
+                        if (startStr != null) {
+                            String[] parts = startStr.trim().split("\\s+");
+                            if (parts.length >= 2) {
+                                try {
+                                    shape.gradientFeatherStart(new double[]{
+                                            Double.parseDouble(parts[0]),
+                                            Double.parseDouble(parts[1])});
+                                } catch (NumberFormatException ignored) {}
+                            }
+                        }
+                    }
                 }
             }
-            break;
         }
     }
 
@@ -989,5 +1015,42 @@ class IDMLSpreadParser {
 
         // GeometricBounds: [top, left, bottom, right]
         return new double[]{minY, minX, maxY, maxX};
+    }
+
+    /**
+     * TextFrame의 PathGeometry에서 Anchor 좌표를 추출하여 저장한다.
+     * 4점 사각형이 아닌 비사각형 프레임 감지에 사용된다.
+     */
+    private static void extractTextFramePath(Element frameElem, IDMLTextFrame frame) {
+        Element props = getFirstChildElement(frameElem, "Properties");
+        if (props == null) return;
+        Element pathGeom = getFirstChildElement(props, "PathGeometry");
+        if (pathGeom == null) return;
+
+        java.util.List<double[]> anchors = new java.util.ArrayList<>();
+        for (Element pathType : getChildElements(pathGeom, "GeometryPathType")) {
+            Element ppa = getFirstChildElement(pathType, "PathPointArray");
+            if (ppa == null) continue;
+            for (Element pp : getChildElements(ppa, "PathPointType")) {
+                String val = pp.getAttribute("Anchor");
+                if (val == null || val.isEmpty()) continue;
+                String[] parts = val.trim().split("\\s+");
+                if (parts.length >= 2) {
+                    anchors.add(new double[]{
+                            Double.parseDouble(parts[0]),
+                            Double.parseDouble(parts[1])});
+                }
+            }
+            break; // 첫 번째 경로만 사용
+        }
+        if (anchors.size() > 4) {
+            double[] px = new double[anchors.size()];
+            double[] py = new double[anchors.size()];
+            for (int i = 0; i < anchors.size(); i++) {
+                px[i] = anchors.get(i)[0];
+                py[i] = anchors.get(i)[1];
+            }
+            frame.localPath(px, py);
+        }
     }
 }

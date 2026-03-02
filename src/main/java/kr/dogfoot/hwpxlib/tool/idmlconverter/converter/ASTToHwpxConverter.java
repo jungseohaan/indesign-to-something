@@ -270,24 +270,32 @@ public class ASTToHwpxConverter {
         // SecPr 단락 생성 — 이 단락 하나에 모든 플로팅 객체 + secPr을 넣는다.
         Para secPrPara = createSectionPara(sectionFile);
 
-        // 배경 전용 블록: BEHIND_TEXT, z-order=0
+        // 1) FIGURE 먼저: BEHIND_TEXT 이미지를 XML에서 먼저 배치하여
+        //    동일 z-order인 배경 블록보다 아래 레이어로 렌더링되게 한다.
+        for (ASTBlock block : otherBlocks) {
+            if (block.blockType() == ASTBlock.BlockType.FIGURE) {
+                ASTFigure fig = (ASTFigure) block;
+                imageBuilder.convertFigure(secPrPara, fig);
+                ctx.framesConverted++;
+            }
+        }
+
+        // 2) 배경 전용 블록: BEHIND_TEXT, z-order=0 — FIGURE 위에 렌더링됨
         for (ASTTextFrameBlock block : backgroundBlocks) {
-            textBoxBuilder.convertTextFrameBlock(secPrPara, block);
+            if (block.hasNonRectPath()) {
+                // 비사각형 폴리곤 → PNG 래스터화 후 이미지로 배치
+                imageBuilder.convertNonRectBackground(secPrPara, block);
+            } else {
+                textBoxBuilder.convertTextFrameBlock(secPrPara, block);
+            }
             ctx.framesConverted++;
         }
 
-        // 나머지 (TABLE, FIGURE) 플로팅 처리
+        // 3) TABLE 플로팅 처리
         for (ASTBlock block : otherBlocks) {
-            switch (block.blockType()) {
-                case TABLE:
-                    tableBuilder.convertTable(secPrPara, (ASTTable) block);
-                    ctx.framesConverted++;
-                    break;
-                case FIGURE:
-                    ASTFigure fig = (ASTFigure) block;
-                    imageBuilder.convertFigure(secPrPara, fig);
-                    ctx.framesConverted++;
-                    break;
+            if (block.blockType() == ASTBlock.BlockType.TABLE) {
+                tableBuilder.convertTable(secPrPara, (ASTTable) block);
+                ctx.framesConverted++;
             }
         }
 
@@ -295,6 +303,15 @@ public class ASTToHwpxConverter {
         for (ASTTextFrameBlock block : floatingBlocks) {
             textBoxBuilder.convertTextFrameBlock(secPrPara, block);
             ctx.framesConverted++;
+        }
+
+        // 4) 셀 내부에서 승격된 오버레이 텍스트박스: PAPER 기준 IN_FRONT_OF_TEXT
+        if (!ctx.deferredOverlays.isEmpty()) {
+            for (HwpxConverterContext.DeferredOverlay d : ctx.deferredOverlays) {
+                textBoxBuilder.addPageLevelOverlay(secPrPara, d.overlay, d.pageX, d.pageY);
+                ctx.framesConverted++;
+            }
+            ctx.deferredOverlays.clear();
         }
 
         // SecPr run을 마지막에 추가 (페이지 레이아웃 정의)

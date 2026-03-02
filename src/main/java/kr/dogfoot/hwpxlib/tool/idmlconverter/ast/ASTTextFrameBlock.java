@@ -39,6 +39,10 @@ public class ASTTextFrameBlock extends ASTBlock {
     private boolean distributed; // resolved 기반 문단 재배치 완료 → 연결 글상자 링크 해제
     private double rotationAngle; // 프레임 회전 각도 (도 단위)
 
+    // 폴리곤 경로 (비사각형 프레임용, 페이지 상대 HWPUNIT 좌표)
+    private long[] pathPointsX; // null이면 사각형
+    private long[] pathPointsY;
+
     private List<ASTParagraph> paragraphs;
 
     public ASTTextFrameBlock() {
@@ -121,6 +125,14 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public double rotationAngle() { return rotationAngle; }
     public void rotationAngle(double v) { this.rotationAngle = v; }
+
+    public long[] pathPointsX() { return pathPointsX; }
+    public long[] pathPointsY() { return pathPointsY; }
+    public void pathPoints(long[] px, long[] py) {
+        this.pathPointsX = px;
+        this.pathPointsY = py;
+    }
+    public boolean hasNonRectPath() { return pathPointsX != null && pathPointsX.length > 4; }
 
     public List<ASTParagraph> paragraphs() { return paragraphs; }
     public void addParagraph(ASTParagraph p) { paragraphs.add(p); }

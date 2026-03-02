@@ -14,6 +14,10 @@ public class ResolvedData {
     private final Map<String, String> colorHexMap = new HashMap<>();  // colorName → "#RRGGBB"
     private final List<ResolvedTextFrame> textFrames = new ArrayList<>();
     private final Map<String, ResolvedTable> tableMap = new HashMap<>();
+    private final List<ResolvedPageItem> pageItems = new ArrayList<>();
+    private final Map<String, ResolvedPageItem> pageItemMap = new HashMap<>();  // DOM id → pageItem
+    private final List<ResolvedPage> pages = new ArrayList<>();
+    private final Map<String, ResolvedPage> pageByName = new HashMap<>();  // page name ("240") → page
 
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
@@ -72,8 +76,123 @@ public class ResolvedData {
         return tableMap.get(tableId);
     }
 
+    // --- PageItem ---
+
+    public void addPageItem(ResolvedPageItem item) {
+        pageItems.add(item);
+        if (item.id() != null) {
+            pageItemMap.put(item.id(), item);
+        }
+    }
+
+    public List<ResolvedPageItem> pageItems() { return pageItems; }
+
+    /** DOM decimal ID로 조회 */
+    public ResolvedPageItem getPageItem(String domId) {
+        return pageItemMap.get(domId);
+    }
+
+    /**
+     * IDML hex ID ("u1735") → DOM decimal ID ("5941") 변환 후 조회.
+     */
+    public ResolvedPageItem getPageItemByIdmlId(String idmlId) {
+        if (idmlId == null || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return null;
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
+            return pageItemMap.get(decimalId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    // --- Page ---
+
+    public void addPage(ResolvedPage page) {
+        pages.add(page);
+        if (page.name() != null) {
+            pageByName.put(page.name(), page);
+        }
+    }
+
+    public List<ResolvedPage> pages() { return pages; }
+
+    public ResolvedPage getPage(int index) {
+        if (index < 0 || index >= pages.size()) return null;
+        return pages.get(index);
+    }
+
+    /** 페이지 이름(실제 페이지 번호 문자열, "240")으로 조회 */
+    public ResolvedPage getPageByName(String name) {
+        return pageByName.get(name);
+    }
+
+    // --- 좌표 단위 정규화 ---
+
+    /**
+     * resolved 좌표 단위를 points로 변환한다.
+     * IDML 페이지 폭(항상 points)과 resolved 페이지 폭을 비교하여
+     * 스케일 팩터를 자동 계산하고 모든 geometry 필드에 적용한다.
+     *
+     * InDesign DOM은 문서의 측정 단위(mm, in, pt 등)로 좌표를 반환하므로,
+     * IDML(항상 points)과 비교하여 변환 비율을 결정한다.
+     *
+     * @param idmlPageWidthPts IDML 첫 페이지의 폭 (points)
+     */
+    public void normalizeToPoints(double idmlPageWidthPts) {
+        if (pages.isEmpty() || idmlPageWidthPts <= 0) return;
+        double resolvedPageWidth = pages.get(0).width();
+        if (resolvedPageWidth <= 0) return;
+
+        double scale = idmlPageWidthPts / resolvedPageWidth;
+        if (Math.abs(scale - 1.0) < 0.01) return;  // 이미 points
+
+        System.out.println("[ResolvedData] 좌표 단위 정규화: scale=" + String.format("%.4f", scale)
+                + " (resolved " + String.format("%.1f", resolvedPageWidth)
+                + " → " + String.format("%.1f", idmlPageWidthPts) + " pt)");
+        applyScale(scale);
+    }
+
+    private void applyScale(double s) {
+        // pages: bounds, margins
+        for (ResolvedPage p : pages) {
+            scaleDoubleArray(p.bounds(), s);
+            p.marginTop(p.marginTop() * s);
+            p.marginBottom(p.marginBottom() * s);
+            p.marginLeft(p.marginLeft() * s);
+            p.marginRight(p.marginRight() * s);
+        }
+        // pageItems: bounds, spatial properties
+        for (ResolvedPageItem pi : pageItems) {
+            scaleDoubleArray(pi.geometricBounds(), s);
+            scaleDoubleArray(pi.visibleBounds(), s);
+            pi.strokeWeight(pi.strokeWeight() * s);
+            pi.cornerRadius(pi.cornerRadius() * s);
+            pi.dropShadowDistance(pi.dropShadowDistance() * s);
+            pi.dropShadowSize(pi.dropShadowSize() * s);
+            pi.gradientFeatherLength(pi.gradientFeatherLength() * s);
+        }
+        // textFrames: bounds, spacing
+        for (ResolvedTextFrame tf : textFrames) {
+            scaleDoubleArray(tf.geometricBounds(), s);
+            scaleDoubleArray(tf.insetSpacing(), s);
+            tf.columnGutter(tf.columnGutter() * s);
+            scaleDoubleArray(tf.paragraphYOffsets(), s);
+        }
+    }
+
+    private static void scaleDoubleArray(double[] arr, double s) {
+        if (arr == null) return;
+        for (int i = 0; i < arr.length; i++) {
+            arr[i] *= s;
+        }
+    }
+
+    // --- 통계 ---
+
     public int storyCount() { return storyMap.size(); }
     public int colorCount() { return colorHexMap.size(); }
     public int textFrameCount() { return textFrames.size(); }
     public int tableCount() { return tableMap.size(); }
+    public int pageItemCount() { return pageItems.size(); }
+    public int pageCount() { return pages.size(); }
 }
