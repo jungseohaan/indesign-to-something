@@ -276,7 +276,7 @@ class ASTMathGrouper {
                 }
                 if (text != null && !text.isEmpty()) {
                     ASTTextRun textRun = new ASTTextRun();
-                    textRun.text(Stage4_BuildAST.stripACEPlaceholders(text));
+                    textRun.text(ASTPageProcessor.stripACEPlaceholders(text));
                     if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
                     if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
                     para.addItem(textRun);
@@ -400,7 +400,7 @@ class ASTMathGrouper {
                 if (text != null && !text.isEmpty()) {
                     ASTTextRun textRun = new ASTTextRun();
                     // 선행 thin space 마커(백틱, 틸드)를 제거하여 리터럴 문자로 나타나지 않도록
-                    String cleaned = Stage4_BuildAST.stripACEPlaceholders(text);
+                    String cleaned = ASTPageProcessor.stripACEPlaceholders(text);
                     int mIdx = 0;
                     while (mIdx < cleaned.length() && (cleaned.charAt(mIdx) == '`' || cleaned.charAt(mIdx) == '~')) mIdx++;
                     if (mIdx > 0) cleaned = cleaned.substring(mIdx);

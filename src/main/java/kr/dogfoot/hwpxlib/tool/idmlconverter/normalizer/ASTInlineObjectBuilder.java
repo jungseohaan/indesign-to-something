@@ -6,14 +6,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -21,15 +16,6 @@ import java.util.List;
  * Stage4_BuildAST에서 분리됨.
  */
 class ASTInlineObjectBuilder {
-
-    private static String decodeURI(String uri) {
-        if (uri == null) return null;
-        try {
-            return URLDecoder.decode(uri, StandardCharsets.UTF_8.name());
-        } catch (Exception e) {
-            return uri;
-        }
-    }
 
     /**
      * InlineGraphic 내부의 TextFrame을 재귀적으로 수집하여 ASTParagraph에 추가.
@@ -59,11 +45,10 @@ class ASTInlineObjectBuilder {
                                       GroupBackground bg) {
         // 이미지 프레임을 찾고 그룹 내 위치 계산
         IDMLCharacterRun.InlineGraphic imageFrame = findImageFrame(ig);
-        double[] imgPos = findImagePositionInGroup(ig, imageFrame);
+        double[] imgPos = ASTOverlayBuilder.findImagePositionInGroup(ig, imageFrame);
 
         // 콘텐츠 바운딩 박스: 이미지 프레임 + 텍스트 프레임만 (배경 사각형 등 장식용 그래픽 제외)
-        // computeGroupVisualBounds()는 모든 자식을 포함하여 컨테이너가 불필요하게 커지는 문제가 있음
-        double[] contentBBox = computeContentBounds(ig, imgPos);
+        double[] contentBBox = ASTOverlayBuilder.computeContentBounds(ig, imgPos);
         double rootLeft = contentBBox[0];   // minX
         double rootTop = contentBBox[1];    // minY
         double contentWidthPts = contentBBox[2] - contentBBox[0];
@@ -74,16 +59,13 @@ class ASTInlineObjectBuilder {
                 && contentWidthPts > 0 && contentHeightPts > 0) {
             double imgFrameWPts = imgPos[2];
             double imgFrameHPts = imgPos[3];
-            // 컨테이너 = 콘텐츠 바운딩 박스 표시 크기 (이미지 표시 크기에서 비율로 확대)
             containerW = Math.round((double) imageObj.width() * contentWidthPts / imgFrameWPts);
             containerH = Math.round((double) imageObj.height() * contentHeightPts / imgFrameHPts);
-            // 이미지의 컨테이너 내 오프셋
             double imgOffXPts = imgPos[0] - rootLeft;
             double imgOffYPts = imgPos[1] - rootTop;
             imgOffX = Math.round((double) containerW * imgOffXPts / contentWidthPts);
             imgOffY = Math.round((double) containerH * imgOffYPts / contentHeightPts);
         } else {
-            // 폴백: 이미지 프레임 위치를 찾을 수 없으면 기존 동작 유지
             containerW = imageObj.width();
             containerH = imageObj.height();
             imgOffX = 0;
@@ -95,149 +77,9 @@ class ASTInlineObjectBuilder {
         imageObj.imageOffsetX(imgOffX);
         imageObj.imageOffsetY(imgOffY);
 
-        // 오버레이 위치 스케일링은 컨테이너(콘텐츠 bbox) 표시 크기 기준으로 수행
         collectChildTextFramesInternal(ig, null, imageObj, idmlDoc, colorResolver, imageLoader, bg,
                 true, containerW, containerH,
                 contentWidthPts, contentHeightPts, rootLeft, rootTop, 0, 0);
-
-        // 오버레이 좌표는 컨테이너 기준 유지 — HWPX에서 인라인 picture를
-        // 컨테이너 크기로 렌더링하므로 PARA-relative 좌표가 컨테이너 기준과 일치
-    }
-
-    /**
-     * 이미지 프레임 + 텍스트 프레임만으로 콘텐츠 바운딩 박스를 계산.
-     * 배경 사각형 등 장식용 그래픽은 제외하여 컨테이너가 불필요하게 커지는 것을 방지.
-     * @param imgPos 이미지 프레임의 그룹 내 위치 [left, top, width, height] (null 가능)
-     * @return [minX, minY, maxX, maxY] (points, 그룹 로컬 좌표계)
-     */
-    private static double[] computeContentBounds(IDMLCharacterRun.InlineGraphic ig,
-                                                   double[] imgPos) {
-        double[] bounds = {Double.MAX_VALUE, Double.MAX_VALUE, -Double.MAX_VALUE, -Double.MAX_VALUE};
-
-        // 1. 이미지 프레임
-        if (imgPos != null) {
-            bounds[0] = Math.min(bounds[0], imgPos[0]);
-            bounds[1] = Math.min(bounds[1], imgPos[1]);
-            bounds[2] = Math.max(bounds[2], imgPos[0] + imgPos[2]);
-            bounds[3] = Math.max(bounds[3], imgPos[1] + imgPos[3]);
-        }
-
-        // 2. 텍스트 프레임 (직접 + 중첩 그룹 내 재귀)
-        includeTextFrameBoundsRecursive(ig, bounds, 0, 0);
-
-        if (bounds[0] == Double.MAX_VALUE) {
-            // 폴백: 콘텐츠가 없으면 전체 그룹 바운드 사용
-            return computeGroupVisualBounds(ig);
-        }
-        return bounds;
-    }
-
-    private static void includeTextFrameBoundsRecursive(IDMLCharacterRun.InlineGraphic ig,
-                                                          double[] bounds,
-                                                          double accTx, double accTy) {
-        for (IDMLTextFrame childTf : ig.childTextFrames()) {
-            double[] tb = childTf.geometricBounds();
-            double[] tt = childTf.itemTransform();
-            if (tb != null && tt != null) {
-                double left = tb[1] + tt[4] + accTx;
-                double top = tb[0] + tt[5] + accTy;
-                double right = tb[3] + tt[4] + accTx;
-                double bottom = tb[2] + tt[5] + accTy;
-                bounds[0] = Math.min(bounds[0], left);
-                bounds[1] = Math.min(bounds[1], top);
-                bounds[2] = Math.max(bounds[2], right);
-                bounds[3] = Math.max(bounds[3], bottom);
-            }
-        }
-        for (IDMLCharacterRun.InlineGraphic childIg : ig.childGraphics()) {
-            double[] ct = childIg.itemTransform();
-            double childAccTx = accTx + (ct != null ? ct[4] : 0);
-            double childAccTy = accTy + (ct != null ? ct[5] : 0);
-            includeTextFrameBoundsRecursive(childIg, bounds, childAccTx, childAccTy);
-        }
-    }
-
-    /**
-     * 이미지 프레임의 루트 그룹 좌표계 내 위치를 재귀적으로 찾는다.
-     * @return [left, top, width, height] (points, 그룹 로컬 좌표계) 또는 null
-     */
-    private static double[] findImagePositionInGroup(
-            IDMLCharacterRun.InlineGraphic group,
-            IDMLCharacterRun.InlineGraphic target) {
-        if (target == null) return null;
-        return findImagePosRecursive(group, target, 0, 0);
-    }
-
-    private static double[] findImagePosRecursive(
-            IDMLCharacterRun.InlineGraphic current,
-            IDMLCharacterRun.InlineGraphic target,
-            double accTx, double accTy) {
-        for (IDMLCharacterRun.InlineGraphic child : current.childGraphics()) {
-            double[] ct = child.itemTransform();
-            double childAccTx = accTx + (ct != null ? ct[4] : 0);
-            double childAccTy = accTy + (ct != null ? ct[5] : 0);
-
-            if (child == target) {
-                double[] cb = child.geometricBounds();
-                if (cb != null) {
-                    return new double[]{
-                            cb[1] + childAccTx,   // left in group space
-                            cb[0] + childAccTy,   // top in group space
-                            cb[3] - cb[1],         // width
-                            cb[2] - cb[0]          // height
-                    };
-                }
-                return new double[]{childAccTx, childAccTy,
-                        child.widthPoints(), child.heightPoints()};
-            }
-
-            double[] found = findImagePosRecursive(child, target, childAccTx, childAccTy);
-            if (found != null) return found;
-        }
-        return null;
-    }
-
-    /**
-     * 그룹의 시각적 바운딩 박스를 모든 직접 자식에서 계산.
-     * @return [minX, minY, maxX, maxY] (points, 그룹 로컬 좌표계)
-     */
-    private static double[] computeGroupVisualBounds(IDMLCharacterRun.InlineGraphic ig) {
-        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
-        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
-
-        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
-            double[] cb = child.geometricBounds();
-            double[] ct = child.itemTransform();
-            if (cb != null && ct != null) {
-                double left = cb[1] + ct[4];
-                double top = cb[0] + ct[5];
-                double right = cb[3] + ct[4];
-                double bottom = cb[2] + ct[5];
-                minX = Math.min(minX, left);
-                minY = Math.min(minY, top);
-                maxX = Math.max(maxX, right);
-                maxY = Math.max(maxY, bottom);
-            }
-        }
-        for (IDMLTextFrame childTf : ig.childTextFrames()) {
-            double[] tb = childTf.geometricBounds();
-            double[] tt = childTf.itemTransform();
-            if (tb != null && tt != null) {
-                double left = tb[1] + tt[4];
-                double top = tb[0] + tt[5];
-                double right = tb[3] + tt[4];
-                double bottom = tb[2] + tt[5];
-                minX = Math.min(minX, left);
-                minY = Math.min(minY, top);
-                maxX = Math.max(maxX, right);
-                maxY = Math.max(maxY, bottom);
-            }
-        }
-
-        if (minX == Double.MAX_VALUE) {
-            return new double[]{0, 0, 0, 0};
-        }
-        return new double[]{minX, minY, maxX, maxY};
     }
 
     /**
@@ -283,13 +125,13 @@ class ASTInlineObjectBuilder {
                     }
                     // 배경 사각형과 텍스트 프레임의 위치 차이 → 암묵적 텍스트 여백
                     if (bg.hasBounds) {
-                        applyImplicitTextMargin(childObj, childTf, bg);
+                        ASTOverlayBuilder.applyImplicitTextMargin(childObj, childTf, bg);
                     }
                 }
 
                 if (isOverlay && targetImageObj != null) {
                     // 오버레이 모드: 부모 이미지 내 상대 위치 계산 후 이미지 객체에 첨부
-                    applyOverlayPosition(childObj, childTf, accTx, accTy,
+                    ASTOverlayBuilder.applyOverlayPosition(childObj, childTf, accTx, accTy,
                             imageDisplayWidth, imageDisplayHeight,
                             groupWidthPts, groupHeightPts, rootLeft, rootTop);
                     targetImageObj.addOverlayFrame(childObj);
@@ -313,91 +155,6 @@ class ASTInlineObjectBuilder {
                     groupWidthPts, groupHeightPts, rootLeft, rootTop,
                     childAccTx, childAccTy);
         }
-    }
-
-    /**
-     * 오버레이 위치 계산: 텍스트프레임의 루트 그룹 내 상대 위치를 ASTInlineObject에 설정.
-     * 누적 번역 오프셋(accTx, accTy)으로 중첩 Group 내 텍스트프레임도 처리.
-     * 이미지 표시 크기와 그룹 바운드의 비율로 스케일링.
-     */
-    private static void applyOverlayPosition(ASTInlineObject obj, IDMLTextFrame tf,
-                                               double accTx, double accTy,
-                                               long imageDisplayWidth, long imageDisplayHeight,
-                                               double groupWidthPts, double groupHeightPts,
-                                               double rootLeft, double rootTop) {
-        double[] tfBounds = tf.geometricBounds();
-        double[] tfTransform = tf.itemTransform();
-        if (tfBounds == null || tfTransform == null) return;
-
-        // 텍스트프레임의 루트 그룹 좌표계 위치 (비회전 가정)
-        double tfX = tfBounds[1] + tfTransform[4] + accTx;
-        double tfY = tfBounds[0] + tfTransform[5] + accTy;
-
-        // 콘텐츠 bbox 원점(minX, minY) 기준 상대 위치 (points)
-        // 음수 클램핑 제거 — 이미지보다 왼쪽/위에 있는 텍스트프레임도 올바르게 배치
-        double relX = tfX - rootLeft;
-        double relY = tfY - rootTop;
-
-        // 콘텐츠 bbox 크기(points) → 컨테이너 표시 크기(HWPUNIT) 비율로 스케일
-        long overlayX, overlayY;
-        if (groupWidthPts > 0 && groupHeightPts > 0) {
-            overlayX = Math.round(relX / groupWidthPts * imageDisplayWidth);
-            overlayY = Math.round(relY / groupHeightPts * imageDisplayHeight);
-        } else {
-            overlayX = CoordinateConverter.pointsToHwpunits(relX);
-            overlayY = CoordinateConverter.pointsToHwpunits(relY);
-        }
-
-        obj.isOverlay(true);
-        obj.overlayX(overlayX);
-        obj.overlayY(overlayY);
-        obj.overlayParentWidth(imageDisplayWidth);
-        obj.overlayParentHeight(imageDisplayHeight);
-    }
-
-    /**
-     * 배경 사각형과 텍스트 프레임의 위치 차이를 암묵적 텍스트 여백으로 적용.
-     * InDesign에서는 배경 사각형 안에 텍스트 프레임이 offset으로 배치되어 시각적 여백을 만들지만,
-     * HWPX에서는 글상자 크기를 배경 크기로 확장하고 textMargin으로 여백을 표현한다.
-     */
-    private static void applyImplicitTextMargin(ASTInlineObject obj, IDMLTextFrame tf,
-                                                 GroupBackground bg) {
-        double[] tfBounds = tf.geometricBounds();
-        double[] tfTransform = tf.itemTransform();
-        if (tfBounds == null || tfTransform == null) return;
-
-        // 텍스트 프레임의 Group 내 바운드 (비회전 가정)
-        double tfLeft = tfBounds[1] + tfTransform[4];
-        double tfTop = tfBounds[0] + tfTransform[5];
-        double tfRight = tfBounds[3] + tfTransform[4];
-        double tfBottom = tfBounds[2] + tfTransform[5];
-
-        double insetLeft = tfLeft - bg.bgLeft;
-        double insetTop = tfTop - bg.bgTop;
-        double insetRight = bg.bgRight - tfRight;
-        double insetBottom = bg.bgBottom - tfBottom;
-
-        // 음수 여백은 0으로 보정 (텍스트 프레임이 배경보다 클 수 없으므로)
-        if (insetLeft < 0) insetLeft = 0;
-        if (insetTop < 0) insetTop = 0;
-        if (insetRight < 0) insetRight = 0;
-        if (insetBottom < 0) insetBottom = 0;
-
-        // 유의미한 여백이 있을 때만 적용 (1pt 이상)
-        if (insetLeft + insetTop + insetRight + insetBottom < 1.0) return;
-
-        obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(insetLeft));
-        obj.textMarginTop(CoordinateConverter.pointsToHwpunits(insetTop));
-        obj.textMarginRight(CoordinateConverter.pointsToHwpunits(insetRight));
-        obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(insetBottom));
-
-        // 글상자 크기를 배경 사각형 크기로 확장 (축소는 하지 않음)
-        double bgW = bg.bgRight - bg.bgLeft;
-        double bgH = bg.bgBottom - bg.bgTop;
-        long bgWHwp = CoordinateConverter.pointsToHwpunits(bgW);
-        long bgHHwp = CoordinateConverter.pointsToHwpunits(bgH);
-        if (bgWHwp > obj.width()) obj.width(bgWHwp);
-        if (bgHHwp > obj.height()) obj.height(bgHHwp);
     }
 
     /**
@@ -427,12 +184,14 @@ class ASTInlineObjectBuilder {
     }
 
     /**
-     * 인라인 Group의 자식 그래픽에서 배경 사각형의 전체 스타일을 추출.
+     * 인라인 Group의 직접 자식 그래픽에서 배경 사각형의 전체 스타일을 추출.
      * fill, stroke, cornerRadius 등을 포함.
+     * 깊은 중첩 Group은 resolved 데이터로 처리하므로 직접 자식만 검색.
      */
     static GroupBackground extractGroupBackground(IDMLCharacterRun.InlineGraphic ig,
                                                    ColorResolver colorResolver) {
         if (!"group".equals(ig.type())) return null;
+        // 1. 직접 자식 그래픽에서 배경 벡터 도형 찾기
         for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
             if (child.hasVectorShape()) {
                 IDMLVectorShape shape = child.vectorShape();
@@ -440,16 +199,14 @@ class ASTInlineObjectBuilder {
                     String hex = resolveColorHex(shape.fillColor(), colorResolver);
                     if (hex != null) {
                         GroupBackground bg = new GroupBackground();
-                        // 틴트를 색상에 사전 블렌딩 (HWPX alpha 비호환 방지)
                         bg.fillHex = blendColorWithWhite(hex, shape.fillTint() / 100.0);
-                        bg.fillTint = 100; // 이미 블렌딩됨
+                        bg.fillTint = 100;
                         String sHex = resolveColorHex(shape.strokeColor(), colorResolver);
                         bg.strokeHex = sHex != null
                                 ? blendColorWithWhite(sHex, shape.strokeTint() / 100.0) : null;
                         bg.strokeWeight = shape.strokeWeight();
                         bg.strokeTint = 100;
                         bg.cornerRadius = shape.cornerRadius();
-                        // 배경 사각형의 Group 내 바운드 계산 (비회전 가정)
                         double[] gb = child.geometricBounds();
                         double[] ct = child.itemTransform();
                         if (gb != null && ct != null) {
@@ -464,7 +221,68 @@ class ASTInlineObjectBuilder {
                 }
             }
         }
+        // 2. 폴백: Group 자체의 FillColor 확인 (자식 사각형 없이 그룹에 직접 fill이 설정된 경우)
+        String groupFillHex = resolveColorHex(ig.groupFillColor(), colorResolver);
+        if (groupFillHex != null) {
+            GroupBackground bg = new GroupBackground();
+            bg.fillHex = blendColorWithWhite(groupFillHex, ig.groupFillTint() / 100.0);
+            bg.fillTint = 100;
+            String groupStrokeHex = resolveColorHex(ig.groupStrokeColor(), colorResolver);
+            bg.strokeHex = groupStrokeHex != null
+                    ? blendColorWithWhite(groupStrokeHex, ig.groupStrokeTint() / 100.0) : null;
+            bg.strokeWeight = ig.groupStrokeWeight();
+            bg.strokeTint = 100;
+            double[] gb = ig.geometricBounds();
+            if (gb != null) {
+                bg.bgLeft = gb[1];
+                bg.bgTop = gb[0];
+                bg.bgRight = gb[3];
+                bg.bgBottom = gb[2];
+                bg.hasBounds = true;
+            }
+            return bg;
+        }
         return null;
+    }
+
+    /**
+     * resolved 데이터에서 인라인 Group의 fill 색상을 조회하여 GroupBackground 생성.
+     * 깊은 중첩 Group 구조에서 IDML 직접 탐색으로 못 찾는 경우,
+     * 플랫화된 resolved.json 데이터에서 fill 정보를 가져온다.
+     */
+    static GroupBackground extractGroupBackgroundFromResolved(IDMLCharacterRun.InlineGraphic ig,
+                                                               ResolvedData resolvedData) {
+        if (resolvedData == null || ig.selfId() == null) return null;
+        ResolvedPageItem item = resolvedData.getPageItemByIdmlId(ig.selfId());
+        if (item == null || item.fillColorName() == null) return null;
+        // "[None]" 또는 빈 문자열 제외
+        String colorName = item.fillColorName();
+        if (colorName.isEmpty() || colorName.contains("None")) return null;
+        String hex = resolvedData.resolveColorHex(colorName);
+        if (hex == null) return null;
+
+        GroupBackground bg = new GroupBackground();
+        bg.fillHex = blendColorWithWhite(hex, item.fillTint() / 100.0);
+        bg.fillTint = 100;
+        // stroke 정보
+        if (item.strokeColorName() != null && !item.strokeColorName().contains("None")) {
+            String strokeHex = resolvedData.resolveColorHex(item.strokeColorName());
+            if (strokeHex != null) {
+                bg.strokeHex = blendColorWithWhite(strokeHex, item.strokeTint() / 100.0);
+                bg.strokeWeight = item.strokeWeight();
+                bg.strokeTint = 100;
+            }
+        }
+        // 바운드는 ig의 geometricBounds 사용
+        double[] gb = ig.geometricBounds();
+        if (gb != null) {
+            bg.bgLeft = gb[1];
+            bg.bgTop = gb[0];
+            bg.bgRight = gb[3];
+            bg.bgBottom = gb[2];
+            bg.hasBounds = true;
+        }
+        return bg;
     }
 
     /**
@@ -488,6 +306,16 @@ class ASTInlineObjectBuilder {
         } catch (Exception e) {
             return hex;
         }
+    }
+
+    /**
+     * IDML 색상 참조를 hex 문자열로 변환.
+     * "None" 또는 null이면 null 반환.
+     */
+    static String resolveColorHex(String colorRef, ColorResolver colorResolver) {
+        if (colorRef == null || "None".equals(colorRef) || colorRef.contains("[None]")) return null;
+        String hex = colorResolver.resolve(colorRef);
+        return (hex != null && !hex.isEmpty()) ? hex : null;
     }
 
     /**
@@ -580,7 +408,7 @@ class ASTInlineObjectBuilder {
             }
         } else if (imageLoader != null) {
             // 그룹 내 자식 텍스트프레임이 있으면 래스터화하지 않고 텍스트 우선 처리
-            // (배경 사각형 + 텍스트프레임 구조는 스타일 적용된 글상자로 변환)
+            // (배경 사각형 + 텍스트프레임 구조는 processInlineGraphic에서 래퍼 글상자로 변환)
             boolean hasChildTextFrames = hasChildTextFramesRecursive(ig);
             List<ASTImageLoader.ShapeWithColor> childShapes = collectChildVectorShapes(ig, colorResolver);
             if (!childShapes.isEmpty() && !hasChildTextFrames) {
@@ -775,889 +603,10 @@ class ASTInlineObjectBuilder {
     }
 
     /**
-     * IDMLTable → ASTTable 변환 (플로팅 스토리 레벨 테이블).
-     */
-    static ASTTable convertTable(IDMLTable idmlTable, IDMLTextFrame tf,
-                                  IDMLPage page, int zOrder,
-                                  IDMLDocument idmlDoc, ColorResolver colorResolver,
-                                  ASTImageLoader imageLoader) {
-        ASTTable table = new ASTTable();
-        table.sourceId(idmlTable.selfId());
-        table.zOrder(zOrder);
-
-        // 테이블 위치 (텍스트 프레임 기준)
-        double[] relPos = IDMLGeometry.pageRelativePosition(
-                tf.geometricBounds(), tf.itemTransform(),
-                page.geometricBounds(), page.itemTransform());
-        table.x(CoordinateConverter.pointsToHwpunits(relPos[0]));
-        table.y(CoordinateConverter.pointsToHwpunits(relPos[1]));
-
-        // 컬럼 너비
-        for (double cw : idmlTable.columnWidths()) {
-            table.addColumnWidth(CoordinateConverter.pointsToHwpunits(cw));
-        }
-        table.colCount(idmlTable.columnWidths().size());
-
-        // 행 변환
-        long totalHeight = 0;
-        int rowIdx = 0;
-        for (IDMLTableRow idmlRow : idmlTable.rows()) {
-            ASTTableRow row = new ASTTableRow();
-            row.rowIndex(rowIdx);
-            row.rowHeight(CoordinateConverter.pointsToHwpunits(idmlRow.rowHeight()));
-            row.autoGrow(idmlRow.autoGrow());
-            totalHeight += row.rowHeight();
-
-            // 셀 변환
-            for (IDMLTableCell idmlCell : idmlRow.cells()) {
-                int colIdx = idmlCell.columnIndex();
-                ASTTableCell cell = convertTableCell(idmlCell, rowIdx, colIdx,
-                        idmlDoc, colorResolver, imageLoader);
-                row.addCell(cell);
-            }
-
-            table.addRow(row);
-            rowIdx++;
-        }
-        table.rowCount(rowIdx);
-
-        // 테이블 크기
-        long totalWidth = 0;
-        for (long cw : table.columnWidths()) {
-            totalWidth += cw;
-        }
-        table.width(totalWidth);
-        table.height(totalHeight);
-
-        // 셀 크기 계산 (columnWidths + rowHeights 기반)
-        List<Long> colWidths = table.columnWidths();
-        for (ASTTableRow row : table.rows()) {
-            for (ASTTableCell cell : row.cells()) {
-                // 셀 너비 = 시작 컬럼부터 colSpan만큼 합산
-                long cellWidth = 0;
-                int startCol = cell.columnIndex();
-                int endCol = Math.min(startCol + cell.columnSpan(), colWidths.size());
-                for (int c = startCol; c < endCol; c++) {
-                    cellWidth += colWidths.get(c);
-                }
-                cell.width(cellWidth);
-
-                // 셀 높이 = 시작 행부터 rowSpan만큼 합산
-                long cellHeight = 0;
-                int startRow = cell.rowIndex();
-                int endRow = Math.min(startRow + cell.rowSpan(), table.rows().size());
-                for (int r = startRow; r < endRow; r++) {
-                    cellHeight += table.rows().get(r).rowHeight();
-                }
-                cell.height(cellHeight);
-            }
-        }
-
-        ASTTableSpacerMerger.merge(table);
-        return table;
-    }
-
-    /**
-     * IDMLTableCell → ASTTableCell 변환 (미니 문서).
-     */
-    static ASTTableCell convertTableCell(IDMLTableCell idmlCell,
-                                          int rowIdx, int colIdx,
-                                          IDMLDocument idmlDoc,
-                                          ColorResolver colorResolver,
-                                          ASTImageLoader imageLoader) {
-        ASTTableCell cell = new ASTTableCell();
-        cell.rowIndex(rowIdx);
-        cell.columnIndex(colIdx);
-        cell.rowSpan(idmlCell.rowSpan());
-        cell.columnSpan(idmlCell.columnSpan());
-
-        // 셀 스타일
-        if (idmlCell.fillColor() != null) {
-            cell.fillColor(colorResolver.resolve(idmlCell.fillColor()));
-        }
-        cell.verticalAlign(idmlCell.verticalJustification());
-
-        // 셀 여백
-        cell.marginTop(CoordinateConverter.pointsToHwpunits(idmlCell.topInset()));
-        cell.marginBottom(CoordinateConverter.pointsToHwpunits(idmlCell.bottomInset()));
-        cell.marginLeft(CoordinateConverter.pointsToHwpunits(idmlCell.leftInset()));
-        cell.marginRight(CoordinateConverter.pointsToHwpunits(idmlCell.rightInset()));
-
-        // 셀 테두리 (IDMLTableCell.CellBorder → ASTTableCell.CellBorder)
-        cell.topBorder(convertCellBorder(idmlCell.topBorder(), colorResolver));
-        cell.bottomBorder(convertCellBorder(idmlCell.bottomBorder(), colorResolver));
-        cell.leftBorder(convertCellBorder(idmlCell.leftBorder(), colorResolver));
-        cell.rightBorder(convertCellBorder(idmlCell.rightBorder(), colorResolver));
-
-        // 대각선
-        cell.topLeftDiagonalLine(idmlCell.topLeftDiagonalLine());
-        cell.topRightDiagonalLine(idmlCell.topRightDiagonalLine());
-
-        // 셀 내용 → 미니 문서 (재귀)
-        FlattenedObjectPool emptyPool = new FlattenedObjectPool(); // 셀 내 인라인은 별도 처리
-        for (IDMLParagraph cellPara : idmlCell.paragraphs()) {
-            ASTParagraph astPara = ASTStoryConverter.convertParagraph(cellPara, emptyPool, idmlDoc, colorResolver, imageLoader, false);
-            if (astPara != null) {
-                cell.addParagraph(astPara);
-            }
-        }
-
-        // 마지막 빈 단락 제거
-        Stage4_BuildAST.removeTrailingEmptyParagraphs(cell.paragraphs());
-
-        return cell;
-    }
-
-    /**
-     * IDMLTableCell.CellBorder → ASTTableCell.CellBorder 변환.
-     */
-    static ASTTableCell.CellBorder convertCellBorder(IDMLTableCell.CellBorder src,
-                                                      ColorResolver colorResolver) {
-        if (src == null || src.strokeWeight <= 0) return null;
-        ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
-        border.weight(src.strokeWeight);
-        border.strokeType(src.strokeType);
-        border.tint(src.strokeTint);
-        if (src.strokeColor != null) {
-            border.color(colorResolver.resolve(src.strokeColor));
-        }
-        return border;
-    }
-
-    /**
-     * IDMLImageFrame → ASTFigure 변환 (플로팅 이미지).
-     */
-    static ASTFigure createFigureFromImageFrame(IDMLImageFrame imgFrame,
-                                                 IDMLPage page,
-                                                 ASTImageLoader imageLoader) {
-        double[] t = imgFrame.itemTransform();
-        boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001
-                || t[0] < 0 || t[3] < 0);
-
-        long wHwp, hHwp, xHwp, yHwp;
-
-        if (hasRotOrFlip) {
-            // === 회전/반전 사전 렌더링 경로 (벡터 도형과 동일) ===
-            double w = IDMLGeometry.transformedWidth(imgFrame.geometricBounds(), imgFrame.itemTransform());
-            double h = IDMLGeometry.transformedHeight(imgFrame.geometricBounds(), imgFrame.itemTransform());
-            wHwp = CoordinateConverter.pointsToHwpunits(w);
-            hHwp = CoordinateConverter.pointsToHwpunits(h);
-
-            double[] bbox = IDMLGeometry.getTransformedBoundingBox(
-                    imgFrame.geometricBounds(), imgFrame.itemTransform());
-            double[] pageAbs = IDMLGeometry.absoluteTopLeft(
-                    page.geometricBounds(), page.itemTransform());
-            xHwp = CoordinateConverter.pointsToHwpunits(bbox[0] - pageAbs[0]);
-            yHwp = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
-        } else {
-            // === 기존 비회전 경로 ===
-            double w = IDMLGeometry.scaledWidth(imgFrame.geometricBounds(), imgFrame.itemTransform());
-            double h = IDMLGeometry.scaledHeight(imgFrame.geometricBounds(), imgFrame.itemTransform());
-
-            double[] relCenter = IDMLGeometry.pageRelativeCenter(
-                    imgFrame.geometricBounds(), imgFrame.itemTransform(),
-                    page.geometricBounds(), page.itemTransform());
-
-            wHwp = CoordinateConverter.pointsToHwpunits(w);
-            hHwp = CoordinateConverter.pointsToHwpunits(h);
-            xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
-            yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
-        }
-
-        if (wHwp <= 0 || hHwp <= 0) return null;
-
-        // 프레임 bounds (points) — 클리핑용
-        double[] frameBounds = imgFrame.geometricBounds();
-
-        // PSD 레이어 가시성 오버라이드
-        java.util.List<Integer> visibleLayers = imgFrame.hasLayerOverrides()
-                ? imgFrame.visibleLayerIndices() : null;
-        String layerSig = imgFrame.hasLayerOverrides()
-                ? imgFrame.layerSignature() : null;
-
-        ASTImageLoader.ImageResult result = imageLoader.loadImage(
-                imgFrame.linkResourceURI(), wHwp, hHwp,
-                imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds(),
-                visibleLayers, layerSig);
-
-        if (result == null || result.imageData == null) return null;
-
-        // 그레이스케일 모노톤 이미지 스킵 (장식용 그림자 등)
-        // InDesign에서 그레이스케일 이미지에 FillColor를 지정하면 모노톤으로 채색한다.
-        // 이런 이미지는 대부분 장식용 그림자/효과이며, HWPX에서 z-order가 다르게
-        // 동작하여 원본과 다르게 보이므로 스킵한다.
-        if (imgFrame.needsGrayscaleColorization()) {
-            return null;
-        }
-
-        // 회전/반전이 있으면 이미지를 픽셀 레벨에서 회전
-        if (hasRotOrFlip) {
-            ASTImageLoader.ImageResult rotated =
-                    ASTImageLoader.preRenderRotation(result.imageData, imgFrame.itemTransform());
-            if (rotated != null) {
-                result = rotated;
-            }
-        }
-
-        ASTFigure figure = new ASTFigure();
-        figure.kind(ASTFigure.FigureKind.IMAGE);
-        figure.x(xHwp);
-        figure.y(yHwp);
-        figure.width(wHwp);
-        figure.height(hHwp);
-        figure.zOrder(imgFrame.zOrder());
-        figure.imageData(result.imageData);
-        figure.imageFormat(result.format);
-        figure.pixelWidth(result.pixelWidth);
-        figure.pixelHeight(result.pixelHeight);
-        figure.imagePath(decodeURI(imgFrame.linkResourceURI()));
-
-        // textWrap 속성 전파 (IDMLImageFrame → ASTFigure)
-        figure.textWrapMode(imgFrame.textWrapMode());
-        figure.textWrapSide(imgFrame.textWrapSide());
-        figure.textWrapTop(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapTop()));
-        figure.textWrapLeft(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapLeft()));
-        figure.textWrapBottom(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapBottom()));
-        figure.textWrapRight(CoordinateConverter.pointsToHwpunits(imgFrame.textWrapRight()));
-
-        // 이미지의 flip은 applyClippingSimple에서 목적지 좌표 반전으로 이미 처리됨.
-        // 프레임의 flip은 hasRotOrFlip=true인 경우 preRenderRotation에서 처리됨.
-        // 여기서 추가 flip을 적용하면 이중 flip 버그 발생.
-
-        // 페이지 경계를 벗어나는 이미지의 크롭 비율 계산 (스프레드 걸침 이미지 처리)
-        // bleed(인쇄 여백 넘침, ~1%)는 무시하고, 실제 페이지 걸침(>5%)만 크롭
-        long pageW = CoordinateConverter.pointsToHwpunits(
-                IDMLGeometry.width(page.geometricBounds()));
-        long pageH = CoordinateConverter.pointsToHwpunits(
-                IDMLGeometry.height(page.geometricBounds()));
-        double minCropThreshold = 0.05;  // 5% 미만은 bleed로 간주, 크롭하지 않음
-
-        if (xHwp < 0) {
-            double frac = (double) -xHwp / wHwp;
-            if (frac > minCropThreshold) figure.cropLeftFraction(frac);
-        }
-        if (yHwp < 0) {
-            double frac = (double) -yHwp / hHwp;
-            if (frac > minCropThreshold) figure.cropTopFraction(frac);
-        }
-        if (xHwp + wHwp > pageW) {
-            double frac = (double) (xHwp + wHwp - pageW) / wHwp;
-            if (frac > minCropThreshold) figure.cropRightFraction(frac);
-        }
-        if (yHwp + hHwp > pageH) {
-            double frac = (double) (yHwp + hHwp - pageH) / hHwp;
-            if (frac > minCropThreshold) figure.cropBottomFraction(frac);
-        }
-
-        figure.sourceId(imgFrame.selfId());
-        return figure;
-    }
-
-    /**
-     * IDMLVectorShape → ASTFigure 변환 (기존 호환용 오버로드).
-     */
-    static ASTFigure createFigureFromVectorShape(IDMLVectorShape shape,
-                                                  IDMLPage page,
-                                                  ASTImageLoader imageLoader,
-                                                  ColorResolver colorResolver) {
-        return createFigureFromVectorShape(shape, page, imageLoader, colorResolver, null, null);
-    }
-
-    /**
-     * IDMLVectorShape → ASTFigure 변환 (플로팅 벡터 도형 → PNG 래스터화).
-     * resolved 데이터가 있으면 geometricBounds로 위치+크기 모두 결정하고
-     * 래스터화도 resolved 크기에 맞춰 수행하여 찌그러짐 없이 일관성을 보장한다.
-     */
-    static ASTFigure createFigureFromVectorShape(IDMLVectorShape shape,
-                                                  IDMLPage page,
-                                                  ASTImageLoader imageLoader,
-                                                  ColorResolver colorResolver,
-                                                  ResolvedData resolvedData,
-                                                  ResolvedPage resolvedPage) {
-        // === 복수 클리핑 자식 (clippedChildren) 처리 ===
-        if (shape.hasClippedChildren()) {
-            return createFigureFromClippedGroup(shape, page, imageLoader, colorResolver,
-                    resolvedData, resolvedPage);
-        }
-
-        // 채우기/선 색상 해석
-        IDMLVectorShape renderTarget = shape.hasClippedChild() ? shape.clippedChild() : shape;
-        String fillHex = resolveColorHex(renderTarget.fillColor(), colorResolver);
-        String strokeHex = resolveColorHex(renderTarget.strokeColor(), colorResolver);
-
-        // 보이지 않는 도형 스킵
-        if (fillHex == null && strokeHex == null) {
-            return null;
-        }
-
-        // === Resolved geometry path ===
-        // resolved geometricBounds로 위치+크기 모두 결정, 래스터화도 resolved 크기로 수행
-        ResolvedPageItem resolvedItem = null;
-        if (resolvedData != null && shape.selfId() != null) {
-            resolvedItem = resolvedData.getPageItemByIdmlId(shape.selfId());
-        }
-        if (resolvedItem != null && resolvedItem.geometricBounds() != null
-                && resolvedPage != null && resolvedPage.bounds() != null) {
-            ASTFigure resolved = createFigureResolvedShape(shape, resolvedItem, resolvedPage,
-                    imageLoader, fillHex, strokeHex);
-            if (resolved != null) return resolved;
-        }
-
-        // === IDML fallback (resolved 없을 때) ===
-        double[] effectiveBounds = shape.geometricBounds();
-        double[] t = shape.itemTransform();
-        boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001
-                || t[0] < 0 || t[3] < 0);
-
-        long wHwp, hHwp, xHwp, yHwp;
-        ASTImageLoader.ImageResult result;
-
-        if (hasRotOrFlip) {
-            double w = IDMLGeometry.transformedWidth(effectiveBounds, shape.itemTransform());
-            double h = IDMLGeometry.transformedHeight(effectiveBounds, shape.itemTransform());
-            wHwp = CoordinateConverter.pointsToHwpunits(w);
-            hHwp = CoordinateConverter.pointsToHwpunits(h);
-
-            double[] bbox = IDMLGeometry.getTransformedBoundingBox(
-                    effectiveBounds, shape.itemTransform());
-            double[] pageAbs = IDMLGeometry.absoluteTopLeft(
-                    page.geometricBounds(), page.itemTransform());
-            xHwp = CoordinateConverter.pointsToHwpunits(bbox[0] - pageAbs[0]);
-            yHwp = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
-
-            if (wHwp <= 0 || hHwp <= 0) {
-                if (shape.hasStroke() && shape.strokeWeight() > 0) {
-                    long minDim = CoordinateConverter.pointsToHwpunits(shape.strokeWeight());
-                    if (minDim < 100) minDim = 100;
-                    if (wHwp <= 0) wHwp = minDim;
-                    if (hHwp <= 0) hHwp = minDim;
-                } else {
-                    return null;
-                }
-            }
-
-            long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
-            long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-            if (wHwp > pageW * 3 || hHwp > pageH * 3) {
-                return null;
-            }
-
-            result = imageLoader.rasterizeShape(shape, fillHex, strokeHex, shape.itemTransform());
-
-            // 래스터화 결과의 실제 픽셀 비율로 표시 크기 보정
-            // (geometricBounds 기반 transformedWidth/Height와 실제 path 기반 allBounds가 다를 수 있음)
-            if (result != null && result.pixelWidth > 0 && result.pixelHeight > 0) {
-                double pixelAR = (double) result.pixelWidth / result.pixelHeight;
-                double displayAR = (double) wHwp / Math.max(1, hHwp);
-                if (Math.abs(pixelAR - displayAR) / Math.max(0.001, displayAR) > 0.03) {
-                    // 표시 영역 면적(대각선 기준)을 유지하면서 비율만 보정
-                    double area = (double) wHwp * hHwp;
-                    long newH = (long) Math.sqrt(area / pixelAR);
-                    long newW = (long) (newH * pixelAR);
-                    // 위치를 중심 기준으로 보정
-                    xHwp += (wHwp - newW) / 2;
-                    yHwp += (hHwp - newH) / 2;
-                    wHwp = newW;
-                    hHwp = newH;
-                }
-            }
-        } else {
-            double w = IDMLGeometry.scaledWidth(effectiveBounds, shape.itemTransform());
-            double h = IDMLGeometry.scaledHeight(effectiveBounds, shape.itemTransform());
-
-            double[] relCenter = IDMLGeometry.pageRelativeCenter(
-                    effectiveBounds, shape.itemTransform(),
-                    page.geometricBounds(), page.itemTransform());
-
-            wHwp = CoordinateConverter.pointsToHwpunits(w);
-            hHwp = CoordinateConverter.pointsToHwpunits(h);
-            xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
-            yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
-
-            if (wHwp <= 0 || hHwp <= 0) {
-                if (shape.hasStroke() && shape.strokeWeight() > 0) {
-                    long minDim = CoordinateConverter.pointsToHwpunits(shape.strokeWeight());
-                    if (minDim < 100) minDim = 100;
-                    if (wHwp <= 0) wHwp = minDim;
-                    if (hHwp <= 0) hHwp = minDim;
-                    xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
-                    yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
-                } else {
-                    return null;
-                }
-            }
-
-            long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
-            long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-            if (wHwp > pageW * 3 || hHwp > pageH * 3) {
-                return null;
-            }
-
-            result = imageLoader.rasterizeShape(shape, fillHex, strokeHex);
-        }
-
-        if (result == null || result.imageData == null) {
-            return null;
-        }
-
-        ASTFigure figure = new ASTFigure();
-        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
-        figure.x(xHwp);
-        figure.y(yHwp);
-        figure.width(wHwp);
-        figure.height(hHwp);
-        figure.zOrder(shape.zOrder());
-        figure.imageData(result.imageData);
-        figure.imageFormat(result.format);
-        figure.pixelWidth(result.pixelWidth);
-        figure.pixelHeight(result.pixelHeight);
-
-        if (!hasRotOrFlip) {
-            if (IDMLGeometry.hasFlip(shape.itemTransform())) {
-                double rotation = IDMLGeometry.extractRotation(shape.itemTransform());
-                if (Math.abs(Math.abs(rotation) - 180) < 0.5) {
-                    result.imageData = ASTImageLoader.flipVertically(result.imageData);
-                    figure.imageData(result.imageData);
-                } else if (Math.abs(rotation) < 0.5) {
-                    result.imageData = ASTImageLoader.flipHorizontally(result.imageData);
-                    figure.imageData(result.imageData);
-                } else {
-                    result.imageData = ASTImageLoader.flipHorizontally(result.imageData);
-                    figure.imageData(result.imageData);
-                    figure.rotationAngle(rotation);
-                }
-            } else {
-                double rotation = IDMLGeometry.extractRotation(shape.itemTransform());
-                if (Math.abs(rotation) > 0.1) {
-                    figure.rotationAngle(rotation);
-                }
-            }
-        }
-
-        figure.sourceId(shape.selfId());
-        return figure;
-    }
-
-    /**
-     * Resolved geometry로 단일 벡터 도형 → ASTFigure 변환.
-     * resolved geometricBounds로 위치+크기를 결정한다.
-     *
-     * 래스터화 전략:
-     * - 비회전: resolved 크기에 맞춰 래스터화 (local ≈ resolved aspect ratio)
-     * - 회전/플립: 기존 사전 렌더링(rotation baked into image) 사용.
-     *   로컬 path의 aspect ratio ≠ resolved AABB이므로 비균일 스케일 → 찌그러짐.
-     *   대신 회전을 이미지에 구워넣고 resolved bounds에 맞춰 표시.
-     */
-    private static ASTFigure createFigureResolvedShape(IDMLVectorShape shape,
-                                                         ResolvedPageItem ri,
-                                                         ResolvedPage resolvedPage,
-                                                         ASTImageLoader imageLoader,
-                                                         String fillHex, String strokeHex) {
-        double[] gb = ri.geometricBounds();     // [top, left, bottom, right] pasteboard 좌표
-        double[] pb = resolvedPage.bounds();     // [top, left, bottom, right] 페이지 bounds
-
-        double rW = gb[3] - gb[1];
-        double rH = gb[2] - gb[0];
-        if (rW <= 0 || rH <= 0) return null;
-
-        // 페이지 상대 좌표
-        double rLeft = gb[1] - pb[1];
-        double rTop = gb[0] - pb[0];
-
-        double pageW = pb[3] - pb[1];
-        double pageH = pb[2] - pb[0];
-
-        long wHwp = CoordinateConverter.pointsToHwpunits(rW);
-        long hHwp = CoordinateConverter.pointsToHwpunits(rH);
-        long xHwp = CoordinateConverter.pointsToHwpunits(rLeft);
-        long yHwp = CoordinateConverter.pointsToHwpunits(rTop);
-
-        // 페이지보다 훨씬 큰 도형은 스프레드 배경이므로 스킵
-        long pageWHwp = CoordinateConverter.pointsToHwpunits(pageW);
-        long pageHHwp = CoordinateConverter.pointsToHwpunits(pageH);
-        if (wHwp > pageWHwp * 3 || hHwp > pageHHwp * 3) return null;
-
-        // IDML 네이티브 비율로 래스터화 후 resolved 크기로 리사이즈
-        ASTImageLoader.ImageResult result = imageLoader.rasterizeShapeAtSize(
-                shape, fillHex, strokeHex, rW, rH);
-        if (result == null || result.imageData == null) return null;
-
-        ASTFigure figure = new ASTFigure();
-        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
-        figure.x(xHwp);
-        figure.y(yHwp);
-        figure.width(wHwp);
-        figure.height(hHwp);
-        figure.zOrder(shape.zOrder());
-        figure.imageData(result.imageData);
-        figure.imageFormat(result.format);
-        figure.pixelWidth(result.pixelWidth);
-        figure.pixelHeight(result.pixelHeight);
-        figure.sourceId(shape.selfId());
-        return figure;
-    }
-
-    /**
-     * 클리핑 프레임 변환 (기존 호환용 오버로드).
-     */
-    static ASTFigure createFigureFromClippedGroup(IDMLVectorShape clipFrame,
-                                                   IDMLPage page,
-                                                   ASTImageLoader imageLoader,
-                                                   ColorResolver colorResolver) {
-        return createFigureFromClippedGroup(clipFrame, page, imageLoader, colorResolver, null, null);
-    }
-
-    /**
-     * 클리핑 프레임 + 복수 자식 도형을 합성 래스터화하여 ASTFigure로 변환.
-     * 유효 영역(자식 바운딩 박스 ∩ 클리핑 프레임)만 렌더링하고 배치한다.
-     * resolved 데이터가 있으면 geometricBounds로 위치+크기를 결정하고
-     * 래스터화 결과를 resolved 크기로 리사이즈한다.
-     */
-    static ASTFigure createFigureFromClippedGroup(IDMLVectorShape clipFrame,
-                                                   IDMLPage page,
-                                                   ASTImageLoader imageLoader,
-                                                   ColorResolver colorResolver,
-                                                   ResolvedData resolvedData,
-                                                   ResolvedPage resolvedPage) {
-        // 클리핑 프레임 자체 또는 자식 중 하나라도 보이는 색상이 있는지 확인
-        boolean anyVisible = false;
-        String clipFillHex = resolveColorHex(clipFrame.fillColor(), colorResolver);
-        if (clipFillHex != null) anyVisible = true;
-        if (!anyVisible) {
-            for (IDMLVectorShape child : clipFrame.clippedChildren()) {
-                String fh = resolveColorHex(child.fillColor(), colorResolver);
-                String sh = resolveColorHex(child.strokeColor(), colorResolver);
-                if (fh != null || sh != null) { anyVisible = true; break; }
-            }
-        }
-        if (!anyVisible) return null;
-
-        // === Resolved geometry path ===
-        ResolvedPageItem resolvedItem = null;
-        if (resolvedData != null && clipFrame.selfId() != null) {
-            resolvedItem = resolvedData.getPageItemByIdmlId(clipFrame.selfId());
-        }
-        if (resolvedItem != null && resolvedItem.geometricBounds() != null
-                && resolvedPage != null && resolvedPage.bounds() != null) {
-            ASTFigure resolved = createFigureResolvedClippedGroup(clipFrame, resolvedItem,
-                    resolvedPage, imageLoader, colorResolver, clipFillHex);
-            if (resolved != null) return resolved;
-        }
-
-        // === IDML fallback ===
-        double[] clipBounds = clipFrame.geometricBounds(); // [top, left, bottom, right]
-        double clipTop = clipBounds[0], clipLeft = clipBounds[1];
-        double clipBottom = clipBounds[2], clipRight = clipBounds[3];
-
-        // 자식들의 바운딩 박스를 클리핑 프레임 로컬 좌표계에서 계산
-        double uLeft = Double.MAX_VALUE, uTop = Double.MAX_VALUE;
-        double uRight = -Double.MAX_VALUE, uBottom = -Double.MAX_VALUE;
-        for (IDMLVectorShape child : clipFrame.clippedChildren()) {
-            double[] ct = child.itemTransform();
-            double[] cb = child.geometricBounds();
-            double[][] corners = {{cb[1], cb[0]}, {cb[3], cb[0]}, {cb[1], cb[2]}, {cb[3], cb[2]}};
-            for (double[] c : corners) {
-                double tx = ct[0] * c[0] + ct[2] * c[1] + ct[4];
-                double ty = ct[1] * c[0] + ct[3] * c[1] + ct[5];
-                uLeft = Math.min(uLeft, tx);
-                uTop = Math.min(uTop, ty);
-                uRight = Math.max(uRight, tx);
-                uBottom = Math.max(uBottom, ty);
-            }
-        }
-
-        double eLeft, eTop, eRight, eBottom;
-        if (clipFillHex != null) {
-            eLeft = clipLeft; eTop = clipTop;
-            eRight = clipRight; eBottom = clipBottom;
-        } else {
-            eLeft = Math.max(uLeft, clipLeft);
-            eTop = Math.max(uTop, clipTop);
-            eRight = Math.min(uRight, clipRight);
-            eBottom = Math.min(uBottom, clipBottom);
-        }
-
-        if (eRight <= eLeft || eBottom <= eTop) return null;
-
-        double effectiveW = eRight - eLeft;
-        double effectiveH = eBottom - eTop;
-        double effectiveCX = (eLeft + eRight) / 2.0;
-        double effectiveCY = (eTop + eBottom) / 2.0;
-
-        double[] tt = clipFrame.itemTransform();
-        double[] absCenter = CoordinateConverter.applyTransform(tt, effectiveCX, effectiveCY);
-        double[] pageAbs = IDMLGeometry.absoluteTopLeft(
-                page.geometricBounds(), page.itemTransform());
-
-        long wHwp = CoordinateConverter.pointsToHwpunits(effectiveW);
-        long hHwp = CoordinateConverter.pointsToHwpunits(effectiveH);
-        long xHwp = CoordinateConverter.pointsToHwpunits(absCenter[0] - pageAbs[0]) - wHwp / 2;
-        long yHwp = CoordinateConverter.pointsToHwpunits(absCenter[1] - pageAbs[1]) - hHwp / 2;
-
-        if (wHwp <= 0 || hHwp <= 0) return null;
-
-        long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
-        long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-        if (wHwp > pageW * 3 || hHwp > pageH * 3) return null;
-
-        ASTImageLoader.ImageResult result = imageLoader.rasterizeClippedGroup(
-                clipFrame, colorResolver, eLeft, eTop, effectiveW, effectiveH);
-        if (result == null || result.imageData == null) return null;
-
-        ASTFigure figure = new ASTFigure();
-        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
-        figure.x(xHwp);
-        figure.y(yHwp);
-        figure.width(wHwp);
-        figure.height(hHwp);
-        figure.zOrder(clipFrame.zOrder());
-        figure.imageData(result.imageData);
-        figure.imageFormat(result.format);
-        figure.pixelWidth(result.pixelWidth);
-        figure.pixelHeight(result.pixelHeight);
-        figure.sourceId(clipFrame.selfId());
-
-        return figure;
-    }
-
-    /**
-     * Resolved geometry로 클리핑 그룹 → ASTFigure 변환.
-     * IDML 크기로 렌더링 후 resolved 크기로 리사이즈한다.
-     */
-    private static ASTFigure createFigureResolvedClippedGroup(IDMLVectorShape clipFrame,
-                                                                ResolvedPageItem ri,
-                                                                ResolvedPage resolvedPage,
-                                                                ASTImageLoader imageLoader,
-                                                                ColorResolver colorResolver,
-                                                                String clipFillHex) {
-        double[] gb = ri.geometricBounds();
-        double[] pb = resolvedPage.bounds();
-
-        double rW = gb[3] - gb[1];
-        double rH = gb[2] - gb[0];
-        if (rW <= 0 || rH <= 0) return null;
-
-        double pageW = pb[3] - pb[1];
-        double pageH = pb[2] - pb[0];
-
-        // IDML 유효 영역 계산 (클리핑 프레임 ∩ 자식 유니온)
-        double[] clipBounds = clipFrame.geometricBounds();
-        double clipTop = clipBounds[0], clipLeft = clipBounds[1];
-        double clipBottom = clipBounds[2], clipRight = clipBounds[3];
-        double clipW = clipRight - clipLeft;
-        double clipH = clipBottom - clipTop;
-
-        double uLeft = Double.MAX_VALUE, uTop = Double.MAX_VALUE;
-        double uRight = -Double.MAX_VALUE, uBottom = -Double.MAX_VALUE;
-        for (IDMLVectorShape child : clipFrame.clippedChildren()) {
-            double[] ct = child.itemTransform();
-            double[] cb = child.geometricBounds();
-            double[][] corners = {{cb[1], cb[0]}, {cb[3], cb[0]}, {cb[1], cb[2]}, {cb[3], cb[2]}};
-            for (double[] c : corners) {
-                double tx = ct[0] * c[0] + ct[2] * c[1] + ct[4];
-                double ty = ct[1] * c[0] + ct[3] * c[1] + ct[5];
-                uLeft = Math.min(uLeft, tx);
-                uTop = Math.min(uTop, ty);
-                uRight = Math.max(uRight, tx);
-                uBottom = Math.max(uBottom, ty);
-            }
-        }
-
-        double eLeft, eTop, eRight, eBottom;
-        if (clipFillHex != null) {
-            eLeft = clipLeft; eTop = clipTop;
-            eRight = clipRight; eBottom = clipBottom;
-        } else {
-            eLeft = Math.max(uLeft, clipLeft);
-            eTop = Math.max(uTop, clipTop);
-            eRight = Math.min(uRight, clipRight);
-            eBottom = Math.min(uBottom, clipBottom);
-        }
-        if (eRight <= eLeft || eBottom <= eTop) return null;
-
-        double effectiveW = eRight - eLeft;
-        double effectiveH = eBottom - eTop;
-
-        // resolved 크기를 유효 영역 비율로 보정
-        // resolved는 클립 프레임 전체 바운드 → 유효 영역만큼 축소
-        double scaleW = (clipW > 0) ? effectiveW / clipW : 1.0;
-        double scaleH = (clipH > 0) ? effectiveH / clipH : 1.0;
-        double adjW = rW * scaleW;
-        double adjH = rH * scaleH;
-
-        // 유효 영역의 클립 프레임 내 상대 오프셋 → resolved 좌표로 보정
-        double offsetFracX = (clipW > 0) ? (eLeft - clipLeft) / clipW : 0;
-        double offsetFracY = (clipH > 0) ? (eTop - clipTop) / clipH : 0;
-        double rLeft = gb[1] - pb[1] + rW * offsetFracX;
-        double rTop = gb[0] - pb[0] + rH * offsetFracY;
-
-        long wHwp = CoordinateConverter.pointsToHwpunits(adjW);
-        long hHwp = CoordinateConverter.pointsToHwpunits(adjH);
-        long xHwp = CoordinateConverter.pointsToHwpunits(rLeft);
-        long yHwp = CoordinateConverter.pointsToHwpunits(rTop);
-
-        long pageWHwp = CoordinateConverter.pointsToHwpunits(pageW);
-        long pageHHwp = CoordinateConverter.pointsToHwpunits(pageH);
-        if (wHwp > pageWHwp * 3 || hHwp > pageHHwp * 3) return null;
-
-        // 유효 영역 크기로 렌더링 후 보정된 resolved 크기로 리사이즈
-        ASTImageLoader.ImageResult result = imageLoader.rasterizeClippedGroupAtSize(
-                clipFrame, colorResolver, eLeft, eTop, effectiveW, effectiveH, adjW, adjH);
-        if (result == null || result.imageData == null) return null;
-
-        ASTFigure figure = new ASTFigure();
-        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
-        figure.x(xHwp);
-        figure.y(yHwp);
-        figure.width(wHwp);
-        figure.height(hHwp);
-        figure.zOrder(clipFrame.zOrder());
-        figure.imageData(result.imageData);
-        figure.imageFormat(result.format);
-        figure.pixelWidth(result.pixelWidth);
-        figure.pixelHeight(result.pixelHeight);
-        figure.sourceId(clipFrame.selfId());
-        return figure;
-    }
-
-    /**
-     * 벡터 그룹 변환 (기존 호환용 오버로드).
-     */
-    static ASTFigure createFigureFromVectorGroup(List<IDMLVectorShape> shapes,
-                                                   IDMLPage page,
-                                                   ASTImageLoader imageLoader,
-                                                   ColorResolver colorResolver) {
-        return createFigureFromVectorGroup(shapes, page, imageLoader, colorResolver, null, null);
-    }
-
-    /**
-     * 같은 그룹(parentGroupId)에 속한 벡터 도형들을 하나의 복합 이미지로 래스터화.
-     * 그룹 내 도형들의 공간 관계를 유지하여 하나의 ASTFigure를 생성한다.
-     * resolved 데이터가 있으면 geometricBounds로 위치+크기를 결정하고
-     * 래스터화 결과를 resolved 크기로 리사이즈한다.
-     */
-    static ASTFigure createFigureFromVectorGroup(List<IDMLVectorShape> shapes,
-                                                   IDMLPage page,
-                                                   ASTImageLoader imageLoader,
-                                                   ColorResolver colorResolver,
-                                                   ResolvedData resolvedData,
-                                                   ResolvedPage resolvedPage) {
-        if (shapes == null || shapes.isEmpty()) return null;
-
-        // z-order 정렬 (낮은 값 = 뒤쪽, 먼저 렌더링)
-        List<IDMLVectorShape> sorted = new ArrayList<>(shapes);
-        Collections.sort(sorted, new Comparator<IDMLVectorShape>() {
-            public int compare(IDMLVectorShape a, IDMLVectorShape b) {
-                return Integer.compare(a.zOrder(), b.zOrder());
-            }
-        });
-
-        // ShapeWithColor 목록 구성 + 보이는 도형 필터
-        List<ASTImageLoader.ShapeWithColor> swcList = new ArrayList<>();
-        for (IDMLVectorShape s : sorted) {
-            String fillHex = resolveColorHex(s.fillColor(), colorResolver);
-            String strokeHex = resolveColorHex(s.strokeColor(), colorResolver);
-            if (fillHex == null && strokeHex == null) continue;
-            swcList.add(new ASTImageLoader.ShapeWithColor(s, fillHex, strokeHex, s.itemTransform()));
-        }
-        if (swcList.isEmpty()) return null;
-
-        // 페이지 절대 좌표 계산 (도형 클리핑용)
-        double[] pageAbs = IDMLGeometry.absoluteTopLeft(
-                page.geometricBounds(), page.itemTransform());
-        double pageW = IDMLGeometry.width(page.geometricBounds());
-        double pageH = IDMLGeometry.height(page.geometricBounds());
-        double[] pageClipBounds = {pageAbs[1], pageAbs[0],
-                pageAbs[1] + pageH, pageAbs[0] + pageW}; // [top, left, bottom, right]
-
-        // 벡터 그룹은 resolved bounds를 사용하지 않는다.
-        // InDesign DOM의 Group geometricBounds는 모든 자식(비가시 포함)의 바운딩 박스이므로
-        // 실제 가시 영역보다 크다. IDML 래스터라이저가 보이는 도형만 렌더링하여 정확한 크기를 계산.
-        String groupId = shapes.get(0).parentGroupId();
-
-        ASTImageLoader.ImageResult result = imageLoader.rasterizeShapes(swcList, null, pageClipBounds);
-        if (result == null || result.imageData == null) return null;
-
-        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
-        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
-        for (ASTImageLoader.ShapeWithColor sc : swcList) {
-            double[] tb = sc.transformedBounds();
-            if (tb == null) continue;
-            if (tb[1] < minX) minX = tb[1];
-            if (tb[0] < minY) minY = tb[0];
-            if (tb[3] > maxX) maxX = tb[3];
-            if (tb[2] > maxY) maxY = tb[2];
-        }
-        minX = Math.max(minX, pageAbs[0]);
-        minY = Math.max(minY, pageAbs[1]);
-        maxX = Math.min(maxX, pageAbs[0] + pageW);
-        maxY = Math.min(maxY, pageAbs[1] + pageH);
-
-        double groupCX = (minX + maxX) / 2.0;
-        double groupCY = (minY + maxY) / 2.0;
-
-        double relCX = groupCX - pageAbs[0];
-        double relCY = groupCY - pageAbs[1];
-
-        long wHwp = CoordinateConverter.pointsToHwpunits(result.widthPts);
-        long hHwp = CoordinateConverter.pointsToHwpunits(result.heightPts);
-        long xHwp = CoordinateConverter.pointsToHwpunits(relCX) - wHwp / 2;
-        long yHwp = CoordinateConverter.pointsToHwpunits(relCY) - hHwp / 2;
-
-        if (wHwp <= 0 || hHwp <= 0) return null;
-
-        long pageWHwp = CoordinateConverter.pointsToHwpunits(pageW);
-        long pageHHwp = CoordinateConverter.pointsToHwpunits(pageH);
-        if (wHwp > pageWHwp * 3 || hHwp > pageHHwp * 3) return null;
-
-        ASTFigure figure = new ASTFigure();
-        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
-        figure.x(xHwp);
-        figure.y(yHwp);
-        figure.width(wHwp);
-        figure.height(hHwp);
-        figure.zOrder(shapes.get(0).zOrder());
-        figure.imageData(result.imageData);
-        figure.imageFormat(result.format);
-        figure.pixelWidth(result.pixelWidth);
-        figure.pixelHeight(result.pixelHeight);
-        figure.sourceId(groupId);
-        return figure;
-    }
-
-    static String resolveColorHex(String colorRef, ColorResolver colorResolver) {
-        if (colorRef == null || "None".equals(colorRef) || colorRef.contains("[None]")) return null;
-        String hex = colorResolver.resolve(colorRef);
-        return (hex != null && !hex.isEmpty()) ? hex : null;
-    }
-
-    /**
-     * 이미지 프레임 중복 제거 키 생성.
-     * 같은 이미지 URI + 같은 위치(tx, ty) + 같은 프레임 크기인 경우 같은 키를 반환.
-     * PSD 레이어 가시성이 다른 중복 배치를 하나로 합치기 위함.
-     */
-    static String buildImageFrameDedupKey(IDMLImageFrame frame) {
-        String uri = frame.linkResourceURI();
-        if (uri == null || uri.isEmpty()) return null;
-
-        double[] t = frame.itemTransform();
-        double[] b = frame.geometricBounds();
-        if (t == null || b == null) return null;
-
-        // 위치(tx, ty)와 프레임 크기를 0.1pt 정밀도로 반올림하여 키 생성
-        long tx = Math.round(t[4] * 10);
-        long ty = Math.round(t[5] * 10);
-        long w = Math.round((b[3] - b[1]) * 10);
-        long h = Math.round((b[2] - b[0]) * 10);
-
-        return uri + "|" + tx + "," + ty + "|" + w + "x" + h;
-    }
-
-    /**
      * TextFrame의 스토리가 수식 폰트(NP 또는 BT) 전용인지 확인.
      * 수식 폰트 전용 TextFrame은 괄호/중괄호 장식이므로 인라인 텍스트로 변환하면 안 된다.
      */
-    private static boolean isMathFontOnlyStory(IDMLTextFrame tf, IDMLDocument idmlDoc) {
+    static boolean isMathFontOnlyStory(IDMLTextFrame tf, IDMLDocument idmlDoc) {
         if (tf.parentStoryId() == null) return false;
         IDMLStory story = idmlDoc.getStory(tf.parentStoryId());
         if (story == null) return false;
@@ -1667,221 +616,9 @@ class ASTInlineObjectBuilder {
                 String text = run.content();
                 if (text == null || text.trim().isEmpty()) continue;
                 hasAnyContent = true;
-                if (!run.isMathFont()) return false;  // 비-수식 콘텐츠가 있으면 false
+                if (!run.isMathFont()) return false;
             }
         }
-        return hasAnyContent;  // 모든 콘텐츠가 수식 폰트이면 true
-    }
-
-    // ── 그리드 TextFrame 감지 및 ASTTable 변환 ──
-
-    /**
-     * Group 내 TextFrame들의 좌표를 분석하여 그리드(2×2 이상)를 감지하고 ASTTable로 변환.
-     * 그리드가 아니면 null 반환 → 호출자가 기존 순차 처리로 폴백.
-     */
-    static ASTTable tryBuildGridTable(IDMLCharacterRun.InlineGraphic ig,
-                                       IDMLDocument idmlDoc,
-                                       ColorResolver colorResolver,
-                                       ASTImageLoader imageLoader,
-                                       GroupBackground bg) {
-        List<PositionedFrame> frames = new ArrayList<>();
-        collectAllTextFramesFlat(ig, frames, 0, 0);
-        if (frames.size() < 4) return null;  // 최소 2×2
-
-        // Y 클러스터링 → 행
-        List<List<PositionedFrame>> rows = clusterByCoordinate(frames, true);
-        if (rows.size() < 2) return null;
-
-        // 각 행의 X 정렬 → 열 수 일관성 확인
-        int colCount = -1;
-        for (List<PositionedFrame> row : rows) {
-            Collections.sort(row, new Comparator<PositionedFrame>() {
-                public int compare(PositionedFrame a, PositionedFrame b) {
-                    return Double.compare(a.x, b.x);
-                }
-            });
-            if (colCount == -1) {
-                colCount = row.size();
-            } else if (row.size() != colCount) {
-                return null;  // 비정규 그리드 → 폴백
-            }
-        }
-        if (colCount < 2) return null;
-
-        return buildTableFromGrid(rows, colCount, idmlDoc, colorResolver, imageLoader, bg);
-    }
-
-    private static class PositionedFrame {
-        final IDMLTextFrame textFrame;
-        final double x, y;
-        final double width, height;
-        PositionedFrame(IDMLTextFrame tf, double x, double y, double w, double h) {
-            this.textFrame = tf;
-            this.x = x;
-            this.y = y;
-            this.width = w;
-            this.height = h;
-        }
-    }
-
-    private static void collectAllTextFramesFlat(IDMLCharacterRun.InlineGraphic ig,
-                                                  List<PositionedFrame> result,
-                                                  double accTx, double accTy) {
-        for (IDMLTextFrame childTf : ig.childTextFrames()) {
-            double[] gb = childTf.geometricBounds();
-            double[] it = childTf.itemTransform();
-            if (gb == null) continue;
-            double tx = accTx + (it != null ? it[4] : 0);
-            double ty = accTy + (it != null ? it[5] : 0);
-            double x = gb[1] + tx;
-            double y = gb[0] + ty;
-            double w = gb[3] - gb[1];
-            double h = gb[2] - gb[0];
-            result.add(new PositionedFrame(childTf, x, y, w, h));
-        }
-        for (IDMLCharacterRun.InlineGraphic childIg : ig.childGraphics()) {
-            double[] ct = childIg.itemTransform();
-            double childTx = accTx + (ct != null ? ct[4] : 0);
-            double childTy = accTy + (ct != null ? ct[5] : 0);
-            collectAllTextFramesFlat(childIg, result, childTx, childTy);
-        }
-    }
-
-    private static List<List<PositionedFrame>> clusterByCoordinate(
-            List<PositionedFrame> frames, boolean byY) {
-        List<PositionedFrame> sorted = new ArrayList<>(frames);
-        Collections.sort(sorted, new Comparator<PositionedFrame>() {
-            public int compare(PositionedFrame a, PositionedFrame b) {
-                return Double.compare(byY ? a.y : a.x, byY ? b.y : b.x);
-            }
-        });
-
-        List<List<PositionedFrame>> clusters = new ArrayList<>();
-        List<PositionedFrame> current = new ArrayList<>();
-        current.add(sorted.get(0));
-        double lastVal = byY ? sorted.get(0).y : sorted.get(0).x;
-
-        for (int i = 1; i < sorted.size(); i++) {
-            double val = byY ? sorted.get(i).y : sorted.get(i).x;
-            if (Math.abs(val - lastVal) > 2.0) {
-                clusters.add(current);
-                current = new ArrayList<>();
-            }
-            current.add(sorted.get(i));
-            lastVal = val;
-        }
-        clusters.add(current);
-        return clusters;
-    }
-
-    private static ASTTable buildTableFromGrid(List<List<PositionedFrame>> rows, int colCount,
-                                                IDMLDocument idmlDoc,
-                                                ColorResolver colorResolver,
-                                                ASTImageLoader imageLoader,
-                                                GroupBackground bg) {
-        ASTTable table = new ASTTable();
-        table.rowCount(rows.size());
-        table.colCount(colCount);
-
-        // 열 너비: 셀 간 간격 포함하여 계산
-        // 각 열의 시작 X ~ 다음 열의 시작 X (마지막 열은 자체 폭 사용)
-        List<PositionedFrame> firstRow = rows.get(0);
-        long totalWidth = 0;
-        for (int c = 0; c < colCount; c++) {
-            long w;
-            if (c < colCount - 1) {
-                // 이 열의 시작 X ~ 다음 열의 시작 X
-                double span = firstRow.get(c + 1).x - firstRow.get(c).x;
-                w = CoordinateConverter.pointsToHwpunits(span);
-            } else {
-                // 마지막 열: 자체 폭 사용
-                w = CoordinateConverter.pointsToHwpunits(firstRow.get(c).width);
-            }
-            table.addColumnWidth(w);
-            totalWidth += w;
-        }
-        table.width(totalWidth);
-
-        // 행 높이: 행 간 간격 포함
-        long[] rowHeights = new long[rows.size()];
-        for (int r = 0; r < rows.size(); r++) {
-            if (r < rows.size() - 1) {
-                double span = rows.get(r + 1).get(0).y - rows.get(r).get(0).y;
-                rowHeights[r] = CoordinateConverter.pointsToHwpunits(span);
-            } else {
-                rowHeights[r] = CoordinateConverter.pointsToHwpunits(rows.get(r).get(0).height);
-            }
-        }
-
-        // 행 빌드
-        long totalHeight = 0;
-        for (int r = 0; r < rows.size(); r++) {
-            List<PositionedFrame> row = rows.get(r);
-            ASTTableRow astRow = new ASTTableRow();
-            astRow.rowIndex(r);
-            astRow.rowHeight(rowHeights[r]);
-            totalHeight += rowHeights[r];
-
-            for (int c = 0; c < colCount; c++) {
-                PositionedFrame pf = row.get(c);
-                ASTTableCell cell = createCellFromFrame(pf, r, c, idmlDoc, colorResolver, imageLoader, bg);
-                // 셀 크기를 열/행 크기와 일치
-                cell.width(table.columnWidths().get(c));
-                cell.height(rowHeights[r]);
-                astRow.addCell(cell);
-            }
-            table.addRow(astRow);
-        }
-        table.height(totalHeight);
-        return table;
-    }
-
-    private static ASTTableCell createCellFromFrame(PositionedFrame pf, int rowIdx, int colIdx,
-                                                     IDMLDocument idmlDoc,
-                                                     ColorResolver colorResolver,
-                                                     ASTImageLoader imageLoader,
-                                                     GroupBackground bg) {
-        ASTTableCell cell = new ASTTableCell();
-        cell.rowIndex(rowIdx);
-        cell.columnIndex(colIdx);
-        cell.width(CoordinateConverter.pointsToHwpunits(pf.width));
-        cell.height(CoordinateConverter.pointsToHwpunits(pf.height));
-
-        IDMLTextFrame tf = pf.textFrame;
-
-        // 셀 배경색
-        if (tf.fillColor() != null) {
-            String resolved = colorResolver.resolve(tf.fillColor());
-            if (resolved != null) cell.fillColor(resolved);
-        } else if (bg != null && bg.fillHex != null) {
-            cell.fillColor(bg.fillHex);
-        }
-
-        // TextFrame 여백
-        double[] inset = tf.insetSpacing();
-        if (inset != null) {
-            cell.marginTop(CoordinateConverter.pointsToHwpunits(inset[0]));
-            cell.marginLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
-            cell.marginBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
-            cell.marginRight(CoordinateConverter.pointsToHwpunits(inset[3]));
-        }
-
-        // TextFrame 스토리 → 단락 변환
-        if (tf.parentStoryId() != null) {
-            IDMLStory story = idmlDoc.getStory(tf.parentStoryId());
-            if (story != null) {
-                FlattenedObjectPool emptyPool = new FlattenedObjectPool();
-                for (IDMLParagraph p : story.paragraphs()) {
-                    ASTParagraph astP = ASTStoryConverter.convertParagraph(
-                            p, emptyPool, idmlDoc, colorResolver, imageLoader, false);
-                    if (astP != null) {
-                        cell.addParagraph(astP);
-                    }
-                }
-                Stage4_BuildAST.removeTrailingEmptyParagraphs(cell.paragraphs());
-            }
-        }
-
-        return cell;
+        return hasAnyContent;
     }
 }

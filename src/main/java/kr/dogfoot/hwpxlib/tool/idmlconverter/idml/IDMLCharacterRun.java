@@ -161,10 +161,19 @@ public class IDMLCharacterRun {
         // Group 레벨 색상 (자식 도형이 명시적 색상 없을 때 폴백용)
         private String groupStrokeColor;
         private String groupFillColor;
+        private double groupFillTint = 100;
+        private double groupStrokeTint = 100;
+        private double groupStrokeWeight = 0;
         public String groupStrokeColor() { return groupStrokeColor; }
         public void groupStrokeColor(String v) { this.groupStrokeColor = v; }
         public String groupFillColor() { return groupFillColor; }
         public void groupFillColor(String v) { this.groupFillColor = v; }
+        public double groupFillTint() { return groupFillTint; }
+        public void groupFillTint(double v) { this.groupFillTint = v; }
+        public double groupStrokeTint() { return groupStrokeTint; }
+        public void groupStrokeTint(double v) { this.groupStrokeTint = v; }
+        public double groupStrokeWeight() { return groupStrokeWeight; }
+        public void groupStrokeWeight(double v) { this.groupStrokeWeight = v; }
     }
 
     public String appliedCharacterStyle() { return appliedCharacterStyle; }

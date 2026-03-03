@@ -622,6 +622,18 @@ class IDMLStoryParser {
         // Group 레벨 stroke/fill 색상 (자식 도형 색상 상속용)
         group.groupStrokeColor(getAttrOrNull(groupElem, "StrokeColor"));
         group.groupFillColor(getAttrOrNull(groupElem, "FillColor"));
+        String fillTintAttr = getAttrOrNull(groupElem, "FillTint");
+        if (fillTintAttr != null) {
+            try { group.groupFillTint(Double.parseDouble(fillTintAttr)); } catch (NumberFormatException ignored) {}
+        }
+        String strokeTintAttr = getAttrOrNull(groupElem, "StrokeTint");
+        if (strokeTintAttr != null) {
+            try { group.groupStrokeTint(Double.parseDouble(strokeTintAttr)); } catch (NumberFormatException ignored) {}
+        }
+        String strokeWeightAttr = getAttrOrNull(groupElem, "StrokeWeight");
+        if (strokeWeightAttr != null) {
+            try { group.groupStrokeWeight(Double.parseDouble(strokeWeightAttr)); } catch (NumberFormatException ignored) {}
+        }
 
         return group;
     }
