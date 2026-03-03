@@ -1131,6 +1131,7 @@ public class Stage4_BuildAST {
      */
     private static class TextWrapZone {
         ASTBlock sourceBlock;       // 이 존을 생성한 블록 (자기 자신 제외용)
+        int sourceZOrder;           // 존을 생성한 블록의 z-order
         long x, y, width, height;   // 페이지 상대 HWPUNIT
         long marginTop, marginLeft, marginBottom, marginRight; // 감싸기 여백
         String mode;                // "BoundingBoxTextWrap", "JumpObjectTextWrap" 등
@@ -1166,6 +1167,7 @@ public class Stage4_BuildAST {
 
             TextWrapZone zone = new TextWrapZone();
             zone.sourceBlock = fig;
+            zone.sourceZOrder = fig.zOrder();
             zone.x = fig.x();
             zone.y = fig.y();
             zone.width = fig.width();
@@ -1187,11 +1189,17 @@ public class Stage4_BuildAST {
 
             for (TextWrapZone zone : zones) {
                 if (zone.sourceBlock == block) continue; // 자기 자신 건너뜀
+                // z-order가 존 출처보다 높은 프레임은 텍스트 감싸기 영향 없음
+                // (InDesign "Text Wrap Only Affects Text Beneath" 동작)
+                if (tfb.zOrder() > zone.sourceZOrder) continue;
 
                 long pushDown = computeTextWrapPushDown(tfb, zone);
                 if (pushDown > 0 && pushDown > tfb.insetTop()) {
                     System.err.println("[TextWrap] frame " + tfb.sourceId()
-                            + " insetTop " + tfb.insetTop() + " → " + pushDown);
+                            + " z=" + tfb.zOrder()
+                            + " insetTop " + tfb.insetTop() + " → " + pushDown
+                            + " by zone src=" + (zone.sourceBlock != null ? zone.sourceBlock.sourceId() : "?")
+                            + " y=" + zone.y + " h=" + zone.height);
                     tfb.insetTop(pushDown);
                 }
             }
@@ -1224,6 +1232,7 @@ public class Stage4_BuildAST {
                     if (mode != null && !"None".equals(mode) && objH > 1000) {
                         TextWrapZone zone = new TextWrapZone();
                         zone.sourceBlock = tfb;
+                        zone.sourceZOrder = tfb.zOrder();
                         zone.x = tfb.x() + tfb.insetLeft();
                         zone.y = tfb.y() + yOffset;
                         zone.width = objW;

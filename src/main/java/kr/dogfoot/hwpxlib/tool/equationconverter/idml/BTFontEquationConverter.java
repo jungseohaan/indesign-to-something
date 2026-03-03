@@ -26,6 +26,10 @@ import java.util.regex.Pattern;
  * - ^-XX^-: bar (윗줄)
  * - .c3: 가운데점 (CDOTS)
  * - rNpar: 원기호 (①, ②, ...)
+ * - z: ±  (플러스마이너스)
+ * - rt...&: √ (제곱근). rt 뒤 & 종료자까지가 피근호수. & 없으면 단순 토큰(연속 숫자/단일 문자)
+ *   예: rt3 → sqrt{3}, rt3& → sqrt{3}, rt(-1) → sqrt{(-1)}, 2rt5 → 2sqrt{5}
+ * - zrt...&: ±√ (플러스마이너스 제곱근). 예: zrt3 → +- sqrt{3}
  */
 public class BTFontEquationConverter {
 
@@ -176,6 +180,8 @@ public class BTFontEquationConverter {
         }
         // 문자/숫자/콤마/공백만으로 구성되었더라도 그리스 문자 키워드가 있으면 수식
         if (containsGreekKeyword(raw)) return false;
+        // "rt" + 숫자/문자 패턴이 있으면 수식 (제곱근)
+        if (containsRtPattern(raw)) return false;
         return true;
     }
 
@@ -195,6 +201,8 @@ public class BTFontEquationConverter {
         if (raw.contains("cup") || raw.contains("hap") || raw.contains("cap")) return true;
         if (raw.contains("div")) return true;
         if (raw.contains("not=") || raw.contains("-<") || raw.contains("/<")) return true;
+        // 제곱근 패턴
+        if (containsRtPattern(raw)) return true;
 
         // 수학 연산자 포함 → 수식
         boolean hasOperator = false;
@@ -245,6 +253,26 @@ public class BTFontEquationConverter {
         }
         // BT 마커 제거
         cleaned = cleaned.replaceAll("[_&\\\\`^]", " ");
+        // 제곱근 마커 "zrt" / "rt" 제거 (영문자 뒤가 아닌 경우만)
+        StringBuilder rtCleaned = new StringBuilder();
+        for (int j = 0; j < cleaned.length(); j++) {
+            // "zrt" 패턴
+            if (j + 2 < cleaned.length() && cleaned.charAt(j) == 'z'
+                    && cleaned.charAt(j + 1) == 'r' && cleaned.charAt(j + 2) == 't'
+                    && (j == 0 || !Character.isLetter(cleaned.charAt(j - 1)))) {
+                rtCleaned.append("   ");
+                j += 2; // skip 'r', 't'
+            }
+            // "rt" 패턴
+            else if (j + 1 < cleaned.length() && cleaned.charAt(j) == 'r' && cleaned.charAt(j + 1) == 't'
+                    && (j == 0 || !Character.isLetter(cleaned.charAt(j - 1)))) {
+                rtCleaned.append("  ");
+                j++; // skip 't'
+            } else {
+                rtCleaned.append(cleaned.charAt(j));
+            }
+        }
+        cleaned = rtCleaned.toString();
         // 비알파벳 문자로 분리하여 각 부분이 4자 이상인지 확인
         String[] words = cleaned.split("[^a-zA-Z]+");
         for (String word : words) {
@@ -272,6 +300,9 @@ public class BTFontEquationConverter {
         // 중괄호 → lbrace/rbrace (위치 마커 전에 처리해야 _{} ^{} 구문과 충돌 방지)
         result = result.replace("{", " lbrace ");
         result = result.replace("}", " rbrace ");
+
+        // 제곱근: rt...& → sqrt{...} (위치 마커 전에 처리해야 &가 리셋으로 소비되지 않음)
+        result = convertRoots(result);
 
         // 위치 마커 파싱: _x → _{x}, & → 리셋
         result = convertPositionMarkers(result);
@@ -502,6 +533,126 @@ public class BTFontEquationConverter {
         if (sb.length() == 0) return false;
         char last = sb.charAt(sb.length() - 1);
         return Character.isLetterOrDigit(last) || last == '}' || last == ')';
+    }
+
+    /**
+     * "rt" 또는 "zrt" + 숫자/문자/부호/괄호 패턴(제곱근)이 포함되어 있는지 확인.
+     * "rt"가 영문자 뒤에 오면 무시 (start, part 등). 단, "z" 뒤의 "rt"는 ±√으로 인식.
+     */
+    private static boolean containsRtPattern(String text) {
+        for (int i = 0; i + 2 < text.length(); i++) {
+            if (text.charAt(i) == 'r' && text.charAt(i + 1) == 't') {
+                // "zrt" 패턴: z 바로 앞이 영문자가 아니면 ±√
+                boolean isZrt = (i >= 1 && text.charAt(i - 1) == 'z'
+                        && (i < 2 || !Character.isLetter(text.charAt(i - 2))));
+                // 일반 "rt" 패턴: 앞이 영문자가 아니면 √
+                boolean isRt = (i == 0 || !Character.isLetter(text.charAt(i - 1)));
+
+                if (isZrt || isRt) {
+                    if (i + 2 < text.length()) {
+                        char next = text.charAt(i + 2);
+                        if (Character.isLetterOrDigit(next) || next == '-' || next == '(') {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * "rt...&" / "zrt...&" 패턴을 "sqrt{...}" / "+- sqrt{...}"로 변환.
+     * - zrt: ±√ (z = 플러스마이너스, rt = 제곱근)
+     * - rt 뒤 &가 있으면(단, _/^ 마커보다 먼저) 그 사이가 피근호수
+     * - & 없으면: 괄호식, 연속 숫자, 또는 단일 문자를 피근호수로 수집
+     * - rt 앞에 영문자가 있으면 무시 (start, part 등의 일반 단어). 단 z는 예외
+     */
+    private static String convertRoots(String text) {
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        while (i < text.length()) {
+            // "zrt" 패턴 감지: z + rt (z 앞이 영문자가 아님)
+            boolean isZrt = false;
+            if (i + 3 < text.length()
+                    && text.charAt(i) == 'z'
+                    && text.charAt(i + 1) == 'r' && text.charAt(i + 2) == 't'
+                    && (i == 0 || !Character.isLetter(text.charAt(i - 1)))) {
+                isZrt = true;
+            }
+
+            // "rt" 패턴 감지
+            boolean isRt = !isZrt
+                    && i + 2 < text.length()
+                    && text.charAt(i) == 'r' && text.charAt(i + 1) == 't'
+                    && (i == 0 || !Character.isLetter(text.charAt(i - 1)));
+
+            if (isZrt || isRt) {
+                if (isZrt) {
+                    sb.append("+- ");
+                    i += 3; // skip "zrt"
+                } else {
+                    i += 2; // skip "rt"
+                }
+
+                // & 종료자 탐색 (단, _/^/닫는괄호가 먼저 오면 중단 — 외부 괄호가 피근호수에 포함 방지)
+                int ampIdx = -1;
+                for (int j = i; j < text.length(); j++) {
+                    char ch = text.charAt(j);
+                    if (ch == '&') { ampIdx = j; break; }
+                    if (ch == '_' || ch == '^' || ch == ')') break;
+                }
+
+                if (ampIdx >= 0 && ampIdx > i) {
+                    // & 종료자까지 전체가 피근호수
+                    String radicand = text.substring(i, ampIdx);
+                    sb.append("sqrt{").append(radicand).append("}");
+                    i = ampIdx + 1; // & 건너뛰기
+                } else {
+                    // & 없음: 단순 토큰 수집
+                    StringBuilder rad = new StringBuilder();
+                    // 선택적 음수 부호
+                    if (i < text.length() && text.charAt(i) == '-') {
+                        rad.append('-');
+                        i++;
+                    }
+                    // 괄호식
+                    if (i < text.length() && text.charAt(i) == '(') {
+                        int depth = 0;
+                        while (i < text.length()) {
+                            char ch = text.charAt(i);
+                            rad.append(ch);
+                            if (ch == '(') depth++;
+                            else if (ch == ')') {
+                                depth--;
+                                if (depth == 0) { i++; break; }
+                            }
+                            i++;
+                        }
+                    } else if (i < text.length() && Character.isDigit(text.charAt(i))) {
+                        // 연속 숫자
+                        while (i < text.length() && Character.isDigit(text.charAt(i))) {
+                            rad.append(text.charAt(i));
+                            i++;
+                        }
+                    } else if (i < text.length() && Character.isLetter(text.charAt(i))) {
+                        // 단일 문자
+                        rad.append(text.charAt(i));
+                        i++;
+                    }
+
+                    if (rad.length() > 0) {
+                        sb.append("sqrt{").append(rad).append("}");
+                    } else {
+                        sb.append("rt"); // 파싱 실패 시 원본 유지
+                    }
+                }
+            } else {
+                sb.append(text.charAt(i));
+                i++;
+            }
+        }
+        return sb.toString();
     }
 
     /**
