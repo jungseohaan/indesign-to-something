@@ -399,7 +399,13 @@ class ASTMathGrouper {
                 String text = run.content();
                 if (text != null && !text.isEmpty()) {
                     ASTTextRun textRun = new ASTTextRun();
-                    textRun.text(Stage4_BuildAST.stripACEPlaceholders(text));
+                    // 선행 thin space 마커(백틱, 틸드)를 제거하여 리터럴 문자로 나타나지 않도록
+                    String cleaned = Stage4_BuildAST.stripACEPlaceholders(text);
+                    int mIdx = 0;
+                    while (mIdx < cleaned.length() && (cleaned.charAt(mIdx) == '`' || cleaned.charAt(mIdx) == '~')) mIdx++;
+                    if (mIdx > 0) cleaned = cleaned.substring(mIdx);
+                    if (cleaned.isEmpty()) continue;
+                    textRun.text(cleaned);
                     String ff = run.fontFamily();
                     if (run.isBTFont() || run.grepMathFont()) {
                         if (ff == null || !ff.contains("BT수식")) ff = "BT수식M";

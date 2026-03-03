@@ -11,7 +11,7 @@ import java.util.*;
  * 매칭 전략:
  * - 스토리: storyId 직접 비교
  * - 문단: 인덱스 기반 (styleName sanity check)
- * - 런: 문자 오프셋 기반 정렬 (런 경계 차이 허용)
+ * - 런: 텍스트 검색 기반 정렬 (인라인 수식 등으로 인한 텍스트 길이 차이 허용)
  */
 public class ResolvedMerger {
 
@@ -200,9 +200,9 @@ public class ResolvedMerger {
     // ─── 런 보강 ──────────────────────────────────────────
 
     /**
-     * 문자 오프셋 기반 런 매칭.
-     * AST와 resolved의 런 경계가 다를 수 있으므로,
-     * 전체 텍스트를 오프셋 기반으로 정렬하여 매칭한다.
+     * 텍스트 검색 기반 런 매칭.
+     * AST와 resolved의 텍스트 길이가 다를 수 있으므로 (인라인 수식 등),
+     * resolved 전체 텍스트에서 AST 런 텍스트를 순차 검색하여 매칭한다.
      */
     private static void enrichRuns(ASTParagraph astPara,
                                     ResolvedParagraph resPara,
@@ -210,18 +210,19 @@ public class ResolvedMerger {
         List<ResolvedRun> resolvedRuns = resPara.runs();
         if (resolvedRuns.isEmpty()) return;
 
-        // resolved 런의 오프셋 인덱스 구축
+        // resolved 전체 텍스트 및 런별 시작 오프셋 구축
+        StringBuilder resTextBuilder = new StringBuilder();
         int[] resRunStarts = new int[resolvedRuns.size()];
-        int offset = 0;
         for (int i = 0; i < resolvedRuns.size(); i++) {
-            resRunStarts[i] = offset;
+            resRunStarts[i] = resTextBuilder.length();
             String text = resolvedRuns.get(i).text();
-            offset += (text != null ? text.length() : 0);
+            if (text != null) resTextBuilder.append(text);
         }
-        int resolvedTotalLen = offset;
+        String resolvedFullText = resTextBuilder.toString();
+        int resolvedTotalLen = resolvedFullText.length();
 
-        // AST 텍스트런 순회 — 오프셋 커서로 resolved 런 찾기
-        int astCursor = 0;
+        // 텍스트 검색 기반 매칭: resolved 텍스트에서 AST 런 텍스트를 찾아 매칭
+        int searchFrom = 0;
         for (ASTInlineItem item : astPara.items()) {
             if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) continue;
 
@@ -229,20 +230,34 @@ public class ResolvedMerger {
             String astText = astRun.text();
             if (astText == null || astText.isEmpty()) continue;
 
-            // AST 런의 중간 지점에 해당하는 resolved 런 찾기
-            int midPoint = astCursor + astText.length() / 2;
-            if (midPoint >= resolvedTotalLen) {
-                // resolved 범위 초과 — 마지막 런 사용
-                midPoint = resolvedTotalLen - 1;
+            // resolved 텍스트에서 AST 텍스트의 위치 검색
+            int foundAt = resolvedFullText.indexOf(astText, searchFrom);
+
+            // 못 찾으면 첫 글자만으로 재시도 (공백/특수문자 차이 보정)
+            if (foundAt < 0 && astText.length() > 1) {
+                // 첫 2글자로 시도
+                String prefix = astText.substring(0, Math.min(3, astText.length()));
+                foundAt = resolvedFullText.indexOf(prefix, searchFrom);
             }
-            if (midPoint < 0) midPoint = 0;
+            if (foundAt < 0) {
+                // 첫 글자만으로 시도
+                foundAt = resolvedFullText.indexOf(astText.substring(0, 1), searchFrom);
+            }
+
+            if (foundAt < 0) continue; // 매칭 불가 — 건너뜀
+
+            // 매칭된 위치의 중간 지점으로 resolved 런 찾기
+            int midPoint = foundAt + astText.length() / 2;
+            if (midPoint >= resolvedTotalLen) midPoint = resolvedTotalLen - 1;
 
             int resRunIdx = findRunAtOffset(resRunStarts, midPoint, resolvedRuns.size());
+
             if (resRunIdx >= 0 && resRunIdx < resolvedRuns.size()) {
                 applyRunOverrides(astRun, resolvedRuns.get(resRunIdx), resolved);
             }
 
-            astCursor += astText.length();
+            // 검색 시작점을 찾은 위치 이후로 전진
+            searchFrom = foundAt + astText.length();
         }
     }
 

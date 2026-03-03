@@ -171,18 +171,34 @@ public class BTFontEquationConverter {
      * 문자/숫자/콤마/공백만으로 구성된 단순 텍스트인지 확인.
      * 수식 마커나 연산자가 없으면 수식이 아닌 수식폰트 텍스트로 처리.
      * 단, 그리스 문자 키워드(alpha, beta 등)가 포함되면 수식으로 간주.
+     * 선행 thin space 마커(`과 ~)는 검사 전에 제거하여 "~b"/"`b"와 "a,"의 일관성을 유지.
      */
     private static boolean isPlainText(String raw) {
-        for (int i = 0; i < raw.length(); i++) {
-            char c = raw.charAt(i);
+        // 선행 thin space 마커(백틱, 틸드)를 제거한 텍스트로 검사 — "~b"/"`b"도 "b"처럼 처리
+        String stripped = stripLeadingThinSpaceMarkers(raw);
+        if (stripped.isEmpty()) return true;
+        for (int i = 0; i < stripped.length(); i++) {
+            char c = stripped.charAt(i);
             if (Character.isLetterOrDigit(c) || Character.isWhitespace(c) || c == ',') continue;
             return false;
         }
         // 문자/숫자/콤마/공백만으로 구성되었더라도 그리스 문자 키워드가 있으면 수식
-        if (containsGreekKeyword(raw)) return false;
+        if (containsGreekKeyword(stripped)) return false;
         // "rt" + 숫자/문자 패턴이 있으면 수식 (제곱근)
-        if (containsRtPattern(raw)) return false;
+        if (containsRtPattern(stripped)) return false;
         return true;
+    }
+
+    /**
+     * 선행 thin space 마커(백틱 `, 틸드 ~)를 제거한다.
+     * "~b" → "b", "`b" → "b", "~~a" → "a", "a~b" → "a~b" (중간 마커는 유지)
+     */
+    private static String stripLeadingThinSpaceMarkers(String text) {
+        int i = 0;
+        while (i < text.length() && (text.charAt(i) == '`' || text.charAt(i) == '~')) {
+            i++;
+        }
+        return i > 0 ? text.substring(i) : text;
     }
 
     /**
@@ -253,13 +269,12 @@ public class BTFontEquationConverter {
         }
         // BT 마커 제거
         cleaned = cleaned.replaceAll("[_&\\\\`^]", " ");
-        // 제곱근 마커 "zrt" / "rt" 제거 (영문자 뒤가 아닌 경우만)
+        // 제곱근 마커 "zrt" / "rt" 제거 (zrt는 항상, rt는 영문자 뒤가 아닌 경우만)
         StringBuilder rtCleaned = new StringBuilder();
         for (int j = 0; j < cleaned.length(); j++) {
-            // "zrt" 패턴
+            // "zrt" 패턴 (고유 패턴이므로 영문자 뒤에도 인식)
             if (j + 2 < cleaned.length() && cleaned.charAt(j) == 'z'
-                    && cleaned.charAt(j + 1) == 'r' && cleaned.charAt(j + 2) == 't'
-                    && (j == 0 || !Character.isLetter(cleaned.charAt(j - 1)))) {
+                    && cleaned.charAt(j + 1) == 'r' && cleaned.charAt(j + 2) == 't') {
                 rtCleaned.append("   ");
                 j += 2; // skip 'r', 't'
             }
@@ -536,25 +551,31 @@ public class BTFontEquationConverter {
     }
 
     /**
-     * "rt" 또는 "zrt" + 숫자/문자/부호/괄호 패턴(제곱근)이 포함되어 있는지 확인.
-     * "rt"가 영문자 뒤에 오면 무시 (start, part 등). 단, "z" 뒤의 "rt"는 ±√으로 인식.
+     * "rt" 또는 "zrt" + 숫자/문자/부호/괄호/공백 패턴(제곱근)이 포함되어 있는지 확인.
+     * "rt"가 영문자 뒤에 오면 무시 (start, part 등). "zrt"는 항상 인식(고유 패턴).
      */
     private static boolean containsRtPattern(String text) {
-        for (int i = 0; i + 2 < text.length(); i++) {
-            if (text.charAt(i) == 'r' && text.charAt(i + 1) == 't') {
-                // "zrt" 패턴: z 바로 앞이 영문자가 아니면 ±√
-                boolean isZrt = (i >= 1 && text.charAt(i - 1) == 'z'
-                        && (i < 2 || !Character.isLetter(text.charAt(i - 2))));
-                // 일반 "rt" 패턴: 앞이 영문자가 아니면 √
-                boolean isRt = (i == 0 || !Character.isLetter(text.charAt(i - 1)));
-
-                if (isZrt || isRt) {
-                    if (i + 2 < text.length()) {
-                        char next = text.charAt(i + 2);
-                        if (Character.isLetterOrDigit(next) || next == '-' || next == '(') {
-                            return true;
-                        }
-                    }
+        for (int i = 0; i < text.length(); i++) {
+            // "zrt" 패턴: 고유하므로 영문자 뒤에도 인식 (예: -bzrt)
+            if (i + 3 <= text.length() && text.charAt(i) == 'z'
+                    && text.charAt(i + 1) == 'r' && text.charAt(i + 2) == 't') {
+                // zrt 뒤에 공백을 건너뛰고 숫자/문자/부호/괄호가 있는지 확인
+                int next = i + 3;
+                while (next < text.length() && Character.isWhitespace(text.charAt(next))) next++;
+                if (next < text.length()) {
+                    char c = text.charAt(next);
+                    if (Character.isLetterOrDigit(c) || c == '-' || c == '(') return true;
+                }
+                continue;
+            }
+            // "rt" 패턴: 앞이 영문자가 아니면 √
+            if (i + 2 <= text.length() && text.charAt(i) == 'r' && text.charAt(i + 1) == 't'
+                    && (i == 0 || !Character.isLetter(text.charAt(i - 1)))) {
+                int next = i + 2;
+                while (next < text.length() && Character.isWhitespace(text.charAt(next))) next++;
+                if (next < text.length()) {
+                    char c = text.charAt(next);
+                    if (Character.isLetterOrDigit(c) || c == '-' || c == '(') return true;
                 }
             }
         }
@@ -572,18 +593,18 @@ public class BTFontEquationConverter {
         StringBuilder sb = new StringBuilder();
         int i = 0;
         while (i < text.length()) {
-            // "zrt" 패턴 감지: z + rt (z 앞이 영문자가 아님)
+            // "zrt" 패턴 감지: z + rt
+            // zrt는 고유한 패턴이므로 영문자 뒤에도 인식 (예: -bzrt → -b ±√)
             boolean isZrt = false;
-            if (i + 3 < text.length()
+            if (i + 3 <= text.length()
                     && text.charAt(i) == 'z'
-                    && text.charAt(i + 1) == 'r' && text.charAt(i + 2) == 't'
-                    && (i == 0 || !Character.isLetter(text.charAt(i - 1)))) {
+                    && text.charAt(i + 1) == 'r' && text.charAt(i + 2) == 't') {
                 isZrt = true;
             }
 
-            // "rt" 패턴 감지
+            // "rt" 패턴 감지 (zrt가 아닌 경우만)
             boolean isRt = !isZrt
-                    && i + 2 < text.length()
+                    && i + 2 <= text.length()
                     && text.charAt(i) == 'r' && text.charAt(i + 1) == 't'
                     && (i == 0 || !Character.isLetter(text.charAt(i - 1)));
 
@@ -593,6 +614,12 @@ public class BTFontEquationConverter {
                     i += 3; // skip "zrt"
                 } else {
                     i += 2; // skip "rt"
+                }
+
+                // 피근호수 앞의 공백/thin space 건너뛰기
+                while (i < text.length() && (Character.isWhitespace(text.charAt(i))
+                        || text.charAt(i) == '\u2009' || text.charAt(i) == '\u2003')) {
+                    i++;
                 }
 
                 // & 종료자 탐색 (단, _/^/닫는괄호가 먼저 오면 중단 — 외부 괄호가 피근호수에 포함 방지)
@@ -605,7 +632,7 @@ public class BTFontEquationConverter {
 
                 if (ampIdx >= 0 && ampIdx > i) {
                     // & 종료자까지 전체가 피근호수
-                    String radicand = text.substring(i, ampIdx);
+                    String radicand = text.substring(i, ampIdx).trim();
                     sb.append("sqrt{").append(radicand).append("}");
                     i = ampIdx + 1; // & 건너뛰기
                 } else {
@@ -644,7 +671,7 @@ public class BTFontEquationConverter {
                     if (rad.length() > 0) {
                         sb.append("sqrt{").append(rad).append("}");
                     } else {
-                        sb.append("rt"); // 파싱 실패 시 원본 유지
+                        sb.append("sqrt "); // 피근호수 없으면 sqrt만 출력 (다음 런에서 이어질 수 있음)
                     }
                 }
             } else {
