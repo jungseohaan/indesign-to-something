@@ -621,6 +621,24 @@ class ASTFigureBuilder {
         for (IDMLVectorShape s : sorted) {
             String fillHex = ASTInlineObjectBuilder.resolveColorHex(s.fillColor(), colorResolver);
             String strokeHex = ASTInlineObjectBuilder.resolveColorHex(s.strokeColor(), colorResolver);
+            // resolved data 폴백: IDML 색상이 없으면 InDesign DOM의 색상 이름으로 시도
+            if (fillHex == null && strokeHex == null && resolvedData != null && s.selfId() != null) {
+                ResolvedPageItem ri = resolvedData.getPageItemByIdmlId(s.selfId());
+                System.err.println("[VEC-GRP-COLOR] shape=" + s.selfId()
+                        + " idmlFill=" + s.fillColor() + " idmlStroke=" + s.strokeColor()
+                        + " resolvedItem=" + (ri != null ? "found(type=" + ri.type()
+                            + " fill=" + ri.fillColorName() + " stroke=" + ri.strokeColorName() + ")" : "null"));
+                if (ri != null) {
+                    if (ri.fillColorName() != null) {
+                        fillHex = resolvedData.resolveColorHex(ri.fillColorName());
+                        System.err.println("[VEC-GRP-COLOR]   fillName=" + ri.fillColorName() + " → hex=" + fillHex);
+                    }
+                    if (ri.strokeColorName() != null) {
+                        strokeHex = resolvedData.resolveColorHex(ri.strokeColorName());
+                        System.err.println("[VEC-GRP-COLOR]   strokeName=" + ri.strokeColorName() + " → hex=" + strokeHex);
+                    }
+                }
+            }
             if (fillHex == null && strokeHex == null) {
                 skippedCount++;
                 continue;

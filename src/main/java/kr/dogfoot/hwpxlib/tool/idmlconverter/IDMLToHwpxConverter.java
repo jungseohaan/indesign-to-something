@@ -91,8 +91,8 @@ public class IDMLToHwpxConverter {
             }
 
             // Phase 2: IDML -> ASTDocument (4단계 정규화, resolved 좌표 활용)
-            reporter.reportProgress(5, 100, "IDML 구조 분석 중...");
-            ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData);
+            reporter.reportProgress(5, 100, "IDML 정규화 중...");
+            ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
 
             // Phase 2.5: Resolved 텍스트/스타일 보강 (선택적)
             if (resolvedData != null) {
@@ -119,6 +119,21 @@ public class IDMLToHwpxConverter {
 
             // Phase 2.7: 플로팅 이미지 → 인라인 머지 (textWrap 자리차지)
             kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FloatingImageMerger.merge(astDoc);
+
+            // 정규화 완료 summary
+            {
+                int tfCount = 0, imgCount = 0, tblCount = 0;
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection sec : astDoc.sections()) {
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : sec.blocks()) {
+                        if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock) tfCount++;
+                        else if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) imgCount++;
+                        else if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) tblCount++;
+                    }
+                }
+                reporter.reportProgress(9, 100,
+                        "정규화 완료 — " + astDoc.sections().size() + "p, "
+                                + tfCount + " 텍스트프레임, " + imgCount + " 이미지, " + tblCount + " 테이블");
+            }
 
             // Phase 3: AST -> HWPX (페이지별 진행률: 10~90)
             int totalPages = astDoc.sections().size();

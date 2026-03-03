@@ -31,8 +31,10 @@ interface AppState {
   sourceType: "idml" | "indd" | null;
   inddPath: string | null;
   resolvedJsonPath: string | null;
+  previewPdfPath: string | null;
   isExtracting: boolean;
   extractionPhase: string | null;
+  extractionMessage: string | null;
 
   // Selection
   selectedSpread: SpreadInfo | null;
@@ -58,11 +60,21 @@ interface AppState {
   spreadBased: boolean;
   vectorDpi: 96 | 150;
   layoutMode: "preserve" | "editable";
+  startPage: number | null;
+  endPage: number | null;
+
+  // InDesign
+  indesignPath: string | null;
+
+  // Page Range Modal
+  showPageRangeModal: boolean;
+  inddPages: { name: string; index: number }[];
 
   // Actions
   initJarPath: () => Promise<void>;
   selectFile: () => Promise<void>;
   selectInddFile: () => Promise<void>;
+  confirmPageRangeAndExtract: (startPage: number | null, endPage: number | null) => Promise<void>;
   selectHwpxFile: () => Promise<void>;
   selectSpread: (spread: SpreadInfo) => void;
   selectPage: (page: PageInfo) => void;
@@ -73,6 +85,9 @@ interface AppState {
   setSpreadBased: (v: boolean) => void;
   setVectorDpi: (v: 96 | 150) => void;
   setLayoutMode: (v: "preserve" | "editable") => void;
+  setStartPage: (v: number | null) => void;
+  setEndPage: (v: number | null) => void;
+  closePageRangeModal: () => void;
   clearError: () => void;
 }
 
@@ -84,8 +99,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   sourceType: null,
   inddPath: null,
   resolvedJsonPath: null,
+  previewPdfPath: null,
   isExtracting: false,
   extractionPhase: null,
+  extractionMessage: null,
   selectedSpread: null,
   selectedPage: null,
   selectedImage: null,
@@ -105,6 +122,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   spreadBased: false,
   vectorDpi: 150,
   layoutMode: "preserve",
+  startPage: null,
+  endPage: null,
+  indesignPath: null,
+  showPageRangeModal: false,
+  inddPages: [],
 
   initJarPath: async () => {
     try {
@@ -112,6 +134,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ jarPath });
     } catch (e) {
       console.error("Failed to get JAR path:", e);
+    }
+    try {
+      const indesignPath = await invoke<string>("check_indesign");
+      set({ indesignPath });
+    } catch {
+      set({ indesignPath: null });
     }
   },
 
@@ -171,8 +199,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       sourceType: "indd",
       idmlPath: null,
       resolvedJsonPath: null,
+      previewPdfPath: null,
       isExtracting: true,
       extractionPhase: "launching",
+      extractionMessage: "InDesign 실행 중...",
       isAnalyzing: false,
       structure: null,
       selectedSpread: null,
@@ -185,44 +215,93 @@ export const useAppStore = create<AppState>((set, get) => ({
       masterPreview: null,
       result: null,
       error: null,
+      inddPages: [],
+      startPage: null,
+      endPage: null,
     });
 
-    // 추출 진행률 이벤트 리스너
+    // 진행률 이벤트 리스너
     const unlisten = await listen<InddExtractionProgress>(
       "indd-extraction-progress",
       (event) => {
-        set({ extractionPhase: event.payload.phase });
+        set({ extractionPhase: event.payload.phase, extractionMessage: event.payload.message });
       }
     );
 
     try {
-      // Step 1: InDesign으로 IDML 추출
+      // Phase 1: 페이지 정보만 빠르게 가져오기 (문서는 열어둠)
+      const pagesResult = await invoke<{ pageCount: number; pages: { name: string; index: number }[] }>(
+        "get_indd_pages",
+        { inddPath: path }
+      );
+
+      set({
+        isExtracting: false,
+        extractionPhase: null,
+        extractionMessage: null,
+        inddPages: pagesResult.pages,
+        showPageRangeModal: true,
+      });
+    } catch (e: any) {
+      set({
+        isExtracting: false,
+        error: String(e),
+      });
+    } finally {
+      unlisten();
+    }
+  },
+
+  confirmPageRangeAndExtract: async (startPage, endPage) => {
+    const { inddPath, jarPath } = get();
+    if (!inddPath) return;
+
+    set({
+      showPageRangeModal: false,
+      startPage,
+      endPage,
+      isExtracting: true,
+      extractionPhase: "exporting",
+      extractionMessage: "IDML 추출 중...",
+    });
+
+    const unlisten = await listen<InddExtractionProgress>(
+      "indd-extraction-progress",
+      (event) => {
+        set({ extractionPhase: event.payload.phase, extractionMessage: event.payload.message });
+      }
+    );
+
+    try {
+      // Step 1: InDesign으로 IDML + resolved 추출 (문서는 이미 열려있음)
       const result = await invoke<InddExtractResult>("extract_indd", {
-        inddPath: path,
-        jarPath: get().jarPath,
+        inddPath,
+        jarPath,
+        startPage: startPage ?? 0,
+        endPage: endPage ?? 0,
       });
 
-      // Step 2: 추출된 IDML로 기존 분석 파이프라인 실행
+      // Step 2: 추출된 IDML로 분석 파이프라인 실행
       set({
         idmlPath: result.idml_path,
         resolvedJsonPath: result.resolved_json_path ?? null,
+        previewPdfPath: result.preview_pdf_path ?? null,
         isExtracting: false,
         isAnalyzing: true,
       });
 
       const structure = await invoke<IDMLStructure>("analyze_idml", {
         path: result.idml_path,
-        jarPath: get().jarPath,
+        jarPath,
       });
       set({ structure, isAnalyzing: false });
 
       // Step 3: AST 자동 로드
-      const jarPath = get().jarPath;
       if (jarPath) {
         useAstStore.getState().loadAST(result.idml_path, jarPath);
       }
 
-      // Step 4: resolved.json 로드 (있으면 — AST 사이드카로 활용)
+      // Step 4: resolved.json 로드
       if (result.resolved_json_path) {
         useAstStore.getState().loadResolved(result.resolved_json_path);
       }
@@ -357,7 +436,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   startConversion: async () => {
-    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, inddPath, resolvedJsonPath } = get();
+    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, startPage, endPage, inddPath, resolvedJsonPath } = get();
     if (!idmlPath) return;
 
     const outputPath = await save({
@@ -398,13 +477,19 @@ export const useAppStore = create<AppState>((set, get) => ({
           include_images: true,
           links_directory: linksDir,
           resolved_json_path: resolvedJsonPath,
-          start_page: null,
-          end_page: null,
+          start_page: startPage,
+          end_page: endPage,
           layout_mode: layoutMode,
         },
         jarPath,
       });
       set({ result, isConverting: false });
+      // 변환 완료 후 자동으로 HWPX 파일 열기
+      try {
+        await invoke("open_file", { path: outputPath });
+      } catch {
+        // 열기 실패해도 변환 자체는 성공
+      }
     } catch (e: any) {
       set({ error: String(e), isConverting: false });
     } finally {
@@ -416,5 +501,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSpreadBased: (v) => set({ spreadBased: v }),
   setVectorDpi: (v) => set({ vectorDpi: v }),
   setLayoutMode: (v) => set({ layoutMode: v }),
+  setStartPage: (v) => set({ startPage: v }),
+  setEndPage: (v) => set({ endPage: v }),
+  closePageRangeModal: () => set({ showPageRangeModal: false }),
   clearError: () => set({ error: null }),
 }));

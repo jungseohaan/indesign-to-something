@@ -89,6 +89,8 @@ pub async fn run_extraction(
     output_dir: &Path,
     jsx_path: &str,
     indesign_app_path: &str,
+    start_page: i32,
+    end_page: i32,
 ) -> Result<InddExtractResult, String> {
     let app_name = app_name_from_path(indesign_app_path);
     let output_dir_str = output_dir.to_string_lossy().to_string();
@@ -99,30 +101,88 @@ pub async fn run_extraction(
     // AppleScript 생성
     // - `do script ... language javascript`: InDesign ExtendScript 실행
     // - `with arguments`: ExtendScript의 arguments 변수로 전달
+    // - arguments[2] = startPage (0=전체), arguments[3] = endPage (0=전체)
     let applescript = format!(
         r#"tell application "{app_name}"
     activate
-    do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}"}}
+    do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}"}}
 end tell"#,
         app_name = app_name,
         jsx_path = jsx_path,
         indd_path = indd_path,
         output_dir = output_dir_str,
+        start_page = start_page,
+        end_page = end_page,
     );
 
     // 진행률: 추출 실행 중
     emit_progress(app, "exporting", "IDML 추출 중...");
 
-    // osascript 실행
-    let output = Command::new("osascript")
-        .args(["-e", &applescript])
-        .output()
+    // osascript를 백그라운드로 스폰하고, .progress 파일을 폴링하여 상세 진행률 전달
+    let applescript_clone = applescript.clone();
+    let osascript_handle = tokio::spawn(async move {
+        Command::new("osascript")
+            .args(["-e", &applescript_clone])
+            .output()
+            .await
+    });
+
+    // .progress 파일 폴링
+    let progress_path = output_dir.join(".progress");
+    let done_path = output_dir.join(".done");
+    let mut last_message = String::new();
+
+    loop {
+        if osascript_handle.is_finished() {
+            break;
+        }
+
+        // .progress 파일에서 상세 진행률 읽기
+        if let Ok(content) = std::fs::read_to_string(&progress_path) {
+            if let Ok(prog) = serde_json::from_str::<serde_json::Value>(&content) {
+                let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
+                let current = prog.get("current").and_then(|v| v.as_i64()).unwrap_or(0);
+                let total = prog.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
+
+                let display = match step {
+                    "open" => "문서 열기 중...".to_string(),
+                    "idml" if total > 0 => format!("IDML 내보내기 중... ({}페이지)", total),
+                    "idml" => "IDML 내보내기 중...".to_string(),
+                    "resolved" if total > 0 => format!("resolved 수집 중... ({}페이지)", total),
+                    "resolved" => "resolved 수집 중...".to_string(),
+                    "resolved_styles" if total > 0 => format!("스타일/색상 수집 중... ({}페이지)", total),
+                    "resolved_styles" => "스타일/색상 수집 중...".to_string(),
+                    "resolved_stories" if current > 0 && total > 0 => format!("스토리 수집 중... ({}/{})", current, total),
+                    "resolved_stories" => "스토리 수집 중...".to_string(),
+                    "resolved_frames" => "텍스트프레임 수집 중...".to_string(),
+                    "resolved_items" => "페이지 아이템 수집 중...".to_string(),
+                    "pdf" => "PDF 프리뷰 생성 중...".to_string(),
+                    _ => format!("추출 중... ({})", step),
+                };
+
+                if display != last_message {
+                    last_message = display.clone();
+                    let phase = match step {
+                        "open" => "launching",
+                        "pdf" => "checking",
+                        _ => "exporting",
+                    };
+                    emit_progress(app, phase, &display);
+                }
+            }
+        }
+
+        sleep(Duration::from_millis(300)).await;
+    }
+
+    // osascript 결과 수집
+    let output = osascript_handle
         .await
+        .map_err(|e| format!("osascript 대기 실패: {}", e))?
         .map_err(|e| format!("osascript 실행 실패: {}", e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        // InDesign이 설치되어 있지만 실행에 실패한 경우
         return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr));
     }
 
@@ -130,7 +190,6 @@ end tell"#,
     emit_progress(app, "checking", "추출 결과 확인 중...");
 
     // .done 시그널 파일 확인
-    let done_path = output_dir.join(".done");
     if done_path.exists() {
         let done_content = std::fs::read_to_string(&done_path)
             .map_err(|e| format!(".done 파일 읽기 실패: {}", e))?;
@@ -142,15 +201,12 @@ end tell"#,
             return Err(format!("InDesign 추출 오류: {}", msg));
         }
     } else {
-        // osascript는 성공했지만 .done 파일이 없는 경우
-        // 짧은 대기 후 재확인 (InDesign이 파일 쓰기를 마무리 중일 수 있음)
         for _ in 0..10 {
             sleep(Duration::from_millis(500)).await;
             if done_path.exists() {
                 break;
             }
         }
-
         if done_path.exists() {
             let done_content = std::fs::read_to_string(&done_path)
                 .map_err(|e| format!(".done 파일 읽기 실패: {}", e))?;
@@ -162,7 +218,6 @@ end tell"#,
                 return Err(format!("InDesign 추출 오류: {}", msg));
             }
         }
-        // .done 파일이 없어도 output.idml이 있으면 진행
     }
 
     // 출력 파일 확인
@@ -175,6 +230,11 @@ end tell"#,
     let preview_pdf_path = output_dir.join("preview.pdf");
 
     emit_progress(app, "done", "추출 완료");
+
+    // 추출 완료 후 데스크탑 앱으로 포커스 복귀
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_focus();
+    }
 
     Ok(InddExtractResult {
         idml_path: idml_path.to_string_lossy().to_string(),
@@ -206,6 +266,143 @@ fn emit_progress(app: &AppHandle, phase: &str, message: &str) {
             message: message.to_string(),
         },
     );
+}
+
+/// InDesign 페이지 정보
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InddPageInfo {
+    pub name: String,
+    pub index: i32,
+}
+
+/// InDesign 페이지 정보 결과
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InddPagesResult {
+    #[serde(rename = "pageCount")]
+    pub page_count: i32,
+    pub pages: Vec<InddPageInfo>,
+}
+
+/// 경량 ExtendScript로 페이지 정보만 추출한다.
+/// 문서는 닫지 않으므로 후속 extract_indd.jsx에서 재활용.
+pub async fn run_get_pages(
+    app: &AppHandle,
+    indd_path: &str,
+    output_dir: &Path,
+    jsx_path: &str,
+    indesign_app_path: &str,
+) -> Result<InddPagesResult, String> {
+    let app_name = app_name_from_path(indesign_app_path);
+    let output_dir_str = output_dir.to_string_lossy().to_string();
+
+    emit_progress(app, "launching", "InDesign 실행 중...");
+
+    let applescript = format!(
+        r#"tell application "{app_name}"
+    activate
+    do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}"}}
+end tell"#,
+        app_name = app_name,
+        jsx_path = jsx_path,
+        indd_path = indd_path,
+        output_dir = output_dir_str,
+    );
+
+    emit_progress(app, "exporting", "문서 열기 중...");
+
+    let output = Command::new("osascript")
+        .args(["-e", &applescript])
+        .output()
+        .await
+        .map_err(|e| format!("osascript 실행 실패: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr));
+    }
+
+    // .done 시그널 확인
+    let done_path = output_dir.join(".done");
+    for _ in 0..20 {
+        if done_path.exists() {
+            break;
+        }
+        sleep(Duration::from_millis(200)).await;
+    }
+
+    if done_path.exists() {
+        let done_content = std::fs::read_to_string(&done_path)
+            .map_err(|e| format!(".done 읽기 실패: {}", e))?;
+        let done_signal: DoneSignal = serde_json::from_str(&done_content)
+            .map_err(|e| format!(".done 파싱 실패: {}", e))?;
+        if done_signal.status == "error" {
+            let msg = done_signal.message.unwrap_or_else(|| "알 수 없는 오류".to_string());
+            return Err(format!("InDesign 오류: {}", msg));
+        }
+    }
+
+    // pages.json 읽기
+    let pages_path = output_dir.join("pages.json");
+    if !pages_path.exists() {
+        return Err("pages.json이 생성되지 않았습니다.".into());
+    }
+
+    let pages_content = std::fs::read_to_string(&pages_path)
+        .map_err(|e| format!("pages.json 읽기 실패: {}", e))?;
+    let pages_result: InddPagesResult = serde_json::from_str(&pages_content)
+        .map_err(|e| format!("pages.json 파싱 실패: {}", e))?;
+
+    // 포커스 복귀
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_focus();
+    }
+
+    emit_progress(app, "done", "페이지 정보 확인 완료");
+
+    Ok(pages_result)
+}
+
+/// ExtendScript 파일 경로를 찾는다 (파일명 지정).
+pub fn find_script(app: &AppHandle, filename: &str) -> Result<String, String> {
+    // 1. 번들 리소스 경로
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("scripts").join(filename);
+        if bundled.exists() {
+            return Ok(bundled.to_string_lossy().to_string());
+        }
+        let bundled_flat = resource_dir.join(filename);
+        if bundled_flat.exists() {
+            return Ok(bundled_flat.to_string_lossy().to_string());
+        }
+        let bundled_up = resource_dir
+            .join("_up_")
+            .join("_up_")
+            .join("scripts")
+            .join(filename);
+        if bundled_up.exists() {
+            return Ok(bundled_up.to_string_lossy().to_string());
+        }
+    }
+
+    // 2. 개발 경로
+    let dev_paths = [
+        format!("../../scripts/{}", filename),
+        format!("../../../scripts/{}", filename),
+        format!("scripts/{}", filename),
+    ];
+    for rel_path in &dev_paths {
+        let path = Path::new(rel_path);
+        if path.exists() {
+            return Ok(
+                path.canonicalize()
+                    .map_err(|e| format!("경로 해석 실패: {}", e))?
+                    .to_string_lossy()
+                    .to_string(),
+            );
+        }
+    }
+
+    Err(format!("ExtendScript 파일을 찾을 수 없습니다: {}", filename))
 }
 
 /// ExtendScript 파일 경로를 찾는다.

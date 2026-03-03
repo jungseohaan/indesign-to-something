@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ProgressReporter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
@@ -26,6 +27,12 @@ public class Stage4_BuildAST {
     public static ASTDocument build(FlattenedObjectPool pool, IDMLDocument idmlDoc,
                                      ConvertOptions options, String sourceFileName,
                                      ResolvedData resolvedData) {
+        return build(pool, idmlDoc, options, sourceFileName, resolvedData, ProgressReporter.NONE);
+    }
+
+    public static ASTDocument build(FlattenedObjectPool pool, IDMLDocument idmlDoc,
+                                     ConvertOptions options, String sourceFileName,
+                                     ResolvedData resolvedData, ProgressReporter reporter) {
         System.err.println("[Stage4_BuildAST] Building AST from stories...");
 
         ASTDocument doc = new ASTDocument();
@@ -39,9 +46,20 @@ public class Stage4_BuildAST {
         ASTImageLoader imageLoader = options.includeImages()
                 ? new ASTImageLoader(idmlDoc, options) : null;
 
+        // 총 페이지 수 계산
+        int totalPages = 0;
+        for (IDMLSpread spread : idmlDoc.spreads()) {
+            totalPages += spread.pages().size();
+        }
+
         // 페이지별 섹션 구축
+        int pageIndex = 0;
         for (IDMLSpread spread : idmlDoc.spreads()) {
             for (IDMLPage page : spread.pages()) {
+                pageIndex++;
+                reporter.reportProgress(6, 100,
+                        "IDML 정규화 중... (" + pageIndex + "/" + totalPages + ")");
+
                 ASTSection section = ASTPageProcessor.processPage(
                         spread, page, pool, idmlDoc, colorResolver, imageLoader,
                         resolvedData, processedStories, doc);

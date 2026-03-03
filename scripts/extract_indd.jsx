@@ -94,6 +94,9 @@ if (typeof JSON.stringify !== "function") {
 function main(args) {
     var inddPath = args[0];
     var outputDir = args[1];
+    // 페이지 범위 (1-based, 0이면 전체)
+    var startPage = parseInt(args[2], 10) || 0;
+    var endPage = parseInt(args[3], 10) || 0;
 
     // --- 기존 환경설정 저장 ---
     var savedInteractionLevel = app.scriptPreferences.userInteractionLevel;
@@ -109,20 +112,40 @@ function main(args) {
         app.linkingPreferences.checkLinksAtOpen = false;
         app.linkingPreferences.findMissingLinksAtOpen = false;
 
+        writeProgress(outputDir, "open", 0, 0);
+
         // 1. 문서 열기 (창 표시 안 함)
         var doc = app.open(File(inddPath), false);
+        var pageCount = doc.pages.length;
 
-        // 2. IDML 내보내기
+        // 페이지 범위 보정
+        if (startPage < 1) startPage = 1;
+        if (endPage < 1 || endPage > pageCount) endPage = pageCount;
+        var rangePageCount = endPage - startPage + 1;
+
+        writeProgress(outputDir, "idml", 0, pageCount);
+
+        // 2. IDML 내보내기 (전체 — API 제한)
         var idmlFile = File(outputDir + "/output.idml");
         doc.exportFile(ExportFormat.INDESIGN_MARKUP, idmlFile);
 
-        // 3. resolved 속성 수집
-        var resolved = collectResolved(doc);
+        writeProgress(outputDir, "resolved", 0, rangePageCount);
+
+        // 3. resolved 속성 수집 (페이지 범위 필터링)
+        var resolved = collectResolved(doc, outputDir, rangePageCount, startPage, endPage);
         writeJson(outputDir + "/resolved.json", resolved);
 
-        // 4. PDF 프리뷰 (선택 — 실패해도 진행)
+        writeProgress(outputDir, "pdf", rangePageCount, rangePageCount);
+
+        // 4. PDF 프리뷰 (페이지 범위 적용)
         try {
             var pdfFile = File(outputDir + "/preview.pdf");
+            // 페이지 범위가 있으면 해당 범위만 PDF 내보내기
+            if (startPage >= 1 && endPage <= pageCount && rangePageCount < pageCount) {
+                app.pdfExportPreferences.pageRange = "" + startPage + "-" + endPage;
+            } else {
+                app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
+            }
             doc.exportFile(ExportFormat.PDF_TYPE, pdfFile);
         } catch (e) {
             // PDF 내보내기 실패는 무시
@@ -147,17 +170,54 @@ function main(args) {
 
 // --- resolved 속성 수집 ---
 
-function collectResolved(doc) {
+function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
+    writeProgress(outputDir, "resolved_styles", 0, rangePageCount);
+    var docInfo = collectDocumentInfo(doc);
+    var paraStyles = collectParagraphStyles(doc);
+    var charStyles = collectCharacterStyles(doc);
+    var colors = collectColors(doc);
+    var fonts = collectFonts(doc);
+
+    // 범위 내 페이지의 텍스트프레임에 연결된 스토리 ID 수집
+    var rangeStoryIds = {};
+    try {
+        var tfs = doc.textFrames.everyItem().getElements();
+        for (var ti = 0; ti < tfs.length; ti++) {
+            var tf = tfs[ti];
+            try {
+                var pp = tf.parentPage;
+                if (pp) {
+                    var pgIdx = pp.documentOffset + 1; // 1-based
+                    if (pgIdx >= startPage && pgIdx <= endPage) {
+                        try {
+                            rangeStoryIds[tf.parentStory.id.toString()] = true;
+                        } catch (e2) {}
+                    }
+                }
+            } catch (e) {}
+        }
+    } catch (e) {}
+
+    writeProgress(outputDir, "resolved_stories", 0, rangePageCount);
+    var stories = collectStories(doc, outputDir, rangePageCount, rangeStoryIds);
+
+    writeProgress(outputDir, "resolved_frames", 0, rangePageCount);
+    var textFrames = collectTextFrames(doc, startPage, endPage);
+
+    writeProgress(outputDir, "resolved_items", 0, rangePageCount);
+    var pages = collectPages(doc, startPage, endPage);
+    var pageItems = collectPageItems(doc, startPage, endPage);
+
     return {
-        documentInfo: collectDocumentInfo(doc),
-        paragraphStyles: collectParagraphStyles(doc),
-        characterStyles: collectCharacterStyles(doc),
-        colors: collectColors(doc),
-        fonts: collectFonts(doc),
-        stories: collectStories(doc),
-        textFrames: collectTextFrames(doc),
-        pages: collectPages(doc),
-        pageItems: collectPageItems(doc)
+        documentInfo: docInfo,
+        paragraphStyles: paraStyles,
+        characterStyles: charStyles,
+        colors: colors,
+        fonts: fonts,
+        stories: stories,
+        textFrames: textFrames,
+        pages: pages,
+        pageItems: pageItems
     };
 }
 
@@ -327,10 +387,20 @@ function collectFonts(doc) {
 
 // --- 스토리 수집 (문단 속성 + 런 확장 속성) ---
 
-function collectStories(doc) {
+function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
     var stories = [];
-    for (var s = 0; s < doc.stories.length; s++) {
+    var totalStories = doc.stories.length;
+    var collected = 0;
+    for (var s = 0; s < totalStories; s++) {
         var story = doc.stories[s];
+        // 페이지 범위 필터: 범위 내 프레임과 연결된 스토리만 수집
+        if (rangeStoryIds && !rangeStoryIds[story.id.toString()]) {
+            continue;
+        }
+        collected++;
+        if (collected % 10 === 0) {
+            writeProgress(outputDir, "resolved_stories", collected, totalStories);
+        }
         var storyData = {
             id: story.id.toString(),
             length: story.length,
@@ -465,12 +535,20 @@ function collectStories(doc) {
 
 // --- 텍스트 프레임 수집 (오버플로/줄 수) ---
 
-function collectTextFrames(doc) {
+function collectTextFrames(doc, startPage, endPage) {
     var frames = [];
     try {
         var tfs = doc.textFrames.everyItem().getElements();
         for (var i = 0; i < tfs.length; i++) {
             var tf = tfs[i];
+            // 페이지 범위 필터
+            try {
+                var pp = tf.parentPage;
+                if (pp) {
+                    var pgIdx = pp.documentOffset + 1;
+                    if (pgIdx < startPage || pgIdx > endPage) continue;
+                }
+            } catch (e) {}
             var fData = {
                 id: tf.id.toString(),
                 storyId: null,
@@ -535,9 +613,11 @@ function collectTextFrames(doc) {
 
 // --- 페이지 수집 ---
 
-function collectPages(doc) {
+function collectPages(doc, startPage, endPage) {
     var pages = [];
     for (var i = 0; i < doc.pages.length; i++) {
+        var pgIdx = i + 1; // 1-based
+        if (pgIdx < startPage || pgIdx > endPage) continue;
         var pg = doc.pages[i];
         var data = {
             index: i,
@@ -559,17 +639,30 @@ function collectPages(doc) {
 
 // --- 페이지 아이템 수집 (벡터/이미지/그룹 속성 평탄화) ---
 
-function collectPageItems(doc) {
+function collectPageItems(doc, startPage, endPage) {
     var items = [];
     var allItems = doc.allPageItems;
     for (var i = 0; i < allItems.length; i++) {
         var pi = allItems[i];
+
+        // 페이지 범위 필터
+        var piPageIdx = -1;
+        try {
+            var parentPage = pi.parentPage;
+            if (parentPage) piPageIdx = parentPage.documentOffset;
+        } catch (e) {}
+        // piPageIdx는 0-based, startPage/endPage는 1-based
+        if (piPageIdx >= 0) {
+            var pgIdx1 = piPageIdx + 1;
+            if (pgIdx1 < startPage || pgIdx1 > endPage) continue;
+        }
+
         var data = {
             id: pi.id.toString(),
             type: pi.constructor.name,
             name: null,
             parentId: null,
-            pageIndex: -1
+            pageIndex: piPageIdx
         };
 
         // 이름
@@ -582,12 +675,6 @@ function collectPageItems(doc) {
                 && pi.parent.constructor.name !== "MasterSpread") {
                 data.parentId = pi.parent.id.toString();
             }
-        } catch (e) {}
-
-        // 페이지 귀속
-        try {
-            var parentPage = pi.parentPage;
-            if (parentPage) data.pageIndex = parentPage.documentOffset;
         } catch (e) {}
 
         // 기하 — InDesign이 모든 변환 적용한 절대 좌표 (pt)
@@ -675,6 +762,15 @@ function writeJson(path, obj) {
     f.encoding = "UTF-8";
     f.open("w");
     f.write(JSON.stringify(obj, null, 2));
+    f.close();
+}
+
+function writeProgress(outputDir, step, current, total) {
+    var obj = { step: step, current: current, total: total };
+    var f = File(outputDir + "/.progress");
+    f.encoding = "UTF-8";
+    f.open("w");
+    f.write(JSON.stringify(obj));
     f.close();
 }
 

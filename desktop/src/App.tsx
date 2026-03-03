@@ -3,28 +3,27 @@ import { listen } from "@tauri-apps/api/event";
 import { FileSelector } from "./components/FileSelector";
 import { ASTTreePanel } from "./components/ASTTreePanel";
 import { ASTDetailPanel } from "./components/ASTDetailPanel";
+import { PdfPreviewPanel } from "./components/PdfPreviewPanel";
 import { ConversionPanel } from "./components/ConversionPanel";
+import { PageRangeModal } from "./components/PageRangeModal";
 import { PlaygroundPage } from "./components/PlaygroundPage";
 import { ExtractPage } from "./components/ExtractPage";
 import { useAppStore } from "./stores/useAppStore";
 
 type Tab = "playground" | "extract" | "converter";
+type RightPanel = "ast" | "pdf";
 
 function App() {
   const initJarPath = useAppStore((state) => state.initJarPath);
-  const selectFile = useAppStore((state) => state.selectFile);
   const selectInddFile = useAppStore((state) => state.selectInddFile);
   const selectHwpxFile = useAppStore((state) => state.selectHwpxFile);
+  const previewPdfPath = useAppStore((state) => state.previewPdfPath);
   const [showAbout, setShowAbout] = useState(false);
-  const [currentTab, setCurrentTab] = useState<Tab>("playground");
+  const [currentTab, setCurrentTab] = useState<Tab>("converter");
+  const [rightPanel, setRightPanel] = useState<RightPanel>("ast");
 
   useEffect(() => {
     initJarPath();
-
-    const unlistenOpenIdml = listen("menu-open-idml", () => {
-      setCurrentTab("converter");
-      selectFile();
-    });
 
     const unlistenOpenIndd = listen("menu-open-indd", () => {
       setCurrentTab("converter");
@@ -49,14 +48,13 @@ function App() {
     });
 
     return () => {
-      unlistenOpenIdml.then((f) => f());
       unlistenOpenIndd.then((f) => f());
       unlistenOpenHwpx.then((f) => f());
       unlistenAbout.then((f) => f());
       unlistenPlayground.then((f) => f());
       unlistenExtract.then((f) => f());
     };
-  }, [initJarPath, selectFile, selectInddFile, selectHwpxFile]);
+  }, [initJarPath, selectInddFile, selectHwpxFile]);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "playground", label: "Playground - 자동조판기" },
@@ -96,14 +94,47 @@ function App() {
             <div className="w-1/2 border-r overflow-hidden">
               <ASTTreePanel />
             </div>
-            <div className="w-1/2 overflow-hidden">
-              <ASTDetailPanel />
+            <div className="w-1/2 overflow-hidden flex flex-col">
+              {previewPdfPath && (
+                <div className="flex border-b bg-gray-50 shrink-0">
+                  <button
+                    onClick={() => setRightPanel("ast")}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      rightPanel === "ast"
+                        ? "text-blue-600 border-b-2 border-blue-500"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    AST 상세
+                  </button>
+                  <button
+                    onClick={() => setRightPanel("pdf")}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      rightPanel === "pdf"
+                        ? "text-blue-600 border-b-2 border-blue-500"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    원본 레이아웃
+                  </button>
+                </div>
+              )}
+              <div className="flex-1 min-h-0">
+                {rightPanel === "pdf" && previewPdfPath ? (
+                  <PdfPreviewPanel />
+                ) : (
+                  <ASTDetailPanel />
+                )}
+              </div>
             </div>
           </div>
 
           <ConversionPanel />
         </div>
       )}
+
+      {/* Page Range Modal */}
+      <PageRangeModal />
 
       {/* About Dialog */}
       {showAbout && (

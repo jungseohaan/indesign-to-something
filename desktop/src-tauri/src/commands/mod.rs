@@ -371,3 +371,29 @@ pub async fn read_resolved_json(path: String) -> Result<serde_json::Value, Strin
     serde_json::from_str(&content)
         .map_err(|e| format!("resolved.json 파싱 실패: {}", e))
 }
+
+/// InDesign 설치 여부 확인. 설치되어 있으면 앱 경로 반환.
+#[tauri::command]
+pub fn check_indesign() -> Result<String, String> {
+    crate::indesign::find_indesign_app()
+}
+
+/// 파일을 시스템 기본 앱으로 열기.
+#[tauri::command]
+pub fn open_file(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("파일 열기 실패: {}", e))?;
+    Ok(())
+}
+
+/// 바이너리 파일을 base64로 읽기 (PDF 프리뷰 등).
+#[tauri::command]
+pub async fn read_file_base64(path: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("파일 읽기 실패: {}", e))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}

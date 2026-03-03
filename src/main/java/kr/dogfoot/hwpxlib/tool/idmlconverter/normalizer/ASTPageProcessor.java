@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -53,7 +54,7 @@ class ASTPageProcessor {
 
         // 텍스트 프레임 처리
         processTextFrames(spread, page, pool, idmlDoc, colorResolver, imageLoader,
-                resolvedData, processedStories, doc, section);
+                resolvedData, resolvedPage, processedStories, doc, section);
 
         // 이미지 프레임 처리
         processImageFrames(spread, page, imageLoader, section);
@@ -99,7 +100,7 @@ class ASTPageProcessor {
     private static void processTextFrames(IDMLSpread spread, IDMLPage page,
                                            FlattenedObjectPool pool, IDMLDocument idmlDoc,
                                            ColorResolver colorResolver, ASTImageLoader imageLoader,
-                                           ResolvedData resolvedData,
+                                           ResolvedData resolvedData, ResolvedPage resolvedPage,
                                            Set<String> processedStories, ASTDocument doc,
                                            ASTSection section) {
         List<FlatObject> textFrames = pool.getTextFramesOnPage(page.pageNumber());
@@ -117,7 +118,8 @@ class ASTPageProcessor {
             boolean isLinkedContinuation = prevFrame != null && !prevFrame.isEmpty()
                     && !"n".equals(prevFrame) && !"null".equalsIgnoreCase(prevFrame);
             if (isLinkedContinuation) {
-                ASTTextFrameBlock emptyBlock = createTextFrameBlock(tf, page, fo.zOrder(), colorResolver);
+                ASTTextFrameBlock emptyBlock = createTextFrameBlock(tf, page, fo.zOrder(), colorResolver,
+                        resolvedData, resolvedPage);
                 if (emptyBlock != null) {
                     emptyBlock.storyId(storyId);
                     section.addBlock(emptyBlock);
@@ -133,7 +135,8 @@ class ASTPageProcessor {
             // 이미 처리된 스토리
             if (processedStories.contains(storyId)) {
                 if (hasFill && (story == null || story.isEmpty())) {
-                    ASTTextFrameBlock bgBlock = createTextFrameBlock(tf, page, fo.zOrder(), colorResolver);
+                    ASTTextFrameBlock bgBlock = createTextFrameBlock(tf, page, fo.zOrder(), colorResolver,
+                            resolvedData, resolvedPage);
                     if (bgBlock != null) {
                         bgBlock.storyId(storyId);
                         section.addBlock(bgBlock);
@@ -165,7 +168,8 @@ class ASTPageProcessor {
             doc.addStory(astStory);
 
             // 텍스트 프레임 블록 생성
-            ASTTextFrameBlock block = createTextFrameBlock(tf, page, fo.zOrder(), colorResolver);
+            ASTTextFrameBlock block = createTextFrameBlock(tf, page, fo.zOrder(), colorResolver,
+                    resolvedData, resolvedPage);
             if (block == null) continue;
             block.storyId(storyId);
 
@@ -651,7 +655,8 @@ class ASTPageProcessor {
      * 텍스트 프레임 블록 생성.
      */
     static ASTTextFrameBlock createTextFrameBlock(IDMLTextFrame tf, IDMLPage page,
-                                                    int zOrder, ColorResolver colorResolver) {
+                                                    int zOrder, ColorResolver colorResolver,
+                                                    ResolvedData resolvedData, ResolvedPage resolvedPage) {
         ASTTextFrameBlock block = new ASTTextFrameBlock();
         block.sourceId(tf.selfId());
 
