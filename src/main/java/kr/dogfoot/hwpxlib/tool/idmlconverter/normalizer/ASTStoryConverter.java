@@ -370,7 +370,26 @@ class ASTStoryConverter {
             }
             if (hasContent) break;
         }
-        if (!hasContent && inlineStory.tables().isEmpty()) return null;
+        if (!hasContent && inlineStory.tables().isEmpty()) {
+            // 채움색이 있는 시각 요소는 빈 콘텐츠여도 유지 (핑크 원 등)
+            double w0 = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
+            double h0 = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+            if (w0 > 0 && h0 > 0 && tf.fillColor() != null
+                    && !"Swatch/None".equals(tf.fillColor())) {
+                String fill = colorResolver.resolve(tf.fillColor());
+                if (fill != null) {
+                    ASTInlineObject spacer = new ASTInlineObject();
+                    spacer.kind(ASTInlineObject.ObjectKind.SPACER_RECT);
+                    spacer.sourceId(tf.selfId());
+                    spacer.width(CoordinateConverter.pointsToHwpunits(w0));
+                    spacer.height(CoordinateConverter.pointsToHwpunits(h0));
+                    spacer.fillColor(fill);
+                    spacer.fillTint(tf.fillTint());
+                    return spacer;
+                }
+            }
+            return null;
+        }
 
         ASTInlineObject obj = new ASTInlineObject();
         obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
@@ -380,6 +399,27 @@ class ASTStoryConverter {
         double h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
         obj.width(CoordinateConverter.pointsToHwpunits(w));
         obj.height(CoordinateConverter.pointsToHwpunits(h));
+
+        // 테두리/채우기/모서리 속성 전달 (ASTPageProcessor.createTextFrameBlock과 동일 패턴)
+        if (tf.strokeColor() != null) {
+            obj.strokeColor(colorResolver.resolve(tf.strokeColor()));
+        }
+        obj.strokeWeight(tf.strokeWeight());
+        obj.strokeTint(tf.strokeTint());
+        if (tf.fillColor() != null) {
+            obj.fillColor(colorResolver.resolve(tf.fillColor()));
+        }
+        obj.fillTint(tf.fillTint());
+        obj.cornerRadius(tf.cornerRadius());
+
+        // 내부 여백 전달
+        if (tf.insetSpacing() != null) {
+            double[] inset = tf.insetSpacing();
+            obj.textMarginTop(CoordinateConverter.pointsToHwpunits(inset[0]));
+            obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
+            obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
+            obj.textMarginRight(CoordinateConverter.pointsToHwpunits(inset[3]));
+        }
 
         // 인라인 스토리의 단락을 ASTParagraph로 변환 (큰 이미지는 별도 단락으로 분리)
         FlattenedObjectPool emptyPool = new FlattenedObjectPool();
@@ -455,8 +495,10 @@ class ASTStoryConverter {
             }
         }
         if (numText == null || denText == null) {
-            // 분수 스타일이지만 내용 없음 → 빈 답안 상자 (□)
-            if (hasFractionStyle) {
+            // 분수 스타일이지만 2단락 구조가 아닌 경우:
+            // - 내용 자체가 없으면 빈 답안 상자 (□)
+            // - 1단락에 텍스트가 있으면 분수가 아닌 일반 인라인 텍스트 → null 반환하여 일반 경로로 처리
+            if (hasFractionStyle && numText == null) {
                 return new ASTEquation("\u25A1", "ANSWER_BOX");
             }
             return null;

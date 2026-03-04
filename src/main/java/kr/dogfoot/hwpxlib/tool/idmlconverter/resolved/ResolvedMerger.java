@@ -319,8 +319,9 @@ public class ResolvedMerger {
             astRun.horizontalScale((short) Math.round(resRun.horizontalScale()));
         }
 
-        // underline
-        if (resRun.underline() != null) {
+        // underline — 장식 선(GraphicLine)에서 전파된 underline=true를
+        // resolved가 false로 덮어쓰지 않도록 보호
+        if (resRun.underline() != null && (resRun.underline() || !astRun.underline())) {
             astRun.underline(resRun.underline());
         }
 

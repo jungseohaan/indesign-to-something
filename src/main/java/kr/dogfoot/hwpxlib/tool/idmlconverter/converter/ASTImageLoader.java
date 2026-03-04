@@ -1,8 +1,10 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.imageinserter.DesignFileConverter;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
@@ -539,8 +541,8 @@ public class ASTImageLoader {
                 Color frameFillColor = resolveFrameFillColor(shape.fillColor());
                 if (frameFillColor != null) {
                     g.setClip(clipShape);
-                    float frameAlpha = alpha * (float) (shape.fillTint() / 100.0);
-                    g.setColor(withAlpha(frameFillColor, frameAlpha));
+                    Color tintedFrame = applyTint(frameFillColor, shape.fillTint());
+                    g.setColor(withAlpha(tintedFrame, alpha));
                     g.fill(clipShape);
                 }
             }
@@ -572,12 +574,12 @@ public class ASTImageLoader {
             awtShape = createAwtShape(renderTarget, scale);
         }
 
-        // 채우기
+        // 채우기 (tint는 색상 농도로 RGB에 적용, opacity만 alpha에 적용)
         if (actualFillHex != null && renderTarget.hasFill()) {
             Color fillColor = hexToColor(actualFillHex);
             if (fillColor != null) {
-                float fillAlpha = alpha * (float) (renderTarget.fillTint() / 100.0);
-                g.setColor(withAlpha(fillColor, fillAlpha));
+                Color tintedFill = applyTint(fillColor, renderTarget.fillTint());
+                g.setColor(withAlpha(tintedFill, alpha));
                 g.fill(awtShape);
             }
         }
@@ -586,8 +588,8 @@ public class ASTImageLoader {
         if (actualStrokeHex != null && renderTarget.hasStroke()) {
             Color strokeColor = hexToColor(actualStrokeHex);
             if (strokeColor != null) {
-                float strokeAlpha = alpha * (float) (renderTarget.strokeTint() / 100.0);
-                g.setColor(withAlpha(strokeColor, strokeAlpha));
+                Color tintedStroke = applyTint(strokeColor, renderTarget.strokeTint());
+                g.setColor(withAlpha(tintedStroke, alpha));
 
                 int cap = BasicStroke.CAP_BUTT;
                 int join = BasicStroke.JOIN_MITER;
@@ -624,6 +626,8 @@ public class ASTImageLoader {
             result.format = "png";
             result.pixelWidth = pixW;
             result.pixelHeight = pixH;
+            result.widthPts = wPts;
+            result.heightPts = hPts;
             return result;
         } catch (IOException e) {
             return null;
@@ -733,12 +737,12 @@ public class ASTImageLoader {
             }
             if (awtShape == null) continue;
 
-            // 채우기
+            // 채우기 (tint는 색상 농도로 RGB에 적용)
             if (sc.fillHex != null) {
                 Color fillColor = hexToColor(sc.fillHex);
                 if (fillColor != null) {
-                    float fillAlpha = (float) (sc.shape.fillTint() / 100.0);
-                    g.setColor(withAlpha(fillColor, fillAlpha));
+                    Color tintedFill = applyTint(fillColor, sc.shape.fillTint());
+                    g.setColor(tintedFill);
                     g.fill(awtShape);
                 }
             }
@@ -748,8 +752,8 @@ public class ASTImageLoader {
             if (sc.strokeHex != null && sc.shape.strokeWeight() > 0) {
                 Color strokeColor = hexToColor(sc.strokeHex);
                 if (strokeColor != null) {
-                    float strokeAlpha = (float) (sc.shape.strokeTint() / 100.0);
-                    g.setColor(withAlpha(strokeColor, strokeAlpha));
+                    Color tintedStroke = applyTint(strokeColor, sc.shape.strokeTint());
+                    g.setColor(tintedStroke);
                     float strokeW = (float) (sc.shape.strokeWeight() * scale);
                     g.setStroke(new BasicStroke(strokeW));
                     g.draw(awtShape);
@@ -961,20 +965,20 @@ public class ASTImageLoader {
                 Color frameFillColor = resolveFrameFillColor(shape.fillColor());
                 if (frameFillColor != null) {
                     g.setClip(transformedClip);
-                    float frameAlpha = alpha * (float) (shape.fillTint() / 100.0);
-                    g.setColor(withAlpha(frameFillColor, frameAlpha));
+                    Color tintedFrame = applyTint(frameFillColor, shape.fillTint());
+                    g.setColor(withAlpha(tintedFrame, alpha));
                     g.fill(transformedClip);
                 }
             }
             g.setClip(transformedClip);
         }
 
-        // 채우기
+        // 채우기 (tint는 색상 농도로 RGB에 적용, opacity만 alpha에 적용)
         if (actualFillHex != null && renderTarget.hasFill()) {
             Color fillColor = hexToColor(actualFillHex);
             if (fillColor != null) {
-                float fillAlpha = alpha * (float) (renderTarget.fillTint() / 100.0);
-                g.setColor(withAlpha(fillColor, fillAlpha));
+                Color tintedFill = applyTint(fillColor, renderTarget.fillTint());
+                g.setColor(withAlpha(tintedFill, alpha));
                 g.fill(transformedShape);
             }
         }
@@ -983,8 +987,8 @@ public class ASTImageLoader {
         if (actualStrokeHex != null && renderTarget.hasStroke()) {
             Color strokeColor = hexToColor(actualStrokeHex);
             if (strokeColor != null) {
-                float strokeAlpha = alpha * (float) (renderTarget.strokeTint() / 100.0);
-                g.setColor(withAlpha(strokeColor, strokeAlpha));
+                Color tintedStroke = applyTint(strokeColor, renderTarget.strokeTint());
+                g.setColor(withAlpha(tintedStroke, alpha));
 
                 int cap = BasicStroke.CAP_BUTT;
                 int join = BasicStroke.JOIN_MITER;
@@ -1088,8 +1092,8 @@ public class ASTImageLoader {
                 Color frameFillColor = hexToColor(fillHex);
                 if (frameFillColor != null) {
                     float frameAlpha = (float) (clipFrame.opacity() / 100.0);
-                    float frameFillAlpha = frameAlpha * (float) (clipFrame.fillTint() / 100.0);
-                    g.setColor(withAlpha(frameFillColor, frameFillAlpha));
+                    Color tintedFrame = applyTint(frameFillColor, clipFrame.fillTint());
+                    g.setColor(withAlpha(tintedFrame, frameAlpha));
                     g.fill(clipShape);
                 }
             }
@@ -1114,8 +1118,8 @@ public class ASTImageLoader {
                 String fillHex = colorResolver.resolve(fillRef);
                 Color fillColor = hexToColor(fillHex);
                 if (fillColor != null) {
-                    float fillAlpha = alpha * (float) (child.fillTint() / 100.0);
-                    g.setColor(withAlpha(fillColor, fillAlpha));
+                    Color tintedFill = applyTint(fillColor, child.fillTint());
+                    g.setColor(withAlpha(tintedFill, alpha));
                     g.fill(childShape);
                 }
             }
@@ -1126,8 +1130,8 @@ public class ASTImageLoader {
                 String strokeHex = colorResolver.resolve(strokeRef);
                 Color strokeColor = hexToColor(strokeHex);
                 if (strokeColor != null) {
-                    float strokeAlpha = alpha * (float) (child.strokeTint() / 100.0);
-                    g.setColor(withAlpha(strokeColor, strokeAlpha));
+                    Color tintedStroke = applyTint(strokeColor, child.strokeTint());
+                    g.setColor(withAlpha(tintedStroke, alpha));
 
                     int cap = BasicStroke.CAP_BUTT;
                     int join = BasicStroke.JOIN_MITER;
@@ -1298,6 +1302,307 @@ public class ASTImageLoader {
             return src;
         }
     }
+
+    // ==================== 다중 이미지 그룹 합성 래스터화 ====================
+
+    /**
+     * 다중 이미지/벡터 그룹의 모든 비-텍스트 자식을 하나의 캔버스에 합성 래스터화.
+     * 이미지(EPS/PSD)는 loadImage로 로드, 벡터 도형은 Java2D로 직접 렌더링.
+     *
+     * @param ig            루트 인라인 그래픽 (Group)
+     * @param colorResolver 색상 해석기
+     * @return 합성 래스터화 결과 (widthPts, heightPts 포함) 또는 실패 시 null
+     */
+    public ImageResult compositeGroupChildren(
+            IDMLCharacterRun.InlineGraphic ig,
+            ColorResolver colorResolver) {
+        // 1. 전체 비-텍스트 자식의 바운딩 박스 계산 (flip/rotation 포함)
+        double[] bounds = computeNonTextVisualBounds(ig, 0, 0);
+        if (bounds == null || bounds[0] >= bounds[2] || bounds[1] >= bounds[3]) {
+            return null;
+        }
+        double canvasLeft = bounds[0];
+        double canvasTop = bounds[1];
+        double canvasW = bounds[2] - bounds[0];
+        double canvasH = bounds[3] - bounds[1];
+
+        int targetDpi = options.imageDpi();
+        double scale = targetDpi / 72.0;
+        int pixW = Math.max(10, (int) Math.ceil(canvasW * scale));
+        int pixH = Math.max(10, (int) Math.ceil(canvasH * scale));
+
+        // 캔버스가 너무 크면 안전 제한
+        if (pixW > 4000 || pixH > 4000) {
+            double shrink = Math.min(4000.0 / pixW, 4000.0 / pixH);
+            scale *= shrink;
+            pixW = (int) Math.ceil(canvasW * scale);
+            pixH = (int) Math.ceil(canvasH * scale);
+        }
+
+        BufferedImage canvas = new BufferedImage(pixW, pixH, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = canvas.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                RenderingHints.VALUE_RENDER_QUALITY);
+
+        // 2. 자식을 z-order(리스트 순서)로 순회하며 렌더링
+        drawCompositeChildren(g, ig, colorResolver, canvasLeft, canvasTop, scale, 0, 0);
+
+        g.dispose();
+
+        try {
+            byte[] pngData = encodePng(canvas);
+            ImageResult result = new ImageResult();
+            result.imageData = pngData;
+            result.format = "png";
+            result.pixelWidth = pixW;
+            result.pixelHeight = pixH;
+            result.widthPts = canvasW;
+            result.heightPts = canvasH;
+            return result;
+        } catch (IOException e) {
+            System.err.println("[COMPOSITE] PNG encode failed: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 비-텍스트 자식의 그룹좌표 바운드 (flip/rotation 포함 4-corner 변환).
+     * @return [minX, minY, maxX, maxY] 그룹 좌표계 (points)
+     */
+    private double[] computeNonTextVisualBounds(
+            IDMLCharacterRun.InlineGraphic ig, double accTx, double accTy) {
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            double[] gb = child.geometricBounds();
+            double[] ct = child.itemTransform();
+            // gb=[0,0,0,0] (그룹 등 PathGeometry 없는 요소)는 건너뜀
+            // — zero-area 점이 바운드를 잘못 확장하는 것을 방지
+            if (gb != null && ct != null
+                    && (gb[0] != gb[2] || gb[1] != gb[3])) {
+                double[] aabb = transformBoundsAABB(gb, ct, accTx, accTy);
+                minX = Math.min(minX, aabb[0]);
+                minY = Math.min(minY, aabb[1]);
+                maxX = Math.max(maxX, aabb[2]);
+                maxY = Math.max(maxY, aabb[3]);
+            }
+            // 하위 그룹 재귀
+            double childAccTx = accTx + (ct != null ? ct[4] : 0);
+            double childAccTy = accTy + (ct != null ? ct[5] : 0);
+            double[] sub = computeNonTextVisualBounds(child, childAccTx, childAccTy);
+            if (sub != null && sub[0] < Double.MAX_VALUE) {
+                minX = Math.min(minX, sub[0]);
+                minY = Math.min(minY, sub[1]);
+                maxX = Math.max(maxX, sub[2]);
+                maxY = Math.max(maxY, sub[3]);
+            }
+        }
+
+        if (minX >= Double.MAX_VALUE) return null;
+        return new double[]{minX, minY, maxX, maxY};
+    }
+
+    /**
+     * geometricBounds [top,left,bottom,right]에 itemTransform + 누적 오프셋을 적용.
+     * @return [minX, minY, maxX, maxY]
+     */
+    private static double[] transformBoundsAABB(double[] gb, double[] ct,
+                                                 double accTx, double accTy) {
+        double a = ct[0], bv = ct[1], c = ct[2], d = ct[3];
+        double tx = ct[4] + accTx, ty = ct[5] + accTy;
+        // 단순 translation 최적화
+        if (a == 1 && bv == 0 && c == 0 && d == 1) {
+            return new double[]{gb[1] + tx, gb[0] + ty, gb[3] + tx, gb[2] + ty};
+        }
+        // 4 corners
+        double[] xs = {
+                a * gb[1] + c * gb[0] + tx, a * gb[3] + c * gb[0] + tx,
+                a * gb[1] + c * gb[2] + tx, a * gb[3] + c * gb[2] + tx};
+        double[] ys = {
+                bv * gb[1] + d * gb[0] + ty, bv * gb[3] + d * gb[0] + ty,
+                bv * gb[1] + d * gb[2] + ty, bv * gb[3] + d * gb[2] + ty};
+        double mnX = xs[0], mxX = xs[0], mnY = ys[0], mxY = ys[0];
+        for (int i = 1; i < 4; i++) {
+            if (xs[i] < mnX) mnX = xs[i];
+            if (xs[i] > mxX) mxX = xs[i];
+            if (ys[i] < mnY) mnY = ys[i];
+            if (ys[i] > mxY) mxY = ys[i];
+        }
+        return new double[]{mnX, mnY, mxX, mxY};
+    }
+
+    /**
+     * 그룹 내 자식을 재귀적으로 순회하며 캔버스에 렌더링.
+     */
+    private void drawCompositeChildren(Graphics2D g,
+                                        IDMLCharacterRun.InlineGraphic ig,
+                                        ColorResolver colorResolver,
+                                        double canvasLeft, double canvasTop,
+                                        double scale,
+                                        double accTx, double accTy) {
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            double[] ct = child.itemTransform();
+            double childTx = accTx + (ct != null ? ct[4] : 0);
+            double childTy = accTy + (ct != null ? ct[5] : 0);
+
+            if (child.hasImage()) {
+                drawCompositeImageChild(g, child, canvasLeft, canvasTop, scale, accTx, accTy);
+            } else if (child.hasVectorShape()) {
+                drawCompositeVectorChild(g, child, colorResolver, canvasLeft, canvasTop, scale, accTx, accTy);
+            }
+
+            // 하위 그룹 재귀
+            if (!child.childGraphics().isEmpty()) {
+                drawCompositeChildren(g, child, colorResolver, canvasLeft, canvasTop, scale,
+                        childTx, childTy);
+            }
+        }
+    }
+
+    /**
+     * 이미지 자식을 로드하여 합성 캔버스에 그린다.
+     */
+    private void drawCompositeImageChild(Graphics2D g,
+                                          IDMLCharacterRun.InlineGraphic child,
+                                          double canvasLeft, double canvasTop,
+                                          double scale,
+                                          double accTx, double accTy) {
+        double[] frameBounds = child.geometricBounds();
+        if (frameBounds == null) return;
+
+        double frameW = frameBounds[3] - frameBounds[1];
+        double frameH = frameBounds[2] - frameBounds[0];
+        if (frameW <= 0 || frameH <= 0) return;
+
+        long displayW = CoordinateConverter.pointsToHwpunits(frameW);
+        long displayH = CoordinateConverter.pointsToHwpunits(frameH);
+
+        // 이미지 로드 (클리핑 적용됨)
+        ImageResult loaded = loadImage(child.linkResourceURI(),
+                displayW, displayH,
+                child.imageTransform(), frameBounds, child.graphicBounds());
+        if (loaded == null || loaded.imageData == null || loaded.isPlaceholder) return;
+
+        try {
+            BufferedImage childImg = ImageIO.read(new ByteArrayInputStream(loaded.imageData));
+            if (childImg == null) return;
+
+            // 프레임의 그룹 좌표 위치 계산
+            double[] ct = child.itemTransform();
+            double[] aabb = transformBoundsAABB(frameBounds, ct, accTx, accTy);
+            double destX = (aabb[0] - canvasLeft) * scale;
+            double destY = (aabb[1] - canvasTop) * scale;
+            double destW = (aabb[2] - aabb[0]) * scale;
+            double destH = (aabb[3] - aabb[1]) * scale;
+
+            boolean flipH = ct != null && ct[0] < 0;
+            boolean flipV = ct != null && ct[3] < 0;
+
+            if (flipH || flipV) {
+                AffineTransform at = new AffineTransform();
+                at.translate(destX, destY);
+                if (flipH) {
+                    at.translate(destW, 0);
+                    at.scale(-1, 1);
+                }
+                if (flipV) {
+                    at.translate(0, destH);
+                    at.scale(1, -1);
+                }
+                at.scale(destW / childImg.getWidth(), destH / childImg.getHeight());
+                g.drawImage(childImg, at, null);
+            } else {
+                g.drawImage(childImg,
+                        (int) Math.round(destX), (int) Math.round(destY),
+                        (int) Math.round(destW), (int) Math.round(destH), null);
+            }
+        } catch (IOException e) {
+            System.err.println("[COMPOSITE] drawImageChild failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 벡터 도형 자식을 합성 캔버스에 그린다 (fill/stroke).
+     * FillColor 미지정 + FillTint > 0 → Paper(흰색) 기본값 사용.
+     */
+    private void drawCompositeVectorChild(Graphics2D g,
+                                           IDMLCharacterRun.InlineGraphic child,
+                                           ColorResolver colorResolver,
+                                           double canvasLeft, double canvasTop,
+                                           double scale,
+                                           double accTx, double accTy) {
+        IDMLVectorShape shape = child.vectorShape();
+        if (shape == null) return;
+
+        String fillRef = shape.fillColor();
+        String strokeRef = shape.strokeColor();
+        String fillHex = resolveColor(fillRef, colorResolver);
+        String strokeHex = resolveColor(strokeRef, colorResolver);
+
+        // FillTint만 있고 FillColor 없는 경우 → Paper(흰색) 기본값
+        if (fillHex == null && shape.fillTint() > 0 && shape.fillTint() < 100) {
+            fillHex = "#FFFFFF";
+        }
+
+        if (fillHex == null && strokeHex == null) return;
+
+        // 누적 변환 계산
+        double[] ct = child.itemTransform();
+        double[] accTransform = null;
+        if (ct != null) {
+            accTransform = new double[]{ct[0], ct[1], ct[2], ct[3],
+                    ct[4] + accTx, ct[5] + accTy};
+        }
+
+        Shape awtShape;
+        if (accTransform != null &&
+                (accTransform[0] != 1 || accTransform[1] != 0 ||
+                        accTransform[2] != 0 || accTransform[3] != 1)) {
+            awtShape = buildTransformedPath(shape, accTransform, scale, canvasLeft, canvasTop);
+        } else {
+            double[] gb = shape.geometricBounds();
+            if (gb == null) return;
+            double offX = gb[1] + (accTransform != null ? accTransform[4] : accTx) - canvasLeft;
+            double offY = gb[0] + (accTransform != null ? accTransform[5] : accTy) - canvasTop;
+            awtShape = buildPathFromPoints(shape, scale, offX, offY);
+        }
+        if (awtShape == null) return;
+
+        if (fillHex != null) {
+            Color fillColor = hexToColor(fillHex);
+            if (fillColor != null) {
+                Color tintedFill = applyTint(fillColor, shape.fillTint());
+                g.setColor(tintedFill);
+                g.fill(awtShape);
+            }
+        }
+        if (strokeHex != null && shape.strokeWeight() > 0) {
+            Color strokeColor = hexToColor(strokeHex);
+            if (strokeColor != null) {
+                Color tintedStroke = applyTint(strokeColor, shape.strokeTint());
+                g.setColor(tintedStroke);
+                float strokeW = (float) (shape.strokeWeight() * scale);
+                g.setStroke(new BasicStroke(strokeW));
+                g.draw(awtShape);
+            }
+        }
+    }
+
+    /**
+     * 색상 참조를 hex 문자열로 변환. "None"/null이면 null 반환.
+     */
+    private static String resolveColor(String colorRef, ColorResolver colorResolver) {
+        if (colorRef == null || "None".equals(colorRef) || colorRef.contains("[None]")) return null;
+        String hex = colorResolver.resolve(colorRef);
+        return (hex != null && !hex.isEmpty()) ? hex : null;
+    }
+
+    // ==================== 끝: 다중 이미지 그룹 합성 ====================
 
     /**
      * GradientFeather 알파 마스크를 이미지에 적용 (비회전 버전).
@@ -1652,6 +1957,22 @@ public class ASTImageLoader {
     private static Color withAlpha(Color c, float alpha) {
         int a = Math.max(0, Math.min(255, Math.round(alpha * 255)));
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), a);
+    }
+
+    /**
+     * tint를 RGB에 적용 (흰색 블렌딩). tint=100→원색, tint=0→흰색.
+     * InDesign의 tint는 투명도(alpha)가 아닌 색상 농도로, 흰색(Paper)과 블렌딩하여 연한 색을 만든다.
+     */
+    private static Color applyTint(Color c, double tint) {
+        if (tint >= 100) return c;
+        double f = tint / 100.0;
+        int r = (int) Math.round(255 + (c.getRed() - 255) * f);
+        int g = (int) Math.round(255 + (c.getGreen() - 255) * f);
+        int b = (int) Math.round(255 + (c.getBlue() - 255) * f);
+        return new Color(
+                Math.max(0, Math.min(255, r)),
+                Math.max(0, Math.min(255, g)),
+                Math.max(0, Math.min(255, b)));
     }
 
     /**

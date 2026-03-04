@@ -66,6 +66,20 @@ public class FlattenedObjectPool {
     }
 
     /**
+     * 지정 페이지에서 특정 그룹에 속한 텍스트 프레임이 있는지 확인.
+     */
+    public boolean hasTextFramesInGroup(int pageNumber, String groupId) {
+        for (FlatObject obj : orderedList) {
+            if (obj.pageNumber() == pageNumber
+                    && obj.contentType() == FlatObject.ContentType.TEXT_FRAME
+                    && groupId.equals(obj.parentGroupId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 인라인으로 분류된 객체 중, 지정 스토리에 앵커된 것만 반환.
      */
     public List<FlatObject> getInlinesForStory(String storyId) {

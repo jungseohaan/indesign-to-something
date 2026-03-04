@@ -28,7 +28,7 @@ class ASTInlineObjectBuilder {
                                         ASTImageLoader imageLoader,
                                         GroupBackground bg) {
         collectChildTextFramesInternal(ig, para, null, idmlDoc, colorResolver, imageLoader, bg,
-                false, 0, 0, 0, 0, 0, 0, 0, 0);
+                false, 0, 0, 0, 0, 0, 0, 0, 0, null);
     }
 
     /**
@@ -43,43 +43,52 @@ class ASTInlineObjectBuilder {
                                       ColorResolver colorResolver,
                                       ASTImageLoader imageLoader,
                                       GroupBackground bg) {
-        // 이미지 프레임을 찾고 그룹 내 위치 계산
-        IDMLCharacterRun.InlineGraphic imageFrame = findImageFrame(ig);
-        double[] imgPos = ASTOverlayBuilder.findImagePositionInGroup(ig, imageFrame);
-
-        // 콘텐츠 바운딩 박스: 이미지 프레임 + 텍스트 프레임만 (배경 사각형 등 장식용 그래픽 제외)
-        double[] contentBBox = ASTOverlayBuilder.computeContentBounds(ig, imgPos);
-        double rootLeft = contentBBox[0];   // minX
-        double rootTop = contentBBox[1];    // minY
-        double contentWidthPts = contentBBox[2] - contentBBox[0];
-        double contentHeightPts = contentBBox[3] - contentBBox[1];
-
-        long containerW, containerH, imgOffX, imgOffY;
-        if (imgPos != null && imgPos[2] > 0 && imgPos[3] > 0
-                && contentWidthPts > 0 && contentHeightPts > 0) {
-            double imgFrameWPts = imgPos[2];
-            double imgFrameHPts = imgPos[3];
-            containerW = Math.round((double) imageObj.width() * contentWidthPts / imgFrameWPts);
-            containerH = Math.round((double) imageObj.height() * contentHeightPts / imgFrameHPts);
-            double imgOffXPts = imgPos[0] - rootLeft;
-            double imgOffYPts = imgPos[1] - rootTop;
-            imgOffX = Math.round((double) containerW * imgOffXPts / contentWidthPts);
-            imgOffY = Math.round((double) containerH * imgOffYPts / contentHeightPts);
+        double[] canvasBounds;
+        if (countImageChildren(ig) >= 2) {
+            // 합성 이미지 그룹: 비-텍스트 자식의 바운드 (합성 캔버스와 동일)
+            canvasBounds = ASTOverlayBuilder.computeNonTextVisualBounds(ig);
         } else {
-            containerW = imageObj.width();
-            containerH = imageObj.height();
-            imgOffX = 0;
-            imgOffY = 0;
+            // 단일 이미지: 이미지 프레임의 그룹 내 위치
+            IDMLCharacterRun.InlineGraphic imageFrame = findImageFrame(ig);
+            double[] imgPos = ASTOverlayBuilder.findImagePositionInGroup(ig, imageFrame);
+            if (imgPos != null) {
+                canvasBounds = new double[]{imgPos[0], imgPos[1],
+                        imgPos[0] + imgPos[2], imgPos[1] + imgPos[3]};
+            } else {
+                canvasBounds = null;
+            }
         }
 
-        imageObj.containerWidth(containerW);
-        imageObj.containerHeight(containerH);
-        imageObj.imageOffsetX(imgOffX);
-        imageObj.imageOffsetY(imgOffY);
+        if (canvasBounds == null || canvasBounds[0] >= canvasBounds[2]
+                || canvasBounds[1] >= canvasBounds[3]) {
+            // 폴백: contentBounds 사용
+            double[] imgPos;
+            if (countImageChildren(ig) >= 2) {
+                double[] vb = ASTOverlayBuilder.computeGroupVisualBounds(ig);
+                imgPos = new double[]{vb[0], vb[1], vb[2] - vb[0], vb[3] - vb[1]};
+            } else {
+                imgPos = null;
+            }
+            double[] contentBBox = ASTOverlayBuilder.computeContentBounds(ig, imgPos);
+            canvasBounds = contentBBox;
+        }
+
+        double rootLeft = canvasBounds[0];
+        double rootTop = canvasBounds[1];
+        double canvasWidthPts = canvasBounds[2] - canvasBounds[0];
+        double canvasHeightPts = canvasBounds[3] - canvasBounds[1];
+
+        if (canvasWidthPts <= 0 || canvasHeightPts <= 0) return;
+
+        // 오버레이 위치는 이미지 기준 — 컨테이너 확장 불필요
+        imageObj.containerWidth(imageObj.width());
+        imageObj.containerHeight(imageObj.height());
+        imageObj.imageOffsetX(0);
+        imageObj.imageOffsetY(0);
 
         collectChildTextFramesInternal(ig, null, imageObj, idmlDoc, colorResolver, imageLoader, bg,
-                true, containerW, containerH,
-                contentWidthPts, contentHeightPts, rootLeft, rootTop, 0, 0);
+                true, imageObj.width(), imageObj.height(),
+                canvasWidthPts, canvasHeightPts, rootLeft, rootTop, 0, 0, ig);
     }
 
     /**
@@ -101,7 +110,8 @@ class ASTInlineObjectBuilder {
                                                          double rootLeft,
                                                          double rootTop,
                                                          double accTx,
-                                                         double accTy) {
+                                                         double accTy,
+                                                         IDMLCharacterRun.InlineGraphic rootGroup) {
         for (IDMLTextFrame childTf : ig.childTextFrames()) {
             // 수식 폰트 전용 TextFrame 건너뛰기 (괄호/중괄호 장식 — HWPX에서 표현 불가)
             if (isMathFontOnlyStory(childTf, idmlDoc)) continue;
@@ -115,7 +125,7 @@ class ASTInlineObjectBuilder {
                 if (bg != null && childObj.fillColor() == null) {
                     childObj.fillColor(bg.fillHex);
                     childObj.fillTint(bg.fillTint);
-                    if (bg.strokeHex != null) {
+                    if (bg.strokeHex != null && childObj.strokeColor() == null) {
                         childObj.strokeColor(bg.strokeHex);
                         childObj.strokeWeight(bg.strokeWeight);
                         childObj.strokeTint(bg.strokeTint);
@@ -131,11 +141,24 @@ class ASTInlineObjectBuilder {
 
                 if (isOverlay && targetImageObj != null) {
                     // 오버레이 모드: 부모 이미지 내 상대 위치 계산 후 이미지 객체에 첨부
-                    ASTOverlayBuilder.applyOverlayPosition(childObj, childTf, accTx, accTy,
+                    ASTOverlayBuilder.applyOverlayPosition(childObj, childTf, rootGroup, accTx, accTy,
                             imageDisplayWidth, imageDisplayHeight,
                             groupWidthPts, groupHeightPts, rootLeft, rootTop);
                     targetImageObj.addOverlayFrame(childObj);
                 } else {
+                    // 자식 TextFrame의 누적 위치 오프셋이 유의미하면 플로팅 배치
+                    double totalTx = accTx;
+                    double totalTy = accTy;
+                    double[] childTransform = childTf.itemTransform();
+                    if (childTransform != null) {
+                        totalTx += childTransform[4];
+                        totalTy += childTransform[5];
+                    }
+                    if (Math.abs(totalTx) > 5 || Math.abs(totalTy) > 5) {
+                        childObj.isOverlay(true);
+                        childObj.overlayX(CoordinateConverter.pointsToHwpunits(totalTx));
+                        childObj.overlayY(CoordinateConverter.pointsToHwpunits(totalTy));
+                    }
                     para.addItem(childObj);
                 }
             }
@@ -153,7 +176,7 @@ class ASTInlineObjectBuilder {
             collectChildTextFramesInternal(childIg, para, targetImageObj, idmlDoc, colorResolver, imageLoader, bg,
                     isOverlay, imageDisplayWidth, imageDisplayHeight,
                     groupWidthPts, groupHeightPts, rootLeft, rootTop,
-                    childAccTx, childAccTy);
+                    childAccTx, childAccTy, rootGroup);
         }
     }
 
@@ -221,7 +244,31 @@ class ASTInlineObjectBuilder {
                 }
             }
         }
-        // 2. 폴백: Group 자체의 FillColor 확인 (자식 사각형 없이 그룹에 직접 fill이 설정된 경우)
+        // 2. stroke-only 배경 사각형 감지 (fill 없이 테두리만 있는 경우)
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            if (child.hasVectorShape()) {
+                IDMLVectorShape shape = child.vectorShape();
+                String sHex = resolveColorHex(shape.strokeColor(), colorResolver);
+                if (sHex != null && shape.strokeWeight() > 0) {
+                    GroupBackground bg = new GroupBackground();
+                    bg.strokeHex = blendColorWithWhite(sHex, shape.strokeTint() / 100.0);
+                    bg.strokeWeight = shape.strokeWeight();
+                    bg.strokeTint = 100;
+                    bg.cornerRadius = shape.cornerRadius();
+                    double[] gb = child.geometricBounds();
+                    double[] ct = child.itemTransform();
+                    if (gb != null && ct != null) {
+                        bg.bgLeft = gb[1] + ct[4];
+                        bg.bgTop = gb[0] + ct[5];
+                        bg.bgRight = gb[3] + ct[4];
+                        bg.bgBottom = gb[2] + ct[5];
+                        bg.hasBounds = true;
+                    }
+                    return bg;
+                }
+            }
+        }
+        // 3. 폴백: Group 자체의 FillColor 확인 (자식 사각형 없이 그룹에 직접 fill이 설정된 경우)
         String groupFillHex = resolveColorHex(ig.groupFillColor(), colorResolver);
         if (groupFillHex != null) {
             GroupBackground bg = new GroupBackground();
@@ -333,6 +380,34 @@ class ASTInlineObjectBuilder {
         obj.width(w);
         obj.height(h);
 
+        // 다중 이미지 그룹 (2+개 이미지 자식) → 합성 래스터화
+        int imageChildCount = countImageChildren(ig);
+        if (imageChildCount >= 2 && imageLoader != null) {
+            ASTImageLoader.ImageResult compositeResult =
+                    imageLoader.compositeGroupChildren(ig, colorResolver);
+            if (compositeResult != null && compositeResult.imageData != null) {
+                obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+                obj.imageData(compositeResult.imageData);
+                obj.imageFormat(compositeResult.format);
+                obj.pixelWidth(compositeResult.pixelWidth);
+                obj.pixelHeight(compositeResult.pixelHeight);
+                if (compositeResult.widthPts > 0 && compositeResult.heightPts > 0) {
+                    obj.width(CoordinateConverter.pointsToHwpunits(compositeResult.widthPts));
+                    obj.height(CoordinateConverter.pointsToHwpunits(compositeResult.heightPts));
+                }
+                // 앵커/래핑 속성 복사
+                obj.anchoredPosition(ig.anchoredPosition());
+                obj.textWrapMode(ig.textWrapMode());
+                obj.textWrapSide(ig.textWrapSide());
+                obj.textWrapTop(CoordinateConverter.pointsToHwpunits(ig.textWrapTop()));
+                obj.textWrapLeft(CoordinateConverter.pointsToHwpunits(ig.textWrapLeft()));
+                obj.textWrapBottom(CoordinateConverter.pointsToHwpunits(ig.textWrapBottom()));
+                obj.textWrapRight(CoordinateConverter.pointsToHwpunits(ig.textWrapRight()));
+                return obj;
+            }
+            // 합성 실패 시 기존 단일 이미지 경로로 폴백
+        }
+
         // 이미지 링크가 있거나, 자식에 이미지가 있으면 IMAGE로 처리
         IDMLCharacterRun.InlineGraphic imageFrame = findImageFrame(ig);
         boolean hasDirectImage = ig.hasImage();
@@ -387,8 +462,9 @@ class ASTInlineObjectBuilder {
                 obj.pixelHeight(result.pixelHeight);
             }
         } else if (ig.hasVectorShape() && imageLoader != null) {
-            // 벡터 도형 (글리프 아웃라인 등) → PNG 래스터화
             IDMLVectorShape shape = ig.vectorShape();
+
+            // 벡터 도형 (글리프 아웃라인 등) → PNG 래스터화
             String fillHex = resolveColorHex(shape.fillColor(), colorResolver);
             String strokeHex = resolveColorHex(shape.strokeColor(), colorResolver);
 
@@ -400,6 +476,11 @@ class ASTInlineObjectBuilder {
                     obj.imageFormat(result.format);
                     obj.pixelWidth(result.pixelWidth);
                     obj.pixelHeight(result.pixelHeight);
+                    // 래스터화된 실제 크기 반영 (GraphicLine 등 한 축이 0인 도형)
+                    if (result.widthPts > 0 && result.heightPts > 0) {
+                        obj.width(CoordinateConverter.pointsToHwpunits(result.widthPts));
+                        obj.height(CoordinateConverter.pointsToHwpunits(result.heightPts));
+                    }
                 } else {
                     obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
                 }
@@ -426,6 +507,22 @@ class ASTInlineObjectBuilder {
                 } else {
                     obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
                 }
+            } else if (hasChildTextFrames && countLeafChildren(ig) >= 5) {
+                // 복잡 그룹 (리프 ≥5 + 텍스트) → 이미지+벡터 합성, 텍스트는 오버레이
+                obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+                ASTImageLoader.ImageResult result = imageLoader.compositeGroupChildren(ig, colorResolver);
+                if (result != null && result.imageData != null) {
+                    obj.imageData(result.imageData);
+                    obj.imageFormat(result.format);
+                    obj.pixelWidth(result.pixelWidth);
+                    obj.pixelHeight(result.pixelHeight);
+                    if (result.widthPts > 0 && result.heightPts > 0) {
+                        obj.width(CoordinateConverter.pointsToHwpunits(result.widthPts));
+                        obj.height(CoordinateConverter.pointsToHwpunits(result.heightPts));
+                    }
+                } else {
+                    obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
+                }
             } else {
                 obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
             }
@@ -443,6 +540,20 @@ class ASTInlineObjectBuilder {
         obj.textWrapRight(CoordinateConverter.pointsToHwpunits(ig.textWrapRight()));
 
         return obj;
+    }
+
+    /**
+     * 인라인 그래픽 그룹의 리프 자식 수를 재귀적으로 센다.
+     * 벡터 도형 + 텍스트 프레임 합산. 복잡도 판별에 사용.
+     */
+    static int countLeafChildren(IDMLCharacterRun.InlineGraphic ig) {
+        int count = 0;
+        if (ig.hasVectorShape()) count++;
+        count += ig.childTextFrames().size();
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            count += countLeafChildren(child);
+        }
+        return count;
     }
 
     /**
@@ -556,6 +667,21 @@ class ASTInlineObjectBuilder {
             }
         }
         return best;
+    }
+
+    /**
+     * 인라인 그래픽 계층에서 이미지를 포함하는 자식 프레임의 수를 재귀적으로 세기.
+     * 2+개이면 다중 이미지 그룹으로 합성 래스터화 대상.
+     */
+    static int countImageChildren(IDMLCharacterRun.InlineGraphic ig) {
+        int count = 0;
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            if (child.hasImage() && child.childGraphics().isEmpty()) {
+                count++;
+            }
+            count += countImageChildren(child);
+        }
+        return count;
     }
 
     /**

@@ -77,24 +77,10 @@ class ASTMathFlushHelper {
         }
 
         if (!fractions.isEmpty()) {
-            if (hasIndentToHere && !isNP) {
-                // Indent to Here가 있는 경우 (BT만): 첫 번째 \uFFFC에서 줄바꿈 분할
-                int firstFffc = script.indexOf('\uFFFC');
-                String beforeFrac = script.substring(0, firstFffc).replace("\uFFFC", "").trim();
-                String afterFrac = script.substring(firstFffc);
-
-                lastEq.hwpScript(beforeFrac);
-                para.addItem(new ASTBreak(ASTBreak.BreakType.LINE));
-
-                String fracLine = replaceFffcWithFractions(afterFrac, fractions);
-                if (!fracLine.isEmpty()) {
-                    para.addItem(new ASTEquation(fracLine, "FRACTION_FRAME"));
-                }
-            } else {
-                // 인라인으로 분수 통합 (줄바꿈 없음)
-                String merged = replaceFffcWithFractions(script, fractions);
-                lastEq.hwpScript(merged);
-            }
+            // 인라인으로 분수 통합 (줄바꿈 없음)
+            // Indent to Here (ACE 7)는 줄 자동 줄바꿈 시 들여쓰기 위치 지정이므로 강제 줄바꿈 안 함
+            String merged = replaceFffcWithFractions(script, fractions);
+            lastEq.hwpScript(merged);
         } else {
             // 분수 없이 \uFFFC만 있는 경우 → 제거
             lastEq.hwpScript(script.replace("\uFFFC", ""));

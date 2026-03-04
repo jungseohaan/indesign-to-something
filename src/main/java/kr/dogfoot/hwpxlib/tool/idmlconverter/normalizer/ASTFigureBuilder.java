@@ -336,17 +336,17 @@ class ASTFigureBuilder {
                                                          ASTImageLoader imageLoader,
                                                          String fillHex, String strokeHex) {
         double[] gb = ri.geometricBounds();
-        double[] pb = resolvedPage.bounds();
 
         double rW = gb[3] - gb[1];
         double rH = gb[2] - gb[0];
         if (rW <= 0 || rH <= 0) return null;
 
-        double rLeft = gb[1] - pb[1];
-        double rTop = gb[0] - pb[0];
+        double[] rel = resolvedPage.toPageRelative(gb);
+        double rLeft = rel[0];
+        double rTop = rel[1];
 
-        double pageW = pb[3] - pb[1];
-        double pageH = pb[2] - pb[0];
+        double pageW = resolvedPage.width();
+        double pageH = resolvedPage.height();
 
         long wHwp = CoordinateConverter.pointsToHwpunits(rW);
         long hHwp = CoordinateConverter.pointsToHwpunits(rH);
@@ -504,14 +504,13 @@ class ASTFigureBuilder {
                                                                 ColorResolver colorResolver,
                                                                 String clipFillHex) {
         double[] gb = ri.geometricBounds();
-        double[] pb = resolvedPage.bounds();
 
         double rW = gb[3] - gb[1];
         double rH = gb[2] - gb[0];
         if (rW <= 0 || rH <= 0) return null;
 
-        double pageW = pb[3] - pb[1];
-        double pageH = pb[2] - pb[0];
+        double pageW = resolvedPage.width();
+        double pageH = resolvedPage.height();
 
         double[] clipBounds = clipFrame.geometricBounds();
         double clipTop = clipBounds[0], clipLeft = clipBounds[1];
@@ -557,8 +556,9 @@ class ASTFigureBuilder {
 
         double offsetFracX = (clipW > 0) ? (eLeft - clipLeft) / clipW : 0;
         double offsetFracY = (clipH > 0) ? (eTop - clipTop) / clipH : 0;
-        double rLeft = gb[1] - pb[1] + rW * offsetFracX;
-        double rTop = gb[0] - pb[0] + rH * offsetFracY;
+        double[] rel = resolvedPage.toPageRelative(gb);
+        double rLeft = rel[0] + rW * offsetFracX;
+        double rTop = rel[1] + rH * offsetFracY;
 
         long wHwp = CoordinateConverter.pointsToHwpunits(adjW);
         long hHwp = CoordinateConverter.pointsToHwpunits(adjH);
@@ -617,37 +617,27 @@ class ASTFigureBuilder {
         });
 
         List<ASTImageLoader.ShapeWithColor> swcList = new ArrayList<>();
-        int skippedCount = 0;
         for (IDMLVectorShape s : sorted) {
             String fillHex = ASTInlineObjectBuilder.resolveColorHex(s.fillColor(), colorResolver);
             String strokeHex = ASTInlineObjectBuilder.resolveColorHex(s.strokeColor(), colorResolver);
             // resolved data 폴백: IDML 색상이 없으면 InDesign DOM의 색상 이름으로 시도
             if (fillHex == null && strokeHex == null && resolvedData != null && s.selfId() != null) {
                 ResolvedPageItem ri = resolvedData.getPageItemByIdmlId(s.selfId());
-                System.err.println("[VEC-GRP-COLOR] shape=" + s.selfId()
-                        + " idmlFill=" + s.fillColor() + " idmlStroke=" + s.strokeColor()
-                        + " resolvedItem=" + (ri != null ? "found(type=" + ri.type()
-                            + " fill=" + ri.fillColorName() + " stroke=" + ri.strokeColorName() + ")" : "null"));
                 if (ri != null) {
                     if (ri.fillColorName() != null) {
                         fillHex = resolvedData.resolveColorHex(ri.fillColorName());
-                        System.err.println("[VEC-GRP-COLOR]   fillName=" + ri.fillColorName() + " → hex=" + fillHex);
                     }
                     if (ri.strokeColorName() != null) {
                         strokeHex = resolvedData.resolveColorHex(ri.strokeColorName());
-                        System.err.println("[VEC-GRP-COLOR]   strokeName=" + ri.strokeColorName() + " → hex=" + strokeHex);
                     }
                 }
             }
             if (fillHex == null && strokeHex == null) {
-                skippedCount++;
                 continue;
             }
             swcList.add(new ASTImageLoader.ShapeWithColor(s, fillHex, strokeHex, s.itemTransform()));
         }
         if (swcList.isEmpty()) {
-            System.err.println("[VEC-GRP-EMPTY] group=" + shapes.get(0).parentGroupId()
-                    + " totalShapes=" + shapes.size() + " allSkipped=" + skippedCount);
             return null;
         }
 
@@ -667,7 +657,9 @@ class ASTFigureBuilder {
         double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
         for (ASTImageLoader.ShapeWithColor sc : swcList) {
             double[] tb = sc.transformedBounds();
-            if (tb == null) continue;
+            if (tb == null) {
+                continue;
+            }
             if (tb[1] < minX) minX = tb[1];
             if (tb[0] < minY) minY = tb[0];
             if (tb[3] > maxX) maxX = tb[3];

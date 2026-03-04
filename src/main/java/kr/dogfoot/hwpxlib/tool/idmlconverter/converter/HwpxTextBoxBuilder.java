@@ -209,17 +209,18 @@ class HwpxTextBoxBuilder {
     }
 
     /**
-     * 글상자 배경색 설정
+     * 글상자 배경색 설정.
+     * fillTint는 색상 농도(흰색 블렌딩)로 처리하고, alpha=0(불투명)으로 설정.
      */
     void setupTextBoxFillBrush(Rectangle rect, String fillColor, double fillTint) {
         if (fillColor != null && fillColor.startsWith("#")) {
-            float alpha = (float) ((100.0 - fillTint) / 100.0);
+            String tinted = blendColorWithWhite(fillColor, fillTint / 100.0);
             rect.createFillBrush();
             rect.fillBrush().createWinBrush();
             rect.fillBrush().winBrush()
-                    .faceColorAnd(fillColor)
+                    .faceColorAnd(tinted)
                     .hatchColorAnd("#000000")
-                    .alphaAnd(alpha);
+                    .alphaAnd(0f);
         }
     }
 
@@ -687,16 +688,16 @@ class HwpxTextBoxBuilder {
         bf.createDiagonal();
         bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
 
-        // 배경 채우기 (fillTint: 100=불투명, 0=투명 → alpha: 0=불투명, 1=투명)
+        // 배경 채우기 (fillTint는 색상 농도로 RGB에 적용, 불투명 처리)
         String fill = block.fillColor();
         if (fill != null && fill.startsWith("#")) {
-            float alpha = (float) ((100.0 - block.fillTint()) / 100.0);
+            String tinted = blendColorWithWhite(fill, block.fillTint() / 100.0);
             bf.createFillBrush();
             bf.fillBrush().createWinBrush();
             bf.fillBrush().winBrush()
-                    .faceColorAnd(fill)
+                    .faceColorAnd(tinted)
                     .hatchColorAnd("#FF000000")
-                    .alphaAnd(alpha);
+                    .alphaAnd(0f);
         }
 
         return bfId;
@@ -911,84 +912,34 @@ class HwpxTextBoxBuilder {
         Run run = anchorPara.addNewRun();
         run.charPrIDRef("0");
 
-        Rectangle rect = run.addNewRectangle();
-        String shapeId = ASTToHwpxConverter.nextShapeId();
+        // hp:tbl (1x1 table) — 한글에서 hp:rect의 IN_FRONT_OF_TEXT가
+        // 이미지 위에 올바르게 렌더링되지 않으므로 hp:tbl 사용
+        Table table = run.addNewTable();
+        String tableId = ASTToHwpxConverter.nextShapeId();
 
-        rect.idAnd(shapeId)
-                .zOrderAnd(10)
-                .numberingTypeAnd(NumberingType.PICTURE)
+        table.idAnd(tableId)
+                .zOrderAnd(1000)
+                .numberingTypeAnd(NumberingType.TABLE)
                 .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
                 .dropcapstyleAnd(resolveDropCapStyle(obj.paragraphs()));
 
-        rect.hrefAnd("");
-        rect.groupLevelAnd((short) 0);
-        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
-        rect.createOffset();
-        rect.offset().set(0L, 0L);
-        rect.createOrgSz();
-        rect.orgSz().set(w, h);
-        rect.createCurSz();
-        rect.curSz().set(w, 0L);
-        rect.createFlip();
-        rect.flip().horizontalAnd(false).verticalAnd(false);
-        rect.createRotationInfo();
-        rect.rotationInfo().angleAnd((short) 0)
-                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
-        rect.createRenderingInfo();
-        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        table.pageBreakAnd(TablePageBreak.CELL)
+                .repeatHeaderAnd(false)
+                .rowCntAnd((short) 1)
+                .colCntAnd((short) 1)
+                .cellSpacingAnd(0)
+                .borderFillIDRefAnd("1")
+                .noAdjustAnd(false);
 
-        // 테두리/배경
-        setupTextBoxLineShape(rect, obj.strokeColor(), obj.strokeWeight(), "Solid", obj.strokeTint());
-        setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());
-
-        // DrawText
-        rect.createDrawText();
-        DrawText dt = rect.drawText();
-        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
-        dt.createTextMargin();
-        dt.textMargin().leftAnd(obj.textMarginLeft()).rightAnd(obj.textMarginRight())
-                .topAnd(obj.textMarginTop()).bottomAnd(obj.textMarginBottom());
-
-        dt.createSubList();
-        SubList subList = dt.subList();
-        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
-                .lineWrapAnd(LineWrapMethod.BREAK)
-                .vertAlignAnd(VerticalAlign2.TOP)
-                .linkListIDRefAnd("0").linkListNextIDRefAnd("0")
-                .textWidthAnd(0).textHeightAnd(0)
-                .hasTextRefAnd(false).hasNumRefAnd(false);
-
-        for (ASTParagraph astPara : obj.paragraphs()) {
-            paragraphBuilder.addParagraphToSubList(subList, astPara);
-        }
-        if (subList.countOfPara() == 0) {
-            paragraphBuilder.addEmptySubListPara(subList);
-        }
-
-        // Rectangle 꼭짓점
-        rect.ratioAnd(computeCornerRatio(obj.cornerRadius(), w, h));
-        rect.createPt0();
-        rect.pt0().set(0L, 0L);
-        rect.createPt1();
-        rect.pt1().set(w, 0L);
-        rect.createPt2();
-        rect.pt2().set(w, h);
-        rect.createPt3();
-        rect.pt3().set(0L, h);
-
-        // ShapeSize
-        rect.createSZ();
-        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+        table.createSZ();
+        table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
                 .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
-        // ShapePosition — PAPER 기준 절대 좌표
-        rect.createPos();
-        rect.pos().treatAsCharAnd(false)
+        table.createPos();
+        table.pos().treatAsCharAnd(false)
                 .affectLSpacingAnd(false)
                 .flowWithTextAnd(false)
                 .allowOverlapAnd(true)
@@ -1000,8 +951,107 @@ class HwpxTextBoxBuilder {
                 .vertOffsetAnd(pageY)
                 .horzOffset(pageX);
 
-        rect.createOutMargin();
-        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        table.createOutMargin();
+        table.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        table.createInMargin();
+        table.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        // 1행 1열 셀
+        Tr tr = table.addNewTr();
+        Tc tc = tr.addNewTc();
+
+        String cellBfId = createOverlayBorderFill(obj);
+
+        tc.nameAnd("")
+                .headerAnd(false)
+                .hasMarginAnd(true)
+                .protectAnd(false)
+                .editableAnd(true)
+                .dirtyAnd(false)
+                .borderFillIDRefAnd(cellBfId);
+
+        tc.createCellAddr();
+        tc.cellAddr().colAddrAnd((short) 0).rowAddrAnd((short) 0);
+        tc.createCellSpan();
+        tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
+        tc.createCellSz();
+        tc.cellSz().widthAnd(w).heightAnd(h);
+        tc.createCellMargin();
+        tc.cellMargin().leftAnd(obj.textMarginLeft()).rightAnd(obj.textMarginRight())
+                .topAnd(obj.textMarginTop()).bottomAnd(obj.textMarginBottom());
+
+        tc.createSubList();
+        SubList subList = tc.subList();
+        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
+                .lineWrapAnd(LineWrapMethod.BREAK)
+                .vertAlignAnd(VerticalAlign2.TOP)
+                .linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+
+        for (ASTParagraph astPara : obj.paragraphs()) {
+            paragraphBuilder.addParagraphToSubList(subList, astPara);
+        }
+        if (subList.countOfPara() == 0) {
+            paragraphBuilder.addEmptySubListPara(subList);
+        }
+    }
+
+    /**
+     * 오버레이 ASTInlineObject의 fill/stroke를 반영하는 BorderFill을 생성한다.
+     */
+    private String createOverlayBorderFill(ASTInlineObject obj) {
+        String bfId = String.valueOf(ctx.borderFillIdCounter.getAndIncrement());
+        BorderFill bf = ctx.hwpxFile.headerXMLFile().refList().borderFills().addNew();
+
+        bf.idAnd(bfId)
+                .threeDAnd(false)
+                .shadowAnd(false)
+                .centerLineAnd(CenterLineSort.NONE)
+                .breakCellSeparateLine(false);
+
+        bf.createSlash();
+        bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+        bf.createBackSlash();
+        bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+
+        // 테두리
+        String stroke = obj.strokeColor();
+        boolean hasStroke = stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0;
+
+        LineType2 lineType = LineType2.NONE;
+        LineWidth lineWidth = LineWidth.MM_0_1;
+        String borderColor = "#000000";
+
+        if (hasStroke) {
+            lineType = LineType2.SOLID;
+            lineWidth = HwpxParagraphBuilder.hwpunitToLineWidth((long) Math.round(obj.strokeWeight()));
+            borderColor = stroke;
+        }
+
+        bf.createLeftBorder();
+        bf.leftBorder().typeAnd(lineType).widthAnd(lineWidth).color(borderColor);
+        bf.createRightBorder();
+        bf.rightBorder().typeAnd(lineType).widthAnd(lineWidth).color(borderColor);
+        bf.createTopBorder();
+        bf.topBorder().typeAnd(lineType).widthAnd(lineWidth).color(borderColor);
+        bf.createBottomBorder();
+        bf.bottomBorder().typeAnd(lineType).widthAnd(lineWidth).color(borderColor);
+
+        bf.createDiagonal();
+        bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+
+        // 배경 채우기 (fillTint는 색상 농도로 RGB에 적용, 불투명 처리)
+        String fill = obj.fillColor();
+        if (fill != null && fill.startsWith("#")) {
+            String tinted = blendColorWithWhite(fill, obj.fillTint() / 100.0);
+            bf.createFillBrush();
+            bf.fillBrush().createWinBrush();
+            bf.fillBrush().winBrush()
+                    .faceColorAnd(tinted)
+                    .hatchColorAnd("#FF000000")
+                    .alphaAnd(0f);
+        }
+
+        return bfId;
     }
 
     // ── 스페이서 인라인 사각형 (빈 인라인 Rectangle, 글자 취급) ──
@@ -1059,19 +1109,33 @@ class HwpxTextBoxBuilder {
                 .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
-        // ShapePosition — 글자처럼 취급 (인라인)
+        // ShapePosition
         pic.createPos();
-        pic.pos().treatAsCharAnd(true)
-                .affectLSpacingAnd(true)
-                .flowWithTextAnd(true)
-                .allowOverlapAnd(false)
-                .holdAnchorAndSOAnd(false)
-                .vertRelToAnd(VertRelTo.PARA)
-                .horzRelToAnd(HorzRelTo.PARA)
-                .vertAlignAnd(VertAlign.BOTTOM)
-                .horzAlignAnd(HorzAlign.LEFT)
-                .vertOffsetAnd(0L)
-                .horzOffset(0L);
+        if (obj.isOverlay()) {
+            pic.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(true)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(obj.overlayY())
+                    .horzOffset(obj.overlayX());
+        } else {
+            pic.pos().treatAsCharAnd(true)
+                    .affectLSpacingAnd(true)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.BOTTOM)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(0L)
+                    .horzOffset(0L);
+        }
 
         pic.createOutMargin();
         pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
@@ -1158,5 +1222,28 @@ class HwpxTextBoxBuilder {
         long cornerHwp = Math.round(cornerRadiusPts * 100); // 1pt = 100 HWPUNIT
         short ratio = (short) Math.min(50, Math.round(cornerHwp * 100.0 / minSide));
         return ratio > 0 ? ratio : 1;
+    }
+
+    /**
+     * 색상 hex를 fraction 비율로 흰색과 블렌딩.
+     * fraction=1.0 → 원래 색상, fraction=0.0 → 흰색.
+     */
+    private static String blendColorWithWhite(String hex, double fraction) {
+        if (hex == null || !hex.startsWith("#") || hex.length() < 7) return hex;
+        try {
+            int rgb = Integer.parseInt(hex.substring(1, 7), 16);
+            int r = (rgb >> 16) & 0xFF;
+            int g = (rgb >> 8) & 0xFF;
+            int b = rgb & 0xFF;
+            r = (int) Math.round(255 + (r - 255) * fraction);
+            g = (int) Math.round(255 + (g - 255) * fraction);
+            b = (int) Math.round(255 + (b - 255) * fraction);
+            return String.format("#%02X%02X%02X",
+                    Math.max(0, Math.min(255, r)),
+                    Math.max(0, Math.min(255, g)),
+                    Math.max(0, Math.min(255, b)));
+        } catch (Exception e) {
+            return hex;
+        }
     }
 }

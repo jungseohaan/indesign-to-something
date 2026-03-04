@@ -158,7 +158,7 @@ class ASTMathGrouper {
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c == '_' || c == '^' || c == '&' || c == '\\') return true;
-            if ("+-*/=<>()[]{}|".indexOf(c) >= 0) hasOperator = true;
+            if ("+-*/=<>|".indexOf(c) >= 0) hasOperator = true;
             if (Character.isLetterOrDigit(c)) hasLetterOrDigit = true;
         }
         // BT 키워드

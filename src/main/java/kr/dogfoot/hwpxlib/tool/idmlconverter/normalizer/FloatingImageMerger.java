@@ -73,7 +73,7 @@ public class FloatingImageMerger {
         // narrowedWidth 적용
         for (Map.Entry<ASTTextFrameBlock, Long> e : frameNarrowedRight.entrySet()) {
             long nw = e.getValue() - e.getKey().x();
-            if (nw > 0) {
+            if (nw > 0 && nw < e.getKey().width()) {
                 e.getKey().narrowedWidth(nw);
             }
         }

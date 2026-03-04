@@ -226,7 +226,7 @@ public class BTFontEquationConverter {
         boolean hasDigit = false;
         for (int i = 0; i < raw.length(); i++) {
             char c = raw.charAt(i);
-            if ("+-*/=<>()[]{}|!".indexOf(c) >= 0) hasOperator = true;
+            if ("+-*/=<>|!".indexOf(c) >= 0) hasOperator = true;
             if (Character.isLetter(c)) hasLetter = true;
             if (Character.isDigit(c)) hasDigit = true;
         }

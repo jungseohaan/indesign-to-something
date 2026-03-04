@@ -100,7 +100,13 @@ class ASTRunConverter {
                         // FFFC 이전 (또는 세그먼트 끝) 텍스트 추가
                         if (j > start) {
                             String part = seg.substring(start, j);
-                            para.addItem(createTextRun(run, part, parentPara, idmlDoc, colorResolver));
+                            ASTTextRun textRun = createTextRun(run, part, parentPara, idmlDoc, colorResolver);
+                            // 장식 선(GraphicLine)의 stroke 색상 → underline으로 전파
+                            if (para.pendingUnderlineColor() != null && !textRun.underline()) {
+                                textRun.underline(true);
+                                textRun.underlineColor(para.pendingUnderlineColor());
+                            }
+                            para.addItem(textRun);
                         }
                         // FFFC 위치에 인라인 항목 삽입 (앵커 모드 또는 레거시 모드)
                         if (j < seg.length()) {
@@ -191,6 +197,17 @@ class ASTRunConverter {
                     && (inlineObj.imageData() == null || inlineObj.imageData().length == 0);
             if (!isEmptyWrapper) {
                 para.addItem(inlineObj);
+            } else if (ig.hasVectorShape()
+                    && ig.vectorShape().shapeType() == IDMLVectorShape.ShapeType.GRAPHIC_LINE) {
+                // 수평 장식 선 → stroke 색상을 후속 텍스트 런에 underline으로 전파
+                IDMLVectorShape shape = ig.vectorShape();
+                String strokeHex = ASTInlineObjectBuilder.resolveColorHex(
+                        shape.strokeColor(), colorResolver);
+                if (strokeHex != null) {
+                    double tint = shape.strokeTint() / 100.0;
+                    String blended = ASTInlineObjectBuilder.blendColorWithWhite(strokeHex, tint);
+                    para.pendingUnderlineColor(blended);
+                }
             }
             // IMAGE로 처리된 Group 중 자식 텍스트프레임이 없는 경우만 스킵
             // 자식 텍스트프레임이 있으면 이미지와 함께 텍스트도 추출 (약도+교통편 등)
@@ -422,6 +439,12 @@ class ASTRunConverter {
         textRun.superscript(run.isSuperscript());
         textRun.grepMathFont(run.grepMathFont());
         textRun.underline(Boolean.TRUE.equals(underline));
+        // 밑줄 틴트가 있으면 Black을 틴트 비율로 흰색과 블렌딩하여 밑줄 색상 계산
+        if (Boolean.TRUE.equals(underline) && run.underlineTint() != null) {
+            double tint = run.underlineTint() / 100.0;
+            int gray = (int) Math.round(255 * (1.0 - tint));
+            textRun.underlineColor(String.format("#%02X%02X%02X", gray, gray, gray));
+        }
         textRun.strikeThrough(Boolean.TRUE.equals(strikeThrough));
 
         return textRun;

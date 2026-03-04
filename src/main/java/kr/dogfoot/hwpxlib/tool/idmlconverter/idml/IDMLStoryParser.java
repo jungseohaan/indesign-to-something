@@ -512,6 +512,10 @@ class IDMLStoryParser {
         // 밑줄 / 취소선
         String underline = getAttrOrNull(charRange, "Underline");
         if ("true".equalsIgnoreCase(underline)) run.underline(true);
+        String underlineTint = getAttrOrNull(charRange, "UnderlineTint");
+        if (underlineTint != null) {
+            try { run.underlineTint(Double.parseDouble(underlineTint)); } catch (NumberFormatException ignored) {}
+        }
         String strikeThru = getAttrOrNull(charRange, "StrikeThru");
         if ("true".equalsIgnoreCase(strikeThru)) run.strikeThrough(true);
 

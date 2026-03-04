@@ -191,8 +191,8 @@ class HwpxParagraphBuilder {
                 ASTEquation eq = (ASTEquation) item;
                 String script = eq.hwpScript();
                 if (script != null && script.contains(" over ")) {
-                    // addEquationRun과 동일한 높이 추정 (baseUnit * 3.5)
-                    long estH = (long) (1100 * 3.5);  // 3850 HWPUNIT
+                    // 분수 높이 추정: 분자(1) + 분수선(0.2) + 분모(1) + 여유(0.6) = 2.8배
+                    long estH = (long) (1100 * 2.8);  // 3080 HWPUNIT
                     if (estH > max) max = estH;
                 }
             }
@@ -514,6 +514,7 @@ class HwpxParagraphBuilder {
                 + "|" + textRun.superscript()
                 + "|" + textRun.subscript()
                 + "|" + textRun.underline()
+                + "|" + (textRun.underlineColor() != null ? textRun.underlineColor() : "")
                 + "|" + textRun.strikeThrough();
     }
 
@@ -536,7 +537,9 @@ class HwpxParagraphBuilder {
                 fontStyle.contains("italic"),
                 textRun.superscript(), textRun.subscript(),
                 textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
-                textRun.underline() ? textColor : "#000000",
+                textRun.underline()
+                        ? (textRun.underlineColor() != null ? textRun.underlineColor() : textColor)
+                        : "#000000",
                 textRun.horizontalScale(),
                 textRun.strikeThrough(),
                 textRun.verticalScale(),
@@ -615,7 +618,7 @@ class HwpxParagraphBuilder {
             long estW = (long) (script.length() * baseUnit * 0.7);
             // 분수(over) 수식은 분자+분수선+분모로 높이가 크므로 별도 추정
             boolean hasFraction = script.contains(" over ");
-            long estH = hasFraction ? (long) (baseUnit * 3.5) : (long) (baseUnit * 1.4);
+            long estH = hasFraction ? (long) (baseUnit * 2.8) : (long) (baseUnit * 1.4);
             hwpxEq.createSZ();
             hwpxEq.sz().widthAnd(estW).widthRelToAnd(WidthRelTo.ABSOLUTE)
                     .heightAnd(estH).heightRelToAnd(HeightRelTo.ABSOLUTE)

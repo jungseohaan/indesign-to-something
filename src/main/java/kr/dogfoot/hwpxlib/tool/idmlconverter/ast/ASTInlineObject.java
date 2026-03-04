@@ -59,6 +59,11 @@ public class ASTInlineObject extends ASTInlineItem {
     private long imageOffsetX;
     private long imageOffsetY;
 
+    // 배경 그래픽 중앙 정렬용 델타 (HWPUNIT)
+    // IDML 그룹 내 텍스트프레임 중심 → 감싸는 배경 그래픽 중심 이동량
+    private long overlayCenterDeltaX;
+    private long overlayCenterDeltaY;
+
     // resolved.json에서 가져온 페이지 기준 절대 좌표 (HWPUNIT)
     // 설정된 경우 IDML transform 계산 대신 이 좌표를 사용
     private long resolvedPageX = -1;  // -1 = 미설정
@@ -165,6 +170,12 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public long overlayParentHeight() { return overlayParentHeight; }
     public void overlayParentHeight(long v) { this.overlayParentHeight = v; }
+
+    public long overlayCenterDeltaX() { return overlayCenterDeltaX; }
+    public void overlayCenterDeltaX(long v) { this.overlayCenterDeltaX = v; }
+
+    public long overlayCenterDeltaY() { return overlayCenterDeltaY; }
+    public void overlayCenterDeltaY(long v) { this.overlayCenterDeltaY = v; }
 
     public long containerWidth() { return containerWidth; }
     public void containerWidth(long v) { this.containerWidth = v; }

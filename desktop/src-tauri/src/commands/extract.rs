@@ -99,11 +99,11 @@ pub async fn extract_indd(
     // 3. ExtendScript 경로 찾기
     let jsx_path = crate::indesign::find_extendscript(&app)?;
 
-    // 4. 추출 실행 (120초 타임아웃)
+    // 4. 추출 실행 (300초 타임아웃 — PDF 내보내기가 대용량 문서에서 오래 걸릴 수 있음)
     let sp = start_page.unwrap_or(0);
     let ep = end_page.unwrap_or(0);
     let result = tokio::time::timeout(
-        Duration::from_secs(120),
+        Duration::from_secs(300),
         crate::indesign::run_extraction(
             &app,
             &indd_path,
@@ -118,7 +118,7 @@ pub async fn extract_indd(
     .map_err(|_| {
         // 타임아웃 시 임시 디렉토리 정리
         let _ = std::fs::remove_dir_all(&output_dir);
-        "InDesign 추출 시간 초과 (120초). InDesign이 응답하지 않습니다.".to_string()
+        "InDesign 추출 시간 초과 (300초). InDesign이 응답하지 않습니다.".to_string()
     })?
     .map_err(|e| {
         // 추출 실패 시 임시 디렉토리 정리

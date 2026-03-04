@@ -42,9 +42,7 @@ class HwpxImageBuilder {
         boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
         String wrapMode = obj.textWrapMode();
         boolean idmlWrapping = isAnchored && wrapMode != null && !"None".equals(wrapMode);
-        // 크기 기반 폴백: IDML 래핑 속성이 없지만 이미지가 큰 경우 자리차지로 전환
-        boolean sizeFallback = !idmlWrapping && displayH > INLINE_IMAGE_HEIGHT_THRESHOLD;
-        boolean useWrapping = idmlWrapping || sizeFallback;
+        boolean useWrapping = idmlWrapping;
 
         // TextWrapMethod / TextFlowSide 결정
         TextWrapMethod twm;
@@ -52,9 +50,6 @@ class HwpxImageBuilder {
         if (idmlWrapping) {
             twm = mapTextWrapMethod(wrapMode);
             tfs = mapTextFlowSide(obj.textWrapSide());
-        } else if (sizeFallback) {
-            twm = TextWrapMethod.TOP_AND_BOTTOM;
-            tfs = TextFlowSide.BOTH_SIDES;
         } else {
             twm = TextWrapMethod.TOP_AND_BOTTOM;
             tfs = TextFlowSide.BOTH_SIDES;
@@ -209,18 +204,20 @@ class HwpxImageBuilder {
         boolean useResolved = hasResolvedOverlays(obj);
 
         if (useResolved) {
-            // ── resolved 경로: 이미지 자체 크기, 오버레이는 절대 좌표 ──
+            // ── resolved 경로: 이미지 자체 크기, 오버레이는 절대 좌표 + 센터링 델타 ──
             addInlinePicture(para, itemId, imgW, imgH,
                     imgW, imgH, 0, 0, clipW, clipH);
 
             for (ASTInlineObject overlay : obj.overlayFrames()) {
                 if (overlay.resolvedPageX() < 0 || overlay.resolvedPageY() < 0) continue;
-                HwpxConverterContext.DeferredOverlay d = new HwpxConverterContext.DeferredOverlay();
-                d.overlay = overlay;
-                d.pageX = overlay.resolvedPageX();
-                d.pageY = overlay.resolvedPageY();
                 if (overlay.resolvedWidth() > 0) overlay.width(overlay.resolvedWidth());
                 if (overlay.resolvedHeight() > 0) overlay.height(overlay.resolvedHeight());
+
+                HwpxConverterContext.DeferredOverlay d = new HwpxConverterContext.DeferredOverlay();
+                d.overlay = overlay;
+                // resolved 절대 좌표를 직접 사용 (InDesign DOM의 정확한 위치)
+                d.pageX = overlay.resolvedPageX();
+                d.pageY = overlay.resolvedPageY();
                 ctx.deferredOverlays.add(d);
             }
         } else {
@@ -650,11 +647,15 @@ class HwpxImageBuilder {
         if (pixW > 2000) pixW = 2000;
         if (pixH > 2000) pixH = 2000;
 
-        // 색상 파싱
-        int r = Integer.parseInt(fillColor.substring(1, 3), 16);
-        int g = Integer.parseInt(fillColor.substring(3, 5), 16);
-        int b = Integer.parseInt(fillColor.substring(5, 7), 16);
-        float alpha = (float) (block.fillTint() / 100.0);
+        // 색상 파싱 + tint 적용 (흰색 블렌딩으로 색상 농도 조절, 불투명 유지)
+        int rgb = Integer.parseInt(fillColor.substring(1, 7), 16);
+        double fraction = block.fillTint() / 100.0;
+        int r = (int) Math.round(255 + (((rgb >> 16) & 0xFF) - 255) * fraction);
+        int g = (int) Math.round(255 + (((rgb >> 8) & 0xFF) - 255) * fraction);
+        int b = (int) Math.round(255 + ((rgb & 0xFF) - 255) * fraction);
+        r = Math.max(0, Math.min(255, r));
+        g = Math.max(0, Math.min(255, g));
+        b = Math.max(0, Math.min(255, b));
 
         // 폴리곤 래스터화 — 페이지 상대 HWPUNIT 좌표를 캔버스 픽셀로 매핑
         // 캔버스는 block의 클리핑된 영역 [x, y, w, h]에 대응
@@ -674,7 +675,7 @@ class HwpxImageBuilder {
         }
         path.closePath();
 
-        g2.setColor(new java.awt.Color(r, g, b, Math.round(alpha * 255)));
+        g2.setColor(new java.awt.Color(r, g, b));
         g2.fill(path);
         g2.dispose();
 

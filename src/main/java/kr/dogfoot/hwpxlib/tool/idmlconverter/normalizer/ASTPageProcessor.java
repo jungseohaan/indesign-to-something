@@ -60,7 +60,8 @@ class ASTPageProcessor {
         processImageFrames(spread, page, imageLoader, section);
 
         // 벡터 도형 처리
-        processVectorShapes(spread, page, imageLoader, colorResolver, resolvedData, resolvedPage, section);
+        processVectorShapes(spread, page, imageLoader,
+                colorResolver, resolvedData, resolvedPage, section);
 
         // 여백 가이드라인
         if (imageLoader != null) {
@@ -227,6 +228,12 @@ class ASTPageProcessor {
         imageFigures.forEach(section::addBlock);
     }
 
+    // ── 복잡 벡터 그룹 사전 스캔 ──────────────────────────────────────
+
+    /**
+     * 벡터 도형 그룹 중 복잡한 것(벡터 ≥3 + 같은 그룹 텍스트 프레임 존재)을 찾아
+     * 해당 그룹 ID를 반환. 텍스트 프레임 처리에서 이 그룹의 TF를 건너뛰기 위함.
+     */
     // ── 벡터 도형 ──────────────────────────────────────
 
     private static void processVectorShapes(IDMLSpread spread, IDMLPage page,
@@ -663,53 +670,90 @@ class ASTPageProcessor {
         double rotation = IDMLGeometry.extractRotation(tf.itemTransform());
         boolean hasRotation = Math.abs(rotation) > 0.5;
 
-        double w, h;
         long xHwp, yHwp, wHwp, hHwp;
 
-        if (hasRotation) {
-            w = IDMLGeometry.scaledWidth(tf.geometricBounds(), tf.itemTransform());
-            h = IDMLGeometry.scaledHeight(tf.geometricBounds(), tf.itemTransform());
-            wHwp = CoordinateConverter.pointsToHwpunits(w);
-            hHwp = CoordinateConverter.pointsToHwpunits(h);
-            double[] relCenter = IDMLGeometry.pageRelativeCenter(
-                    tf.geometricBounds(), tf.itemTransform(),
-                    page.geometricBounds(), page.itemTransform());
-            xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
-            yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
-        } else {
-            double[] relPos = IDMLGeometry.pageRelativePosition(
-                    tf.geometricBounds(), tf.itemTransform(),
-                    page.geometricBounds(), page.itemTransform());
-            w = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
-            h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
-            xHwp = CoordinateConverter.pointsToHwpunits(relPos[0]);
-            yHwp = CoordinateConverter.pointsToHwpunits(relPos[1]);
-            wHwp = CoordinateConverter.pointsToHwpunits(w);
-            hHwp = CoordinateConverter.pointsToHwpunits(h);
-        }
+        // --- resolved.json 좌표 우선, IDML 폴백 ---
+        boolean resolvedApplied = false;
+        if (!hasRotation && resolvedData != null && resolvedPage != null
+                && resolvedPage.bounds() != null && tf.selfId() != null) {
+            ResolvedPageItem ri = resolvedData.getPageItemByIdmlId(tf.selfId());
+            if (ri != null && ri.geometricBounds() != null) {
+                double[] gb = ri.geometricBounds();
+                double rW = gb[3] - gb[1];
+                double rH = gb[2] - gb[0];
+                if (rW > 0 && rH > 0) {
+                    double[] rel = resolvedPage.toPageRelative(gb);
+                    xHwp = CoordinateConverter.pointsToHwpunits(rel[0]);
+                    yHwp = CoordinateConverter.pointsToHwpunits(rel[1]);
+                    wHwp = CoordinateConverter.pointsToHwpunits(rW);
+                    hHwp = CoordinateConverter.pointsToHwpunits(rH);
 
-        // 페이지 경계 클리핑
-        if (!hasRotation) {
-            long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
-            long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-            if (xHwp < 0) { wHwp += xHwp; xHwp = 0; }
-            if (yHwp < 0) { hHwp += yHwp; yHwp = 0; }
-            if (xHwp + wHwp > pageW) { wHwp = pageW - xHwp; }
-            if (yHwp + hHwp > pageH) { hHwp = pageH - yHwp; }
-            if (wHwp <= 0 || hHwp <= 0) {
-                System.err.println("[CLIP-SKIP] TextFrame id=" + tf.selfId()
-                        + " clipped to w=" + wHwp + " h=" + hHwp
-                        + " w_orig=" + CoordinateConverter.pointsToHwpunits(w)
-                        + " h_orig=" + CoordinateConverter.pointsToHwpunits(h)
-                        + " pageW=" + pageW + " pageH=" + pageH);
-                return null;
+                    // 페이지 경계 클리핑
+                    long pageW = CoordinateConverter.pointsToHwpunits(resolvedPage.width());
+                    long pageH = CoordinateConverter.pointsToHwpunits(resolvedPage.height());
+                    if (xHwp < 0) { wHwp += xHwp; xHwp = 0; }
+                    if (yHwp < 0) { hHwp += yHwp; yHwp = 0; }
+                    if (xHwp + wHwp > pageW) { wHwp = pageW - xHwp; }
+                    if (yHwp + hHwp > pageH) { hHwp = pageH - yHwp; }
+                    if (wHwp > 0 && hHwp > 0) {
+                        block.x(xHwp);
+                        block.y(yHwp);
+                        block.width(wHwp);
+                        block.height(hHwp);
+                        resolvedApplied = true;
+                    }
+                }
             }
         }
 
-        block.x(xHwp);
-        block.y(yHwp);
-        block.width(wHwp);
-        block.height(hHwp);
+        if (!resolvedApplied) {
+            double w, h;
+            if (hasRotation) {
+                w = IDMLGeometry.scaledWidth(tf.geometricBounds(), tf.itemTransform());
+                h = IDMLGeometry.scaledHeight(tf.geometricBounds(), tf.itemTransform());
+                wHwp = CoordinateConverter.pointsToHwpunits(w);
+                hHwp = CoordinateConverter.pointsToHwpunits(h);
+                double[] relCenter = IDMLGeometry.pageRelativeCenter(
+                        tf.geometricBounds(), tf.itemTransform(),
+                        page.geometricBounds(), page.itemTransform());
+                xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
+                yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
+            } else {
+                double[] relPos = IDMLGeometry.pageRelativePosition(
+                        tf.geometricBounds(), tf.itemTransform(),
+                        page.geometricBounds(), page.itemTransform());
+                w = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
+                h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+                xHwp = CoordinateConverter.pointsToHwpunits(relPos[0]);
+                yHwp = CoordinateConverter.pointsToHwpunits(relPos[1]);
+                wHwp = CoordinateConverter.pointsToHwpunits(w);
+                hHwp = CoordinateConverter.pointsToHwpunits(h);
+            }
+
+            // 페이지 경계 클리핑
+            if (!hasRotation) {
+                long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
+                long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
+                if (xHwp < 0) { wHwp += xHwp; xHwp = 0; }
+                if (yHwp < 0) { hHwp += yHwp; yHwp = 0; }
+                if (xHwp + wHwp > pageW) { wHwp = pageW - xHwp; }
+                if (yHwp + hHwp > pageH) { hHwp = pageH - yHwp; }
+                if (wHwp <= 0 || hHwp <= 0) {
+                    System.err.println("[CLIP-SKIP] TextFrame id=" + tf.selfId()
+                            + " clipped to w=" + wHwp + " h=" + hHwp
+                            + " w_orig=" + CoordinateConverter.pointsToHwpunits(w)
+                            + " h_orig=" + CoordinateConverter.pointsToHwpunits(h)
+                            + " pageW=" + pageW + " pageH=" + pageH);
+                    return null;
+                }
+            }
+
+            block.x(xHwp);
+            block.y(yHwp);
+            block.width(wHwp);
+            block.height(hHwp);
+        }
+
         block.zOrder(zOrder);
         block.columnCount(tf.columnCount());
         block.columnGutter(CoordinateConverter.pointsToHwpunits(tf.columnGutter()));

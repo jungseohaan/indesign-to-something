@@ -546,6 +546,8 @@ public class ASTToHwpxConverter {
         StringBuilder sb = new StringBuilder(text.length());
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
+            // PUA → 표준 유니코드 (윤고딕 폰트 전용 글리프)
+            if (c == '\uE288') { c = '\u25A1'; } // □ 네모 기호
             if (c == '\t' || c == '\n' || c == '\r'
                     || (c >= 0x20 && c <= 0xD7FF)
                     || (c >= 0xE000 && c <= 0xFFFD)) {

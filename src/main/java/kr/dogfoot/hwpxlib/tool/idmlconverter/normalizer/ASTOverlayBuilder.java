@@ -122,29 +122,25 @@ class ASTOverlayBuilder {
         for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
             double[] cb = child.geometricBounds();
             double[] ct = child.itemTransform();
-            if (cb != null && ct != null) {
-                double left = cb[1] + ct[4];
-                double top = cb[0] + ct[5];
-                double right = cb[3] + ct[4];
-                double bottom = cb[2] + ct[5];
-                minX = Math.min(minX, left);
-                minY = Math.min(minY, top);
-                maxX = Math.max(maxX, right);
-                maxY = Math.max(maxY, bottom);
+            // gb=[0,0,0,0] (그룹 등 PathGeometry 없는 요소)는 건너뜀
+            if (cb != null && ct != null
+                    && (cb[0] != cb[2] || cb[1] != cb[3])) {
+                double[] aabb = transformBoundsAABB(cb, ct);
+                minX = Math.min(minX, aabb[0]);
+                minY = Math.min(minY, aabb[1]);
+                maxX = Math.max(maxX, aabb[2]);
+                maxY = Math.max(maxY, aabb[3]);
             }
         }
         for (IDMLTextFrame childTf : ig.childTextFrames()) {
             double[] tb = childTf.geometricBounds();
             double[] tt = childTf.itemTransform();
             if (tb != null && tt != null) {
-                double left = tb[1] + tt[4];
-                double top = tb[0] + tt[5];
-                double right = tb[3] + tt[4];
-                double bottom = tb[2] + tt[5];
-                minX = Math.min(minX, left);
-                minY = Math.min(minY, top);
-                maxX = Math.max(maxX, right);
-                maxY = Math.max(maxY, bottom);
+                double[] aabb = transformBoundsAABB(tb, tt);
+                minX = Math.min(minX, aabb[0]);
+                minY = Math.min(minY, aabb[1]);
+                maxX = Math.max(maxX, aabb[2]);
+                maxY = Math.max(maxY, aabb[3]);
             }
         }
 
@@ -155,11 +151,107 @@ class ASTOverlayBuilder {
     }
 
     /**
-     * 오버레이 위치 계산: 텍스트프레임의 루트 그룹 내 상대 위치를 ASTInlineObject에 설정.
-     * 누적 번역 오프셋(accTx, accTy)으로 중첩 Group 내 텍스트프레임도 처리.
-     * 이미지 표시 크기와 그룹 바운드의 비율로 스케일링.
+     * 그룹의 비-텍스트 자식만의 시각적 바운딩 박스를 계산.
+     * 합성 이미지 캔버스(ASTImageLoader.computeNonTextVisualBounds)와 동일한 범위.
+     * @return [minX, minY, maxX, maxY] (points, 그룹 로컬 좌표계) 또는 null
+     */
+    static double[] computeNonTextVisualBounds(IDMLCharacterRun.InlineGraphic ig) {
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            double[] cb = child.geometricBounds();
+            double[] ct = child.itemTransform();
+            // gb=[0,0,0,0] (그룹 등 PathGeometry 없는 요소)는 건너뜀
+            if (cb != null && ct != null
+                    && (cb[0] != cb[2] || cb[1] != cb[3])) {
+                double[] aabb = transformBoundsAABB(cb, ct);
+                minX = Math.min(minX, aabb[0]);
+                minY = Math.min(minY, aabb[1]);
+                maxX = Math.max(maxX, aabb[2]);
+                maxY = Math.max(maxY, aabb[3]);
+            }
+        }
+
+        if (minX == Double.MAX_VALUE) return null;
+        return new double[]{minX, minY, maxX, maxY};
+    }
+
+    /**
+     * 그룹의 자식 그래픽 중에서 주어진 점을 포함하는 가장 작은 사각형의 바운드를 찾는다.
+     * 텍스트프레임의 중심점으로 검색하여 해당 텍스트프레임이 속한 배경 그래픽을 식별한다.
+     * @return [left, top, right, bottom] (points, group coordinate) 또는 null
+     */
+    static double[] findEnclosingGraphicBounds(IDMLCharacterRun.InlineGraphic group,
+                                                double pointX, double pointY) {
+        double[] best = null;
+        double bestArea = Double.MAX_VALUE;
+
+        for (IDMLCharacterRun.InlineGraphic child : group.childGraphics()) {
+            double[] cb = child.geometricBounds();
+            double[] ct = child.itemTransform();
+            if (cb == null || ct == null) continue;
+
+            double[] aabb = transformBoundsAABB(cb, ct);
+            double left = aabb[0], top = aabb[1], right = aabb[2], bottom = aabb[3];
+
+            if (pointX >= left && pointX <= right && pointY >= top && pointY <= bottom) {
+                double area = (right - left) * (bottom - top);
+                if (area < bestArea) {
+                    bestArea = area;
+                    best = new double[]{left, top, right, bottom};
+                }
+            }
+        }
+        return best;
+    }
+
+    /**
+     * geometricBounds [top,left,bottom,right]에 아핀 변환을 적용하여
+     * 축 정렬 바운딩 박스를 반환. flip/rotation/scale을 올바르게 처리.
+     * @return [minX, minY, maxX, maxY]
+     */
+    static double[] transformBoundsAABB(double[] bounds, double[] transform) {
+        double a = transform[0], bv = transform[1];
+        double c = transform[2], d = transform[3];
+        double tx = transform[4], ty = transform[5];
+        // 단순 translation 최적화
+        if (a == 1 && bv == 0 && c == 0 && d == 1) {
+            return new double[]{bounds[1] + tx, bounds[0] + ty,
+                    bounds[3] + tx, bounds[2] + ty};
+        }
+        // 4 corners: (left,top), (right,top), (left,bottom), (right,bottom)
+        double[] xs = new double[4];
+        double[] ys = new double[4];
+        xs[0] = a * bounds[1] + c * bounds[0] + tx;
+        ys[0] = bv * bounds[1] + d * bounds[0] + ty;
+        xs[1] = a * bounds[3] + c * bounds[0] + tx;
+        ys[1] = bv * bounds[3] + d * bounds[0] + ty;
+        xs[2] = a * bounds[1] + c * bounds[2] + tx;
+        ys[2] = bv * bounds[1] + d * bounds[2] + ty;
+        xs[3] = a * bounds[3] + c * bounds[2] + tx;
+        ys[3] = bv * bounds[3] + d * bounds[2] + ty;
+        double minXr = xs[0], maxXr = xs[0], minYr = ys[0], maxYr = ys[0];
+        for (int i = 1; i < 4; i++) {
+            if (xs[i] < minXr) minXr = xs[i];
+            if (xs[i] > maxXr) maxXr = xs[i];
+            if (ys[i] < minYr) minYr = ys[i];
+            if (ys[i] > maxYr) maxYr = ys[i];
+        }
+        return new double[]{minXr, minYr, maxXr, maxYr};
+    }
+
+    /**
+     * 오버레이 위치 계산: 텍스트프레임을 감싸는 배경 그래픽의 중앙에 오버레이를 배치.
+     * 감싸는 그래픽이 없으면 텍스트프레임의 원래 위치를 사용한다.
+     *
+     * overlayX/Y: 이미지 캔버스 기준 상대 좌표 (폴백 경로용)
+     * overlayCenterDeltaX/Y: IDML 좌표계에서 텍스트프레임→배경 중앙 이동량 (resolved 경로용)
+     *
+     * @param rootGroup 루트 그룹 (배경 그래픽 검색용, null 가능)
      */
     static void applyOverlayPosition(ASTInlineObject obj, IDMLTextFrame tf,
+                                       IDMLCharacterRun.InlineGraphic rootGroup,
                                        double accTx, double accTy,
                                        long imageDisplayWidth, long imageDisplayHeight,
                                        double groupWidthPts, double groupHeightPts,
@@ -171,20 +263,49 @@ class ASTOverlayBuilder {
         // 텍스트프레임의 루트 그룹 좌표계 위치 (비회전 가정)
         double tfX = tfBounds[1] + tfTransform[4] + accTx;
         double tfY = tfBounds[0] + tfTransform[5] + accTy;
+        double tfW = tfBounds[3] - tfBounds[1];
+        double tfH = tfBounds[2] - tfBounds[0];
+        double tfCenterX = tfX + tfW / 2;
+        double tfCenterY = tfY + tfH / 2;
 
-        // 콘텐츠 bbox 원점(minX, minY) 기준 상대 위치 (points)
-        // 음수 클램핑 제거 — 이미지보다 왼쪽/위에 있는 텍스트프레임도 올바르게 배치
-        double relX = tfX - rootLeft;
-        double relY = tfY - rootTop;
-
-        // 콘텐츠 bbox 크기(points) → 컨테이너 표시 크기(HWPUNIT) 비율로 스케일
         long overlayX, overlayY;
-        if (groupWidthPts > 0 && groupHeightPts > 0) {
-            overlayX = Math.round(relX / groupWidthPts * imageDisplayWidth);
-            overlayY = Math.round(relY / groupHeightPts * imageDisplayHeight);
+
+        // 텍스트프레임을 감싸는 배경 그래픽 탐색
+        double[] enclosing = rootGroup != null
+                ? findEnclosingGraphicBounds(rootGroup, tfCenterX, tfCenterY) : null;
+
+        if (enclosing != null && groupWidthPts > 0 && groupHeightPts > 0) {
+            double bgCenterX = (enclosing[0] + enclosing[2]) / 2;
+            double bgCenterY = (enclosing[1] + enclosing[3]) / 2;
+
+            // 폴백 경로: 캔버스 기준 배경 중앙에 오버레이 배치
+            double relCenterX = bgCenterX - rootLeft;
+            double relCenterY = bgCenterY - rootTop;
+
+            long centerInDisplayX = Math.round(relCenterX / groupWidthPts * imageDisplayWidth);
+            long centerInDisplayY = Math.round(relCenterY / groupHeightPts * imageDisplayHeight);
+
+            overlayX = centerInDisplayX - obj.width() / 2;
+            overlayY = centerInDisplayY - obj.height() / 2;
+
+            // resolved 경로용: IDML 좌표계에서의 센터링 델타 (points → HWPUNIT)
+            // 텍스트프레임 중심 → 배경 그래픽 중심 이동량
+            double deltaPtsX = bgCenterX - tfCenterX;
+            double deltaPtsY = bgCenterY - tfCenterY;
+            obj.overlayCenterDeltaX(CoordinateConverter.pointsToHwpunits(deltaPtsX));
+            obj.overlayCenterDeltaY(CoordinateConverter.pointsToHwpunits(deltaPtsY));
         } else {
-            overlayX = CoordinateConverter.pointsToHwpunits(relX);
-            overlayY = CoordinateConverter.pointsToHwpunits(relY);
+            // 폴백: 텍스트프레임의 원래 위치
+            double relX = tfX - rootLeft;
+            double relY = tfY - rootTop;
+
+            if (groupWidthPts > 0 && groupHeightPts > 0) {
+                overlayX = Math.round(relX / groupWidthPts * imageDisplayWidth);
+                overlayY = Math.round(relY / groupHeightPts * imageDisplayHeight);
+            } else {
+                overlayX = CoordinateConverter.pointsToHwpunits(relX);
+                overlayY = CoordinateConverter.pointsToHwpunits(relY);
+            }
         }
 
         obj.isOverlay(true);
