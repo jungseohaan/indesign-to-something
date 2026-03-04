@@ -191,6 +191,10 @@ class ASTRunConverter {
                                               ResolvedData resolvedData) {
         ASTInlineObject inlineObj = ASTInlineObjectBuilder.createInlineObjectFromGraphic(ig, imageLoader, colorResolver);
         if (inlineObj != null) {
+            // 인라인 수평 GraphicLine → 언더라인 탭으로 변환 (빈칸 밑줄선)
+            if (tryConvertGraphicLineToUnderlineTab(ig, inlineObj, para, colorResolver, idmlDoc)) {
+                return;
+            }
             // 크기 0인 RENDERED_GROUP 래퍼는 추가하지 않음 (배경 사각형+텍스트프레임 구조의 Group)
             boolean isEmptyWrapper = inlineObj.kind() == ASTInlineObject.ObjectKind.RENDERED_GROUP
                     && inlineObj.width() <= 0 && inlineObj.height() <= 0
@@ -271,6 +275,92 @@ class ASTRunConverter {
                 ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
             }
         }
+    }
+
+    private static boolean tryConvertGraphicLineToUnderlineTab(
+            IDMLCharacterRun.InlineGraphic ig, ASTInlineObject inlineObj,
+            ASTParagraph para, ColorResolver colorResolver, IDMLDocument idmlDoc) {
+        if (!ig.hasVectorShape()) return false;
+        if (ig.vectorShape().shapeType() != IDMLVectorShape.ShapeType.GRAPHIC_LINE) return false;
+        if (inlineObj.height() > 200 || inlineObj.width() <= 0) return false;
+
+        IDMLVectorShape shape = ig.vectorShape();
+        String strokeHex = ASTInlineObjectBuilder.resolveColorHex(shape.strokeColor(), colorResolver);
+        double tint = shape.strokeTint();
+
+        // 직접 속성 없으면 AppliedObjectStyle에서 stroke 색상 조회
+        if (strokeHex == null && ig.appliedObjectStyle() != null && idmlDoc != null) {
+            String[] objStyle = idmlDoc.getObjectStyle(ig.appliedObjectStyle());
+            if (objStyle != null) {
+                strokeHex = ASTInlineObjectBuilder.resolveColorHex(objStyle[0], colorResolver);
+                if (objStyle[2] != null) {
+                    try { tint = Double.parseDouble(objStyle[2]); } catch (NumberFormatException e) { /* ignore */ }
+                }
+            }
+        }
+        if (strokeHex == null) return false;
+
+        // IDML tint: -1 = 기본값(100%), 0~100 = 퍼센트
+        double tintRatio = (tint < 0) ? 1.0 : tint / 100.0;
+        String blended = ASTInlineObjectBuilder.blendColorWithWhite(strokeHex, tintRatio);
+
+        // stroke 유형 힌트 → underline shape ("DOT", "DASH", null=SOLID)
+        String ulShape = null;
+        if (shape.strokeTypeHint() != null) {
+            if ("dot".equals(shape.strokeTypeHint())) ulShape = "DOT";
+            else if ("dash".equals(shape.strokeTypeHint())) ulShape = "DASH";
+        }
+
+        // 선행 텍스트 길이로 변환 방식 결정
+        int textCharsBefore = 0;
+        int lastFontSize = 1350; // default 13.5pt
+        String lastFontFamily = null;
+        for (ASTInlineItem item : para.items()) {
+            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                ASTTextRun tr = (ASTTextRun) item;
+                if (tr.text() != null) textCharsBefore += tr.text().length();
+                if (tr.fontSizeHwpunits() != null) lastFontSize = tr.fontSizeHwpunits();
+                if (tr.fontFamily() != null) lastFontFamily = tr.fontFamily();
+            }
+        }
+
+        if (textCharsBefore < 10) {
+            // 탭+리더 방식: 선행 텍스트가 짧은 경우 (e.g., "1. \t[___]")
+            long lastTabPos = 0;
+            if (para.hasTabStops()) {
+                for (ASTTabStop ts : para.tabStops()) {
+                    if (ts.position() > lastTabPos) lastTabPos = ts.position();
+                }
+            }
+            para.addTabStop(new ASTTabStop(lastTabPos + inlineObj.width(), "left", "_"));
+
+            ASTTextRun tabRun = new ASTTextRun();
+            tabRun.text("\t");
+            tabRun.underline(true);
+            tabRun.underlineColor(blended);
+            tabRun.underlineShape(ulShape);
+            tabRun.textColor(blended);
+            para.addItem(tabRun);
+        } else {
+            // 고정폭 공백 방식: 본문 중간의 빈칸 밑줄 (e.g., "I like [___] the most")
+            // en-space (U+2002) = 0.5em 폭으로 정밀한 너비 제어
+            int enSpaceWidth = lastFontSize / 2;
+            if (enSpaceWidth <= 0) enSpaceWidth = 675;
+            int count = Math.max(1, (int) Math.round((double) inlineObj.width() / enSpaceWidth));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < count; i++) sb.append('\u2002');
+
+            ASTTextRun spaceRun = new ASTTextRun();
+            spaceRun.text(sb.toString());
+            spaceRun.underline(true);
+            spaceRun.underlineColor(blended);
+            spaceRun.underlineShape(ulShape);
+            spaceRun.textColor(blended);
+            spaceRun.fontSizeHwpunits(lastFontSize);
+            if (lastFontFamily != null) spaceRun.fontFamily(lastFontFamily);
+            para.addItem(spaceRun);
+        }
+        return true;
     }
 
     /**

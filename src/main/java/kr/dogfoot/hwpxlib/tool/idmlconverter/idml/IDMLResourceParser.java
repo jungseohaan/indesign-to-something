@@ -96,6 +96,19 @@ class IDMLResourceParser {
             IDMLStyleDef styleDef = parseStyleDef(styleElem);
             doc.putCharacterStyle(styleDef.selfRef(), styleDef);
         }
+
+        // ObjectStyle (stroke 색상/두께 최소 파싱)
+        NodeList objStyles = stylesDoc.getElementsByTagName("ObjectStyle");
+        for (int i = 0; i < objStyles.getLength(); i++) {
+            Element elem = (Element) objStyles.item(i);
+            String self = elem.getAttribute("Self");
+            String strokeColor = getAttrOrNull(elem, "StrokeColor");
+            String strokeWeight = getAttrOrNull(elem, "StrokeWeight");
+            String strokeTint = getAttrOrNull(elem, "StrokeTint");
+            if (self != null && strokeColor != null) {
+                doc.putObjectStyle(self, strokeColor, strokeWeight, strokeTint);
+            }
+        }
     }
 
     static IDMLStyleDef parseStyleDef(Element styleElem) {
@@ -216,6 +229,26 @@ class IDMLResourceParser {
             String hexColor = convertColorToHex(colorValue, model, space);
             if (hexColor != null) {
                 doc.putColor(selfRef, hexColor);
+            }
+        }
+
+        // DashedStrokeStyle 파싱: 사용자 정의 점선/파선 패턴
+        NodeList dashedStyles = graphicDoc.getElementsByTagName("DashedStrokeStyle");
+        for (int i = 0; i < dashedStyles.getLength(); i++) {
+            Element elem = (Element) dashedStyles.item(i);
+            String self = elem.getAttribute("Self");
+            String dashArrayStr = getAttrOrNull(elem, "DashArray");
+            if (self != null && dashArrayStr != null) {
+                String[] parts = dashArrayStr.trim().split("\\s+");
+                if (parts.length >= 2) {
+                    try {
+                        double[] dashArray = new double[parts.length];
+                        for (int j = 0; j < parts.length; j++) {
+                            dashArray[j] = Double.parseDouble(parts[j]);
+                        }
+                        doc.putDashedStrokeStyle(self, dashArray);
+                    } catch (NumberFormatException ignored) {}
+                }
             }
         }
 

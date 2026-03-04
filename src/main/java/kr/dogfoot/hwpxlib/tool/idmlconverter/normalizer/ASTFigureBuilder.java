@@ -36,7 +36,8 @@ class ASTFigureBuilder {
      */
     static ASTFigure createFigureFromImageFrame(IDMLImageFrame imgFrame,
                                                  IDMLPage page,
-                                                 ASTImageLoader imageLoader) {
+                                                 ASTImageLoader imageLoader,
+                                                 ColorResolver colorResolver) {
         double[] t = imgFrame.itemTransform();
         boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001
                 || t[0] < 0 || t[3] < 0);
@@ -87,9 +88,16 @@ class ASTFigureBuilder {
 
         if (result == null || result.imageData == null) return null;
 
-        // 그레이스케일 모노톤 이미지 스킵
-        if (imgFrame.needsGrayscaleColorization()) {
-            return null;
+        // 그레이스케일 모노톤 이미지: FillColor로 채색 (QR코드 등 검정 그레이스케일도 포함)
+        if (imgFrame.needsGrayscaleColorization() && colorResolver != null) {
+            String fillHex = colorResolver.resolve(imgFrame.imageFillColor());
+            double tint = imgFrame.imageFillTint();
+            byte[] colorized = ASTImageLoader.colorizeGrayscaleImage(
+                    result.imageData, fillHex, tint);
+            if (colorized != null) {
+                result.imageData = colorized;
+                result.format = "png";
+            }
         }
 
         // 회전/반전이 있으면 이미지를 픽셀 레벨에서 회전

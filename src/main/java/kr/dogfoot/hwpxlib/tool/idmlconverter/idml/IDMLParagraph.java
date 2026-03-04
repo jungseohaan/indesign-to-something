@@ -26,6 +26,9 @@ public class IDMLParagraph {
     // 단락 아래선 (RuleBelow) — 분수 TextFrame 감지용
     private boolean ruleBelowOn;
 
+    // 컬럼 브레이크 (이 단락 뒤에서 다음 컬럼으로 이동)
+    private boolean columnBreakAfter;
+
     // 단락 음영 (Paragraph Shading)
     private boolean shadingOn;         // 음영 사용 여부
     private String shadingColor;       // 음영 색상 (Color 참조)
@@ -66,6 +69,9 @@ public class IDMLParagraph {
 
     public Double tracking() { return tracking; }
     public void tracking(Double v) { this.tracking = v; }
+
+    public boolean columnBreakAfter() { return columnBreakAfter; }
+    public void columnBreakAfter(boolean v) { this.columnBreakAfter = v; }
 
     public boolean ruleBelowOn() { return ruleBelowOn; }
     public void ruleBelowOn(boolean v) { this.ruleBelowOn = v; }

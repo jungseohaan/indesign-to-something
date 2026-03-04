@@ -335,6 +335,15 @@ class HwpxParagraphBuilder {
         int next = resolveParaLong(astPara.spaceAfter(),
                 baseStyle != null ? baseStyle.spaceAfter() : null);
 
+        // HWPX 탭 위치는 leftMargin 기준이므로,
+        // 행잉 인덴트(indent < 0)일 때 탭 위치를 leftMargin만큼 감산하고 leftMargin=0으로 설정
+        if (indent < 0 && left > 0 && astPara.hasTabStops()) {
+            // 첫 줄 시작 위치를 보존하면서 leftMargin=0, indent=원래첫줄위치
+            int origFirstLine = left + indent; // 원래 첫 줄 시작 위치
+            indent = origFirstLine; // left=0이므로 indent만으로 첫줄 위치 결정
+            left = 0;
+        }
+
         paraPr.createMargin();
         paraPr.margin().createIntent();
         paraPr.margin().intent().valueAnd(indent).unit(ValueUnit2.HWPUNIT);
@@ -515,6 +524,7 @@ class HwpxParagraphBuilder {
                 + "|" + textRun.subscript()
                 + "|" + textRun.underline()
                 + "|" + (textRun.underlineColor() != null ? textRun.underlineColor() : "")
+                + "|" + (textRun.underlineShape() != null ? textRun.underlineShape() : "")
                 + "|" + textRun.strikeThrough();
     }
 
@@ -530,6 +540,12 @@ class HwpxParagraphBuilder {
         String textColor = textRun.textColor() != null ? textRun.textColor() : "#000000";
         String fontStyle = textRun.fontStyle() != null ? textRun.fontStyle().toLowerCase() : "";
 
+        // underline shape: ASTTextRun.underlineShape → LineType3
+        LineType3 ulShape = null;
+        if (textRun.underline() && textRun.underlineShape() != null) {
+            ulShape = LineType3.fromString(textRun.underlineShape());
+        }
+
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), ctx.fontRegistry,
                 textRun.letterSpacing(),
@@ -540,6 +556,7 @@ class HwpxParagraphBuilder {
                 textRun.underline()
                         ? (textRun.underlineColor() != null ? textRun.underlineColor() : textColor)
                         : "#000000",
+                ulShape,
                 textRun.horizontalScale(),
                 textRun.strikeThrough(),
                 textRun.verticalScale(),
@@ -575,6 +592,7 @@ class HwpxParagraphBuilder {
                 fontStyle.contains("italic"),
                 textRun.superscript(), textRun.subscript(),
                 UnderlineType.NONE, textColor,
+                null, // underlineShape
                 null,
                 false,
                 null, null);

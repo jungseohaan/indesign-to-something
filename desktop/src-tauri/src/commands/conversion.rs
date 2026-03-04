@@ -70,6 +70,22 @@ pub async fn convert_idml(
         args.push(resolved.clone());
     }
 
+    // 사용자 지정 폰트 매핑 → temp JSON 파일로 전달
+    let mut font_map_file: Option<std::path::PathBuf> = None;
+    if let Some(ref map) = options.font_map {
+        if !map.is_empty() {
+            let temp_dir = std::env::temp_dir();
+            let path = temp_dir.join("idml_font_map.json");
+            let json = serde_json::to_string(map)
+                .map_err(|e| format!("Failed to serialize font map: {}", e))?;
+            std::fs::write(&path, &json)
+                .map_err(|e| format!("Failed to write font map file: {}", e))?;
+            args.push("--font-map".to_string());
+            args.push(path.to_string_lossy().to_string());
+            font_map_file = Some(path);
+        }
+    }
+
     println!("Convert args: {:?}", args);
     println!("spread_based option: {}", options.spread_based);
 
@@ -143,6 +159,11 @@ pub async fn convert_idml(
 
     // Wait for stderr task to complete
     let _ = stderr_task.await;
+
+    // font map temp 파일 정리
+    if let Some(path) = font_map_file {
+        let _ = std::fs::remove_file(&path);
+    }
 
     let status = child.wait().await.map_err(|e| e.to_string())?;
 

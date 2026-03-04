@@ -1,5 +1,11 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+
+import java.io.FileReader;
+import java.io.Reader;
+import java.lang.reflect.Type;
 import java.util.*;
 
 /**
@@ -133,6 +139,42 @@ public class FontMapper {
 
     /** 기본 대체 폰트 */
     public static final String DEFAULT_HWPX_FONT = "함초롬바탕";
+
+    /**
+     * JSON 파일에서 사용자 지정 폰트 매핑을 로드한다.
+     * JSON 형식: {"IDML폰트명": "HWPX폰트명", ...}
+     */
+    public static Map<String, String> loadFontMapFromJson(String jsonPath) {
+        try {
+            Reader reader = new FileReader(jsonPath);
+            try {
+                Type mapType = new TypeToken<Map<String, String>>() {}.getType();
+                Map<String, String> map = new Gson().fromJson(reader, mapType);
+                return map != null ? map : Collections.<String, String>emptyMap();
+            } finally {
+                reader.close();
+            }
+        } catch (Exception e) {
+            System.err.println("Warning: 폰트 매핑 파일 로드 실패 (" + jsonPath + "): " + e.getMessage());
+            return Collections.emptyMap();
+        }
+    }
+
+    /**
+     * IDML 폰트 패밀리명을 HWPX 폰트명으로 매핑한다.
+     * 커스텀 맵이 있으면 최우선으로 적용한다.
+     */
+    public static String mapToHwpxFont(String idmlFontFamily, Map<String, String> customMap) {
+        if (idmlFontFamily == null) return DEFAULT_HWPX_FONT;
+
+        // 0. 커스텀 맵 정확 매치 (최우선)
+        if (customMap != null) {
+            String custom = customMap.get(idmlFontFamily);
+            if (custom != null) return custom;
+        }
+
+        return mapToHwpxFont(idmlFontFamily);
+    }
 
     /**
      * IDML 폰트 패밀리명을 HWPX 폰트명으로 매핑한다.

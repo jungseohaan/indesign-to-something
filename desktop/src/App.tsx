@@ -6,6 +6,7 @@ import { ASTDetailPanel } from "./components/ASTDetailPanel";
 import { PdfPreviewPanel } from "./components/PdfPreviewPanel";
 import { ConversionPanel } from "./components/ConversionPanel";
 import { PageRangeModal } from "./components/PageRangeModal";
+import { FontMappingModal } from "./components/FontMappingModal";
 import { PlaygroundPage } from "./components/PlaygroundPage";
 import { ExtractPage } from "./components/ExtractPage";
 import { useAppStore } from "./stores/useAppStore";
@@ -135,6 +136,9 @@ function App() {
 
       {/* Page Range Modal */}
       <PageRangeModal />
+
+      {/* Font Mapping Modal */}
+      <FontMappingModal />
 
       {/* About Dialog */}
       {showAbout && (

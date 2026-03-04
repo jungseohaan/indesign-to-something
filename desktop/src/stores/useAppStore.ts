@@ -70,6 +70,10 @@ interface AppState {
   showPageRangeModal: boolean;
   inddPages: { name: string; index: number }[];
 
+  // Font Mapping
+  fontMappings: Record<string, string>;
+  showFontMappingModal: boolean;
+
   // Actions
   initJarPath: () => Promise<void>;
   selectFile: () => Promise<void>;
@@ -89,6 +93,9 @@ interface AppState {
   setEndPage: (v: number | null) => void;
   closePageRangeModal: () => void;
   clearError: () => void;
+  setFontMappings: (mappings: Record<string, string>) => void;
+  openFontMappingModal: () => void;
+  closeFontMappingModal: () => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -127,6 +134,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   indesignPath: null,
   showPageRangeModal: false,
   inddPages: [],
+  fontMappings: {},
+  showFontMappingModal: false,
 
   initJarPath: async () => {
     try {
@@ -436,7 +445,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   startConversion: async () => {
-    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, startPage, endPage, inddPath, resolvedJsonPath } = get();
+    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, startPage, endPage, inddPath, resolvedJsonPath, fontMappings } = get();
     if (!idmlPath) return;
 
     const outputPath = await save({
@@ -480,6 +489,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           start_page: startPage,
           end_page: endPage,
           layout_mode: layoutMode,
+          font_map: Object.keys(fontMappings).length > 0 ? fontMappings : null,
         },
         jarPath,
       });
@@ -505,4 +515,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setEndPage: (v) => set({ endPage: v }),
   closePageRangeModal: () => set({ showPageRangeModal: false }),
   clearError: () => set({ error: null }),
+  setFontMappings: (mappings) => set({ fontMappings: mappings }),
+  openFontMappingModal: () => set({ showFontMappingModal: true }),
+  closeFontMappingModal: () => set({ showFontMappingModal: false }),
 }));

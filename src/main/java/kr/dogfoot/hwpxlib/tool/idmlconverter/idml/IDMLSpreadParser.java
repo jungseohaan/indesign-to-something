@@ -59,12 +59,16 @@ class IDMLSpreadParser {
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
-                    // 클리핑 자식이 있으면 Group 자식이 이미 수집됨 → extractGroups 건너뛰기
-                    if (vectorShape == null || !vectorShape.hasClippedChildren()) {
-                        double[] frameTransform = IDMLGeometry.parseTransform(
-                                elem.getAttribute("ItemTransform"));
-                        extractGroupsFromFrame(elem, spread, frameTransform,
-                                hiddenLayerIds, zOrderCounter);
+                    // 클리핑 자식 수집은 벡터 도형만 대상이므로,
+                    // TextFrame 등 다른 자식은 항상 extractGroupsFromFrame으로 추출해야 한다.
+                    int tfCountBefore = spread.textFrames().size();
+                    double[] frameTransform = IDMLGeometry.parseTransform(
+                            elem.getAttribute("ItemTransform"));
+                    extractGroupsFromFrame(elem, spread, frameTransform,
+                            hiddenLayerIds, zOrderCounter);
+                    // 래퍼 Rectangle이 TextFrame을 포함하면 벡터 도형(채우기 이미지)으로 렌더링 억제
+                    if (vectorShape != null && spread.textFrames().size() > tfCountBefore) {
+                        spread.vectorShapes().remove(vectorShape);
                     }
                 }
             } else if ("GraphicLine".equals(elem.getTagName())) {
@@ -519,6 +523,12 @@ class IDMLSpreadParser {
                 shape.startCap(IDMLVectorShape.LineCap.ROUND);
                 shape.endCap(IDMLVectorShape.LineCap.ROUND);
             }
+            // 밑줄 변환용 strokeType 힌트
+            if (strokeType.contains("Dotted") || strokeType.contains("Japanese Dots")) {
+                shape.strokeTypeHint("dot");
+            } else if (strokeType.contains("Dashed") || strokeType.contains("DashedStrokeStyle")) {
+                shape.strokeTypeHint("dot");  // 짧은 대시(3-2)도 시각적으로 점선
+            }
         }
 
         // PathPoint 파싱 (Properties/PathGeometry/GeometryPathType/PathPointArray)
@@ -592,6 +602,10 @@ class IDMLSpreadParser {
      * Solid이면 null 반환 (점선 없음).
      */
     static double[] resolveStrokeDashPattern(String strokeType, double strokeWeight) {
+        return resolveStrokeDashPattern(strokeType, strokeWeight, null);
+    }
+
+    static double[] resolveStrokeDashPattern(String strokeType, double strokeWeight, IDMLDocument doc) {
         if (strokeType == null || strokeType.contains("Solid")) return null;
         if (strokeWeight <= 0) strokeWeight = 1.0;
 
@@ -604,6 +618,13 @@ class IDMLSpreadParser {
         } else if (strokeType.contains("Japanese Dots")) {
             // CAP_ROUND + 0-길이 대시 → 둥근 점. BasicStroke는 양수만 허용하므로 0.01 사용.
             return new double[]{0.01, strokeWeight * 3};
+        } else if (strokeType.startsWith("DashedStrokeStyle/")) {
+            // 사용자 정의 DashedStrokeStyle — 파싱된 DashArray 사용
+            if (doc != null) {
+                double[] parsed = doc.getDashedStrokeStyle(strokeType);
+                if (parsed != null) return parsed;
+            }
+            return new double[]{3, 2};  // 기본 짧은 대시 패턴
         } else if (strokeType.contains("Dashed")) {
             return new double[]{6, 4};
         }
@@ -679,25 +700,75 @@ class IDMLSpreadParser {
     /**
      * 프레임(Rectangle/Polygon/Oval) 내부의 Group 자식을 탐색하여
      * 벡터 도형/이미지/텍스트 프레임을 추출한다.
+     * 부모 프레임의 시각 속성(fill/stroke/corner)을 자식 TextFrame에 전파한다.
      */
     static void extractGroupsFromFrame(Element frameElem, IDMLSpread spread,
                                        double[] frameTransform,
                                        Set<String> hiddenLayerIds,
                                        int[] zOrderCounter) {
+        // 부모 프레임의 시각 속성 읽기
+        String wrapperFill = getAttrOrNull(frameElem, "FillColor");
+        double wrapperFillTint = parseDoubleAttrDef(frameElem, "FillTint", -1);
+        String wrapperStroke = getAttrOrNull(frameElem, "StrokeColor");
+        double wrapperStrokeWeight = parseDoubleAttrDef(frameElem, "StrokeWeight", 0);
+        double wrapperCornerRadius = parseDoubleAttrDef(frameElem, "CornerRadius", 0);
+
+        // 유효한 채우기/선이 있는지 확인
+        boolean hasWrapperFill = wrapperFill != null && !wrapperFill.contains("None")
+                && !wrapperFill.contains("Paper");
+        boolean hasWrapperStroke = wrapperStroke != null && !wrapperStroke.contains("None")
+                && wrapperStrokeWeight > 0;
+
         NodeList children = frameElem.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node node = children.item(i);
             if (node.getNodeType() != Node.ELEMENT_NODE) continue;
             Element child = (Element) node;
-            if ("Group".equals(child.getTagName())) {
+            if ("TextFrame".equals(child.getTagName())) {
+                // Rectangle/Polygon/Oval 내부에 중첩된 TextFrame (테이블 등)
+                IDMLTextFrame frame = parseTextFrame(child);
+                if (frame != null) {
+                    frame.itemTransform(CoordinateConverter.combineTransforms(
+                            frameTransform, frame.itemTransform()));
+                    // 부모 프레임의 시각 속성 전파
+                    if (hasWrapperFill || hasWrapperStroke) {
+                        applyWrapperStyle(frame, wrapperFill, wrapperFillTint,
+                                wrapperStroke, wrapperStrokeWeight, wrapperCornerRadius);
+                    }
+                    spread.addTextFrame(frame);
+                }
+            } else if ("Group".equals(child.getTagName())) {
                 double[] groupTransform = IDMLGeometry.parseTransform(
                         child.getAttribute("ItemTransform"));
                 double[] combined = CoordinateConverter.combineTransforms(
                         frameTransform, groupTransform);
                 String groupSelfId = child.getAttribute("Self");
                 parseGroupForFrames(child, spread, combined, hiddenLayerIds,
-                        zOrderCounter, groupSelfId);
+                        zOrderCounter, groupSelfId,
+                        hasWrapperFill ? wrapperFill : null, wrapperFillTint,
+                        hasWrapperStroke ? wrapperStroke : null,
+                        wrapperStrokeWeight, wrapperCornerRadius);
             }
+        }
+    }
+
+    /**
+     * 부모 프레임의 시각 속성을 자식 TextFrame에 적용한다.
+     */
+    private static void applyWrapperStyle(IDMLTextFrame frame,
+                                           String fillColor, double fillTint,
+                                           String strokeColor, double strokeWeight,
+                                           double cornerRadius) {
+        if (fillColor != null && !fillColor.contains("None") && !fillColor.contains("Paper")) {
+            frame.wrapperFillColor(fillColor);
+            frame.wrapperFillTint(fillTint);
+        }
+        if (strokeColor != null && !strokeColor.contains("None") && strokeWeight > 0) {
+            frame.wrapperStrokeColor(strokeColor);
+            frame.wrapperStrokeWeight(strokeWeight);
+        }
+        if (cornerRadius > 0) {
+            frame.wrapperCornerRadius(cornerRadius);
         }
     }
 
@@ -742,6 +813,22 @@ class IDMLSpreadParser {
                                     Set<String> hiddenLayerIds,
                                     int[] zOrderCounter,
                                     String groupSelfId) {
+        parseGroupForFrames(groupElem, spread, accumulatedTransform, hiddenLayerIds,
+                zOrderCounter, groupSelfId, null, -1, null, 0, 0);
+    }
+
+    /**
+     * Group 내부의 TextFrame과 이미지 프레임을 재귀적으로 수집한다.
+     * 부모 프레임의 시각 속성(fill/stroke/corner)을 자식 TextFrame에 전파한다.
+     */
+    static void parseGroupForFrames(Element groupElem, IDMLSpread spread,
+                                    double[] accumulatedTransform,
+                                    Set<String> hiddenLayerIds,
+                                    int[] zOrderCounter,
+                                    String groupSelfId,
+                                    String wrapperFill, double wrapperFillTint,
+                                    String wrapperStroke, double wrapperStrokeWeight,
+                                    double wrapperCornerRadius) {
         // Group 자체가 숨겨진 레이어에 속하면 전체 건너뛰기
         String groupLayer = getAttrOrNull(groupElem, "ItemLayer");
         if (groupLayer != null && hiddenLayerIds.contains(groupLayer)) return;
@@ -763,6 +850,11 @@ class IDMLSpreadParser {
                     frame.itemTransform(CoordinateConverter.combineTransforms(
                             accumulatedTransform, frame.itemTransform()));
                     frame.parentGroupId(groupSelfId);
+                    // 부모 프레임의 시각 속성 전파
+                    if (wrapperFill != null || wrapperStroke != null) {
+                        applyWrapperStyle(frame, wrapperFill, wrapperFillTint,
+                                wrapperStroke, wrapperStrokeWeight, wrapperCornerRadius);
+                    }
                     spread.addTextFrame(frame);
                 }
             } else if ("Rectangle".equals(elem.getTagName())
@@ -789,8 +881,12 @@ class IDMLSpreadParser {
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
-                    // 프레임 내부의 Group 자식도 탐색
-                    extractGroupsFromFrame(elem, spread, accumulatedTransform,
+                    // 프레임 내부의 Group/TextFrame 자식도 탐색
+                    double[] rectTransform = IDMLGeometry.parseTransform(
+                            elem.getAttribute("ItemTransform"));
+                    double[] combinedForChildren = CoordinateConverter.combineTransforms(
+                            accumulatedTransform, rectTransform);
+                    extractGroupsFromFrame(elem, spread, combinedForChildren,
                             hiddenLayerIds, zOrderCounter);
                 }
             } else if ("GraphicLine".equals(elem.getTagName())) {
@@ -811,7 +907,8 @@ class IDMLSpreadParser {
                         elem.getAttribute("ItemTransform"));
                 double[] combined = CoordinateConverter.combineTransforms(
                         accumulatedTransform, childGroupTransform);
-                parseGroupForFrames(elem, spread, combined, hiddenLayerIds, zOrderCounter, groupSelfId);
+                parseGroupForFrames(elem, spread, combined, hiddenLayerIds, zOrderCounter, groupSelfId,
+                        wrapperFill, wrapperFillTint, wrapperStroke, wrapperStrokeWeight, wrapperCornerRadius);
             }
         }
     }

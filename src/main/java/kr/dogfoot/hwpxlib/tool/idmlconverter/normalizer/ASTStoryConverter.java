@@ -92,6 +92,11 @@ class ASTStoryConverter {
             }
         }
 
+        // 컬럼 브레이크
+        if (idmlPara.columnBreakAfter()) {
+            para.columnBreakAfter(true);
+        }
+
         // Character Runs → 인라인 항목
         // BT수식M 폰트 런은 그룹핑하여 ASTEquation으로 변환
         // NP 폰트 런도 그룹핑하여 NPFontEquationConverter로 ASTEquation 변환

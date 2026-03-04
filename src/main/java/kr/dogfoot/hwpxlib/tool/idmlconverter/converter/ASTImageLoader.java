@@ -386,7 +386,7 @@ public class ASTImageLoader {
         int sx2 = Math.min(srcImage.getWidth(), (int) Math.ceil(rawSrcR));
         int sy2 = Math.min(srcImage.getHeight(), (int) Math.ceil(rawSrcB));
 
-        if (sx1 >= sx2 || sy1 >= sy2) return encodePng(srcImage);
+        if (sx1 >= sx2 || sy1 >= sy2) return safeEncodePng(srcImage);
 
         int targetDpi = options.imageDpi();
         int pixW = Math.max(10, (int) Math.ceil(frameW * targetDpi / 72.0));
@@ -2084,6 +2084,22 @@ public class ASTImageLoader {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(image, "png", baos);
         return baos.toByteArray();
+    }
+
+    /**
+     * CMYK 등 PNG 직접 인코딩이 실패하는 이미지를 ARGB로 변환 후 재시도.
+     */
+    private static byte[] safeEncodePng(BufferedImage image) throws IOException {
+        byte[] data = encodePng(image);
+        if (data.length > 0) return data;
+
+        // CMYK 등 비표준 색공간 → ARGB 변환 후 재시도
+        BufferedImage argb = new BufferedImage(image.getWidth(), image.getHeight(),
+                BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = argb.createGraphics();
+        g.drawImage(image, 0, 0, null);
+        g.dispose();
+        return encodePng(argb);
     }
 
     private ImageResult createPlaceholderResult(long displayWidthHwp, long displayHeightHwp, String filename) {

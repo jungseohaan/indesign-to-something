@@ -20,6 +20,7 @@ public class ConvertOptions {
     private String layoutMode;
     private String imageCacheDir;
     private String resolvedJsonPath;
+    private String fontMapPath;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -230,6 +231,20 @@ public class ConvertOptions {
 
     public ConvertOptions resolvedJsonPath(String resolvedJsonPath) {
         this.resolvedJsonPath = resolvedJsonPath;
+        return this;
+    }
+
+    /**
+     * 사용자 지정 폰트 매핑 JSON 파일 경로.
+     * JSON 형식: {"IDML폰트명": "HWPX폰트명", ...}
+     * 설정하면 FontMapper 기본 매핑보다 우선 적용된다.
+     */
+    public String fontMapPath() {
+        return fontMapPath;
+    }
+
+    public ConvertOptions fontMapPath(String fontMapPath) {
+        this.fontMapPath = fontMapPath;
         return this;
     }
 }

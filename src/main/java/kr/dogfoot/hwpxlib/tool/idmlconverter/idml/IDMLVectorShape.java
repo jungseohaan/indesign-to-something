@@ -127,6 +127,9 @@ public class IDMLVectorShape {
     private double gradientFeatherLength;               // 길이 (points)
     private double[] gradientFeatherStart;              // 시작점 [x, y] (로컬 좌표, points)
 
+    // stroke 유형 힌트 ("solid", "dot", "dash" — 밑줄 변환용)
+    private String strokeTypeHint;     // null = solid
+
     // 인라인/앵커 객체 플래그
     private boolean isInline;          // Story 내 인라인 그래픽 여부
     private String parentStoryId;      // 인라인 그래픽의 부모 Story ID
@@ -215,6 +218,9 @@ public class IDMLVectorShape {
 
     public double[] dashPattern() { return dashPattern; }
     public void dashPattern(double[] v) { this.dashPattern = v; }
+
+    public String strokeTypeHint() { return strokeTypeHint; }
+    public void strokeTypeHint(String v) { this.strokeTypeHint = v; }
 
     public double fillTint() { return fillTint; }
     public void fillTint(double v) { this.fillTint = v; }

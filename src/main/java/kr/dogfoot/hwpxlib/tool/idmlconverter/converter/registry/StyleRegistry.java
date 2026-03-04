@@ -155,11 +155,19 @@ public class StyleRegistry {
     public String createInlineTabPr(java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop> tabStops) {
         String tabPrId = String.valueOf(nextTabPrIndex++);
         TabPr tabPr = hwpxFile.headerXMLFile().refList().tabProperties().addNew();
+        boolean hasRightTab = false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop ts : tabStops) {
+            if ("right".equals(ts.alignment())) { hasRightTab = true; break; }
+        }
+
         tabPr.idAnd(tabPrId)
-                .autoTabLeftAnd(false)
+                .autoTabLeftAnd(hasRightTab)  // RIGHT 탭 제거 시 auto tab으로 기본 간격 보장
                 .autoTabRightAnd(false);
 
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop ts : tabStops) {
+            // HWPX에서 RIGHT 탭은 LEFT처럼 동작하여 텍스트가 탭 위치에서 시작됨
+            // → RIGHT 탭은 건너뛰고, 해당 TAB 문자는 auto tab 간격으로 처리
+            if ("right".equals(ts.alignment())) continue;
             TabItem item = tabPr.addNewTabItem();
             item.posAnd((int) ts.position())
                     .typeAnd(mapTabItemType(ts.alignment()))
@@ -211,6 +219,7 @@ public class StyleRegistry {
                 false, false,
                 underline ? UnderlineType.BOTTOM : UnderlineType.NONE,
                 underline ? textColor : "#000000",
+                null, // underlineShape
                 styleDef.horizontalScale(),
                 strikeThrough,
                 null, null);
@@ -250,6 +259,14 @@ public class StyleRegistry {
         int right = styleDef.rightMargin() != null ? styleDef.rightMargin().intValue() : 0;
         int prev = styleDef.spaceBefore() != null ? styleDef.spaceBefore().intValue() : 0;
         int next = styleDef.spaceAfter() != null ? styleDef.spaceAfter().intValue() : 0;
+
+        // HWPX 탭 위치는 leftMargin 기준이므로,
+        // 행잉 인덴트(indent < 0)일 때 leftMargin=0으로 설정
+        if (indent < 0 && left > 0 && styleDef.hasTabStops()) {
+            int origFirstLine = left + indent;
+            indent = origFirstLine;
+            left = 0;
+        }
 
         paraPr.createMargin();
         paraPr.margin().createIntent();

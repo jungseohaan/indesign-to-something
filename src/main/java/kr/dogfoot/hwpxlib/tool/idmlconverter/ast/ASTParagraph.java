@@ -39,6 +39,9 @@ public class ASTParagraph {
     // 인라인 테이블 (이 문단이 테이블 자리표시자인 경우)
     private ASTTable inlineTable;
 
+    // 컬럼 브레이크 (이 단락 뒤에서 다음 컬럼으로 이동)
+    private boolean columnBreakAfter;
+
     // 장식 선(GraphicLine)의 stroke 색상 → 후속 텍스트 런에 underline으로 전파
     private String pendingUnderlineColor;
 
@@ -114,6 +117,9 @@ public class ASTParagraph {
 
     public ASTTable inlineTable() { return inlineTable; }
     public void inlineTable(ASTTable v) { this.inlineTable = v; }
+
+    public boolean columnBreakAfter() { return columnBreakAfter; }
+    public void columnBreakAfter(boolean v) { this.columnBreakAfter = v; }
 
     public String pendingUnderlineColor() { return pendingUnderlineColor; }
     public void pendingUnderlineColor(String v) { this.pendingUnderlineColor = v; }

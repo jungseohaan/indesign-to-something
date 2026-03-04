@@ -120,6 +120,7 @@ export interface ConvertOptions {
   start_page: number | null;
   end_page: number | null;
   layout_mode: "preserve" | "editable";
+  font_map: Record<string, string> | null;
 }
 
 export interface ConvertResult {

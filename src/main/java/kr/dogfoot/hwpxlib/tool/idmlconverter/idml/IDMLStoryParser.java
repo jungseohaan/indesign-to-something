@@ -220,10 +220,10 @@ class IDMLStoryParser {
         cell.fillTint(parseDoubleAttrDef(cellElem, "FillTint", 100));
 
         // Cell insets/padding
-        cell.topInset(parseDoubleAttrDef(cellElem, "TopInset", 4));
-        cell.bottomInset(parseDoubleAttrDef(cellElem, "BottomInset", 4));
-        cell.leftInset(parseDoubleAttrDef(cellElem, "LeftInset", 4));
-        cell.rightInset(parseDoubleAttrDef(cellElem, "RightInset", 4));
+        cell.topInset(parseDoubleAttrDef(cellElem, "TextTopInset", 4));
+        cell.bottomInset(parseDoubleAttrDef(cellElem, "TextBottomInset", 4));
+        cell.leftInset(parseDoubleAttrDef(cellElem, "TextLeftInset", 4));
+        cell.rightInset(parseDoubleAttrDef(cellElem, "TextRightInset", 4));
 
         // Vertical justification
         cell.verticalJustification(getAttrOrNull(cellElem, "VerticalJustification"));
@@ -273,7 +273,8 @@ class IDMLStoryParser {
         IDMLTableCell.CellBorder border = new IDMLTableCell.CellBorder();
 
         // StrokeWeight (선 두께, 포인트)
-        border.strokeWeight = parseDoubleAttrDef(cellElem, prefix + "StrokeWeight", 1.0);
+        // Cell에 속성이 명시되지 않으면 CellStyle 상속 — 대부분 weight=0이므로 기본값 0
+        border.strokeWeight = parseDoubleAttrDef(cellElem, prefix + "StrokeWeight", 0);
 
         // StrokeColor (색상 참조 ID)
         String colorRef = getAttrOrNull(cellElem, prefix + "StrokeColor");
@@ -332,6 +333,12 @@ class IDMLStoryParser {
                         currentPara.addCharacterRun(currentRun);
                     }
                     result.add(currentPara);
+
+                    // NextColumn → 방금 추가한 단락에 컬럼 브레이크 마킹
+                    String pBreakType = getAttrOrNull(charRange, "ParagraphBreakType");
+                    if ("NextColumn".equals(pBreakType)) {
+                        currentPara.columnBreakAfter(true);
+                    }
 
                     // 새 단락 + 새 런 시작
                     currentPara = createParagraphFromRange(paraRange);
@@ -582,6 +589,7 @@ class IDMLStoryParser {
             graphic.geometricBounds(bounds);
         }
         graphic.itemTransform(IDMLGeometry.parseTransform(elem.getAttribute("ItemTransform")));
+        graphic.appliedObjectStyle(getAttrOrNull(elem, "AppliedObjectStyle"));
 
         // 앵커/래핑 속성 파싱
         parseAnchorAndWrapSettings(elem, graphic);

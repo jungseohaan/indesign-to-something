@@ -25,10 +25,16 @@ public class FontRegistry {
     private final Set<String> registeredFonts = new HashSet<>();
 
     private final HWPXFile hwpxFile;
+    private final Map<String, String> customFontMap;
     private int nextFontId;
 
     public FontRegistry(HWPXFile hwpxFile) {
+        this(hwpxFile, null);
+    }
+
+    public FontRegistry(HWPXFile hwpxFile, Map<String, String> customFontMap) {
         this.hwpxFile = hwpxFile;
+        this.customFontMap = customFontMap;
 
         // BlankFileMaker에서 이미 등록된 기본 폰트
         fontNameToId.put("함초롬돋움", "0");
@@ -55,8 +61,8 @@ public class FontRegistry {
                 return registerDirectFont(fontFamily);
             }
 
-            // FontMapper 매핑
-            String hwpxName = FontMapper.mapToHwpxFont(fontFamily);
+            // FontMapper 매핑 (커스텀 맵 우선)
+            String hwpxName = FontMapper.mapToHwpxFont(fontFamily, customFontMap);
             String id = fontNameToId.get(hwpxName);
             if (id != null) return id;
 

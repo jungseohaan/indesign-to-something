@@ -149,6 +149,11 @@ public class ConverterCLI {
                         options = options.resolvedJsonPath(args[++i]);
                     }
                     break;
+                case "--font-map":
+                    if (i + 1 < args.length) {
+                        options = options.fontMapPath(args[++i]);
+                    }
+                    break;
                 default:
                     System.err.println("Unknown option: " + arg);
             }

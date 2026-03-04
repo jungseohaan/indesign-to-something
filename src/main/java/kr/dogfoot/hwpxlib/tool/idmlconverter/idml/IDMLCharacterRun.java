@@ -159,6 +159,10 @@ public class IDMLCharacterRun {
         public void vectorShape(IDMLVectorShape v) { this.vectorShape = v; }
         public boolean hasVectorShape() { return vectorShape != null; }
 
+        private String appliedObjectStyle;
+        public String appliedObjectStyle() { return appliedObjectStyle; }
+        public void appliedObjectStyle(String v) { this.appliedObjectStyle = v; }
+
         // Group 레벨 색상 (자식 도형이 명시적 색상 없을 때 폴백용)
         private String groupStrokeColor;
         private String groupFillColor;

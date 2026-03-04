@@ -12,8 +12,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedDataReader;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper;
+
 import java.io.File;
 import java.util.List;
+import java.util.Map;
 
 /**
  * IDML -> HWPX 변환 메인 파사드.
@@ -135,9 +138,18 @@ public class IDMLToHwpxConverter {
                                 + tfCount + " 텍스트프레임, " + imgCount + " 이미지, " + tblCount + " 테이블");
             }
 
+            // Phase 2.8: 사용자 지정 폰트 매핑 로드 (선택적)
+            Map<String, String> customFontMap = null;
+            if (options.fontMapPath() != null) {
+                customFontMap = FontMapper.loadFontMapFromJson(options.fontMapPath());
+                if (customFontMap.isEmpty()) {
+                    customFontMap = null;
+                }
+            }
+
             // Phase 3: AST -> HWPX (페이지별 진행률: 10~90)
             int totalPages = astDoc.sections().size();
-            ConvertResult result = ASTToHwpxConverter.convert(astDoc, reporter, 10, totalPages);
+            ConvertResult result = ASTToHwpxConverter.convert(astDoc, reporter, 10, totalPages, customFontMap);
 
             // Phase 4: HWPX 파일 저장
             reporter.reportProgress(95, 100, "HWPX 파일 저장 중...");

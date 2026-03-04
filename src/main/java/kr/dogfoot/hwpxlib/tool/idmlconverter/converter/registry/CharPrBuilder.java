@@ -40,6 +40,7 @@ public final class CharPrBuilder {
                               boolean bold, boolean italic,
                               boolean superscript, boolean subscript,
                               UnderlineType underlineType, String underlineColor,
+                              LineType3 underlineShape,
                               Short horizontalScale,
                               boolean strikethrough,
                               Short verticalScale,
@@ -97,7 +98,8 @@ public final class CharPrBuilder {
         charPr.offset().set(offsetVal, offsetVal, offsetVal, offsetVal, offsetVal, offsetVal, offsetVal);
 
         charPr.createUnderline();
-        charPr.underline().typeAnd(underlineType).shapeAnd(LineType3.SOLID).color(underlineColor);
+        LineType3 ulShape = (underlineShape != null) ? underlineShape : LineType3.SOLID;
+        charPr.underline().typeAnd(underlineType).shapeAnd(ulShape).color(underlineColor);
 
         charPr.createStrikeout();
         charPr.strikeout().shapeAnd(strikethrough ? LineType2.SOLID : LineType2.NONE).color("#000000");

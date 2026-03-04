@@ -254,23 +254,216 @@ class HwpxTextBoxBuilder {
 
         int colCount = Math.max(block.columnCount(), 1);
         if (colCount <= 1) {
-            // 단일 컬럼 — 기존 1×1 테이블
+            // 래퍼 fill이 있으면 배경 라운드 사각형 추가 + 셀 테두리 억제
+            boolean hasWrapper = block.hasWrapperFill() || block.cornerRadius() > 0;
+            if (hasWrapper) {
+                addWrapperRoundedRect(framePara, block, w, h);
+            }
             convertSingleColumnTable(framePara, block, block.x(), block.y(), w, h,
-                    block.paragraphs());
+                    block.paragraphs(), hasWrapper);
         } else {
             // 다단 — N개 독립 글상자(1×1 테이블)를 수평 배치
             long[] colWidths = computeColumnWidths(block, colCount);
             java.util.List<java.util.List<ASTParagraph>> distributed =
                     distributeParagraphs(block.paragraphs(), colCount);
 
+            // 다단 프레임에 테두리/라운드코너가 있으면 전체를 감싸는 배경 사각형 추가
+            boolean hasFrameBorder = block.strokeColor() != null
+                    && block.strokeColor().startsWith("#")
+                    && block.strokeWeight() > 0;
+            boolean hasFrameStyle = hasFrameBorder || block.cornerRadius() > 0;
+            if (hasFrameStyle) {
+                addMultiColumnFrameBorder(framePara, block, w, h);
+            }
+
             long xCursor = block.x();
             long gutter = block.columnGutter();
             for (int c = 0; c < colCount; c++) {
                 convertSingleColumnTable(framePara, block, xCursor, block.y(),
-                        colWidths[c], h, distributed.get(c));
+                        colWidths[c], h, distributed.get(c), hasFrameStyle);
                 xCursor += colWidths[c] + gutter;
             }
         }
+    }
+
+    /**
+     * 다단 프레임의 테두리/배경을 별도 Rectangle로 추가.
+     * 다단 분할 시 원본 프레임의 라운드 사각형 테두리가 유지되도록
+     * 전체 프레임 영역을 감싸는 배경 rect를 BEHIND_TEXT로 생성한다.
+     */
+    private void addMultiColumnFrameBorder(Para framePara, ASTTextFrameBlock block,
+                                            long w, long h) {
+        Run anchorRun = framePara.addNewRun();
+        anchorRun.charPrIDRef("0");
+
+        Rectangle rect = anchorRun.addNewRectangle();
+        String shapeId = ASTToHwpxConverter.nextShapeId();
+
+        rect.idAnd(shapeId)
+                .zOrderAnd(0)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+
+        // ShapeComponent
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+        rect.createCurSz();
+        rect.curSz().set(w, h);
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        // LineShape (테두리)
+        setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
+                block.strokeType(), block.strokeTint());
+
+        // FillBrush (배경색)
+        setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint());
+
+        // Rectangle 꼭짓점 + 라운드 코너
+        rect.ratioAnd(computeCornerRatio(block.cornerRadius(), w, h));
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        // ShapeSize — PAPER 기준 절대 좌표
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(block.y())
+                .horzOffset(block.x());
+
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+    }
+
+    /**
+     * 래퍼 사각형(부모 Rectangle)의 fill을 라운드 사각형 아웃라인으로 변환.
+     * InDesign에서 "큰 채우기 사각형 + 안쪽 흰 텍스트 프레임" 패턴을
+     * HWPX에서 "라운드 스트로크 사각형 + 셀" 패턴으로 근사한다.
+     */
+    private void addWrapperRoundedRect(Para framePara, ASTTextFrameBlock block,
+                                        long w, long h) {
+        // 래퍼 fill을 stroke(아웃라인) 색으로 사용
+        String strokeColor = null;
+        double strokeWeightPt = 1.0; // 기본 1pt 아웃라인
+        if (block.hasWrapperFill()) {
+            double tint = block.wrapperFillTint();
+            if (tint < 0) tint = 100;
+            strokeColor = blendColorWithWhite(block.wrapperFillColor(), tint / 100.0);
+        } else if (block.strokeColor() != null && block.strokeColor().startsWith("#")) {
+            strokeColor = block.strokeColor();
+            strokeWeightPt = block.strokeWeight();
+        }
+        if (strokeColor == null) return;
+
+        Run anchorRun = framePara.addNewRun();
+        anchorRun.charPrIDRef("0");
+
+        Rectangle rect = anchorRun.addNewRectangle();
+        String shapeId = ASTToHwpxConverter.nextShapeId();
+
+        rect.idAnd(shapeId)
+                .zOrderAnd(0)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+        rect.createCurSz();
+        rect.curSz().set(w, h);
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        // 아웃라인 스트로크 (래퍼 fill → stroke)
+        setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, "Solid", 100);
+
+        // 배경은 흰색(Paper) 또는 프레임 자체 fill
+        String bgColor = block.fillColor();
+        double bgTint = block.fillTint();
+        if (bgColor == null || !bgColor.startsWith("#")) {
+            bgColor = "#FFFFFF";
+            bgTint = 100;
+        }
+        setupTextBoxFillBrush(rect, bgColor, bgTint);
+
+        // 라운드 코너
+        rect.ratioAnd(computeCornerRatio(block.cornerRadius(), w, h));
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(block.y())
+                .horzOffset(block.x());
+
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
     }
 
     /**
@@ -396,6 +589,13 @@ class HwpxTextBoxBuilder {
     private void convertSingleColumnTable(Para framePara, ASTTextFrameBlock block,
                                            long x, long y, long w, long h,
                                            java.util.List<ASTParagraph> paragraphs) {
+        convertSingleColumnTable(framePara, block, x, y, w, h, paragraphs, false);
+    }
+
+    private void convertSingleColumnTable(Para framePara, ASTTextFrameBlock block,
+                                           long x, long y, long w, long h,
+                                           java.util.List<ASTParagraph> paragraphs,
+                                           boolean suppressBorder) {
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
 
@@ -456,7 +656,8 @@ class HwpxTextBoxBuilder {
         Tr tr = table.addNewTr();
         Tc tc = tr.addNewTc();
 
-        String cellBfId = createTextFrameBorderFill(block);
+        // suppressBorder: 배경 사각형이 테두리를 담당하므로 개별 컬럼은 테두리/배경 없이
+        String cellBfId = suppressBorder ? "1" : createTextFrameBorderFill(block);
 
         tc.nameAnd("")
                 .headerAnd(false)
@@ -604,7 +805,25 @@ class HwpxTextBoxBuilder {
             return result;
         }
 
-        // 전체 문자 수 계산
+        // columnBreakAfter가 있으면 명시적 컬럼 분배
+        boolean hasExplicitBreak = false;
+        for (ASTParagraph p : paragraphs) {
+            if (p.columnBreakAfter()) { hasExplicitBreak = true; break; }
+        }
+
+        if (hasExplicitBreak) {
+            int currentCol = 0;
+            for (ASTParagraph p : paragraphs) {
+                if (currentCol >= colCount) currentCol = colCount - 1;
+                result.get(currentCol).add(p);
+                if (p.columnBreakAfter() && currentCol < colCount - 1) {
+                    currentCol++;
+                }
+            }
+            return result;
+        }
+
+        // fallback: 문자 수 기반 균등 분배
         int totalChars = 0;
         int[] paraChars = new int[paragraphs.size()];
         for (int i = 0; i < paragraphs.size(); i++) {
@@ -739,7 +958,9 @@ class HwpxTextBoxBuilder {
             twm = HwpxImageBuilder.mapTextWrapMethod(wrapMode);
             tfs = HwpxImageBuilder.mapTextFlowSide(obj.textWrapSide());
         } else {
-            twm = TextWrapMethod.TOP_AND_BOTTOM;
+            // 인라인(treatAsChar=true) rect: SQUARE로 같은 줄에 텍스트 배치
+            // TOP_AND_BOTTOM은 rect 뒤 텍스트를 다음 줄로 밀어냄
+            twm = TextWrapMethod.SQUARE;
             tfs = TextFlowSide.BOTH_SIDES;
         }
 
@@ -1214,13 +1435,22 @@ class HwpxTextBoxBuilder {
     /**
      * IDML cornerRadius (pts) → HWPX 둥근 사각형 ratio (0~50).
      * ratio: 0=직각, 20=둥근 모양, 50=반원.
+     * HWPX ratio는 가로/세로 양축에 동일 비율로 적용되므로,
+     * 비정사각형에서 ratio=50이면 타원이 됨.
+     * 가로세로 비율이 1.5:1 이상일 때 ratio를 제한하여 라운드 사각형 유지.
      */
     private static short computeCornerRatio(double cornerRadiusPts, long widthHwp, long heightHwp) {
         if (cornerRadiusPts <= 0) return 0;
         long minSide = Math.min(widthHwp, heightHwp);
+        long maxSide = Math.max(widthHwp, heightHwp);
         if (minSide <= 0) return 0;
         long cornerHwp = Math.round(cornerRadiusPts * 100); // 1pt = 100 HWPUNIT
         short ratio = (short) Math.min(50, Math.round(cornerHwp * 100.0 / minSide));
+
+        // ratio=50 + 비정사각형 → 타원 방지: maxSide 기준으로 재계산
+        if (ratio >= 50 && maxSide > minSide * 3 / 2) {
+            ratio = (short) Math.max(1, Math.round(minSide * 50.0 / maxSide));
+        }
         return ratio > 0 ? ratio : 1;
     }
 

@@ -45,6 +45,13 @@ public class IDMLTextFrame {
     // 그룹 소속 정보
     private String parentGroupId;
 
+    // 래퍼 사각형 스타일 (부모 Rectangle/Polygon에서 전파)
+    private String wrapperFillColor;
+    private double wrapperFillTint = -1;
+    private String wrapperStrokeColor;
+    private double wrapperStrokeWeight;
+    private double wrapperCornerRadius;
+
     // 폴리곤 경로 포인트 (local 좌표, non-rectangular 프레임 감지용)
     private double[] localPathX;
     private double[] localPathY;
@@ -156,6 +163,23 @@ public class IDMLTextFrame {
 
     public double columnRuleInsetWidth() { return columnRuleInsetWidth; }
     public void columnRuleInsetWidth(double v) { this.columnRuleInsetWidth = v; }
+
+    public String wrapperFillColor() { return wrapperFillColor; }
+    public void wrapperFillColor(String v) { this.wrapperFillColor = v; }
+
+    public double wrapperFillTint() { return wrapperFillTint; }
+    public void wrapperFillTint(double v) { this.wrapperFillTint = v; }
+
+    public String wrapperStrokeColor() { return wrapperStrokeColor; }
+    public void wrapperStrokeColor(String v) { this.wrapperStrokeColor = v; }
+
+    public double wrapperStrokeWeight() { return wrapperStrokeWeight; }
+    public void wrapperStrokeWeight(double v) { this.wrapperStrokeWeight = v; }
+
+    public double wrapperCornerRadius() { return wrapperCornerRadius; }
+    public void wrapperCornerRadius(double v) { this.wrapperCornerRadius = v; }
+
+    public boolean hasWrapper() { return wrapperFillColor != null || wrapperStrokeColor != null; }
 
     public double[] localPathX() { return localPathX; }
     public double[] localPathY() { return localPathY; }

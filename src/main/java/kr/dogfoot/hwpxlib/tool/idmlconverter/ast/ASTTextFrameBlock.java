@@ -40,6 +40,10 @@ public class ASTTextFrameBlock extends ASTBlock {
     private double rotationAngle; // 프레임 회전 각도 (도 단위)
     private long narrowedWidth;   // side-by-side 이미지로 축소된 폭 (0 = 미적용)
 
+    // 래퍼 사각형 배경 (부모 Rectangle에서 전파된 fill — 테두리 효과용)
+    private String wrapperFillColor;
+    private double wrapperFillTint = -1;
+
     // 폴리곤 경로 (비사각형 프레임용, 페이지 상대 HWPUNIT 좌표)
     private long[] pathPointsX; // null이면 사각형
     private long[] pathPointsY;
@@ -134,6 +138,14 @@ public class ASTTextFrameBlock extends ASTBlock {
     public long effectiveWidth() {
         return narrowedWidth > 0 ? narrowedWidth : width;
     }
+
+    public String wrapperFillColor() { return wrapperFillColor; }
+    public void wrapperFillColor(String v) { this.wrapperFillColor = v; }
+
+    public double wrapperFillTint() { return wrapperFillTint; }
+    public void wrapperFillTint(double v) { this.wrapperFillTint = v; }
+
+    public boolean hasWrapperFill() { return wrapperFillColor != null && wrapperFillColor.startsWith("#"); }
 
     public long[] pathPointsX() { return pathPointsX; }
     public long[] pathPointsY() { return pathPointsY; }

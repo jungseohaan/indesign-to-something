@@ -15,6 +15,7 @@ export function ConversionPanel() {
     endPage,
     structure,
     conversionLogs,
+    fontMappings,
     startConversion,
     setSpreadBased,
     setVectorDpi,
@@ -22,6 +23,7 @@ export function ConversionPanel() {
     setStartPage,
     setEndPage,
     clearError,
+    openFontMappingModal,
   } = useAppStore();
 
   // 모든 페이지의 라벨(name) 목록 구축
@@ -221,6 +223,15 @@ export function ConversionPanel() {
               className="border border-gray-300 rounded px-2 py-0.5 text-sm w-16 text-center"
             />
           </label>
+          <button
+            onClick={openFontMappingModal}
+            disabled={!idmlPath}
+            className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {Object.keys(fontMappings).length > 0
+              ? `폰트 (${Object.keys(fontMappings).length}개 변경)`
+              : "폰트 매핑"}
+          </button>
         </div>
 
         {/* Progress / Convert Button */}

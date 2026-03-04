@@ -13,6 +13,8 @@ public class IDMLDocument {
     private Map<String, IDMLStyleDef> charStyles;
     private Map<String, IDMLFontDef> fonts;
     private Map<String, String> colors;
+    private Map<String, String[]> objectStyles; // selfRef → [strokeColor, strokeWeight, strokeTint]
+    private Map<String, double[]> dashedStrokeStyles; // selfRef → dashArray (e.g., [3, 2])
     private Set<String> hiddenLayerIds;
     private Map<String, IDMLSpread> masterSpreads;
     private String basePath;
@@ -26,6 +28,8 @@ public class IDMLDocument {
         this.charStyles = new LinkedHashMap<String, IDMLStyleDef>();
         this.fonts = new LinkedHashMap<String, IDMLFontDef>();
         this.colors = new LinkedHashMap<String, String>();
+        this.objectStyles = new LinkedHashMap<String, String[]>();
+        this.dashedStrokeStyles = new LinkedHashMap<String, double[]>();
         this.hiddenLayerIds = new HashSet<String>();
         this.masterSpreads = new LinkedHashMap<String, IDMLSpread>();
         this.pageNumberStart = 1;
@@ -53,6 +57,18 @@ public class IDMLDocument {
     public Map<String, String> colors() { return colors; }
     public String getColor(String colorRef) { return colors.get(colorRef); }
     public void putColor(String colorRef, String hexColor) { colors.put(colorRef, hexColor); }
+
+    /** ObjectStyle: selfRef → [strokeColor, strokeWeight, strokeTint] */
+    public void putObjectStyle(String selfRef, String strokeColor, String strokeWeight, String strokeTint) {
+        objectStyles.put(selfRef, new String[]{strokeColor, strokeWeight, strokeTint});
+    }
+    public String[] getObjectStyle(String selfRef) { return objectStyles.get(selfRef); }
+
+    /** DashedStrokeStyle: selfRef → dashArray */
+    public void putDashedStrokeStyle(String selfRef, double[] dashArray) {
+        dashedStrokeStyles.put(selfRef, dashArray);
+    }
+    public double[] getDashedStrokeStyle(String selfRef) { return dashedStrokeStyles.get(selfRef); }
 
     public Map<String, IDMLSpread> masterSpreads() { return masterSpreads; }
     public IDMLSpread getMasterSpread(String masterId) { return masterSpreads.get(masterId); }

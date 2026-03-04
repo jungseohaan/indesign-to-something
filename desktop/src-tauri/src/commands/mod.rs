@@ -219,6 +219,8 @@ pub struct ConvertOptions {
     pub end_page: Option<i32>,
     #[serde(default = "default_layout_mode")]
     pub layout_mode: String,
+    #[serde(default)]
+    pub font_map: Option<std::collections::HashMap<String, String>>,
 }
 
 fn default_layout_mode() -> String {

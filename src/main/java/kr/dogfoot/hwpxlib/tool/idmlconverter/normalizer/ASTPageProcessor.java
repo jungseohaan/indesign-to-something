@@ -57,7 +57,7 @@ class ASTPageProcessor {
                 resolvedData, resolvedPage, processedStories, doc, section);
 
         // 이미지 프레임 처리
-        processImageFrames(spread, page, imageLoader, section);
+        processImageFrames(spread, page, imageLoader, colorResolver, section);
 
         // 벡터 도형 처리
         processVectorShapes(spread, page, imageLoader,
@@ -190,7 +190,9 @@ class ASTPageProcessor {
     // ── 이미지 프레임 ──────────────────────────────────────
 
     private static void processImageFrames(IDMLSpread spread, IDMLPage page,
-                                            ASTImageLoader imageLoader, ASTSection section) {
+                                            ASTImageLoader imageLoader,
+                                            ColorResolver colorResolver,
+                                            ASTSection section) {
         if (imageLoader == null) return;
 
         List<IDMLImageFrame> imageFrames = spread.getImageFramesOnPage(page);
@@ -209,7 +211,7 @@ class ASTPageProcessor {
         List<ASTFigure> imageFigures = uniqueFrames.parallelStream()
                 .map(imgFrame -> {
                     ASTFigure fig = ASTFigureBuilder.createFigureFromImageFrame(
-                            imgFrame, finalPage, imageLoader);
+                            imgFrame, finalPage, imageLoader, colorResolver);
                     if (fig == null) {
                         System.err.println("[IMG-FAIL] Page " + finalPage.pageNumber()
                                 + " imageFrame URI=" + imgFrame.linkResourceURI()
@@ -318,7 +320,7 @@ class ASTPageProcessor {
         }
         IDMLPage mp = masterPage;
         List<ASTFigure> masterImgFigs = uniqueMasterImgs.parallelStream()
-                .map(f -> ASTFigureBuilder.createFigureFromImageFrame(f, mp, imageLoader))
+                .map(f -> ASTFigureBuilder.createFigureFromImageFrame(f, mp, imageLoader, colorResolver))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
@@ -429,9 +431,7 @@ class ASTPageProcessor {
                     ASTTable astTable = ASTTableConverter.convertTable(
                             idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader);
                     if (astTable != null) {
-                        ASTParagraph tablePara = new ASTParagraph();
-                        tablePara.inlineTable(astTable);
-                        block.addParagraph(tablePara);
+                        addInlineTableOrFlatten(astTable, block);
                     }
                 }
             }
@@ -459,9 +459,7 @@ class ASTPageProcessor {
                 ASTTable astTable = ASTTableConverter.convertTable(
                         idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader);
                 if (astTable != null) {
-                    ASTParagraph tablePara = new ASTParagraph();
-                    tablePara.inlineTable(astTable);
-                    block.addParagraph(tablePara);
+                    addInlineTableOrFlatten(astTable, block);
                 }
             }
         }
@@ -782,13 +780,52 @@ class ASTPageProcessor {
         }
 
         block.verticalJustification(tf.verticalJustification());
-        block.fillColor(tf.fillColor() != null ? colorResolver.resolve(tf.fillColor()) : null);
-        block.strokeColor(tf.strokeColor() != null ? colorResolver.resolve(tf.strokeColor()) : null);
-        block.strokeWeight(tf.strokeWeight());
-        block.strokeType(tf.strokeType());
-        block.fillTint(tf.fillTint());
-        block.strokeTint(tf.strokeTint());
-        block.cornerRadius(tf.cornerRadius());
+
+        // 프레임 자체의 fill/stroke 해석
+        String resolvedFill = tf.fillColor() != null ? colorResolver.resolve(tf.fillColor()) : null;
+        String resolvedStroke = tf.strokeColor() != null ? colorResolver.resolve(tf.strokeColor()) : null;
+        double strokeWeight = tf.strokeWeight();
+        String strokeType = tf.strokeType();
+        double fillTint = tf.fillTint();
+        double strokeTint = tf.strokeTint();
+        double cornerRadius = tf.cornerRadius();
+
+        // 래퍼 사각형 속성 병합: 프레임 자체에 유효한 stroke가 없고 래퍼에 fill이 있으면
+        // 래퍼 fill을 셀 배경으로 사용하고, 프레임 fill은 유지
+        if (tf.hasWrapper()) {
+            String wFill = colorResolver.resolve(tf.wrapperFillColor());
+            String wStroke = colorResolver.resolve(tf.wrapperStrokeColor());
+
+            // 래퍼 fill → 블록 배경 (프레임 자체 fill이 Paper/None인 경우)
+            boolean frameHasVisibleFill = resolvedFill != null
+                    && !resolvedFill.equals("#FFFFFF")
+                    && tf.fillColor() != null
+                    && !tf.fillColor().contains("Paper");
+            if (!frameHasVisibleFill && wFill != null) {
+                block.wrapperFillColor(wFill);
+                block.wrapperFillTint(tf.wrapperFillTint() >= 0 ? tf.wrapperFillTint() : 100);
+            }
+
+            // 래퍼 stroke → 블록 stroke (프레임 자체 stroke가 없는 경우)
+            if ((resolvedStroke == null || strokeWeight <= 0) && wStroke != null) {
+                resolvedStroke = wStroke;
+                strokeWeight = tf.wrapperStrokeWeight();
+                strokeTint = 100;
+            }
+
+            // 래퍼 corner radius → 블록 corner radius (프레임 자체가 0인 경우)
+            if (cornerRadius <= 0 && tf.wrapperCornerRadius() > 0) {
+                cornerRadius = tf.wrapperCornerRadius();
+            }
+        }
+
+        block.fillColor(resolvedFill);
+        block.strokeColor(resolvedStroke);
+        block.strokeWeight(strokeWeight);
+        block.strokeType(strokeType);
+        block.fillTint(fillTint);
+        block.strokeTint(strokeTint);
+        block.cornerRadius(cornerRadius);
         block.rotationAngle(rotation);
 
         // 비사각형 폴리곤 경로
@@ -946,6 +983,39 @@ class ASTPageProcessor {
     }
 
     /**
+     * 1x1 인라인 테이블은 셀 내용을 직접 블록에 추가 (이중 테이블 방지),
+     * 그 외에는 인라인 테이블로 추가.
+     */
+    private static void addInlineTableOrFlatten(ASTTable astTable, ASTTextFrameBlock block) {
+        if (astTable.rowCount() == 1 && astTable.colCount() == 1) {
+            ASTTableCell cell = astTable.rows().get(0).cells().get(0);
+            if (!hasSolidBorder(cell)) {
+                // 테두리 없는 1x1 인라인 테이블 → 셀 내용을 직접 추가
+                for (ASTParagraph p : cell.paragraphs()) {
+                    block.addParagraph(p);
+                }
+                return;
+            }
+        }
+        ASTParagraph tablePara = new ASTParagraph();
+        tablePara.inlineTable(astTable);
+        block.addParagraph(tablePara);
+    }
+
+    private static boolean hasSolidBorder(ASTTableCell cell) {
+        return isSolidBorder(cell.topBorder())
+                || isSolidBorder(cell.bottomBorder())
+                || isSolidBorder(cell.leftBorder())
+                || isSolidBorder(cell.rightBorder());
+    }
+
+    private static boolean isSolidBorder(ASTTableCell.CellBorder border) {
+        if (border == null) return false;
+        String type = border.strokeType();
+        return type == null || "solid".equalsIgnoreCase(type);
+    }
+
+    /**
      * 텍스트 프레임 블록에 실제 콘텐츠가 있는지 확인.
      */
     static boolean hasContent(ASTTextFrameBlock block) {
@@ -953,6 +1023,7 @@ class ASTPageProcessor {
         if (block.paragraphs().isEmpty()) return false;
         for (ASTParagraph para : block.paragraphs()) {
             if (!para.items().isEmpty()) return true;
+            if (para.inlineTable() != null) return true;
         }
         return false;
     }

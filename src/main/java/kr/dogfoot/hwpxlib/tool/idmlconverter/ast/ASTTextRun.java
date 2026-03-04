@@ -16,6 +16,7 @@ public class ASTTextRun extends ASTInlineItem {
     private boolean grepMathFont;  // GREP 스타일에서 BT수식M이 동적 적용된 런
     private boolean underline;     // 밑줄
     private String underlineColor; // 밑줄 색상 (null이면 textColor 사용)
+    private String underlineShape; // 밑줄 선 형태 (null=SOLID, "DOT", "DASH")
     private boolean strikeThrough; // 취소선
     private Short horizontalScale; // 장평 (%, 100 = normal)
     private Short verticalScale;   // 세로 비율 (%, 100 = normal)
@@ -58,6 +59,9 @@ public class ASTTextRun extends ASTInlineItem {
 
     public String underlineColor() { return underlineColor; }
     public void underlineColor(String v) { this.underlineColor = v; }
+
+    public String underlineShape() { return underlineShape; }
+    public void underlineShape(String v) { this.underlineShape = v; }
 
     public boolean strikeThrough() { return strikeThrough; }
     public void strikeThrough(boolean v) { this.strikeThrough = v; }

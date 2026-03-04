@@ -46,13 +46,19 @@ public class ASTToHwpxConverter {
     // ── 정적 팩토리 ──
 
     public static ConvertResult convert(ASTDocument doc) throws ConvertException {
-        return convert(doc, ProgressReporter.NONE, 0, 0);
+        return convert(doc, ProgressReporter.NONE, 0, 0, null);
     }
 
     public static ConvertResult convert(ASTDocument doc, ProgressReporter reporter,
                                          int progressOffset, int progressTotal) throws ConvertException {
+        return convert(doc, reporter, progressOffset, progressTotal, null);
+    }
+
+    public static ConvertResult convert(ASTDocument doc, ProgressReporter reporter,
+                                         int progressOffset, int progressTotal,
+                                         Map<String, String> customFontMap) throws ConvertException {
         try {
-            return new ASTToHwpxConverter(doc, reporter, progressOffset, progressTotal).doConvert();
+            return new ASTToHwpxConverter(doc, reporter, progressOffset, progressTotal, customFontMap).doConvert();
         } catch (ConvertException ce) {
             throw ce;
         } catch (Exception e) {
@@ -68,6 +74,7 @@ public class ASTToHwpxConverter {
     private final ProgressReporter reporter;
     private final int progressOffset;
     private final int progressTotal;
+    private final Map<String, String> customFontMap;
 
     // 통계
     private int pagesConverted;
@@ -80,12 +87,14 @@ public class ASTToHwpxConverter {
     private HwpxImageBuilder imageBuilder;
 
     private ASTToHwpxConverter(ASTDocument doc, ProgressReporter reporter,
-                                int progressOffset, int progressTotal) {
+                                int progressOffset, int progressTotal,
+                                Map<String, String> customFontMap) {
         this.doc = doc;
         this.result = new ConvertResult();
         this.reporter = reporter;
         this.progressOffset = progressOffset;
         this.progressTotal = progressTotal;
+        this.customFontMap = customFontMap;
     }
 
     // ── 변환 메인 ──
@@ -97,7 +106,7 @@ public class ASTToHwpxConverter {
         HWPXFile hwpxFile = BlankFileMaker.make();
 
         // 2. 레지스트리 초기화
-        FontRegistry fontRegistry = new FontRegistry(hwpxFile);
+        FontRegistry fontRegistry = new FontRegistry(hwpxFile, customFontMap);
         StyleRegistry styleRegistry = new StyleRegistry(hwpxFile, fontRegistry);
 
         // 3. 컨텍스트 + 빌더 생성
