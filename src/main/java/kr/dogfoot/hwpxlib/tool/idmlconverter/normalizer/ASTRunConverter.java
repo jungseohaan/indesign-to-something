@@ -332,7 +332,10 @@ class ASTRunConverter {
                     if (ts.position() > lastTabPos) lastTabPos = ts.position();
                 }
             }
-            para.addTabStop(new ASTTabStop(lastTabPos + inlineObj.width(), "left", "_"));
+            // 안전 마진 200 HWPUNIT(2pt): 탭 리더가 셀 경계에 닿으면 한글이 줄바꿈하므로
+            long tabPos = lastTabPos + inlineObj.width() - 200;
+            if (tabPos < lastTabPos + 100) tabPos = lastTabPos + 100;
+            para.addTabStop(new ASTTabStop(tabPos, "left", "_"));
 
             ASTTextRun tabRun = new ASTTextRun();
             tabRun.text("\t");

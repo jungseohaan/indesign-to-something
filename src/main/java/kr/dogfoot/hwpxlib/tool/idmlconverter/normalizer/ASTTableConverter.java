@@ -114,9 +114,14 @@ class ASTTableConverter {
         cell.rowSpan(idmlCell.rowSpan());
         cell.columnSpan(idmlCell.columnSpan());
 
-        // 셀 스타일
+        // 셀 스타일 (FillColor + FillTint 블렌딩)
         if (idmlCell.fillColor() != null) {
-            cell.fillColor(colorResolver.resolve(idmlCell.fillColor()));
+            String resolved = colorResolver.resolve(idmlCell.fillColor());
+            double tint = idmlCell.fillTint();
+            if (tint < 100 && resolved != null && resolved.startsWith("#") && resolved.length() >= 7) {
+                resolved = blendColorWithWhite(resolved, tint / 100.0);
+            }
+            cell.fillColor(resolved);
         }
         cell.verticalAlign(idmlCell.verticalJustification());
 
@@ -377,5 +382,27 @@ class ASTTableConverter {
         }
 
         return cell;
+    }
+
+    /**
+     * 색상에 tint(농도)를 적용: 흰색과 블렌딩.
+     */
+    private static String blendColorWithWhite(String hex, double fraction) {
+        if (hex == null || !hex.startsWith("#") || hex.length() < 7) return hex;
+        try {
+            int rgb = Integer.parseInt(hex.substring(1, 7), 16);
+            int r = (rgb >> 16) & 0xFF;
+            int g = (rgb >> 8) & 0xFF;
+            int b = rgb & 0xFF;
+            r = (int) Math.round(255 + (r - 255) * fraction);
+            g = (int) Math.round(255 + (g - 255) * fraction);
+            b = (int) Math.round(255 + (b - 255) * fraction);
+            return String.format("#%02X%02X%02X",
+                    Math.max(0, Math.min(255, r)),
+                    Math.max(0, Math.min(255, g)),
+                    Math.max(0, Math.min(255, b)));
+        } catch (Exception e) {
+            return hex;
+        }
     }
 }
