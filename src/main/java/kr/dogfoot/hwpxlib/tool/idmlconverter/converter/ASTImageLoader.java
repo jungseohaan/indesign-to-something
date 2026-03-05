@@ -148,6 +148,21 @@ public class ASTImageLoader {
                                   double[] imageTransform, double[] frameBoundsPoints,
                                   double[] graphicBounds,
                                   List<Integer> visibleLayerIndices, String layerSignature) {
+        return loadImage(linkResourceURI, displayWidthHwp, displayHeightHwp,
+                imageTransform, frameBoundsPoints, graphicBounds,
+                visibleLayerIndices, layerSignature, null);
+    }
+
+    /**
+     * 이미지를 로드하고 프레임 클리핑을 적용한다.
+     * @param framePath 비사각형 프레임 경로 (null이면 사각형 클리핑만 적용)
+     */
+    public ImageResult loadImage(String linkResourceURI,
+                                  long displayWidthHwp, long displayHeightHwp,
+                                  double[] imageTransform, double[] frameBoundsPoints,
+                                  double[] graphicBounds,
+                                  List<Integer> visibleLayerIndices, String layerSignature,
+                                  List<double[]> framePath) {
         if (linkResourceURI == null || linkResourceURI.isEmpty()) {
             return createPlaceholderResult(displayWidthHwp, displayHeightHwp, null);
         }
@@ -205,7 +220,7 @@ public class ASTImageLoader {
 
             // 클리핑 적용
             if (imageTransform != null && frameBoundsPoints != null) {
-                imageData = applyClipping(imageData, imageTransform, frameBoundsPoints, graphicBounds);
+                imageData = applyClipping(imageData, imageTransform, frameBoundsPoints, graphicBounds, framePath);
                 outputFormat = "png";
             }
 
@@ -316,7 +331,8 @@ public class ASTImageLoader {
     }
 
     private byte[] applyClipping(byte[] imageData, double[] imageTransform,
-                                  double[] frameBounds, double[] graphicBounds) throws IOException {
+                                  double[] frameBounds, double[] graphicBounds,
+                                  List<double[]> framePath) throws IOException {
         BufferedImage srcImage = ImageIO.read(new ByteArrayInputStream(imageData));
         if (srcImage == null) return imageData;
 
@@ -343,15 +359,129 @@ public class ASTImageLoader {
         boolean hasRotation = Math.abs(imageTransform[1]) > 0.001
                            || Math.abs(imageTransform[2]) > 0.001;
 
+        byte[] clipped;
         if (hasRotation) {
-            return applyClippingRotated(srcImage, imageTransform,
+            clipped = applyClippingRotated(srcImage, imageTransform,
                     fLeft, fTop, fRight, fBottom, frameW, frameH,
                     gLeft, gTop, pxPerPtX, pxPerPtY);
         } else {
-            return applyClippingSimple(srcImage, imageTransform,
+            clipped = applyClippingSimple(srcImage, imageTransform,
                     fLeft, fTop, fRight, fBottom, frameW, frameH,
                     gLeft, gTop, pxPerPtX, pxPerPtY);
         }
+
+        // 비사각형 프레임 경로가 있으면 알파 마스크 적용
+        if (framePath != null && isNonRectangularPath(framePath)) {
+            System.err.printf("[PATH-MASK] Applying path mask: %d points, frame=[%.1f,%.1f,%.1f,%.1f]%n",
+                    framePath.size(), fLeft, fTop, frameW, frameH);
+            clipped = applyPathMask(clipped, framePath, fLeft, fTop, frameW, frameH);
+        }
+
+        return clipped;
+    }
+
+    /**
+     * PathPoint 목록이 비사각형(곡선 또는 5개 이상 점)인지 확인한다.
+     */
+    private boolean isNonRectangularPath(List<double[]> framePath) {
+        if (framePath.size() > 4) return true;
+        for (double[] pt : framePath) {
+            double ax = pt[0], ay = pt[1];
+            double lx = pt[2], ly = pt[3];
+            double rx = pt[4], ry = pt[5];
+            if (Math.abs(ax - lx) > 0.001 || Math.abs(ay - ly) > 0.001
+                    || Math.abs(ax - rx) > 0.001 || Math.abs(ay - ry) > 0.001) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 비사각형 프레임 경로를 알파 마스크로 적용한다.
+     * 경로 밖 영역을 투명하게 만든다.
+     */
+    private byte[] applyPathMask(byte[] imageData, List<double[]> framePath,
+                                  double fLeft, double fTop,
+                                  double frameW, double frameH) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(imageData));
+        if (img == null) return imageData;
+
+        int pixW = img.getWidth();
+        int pixH = img.getHeight();
+
+        // 프레임 경로를 캔버스 픽셀 좌표로 변환하여 GeneralPath 생성
+        java.awt.geom.GeneralPath path = new java.awt.geom.GeneralPath();
+        double scaleX = pixW / frameW;
+        double scaleY = pixH / frameH;
+
+        for (int i = 0; i < framePath.size(); i++) {
+            double[] pt = framePath.get(i);
+            // pt: [anchorX, anchorY, leftDirX, leftDirY, rightDirX, rightDirY]
+            double ax = (pt[0] - fLeft) * scaleX;
+            double ay = (pt[1] - fTop) * scaleY;
+
+            if (i == 0) {
+                path.moveTo(ax, ay);
+            } else {
+                double[] prev = framePath.get(i - 1);
+                double prevRx = (prev[4] - fLeft) * scaleX;
+                double prevRy = (prev[5] - fTop) * scaleY;
+                double curLx = (pt[2] - fLeft) * scaleX;
+                double curLy = (pt[3] - fTop) * scaleY;
+
+                // 이전 점의 rightDirection과 현재 점의 leftDirection이
+                // 각각의 anchor와 같으면 직선, 다르면 베지어 곡선
+                double prevAx = (prev[0] - fLeft) * scaleX;
+                double prevAy = (prev[1] - fTop) * scaleY;
+                boolean straightPrev = Math.abs(prevRx - prevAx) < 0.5
+                        && Math.abs(prevRy - prevAy) < 0.5;
+                boolean straightCur = Math.abs(curLx - ax) < 0.5
+                        && Math.abs(curLy - ay) < 0.5;
+
+                if (straightPrev && straightCur) {
+                    path.lineTo(ax, ay);
+                } else {
+                    path.curveTo(prevRx, prevRy, curLx, curLy, ax, ay);
+                }
+            }
+        }
+
+        // 마지막 점 → 첫 점 닫기
+        if (framePath.size() > 2) {
+            double[] last = framePath.get(framePath.size() - 1);
+            double[] first = framePath.get(0);
+            double lastRx = (last[4] - fLeft) * scaleX;
+            double lastRy = (last[5] - fTop) * scaleY;
+            double firstLx = (first[2] - fLeft) * scaleX;
+            double firstLy = (first[3] - fTop) * scaleY;
+            double firstAx = (first[0] - fLeft) * scaleX;
+            double firstAy = (first[1] - fTop) * scaleY;
+            double lastAx = (last[0] - fLeft) * scaleX;
+            double lastAy = (last[1] - fTop) * scaleY;
+
+            boolean straightLast = Math.abs(lastRx - lastAx) < 0.5
+                    && Math.abs(lastRy - lastAy) < 0.5;
+            boolean straightFirst = Math.abs(firstLx - firstAx) < 0.5
+                    && Math.abs(firstLy - firstAy) < 0.5;
+
+            if (straightLast && straightFirst) {
+                path.lineTo(firstAx, firstAy);
+            } else {
+                path.curveTo(lastRx, lastRy, firstLx, firstLy, firstAx, firstAy);
+            }
+        }
+        path.closePath();
+
+        // 새 이미지에 path 클리핑 후 원본 그리기
+        BufferedImage masked = new BufferedImage(pixW, pixH, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = masked.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setClip(path);
+        g.drawImage(img, 0, 0, null);
+        g.dispose();
+
+        return encodePng(masked);
     }
 
     /**
@@ -615,9 +745,10 @@ public class ASTImageLoader {
 
         g.dispose();
 
-        // GradientFeather 알파 마스크 비활성:
-        // 개별 도형을 독립 래스터화하면 투명 영역이 배경 없이 흰색으로 나타나
-        // 원본 InDesign과 다른 결과물이 생성됨. 솔리드 채우기로 렌더링.
+        // GradientFeather 알파 마스크 적용
+        if (shape.hasGradientFeather()) {
+            applyGradientFeatherAlpha(image, shape, canvasBounds, scale, strokePad);
+        }
 
         try {
             byte[] pngData = encodePng(image);
@@ -631,6 +762,65 @@ public class ASTImageLoader {
             return result;
         } catch (IOException e) {
             return null;
+        }
+    }
+
+    /**
+     * GradientFeather 알파 마스크를 이미지에 적용한다.
+     * InDesign의 GradientFeather 효과는 도형의 투명도를 선형 그라디언트로 페이드한다.
+     */
+    private void applyGradientFeatherAlpha(BufferedImage image, IDMLVectorShape shape,
+                                            double[] canvasBounds, double scale, double strokePad) {
+        double angle = shape.gradientFeatherAngle();
+        double length = shape.gradientFeatherLength();
+        double[] start = shape.gradientFeatherStart();
+
+        if (length <= 0) return;
+
+        double canvasW = canvasBounds[3] - canvasBounds[1];
+        double canvasH = canvasBounds[2] - canvasBounds[0];
+
+        // 그라디언트 시작점 (도형 중심 기준 → 캔버스 좌표)
+        double startX, startY;
+        if (start != null) {
+            startX = start[0] + canvasW / 2;
+            startY = start[1] + canvasH / 2;
+        } else {
+            startX = canvasW / 2;
+            startY = canvasH / 2;
+        }
+
+        // 각도 → 방향 벡터 (InDesign: 0°=오른쪽, 반시계)
+        double rad = Math.toRadians(angle);
+        double dirX = Math.cos(rad);
+        double dirY = -Math.sin(rad);  // Y축 반전 (화면 좌표계)
+
+        int pixW = image.getWidth();
+        int pixH = image.getHeight();
+
+        for (int py = 0; py < pixH; py++) {
+            for (int px = 0; px < pixW; px++) {
+                // 픽셀 → 포인트 좌표
+                double ptX = (px - strokePad) / scale;
+                double ptY = (py - strokePad) / scale;
+
+                // 시작점으로부터 그라디언트 방향 투영
+                double dx = ptX - startX;
+                double dy = ptY - startY;
+                double proj = dx * dirX + dy * dirY;
+
+                // 0 → length 범위에서 t 계산 (0=불투명, 1=투명)
+                double t = proj / length;
+                t = Math.max(0, Math.min(1, t));
+
+                // 알파 = 1 - t (100% → 0%)
+                double alphaFactor = 1.0 - t;
+
+                int argb = image.getRGB(px, py);
+                int a = (argb >> 24) & 0xFF;
+                int newA = (int) Math.round(a * alphaFactor);
+                image.setRGB(px, py, (newA << 24) | (argb & 0x00FFFFFF));
+            }
         }
     }
 

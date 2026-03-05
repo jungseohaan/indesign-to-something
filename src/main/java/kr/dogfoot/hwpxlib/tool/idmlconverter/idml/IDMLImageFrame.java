@@ -37,6 +37,10 @@ public class IDMLImageFrame {
     private double imageFillTint = -1;   // Image 요소의 FillTint (0~100, -1=미지정)
     private String imageColorSpace;      // Image 요소의 Space (예: "$ID/#Links_Grayscale")
 
+    // 프레임 경로 (비사각형 클리핑용)
+    // 각 포인트: [anchorX, anchorY, leftDirX, leftDirY, rightDirX, rightDirY]
+    private List<double[]> framePath;    // null이면 사각형 프레임
+
     // 텍스트 감싸기 (TextWrapPreference)
     private String textWrapMode;         // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap", "Contour"
     private String textWrapSide;         // "BothSides", "LeftSide", "RightSide", "LargestArea"
@@ -88,6 +92,29 @@ public class IDMLImageFrame {
 
     public boolean isEmbedded() {
         return "Embedded".equals(linkStoredState);
+    }
+
+    public List<double[]> framePath() { return framePath; }
+    public void framePath(List<double[]> v) { this.framePath = v; }
+
+    /**
+     * 프레임이 비사각형인지 확인한다.
+     * PathPoint가 4개 초과이거나 베지어 곡선이 포함되어 있으면 true.
+     */
+    public boolean hasNonRectangularFrame() {
+        if (framePath == null || framePath.isEmpty()) return false;
+        if (framePath.size() > 4) return true;
+        for (double[] pt : framePath) {
+            // pt: [anchorX, anchorY, leftX, leftY, rightX, rightY]
+            double ax = pt[0], ay = pt[1];
+            double lx = pt[2], ly = pt[3];
+            double rx = pt[4], ry = pt[5];
+            if (Math.abs(ax - lx) > 0.001 || Math.abs(ay - ly) > 0.001
+                    || Math.abs(ax - rx) > 0.001 || Math.abs(ay - ry) > 0.001) {
+                return true; // 베지어 곡선
+            }
+        }
+        return false;
     }
 
     public String textWrapMode() { return textWrapMode; }

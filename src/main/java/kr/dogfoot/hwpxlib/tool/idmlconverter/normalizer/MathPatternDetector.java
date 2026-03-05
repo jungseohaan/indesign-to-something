@@ -67,32 +67,38 @@ class MathPatternDetector {
     static boolean isMathPattern(String text) {
         if (text == null || text.isEmpty()) return false;
 
+        // 탭/공백/선지번호(⑴①ㄱ. 등) 제거 후 수식 부분만 추출하여 판정
+        String cleaned = stripNonMathPrefix(text);
+        if (cleaned.isEmpty()) return false;
+
         // 한국어 포함 → 수식 아님
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
+        for (int i = 0; i < cleaned.length(); i++) {
+            char c = cleaned.charAt(i);
             if (c >= 0xAC00 && c <= 0xD7AF) return false;
             if (c >= 0x3131 && c <= 0x318E) return false;
-            if (c == '\t') return false;
         }
 
         // 일반 영단어이면 수식 아님
-        String stripped = text.trim();
+        String stripped = cleaned.trim();
         if (isCommonWord(stripped)) return false;
 
         // 유니코드 수학 기호 포함 → 수식
-        if (hasUnicodeMathSymbol(text)) return true;
+        if (hasUnicodeMathSymbol(cleaned)) return true;
 
         // 유니코드 그리스 문자 포함 → 수식
-        if (hasGreekLetter(text)) return true;
+        if (hasGreekLetter(cleaned)) return true;
 
         // 유니코드 첨자 포함 → 수식
-        if (hasUnicodeScript(text)) return true;
+        if (hasUnicodeScript(cleaned)) return true;
 
         // 수학 함수 키워드 + 괄호/첨자 → 수식
-        if (hasMathFunction(text)) return true;
+        if (hasMathFunction(cleaned)) return true;
 
         // 변수+연산자 조합 패턴 → 수식
-        if (MATH_EXPR_PATTERN.matcher(text).find()) return true;
+        if (MATH_EXPR_PATTERN.matcher(cleaned).find()) return true;
+
+        // EH 분수 패턴 (;...;) 포함 → 수식
+        if (hasEHFractionPattern(cleaned)) return true;
 
         return false;
     }
@@ -188,6 +194,51 @@ class MathPatternDetector {
             }
         }
         return false;
+    }
+
+    /**
+     * 선지번호(⑴①ㄱ. 등), 탭, 앞뒤 공백 제거 후 수식 부분만 추출.
+     * InDesign 탭(열 정렬용)과 선지번호가 수식 감지를 방해하지 않도록 한다.
+     */
+    private static String stripNonMathPrefix(String text) {
+        // 앞뒤 탭/공백 제거
+        int start = 0;
+        int end = text.length();
+        while (start < end) {
+            char c = text.charAt(start);
+            if (c == ' ' || c == '\t' || c == '\u2009' || c == '\u200A') {
+                start++;
+            } else if (c >= 0x2460 && c <= 0x2473) {
+                start++; // ①-⑳
+            } else if (c >= 0x2474 && c <= 0x2487) {
+                start++; // ⑴-⒇
+            } else if (c >= 0x3131 && c <= 0x314E && start + 1 < end && text.charAt(start + 1) == '.') {
+                start += 2; // ㄱ. ㄴ. 등
+            } else {
+                break;
+            }
+        }
+        while (end > start) {
+            char c = text.charAt(end - 1);
+            if (c == ' ' || c == '\t' || c == '\u2009' || c == '\u200A') {
+                end--;
+            } else {
+                break;
+            }
+        }
+        if (start >= end) return "";
+        return text.substring(start, end);
+    }
+
+    /** EH 분수 패턴 (;...;) 포함 여부 확인 */
+    private static boolean hasEHFractionPattern(String text) {
+        int firstSemi = text.indexOf(';');
+        if (firstSemi < 0) return false;
+        int secondSemi = text.indexOf(';', firstSemi + 1);
+        if (secondSemi < 0) return false;
+        // ; 사이에 1~10자 내용이 있어야 함
+        int innerLen = secondSemi - firstSemi - 1;
+        return innerLen >= 1 && innerLen <= 10;
     }
 
     /** 순수 숫자 또는 영단어인지 확인 (수식 폰트라도 수식 아님) */

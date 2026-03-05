@@ -57,7 +57,8 @@ class ASTPageProcessor {
                 resolvedData, resolvedPage, processedStories, doc, section);
 
         // 이미지 프레임 처리
-        processImageFrames(spread, page, imageLoader, colorResolver, section);
+        processImageFrames(spread, page, imageLoader, colorResolver,
+                resolvedData, resolvedPage, section);
 
         // 벡터 도형 처리
         processVectorShapes(spread, page, imageLoader,
@@ -282,6 +283,8 @@ class ASTPageProcessor {
     private static void processImageFrames(IDMLSpread spread, IDMLPage page,
                                             ASTImageLoader imageLoader,
                                             ColorResolver colorResolver,
+                                            ResolvedData resolvedData,
+                                            ResolvedPage resolvedPage,
                                             ASTSection section) {
         if (imageLoader == null) return;
 
@@ -301,7 +304,8 @@ class ASTPageProcessor {
         List<ASTFigure> imageFigures = uniqueFrames.parallelStream()
                 .map(imgFrame -> {
                     ASTFigure fig = ASTFigureBuilder.createFigureFromImageFrame(
-                            imgFrame, finalPage, imageLoader, colorResolver);
+                            imgFrame, finalPage, imageLoader, colorResolver,
+                            resolvedData, resolvedPage);
                     if (fig == null) {
                         System.err.println("[IMG-FAIL] Page " + finalPage.pageNumber()
                                 + " imageFrame URI=" + imgFrame.linkResourceURI()

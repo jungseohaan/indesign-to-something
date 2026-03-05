@@ -166,6 +166,9 @@ class ASTStoryConverter {
             } else if (EHFontGlyphMap.containsEHEncodedChars(run.content())) {
                 // 폰트 미지정이지만 EH 인코딩 패턴(Û` 등) 포함 → EH 그룹으로 진입
                 enterEHMathGroup = true;
+            } else if (EHFontGlyphMap.containsEHFractionPattern(run.content())) {
+                // 폰트 미지정이지만 ;...; 분수 GREP 패턴 포함 → EH 그룹으로 진입
+                enterEHMathGroup = true;
             } else if (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx)) {
                 enterEHMathGroup = true;
             }

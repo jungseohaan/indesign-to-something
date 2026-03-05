@@ -336,6 +336,9 @@ class IDMLSpreadParser {
 
         frame.geometricBounds(localBounds);
 
+        // 프레임 경로 추출 (비사각형 클리핑용)
+        frame.framePath(extractFramePath(shapeElem));
+
         // ItemTransform: 자식 컨테이너를 사용하는 경우 부모 + 자식 transform 결합
         double[] frameTransform = IDMLGeometry.parseTransform(
                 shapeElem.getAttribute("ItemTransform"));
@@ -1101,6 +1104,43 @@ class IDMLSpreadParser {
 
         // PathGeometry에서 bounds 계산
         return computeBoundsFromPathGeometry(elem);
+    }
+
+    /**
+     * 이미지 프레임의 PathPoint 경로를 추출한다.
+     * 비사각형 클리핑(타원, 복합 모양)에 사용.
+     * 각 포인트: [anchorX, anchorY, leftDirX, leftDirY, rightDirX, rightDirY]
+     */
+    private static java.util.List<double[]> extractFramePath(Element shapeElem) {
+        Element props = getFirstChildElement(shapeElem, "Properties");
+        if (props == null) return null;
+        Element pathGeom = getFirstChildElement(props, "PathGeometry");
+        if (pathGeom == null) return null;
+
+        java.util.List<double[]> points = new java.util.ArrayList<>();
+        for (Element pathType : getChildElements(pathGeom, "GeometryPathType")) {
+            Element ppa = getFirstChildElement(pathType, "PathPointArray");
+            if (ppa == null) continue;
+            for (Element pp : getChildElements(ppa, "PathPointType")) {
+                double[] pt = new double[6];
+                parsePointAttr(pp, "Anchor", pt, 0);
+                parsePointAttr(pp, "LeftDirection", pt, 2);
+                parsePointAttr(pp, "RightDirection", pt, 4);
+                points.add(pt);
+            }
+        }
+        return points.isEmpty() ? null : points;
+    }
+
+    private static void parsePointAttr(Element pp, String attr, double[] out, int offset) {
+        String val = pp.getAttribute(attr);
+        if (val != null && !val.isEmpty()) {
+            String[] parts = val.trim().split("\\s+");
+            if (parts.length >= 2) {
+                out[offset] = Double.parseDouble(parts[0]);
+                out[offset + 1] = Double.parseDouble(parts[1]);
+            }
+        }
     }
 
     /**

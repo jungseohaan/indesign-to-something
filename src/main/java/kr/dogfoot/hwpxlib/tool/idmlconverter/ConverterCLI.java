@@ -13,6 +13,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.IDMLTemplateCreator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.IDMLValidator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.IDMLSchemaExtractor;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.CoordinateDiagnoser;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedDataReader;
 import kr.dogfoot.hwpxlib.tool.hwpxconverter.HwpxToIdmlConverter;
 
 import java.util.Arrays;
@@ -81,6 +84,8 @@ public class ConverterCLI {
                 runExtractAst(args);
             } else if ("--convert-ast".equals(command)) {
                 runConvertAst(args);
+            } else if ("--diagnose".equals(command)) {
+                runDiagnose(args);
             } else {
                 printUsage();
                 System.exit(1);
@@ -1265,6 +1270,39 @@ public class ConverterCLI {
 
         HWPXWriter.toFilepath(result.hwpxFile(), hwpxPath);
         System.out.println("Conversion completed: " + result.summary());
+    }
+
+    private static void runDiagnose(String[] args) throws Exception {
+        if (args.length < 2) {
+            System.err.println("Error: Missing IDML path");
+            System.err.println("Usage: --diagnose <input.idml> [--resolved <resolved.json>] [--start-page N] [--end-page N]");
+            System.exit(1);
+        }
+
+        String idmlPath = args[1];
+        String resolvedPath = null;
+        int startPage = 0;
+        int endPage = 0;
+
+        for (int i = 2; i < args.length; i++) {
+            if ("--resolved".equals(args[i]) && i + 1 < args.length) {
+                resolvedPath = args[++i];
+            } else if ("--start-page".equals(args[i]) && i + 1 < args.length) {
+                startPage = Integer.parseInt(args[++i]);
+            } else if ("--end-page".equals(args[i]) && i + 1 < args.length) {
+                endPage = Integer.parseInt(args[++i]);
+            }
+        }
+
+        IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
+        ResolvedData resolved = null;
+        if (resolvedPath != null) {
+            resolved = ResolvedDataReader.read(resolvedPath);
+        }
+
+        CoordinateDiagnoser.diagnose(idmlDoc, resolved, startPage, endPage, System.out);
+
+        idmlDoc.cleanup();
     }
 
     private static void printUsage() {

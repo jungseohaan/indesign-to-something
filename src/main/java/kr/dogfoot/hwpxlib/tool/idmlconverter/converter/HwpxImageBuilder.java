@@ -9,6 +9,11 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+
 /**
  * ASTFigure / ASTInlineObject(IMAGE) / ASTPageBackground → HWPX Picture로 변환한다.
  */
@@ -382,33 +387,46 @@ class HwpxImageBuilder {
         if (figure.width() <= 0 || figure.height() <= 0) return;
 
         String format = figure.imageFormat() != null ? figure.imageFormat() : "png";
-        String itemId = ImageInserter.registerImage(ctx.hwpxFile, imageData, format);
 
         long x = figure.x();
         long y = figure.y();
         long displayW = figure.width();
         long displayH = figure.height();
-        long clipW = (long) figure.pixelWidth() * 75;
-        long clipH = (long) figure.pixelHeight() * 75;
-        if (clipW <= 0) clipW = displayW;
-        if (clipH <= 0) clipH = displayH;
+        int pixelW = figure.pixelWidth();
+        int pixelH = figure.pixelHeight();
 
-        // 페이지 크롭 적용 (스프레드 걸침 이미지)
-        long imgClipLeft = 0, imgClipTop = 0, imgClipRight = clipW, imgClipBottom = clipH;
+        // 페이지 크롭 적용 (스프레드 걸침 이미지) — 픽셀 레벨 크롭
         if (figure.hasCrop()) {
-            imgClipLeft = Math.round(clipW * figure.cropLeftFraction());
-            imgClipTop = Math.round(clipH * figure.cropTopFraction());
-            imgClipRight = clipW - Math.round(clipW * figure.cropRightFraction());
-            imgClipBottom = clipH - Math.round(clipH * figure.cropBottomFraction());
-
             // 표시 크기를 보이는 영역으로 축소
             displayW = Math.round(figure.width() * (1.0 - figure.cropLeftFraction() - figure.cropRightFraction()));
             displayH = Math.round(figure.height() * (1.0 - figure.cropTopFraction() - figure.cropBottomFraction()));
 
-            // 위치 조정: 크롭된 부분만큼 페이지 경계로 이동
+            // 위치 조정
             if (x < 0) x = 0;
             if (y < 0) y = 0;
+
+            // 이미지 데이터를 직접 픽셀 크롭 (imgClip 대신)
+            imageData = pixelCrop(imageData, pixelW, pixelH,
+                    figure.cropLeftFraction(), figure.cropTopFraction(),
+                    figure.cropRightFraction(), figure.cropBottomFraction());
+            if (imageData == null || imageData.length == 0) return;
+
+            // 크롭된 이미지의 픽셀 크기 재계산
+            int cropX = (int) Math.round(pixelW * figure.cropLeftFraction());
+            int cropY = (int) Math.round(pixelH * figure.cropTopFraction());
+            int cropR = (int) Math.round(pixelW * figure.cropRightFraction());
+            int cropB = (int) Math.round(pixelH * figure.cropBottomFraction());
+            pixelW = Math.max(1, pixelW - cropX - cropR);
+            pixelH = Math.max(1, pixelH - cropY - cropB);
+            format = "png";
         }
+
+        long clipW = (long) pixelW * 75;
+        long clipH = (long) pixelH * 75;
+        if (clipW <= 0) clipW = displayW;
+        if (clipH <= 0) clipH = displayH;
+
+        String itemId = ImageInserter.registerImage(ctx.hwpxFile, imageData, format);
 
         Run anchorRun = anchorPara.addNewRun();
         anchorRun.charPrIDRef("0");
@@ -495,10 +513,10 @@ class HwpxImageBuilder {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, displayH);
 
-        // ImageClip — 원본 이미지 내 표시 영역 (pixel * 75)
+        // ImageClip — 픽셀 크롭 완료이므로 전체 영역
         pic.createImgClip();
-        pic.imgClip().leftAnd(imgClipLeft).rightAnd(imgClipRight)
-                .topAnd(imgClipTop).bottomAnd(imgClipBottom);
+        pic.imgClip().leftAnd(0L).rightAnd(clipW)
+                .topAnd(0L).bottomAnd(clipH);
 
         pic.createInMargin();
         pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
@@ -787,6 +805,45 @@ class HwpxImageBuilder {
                 .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
 
         ctx.imagesConverted++;
+    }
+
+    // ── 이미지 픽셀 크롭 ──
+
+    /**
+     * 이미지를 crop fraction에 따라 픽셀 레벨로 자른다.
+     * imgClip에 의존하지 않고 이미지 데이터 자체를 잘라서 한글 호환성을 보장한다.
+     */
+    private static byte[] pixelCrop(byte[] imageData, int pixelW, int pixelH,
+                                     double cropLeft, double cropTop,
+                                     double cropRight, double cropBottom) {
+        try {
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(imageData));
+            if (img == null) return imageData;
+
+            int imgW = img.getWidth();
+            int imgH = img.getHeight();
+
+            int cx = Math.max(0, (int) Math.round(imgW * cropLeft));
+            int cy = Math.max(0, (int) Math.round(imgH * cropTop));
+            int cr = Math.max(0, (int) Math.round(imgW * cropRight));
+            int cb = Math.max(0, (int) Math.round(imgH * cropBottom));
+
+            int cw = Math.max(1, imgW - cx - cr);
+            int ch = Math.max(1, imgH - cy - cb);
+
+            // 범위 보정
+            if (cx + cw > imgW) cw = imgW - cx;
+            if (cy + ch > imgH) ch = imgH - cy;
+            if (cw <= 0 || ch <= 0) return imageData;
+
+            BufferedImage cropped = img.getSubimage(cx, cy, cw, ch);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(cropped, "png", baos);
+            return baos.toByteArray();
+        } catch (Exception e) {
+            System.err.println("[HwpxImageBuilder] pixelCrop failed: " + e.getMessage());
+            return imageData;
+        }
     }
 
     // ── TextWrap 매핑 유틸리티 (delegate to HwpxEnumMapper) ──

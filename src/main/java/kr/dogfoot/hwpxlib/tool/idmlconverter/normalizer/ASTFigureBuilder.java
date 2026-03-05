@@ -32,18 +32,54 @@ class ASTFigureBuilder {
     }
 
     /**
-     * IDMLImageFrame → ASTFigure 변환 (플로팅 이미지).
+     * IDMLImageFrame → ASTFigure 변환 (플로팅 이미지, 기존 호환용 오버로드).
      */
     static ASTFigure createFigureFromImageFrame(IDMLImageFrame imgFrame,
                                                  IDMLPage page,
                                                  ASTImageLoader imageLoader,
                                                  ColorResolver colorResolver) {
+        return createFigureFromImageFrame(imgFrame, page, imageLoader, colorResolver, null, null);
+    }
+
+    /**
+     * IDMLImageFrame → ASTFigure 변환 (플로팅 이미지).
+     * resolved 좌표가 있으면 우선 사용, 없으면 IDML 변환행렬 fallback.
+     */
+    static ASTFigure createFigureFromImageFrame(IDMLImageFrame imgFrame,
+                                                 IDMLPage page,
+                                                 ASTImageLoader imageLoader,
+                                                 ColorResolver colorResolver,
+                                                 ResolvedData resolvedData,
+                                                 ResolvedPage resolvedPage) {
         double[] t = imgFrame.itemTransform();
         boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001
                 || t[0] < 0 || t[3] < 0);
 
-        long wHwp, hHwp, xHwp, yHwp;
+        long wHwp = 0, hHwp = 0, xHwp = 0, yHwp = 0;
 
+        // Resolved geometry path — 우선 사용
+        ResolvedPageItem resolvedItem = null;
+        if (resolvedData != null && imgFrame.selfId() != null) {
+            resolvedItem = resolvedData.getPageItemByIdmlId(imgFrame.selfId());
+        }
+        boolean usedResolved = false;
+        if (resolvedItem != null && resolvedItem.geometricBounds() != null
+                && resolvedPage != null && resolvedPage.bounds() != null) {
+            double[] gb = resolvedItem.geometricBounds();
+            double rW = gb[3] - gb[1];
+            double rH = gb[2] - gb[0];
+            if (rW > 0 && rH > 0) {
+                double[] rel = resolvedPage.toPageRelative(gb);
+                xHwp = CoordinateConverter.pointsToHwpunits(rel[0]);
+                yHwp = CoordinateConverter.pointsToHwpunits(rel[1]);
+                wHwp = CoordinateConverter.pointsToHwpunits(rW);
+                hHwp = CoordinateConverter.pointsToHwpunits(rH);
+                usedResolved = true;
+            }
+        }
+
+        // IDML fallback
+        if (!usedResolved)
         if (hasRotOrFlip) {
             double w = IDMLGeometry.transformedWidth(imgFrame.geometricBounds(), imgFrame.itemTransform());
             double h = IDMLGeometry.transformedHeight(imgFrame.geometricBounds(), imgFrame.itemTransform());
@@ -75,6 +111,22 @@ class ASTFigureBuilder {
         // 프레임 bounds (points) — 클리핑용
         double[] frameBounds = imgFrame.geometricBounds();
 
+        // [DEBUG] 이미지 프레임 클리핑 정보 출력
+        {
+            String uri = imgFrame.linkResourceURI();
+            String fn = uri != null && uri.contains("/") ? uri.substring(uri.lastIndexOf('/') + 1) : uri;
+            try { fn = java.net.URLDecoder.decode(fn != null ? fn : "?", "UTF-8"); } catch (Exception ignored) {}
+            double[] gb = frameBounds;
+            double[] it = imgFrame.imageTransform();
+            double[] gBounds = imgFrame.graphicBounds();
+            System.err.printf("[IMG-CLIP] id=%s file=%s frameBounds=%s imgTransform=%s graphicBounds=%s pos=(%d,%d) size=(%d,%d)%n",
+                    imgFrame.selfId(), fn,
+                    gb != null ? String.format("[%.1f,%.1f,%.1f,%.1f]", gb[0], gb[1], gb[2], gb[3]) : "null",
+                    it != null ? String.format("[%.3f,%.3f,%.3f,%.3f,%.1f,%.1f]", it[0], it[1], it[2], it[3], it[4], it[5]) : "null",
+                    gBounds != null ? String.format("[%.1f,%.1f,%.1f,%.1f]", gBounds[0], gBounds[1], gBounds[2], gBounds[3]) : "null",
+                    xHwp, yHwp, wHwp, hHwp);
+        }
+
         // PSD 레이어 가시성 오버라이드
         java.util.List<Integer> visibleLayers = imgFrame.hasLayerOverrides()
                 ? imgFrame.visibleLayerIndices() : null;
@@ -84,7 +136,7 @@ class ASTFigureBuilder {
         ASTImageLoader.ImageResult result = imageLoader.loadImage(
                 imgFrame.linkResourceURI(), wHwp, hHwp,
                 imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds(),
-                visibleLayers, layerSig);
+                visibleLayers, layerSig, imgFrame.framePath());
 
         if (result == null || result.imageData == null) return null;
 

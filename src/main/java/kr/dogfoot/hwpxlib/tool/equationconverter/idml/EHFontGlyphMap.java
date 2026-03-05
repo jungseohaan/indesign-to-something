@@ -116,6 +116,136 @@ public class EHFontGlyphMap {
         return fontFamily.startsWith("EH선모음");
     }
 
+    /**
+     * 텍스트에 EH 분수 GREP 인코딩 패턴 (;...;) 이 포함되어 있는지 확인.
+     * ParagraphStyle GREP 규칙으로 분수소문자 폰트가 적용되는 패턴:
+     * (;{1,2}).*?(;{1,2})
+     */
+    public static boolean containsEHFractionPattern(String text) {
+        if (text == null || text.isEmpty()) return false;
+        int first = text.indexOf(';');
+        if (first < 0) return false;
+        int second = text.indexOf(';', first + 1);
+        if (second < 0) return false;
+        int innerLen = second - first - 1;
+        return innerLen >= 1 && innerLen <= 10;
+    }
+
+    // ── 분수 기본범위 글리프 디코딩 ──
+
+    /**
+     * EH 분수소문자 폰트의 기본 범위(0x20-0x7F) 글리프 디코딩.
+     * <p>
+     * EH 분수소문자 폰트는 "폰트 해킹"으로 ASCII 글리프를 교체:
+     * - 분자(분수선 위): shift-digit → 숫자, 대문자 → 소문자
+     * - 분모(분수선 아래): 숫자/소문자 → 그대로
+     * - 구조: ; = 분수선, [] {} | = 괄호
+     * <p>
+     * GREP 스타일 (;{1,2}).*?(;{1,2})로 적용되므로,
+     * 폰트 지정 없는 런에서도 ;...; 패턴으로 분수를 감지할 수 있다.
+     *
+     * @return 2-element String[]{numerator, denominator}, 또는 분수가 아니면 null
+     */
+    public static String[] decodeFractionInner(String inner) {
+        if (inner == null || inner.isEmpty()) return null;
+
+        StringBuilder numer = new StringBuilder();
+        StringBuilder denom = new StringBuilder();
+
+        for (int i = 0; i < inner.length(); i++) {
+            char c = inner.charAt(i);
+
+            // 확장 범위 (0x80+): 상부자 매핑 사용
+            if (c >= 0x80) {
+                char decoded = decodeSubSupGlyph(c);
+                if (decoded != c) {
+                    // 확장범위의 숫자/소문자 → 분모, 대문자 → 분자
+                    // (상부자 테이블의 분수용 확장 매핑)
+                    denom.append(decoded);
+                }
+                continue;
+            }
+
+            // Shift-digit → 분자 숫자 (! @ # $ % ^ & * ( ) → 1 2 3 4 5 6 7 8 9 0)
+            char fracNum = decodeFractionNumeratorDigit(c);
+            if (fracNum != 0) {
+                numer.append(fracNum);
+                continue;
+            }
+
+            // 대문자 A-Z → 분자 소문자 a-z
+            if (c >= 'A' && c <= 'Z') {
+                numer.append((char) (c - 'A' + 'a'));
+                continue;
+            }
+
+            // 숫자 0-9 → 분모
+            if (c >= '0' && c <= '9') {
+                denom.append(c);
+                continue;
+            }
+
+            // 소문자 a-z → 분모
+            if (c >= 'a' && c <= 'z') {
+                denom.append(c);
+                continue;
+            }
+
+            // 연산자: +, -, = 등 → 분수 내용에 포함 (위치에 따라 판단)
+            if (c == '+' || c == '-' || c == '=') {
+                // 앞에 분자가 있으면 분자에, 없으면 분모에 추가
+                if (numer.length() > 0 && denom.length() == 0) {
+                    numer.append(c);
+                } else {
+                    denom.append(c);
+                }
+                continue;
+            }
+
+            // 구조 문자 (괄호): 스킵 (분수 시각 장식)
+            // [, ], {, }, | → 분수 괄호 요소
+        }
+
+        if (numer.length() == 0 && denom.length() == 0) return null;
+        return new String[]{numer.toString(), denom.toString()};
+    }
+
+    /**
+     * Shift-digit 패턴으로 분자 숫자 디코딩.
+     * 키보드 Shift+숫자키: ! @ # $ % ^ & * ( ) → 1 2 3 4 5 6 7 8 9 0
+     *
+     * @return 디코딩된 숫자 문자, 또는 매핑 없으면 0
+     */
+    public static char decodeFractionNumeratorDigit(char c) {
+        switch (c) {
+            case '!': return '1';
+            case '@': return '2';
+            case '#': return '3';
+            case '$': return '4';
+            case '%': return '5';
+            case '^': return '6';
+            case '&': return '7';
+            case '*': return '8';
+            case '(': return '9';
+            case ')': return '0';
+            default: return 0;
+        }
+    }
+
+    /**
+     * 분수 인코딩 문자인지 확인 (분자 shift-digit 또는 분모 숫자/문자).
+     * ; 사이에 올 수 있는 분수 내용 문자.
+     */
+    public static boolean isFractionContentChar(char c) {
+        if (decodeFractionNumeratorDigit(c) != 0) return true;  // shift-digit
+        if (c >= 'A' && c <= 'Z') return true;  // 분자 대문자
+        if (c >= '0' && c <= '9') return true;   // 분모 숫자
+        if (c >= 'a' && c <= 'z') return true;   // 분모 소문자
+        if (c >= 0x80) return true;               // 확장 범위
+        if (c == '+' || c == '-') return true;    // 부호
+        return false;
+    }
+
     // ── 글리프 디코딩 ──
 
     /**

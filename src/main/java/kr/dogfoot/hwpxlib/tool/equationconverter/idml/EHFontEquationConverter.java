@@ -68,6 +68,9 @@ public class EHFontEquationConverter {
             } else if (EHFontGlyphMap.containsEHEncodedChars(text)) {
                 // 폰트 미지정이지만 EH 인코딩 패턴 포함 → 상부자로 처리
                 convertSubSupRun(text, "EH상부자", sb);
+            } else if (EHFontGlyphMap.containsEHFractionPattern(text)) {
+                // 폰트 미지정이지만 ;...; 분수 GREP 패턴 포함 → 분수 변환
+                convertFractionPatternRun(text, sb);
             } else {
                 // 비EH 브릿지 런: 패스스루
                 sb.append(convertToHwpScript(text));
@@ -144,6 +147,68 @@ public class EHFontEquationConverter {
         }
         if (baseBuf.length() > 0) {
             sb.append(convertToHwpScript(baseBuf.toString()));
+        }
+    }
+
+    /**
+     * 폰트 미지정 런에서 EH 분수 GREP 패턴 (;...;) 을 감지하여 변환.
+     * ParagraphStyle의 GREP 규칙이 분수소문자 폰트를 동적 적용하는 경우,
+     * IDML에는 폰트 정보 없이 ;numerator_denominator; 패턴만 남는다.
+     * <p>
+     * 분수 인코딩: ; + [분자/분모 혼합 문자] + ;
+     * - 분자 숫자: !@#$%^&*() → 1234567890 (Shift-digit)
+     * - 분자 소문자: A-Z → a-z
+     * - 분모 숫자: 0-9 → 그대로
+     * - 분모 소문자: a-z → 그대로
+     * - 구조: ; = 분수선, [] {} = 괄호(스킵)
+     */
+    private static void convertFractionPatternRun(String text, StringBuilder sb) {
+        int i = 0;
+        while (i < text.length()) {
+            // ;...; 패턴 탐색
+            int semiStart = text.indexOf(';', i);
+            if (semiStart < 0) {
+                // 남은 텍스트는 일반 수식으로 처리
+                sb.append(convertToHwpScript(text.substring(i)));
+                break;
+            }
+
+            // ; 이전 텍스트 처리
+            if (semiStart > i) {
+                sb.append(convertToHwpScript(text.substring(i, semiStart)));
+            }
+
+            // 두 번째 ; 찾기
+            int semiEnd = text.indexOf(';', semiStart + 1);
+            if (semiEnd < 0) {
+                // 닫는 ; 없으면 나머지 전부 일반 처리
+                sb.append(convertToHwpScript(text.substring(semiStart)));
+                break;
+            }
+
+            // ;...; 내용 추출 및 분수 디코딩
+            String inner = text.substring(semiStart + 1, semiEnd);
+            String[] fracParts = EHFontGlyphMap.decodeFractionInner(inner);
+            if (fracParts != null && (fracParts[0].length() > 0 || fracParts[1].length() > 0)) {
+                String numer = fracParts[0];
+                String denom = fracParts[1];
+                if (numer.length() > 0 && denom.length() > 0) {
+                    sb.append("{").append(convertToHwpScript(numer)).append("}")
+                      .append(" over ")
+                      .append("{").append(convertToHwpScript(denom)).append("}");
+                } else if (numer.length() > 0) {
+                    // 분자만 있는 경우 (분모 없음)
+                    sb.append("{").append(convertToHwpScript(numer)).append("} over { }");
+                } else {
+                    // 분모만 있는 경우
+                    sb.append("{ } over {").append(convertToHwpScript(denom)).append("}");
+                }
+            } else {
+                // 디코딩 실패 → 원본 패스스루
+                sb.append(';').append(inner).append(';');
+            }
+
+            i = semiEnd + 1;
         }
     }
 

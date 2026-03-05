@@ -51,6 +51,9 @@ desktop/src-tauri/target/
 ### Build artifacts ###
 dependency-reduced-pom.xml
 
+### Test data (paths are machine-specific) ###
+test-data/cases.json
+
 ### Temporary files ###
 extract_err.log
 physics_items.json
