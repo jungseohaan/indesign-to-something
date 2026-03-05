@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "../stores/useAppStore";
 
 export function FileSelector() {
@@ -11,7 +12,23 @@ export function FileSelector() {
     structure,
     indesignPath,
     selectInddFile,
+    selectInddFolder,
   } = useAppStore();
+
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // 외부 클릭 시 드롭다운 닫기
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [dropdownOpen]);
 
   const displayPath = sourceType === "indd" ? inddPath : idmlPath;
   const filename = displayPath
@@ -26,6 +43,8 @@ export function FileSelector() {
   const indesignName = indesignPath
     ? indesignPath.split("/").pop()?.replace(".app", "") ?? "InDesign"
     : null;
+
+  const disabled = isExtracting || !indesignPath;
 
   return (
     <div className="border-b">
@@ -53,13 +72,42 @@ export function FileSelector() {
           ) : (
             <span className="text-xs text-red-400">InDesign 미설치</span>
           )}
-          <button
-            onClick={selectInddFile}
-            disabled={isExtracting || !indesignPath}
-            className="px-4 py-1.5 bg-purple-500 text-white text-sm rounded hover:bg-purple-600 disabled:opacity-50"
-          >
-            {isExtracting ? "추출 중..." : "INDD 열기"}
-          </button>
+          <div className="relative" ref={dropdownRef}>
+            <div className="flex">
+              <button
+                onClick={selectInddFile}
+                disabled={disabled}
+                className="px-4 py-1.5 bg-purple-500 text-white text-sm rounded-l hover:bg-purple-600 disabled:opacity-50"
+              >
+                {isExtracting ? "추출 중..." : "INDD 열기"}
+              </button>
+              <button
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                disabled={disabled}
+                className="px-2 py-1.5 bg-purple-500 text-white text-sm rounded-r hover:bg-purple-600 disabled:opacity-50 border-l border-purple-400"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            </div>
+            {dropdownOpen && (
+              <div className="absolute right-0 top-full mt-1 bg-white rounded shadow-lg border py-1 z-50 min-w-[140px]">
+                <button
+                  onClick={() => { setDropdownOpen(false); setTimeout(selectInddFile, 50); }}
+                  className="w-full text-left px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  파일 열기...
+                </button>
+                <button
+                  onClick={() => { setDropdownOpen(false); setTimeout(selectInddFolder, 50); }}
+                  className="w-full text-left px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  폴더 일괄 변환...
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

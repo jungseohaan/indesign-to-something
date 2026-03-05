@@ -216,6 +216,30 @@ export interface InddExtractionProgress {
   message: string;
 }
 
+// INDD Folder Scan Types
+export interface InddFileEntry {
+  path: string;
+  filename: string;
+}
+
+export interface InddSubfolderEntry {
+  folder_name: string;
+  folder_path: string;
+  indd_files: InddFileEntry[];
+}
+
+export interface InddFolderScanResult {
+  direct_files: string[];
+  subfolder_files: InddSubfolderEntry[];
+}
+
+export interface BatchFileResult {
+  path: string;
+  filename: string;
+  status: "pending" | "extracting" | "converting" | "done" | "error";
+  error?: string;
+}
+
 // Resolved Data Types (InDesign DOM에서 추출한 계산된 속성)
 export interface ResolvedData {
   documentInfo: {

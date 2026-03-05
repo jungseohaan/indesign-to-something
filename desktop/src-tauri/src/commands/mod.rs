@@ -390,6 +390,120 @@ pub fn open_file(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 파일 복사.
+#[tauri::command]
+pub async fn copy_file(src: String, dst: String) -> Result<(), String> {
+    tokio::fs::copy(&src, &dst)
+        .await
+        .map_err(|e| format!("파일 복사 실패: {}", e))?;
+    Ok(())
+}
+
+/// 디렉토리 생성 (mkdir -p 상당).
+#[tauri::command]
+pub async fn create_dir(path: String) -> Result<(), String> {
+    tokio::fs::create_dir_all(&path)
+        .await
+        .map_err(|e| format!("디렉토리 생성 실패: {}", e))
+}
+
+// ─────────────────────────────────────────────────────────────────
+// INDD Folder Scan
+// ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InddFileEntry {
+    pub path: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InddSubfolderEntry {
+    pub folder_name: String,
+    pub folder_path: String,
+    pub indd_files: Vec<InddFileEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InddFolderScanResult {
+    pub direct_files: Vec<String>,
+    pub subfolder_files: Vec<InddSubfolderEntry>,
+}
+
+/// 폴더를 스캔하여 .indd 파일을 찾는다 (1 depth).
+/// - direct_files: 폴더 직접 하위 .indd 경로
+/// - subfolder_files: 서브폴더별 .indd 파일
+#[tauri::command]
+pub fn scan_indd_folder(path: String) -> Result<InddFolderScanResult, String> {
+    let dir = std::path::Path::new(&path);
+    if !dir.is_dir() {
+        return Err("유효한 디렉토리가 아닙니다.".into());
+    }
+
+    let mut direct_files: Vec<String> = Vec::new();
+    let mut subfolder_files: Vec<InddSubfolderEntry> = Vec::new();
+
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| format!("디렉토리 읽기 실패: {}", e))?;
+
+    let mut sorted_entries: Vec<_> = entries
+        .filter_map(|e| e.ok())
+        .collect();
+    sorted_entries.sort_by_key(|e| e.file_name());
+
+    for entry in &sorted_entries {
+        let entry_path = entry.path();
+        if entry_path.is_file() {
+            if let Some(ext) = entry_path.extension() {
+                if ext.eq_ignore_ascii_case("indd") {
+                    direct_files.push(entry_path.to_string_lossy().to_string());
+                }
+            }
+        } else if entry_path.is_dir() {
+            // 1 depth: 서브폴더 내 .indd 파일 수집
+            let mut indd_files: Vec<InddFileEntry> = Vec::new();
+            if let Ok(sub_entries) = std::fs::read_dir(&entry_path) {
+                let mut sorted_sub: Vec<_> = sub_entries
+                    .filter_map(|e| e.ok())
+                    .collect();
+                sorted_sub.sort_by_key(|e| e.file_name());
+
+                for sub_entry in &sorted_sub {
+                    let sub_path = sub_entry.path();
+                    if sub_path.is_file() {
+                        if let Some(ext) = sub_path.extension() {
+                            if ext.eq_ignore_ascii_case("indd") {
+                                indd_files.push(InddFileEntry {
+                                    path: sub_path.to_string_lossy().to_string(),
+                                    filename: sub_path.file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy()
+                                        .to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            if !indd_files.is_empty() {
+                subfolder_files.push(InddSubfolderEntry {
+                    folder_name: entry_path.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string(),
+                    folder_path: entry_path.to_string_lossy().to_string(),
+                    indd_files,
+                });
+            }
+        }
+    }
+
+    Ok(InddFolderScanResult {
+        direct_files,
+        subfolder_files,
+    })
+}
+
 /// 바이너리 파일을 base64로 읽기 (PDF 프리뷰 등).
 #[tauri::command]
 pub async fn read_file_base64(path: String) -> Result<String, String> {

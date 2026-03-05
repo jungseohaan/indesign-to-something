@@ -7,6 +7,7 @@ import { PdfPreviewPanel } from "./components/PdfPreviewPanel";
 import { ConversionPanel } from "./components/ConversionPanel";
 import { PageRangeModal } from "./components/PageRangeModal";
 import { FontMappingModal } from "./components/FontMappingModal";
+import { InddBatchModal } from "./components/InddBatchModal";
 import { PlaygroundPage } from "./components/PlaygroundPage";
 import { ExtractPage } from "./components/ExtractPage";
 import { useAppStore } from "./stores/useAppStore";
@@ -17,6 +18,7 @@ type RightPanel = "ast" | "pdf";
 function App() {
   const initJarPath = useAppStore((state) => state.initJarPath);
   const selectInddFile = useAppStore((state) => state.selectInddFile);
+  const selectInddFolder = useAppStore((state) => state.selectInddFolder);
   const selectHwpxFile = useAppStore((state) => state.selectHwpxFile);
   const previewPdfPath = useAppStore((state) => state.previewPdfPath);
   const [showAbout, setShowAbout] = useState(false);
@@ -29,6 +31,11 @@ function App() {
     const unlistenOpenIndd = listen("menu-open-indd", () => {
       setCurrentTab("converter");
       selectInddFile();
+    });
+
+    const unlistenOpenInddFolder = listen("menu-open-indd-folder", () => {
+      setCurrentTab("converter");
+      selectInddFolder();
     });
 
     const unlistenOpenHwpx = listen("menu-open-hwpx", () => {
@@ -50,12 +57,13 @@ function App() {
 
     return () => {
       unlistenOpenIndd.then((f) => f());
+      unlistenOpenInddFolder.then((f) => f());
       unlistenOpenHwpx.then((f) => f());
       unlistenAbout.then((f) => f());
       unlistenPlayground.then((f) => f());
       unlistenExtract.then((f) => f());
     };
-  }, [initJarPath, selectInddFile, selectHwpxFile]);
+  }, [initJarPath, selectInddFile, selectInddFolder, selectHwpxFile]);
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "playground", label: "Playground - 자동조판기" },
@@ -139,6 +147,9 @@ function App() {
 
       {/* Font Mapping Modal */}
       <FontMappingModal />
+
+      {/* Batch Processing Modal */}
+      <InddBatchModal />
 
       {/* About Dialog */}
       {showAbout && (

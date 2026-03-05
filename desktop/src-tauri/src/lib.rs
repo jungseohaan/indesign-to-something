@@ -29,6 +29,12 @@ pub fn run() {
                         let _ = window.emit("menu-open-indd", ());
                     }
                 }
+                "open-indd-folder" => {
+                    // InDesign 폴더 일괄 변환 이벤트
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.emit("menu-open-indd-folder", ());
+                    }
+                }
                 "quit" => {
                     app.exit(0);
                 }
@@ -73,6 +79,9 @@ pub fn run() {
             commands::read_resolved_json,
             commands::check_indesign,
             commands::open_file,
+            commands::copy_file,
+            commands::create_dir,
+            commands::scan_indd_folder,
             commands::read_file_base64,
         ])
         .run(tauri::generate_context!())
@@ -105,6 +114,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     // File 메뉴
     let open_idml = MenuItem::with_id(handle, "open-idml", "Open IDML...", true, Some("CmdOrCtrl+O"))?;
     let open_indd = MenuItem::with_id(handle, "open-indd", "Open InDesign...", true, Some("CmdOrCtrl+Shift+I"))?;
+    let open_indd_folder = MenuItem::with_id(handle, "open-indd-folder", "Open InDesign Folder...", true, Some("CmdOrCtrl+Shift+F"))?;
     let open_hwpx = MenuItem::with_id(handle, "open-hwpx", "Open HWPX...", true, Some("CmdOrCtrl+Shift+O"))?;
 
     #[cfg(not(target_os = "macos"))]
@@ -118,6 +128,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         &[
             &open_idml,
             &open_indd,
+            &open_indd_folder,
             &open_hwpx,
             &PredefinedMenuItem::separator(handle)?,
             &PredefinedMenuItem::close_window(handle, Some("Close Window"))?,
@@ -132,6 +143,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         &[
             &open_idml,
             &open_indd,
+            &open_indd_folder,
             &open_hwpx,
             &PredefinedMenuItem::separator(handle)?,
             &quit,

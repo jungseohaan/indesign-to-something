@@ -15,6 +15,8 @@ import type {
   MasterSpreadInfo,
   InddExtractResult,
   InddExtractionProgress,
+  InddFolderScanResult,
+  BatchFileResult,
 } from "../types";
 import { useAstStore } from "./useAstStore";
 
@@ -74,6 +76,21 @@ interface AppState {
   fontMappings: Record<string, string>;
   showFontMappingModal: boolean;
 
+  // Remembered paths
+  lastOpenDir: string | null;
+  lastExportDir: string | null;
+
+  // Batch Processing
+  showBatchModal: boolean;
+  batchScanResult: InddFolderScanResult | null;
+  batchQueue: string[];
+  batchBasePath: string | null;
+  batchOutputDir: string | null;
+  batchCurrentIndex: number;
+  batchResults: BatchFileResult[];
+  isBatchProcessing: boolean;
+  batchCancelled: boolean;
+
   // Actions
   initJarPath: () => Promise<void>;
   selectFile: () => Promise<void>;
@@ -96,6 +113,10 @@ interface AppState {
   setFontMappings: (mappings: Record<string, string>) => void;
   openFontMappingModal: () => void;
   closeFontMappingModal: () => void;
+  selectInddFolder: () => Promise<void>;
+  startBatch: (selectedPaths: string[]) => Promise<void>;
+  closeBatchModal: () => void;
+  cancelBatch: () => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -136,6 +157,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   inddPages: [],
   fontMappings: {},
   showFontMappingModal: false,
+  lastOpenDir: localStorage.getItem("lastOpenDir"),
+  lastExportDir: localStorage.getItem("lastExportDir"),
+  showBatchModal: false,
+  batchScanResult: null,
+  batchQueue: [],
+  batchBasePath: null,
+  batchOutputDir: null,
+  batchCurrentIndex: -1,
+  batchResults: [],
+  isBatchProcessing: false,
+  batchCancelled: false,
 
   initJarPath: async () => {
     try {
@@ -198,67 +230,30 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   selectInddFile: async () => {
+    const { lastOpenDir } = get();
     const path = await open({
       filters: [{ name: "InDesign", extensions: ["indd"] }],
+      defaultPath: lastOpenDir ?? undefined,
     });
     if (!path) return;
 
+    const parentDir = path.substring(0, path.lastIndexOf("/"));
+    localStorage.setItem("lastOpenDir", parentDir);
+    set({ lastOpenDir: parentDir });
+
+    // 배치 흐름으로 자동 처리 (단일 파일도 배치 모달 사용)
     set({
-      inddPath: path,
-      sourceType: "indd",
-      idmlPath: null,
-      resolvedJsonPath: null,
-      previewPdfPath: null,
-      isExtracting: true,
-      extractionPhase: "launching",
-      extractionMessage: "InDesign 실행 중...",
-      isAnalyzing: false,
-      structure: null,
-      selectedSpread: null,
-      selectedPage: null,
-      selectedImage: null,
-      selectedTextFrame: null,
-      selectedMaster: null,
-      previewImages: [],
-      textFrameDetail: null,
-      masterPreview: null,
-      result: null,
-      error: null,
-      inddPages: [],
-      startPage: null,
-      endPage: null,
+      showBatchModal: true,
+      batchScanResult: {
+        direct_files: [path],
+        subfolder_files: [],
+      },
+      batchBasePath: parentDir,
+      batchResults: [],
+      batchCurrentIndex: -1,
+      isBatchProcessing: false,
+      batchCancelled: false,
     });
-
-    // 진행률 이벤트 리스너
-    const unlisten = await listen<InddExtractionProgress>(
-      "indd-extraction-progress",
-      (event) => {
-        set({ extractionPhase: event.payload.phase, extractionMessage: event.payload.message });
-      }
-    );
-
-    try {
-      // Phase 1: 페이지 정보만 빠르게 가져오기 (문서는 열어둠)
-      const pagesResult = await invoke<{ pageCount: number; pages: { name: string; index: number }[] }>(
-        "get_indd_pages",
-        { inddPath: path }
-      );
-
-      set({
-        isExtracting: false,
-        extractionPhase: null,
-        extractionMessage: null,
-        inddPages: pagesResult.pages,
-        showPageRangeModal: true,
-      });
-    } catch (e: any) {
-      set({
-        isExtracting: false,
-        error: String(e),
-      });
-    } finally {
-      unlisten();
-    }
   },
 
   confirmPageRangeAndExtract: async (startPage, endPage) => {
@@ -448,7 +443,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, startPage, endPage, inddPath, resolvedJsonPath, fontMappings } = get();
     if (!idmlPath) return;
 
+    // 기본 파일명: 원본 파일명에서 확장자를 .hwpx로 변경
+    const sourcePath = inddPath || idmlPath;
+    const defaultName = sourcePath
+      ? sourcePath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, ".hwpx")
+      : undefined;
+
     const outputPath = await save({
+      defaultPath: defaultName,
       filters: [{ name: "HWPX", extensions: ["hwpx"] }],
     });
     if (!outputPath) return;
@@ -494,11 +496,36 @@ export const useAppStore = create<AppState>((set, get) => ({
         jarPath,
       });
       set({ result, isConverting: false });
-      // 변환 완료 후 자동으로 HWPX 파일 열기
+
+      // 변환 완료 후: preview PDF를 HWPX와 같은 폴더에 복사
+      const { previewPdfPath } = get();
+      const outputDir = outputPath.replace(/[/\\][^/\\]+$/, "");
+      const outputBaseName = outputPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
+      let copiedPdfPath: string | null = null;
+
+      if (previewPdfPath) {
+        try {
+          copiedPdfPath = `${outputDir}/${outputBaseName}.pdf`;
+          await invoke("copy_file", { src: previewPdfPath, dst: copiedPdfPath });
+        } catch {
+          copiedPdfPath = null;
+        }
+      }
+
+      // HWPX 파일 열기
       try {
         await invoke("open_file", { path: outputPath });
       } catch {
         // 열기 실패해도 변환 자체는 성공
+      }
+
+      // PDF 파일 열기
+      if (copiedPdfPath) {
+        try {
+          await invoke("open_file", { path: copiedPdfPath });
+        } catch {
+          // 열기 실패해도 무시
+        }
       }
     } catch (e: any) {
       set({ error: String(e), isConverting: false });
@@ -518,4 +545,206 @@ export const useAppStore = create<AppState>((set, get) => ({
   setFontMappings: (mappings) => set({ fontMappings: mappings }),
   openFontMappingModal: () => set({ showFontMappingModal: true }),
   closeFontMappingModal: () => set({ showFontMappingModal: false }),
+
+  selectInddFolder: async () => {
+    const { lastOpenDir } = get();
+    const folderPath = await open({
+      directory: true,
+      title: "InDesign 폴더 선택",
+      defaultPath: lastOpenDir ?? undefined,
+    });
+    if (!folderPath) return;
+
+    localStorage.setItem("lastOpenDir", folderPath as string);
+    set({ lastOpenDir: folderPath as string });
+
+    try {
+      const result = await invoke<InddFolderScanResult>("scan_indd_folder", {
+        path: folderPath,
+      });
+
+      // 모든 .indd 파일 수집 (직접 하위 + 서브폴더)
+      const allFiles: string[] = [...result.direct_files];
+      for (const sf of result.subfolder_files) {
+        for (const f of sf.indd_files) {
+          allFiles.push(f.path);
+        }
+      }
+
+      if (allFiles.length === 0) {
+        set({ error: "선택한 폴더에서 InDesign 문서를 찾을 수 없습니다." });
+        return;
+      }
+
+      // 단일 파일이든 다중 파일이든 배치 모달 표시
+      // (직접 하위 파일만 있으면 subfolder 없이 direct_files로 표시)
+      set({
+        showBatchModal: true,
+        batchScanResult: result,
+        batchBasePath: folderPath,
+        batchResults: [],
+        batchCurrentIndex: -1,
+        isBatchProcessing: false,
+        batchCancelled: false,
+      });
+    } catch (e: any) {
+      set({ error: String(e) });
+    }
+  },
+
+  startBatch: async (selectedPaths: string[]) => {
+    if (selectedPaths.length === 0) return;
+
+    // 출력 폴더 선택
+    const { lastExportDir } = get();
+    const outputDir = await open({
+      directory: true,
+      title: "내보내기 폴더 선택",
+      defaultPath: lastExportDir ?? undefined,
+    });
+    if (!outputDir) return;
+
+    localStorage.setItem("lastExportDir", outputDir as string);
+    set({ lastExportDir: outputDir as string });
+
+    const { jarPath, batchBasePath, spreadBased, vectorDpi, layoutMode, fontMappings } = get();
+    if (!jarPath) {
+      set({ error: "JAR 파일을 찾을 수 없습니다." });
+      return;
+    }
+
+    const results: BatchFileResult[] = selectedPaths.map((p) => ({
+      path: p,
+      filename: p.replace(/^.*[/\\]/, ""),
+      status: "pending" as const,
+    }));
+
+    set({
+      showBatchModal: true,
+      batchQueue: selectedPaths,
+      batchOutputDir: outputDir,
+      batchCurrentIndex: 0,
+      batchResults: results,
+      isBatchProcessing: true,
+      batchCancelled: false,
+    });
+
+    for (let i = 0; i < selectedPaths.length; i++) {
+      // 중단 확인
+      if (get().batchCancelled) break;
+
+      const inddPath = selectedPaths[i];
+      set({ batchCurrentIndex: i });
+
+      // 상태 업데이트: extracting
+      set((s) => ({
+        batchResults: s.batchResults.map((r, idx) =>
+          idx === i ? { ...r, status: "extracting" as const } : r
+        ),
+      }));
+
+      try {
+        // 1. InDesign으로 추출 (전체 페이지)
+        const extractResult = await invoke<InddExtractResult>("extract_indd", {
+          inddPath,
+          jarPath,
+          startPage: 0,
+          endPage: 0,
+        });
+
+        if (get().batchCancelled) break;
+
+        // 상태 업데이트: converting
+        set((s) => ({
+          batchResults: s.batchResults.map((r, idx) =>
+            idx === i ? { ...r, status: "converting" as const } : r
+          ),
+        }));
+
+        // 2. 출력 경로 계산 (원본 폴더 구조 유지)
+        let relativeSubdir = "";
+        if (batchBasePath) {
+          const inddDir = inddPath.replace(/[/\\][^/\\]+$/, "");
+          if (inddDir.startsWith(batchBasePath)) {
+            relativeSubdir = inddDir.substring(batchBasePath.length).replace(/^[/\\]/, "");
+          }
+        }
+
+        const outputSubdir = relativeSubdir
+          ? `${outputDir}/${relativeSubdir}`
+          : outputDir;
+
+        // 디렉토리 생성
+        await invoke("create_dir", { path: outputSubdir });
+
+        const inddFilename = inddPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
+        const hwpxOutputPath = `${outputSubdir}/${inddFilename}.hwpx`;
+
+        // INDD 원본 디렉토리의 Links/ 폴더
+        const inddDir = inddPath.replace(/[/\\][^/\\]+$/, "");
+        const linksDir = `${inddDir}/Links`;
+
+        // 3. HWPX 변환
+        await invoke<ConvertResult>("convert_idml", {
+          inputPath: extractResult.idml_path,
+          outputPath: hwpxOutputPath,
+          options: {
+            spread_based: spreadBased,
+            vector_dpi: vectorDpi,
+            include_images: true,
+            links_directory: linksDir,
+            resolved_json_path: extractResult.resolved_json_path,
+            start_page: null,
+            end_page: null,
+            layout_mode: layoutMode,
+            font_map: Object.keys(fontMappings).length > 0 ? fontMappings : null,
+          },
+          jarPath,
+        });
+
+        // 4. preview PDF 복사
+        let pdfOutputPath: string | null = null;
+        if (extractResult.preview_pdf_path) {
+          try {
+            pdfOutputPath = `${outputSubdir}/${inddFilename}.pdf`;
+            await invoke("copy_file", { src: extractResult.preview_pdf_path, dst: pdfOutputPath });
+          } catch {
+            pdfOutputPath = null;
+          }
+        }
+
+        // 성공
+        set((s) => ({
+          batchResults: s.batchResults.map((r, idx) =>
+            idx === i ? { ...r, status: "done" as const } : r
+          ),
+        }));
+
+        // 5. 변환된 파일 열기 (HWPX → 한컴 한글, PDF → PDF 뷰어)
+        try { await invoke("open_file", { path: hwpxOutputPath }); } catch {}
+        if (pdfOutputPath) {
+          try { await invoke("open_file", { path: pdfOutputPath }); } catch {}
+        }
+      } catch (e: any) {
+        // 실패 — 다음 파일 계속
+        set((s) => ({
+          batchResults: s.batchResults.map((r, idx) =>
+            idx === i ? { ...r, status: "error" as const, error: String(e) } : r
+          ),
+        }));
+      }
+    }
+
+    // 완료
+    set({ isBatchProcessing: false, batchCurrentIndex: -1 });
+  },
+
+  closeBatchModal: () => set({
+    showBatchModal: false,
+    batchScanResult: null,
+    batchResults: [],
+    isBatchProcessing: false,
+  }),
+
+  cancelBatch: () => set({ batchCancelled: true }),
 }));
