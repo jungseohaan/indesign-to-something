@@ -50,6 +50,7 @@ public class IDMLTextFrame {
     private double wrapperFillTint = -1;
     private String wrapperStrokeColor;
     private double wrapperStrokeWeight;
+    private String wrapperStrokeType;
     private double wrapperCornerRadius;
 
     // 폴리곤 경로 포인트 (local 좌표, non-rectangular 프레임 감지용)
@@ -175,6 +176,9 @@ public class IDMLTextFrame {
 
     public double wrapperStrokeWeight() { return wrapperStrokeWeight; }
     public void wrapperStrokeWeight(double v) { this.wrapperStrokeWeight = v; }
+
+    public String wrapperStrokeType() { return wrapperStrokeType; }
+    public void wrapperStrokeType(String v) { this.wrapperStrokeType = v; }
 
     public double wrapperCornerRadius() { return wrapperCornerRadius; }
     public void wrapperCornerRadius(double v) { this.wrapperCornerRadius = v; }

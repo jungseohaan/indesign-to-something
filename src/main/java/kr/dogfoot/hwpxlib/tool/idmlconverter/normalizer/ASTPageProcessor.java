@@ -883,6 +883,12 @@ class ASTPageProcessor {
         double fillTint = tf.fillTint();
         double strokeTint = tf.strokeTint();
         double cornerRadius = tf.cornerRadius();
+        // per-corner radii fallback (TopLeftCornerRadius 등 개별 속성만 있는 경우)
+        if (cornerRadius <= 0 && tf.cornerRadii() != null) {
+            for (double r : tf.cornerRadii()) {
+                cornerRadius = Math.max(cornerRadius, r);
+            }
+        }
 
         // 래퍼 사각형 속성 병합: 프레임 자체에 유효한 stroke가 없고 래퍼에 fill이 있으면
         // 래퍼 fill을 셀 배경으로 사용하고, 프레임 fill은 유지
@@ -905,6 +911,9 @@ class ASTPageProcessor {
                 resolvedStroke = wStroke;
                 strokeWeight = tf.wrapperStrokeWeight();
                 strokeTint = 100;
+                if (tf.wrapperStrokeType() != null) {
+                    strokeType = tf.wrapperStrokeType();
+                }
             }
 
             // 래퍼 corner radius → 블록 corner radius (프레임 자체가 0인 경우)

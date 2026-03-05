@@ -62,7 +62,6 @@ class HwpxImageBuilder {
 
         Run run = para.addNewRun();
         run.charPrIDRef("0");
-
         Picture pic = run.addNewPicture();
         String picId = ASTToHwpxConverter.nextShapeId();
 

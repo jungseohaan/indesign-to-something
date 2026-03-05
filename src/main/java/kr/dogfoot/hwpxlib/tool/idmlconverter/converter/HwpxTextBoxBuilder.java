@@ -252,10 +252,23 @@ class HwpxTextBoxBuilder {
             return;
         }
 
+        // 라운드 코너 + 유효 fill/stroke가 있는 단일 컬럼 블록은 Rectangle(DrawTextBox)로 변환
         int colCount = Math.max(block.columnCount(), 1);
+        if (colCount <= 1 && block.cornerRadius() > 0) {
+            boolean hasFill = block.fillColor() != null && block.fillColor().startsWith("#");
+            boolean hasStroke = block.strokeColor() != null && block.strokeColor().startsWith("#")
+                    && block.strokeWeight() > 0;
+            if (hasFill || hasStroke) {
+                convertRoundedFloatingBlock(framePara, block, w, h);
+                return;
+            }
+        }
+
         if (colCount <= 1) {
-            // 래퍼 fill이 있으면 배경 라운드 사각형 추가 + 셀 테두리 억제
-            boolean hasWrapper = block.hasWrapperFill() || block.cornerRadius() > 0;
+            // 래퍼 fill 또는 프레임 자체 fill이 있으면 배경 사각형 추가
+            boolean hasOwnVisibleFill = block.fillColor() != null
+                    && block.fillColor().startsWith("#") && !block.fillColor().equals("#FFFFFF");
+            boolean hasWrapper = block.hasWrapperFill() || hasOwnVisibleFill;
             if (hasWrapper) {
                 addWrapperRoundedRect(framePara, block, w, h);
             }
@@ -378,6 +391,8 @@ class HwpxTextBoxBuilder {
         // 래퍼 fill을 stroke(아웃라인) 색으로 사용
         String strokeColor = null;
         double strokeWeightPt = 1.0; // 기본 1pt 아웃라인
+        boolean hasOwnFill = block.fillColor() != null && block.fillColor().startsWith("#")
+                && !block.fillColor().equals("#FFFFFF");
         if (block.hasWrapperFill()) {
             double tint = block.wrapperFillTint();
             if (tint < 0) tint = 100;
@@ -386,7 +401,8 @@ class HwpxTextBoxBuilder {
             strokeColor = block.strokeColor();
             strokeWeightPt = block.strokeWeight();
         }
-        if (strokeColor == null) return;
+        // strokeColor가 없어도 프레임 자체 fill이 있거나 라운드 코너이면 배경 사각형 생성
+        if (strokeColor == null && !hasOwnFill && block.cornerRadius() <= 0) return;
 
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
@@ -550,6 +566,119 @@ class HwpxTextBoxBuilder {
 
         // Rectangle 꼭짓점 (필수 요소)
         rect.ratioAnd((short) 0);
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        // ShapeSize — PAPER 기준 절대 좌표
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(block.y())
+                .horzOffset(block.x());
+
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+    }
+
+    /**
+     * 라운드 코너가 있는 플로팅 블록 → Rectangle + DrawText로 변환.
+     * Table 방식 대신 사용하여 cornerRadius가 직접 반영되도록 한다.
+     */
+    private void convertRoundedFloatingBlock(Para framePara, ASTTextFrameBlock block,
+                                              long w, long h) {
+        Run anchorRun = framePara.addNewRun();
+        anchorRun.charPrIDRef("0");
+
+        Rectangle rect = anchorRun.addNewRectangle();
+        String shapeId = ASTToHwpxConverter.nextShapeId();
+
+        TextWrapMethod wrapMethod = block.isBackgroundOnly()
+                ? TextWrapMethod.BEHIND_TEXT
+                : TextWrapMethod.IN_FRONT_OF_TEXT;
+        int zOrder = block.isBackgroundOnly() ? 0 : block.zOrder();
+
+        rect.idAnd(shapeId)
+                .zOrderAnd(zOrder)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(wrapMethod)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(resolveDropCapStyle(block.paragraphs()));
+
+        // ShapeComponent
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+        rect.createCurSz();
+        rect.curSz().set(w, 0L);
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        // LineShape (테두리)
+        setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
+                block.strokeType(), block.strokeTint());
+
+        // FillBrush (배경색)
+        setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint());
+
+        // DrawText (글상자 내용)
+        rect.createDrawText();
+        DrawText dt = rect.drawText();
+        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
+
+        dt.createTextMargin();
+        dt.textMargin().leftAnd(block.insetLeft())
+                .rightAnd(block.insetRight())
+                .topAnd(block.insetTop())
+                .bottomAnd(block.insetBottom());
+
+        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
+        VerticalAlign2 cellVAlign = mapVerticalJustification(block.verticalJustification());
+        dt.createSubList();
+        SubList subList = dt.subList();
+        subList.idAnd("").textDirectionAnd(textDir)
+                .lineWrapAnd(LineWrapMethod.BREAK)
+                .vertAlignAnd(cellVAlign);
+        subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+
+        for (ASTParagraph para : block.paragraphs()) {
+            paragraphBuilder.addParagraphToSubList(subList, para);
+        }
+        if (subList.countOfPara() == 0) {
+            paragraphBuilder.addEmptySubListPara(subList);
+        }
+
+        // Rectangle 꼭짓점 + 라운드 코너
+        rect.ratioAnd(computeCornerRatio(block.cornerRadius(), w, h));
         rect.createPt0();
         rect.pt0().set(0L, 0L);
         rect.createPt1();

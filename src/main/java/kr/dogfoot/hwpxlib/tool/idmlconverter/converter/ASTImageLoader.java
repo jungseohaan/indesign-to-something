@@ -917,7 +917,9 @@ public class ASTImageLoader {
             if (sc.shape.shapeType() == IDMLVectorShape.ShapeType.RECTANGLE
                     && sc.shape.hasRoundedCorners()
                     && !hasNonRectangularPath(sc.shape)) {
-                double r = sc.shape.cornerRadius() * scale;
+                // InDesign은 cornerRadius를 min(width,height)/2로 클램핑 (원형 모서리)
+                double maxR = Math.min(sw, sh) / 2.0;
+                double r = Math.min(sc.shape.cornerRadius(), maxR) * scale;
                 awtShape = new RoundRectangle2D.Double(
                         offX * scale, offY * scale, sw * scale, sh * scale, r * 2, r * 2);
             } else if (sc.accTransform != null) {
@@ -945,7 +947,26 @@ public class ASTImageLoader {
                     Color tintedStroke = applyTint(strokeColor, sc.shape.strokeTint());
                     g.setColor(tintedStroke);
                     float strokeW = (float) (sc.shape.strokeWeight() * scale);
-                    g.setStroke(new BasicStroke(strokeW));
+
+                    int cap = java.awt.BasicStroke.CAP_BUTT;
+                    int join = java.awt.BasicStroke.JOIN_MITER;
+                    if (sc.shape.endCap() == IDMLVectorShape.LineCap.ROUND) cap = java.awt.BasicStroke.CAP_ROUND;
+                    else if (sc.shape.endCap() == IDMLVectorShape.LineCap.PROJECTING) cap = java.awt.BasicStroke.CAP_SQUARE;
+                    if (sc.shape.lineJoin() == IDMLVectorShape.LineJoin.ROUND) join = java.awt.BasicStroke.JOIN_ROUND;
+                    else if (sc.shape.lineJoin() == IDMLVectorShape.LineJoin.BEVEL) join = java.awt.BasicStroke.JOIN_BEVEL;
+
+                    BasicStroke stroke;
+                    if (sc.shape.hasDashPattern()) {
+                        float[] dashArr = new float[sc.shape.dashPattern().length];
+                        for (int di = 0; di < dashArr.length; di++)
+                            dashArr[di] = (float) (sc.shape.dashPattern()[di] * scale);
+                        stroke = new BasicStroke(strokeW, cap, join,
+                                (float) sc.shape.miterLimit(), dashArr, 0);
+                    } else {
+                        stroke = new BasicStroke(strokeW, cap, join,
+                                (float) sc.shape.miterLimit());
+                    }
+                    g.setStroke(stroke);
                     g.draw(awtShape);
                 }
             }
@@ -1958,7 +1979,9 @@ public class ASTImageLoader {
                     return buildPathFromPoints(shape, scale);
                 }
                 if (shape.hasRoundedCorners()) {
-                    double r = shape.cornerRadius() * scale;
+                    // InDesign은 cornerRadius를 min(width,height)/2로 클램핑
+                    double maxRPts = Math.min(shape.widthPoints(), shape.heightPoints()) / 2.0;
+                    double r = Math.min(shape.cornerRadius(), maxRPts) * scale;
                     return new RoundRectangle2D.Double(0, 0, w, h, r * 2, r * 2);
                 }
                 return new Rectangle2D.Double(0, 0, w, h);

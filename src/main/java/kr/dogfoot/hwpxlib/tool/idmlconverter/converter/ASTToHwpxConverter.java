@@ -293,7 +293,8 @@ public class ASTToHwpxConverter {
         // 3) TABLE 플로팅 처리
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.TABLE) {
-                tableBuilder.convertTable(secPrPara, (ASTTable) block);
+                ASTTable table = (ASTTable) block;
+                tableBuilder.convertTable(secPrPara, table);
                 ctx.framesConverted++;
             }
         }
@@ -412,12 +413,6 @@ public class ASTToHwpxConverter {
             hwpxWidth = (int) layout.pageWidth();
             hwpxHeight = (int) layout.pageHeight();
         }
-        secPr.createPagePr();
-        secPr.pagePr()
-                .landscapeAnd(direction)
-                .widthAnd(hwpxWidth)
-                .heightAnd(hwpxHeight)
-                .gutterType(GutterMethod.LEFT_ONLY);
 
         // 마진
         int mTop = layout.marginTop() > 0 ? (int) layout.marginTop() : 1417;
@@ -425,6 +420,13 @@ public class ASTToHwpxConverter {
         int mLeft = layout.marginLeft() > 0 ? (int) layout.marginLeft() : 1417;
         int mRight = layout.marginRight() > 0 ? (int) layout.marginRight() : 1417;
         int headerFooter = 1417;
+
+        secPr.createPagePr();
+        secPr.pagePr()
+                .landscapeAnd(direction)
+                .widthAnd(hwpxWidth)
+                .heightAnd(hwpxHeight)
+                .gutterType(GutterMethod.LEFT_ONLY);
 
         secPr.pagePr().createMargin();
         secPr.pagePr().margin()

@@ -747,6 +747,17 @@ class IDMLSpreadParser {
         double wrapperFillTint = parseDoubleAttrDef(frameElem, "FillTint", -1);
         String wrapperStroke = getAttrOrNull(frameElem, "StrokeColor");
         double wrapperStrokeWeight = parseDoubleAttrDef(frameElem, "StrokeWeight", 0);
+        String wrapperStrokeTypeRaw = getAttrOrNull(frameElem, "StrokeType");
+        String wrapperStrokeType = null;
+        if (wrapperStrokeTypeRaw != null) {
+            if (wrapperStrokeTypeRaw.contains("Dashed")) {
+                wrapperStrokeType = "Dashed";
+            } else if (wrapperStrokeTypeRaw.contains("Dotted")) {
+                wrapperStrokeType = "Dotted";
+            } else if (wrapperStrokeTypeRaw.contains("Solid")) {
+                wrapperStrokeType = "Solid";
+            }
+        }
         double wrapperCornerRadius = parseDoubleAttrDef(frameElem, "CornerRadius", 0);
 
         // 유효한 채우기/선이 있는지 확인
@@ -769,7 +780,8 @@ class IDMLSpreadParser {
                     // 부모 프레임의 시각 속성 전파
                     if (hasWrapperFill || hasWrapperStroke) {
                         applyWrapperStyle(frame, wrapperFill, wrapperFillTint,
-                                wrapperStroke, wrapperStrokeWeight, wrapperCornerRadius);
+                                wrapperStroke, wrapperStrokeWeight, wrapperStrokeType,
+                                wrapperCornerRadius);
                     }
                     spread.addTextFrame(frame);
                 }
@@ -783,7 +795,8 @@ class IDMLSpreadParser {
                         zOrderCounter, groupSelfId,
                         hasWrapperFill ? wrapperFill : null, wrapperFillTint,
                         hasWrapperStroke ? wrapperStroke : null,
-                        wrapperStrokeWeight, wrapperCornerRadius);
+                        wrapperStrokeWeight, wrapperStrokeType,
+                        wrapperCornerRadius);
             }
         }
     }
@@ -794,7 +807,7 @@ class IDMLSpreadParser {
     private static void applyWrapperStyle(IDMLTextFrame frame,
                                            String fillColor, double fillTint,
                                            String strokeColor, double strokeWeight,
-                                           double cornerRadius) {
+                                           String strokeType, double cornerRadius) {
         if (fillColor != null && !fillColor.contains("None") && !fillColor.contains("Paper")) {
             frame.wrapperFillColor(fillColor);
             frame.wrapperFillTint(fillTint);
@@ -802,6 +815,9 @@ class IDMLSpreadParser {
         if (strokeColor != null && !strokeColor.contains("None") && strokeWeight > 0) {
             frame.wrapperStrokeColor(strokeColor);
             frame.wrapperStrokeWeight(strokeWeight);
+            if (strokeType != null) {
+                frame.wrapperStrokeType(strokeType);
+            }
         }
         if (cornerRadius > 0) {
             frame.wrapperCornerRadius(cornerRadius);
@@ -850,7 +866,7 @@ class IDMLSpreadParser {
                                     int[] zOrderCounter,
                                     String groupSelfId) {
         parseGroupForFrames(groupElem, spread, accumulatedTransform, hiddenLayerIds,
-                zOrderCounter, groupSelfId, null, -1, null, 0, 0);
+                zOrderCounter, groupSelfId, null, -1, null, 0, null, 0);
     }
 
     /**
@@ -864,6 +880,7 @@ class IDMLSpreadParser {
                                     String groupSelfId,
                                     String wrapperFill, double wrapperFillTint,
                                     String wrapperStroke, double wrapperStrokeWeight,
+                                    String wrapperStrokeType,
                                     double wrapperCornerRadius) {
         // Group 자체가 숨겨진 레이어에 속하면 전체 건너뛰기
         String groupLayer = getAttrOrNull(groupElem, "ItemLayer");
@@ -889,7 +906,8 @@ class IDMLSpreadParser {
                     // 부모 프레임의 시각 속성 전파
                     if (wrapperFill != null || wrapperStroke != null) {
                         applyWrapperStyle(frame, wrapperFill, wrapperFillTint,
-                                wrapperStroke, wrapperStrokeWeight, wrapperCornerRadius);
+                                wrapperStroke, wrapperStrokeWeight, wrapperStrokeType,
+                                wrapperCornerRadius);
                     }
                     spread.addTextFrame(frame);
                 }
@@ -944,7 +962,8 @@ class IDMLSpreadParser {
                 double[] combined = CoordinateConverter.combineTransforms(
                         accumulatedTransform, childGroupTransform);
                 parseGroupForFrames(elem, spread, combined, hiddenLayerIds, zOrderCounter, groupSelfId,
-                        wrapperFill, wrapperFillTint, wrapperStroke, wrapperStrokeWeight, wrapperCornerRadius);
+                        wrapperFill, wrapperFillTint, wrapperStroke, wrapperStrokeWeight,
+                        wrapperStrokeType, wrapperCornerRadius);
             }
         }
     }
