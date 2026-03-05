@@ -1091,6 +1091,92 @@ class IDMLStoryParser {
         return result;
     }
 
+    // ===== CharacterStyle 폰트 상속 해석 =====
+
+    /**
+     * CharacterStyleRange에 명시적 AppliedFont/FillColor가 없는 경우,
+     * AppliedCharacterStyle 또는 ParagraphStyle 정의에서 상속한다.
+     */
+    static void resolveCharacterStyleFonts(IDMLDocument doc) {
+        int fontCount = 0;
+        int colorCount = 0;
+        for (IDMLStory story : doc.stories().values()) {
+            for (IDMLParagraph para : story.paragraphs()) {
+                int[] counts = resolveStylePropsForParagraph(para, doc);
+                fontCount += counts[0];
+                colorCount += counts[1];
+            }
+            for (IDMLTable table : story.tables()) {
+                for (IDMLTableRow row : table.rows()) {
+                    for (IDMLTableCell cell : row.cells()) {
+                        for (IDMLParagraph para : cell.paragraphs()) {
+                            int[] counts = resolveStylePropsForParagraph(para, doc);
+                            fontCount += counts[0];
+                            colorCount += counts[1];
+                        }
+                    }
+                }
+            }
+        }
+        if (fontCount > 0 || colorCount > 0) {
+            System.err.println("[IDMLLoader] CharacterStyle inheritance resolved: "
+                    + fontCount + " fonts, " + colorCount + " colors");
+        }
+    }
+
+    /**
+     * 단락 내 런의 fontFamily/fillColor를 스타일 정의에서 상속.
+     * fontFamily: CharacterStyle에서만 상속 (ParagraphStyle 폰트는 범용이므로 제외)
+     * fillColor: CharacterStyle → ParagraphStyle 순서로 상속
+     * @return [fontCount, colorCount]
+     */
+    private static int[] resolveStylePropsForParagraph(IDMLParagraph para, IDMLDocument doc) {
+        int fontCount = 0;
+        int colorCount = 0;
+        String paraStyleRef = para.appliedParagraphStyle();
+
+        for (IDMLCharacterRun run : para.characterRuns()) {
+            String charStyleRef = run.appliedCharacterStyle();
+
+            // fontFamily 상속 (CharacterStyle에서만)
+            if (run.fontFamily() == null && charStyleRef != null) {
+                String font = resolveStyleProp(charStyleRef, doc, true, 0);
+                if (font != null) {
+                    run.fontFamily(font);
+                    fontCount++;
+                }
+            }
+
+            // fillColor 상속 (CharacterStyle → ParagraphStyle)
+            if (run.fillColor() == null) {
+                String color = resolveStyleProp(charStyleRef, doc, false, 0);
+                if (color == null) color = resolveStyleProp(paraStyleRef, doc, false, 0);
+                if (color != null) {
+                    run.fillColor(color);
+                    colorCount++;
+                }
+            }
+        }
+        return new int[]{fontCount, colorCount};
+    }
+
+    /**
+     * 스타일 정의에서 속성 조회 (BasedOn 체인 따라감).
+     * @param isFont true면 fontFamily, false면 fillColor
+     */
+    private static String resolveStyleProp(String styleRef, IDMLDocument doc,
+                                             boolean isFont, int depth) {
+        if (styleRef == null || depth > 10) return null;
+        // CharacterStyle 먼저 시도, 없으면 ParagraphStyle
+        IDMLStyleDef styleDef = doc.getCharacterStyle(styleRef);
+        if (styleDef == null) styleDef = doc.getParagraphStyle(styleRef);
+        if (styleDef == null) return null;
+
+        String value = isFont ? styleDef.fontFamily() : styleDef.fillColor();
+        if (value != null) return value;
+        return resolveStyleProp(styleDef.basedOn(), doc, isFont, depth + 1);
+    }
+
     // ===== GREP 스타일 해석 =====
 
     /**

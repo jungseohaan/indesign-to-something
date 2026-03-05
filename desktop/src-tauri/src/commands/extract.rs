@@ -4,55 +4,6 @@ use tokio::process::Command;
 use super::find_java;
 
 // ─────────────────────────────────────────────────────────────────
-// InDesign (.indd) Page Info (경량)
-// ─────────────────────────────────────────────────────────────────
-
-/// .indd 파일을 열어 페이지 목록만 빠르게 가져온다.
-/// 문서는 닫지 않으므로 후속 extract_indd에서 재활용된다.
-#[tauri::command]
-pub async fn get_indd_pages(
-    app: AppHandle,
-    indd_path: String,
-) -> Result<crate::indesign::InddPagesResult, String> {
-    use std::time::Duration;
-
-    // 1. InDesign 설치 확인
-    let indesign_app_path = crate::indesign::find_indesign_app()?;
-
-    // 2. 임시 디렉토리 생성
-    let output_dir = crate::indesign::create_extraction_temp_dir()?;
-
-    // 3. get_indd_pages.jsx 찾기
-    let jsx_path = crate::indesign::find_script(&app, "get_indd_pages.jsx")?;
-
-    // 4. 실행 (30초 타임아웃 — 문서 열기만이라 빠름)
-    let result = tokio::time::timeout(
-        Duration::from_secs(60),
-        crate::indesign::run_get_pages(
-            &app,
-            &indd_path,
-            &output_dir,
-            &jsx_path,
-            &indesign_app_path,
-        ),
-    )
-    .await
-    .map_err(|_| {
-        let _ = std::fs::remove_dir_all(&output_dir);
-        "InDesign 페이지 정보 가져오기 시간 초과 (60초).".to_string()
-    })?
-    .map_err(|e| {
-        let _ = std::fs::remove_dir_all(&output_dir);
-        e
-    })?;
-
-    // 임시 디렉토리 정리
-    let _ = std::fs::remove_dir_all(&output_dir);
-
-    Ok(result)
-}
-
-// ─────────────────────────────────────────────────────────────────
 // InDesign (.indd) Extraction
 // ─────────────────────────────────────────────────────────────────
 
@@ -64,13 +15,8 @@ pub async fn extract_indd(
     app: AppHandle,
     indd_path: String,
     _jar_path: String,
-    #[allow(unused_variables)]
-    start_page: Option<i32>,
-    #[allow(unused_variables)]
-    end_page: Option<i32>,
+    spread_mode: Option<bool>,
 ) -> Result<crate::indesign::InddExtractResult, String> {
-    use std::time::Duration;
-
     // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵
     let indd = std::path::Path::new(&indd_path);
     if let Some(indd_parent) = indd.parent() {
@@ -90,36 +36,33 @@ pub async fn extract_indd(
         }
     }
 
-    // 1. InDesign 설치 확인
+    // 1. INDD 파일 존재 확인
+    if !std::path::Path::new(&indd_path).exists() {
+        return Err(format!("INDD 파일을 찾을 수 없습니다: {}", indd_path));
+    }
+
+    // 2. InDesign 설치 확인
     let indesign_app_path = crate::indesign::find_indesign_app()?;
 
-    // 2. 임시 디렉토리 생성
+    // 3. 임시 디렉토리 생성
     let output_dir = crate::indesign::create_extraction_temp_dir()?;
 
-    // 3. ExtendScript 경로 찾기
+    // 4. ExtendScript 경로 찾기
     let jsx_path = crate::indesign::find_extendscript(&app)?;
 
-    // 4. 추출 실행 (300초 타임아웃 — PDF 내보내기가 대용량 문서에서 오래 걸릴 수 있음)
-    let sp = start_page.unwrap_or(0);
-    let ep = end_page.unwrap_or(0);
-    let result = tokio::time::timeout(
-        Duration::from_secs(300),
-        crate::indesign::run_extraction(
-            &app,
-            &indd_path,
-            &output_dir,
-            &jsx_path,
-            &indesign_app_path,
-            sp,
-            ep,
-        ),
+    // 5. 추출 실행 (타임아웃은 run_extraction 내부에서 처리 — 600초)
+    let sm = spread_mode.unwrap_or(false);
+    let result = crate::indesign::run_extraction(
+        &app,
+        &indd_path,
+        &output_dir,
+        &jsx_path,
+        &indesign_app_path,
+        0,
+        0,
+        sm,
     )
     .await
-    .map_err(|_| {
-        // 타임아웃 시 임시 디렉토리 정리
-        let _ = std::fs::remove_dir_all(&output_dir);
-        "InDesign 추출 시간 초과 (300초). InDesign이 응답하지 않습니다.".to_string()
-    })?
     .map_err(|e| {
         // 추출 실패 시 임시 디렉토리 정리
         let _ = std::fs::remove_dir_all(&output_dir);

@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
@@ -116,6 +117,9 @@ class ASTStoryConverter {
         List<ASTEquation> mathGroupFractions = new ArrayList<>(); // 수식 그룹 런의 인라인 분수
         List<IDMLCharacterRun> npMathGroup = new ArrayList<>(); // NP 폰트 수식 그룹
         List<ASTEquation> npMathGroupFractions = new ArrayList<>(); // NP 수식 그룹의 인라인 분수
+        List<IDMLCharacterRun> ehMathGroup = new ArrayList<>(); // EH 폰트 수식 그룹
+        List<ASTEquation> ehMathGroupFractions = new ArrayList<>(); // EH 수식 그룹의 인라인 분수
+        List<IDMLCharacterRun> patternMathGroup = new ArrayList<>(); // 패턴 감지 수식 그룹
 
         // 단락 또는 스토리에 BT 수식 폰트 런이 하나라도 있는지 확인
         boolean paraHasBTRuns = storyHasBTRuns;
@@ -155,24 +159,37 @@ class ASTStoryConverter {
                 }
             }
 
+            // EH 수식 그룹 진입 여부 판단
+            boolean enterEHMathGroup = false;
+            if (run.isEHFont()) {
+                enterEHMathGroup = true;
+            } else if (EHFontGlyphMap.containsEHEncodedChars(run.content())) {
+                // 폰트 미지정이지만 EH 인코딩 패턴(Û` 등) 포함 → EH 그룹으로 진입
+                enterEHMathGroup = true;
+            } else if (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx)) {
+                enterEHMathGroup = true;
+            }
+
             // NP 수식 그룹 진입 여부 판단
             boolean enterNPMathGroup = false;
-            if (run.isNPFont()) {
-                enterNPMathGroup = true;
-            } else if (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx)) {
-                enterNPMathGroup = true;
-            } else if (npMathGroup.isEmpty() && ASTMathGrouper.isPreNPMathRun(run, runs, idx)) {
-                // NP 그룹 시작 전 비NP 수학 텍스트 (예: "y=log" 뒤에 NP_ISHS:"2" 올 때)
-                enterNPMathGroup = true;
-            } else if (paraHasNPStructuralRuns && !run.isNPFont() && !run.isBTFont()
-                    && !run.grepMathFont() && ASTMathGrouper.isStandaloneMathRun(run)) {
-                // 단락에 NP 구조 런이 있으면, 독립 수학 텍스트(x=k, 0<k<8)도 수식으로 변환
-                enterNPMathGroup = true;
+            if (!enterEHMathGroup) {
+                if (run.isNPFont()) {
+                    enterNPMathGroup = true;
+                } else if (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx)) {
+                    enterNPMathGroup = true;
+                } else if (npMathGroup.isEmpty() && ASTMathGrouper.isPreNPMathRun(run, runs, idx)) {
+                    // NP 그룹 시작 전 비NP 수학 텍스트 (예: "y=log" 뒤에 NP_ISHS:"2" 올 때)
+                    enterNPMathGroup = true;
+                } else if (paraHasNPStructuralRuns && !run.isNPFont() && !run.isBTFont()
+                        && !run.grepMathFont() && !run.isEHFont() && ASTMathGrouper.isStandaloneMathRun(run)) {
+                    // 단락에 NP 구조 런이 있으면, 독립 수학 텍스트(x=k, 0<k<8)도 수식으로 변환
+                    enterNPMathGroup = true;
+                }
             }
 
             // BT 수식 그룹 진입 여부 판단
             boolean enterMathGroup = false;
-            if (!enterNPMathGroup) {
+            if (!enterEHMathGroup && !enterNPMathGroup) {
                 if ((run.isBTFont() || run.grepMathFont())
                         && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())
                         && !ASTMathGrouper.isPlainAlphanumericRun(run)) {
@@ -184,53 +201,108 @@ class ASTStoryConverter {
                 }
             }
 
-            if (enterNPMathGroup) {
-                // BT 그룹이 열려있으면 먼저 flush
+            if (enterEHMathGroup) {
+                // 다른 그룹이 열려있으면 먼저 flush
                 if (!mathGroup.isEmpty()) {
-                    ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere);
+                    ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere, colorResolver);
                     ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
                     mathGroup.clear();
                     mathGroupFractions.clear();
                 }
-                ASTMathFlushHelper.extractFractionFrames(run, idmlDoc, npMathGroupFractions);
-                npMathGroup.add(run);
-            } else if (enterMathGroup) {
-                // NP 그룹이 열려있으면 먼저 flush
                 if (!npMathGroup.isEmpty()) {
-                    ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere);
+                    ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
                     ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
                     npMathGroup.clear();
                     npMathGroupFractions.clear();
+                }
+                ASTMathFlushHelper.extractFractionFrames(run, idmlDoc, ehMathGroupFractions);
+                ehMathGroup.add(run);
+            } else if (enterNPMathGroup) {
+                // 다른 그룹이 열려있으면 먼저 flush
+                if (!mathGroup.isEmpty()) {
+                    ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere, colorResolver);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    mathGroup.clear();
+                    mathGroupFractions.clear();
+                }
+                if (!ehMathGroup.isEmpty()) {
+                    ASTMathFlushHelper.flushEHMathGroupWithFractions(ehMathGroup, para, ehMathGroupFractions, hasIndentToHere, colorResolver);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ehMathGroup.clear();
+                    ehMathGroupFractions.clear();
+                }
+                ASTMathFlushHelper.extractFractionFrames(run, idmlDoc, npMathGroupFractions);
+                npMathGroup.add(run);
+            } else if (enterMathGroup) {
+                // 다른 그룹이 열려있으면 먼저 flush
+                if (!npMathGroup.isEmpty()) {
+                    ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    npMathGroup.clear();
+                    npMathGroupFractions.clear();
+                }
+                if (!ehMathGroup.isEmpty()) {
+                    ASTMathFlushHelper.flushEHMathGroupWithFractions(ehMathGroup, para, ehMathGroupFractions, hasIndentToHere, colorResolver);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ehMathGroup.clear();
+                    ehMathGroupFractions.clear();
                 }
                 // 수식 그룹에 들어가는 런의 인라인 분수 TextFrame 추출
                 // (flushMathGroup은 텍스트만 처리하므로 인라인 프레임은 여기서 별도 수집)
                 ASTMathFlushHelper.extractFractionFrames(run, idmlDoc, mathGroupFractions);
                 mathGroup.add(run);
             } else {
-                // 둘 다 종료 → 변환
+                // 모두 종료 → 변환
                 if (!mathGroup.isEmpty()) {
-                    ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere);
+                    ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere, colorResolver);
                     ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
                     mathGroup.clear();
                     mathGroupFractions.clear();
                 }
                 if (!npMathGroup.isEmpty()) {
-                    ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere);
+                    ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
                     ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
                     npMathGroup.clear();
                     npMathGroupFractions.clear();
                 }
-                ASTRunConverter.convertCharacterRun(run, idmlPara, para, pool, idmlDoc, colorResolver, imageLoader, resolvedData);
+                if (!ehMathGroup.isEmpty()) {
+                    ASTMathFlushHelper.flushEHMathGroupWithFractions(ehMathGroup, para, ehMathGroupFractions, hasIndentToHere, colorResolver);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ehMathGroup.clear();
+                    ehMathGroupFractions.clear();
+                }
+                if (!patternMathGroup.isEmpty()) {
+                    ASTMathGrouper.flushPatternMathGroup(patternMathGroup, para, colorResolver);
+                    patternMathGroup.clear();
+                }
+
+                // 패턴 감지 fallback: BT/NP/EH 어디에도 해당하지 않는 런에서 수식 패턴 감지
+                if (MathPatternDetector.isMathInContext(run, runs, idx)) {
+                    patternMathGroup.add(run);
+                } else {
+                    if (!patternMathGroup.isEmpty()) {
+                        ASTMathGrouper.flushPatternMathGroup(patternMathGroup, para, colorResolver);
+                        patternMathGroup.clear();
+                    }
+                    ASTRunConverter.convertCharacterRun(run, idmlPara, para, pool, idmlDoc, colorResolver, imageLoader, resolvedData);
+                }
             }
         }
         // 마지막 수식 그룹 처리
         if (!mathGroup.isEmpty()) {
-            ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere);
+            ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere, colorResolver);
             ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
         }
         if (!npMathGroup.isEmpty()) {
-            ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere);
+            ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
             ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
+        }
+        if (!ehMathGroup.isEmpty()) {
+            ASTMathFlushHelper.flushEHMathGroupWithFractions(ehMathGroup, para, ehMathGroupFractions, hasIndentToHere, colorResolver);
+            ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader);
+        }
+        if (!patternMathGroup.isEmpty()) {
+            ASTMathGrouper.flushPatternMathGroup(patternMathGroup, para, colorResolver);
         }
 
         // 단락 끝의 trailing lineBreak 제거

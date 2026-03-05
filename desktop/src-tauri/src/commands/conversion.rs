@@ -46,20 +46,6 @@ pub async fn convert_idml(
         args.push(dir);
     }
 
-    if let Some(start) = options.start_page {
-        if start > 0 {
-            args.push("--start-page".to_string());
-            args.push(start.to_string());
-        }
-    }
-
-    if let Some(end) = options.end_page {
-        if end > 0 {
-            args.push("--end-page".to_string());
-            args.push(end.to_string());
-        }
-    }
-
     if options.layout_mode != "preserve" {
         args.push("--layout-mode".to_string());
         args.push(options.layout_mode.clone());

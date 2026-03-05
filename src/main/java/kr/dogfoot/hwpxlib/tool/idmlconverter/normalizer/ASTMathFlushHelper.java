@@ -23,7 +23,15 @@ class ASTMathFlushHelper {
                                               ASTParagraph para,
                                               List<ASTEquation> fractions,
                                               boolean hasIndentToHere) {
-        flushMathGroup(mathGroup, para, fractions, hasIndentToHere, false);
+        flushMathGroupWithFractions(mathGroup, para, fractions, hasIndentToHere, null);
+    }
+
+    static void flushMathGroupWithFractions(List<IDMLCharacterRun> mathGroup,
+                                              ASTParagraph para,
+                                              List<ASTEquation> fractions,
+                                              boolean hasIndentToHere,
+                                              ColorResolver colorResolver) {
+        flushMathGroup(mathGroup, para, fractions, hasIndentToHere, FlushType.BT, colorResolver);
     }
 
     /**
@@ -33,22 +41,56 @@ class ASTMathFlushHelper {
                                                 ASTParagraph para,
                                                 List<ASTEquation> fractions,
                                                 boolean hasIndentToHere) {
-        flushMathGroup(npGroup, para, fractions, hasIndentToHere, true);
+        flushNPMathGroupWithFractions(npGroup, para, fractions, hasIndentToHere, null);
+    }
+
+    static void flushNPMathGroupWithFractions(List<IDMLCharacterRun> npGroup,
+                                                ASTParagraph para,
+                                                List<ASTEquation> fractions,
+                                                boolean hasIndentToHere,
+                                                ColorResolver colorResolver) {
+        flushMathGroup(npGroup, para, fractions, hasIndentToHere, FlushType.NP, colorResolver);
     }
 
     /**
-     * BT/NP 통합 수식 그룹 flush.
-     * @param isNP true이면 NP 수식, false이면 BT 수식
+     * EH 수식 그룹을 flush하면서 인라인 분수 TextFrame을 통합.
+     */
+    static void flushEHMathGroupWithFractions(List<IDMLCharacterRun> ehGroup,
+                                                ASTParagraph para,
+                                                List<ASTEquation> fractions,
+                                                boolean hasIndentToHere) {
+        flushEHMathGroupWithFractions(ehGroup, para, fractions, hasIndentToHere, null);
+    }
+
+    static void flushEHMathGroupWithFractions(List<IDMLCharacterRun> ehGroup,
+                                                ASTParagraph para,
+                                                List<ASTEquation> fractions,
+                                                boolean hasIndentToHere,
+                                                ColorResolver colorResolver) {
+        flushMathGroup(ehGroup, para, fractions, hasIndentToHere, FlushType.EH, colorResolver);
+    }
+
+    private enum FlushType { BT, NP, EH }
+
+    /**
+     * BT/NP/EH 통합 수식 그룹 flush.
      */
     private static void flushMathGroup(List<IDMLCharacterRun> group,
                                          ASTParagraph para,
                                          List<ASTEquation> fractions,
                                          boolean hasIndentToHere,
-                                         boolean isNP) {
-        if (isNP) {
-            ASTMathGrouper.flushNPMathGroup(group, para);
-        } else {
-            ASTMathGrouper.flushMathGroup(group, para);
+                                         FlushType type,
+                                         ColorResolver colorResolver) {
+        switch (type) {
+            case NP:
+                ASTMathGrouper.flushNPMathGroup(group, para);
+                break;
+            case EH:
+                ASTMathGrouper.flushEHMathGroup(group, para);
+                break;
+            default:
+                ASTMathGrouper.flushMathGroup(group, para);
+                break;
         }
 
         // flush가 방금 추가한 마지막 수식 항목 찾기
@@ -58,6 +100,14 @@ class ASTMathFlushHelper {
             if (items.get(i).itemType() == ASTInlineItem.ItemType.EQUATION) {
                 lastEq = (ASTEquation) items.get(i);
                 break;
+            }
+        }
+
+        // 수식 텍스트 색상 설정 (소스 런의 fillColor 사용)
+        if (lastEq != null) {
+            String color = resolveGroupTextColor(group, colorResolver);
+            if (color != null) {
+                lastEq.textColor(color);
             }
         }
 
@@ -150,5 +200,24 @@ class ASTMathFlushHelper {
                 ASTRunConverter.processInlineGraphic(ig, para, idmlDoc, colorResolver, imageLoader, null);
             }
         }
+    }
+
+    /**
+     * 수식 그룹 런들에서 대표 텍스트 색상을 추출.
+     * 첫 번째로 발견되는 non-null fillColor를 사용.
+     */
+    private static String resolveGroupTextColor(List<IDMLCharacterRun> group,
+                                                  ColorResolver colorResolver) {
+        if (colorResolver == null) return null;
+        for (IDMLCharacterRun run : group) {
+            String fill = run.fillColor();
+            if (fill != null) {
+                String hex = colorResolver.resolve(fill);
+                if (hex != null && !hex.isEmpty()) {
+                    return hex;
+                }
+            }
+        }
+        return null;
     }
 }

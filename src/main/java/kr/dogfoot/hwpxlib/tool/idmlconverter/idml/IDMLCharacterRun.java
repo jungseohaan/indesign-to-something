@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.idml;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 
 import java.util.ArrayList;
@@ -239,10 +240,18 @@ public class IDMLCharacterRun {
     }
 
     /**
-     * 수식 폰트인지 확인 (NP 또는 BT).
+     * EH 수식 폰트인지 확인 (fontFamily 또는 CharacterStyle 기반).
+     */
+    public boolean isEHFont() {
+        return EHFontGlyphMap.isEHFontFamily(fontFamily)
+                || EHFontGlyphMap.isEHFontStyle(appliedCharacterStyle);
+    }
+
+    /**
+     * 수식 폰트인지 확인 (NP, BT, EH).
      */
     public boolean isMathFont() {
-        return isNPFont() || isBTFont();
+        return isNPFont() || isBTFont() || isEHFont();
     }
 
     public boolean isSubscript() {

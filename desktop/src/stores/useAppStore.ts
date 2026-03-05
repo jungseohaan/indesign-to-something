@@ -62,15 +62,8 @@ interface AppState {
   spreadBased: boolean;
   vectorDpi: 96 | 150;
   layoutMode: "preserve" | "editable";
-  startPage: number | null;
-  endPage: number | null;
-
   // InDesign
   indesignPath: string | null;
-
-  // Page Range Modal
-  showPageRangeModal: boolean;
-  inddPages: { name: string; index: number }[];
 
   // Font Mapping
   fontMappings: Record<string, string>;
@@ -95,7 +88,6 @@ interface AppState {
   initJarPath: () => Promise<void>;
   selectFile: () => Promise<void>;
   selectInddFile: () => Promise<void>;
-  confirmPageRangeAndExtract: (startPage: number | null, endPage: number | null) => Promise<void>;
   selectHwpxFile: () => Promise<void>;
   selectSpread: (spread: SpreadInfo) => void;
   selectPage: (page: PageInfo) => void;
@@ -106,9 +98,6 @@ interface AppState {
   setSpreadBased: (v: boolean) => void;
   setVectorDpi: (v: 96 | 150) => void;
   setLayoutMode: (v: "preserve" | "editable") => void;
-  setStartPage: (v: number | null) => void;
-  setEndPage: (v: number | null) => void;
-  closePageRangeModal: () => void;
   clearError: () => void;
   setFontMappings: (mappings: Record<string, string>) => void;
   openFontMappingModal: () => void;
@@ -150,11 +139,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   spreadBased: false,
   vectorDpi: 150,
   layoutMode: "preserve",
-  startPage: null,
-  endPage: null,
   indesignPath: null,
-  showPageRangeModal: false,
-  inddPages: [],
   fontMappings: {},
   showFontMappingModal: false,
   lastOpenDir: localStorage.getItem("lastOpenDir"),
@@ -254,70 +239,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       isBatchProcessing: false,
       batchCancelled: false,
     });
-  },
-
-  confirmPageRangeAndExtract: async (startPage, endPage) => {
-    const { inddPath, jarPath } = get();
-    if (!inddPath) return;
-
-    set({
-      showPageRangeModal: false,
-      startPage,
-      endPage,
-      isExtracting: true,
-      extractionPhase: "exporting",
-      extractionMessage: "IDML 추출 중...",
-    });
-
-    const unlisten = await listen<InddExtractionProgress>(
-      "indd-extraction-progress",
-      (event) => {
-        set({ extractionPhase: event.payload.phase, extractionMessage: event.payload.message });
-      }
-    );
-
-    try {
-      // Step 1: InDesign으로 IDML + resolved 추출 (문서는 이미 열려있음)
-      const result = await invoke<InddExtractResult>("extract_indd", {
-        inddPath,
-        jarPath,
-        startPage: startPage ?? 0,
-        endPage: endPage ?? 0,
-      });
-
-      // Step 2: 추출된 IDML로 분석 파이프라인 실행
-      set({
-        idmlPath: result.idml_path,
-        resolvedJsonPath: result.resolved_json_path ?? null,
-        previewPdfPath: result.preview_pdf_path ?? null,
-        isExtracting: false,
-        isAnalyzing: true,
-      });
-
-      const structure = await invoke<IDMLStructure>("analyze_idml", {
-        path: result.idml_path,
-        jarPath,
-      });
-      set({ structure, isAnalyzing: false });
-
-      // Step 3: AST 자동 로드
-      if (jarPath) {
-        useAstStore.getState().loadAST(result.idml_path, jarPath);
-      }
-
-      // Step 4: resolved.json 로드
-      if (result.resolved_json_path) {
-        useAstStore.getState().loadResolved(result.resolved_json_path);
-      }
-    } catch (e: any) {
-      set({
-        isExtracting: false,
-        isAnalyzing: false,
-        error: String(e),
-      });
-    } finally {
-      unlisten();
-    }
   },
 
   selectHwpxFile: async () => {
@@ -440,7 +361,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   startConversion: async () => {
-    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, startPage, endPage, inddPath, resolvedJsonPath, fontMappings } = get();
+    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, inddPath, resolvedJsonPath, fontMappings } = get();
     if (!idmlPath) return;
 
     // 기본 파일명: 원본 파일명에서 확장자를 .hwpx로 변경
@@ -488,8 +409,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           include_images: true,
           links_directory: linksDir,
           resolved_json_path: resolvedJsonPath,
-          start_page: startPage,
-          end_page: endPage,
           layout_mode: layoutMode,
           font_map: Object.keys(fontMappings).length > 0 ? fontMappings : null,
         },
@@ -538,9 +457,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSpreadBased: (v) => set({ spreadBased: v }),
   setVectorDpi: (v) => set({ vectorDpi: v }),
   setLayoutMode: (v) => set({ layoutMode: v }),
-  setStartPage: (v) => set({ startPage: v }),
-  setEndPage: (v) => set({ endPage: v }),
-  closePageRangeModal: () => set({ showPageRangeModal: false }),
   clearError: () => set({ error: null }),
   setFontMappings: (mappings) => set({ fontMappings: mappings }),
   openFontMappingModal: () => set({ showFontMappingModal: true }),
@@ -629,9 +545,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       batchCancelled: false,
     });
 
+    // 완료 후 일괄 열기를 위한 경로 수집
+    const completedFiles: { hwpx: string; pdf: string | null }[] = [];
+
     for (let i = 0; i < selectedPaths.length; i++) {
       // 중단 확인
       if (get().batchCancelled) break;
+
+      // 배치 파일 간 딜레이 (InDesign 안정화)
+      if (i > 0) {
+        await new Promise((r) => setTimeout(r, 3000));
+      }
 
       const inddPath = selectedPaths[i];
       set({ batchCurrentIndex: i });
@@ -648,8 +572,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const extractResult = await invoke<InddExtractResult>("extract_indd", {
           inddPath,
           jarPath,
-          startPage: 0,
-          endPage: 0,
+          spreadMode: spreadBased,
         });
 
         if (get().batchCancelled) break;
@@ -694,8 +617,6 @@ export const useAppStore = create<AppState>((set, get) => ({
             include_images: true,
             links_directory: linksDir,
             resolved_json_path: extractResult.resolved_json_path,
-            start_page: null,
-            end_page: null,
             layout_mode: layoutMode,
             font_map: Object.keys(fontMappings).length > 0 ? fontMappings : null,
           },
@@ -720,11 +641,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ),
         }));
 
-        // 5. 변환된 파일 열기 (HWPX → 한컴 한글, PDF → PDF 뷰어)
-        try { await invoke("open_file", { path: hwpxOutputPath }); } catch {}
-        if (pdfOutputPath) {
-          try { await invoke("open_file", { path: pdfOutputPath }); } catch {}
-        }
+        completedFiles.push({ hwpx: hwpxOutputPath, pdf: pdfOutputPath });
       } catch (e: any) {
         // 실패 — 다음 파일 계속
         set((s) => ({
@@ -735,8 +652,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
-    // 완료
+    // 완료: 모든 파일을 일괄 열기
     set({ isBatchProcessing: false, batchCurrentIndex: -1 });
+
+    for (const f of completedFiles) {
+      try { await invoke("open_file", { path: f.hwpx }); } catch {}
+      if (f.pdf) {
+        try { await invoke("open_file", { path: f.pdf }); } catch {}
+      }
+    }
   },
 
   closeBatchModal: () => set({

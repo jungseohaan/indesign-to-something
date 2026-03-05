@@ -74,7 +74,6 @@ pub fn run() {
             commands::write_text_file,
             commands::extract_questions,
             commands::export_ast,
-            commands::get_indd_pages,
             commands::extract_indd,
             commands::read_resolved_json,
             commands::check_indesign,

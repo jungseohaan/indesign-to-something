@@ -467,6 +467,7 @@ public class ASTDeserializer {
         ASTEquation eq = new ASTEquation();
         eq.hwpScript(getString(o, "hwpScript"));
         eq.sourceType(getString(o, "sourceType"));
+        eq.textColor(getString(o, "textColor"));
         return eq;
     }
 

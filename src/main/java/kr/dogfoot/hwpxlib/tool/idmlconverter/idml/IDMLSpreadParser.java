@@ -309,9 +309,42 @@ class IDMLSpreadParser {
                 localBounds = IDMLGeometry.inverseTransformBounds(parentBounds, transform);
             }
         }
+
+        // 이미지의 직접 부모 요소가 shapeElem과 다르면 (예: Rectangle → Polygon → PDF),
+        // 자식 프레임(Polygon)이 실제 이미지 컨테이너이므로 그 bounds/transform을 결합한다.
+        Element actualContainer = shapeElem;
+        Element imageParent = imageElem.getParentNode() instanceof Element
+                ? (Element) imageElem.getParentNode() : null;
+        if (imageParent != null && imageParent != shapeElem) {
+            double[] childBounds = computeBoundsFromPathGeometry(imageParent);
+            if (childBounds[0] == 0 && childBounds[1] == 0
+                    && childBounds[2] == 0 && childBounds[3] == 0) {
+                String childBoundsAttr = imageParent.getAttribute("GeometricBounds");
+                if (childBoundsAttr != null && !childBoundsAttr.isEmpty()) {
+                    double[] pb = IDMLGeometry.parseBounds(childBoundsAttr);
+                    double[] ct = IDMLGeometry.parseTransform(
+                            imageParent.getAttribute("ItemTransform"));
+                    childBounds = IDMLGeometry.inverseTransformBounds(pb, ct);
+                }
+            }
+            if (!(childBounds[0] == 0 && childBounds[1] == 0
+                    && childBounds[2] == 0 && childBounds[3] == 0)) {
+                localBounds = childBounds;
+                actualContainer = imageParent;
+            }
+        }
+
         frame.geometricBounds(localBounds);
-        frame.itemTransform(IDMLGeometry.parseTransform(
-                shapeElem.getAttribute("ItemTransform")));
+
+        // ItemTransform: 자식 컨테이너를 사용하는 경우 부모 + 자식 transform 결합
+        double[] frameTransform = IDMLGeometry.parseTransform(
+                shapeElem.getAttribute("ItemTransform"));
+        if (actualContainer != shapeElem) {
+            double[] childTransform = IDMLGeometry.parseTransform(
+                    actualContainer.getAttribute("ItemTransform"));
+            frameTransform = CoordinateConverter.combineTransforms(frameTransform, childTransform);
+        }
+        frame.itemTransform(frameTransform);
         frame.appliedObjectStyle(getAttrOrNull(shapeElem, "AppliedObjectStyle"));
 
         // 이미지 채색 정보 (그레이스케일 이미지의 InDesign 컬러링)

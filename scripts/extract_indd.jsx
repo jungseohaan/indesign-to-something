@@ -97,6 +97,8 @@ function main(args) {
     // 페이지 범위 (1-based, 0이면 전체)
     var startPage = parseInt(args[2], 10) || 0;
     var endPage = parseInt(args[3], 10) || 0;
+    // 스프레드 모드 ("1"이면 PDF를 스프레드 단위로 내보냄)
+    var spreadMode = (args[4] === "1");
 
     // --- 기존 환경설정 저장 ---
     var savedInteractionLevel = app.scriptPreferences.userInteractionLevel;
@@ -104,6 +106,7 @@ function main(args) {
     var savedCheckLinks = app.linkingPreferences.checkLinksAtOpen;
     var savedFindMissing = app.linkingPreferences.findMissingLinksAtOpen;
 
+    var doc = null;
     try {
         // --- 다이얼로그 억제 (headless) ---
         // 누락 폰트, 링크 관련 팝업을 모두 자동 dismiss
@@ -114,8 +117,24 @@ function main(args) {
 
         writeProgress(outputDir, "open", 0, 0);
 
+        // 0. 이전 배치에서 닫히지 않은 문서 정리
+        try {
+            while (app.documents.length > 0) {
+                app.documents[0].close(SaveOptions.NO);
+            }
+        } catch (e) {}
+
         // 1. 문서 열기 (창 표시 안 함)
-        var doc = app.open(File(inddPath), false);
+        var inddFile = File(inddPath);
+        if (!inddFile.exists) {
+            var parentFolder = inddFile.parent;
+            if (!parentFolder || !parentFolder.exists) {
+                throw new Error("상위 폴더에 접근할 수 없습니다: " + (parentFolder ? parentFolder.fsName : inddPath) + "\nmacOS 설정 > 개인정보 보호 > 파일 및 폴더에서 InDesign의 접근 권한을 확인해주세요.");
+            } else {
+                throw new Error("INDD 파일을 찾을 수 없습니다: " + inddPath);
+            }
+        }
+        doc = app.open(inddFile, false);
         var pageCount = doc.pages.length;
 
         // 페이지 범위 보정
@@ -137,7 +156,7 @@ function main(args) {
 
         writeProgress(outputDir, "pdf", rangePageCount, rangePageCount);
 
-        // 4. PDF 프리뷰 (페이지 범위 적용)
+        // 4. PDF 프리뷰 (페이지 범위 + 스프레드 모드 적용)
         try {
             var pdfFile = File(outputDir + "/preview.pdf");
             // 페이지 범위가 있으면 해당 범위만 PDF 내보내기
@@ -146,6 +165,8 @@ function main(args) {
             } else {
                 app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
             }
+            // 스프레드 모드: 맞붙은 페이지를 하나의 PDF 페이지로 내보냄
+            app.pdfExportPreferences.exportReaderSpreads = spreadMode;
             doc.exportFile(ExportFormat.PDF_TYPE, pdfFile);
         } catch (e) {
             // PDF 내보내기 실패는 무시
@@ -153,6 +174,7 @@ function main(args) {
 
         // 5. 문서 닫기 (저장 안 함)
         doc.close(SaveOptions.NO);
+        doc = null;
 
         // 6. 성공 시그널
         writeDone(outputDir, "ok", null);
@@ -160,6 +182,10 @@ function main(args) {
         // 에러 시그널
         writeDone(outputDir, "error", e.message);
     } finally {
+        // --- 반드시 현재 문서 닫기 (에러로 close에 도달 못한 경우) ---
+        if (doc) {
+            try { doc.close(SaveOptions.NO); } catch (e) {}
+        }
         // --- 반드시 원래 환경설정 복원 ---
         app.scriptPreferences.userInteractionLevel = savedInteractionLevel;
         app.scriptPreferences.enableRedraw = savedEnableRedraw;

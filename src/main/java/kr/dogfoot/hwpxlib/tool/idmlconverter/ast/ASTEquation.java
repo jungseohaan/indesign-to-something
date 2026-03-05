@@ -6,7 +6,8 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.ast;
  */
 public class ASTEquation extends ASTInlineItem {
     private String hwpScript;
-    private String sourceType; // "BT_FONT", "NP_FONT"
+    private String sourceType; // "BT_FONT", "NP_FONT", "EH_FONT", etc.
+    private String textColor;  // hex color (e.g., "#FFFFFF"), null이면 기본 검정
 
     public ASTEquation() {}
 
@@ -22,4 +23,7 @@ public class ASTEquation extends ASTInlineItem {
 
     public String sourceType() { return sourceType; }
     public void sourceType(String v) { this.sourceType = v; }
+
+    public String textColor() { return textColor; }
+    public void textColor(String v) { this.textColor = v; }
 }

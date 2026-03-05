@@ -1,13 +1,16 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.PatternEquationConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -385,6 +388,59 @@ class ASTMathGrouper {
     }
 
     /**
+     * EH 수식 런 사이의 비EH 런이 수식 그룹에 포함될 수 있는지 확인.
+     * 한국어/탭 포함 → 브릿지 아님. 뒤에 EH 런이 이어지면 → 브릿지.
+     */
+    static boolean isEHMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+        String text = run.content();
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 0xAC00 && c <= 0xD7AF) return false;
+            if (c >= 0x3131 && c <= 0x318E) return false;
+            if (c == '\t') return false;
+        }
+        // 뒤에 EH 수식 런이 있는지 확인
+        for (int j = idx + 1; j < runs.size(); j++) {
+            IDMLCharacterRun next = runs.get(j);
+            if (next.isEHFont()) return true;
+            String nextText = next.content();
+            if (nextText == null || nextText.isEmpty()) continue;
+            for (int i = 0; i < nextText.length(); i++) {
+                char c = nextText.charAt(i);
+                if ((c >= 0xAC00 && c <= 0xD7AF) || (c >= 0x3131 && c <= 0x318E)) {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * EH 수식 폰트 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
+     * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
+     */
+    static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
+        String hwpScript = EHFontEquationConverter.convert(ehRuns);
+        if (hwpScript != null) {
+            para.addItem(new ASTEquation(hwpScript, "EH_FONT"));
+        } else {
+            // 수식이 아닌 EH 폰트 텍스트 → 일반 텍스트 런으로 폴백
+            for (IDMLCharacterRun run : ehRuns) {
+                String text = run.content();
+                if (text != null && !text.isEmpty()) {
+                    ASTTextRun textRun = new ASTTextRun();
+                    textRun.text(ASTPageProcessor.stripACEPlaceholders(text));
+                    textRun.fontFamily(run.fontFamily());
+                    if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
+                    if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
+                    para.addItem(textRun);
+                }
+            }
+        }
+    }
+
+    /**
      * 연속된 수식 폰트 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
      * 수식으로 변환할 수 없는 경우 (순수 텍스트 등) 일반 텍스트 런으로 폴백.
      */
@@ -412,6 +468,53 @@ class ASTMathGrouper {
                     }
                     textRun.fontFamily(ff);
                     textRun.grepMathFont(run.grepMathFont());
+                    if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
+                    if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
+                    para.addItem(textRun);
+                }
+            }
+        }
+    }
+
+    /**
+     * 수식 패턴으로 감지된 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
+     * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
+     */
+    static void flushPatternMathGroup(List<IDMLCharacterRun> patternRuns, ASTParagraph para) {
+        flushPatternMathGroup(patternRuns, para, null);
+    }
+
+    static void flushPatternMathGroup(List<IDMLCharacterRun> patternRuns, ASTParagraph para,
+                                        ColorResolver colorResolver) {
+        String hwpScript = PatternEquationConverter.convert(patternRuns);
+        if (hwpScript != null) {
+            // 수식 폰트 등록 (동적 학습)
+            for (IDMLCharacterRun run : patternRuns) {
+                if (run.fontFamily() != null) {
+                    MathPatternDetector.registerDetectedMathFont(run.fontFamily());
+                }
+            }
+            ASTEquation eq = new ASTEquation(hwpScript, "PATTERN_DETECT");
+            if (colorResolver != null) {
+                for (IDMLCharacterRun run : patternRuns) {
+                    if (run.fillColor() != null) {
+                        String hex = colorResolver.resolve(run.fillColor());
+                        if (hex != null && !hex.isEmpty()) {
+                            eq.textColor(hex);
+                            break;
+                        }
+                    }
+                }
+            }
+            para.addItem(eq);
+        } else {
+            // 변환 실패 → 일반 텍스트 런으로 폴백
+            for (IDMLCharacterRun run : patternRuns) {
+                String text = run.content();
+                if (text != null && !text.isEmpty()) {
+                    ASTTextRun textRun = new ASTTextRun();
+                    textRun.text(ASTPageProcessor.stripACEPlaceholders(text));
+                    textRun.fontFamily(run.fontFamily());
                     if (run.fontStyle() != null) textRun.fontStyle(run.fontStyle());
                     if (run.fontSize() != null) textRun.fontSizeHwpunits((int)(run.fontSize() * 100));
                     para.addItem(textRun);

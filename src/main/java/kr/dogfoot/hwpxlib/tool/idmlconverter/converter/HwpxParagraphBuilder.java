@@ -13,6 +13,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Equation;
 import kr.dogfoot.hwpxlib.tool.equationconverter.EquationBuilder;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.CharPrBuilder;
 
@@ -568,7 +569,9 @@ class HwpxParagraphBuilder {
 
     static boolean isEquationFont(String fontFamily) {
         if (fontFamily == null) return false;
-        return fontFamily.startsWith("NP_") || BTFontGlyphMap.isBTFontFamily(fontFamily);
+        return fontFamily.startsWith("NP_")
+                || BTFontGlyphMap.isBTFontFamily(fontFamily)
+                || EHFontGlyphMap.isEHFontFamily(fontFamily);
     }
 
     String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId) {
@@ -618,8 +621,10 @@ class HwpxParagraphBuilder {
         try {
             Equation template = EquationBuilder.fromHwpScript(eq.hwpScript());
             Equation hwpxEq = run.addNewEquation();
+            // 수식 색상: AST에서 전달된 색상이 있으면 사용, 없으면 기본 검정
+            String eqColor = eq.textColor() != null ? eq.textColor() : template.textColor();
             hwpxEq.versionAnd(template.version())
-                    .textColorAnd(template.textColor())
+                    .textColorAnd(eqColor)
                     .baseUnitAnd(template.baseUnit())
                     .lineModeAnd(template.lineMode())
                     .fontAnd(template.font());

@@ -213,10 +213,6 @@ pub struct ConvertOptions {
     pub links_directory: Option<String>,
     #[serde(default)]
     pub resolved_json_path: Option<String>,
-    #[serde(default)]
-    pub start_page: Option<i32>,
-    #[serde(default)]
-    pub end_page: Option<i32>,
     #[serde(default = "default_layout_mode")]
     pub layout_mode: String,
     #[serde(default)]

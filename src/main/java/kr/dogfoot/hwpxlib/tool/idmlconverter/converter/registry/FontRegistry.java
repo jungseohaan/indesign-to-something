@@ -56,8 +56,8 @@ public class FontRegistry {
             String directId = fontNameToId.get(fontFamily);
             if (directId != null) return directId;
 
-            // BT수식 폰트는 FontMapper를 거치지 않고 직접 등록
-            if (fontFamily.contains("BT수식")) {
+            // BT수식/EH 수식 폰트는 FontMapper를 거치지 않고 직접 등록
+            if (fontFamily.contains("BT수식") || fontFamily.startsWith("EH")) {
                 return registerDirectFont(fontFamily);
             }
 

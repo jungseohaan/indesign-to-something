@@ -96,6 +96,96 @@ class ASTPageProcessor {
         return section;
     }
 
+    // ── 스프레드 단위 처리 ──────────────────────────────────────
+
+    /**
+     * 스프레드 전체를 하나의 ASTSection으로 처리.
+     * 각 페이지를 독립 처리한 뒤, 두 번째 페이지부터 X 오프셋을 적용하여 병합한다.
+     */
+    static ASTSection processSpread(IDMLSpread spread,
+                                     FlattenedObjectPool pool, IDMLDocument idmlDoc,
+                                     ColorResolver colorResolver, ASTImageLoader imageLoader,
+                                     ResolvedData resolvedData,
+                                     Set<String> processedStories, ASTDocument doc) {
+        List<IDMLPage> pages = spread.pages();
+        if (pages.isEmpty()) {
+            return new ASTSection();
+        }
+
+        // 스프레드 전체 크기 계산 (모든 페이지의 geometricBounds union)
+        double minLeft = Double.MAX_VALUE, minTop = Double.MAX_VALUE;
+        double maxRight = -Double.MAX_VALUE, maxBottom = -Double.MAX_VALUE;
+        for (IDMLPage p : pages) {
+            double[] gb = p.geometricBounds();
+            if (gb == null || gb.length < 4) continue;
+            double[] t = p.itemTransform();
+            // 페이지 좌상단/우하단 (스프레드 좌표)
+            double left = (t != null && t.length >= 6) ? t[4] + gb[1] : gb[1];
+            double top = (t != null && t.length >= 6) ? t[5] + gb[0] : gb[0];
+            double right = left + (gb[3] - gb[1]);
+            double bottom = top + (gb[2] - gb[0]);
+            if (left < minLeft) minLeft = left;
+            if (top < minTop) minTop = top;
+            if (right > maxRight) maxRight = right;
+            if (bottom > maxBottom) maxBottom = bottom;
+        }
+
+        double spreadWidth = maxRight - minLeft;
+        double spreadHeight = maxBottom - minTop;
+
+        // 첫 페이지 기준으로 섹션 처리 후 레이아웃 덮어쓰기
+        // 각 페이지를 processPage로 처리하고 블록들의 X좌표에 오프셋 적용
+        ASTSection mergedSection = new ASTSection();
+        mergedSection.pageNumber(pages.get(0).pageNumber());
+
+        // 스프레드 전체 레이아웃 (여백 없음)
+        ASTPageLayout layout = new ASTPageLayout();
+        layout.pageWidth(CoordinateConverter.pointsToHwpunits(spreadWidth));
+        layout.pageHeight(CoordinateConverter.pointsToHwpunits(spreadHeight));
+        layout.marginTop(0);
+        layout.marginBottom(0);
+        layout.marginLeft(0);
+        layout.marginRight(0);
+        layout.columnCount(1);
+        layout.columnGutter(0);
+        mergedSection.layout(layout);
+
+        for (IDMLPage page : pages) {
+            // 페이지의 스프레드 내 X 오프셋 계산
+            double[] gb = page.geometricBounds();
+            double[] t = page.itemTransform();
+            double pageLeft = (t != null && t.length >= 6) ? t[4] + gb[1] : gb[1];
+            long xOffset = CoordinateConverter.pointsToHwpunits(pageLeft - minLeft);
+
+            // 페이지 단위로 처리
+            ASTSection pageSection = processPage(
+                    spread, page, pool, idmlDoc, colorResolver, imageLoader,
+                    resolvedData, processedStories, doc);
+
+            // 블록들의 X 좌표에 오프셋 적용하여 병합
+            for (ASTBlock block : pageSection.blocks()) {
+                if (block instanceof ASTTextFrameBlock) {
+                    ASTTextFrameBlock tfb = (ASTTextFrameBlock) block;
+                    tfb.x(tfb.x() + xOffset);
+                } else if (block instanceof ASTFigure) {
+                    ASTFigure fig = (ASTFigure) block;
+                    fig.x(fig.x() + xOffset);
+                } else if (block instanceof ASTTable) {
+                    ASTTable tbl = (ASTTable) block;
+                    tbl.x(tbl.x() + xOffset);
+                }
+                mergedSection.addBlock(block);
+            }
+        }
+
+        System.err.println("[Stage4] Spread pages=" + pages.size()
+                + " width=" + Math.round(spreadWidth) + "pt"
+                + " height=" + Math.round(spreadHeight) + "pt"
+                + " blocks=" + mergedSection.blocks().size());
+
+        return mergedSection;
+    }
+
     // ── 텍스트 프레임 ──────────────────────────────────────
 
     private static void processTextFrames(IDMLSpread spread, IDMLPage page,

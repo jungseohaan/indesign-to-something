@@ -73,22 +73,29 @@ export function InddBatchModal() {
             {batchResults.map((r, i) => (
               <div
                 key={r.path}
-                className={`flex items-center gap-2 py-1.5 px-2 rounded text-sm ${
+                className={`py-1.5 px-2 rounded text-sm ${
                   i === batchCurrentIndex && isBatchProcessing ? "bg-blue-50" : ""
                 }`}
               >
-                <StatusIcon status={r.status} />
-                <span className="flex-1 truncate text-gray-700" title={r.path}>
-                  {r.filename}
-                </span>
-                <span className="text-xs text-gray-400 shrink-0">
-                  {r.status === "extracting" && "추출 중..."}
-                  {r.status === "converting" && "변환 중..."}
-                  {r.status === "done" && "완료"}
-                  {r.status === "error" && (
-                    <span className="text-red-500" title={r.error}>실패</span>
-                  )}
-                </span>
+                <div className="flex items-center gap-2">
+                  <StatusIcon status={r.status} />
+                  <span className="flex-1 truncate text-gray-700" title={r.path}>
+                    {r.filename}
+                  </span>
+                  <span className="text-xs text-gray-400 shrink-0">
+                    {r.status === "extracting" && "추출 중..."}
+                    {r.status === "converting" && "변환 중..."}
+                    {r.status === "done" && "완료"}
+                    {r.status === "error" && (
+                      <span className="text-red-500">실패</span>
+                    )}
+                  </span>
+                </div>
+                {r.status === "error" && r.error && (
+                  <div className="ml-6 mt-1 text-xs text-red-400 break-words whitespace-pre-wrap">
+                    {r.error}
+                  </div>
+                )}
               </div>
             ))}
           </div>

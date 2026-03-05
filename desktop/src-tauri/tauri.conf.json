@@ -35,8 +35,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../../scripts/extract_indd.jsx",
-      "../../scripts/get_indd_pages.jsx"
+      "../../scripts/extract_indd.jsx"
     ]
   },
   "plugins": {}

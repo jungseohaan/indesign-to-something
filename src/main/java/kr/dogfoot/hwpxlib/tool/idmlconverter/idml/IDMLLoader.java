@@ -184,7 +184,10 @@ public class IDMLLoader {
             // 8. Story에서 인라인 그래픽(앵커 오브젝트) 추출 및 스프레드에 추가
             IDMLStoryParser.extractInlineGraphicsFromStories(doc, storiesDir, neededStoryIds);
 
-            // 9. GREP 스타일에서 BT수식M 폰트가 동적 적용되는 런 해석
+            // 9. CharacterStyle 정의에서 fontFamily 상속 (명시적 AppliedFont 없는 런)
+            IDMLStoryParser.resolveCharacterStyleFonts(doc);
+
+            // 10. GREP 스타일에서 BT수식M 폰트가 동적 적용되는 런 해석
             IDMLStoryParser.resolveGrepMathStyles(doc);
 
         } catch (ConvertException ce) {

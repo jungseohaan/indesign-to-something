@@ -11,27 +11,15 @@ export function ConversionPanel() {
     spreadBased,
     vectorDpi,
     layoutMode,
-    startPage,
-    endPage,
-    structure,
     conversionLogs,
     fontMappings,
     startConversion,
     setSpreadBased,
     setVectorDpi,
     setLayoutMode,
-    setStartPage,
-    setEndPage,
     clearError,
     openFontMappingModal,
   } = useAppStore();
-
-  // 모든 페이지의 라벨(name) 목록 구축
-  const allPages = structure
-    ? structure.spreads.flatMap((s) => s.pages)
-    : [];
-  const firstPageName = allPages.length > 0 ? allPages[0].name : "";
-  const lastPageName = allPages.length > 0 ? allPages[allPages.length - 1].name : "";
 
   const [showWarnings, setShowWarnings] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -192,36 +180,6 @@ export function ConversionPanel() {
               <option value="preserve">레이아웃 유지</option>
               <option value="editable">편집 우선 (1단)</option>
             </select>
-          </label>
-          <label className="flex items-center gap-1.5 text-sm">
-            페이지:
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder={firstPageName || "시작"}
-              value={startPage != null ? (allPages[startPage - 1]?.name ?? startPage) : ""}
-              onChange={(e) => {
-                const val = e.target.value.trim();
-                if (!val) { setStartPage(null); return; }
-                const idx = allPages.findIndex((p) => p.name === val);
-                setStartPage(idx >= 0 ? idx + 1 : (Number(val) || null));
-              }}
-              className="border border-gray-300 rounded px-2 py-0.5 text-sm w-16 text-center"
-            />
-            <span className="text-gray-400">~</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder={lastPageName || "끝"}
-              value={endPage != null ? (allPages[endPage - 1]?.name ?? endPage) : ""}
-              onChange={(e) => {
-                const val = e.target.value.trim();
-                if (!val) { setEndPage(null); return; }
-                const idx = allPages.findIndex((p) => p.name === val);
-                setEndPage(idx >= 0 ? idx + 1 : (Number(val) || null));
-              }}
-              className="border border-gray-300 rounded px-2 py-0.5 text-sm w-16 text-center"
-            />
           </label>
           <button
             onClick={openFontMappingModal}

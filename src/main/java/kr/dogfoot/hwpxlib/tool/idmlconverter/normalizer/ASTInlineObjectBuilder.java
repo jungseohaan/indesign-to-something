@@ -27,8 +27,30 @@ class ASTInlineObjectBuilder {
                                         ColorResolver colorResolver,
                                         ASTImageLoader imageLoader,
                                         GroupBackground bg) {
-        collectChildTextFramesInternal(ig, para, null, idmlDoc, colorResolver, imageLoader, bg,
+        // 자식 TextFrame이 여러 개이면 bg fill 전파 안 함 (컨테이너 배경이지 개별 자식 배경이 아님)
+        GroupBackground effectiveBg = bg;
+        if (bg != null && bg.fillHex != null && countChildTextFramesRecursive(ig) > 1) {
+            effectiveBg = new GroupBackground();
+            effectiveBg.strokeHex = bg.strokeHex;
+            effectiveBg.strokeWeight = bg.strokeWeight;
+            effectiveBg.strokeTint = bg.strokeTint;
+            effectiveBg.cornerRadius = bg.cornerRadius;
+            effectiveBg.bgLeft = bg.bgLeft;
+            effectiveBg.bgTop = bg.bgTop;
+            effectiveBg.bgRight = bg.bgRight;
+            effectiveBg.bgBottom = bg.bgBottom;
+            effectiveBg.hasBounds = bg.hasBounds;
+        }
+        collectChildTextFramesInternal(ig, para, null, idmlDoc, colorResolver, imageLoader, effectiveBg,
                 false, 0, 0, 0, 0, 0, 0, 0, 0, null);
+    }
+
+    private static int countChildTextFramesRecursive(IDMLCharacterRun.InlineGraphic ig) {
+        int count = ig.childTextFrames().size();
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            count += countChildTextFramesRecursive(child);
+        }
+        return count;
     }
 
     /**

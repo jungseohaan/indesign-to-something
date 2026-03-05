@@ -5,7 +5,6 @@ import { ASTTreePanel } from "./components/ASTTreePanel";
 import { ASTDetailPanel } from "./components/ASTDetailPanel";
 import { PdfPreviewPanel } from "./components/PdfPreviewPanel";
 import { ConversionPanel } from "./components/ConversionPanel";
-import { PageRangeModal } from "./components/PageRangeModal";
 import { FontMappingModal } from "./components/FontMappingModal";
 import { InddBatchModal } from "./components/InddBatchModal";
 import { PlaygroundPage } from "./components/PlaygroundPage";
@@ -141,9 +140,6 @@ function App() {
           <ConversionPanel />
         </div>
       )}
-
-      {/* Page Range Modal */}
-      <PageRangeModal />
 
       {/* Font Mapping Modal */}
       <FontMappingModal />

@@ -185,11 +185,10 @@ class ASTTableConverter {
                                        ASTInlineObjectBuilder.GroupBackground bg) {
         List<PositionedFrame> frames = new ArrayList<>();
         collectAllTextFramesFlat(ig, frames, 0, 0);
-        if (frames.size() < 4) return null;  // 최소 2×2
+        if (frames.size() < 2) return null;  // 최소 2프레임
 
         // Y 클러스터링 → 행
         List<List<PositionedFrame>> rows = clusterByCoordinate(frames, true);
-        if (rows.size() < 2) return null;
 
         // 각 행의 X 정렬 → 열 수 일관성 확인
         int colCount = -1;
@@ -205,7 +204,8 @@ class ASTTableConverter {
                 return null;  // 비정규 그리드 → 폴백
             }
         }
-        if (colCount < 2) return null;
+        // 최소 2행 또는 2열 (1×1은 제외)
+        if (rows.size() < 2 && colCount < 2) return null;
 
         return buildTableFromGrid(rows, colCount, idmlDoc, colorResolver, imageLoader, bg);
     }
@@ -325,14 +325,64 @@ class ASTTableConverter {
                 PositionedFrame pf = row.get(c);
                 ASTTableCell cell = createCellFromFrame(pf, r, c, idmlDoc, colorResolver, imageLoader, bg);
                 // 셀 크기를 열/행 크기와 일치
-                cell.width(table.columnWidths().get(c));
-                cell.height(rowHeights[r]);
+                long colW = table.columnWidths().get(c);
+                long rowH = rowHeights[r];
+                cell.width(colW);
+                cell.height(rowH);
+
+                // 원본 TextFrame 크기와의 차이를 마진으로 변환 → 간격 보존 + 고정 크기
+                long frameW = CoordinateConverter.pointsToHwpunits(pf.width);
+                long frameH = CoordinateConverter.pointsToHwpunits(pf.height);
+                long gapW = colW - frameW;
+                long gapH = rowH - frameH;
+                if (gapW > 0) {
+                    cell.marginRight(cell.marginRight() + gapW);
+                }
+                if (gapH > 0) {
+                    cell.marginBottom(cell.marginBottom() + gapH);
+                }
+
                 astRow.addCell(cell);
             }
             table.addRow(astRow);
         }
         table.height(totalHeight);
+
+        // 그룹 배경을 테이블 외곽선으로 적용 (셀 배경 대신 외곽 테두리로 표현)
+        if (bg != null) {
+            String borderColor = bg.strokeHex != null ? bg.strokeHex : bg.fillHex;
+            double borderWeight = bg.strokeWeight > 0 ? bg.strokeWeight : 0.5;
+            if (borderColor != null) {
+                int rowCount = rows.size();
+                for (ASTTableRow astRow : table.rows()) {
+                    for (ASTTableCell cell : astRow.cells()) {
+                        int r = cell.rowIndex();
+                        int c = cell.columnIndex();
+                        if (r == 0 && cell.topBorder() == null) {
+                            cell.topBorder(makeBgBorder(borderColor, borderWeight));
+                        }
+                        if (r == rowCount - 1 && cell.bottomBorder() == null) {
+                            cell.bottomBorder(makeBgBorder(borderColor, borderWeight));
+                        }
+                        if (c == 0 && cell.leftBorder() == null) {
+                            cell.leftBorder(makeBgBorder(borderColor, borderWeight));
+                        }
+                        if (c == colCount - 1 && cell.rightBorder() == null) {
+                            cell.rightBorder(makeBgBorder(borderColor, borderWeight));
+                        }
+                    }
+                }
+            }
+        }
+
         return table;
+    }
+
+    private static ASTTableCell.CellBorder makeBgBorder(String color, double weight) {
+        ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
+        border.color(color);
+        border.weight(weight);
+        return border;
     }
 
     private static ASTTableCell createCellFromFrame(PositionedFrame pf, int rowIdx, int colIdx,
@@ -348,12 +398,10 @@ class ASTTableConverter {
 
         IDMLTextFrame tf = pf.textFrame;
 
-        // 셀 배경색
+        // 셀 배경색 — TextFrame 자체 fillColor만 사용 (그룹 배경은 외곽 컨테이너 색이므로 셀에 전파하지 않음)
         if (tf.fillColor() != null) {
             String resolved = colorResolver.resolve(tf.fillColor());
             if (resolved != null) cell.fillColor(resolved);
-        } else if (bg != null && bg.fillHex != null) {
-            cell.fillColor(bg.fillHex);
         }
 
         // TextFrame 여백

@@ -46,24 +46,39 @@ public class Stage4_BuildAST {
         ASTImageLoader imageLoader = options.includeImages()
                 ? new ASTImageLoader(idmlDoc, options) : null;
 
-        // 총 페이지 수 계산
-        int totalPages = 0;
-        for (IDMLSpread spread : idmlDoc.spreads()) {
-            totalPages += spread.pages().size();
-        }
-
-        // 페이지별 섹션 구축
-        int pageIndex = 0;
-        for (IDMLSpread spread : idmlDoc.spreads()) {
-            for (IDMLPage page : spread.pages()) {
-                pageIndex++;
+        if (options.spreadBasedConversion()) {
+            // 스프레드 단위 섹션 구축
+            int spreadCount = idmlDoc.spreads().size();
+            int spreadIndex = 0;
+            for (IDMLSpread spread : idmlDoc.spreads()) {
+                spreadIndex++;
                 reporter.reportProgress(6, 100,
-                        "IDML 정규화 중... (" + pageIndex + "/" + totalPages + ")");
+                        "IDML 정규화 중... (스프레드 " + spreadIndex + "/" + spreadCount + ")");
 
-                ASTSection section = ASTPageProcessor.processPage(
-                        spread, page, pool, idmlDoc, colorResolver, imageLoader,
+                ASTSection section = ASTPageProcessor.processSpread(
+                        spread, pool, idmlDoc, colorResolver, imageLoader,
                         resolvedData, processedStories, doc);
                 doc.addSection(section);
+            }
+        } else {
+            // 페이지별 섹션 구축
+            int totalPages = 0;
+            for (IDMLSpread spread : idmlDoc.spreads()) {
+                totalPages += spread.pages().size();
+            }
+
+            int pageIndex = 0;
+            for (IDMLSpread spread : idmlDoc.spreads()) {
+                for (IDMLPage page : spread.pages()) {
+                    pageIndex++;
+                    reporter.reportProgress(6, 100,
+                            "IDML 정규화 중... (" + pageIndex + "/" + totalPages + ")");
+
+                    ASTSection section = ASTPageProcessor.processPage(
+                            spread, page, pool, idmlDoc, colorResolver, imageLoader,
+                            resolvedData, processedStories, doc);
+                    doc.addSection(section);
+                }
             }
         }
 

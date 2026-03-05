@@ -708,6 +708,7 @@ public class ASTSerializer {
         first = writeStringField(sb, "itemType", "EQUATION", first);
         first = writeStringField(sb, "hwpScript", eq.hwpScript(), first);
         first = writeStringField(sb, "sourceType", eq.sourceType(), first);
+        first = writeStringField(sb, "textColor", eq.textColor(), first);
         sb.append('}');
     }
 

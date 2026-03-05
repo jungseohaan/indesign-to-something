@@ -401,13 +401,22 @@ public class ASTToHwpxConverter {
                 .countByAnd(0).distanceAnd(0).startNumber(0);
 
         // 페이지 크기 및 방향
+        // HWPX에서 가로 모드(NARROWLY)는 width=짧은변, height=긴변으로 저장
         PageDirection direction = layout.pageWidth() > layout.pageHeight()
                 ? PageDirection.NARROWLY : PageDirection.WIDELY;
+        int hwpxWidth, hwpxHeight;
+        if (direction == PageDirection.NARROWLY) {
+            hwpxWidth = (int) layout.pageHeight();
+            hwpxHeight = (int) layout.pageWidth();
+        } else {
+            hwpxWidth = (int) layout.pageWidth();
+            hwpxHeight = (int) layout.pageHeight();
+        }
         secPr.createPagePr();
         secPr.pagePr()
                 .landscapeAnd(direction)
-                .widthAnd((int) layout.pageWidth())
-                .heightAnd((int) layout.pageHeight())
+                .widthAnd(hwpxWidth)
+                .heightAnd(hwpxHeight)
                 .gutterType(GutterMethod.LEFT_ONLY);
 
         // 마진
