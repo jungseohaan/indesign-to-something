@@ -490,9 +490,25 @@ class ASTInlineObjectBuilder {
             String fillHex = resolveColorHex(shape.fillColor(), colorResolver);
             String strokeHex = resolveColorHex(shape.strokeColor(), colorResolver);
 
-            if (fillHex != null || strokeHex != null) {
+            // 자식 그래픽 중 벡터 도형이 있으면 합성 래스터화 (체크박스+체크마크 등)
+            List<ASTImageLoader.ShapeWithColor> childVectorShapes = collectChildVectorShapes(ig, colorResolver);
+
+            if (fillHex != null || strokeHex != null || !childVectorShapes.isEmpty()) {
                 obj.kind(ASTInlineObject.ObjectKind.IMAGE);
-                ASTImageLoader.ImageResult result = imageLoader.rasterizeShape(shape, fillHex, strokeHex);
+                ASTImageLoader.ImageResult result;
+
+                if (!childVectorShapes.isEmpty()) {
+                    // 부모 도형 + 자식 도형 합성 래스터화
+                    List<ASTImageLoader.ShapeWithColor> allShapes = new ArrayList<>();
+                    if (fillHex != null || strokeHex != null) {
+                        allShapes.add(new ASTImageLoader.ShapeWithColor(shape, fillHex, strokeHex, null));
+                    }
+                    allShapes.addAll(childVectorShapes);
+                    result = imageLoader.rasterizeShapes(allShapes, ig.itemTransform());
+                } else {
+                    result = imageLoader.rasterizeShape(shape, fillHex, strokeHex);
+                }
+
                 if (result != null && result.imageData != null) {
                     obj.imageData(result.imageData);
                     obj.imageFormat(result.format);

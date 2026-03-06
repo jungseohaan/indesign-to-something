@@ -213,10 +213,10 @@ class ASTRunConverter {
                     para.pendingUnderlineColor(blended);
                 }
             }
-            // IMAGE로 처리된 Group 중 자식 텍스트프레임이 없는 경우만 스킵
-            // 자식 텍스트프레임이 있으면 이미지와 함께 텍스트도 추출 (약도+교통편 등)
+            // IMAGE로 처리된 그래픽: 자식 텍스트프레임에 실제 텍스트가 있는 경우만 오버레이 처리
+            // (장식용 도형만 가진 빈 TextFrame은 오버레이 불필요 — 체크박스 등)
             if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
-                    && !ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig)) {
+                    && !hasChildTextFramesWithContent(ig, idmlDoc)) {
                 return;
             }
         }
@@ -275,6 +275,41 @@ class ASTRunConverter {
                 ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
             }
         }
+    }
+
+    /**
+     * 인라인 그래픽의 자식 텍스트프레임 중 실제 텍스트 콘텐츠가 있는 것이 있는지 확인.
+     * 장식용 도형(체크마크 PathGeometry 등)만 포함하는 빈 TextFrame은 false.
+     */
+    private static boolean hasChildTextFramesWithContent(IDMLCharacterRun.InlineGraphic ig,
+                                                          IDMLDocument idmlDoc) {
+        if (idmlDoc == null) return ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig);
+        return hasChildTextFramesWithContentRecursive(ig, idmlDoc);
+    }
+
+    private static boolean hasChildTextFramesWithContentRecursive(IDMLCharacterRun.InlineGraphic ig,
+                                                                    IDMLDocument idmlDoc) {
+        if (ig.childTextFrames() != null) {
+            for (IDMLTextFrame tf : ig.childTextFrames()) {
+                String storyId = tf.parentStoryId();
+                if (storyId == null) continue;
+                IDMLStory story = idmlDoc.getStory(storyId);
+                if (story == null) continue;
+                if (story.hasTables()) return true;
+                for (IDMLParagraph p : story.paragraphs()) {
+                    for (IDMLCharacterRun run : p.characterRuns()) {
+                        String c = run.content();
+                        if (c != null && !c.trim().isEmpty()) return true;
+                    }
+                }
+            }
+        }
+        if (ig.childGraphics() != null) {
+            for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+                if (hasChildTextFramesWithContentRecursive(child, idmlDoc)) return true;
+            }
+        }
+        return false;
     }
 
     private static boolean tryConvertGraphicLineToUnderlineTab(

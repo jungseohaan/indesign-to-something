@@ -654,16 +654,17 @@ class IDMLStoryParser {
      * 인라인 그래픽/그룹에서 AnchoredObjectSetting, TextWrapPreference 파싱.
      */
     static void parseAnchorAndWrapSettings(Element elem, IDMLCharacterRun.InlineGraphic graphic) {
-        List<Element> aosList = getDescendantElements(elem, "AnchoredObjectSetting");
-        if (!aosList.isEmpty()) {
-            String pos = aosList.get(0).getAttribute("AnchoredPosition");
+        // AnchoredObjectSetting은 직접 자식만 검색 (중첩 TextFrame 등의 설정을 상속하지 않기 위해)
+        Element aosElem = getFirstChildElement(elem, "AnchoredObjectSetting");
+        if (aosElem != null) {
+            String pos = aosElem.getAttribute("AnchoredPosition");
             if (pos != null && !pos.isEmpty()) {
                 graphic.anchoredPosition(pos);
             }
         }
-        List<Element> twpList = getDescendantElements(elem, "TextWrapPreference");
-        if (!twpList.isEmpty()) {
-            Element twp = twpList.get(0);
+        // TextWrapPreference도 직접 자식만 검색
+        Element twp = getFirstChildElement(elem, "TextWrapPreference");
+        if (twp != null) {
             String mode = twp.getAttribute("TextWrapMode");
             if (mode != null && !mode.isEmpty()) {
                 graphic.textWrapMode(mode);
@@ -704,6 +705,27 @@ class IDMLStoryParser {
                 tf.geometricBounds(IDMLSpreadParser.resolveGeometricBounds(child));
                 tf.itemTransform(IDMLGeometry.parseTransform(child.getAttribute("ItemTransform")));
                 target.addChildTextFrame(tf);
+
+                // 장식용 TextFrame(fill 있고 PathGeometry 도형) → 벡터 도형으로도 파싱 (체크마크 등)
+                String tfFill = getAttrOrNull(child, "FillColor");
+                if (tfFill != null && !tfFill.contains("None") && !tfFill.contains("Paper")) {
+                    IDMLVectorShape vs = IDMLSpreadParser.tryParseVectorShape(child);
+                    if (vs != null) {
+                        IDMLCharacterRun.InlineGraphic shapeGfx = new IDMLCharacterRun.InlineGraphic();
+                        shapeGfx.selfId(child.getAttribute("Self") + "_vs");
+                        shapeGfx.type("textframe_shape");
+                        shapeGfx.vectorShape(vs);
+                        double[] bounds = IDMLSpreadParser.resolveGeometricBounds(child);
+                        if (bounds != null && bounds.length >= 4) {
+                            shapeGfx.widthPoints(bounds[3] - bounds[1]);
+                            shapeGfx.heightPoints(bounds[2] - bounds[0]);
+                            shapeGfx.geometricBounds(bounds);
+                        }
+                        shapeGfx.itemTransform(IDMLGeometry.parseTransform(
+                                child.getAttribute("ItemTransform")));
+                        target.addChildGraphic(shapeGfx);
+                    }
+                }
             } else if ("Rectangle".equals(tag) || "Polygon".equals(tag)
                     || "Oval".equals(tag) || "GraphicLine".equals(tag)) {
                 target.addChildGraphic(parseInlineGraphicElement(child));

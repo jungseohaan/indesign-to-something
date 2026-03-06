@@ -59,16 +59,21 @@ class IDMLSpreadParser {
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
-                    // 클리핑 자식 수집은 벡터 도형만 대상이므로,
-                    // TextFrame 등 다른 자식은 항상 extractGroupsFromFrame으로 추출해야 한다.
-                    int tfCountBefore = spread.textFrames().size();
-                    double[] frameTransform = IDMLGeometry.parseTransform(
-                            elem.getAttribute("ItemTransform"));
-                    extractGroupsFromFrame(elem, spread, frameTransform,
-                            hiddenLayerIds, zOrderCounter);
-                    // 래퍼 Rectangle이 TextFrame을 포함하면 벡터 도형(채우기 이미지)으로 렌더링 억제
-                    if (vectorShape != null && spread.textFrames().size() > tfCountBefore) {
-                        spread.vectorShapes().remove(vectorShape);
+                    // 클리핑 자식이 수집된 경우, 내부 Group의 도형은 이미 clippedChildren에 포함되므로
+                    // extractGroupsFromFrame을 호출하면 GraphicLine 등이 개별 벡터로 중복 등록된다.
+                    // → 클리핑 프레임이면 TextFrame 추출만 건너뛴다.
+                    if (vectorShape == null || !vectorShape.hasClippedChildren()) {
+                        // 클리핑 자식 수집은 벡터 도형만 대상이므로,
+                        // TextFrame 등 다른 자식은 항상 extractGroupsFromFrame으로 추출해야 한다.
+                        int tfCountBefore = spread.textFrames().size();
+                        double[] frameTransform = IDMLGeometry.parseTransform(
+                                elem.getAttribute("ItemTransform"));
+                        extractGroupsFromFrame(elem, spread, frameTransform,
+                                hiddenLayerIds, zOrderCounter);
+                        // 래퍼 Rectangle이 TextFrame을 포함하면 벡터 도형(채우기 이미지)으로 렌더링 억제
+                        if (vectorShape != null && spread.textFrames().size() > tfCountBefore) {
+                            spread.vectorShapes().remove(vectorShape);
+                        }
                     }
                 }
             } else if ("GraphicLine".equals(elem.getTagName())) {
@@ -516,13 +521,17 @@ class IDMLSpreadParser {
         }
 
         // 투명도 (FillTint, StrokeTint: 0~100, 100=불투명)
+        // IDML에서 -1은 "기본값(100%)" 의미
         // FillTint=0 + 유효한 FillColor → 100%로 보정 (아웃라인된 글리프 등 IDML 내보내기 아티팩트)
         double fillTint = parseDoubleAttrDef(shapeElem, "FillTint", 100);
+        if (fillTint < 0) fillTint = 100;
         if (fillTint == 0 && shape.hasFill()) {
             fillTint = 100;
         }
         shape.fillTint(fillTint);
-        shape.strokeTint(parseDoubleAttrDef(shapeElem, "StrokeTint", 100));
+        double strokeTint = parseDoubleAttrDef(shapeElem, "StrokeTint", 100);
+        if (strokeTint < 0) strokeTint = 100;
+        shape.strokeTint(strokeTint);
 
         // 라인 끝 모양 (EndCap: ButtEndCap, RoundEndCap, ProjectingEndCap)
         String endCapStr = getAttrOrNull(shapeElem, "EndCap");

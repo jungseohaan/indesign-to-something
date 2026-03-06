@@ -1129,6 +1129,8 @@ class ASTPageProcessor {
      */
     static boolean hasContent(ASTTextFrameBlock block) {
         if (block.fillColor() != null) return true;
+        // visible stroke가 있으면 테두리 사각형으로 출력 (table-only 래퍼 등)
+        if (block.strokeColor() != null && block.strokeWeight() > 0) return true;
         if (block.paragraphs().isEmpty()) return false;
         for (ASTParagraph para : block.paragraphs()) {
             if (!para.items().isEmpty()) return true;
