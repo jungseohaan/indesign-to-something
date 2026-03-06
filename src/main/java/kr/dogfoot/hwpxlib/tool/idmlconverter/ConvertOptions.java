@@ -12,7 +12,6 @@ public class ConvertOptions {
     private String imageOutputDir;
     private int imageDpi;
     private int vectorDpi;
-    private String linksDirectory;
     private boolean singlePagePerSpread;
     private boolean mergeAllPages;
     private boolean spreadBasedConversion;
@@ -21,6 +20,7 @@ public class ConvertOptions {
     private String imageCacheDir;
     private String resolvedJsonPath;
     private String fontMapPath;
+    private String linksDirectory;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -31,7 +31,6 @@ public class ConvertOptions {
         this.imageOutputDir = null;
         this.imageDpi = 220;
         this.vectorDpi = 300;
-        this.linksDirectory = null;
         this.singlePagePerSpread = false;
         this.mergeAllPages = false;
         this.spreadBasedConversion = false;
@@ -117,20 +116,6 @@ public class ConvertOptions {
 
     public ConvertOptions vectorDpi(int vectorDpi) {
         this.vectorDpi = vectorDpi;
-        return this;
-    }
-
-    /**
-     * 이미지 파일이 위치한 Links 디렉토리 경로.
-     * IDML 파일에 저장된 이미지 경로가 다른 컴퓨터의 절대 경로인 경우,
-     * 이 옵션으로 실제 Links 폴더 위치를 지정할 수 있다.
-     */
-    public String linksDirectory() {
-        return linksDirectory;
-    }
-
-    public ConvertOptions linksDirectory(String linksDirectory) {
-        this.linksDirectory = linksDirectory;
         return this;
     }
 
@@ -245,6 +230,20 @@ public class ConvertOptions {
 
     public ConvertOptions fontMapPath(String fontMapPath) {
         this.fontMapPath = fontMapPath;
+        return this;
+    }
+
+    /**
+     * 외부 Links 디렉토리 경로.
+     * INDD에서 추출한 IDML이 임시 디렉토리에 있을 때,
+     * 원본 INDD 옆의 Links 폴더 경로를 지정한다.
+     */
+    public String linksDirectory() {
+        return linksDirectory;
+    }
+
+    public ConvertOptions linksDirectory(String linksDirectory) {
+        this.linksDirectory = linksDirectory;
         return this;
     }
 

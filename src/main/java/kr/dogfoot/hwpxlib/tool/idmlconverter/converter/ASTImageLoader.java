@@ -287,13 +287,20 @@ public class ASTImageLoader {
     }
 
     private String resolveImagePathUncached(String path, String filename) {
-        // 1. 절대 경로
-        File absolute = new File(path);
-        if (absolute.exists()) return absolute.getAbsolutePath();
-
-        // 2. options.linksDirectory()
+        // 1. 외부 Links 디렉토리 (INDD 원본 옆 Links 폴더 — 최우선)
         if (options.linksDirectory() != null && filename != null) {
-            File linksDir = new File(options.linksDirectory());
+            File extLinksDir = new File(options.linksDirectory());
+            if (extLinksDir.isDirectory()) {
+                File inLinks = new File(extLinksDir, filename);
+                if (inLinks.exists()) return inLinks.getAbsolutePath();
+                String found = findFileIgnoreCaseCached(extLinksDir, filename);
+                if (found != null) return found;
+            }
+        }
+
+        // 2. basePath/Links/ (IDML 파일 옆 Links 폴더)
+        if (idmlDoc.basePath() != null && filename != null) {
+            File linksDir = new File(idmlDoc.basePath(), "Links");
             if (linksDir.isDirectory()) {
                 File inLinks = new File(linksDir, filename);
                 if (inLinks.exists()) return inLinks.getAbsolutePath();
@@ -302,7 +309,11 @@ public class ASTImageLoader {
             }
         }
 
-        // 3. basePath 기준
+        // 3. 절대 경로 (같은 머신일 때 폴백)
+        File absolute = new File(path);
+        if (absolute.exists()) return absolute.getAbsolutePath();
+
+        // 3. basePath 기준 (상대 경로 등)
         if (idmlDoc.basePath() != null) {
             File relative = new File(idmlDoc.basePath(), path);
             if (relative.exists()) return relative.getAbsolutePath();

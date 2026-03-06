@@ -339,9 +339,8 @@ class ASTRunConverter {
 
             ASTTextRun tabRun = new ASTTextRun();
             tabRun.text("\t");
-            tabRun.underline(true);
-            tabRun.underlineColor(blended);
-            tabRun.underlineShape(ulShape);
+            // 탭 리더("_" → SOLID)가 밑줄 역할을 하므로 문자 밑줄은 설정하지 않는다.
+            // 둘 다 설정하면 이중 밑줄이 나타남.
             tabRun.textColor(blended);
             para.addItem(tabRun);
         } else {

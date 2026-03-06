@@ -36,16 +36,6 @@ pub async fn convert_idml(
         args.push("--include-images".to_string());
     }
 
-    // links_directory: 명시적 지정이 있으면 사용, 없으면 IDML 파일 옆 Links/ 폴더 자동 탐색
-    let links_dir = options.links_directory.or_else(|| {
-        let idml_path = std::path::Path::new(&input_path_ref);
-        idml_path.parent().map(|p| p.join("Links")).filter(|p| p.is_dir()).map(|p| p.to_string_lossy().to_string())
-    });
-    if let Some(dir) = links_dir {
-        args.push("--links-directory".to_string());
-        args.push(dir);
-    }
-
     if options.layout_mode != "preserve" {
         args.push("--layout-mode".to_string());
         args.push(options.layout_mode.clone());
@@ -54,6 +44,11 @@ pub async fn convert_idml(
     if let Some(resolved) = &options.resolved_json_path {
         args.push("--resolved".to_string());
         args.push(resolved.clone());
+    }
+
+    if let Some(links_dir) = &options.links_directory {
+        args.push("--links-directory".to_string());
+        args.push(links_dir.clone());
     }
 
     // 사용자 지정 폰트 매핑 → temp JSON 파일로 전달

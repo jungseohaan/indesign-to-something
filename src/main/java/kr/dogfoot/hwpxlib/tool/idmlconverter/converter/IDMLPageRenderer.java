@@ -23,16 +23,10 @@ public class IDMLPageRenderer {
     private final IDMLDocument idmlDoc;
     private final Map<String, String> colorMap;  // colorRef -> "#RRGGBB"
     private final int dpi;
-    private String linksDirectory;  // 인라인 그래픽 이미지 로드용
-
     public IDMLPageRenderer(IDMLDocument idmlDoc, int dpi) {
         this.idmlDoc = idmlDoc;
         this.colorMap = idmlDoc.colors();
         this.dpi = dpi;
-    }
-
-    public void setLinksDirectory(String linksDirectory) {
-        this.linksDirectory = linksDirectory;
     }
 
     /**
@@ -931,22 +925,27 @@ public class IDMLPageRenderer {
         String path = stripFileUri(uri);
         String filename = extractFilename(path);
 
-        // 검색 순서: linksDirectory → 절대경로 → basePath/Links/
         File imageFile = null;
 
+        // 외부 linksDirectory 우선
         if (linksDirectory != null && filename != null) {
-            File f = new File(linksDirectory, filename);
-            if (f.exists()) imageFile = f;
+            File extDir = new File(linksDirectory);
+            if (extDir.isDirectory()) {
+                File f = new File(extDir, filename);
+                if (f.exists()) imageFile = f;
+            }
         }
 
-        if (imageFile == null) {
-            File f = new File(path);
-            if (f.exists()) imageFile = f;
-        }
-
+        // basePath/Links/ 폴백
         if (imageFile == null && idmlDoc.basePath() != null && filename != null) {
             File linksDir = new File(idmlDoc.basePath(), "Links");
             File f = new File(linksDir, filename);
+            if (f.exists()) imageFile = f;
+        }
+
+        // 절대 경로 폴백
+        if (imageFile == null) {
+            File f = new File(path);
             if (f.exists()) imageFile = f;
         }
 
@@ -1454,19 +1453,16 @@ public class IDMLPageRenderer {
 
         File imageFile = null;
 
-        if (linksDirectory != null && filename != null) {
-            File f = new File(linksDirectory, filename);
-            if (f.exists()) imageFile = f;
-        }
-
-        if (imageFile == null) {
-            File f = new File(path);
-            if (f.exists()) imageFile = f;
-        }
-
-        if (imageFile == null && idmlDoc.basePath() != null && filename != null) {
+        // basePath/Links/ 우선
+        if (idmlDoc.basePath() != null && filename != null) {
             File linksDir = new File(idmlDoc.basePath(), "Links");
             File f = new File(linksDir, filename);
+            if (f.exists()) imageFile = f;
+        }
+
+        // 절대 경로 폴백
+        if (imageFile == null) {
+            File f = new File(path);
             if (f.exists()) imageFile = f;
         }
 

@@ -115,10 +115,10 @@ export interface ConvertOptions {
   spread_based: boolean;
   vector_dpi: number;
   include_images: boolean;
-  links_directory: string | null;
   resolved_json_path: string | null;
   layout_mode: "preserve" | "editable";
   font_map: Record<string, string> | null;
+  links_directory: string | null;
 }
 
 export interface ConvertResult {

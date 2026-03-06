@@ -36,7 +36,7 @@ import java.util.List;
  *   --spread-mode        스프레드 단위로 변환
  *   --vector-dpi <dpi>   벡터 렌더링 DPI (기본 150)
  *   --include-images     이미지 포함
- *   --links-directory <path>  이미지 링크 디렉토리
+ *   (Links 폴더는 IDML 옆에서 자동 감지)
  */
 public class ConverterCLI {
 
@@ -129,11 +129,6 @@ public class ConverterCLI {
                 case "--include-images":
                     options = options.includeImages(true);
                     break;
-                case "--links-directory":
-                    if (i + 1 < args.length) {
-                        options = options.linksDirectory(args[++i]);
-                    }
-                    break;
                 case "--start-page":
                     if (i + 1 < args.length) {
                         options = options.startPage(Integer.parseInt(args[++i]));
@@ -159,17 +154,13 @@ public class ConverterCLI {
                         options = options.fontMapPath(args[++i]);
                     }
                     break;
+                case "--links-directory":
+                    if (i + 1 < args.length) {
+                        options = options.linksDirectory(args[++i]);
+                    }
+                    break;
                 default:
                     System.err.println("Unknown option: " + arg);
-            }
-        }
-
-        // Links 디렉토리 자동 감지
-        if (options.linksDirectory() == null) {
-            java.io.File inputFile = new java.io.File(inputPath);
-            java.io.File linksDir = new java.io.File(inputFile.getParentFile(), "Links");
-            if (linksDir.isDirectory()) {
-                options = options.linksDirectory(linksDir.getAbsolutePath());
             }
         }
 
@@ -269,14 +260,11 @@ public class ConverterCLI {
         String idmlPath = args[1];
         String frameId = args[2];
         int dpi = 150;
-        String linksDirectory = null;
 
         // 옵션 파싱
         for (int i = 3; i < args.length; i++) {
             if ("--dpi".equals(args[i]) && i + 1 < args.length) {
                 dpi = Integer.parseInt(args[++i]);
-            } else if ("--links-directory".equals(args[i]) && i + 1 < args.length) {
-                linksDirectory = args[++i];
             }
         }
 
@@ -312,7 +300,7 @@ public class ConverterCLI {
         }
 
         // PNG 렌더링 (트랜스폼, 클리핑 적용)
-        IDMLPageRenderer.RenderResult result = renderer.renderImageToPng(targetFrame, targetPage, linksDirectory);
+        IDMLPageRenderer.RenderResult result = renderer.renderImageToPng(targetFrame, targetPage, null);
         if (result == null) {
             outputJsonError("Failed to render image frame");
             System.exit(1);
@@ -363,14 +351,11 @@ public class ConverterCLI {
         String idmlPath = args[1];
         String masterId = args[2];
         int dpi = 150;
-        String linksDirectory = null;
 
         // 옵션 파싱
         for (int i = 3; i < args.length; i++) {
             if ("--dpi".equals(args[i]) && i + 1 < args.length) {
                 dpi = Integer.parseInt(args[++i]);
-            } else if ("--links-directory".equals(args[i]) && i + 1 < args.length) {
-                linksDirectory = args[++i];
             }
         }
 
@@ -395,7 +380,7 @@ public class ConverterCLI {
 
         // 모든 페이지를 나란히 렌더링
         IDMLPageRenderer renderer = new IDMLPageRenderer(idmlDoc, dpi);
-        byte[] pngData = renderer.renderSpreadPages(masterSpread, linksDirectory, true, true);
+        byte[] pngData = renderer.renderSpreadPages(masterSpread, null, true, true);
 
         // 합산된 이미지 크기 계산
         int gap = (int) Math.ceil(2 * dpi / 72.0);
@@ -1126,23 +1111,6 @@ public class ConverterCLI {
         }
 
         String idmlPath = args[1];
-        String linksDirectory = null;
-
-        // 옵션 파싱
-        for (int i = 2; i < args.length; i++) {
-            if ("--links-directory".equals(args[i]) && i + 1 < args.length) {
-                linksDirectory = args[++i];
-            }
-        }
-
-        // Links 디렉토리 자동 감지
-        if (linksDirectory == null) {
-            java.io.File idmlFile = new java.io.File(idmlPath);
-            java.io.File linksDir = new java.io.File(idmlFile.getParentFile(), "Links");
-            if (linksDir.isDirectory()) {
-                linksDirectory = linksDir.getAbsolutePath();
-            }
-        }
 
         // IDML 로드
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
@@ -1158,9 +1126,6 @@ public class ConverterCLI {
 
         // 4단계 정규화 → AST (이미지 포함하여 마스터 페이지 객체도 처리)
         ConvertOptions options = ConvertOptions.defaults().includeImages(true);
-        if (linksDirectory != null) {
-            options = options.linksDirectory(linksDirectory);
-        }
         ASTDocument ast = IDMLNormalizer.normalize(idmlDoc, options, fileName);
 
         // JSON 직렬화
@@ -1184,16 +1149,12 @@ public class ConverterCLI {
 
         String idmlPath = args[1];
         String outputDirPath = args[2];
-        String linksDirectory = null;
         int vectorDpi = 150;
         int startPage = 0;
         int endPage = 0;
 
         for (int i = 3; i < args.length; i++) {
             switch (args[i]) {
-                case "--links-directory":
-                    if (i + 1 < args.length) linksDirectory = args[++i];
-                    break;
                 case "--vector-dpi":
                     if (i + 1 < args.length) vectorDpi = Integer.parseInt(args[++i]);
                     break;
@@ -1203,15 +1164,6 @@ public class ConverterCLI {
                 case "--end-page":
                     if (i + 1 < args.length) endPage = Integer.parseInt(args[++i]);
                     break;
-            }
-        }
-
-        // Links 디렉토리 자동 감지
-        if (linksDirectory == null) {
-            java.io.File idmlFile = new java.io.File(idmlPath);
-            java.io.File linksDir = new java.io.File(idmlFile.getParentFile(), "Links");
-            if (linksDir.isDirectory()) {
-                linksDirectory = linksDir.getAbsolutePath();
             }
         }
 
@@ -1234,7 +1186,6 @@ public class ConverterCLI {
                 .includeImages(true)
                 .vectorDpi(vectorDpi)
                 .imageCacheDir(imagesDir.getAbsolutePath());
-        if (linksDirectory != null) options = options.linksDirectory(linksDirectory);
         if (startPage > 0) options = options.startPage(startPage);
         if (endPage > 0) options = options.endPage(endPage);
 
@@ -1322,7 +1273,7 @@ public class ConverterCLI {
         System.out.println("  --spread-mode        Convert by spread (default: by page)");
         System.out.println("  --vector-dpi <dpi>   Vector rendering DPI (default: 150)");
         System.out.println("  --include-images     Include images in output");
-        System.out.println("  --links-directory <path>  Directory for image links");
+        System.out.println("  (Links folder is auto-detected next to IDML file)");
         System.out.println("  --start-page <num>   Start page number (1-based)");
         System.out.println("  --end-page <num>     End page number (1-based)");
         System.out.println();

@@ -86,6 +86,9 @@ class HwpxTableBuilder {
 
         // 행(Tr) 생성
         buildTableRows(table, astTable);
+
+        // 테이블 뒤에 빈 텍스트 요소 추가 (한글 렌더링 필수)
+        anchorRun.addNewT().addText("");
     }
 
     // ── 인라인 테이블 변환 ──
@@ -153,6 +156,9 @@ class HwpxTableBuilder {
 
         // 행(Tr) 생성
         buildTableRows(table, astTable);
+
+        // 테이블 뒤에 빈 텍스트 요소 추가 (한글 렌더링 필수)
+        run.addNewT().addText("");
     }
 
     // ── 공통 행/셀 생성 ──

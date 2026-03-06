@@ -501,15 +501,18 @@ class ASTPageProcessor {
         }
 
         // 테이블을 paragraphIndexBefore 기준으로 매핑
+        // 문단이 없는 스토리(table-only)에서는 인라인 삽입 불가 → convertStoryTables에서 독립 처리
         Map<Integer, List<IDMLTable>> tablesByParaIdx = new HashMap<>();
-        for (IDMLTable t : story.tables()) {
-            if (t.paragraphIndexBefore() >= 0) {
-                List<IDMLTable> list = tablesByParaIdx.get(t.paragraphIndexBefore());
-                if (list == null) {
-                    list = new ArrayList<>();
-                    tablesByParaIdx.put(t.paragraphIndexBefore(), list);
+        if (!story.paragraphs().isEmpty()) {
+            for (IDMLTable t : story.tables()) {
+                if (t.paragraphIndexBefore() >= 0) {
+                    List<IDMLTable> list = tablesByParaIdx.get(t.paragraphIndexBefore());
+                    if (list == null) {
+                        list = new ArrayList<>();
+                        tablesByParaIdx.put(t.paragraphIndexBefore(), list);
+                    }
+                    list.add(t);
                 }
-                list.add(t);
             }
         }
 
@@ -581,14 +584,17 @@ class ASTPageProcessor {
     /**
      * 스토리의 테이블 → ASTTable 변환.
      * paragraphIndexBefore가 설정된 테이블은 이미 인라인 처리되었으므로 스킵.
+     * 단, 문단이 없는 table-only 스토리는 인라인 삽입이 불가하므로 독립 블록으로 처리.
      */
     private static void convertStoryTables(IDMLStory story, ASTSection section,
                                              IDMLTextFrame tf, IDMLPage page,
                                              int zOrder, IDMLDocument idmlDoc,
                                              ColorResolver colorResolver,
                                              ASTImageLoader imageLoader) {
+        boolean tableOnlyStory = story.paragraphs().isEmpty();
         for (IDMLTable idmlTable : story.tables()) {
-            if (idmlTable.paragraphIndexBefore() >= 0) {
+            // 인라인 처리된 테이블은 스킵 — 단, table-only 스토리는 인라인 처리 안 됨
+            if (idmlTable.paragraphIndexBefore() >= 0 && !tableOnlyStory) {
                 continue;
             }
             ASTTable table = ASTTableConverter.convertTable(

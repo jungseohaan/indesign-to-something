@@ -2,22 +2,30 @@
 # test.sh — 테스트 문서 빌드+변환+진단 원커맨드
 #
 # 사용법:
-#   ./test.sh <alias>              빌드 + 변환 + 진단
-#   ./test.sh <alias> convert      빌드 + 변환만
-#   ./test.sh <alias> diagnose     빌드 + 진단만
-#   ./test.sh <alias> extract      추출만 (InDesign 필요)
-#   ./test.sh list                 등록된 케이스 목록
+#   ./test.sh <과목/단원>              빌드 + 변환 + 진단
+#   ./test.sh <과목/단원> convert      빌드 + 변환만
+#   ./test.sh <과목/단원> diagnose     빌드 + 진단만
+#   ./test.sh <과목/단원> extract      추출만 (InDesign 필요)
+#   ./test.sh list                     등록된 케이스 목록
 #
 # 케이스 등록: test-data/cases.json 편집
 #   {
 #     "cases": {
-#       "별칭": {
-#         "indd": "/path/to/file.indd",
-#         "pages": "8-10",           ← 선택, 생략 시 전체 페이지
-#         "desc": "설명"
+#       "과목": {
+#         "desc": "과목 설명",
+#         "units": {
+#           "단원": {
+#             "indd": "/path/to/file.indd",
+#             "pages": "8-10",       ← 선택, 생략 시 전체 페이지
+#             "desc": "설명"
+#           }
+#         }
 #       }
 #     }
 #   }
+#
+# 예시:
+#   ./test.sh eng/u1 convert     → eng 과목의 u1 단원 변환
 #
 # pages 형식:
 #   "5"      → 5페이지만
@@ -46,16 +54,17 @@ if [ "$1" = "list" ]; then
     python3 -c "
 import json
 d = json.load(open('$CASES_FILE'))
-for k, v in d.get('cases', {}).items():
-    pages = v.get('pages', 'all')
-    print(f'  {k:20s} {v.get(\"desc\", \"\")}')
-    print(f'    indd: {v.get(\"indd\", \"?\")}  pages: {pages}')
+for subj_key, subj in d.get('cases', {}).items():
+    print(f'  [{subj_key}] {subj.get(\"desc\", \"\")}')
+    for unit_key, unit in subj.get('units', {}).items():
+        pages = unit.get('pages', 'all')
+        print(f'    {subj_key}/{unit_key:12s} {unit.get(\"desc\", \"\")}  pages: {pages}')
 " 2>/dev/null || echo "  (no cases registered)"
     exit 0
 fi
 
 if [ -z "$1" ]; then
-    echo "Usage: ./test.sh <alias> [convert|diagnose|both|extract]"
+    echo "Usage: ./test.sh <과목/단원> [convert|diagnose|both|extract]"
     echo "       ./test.sh list"
     exit 1
 fi
@@ -63,26 +72,36 @@ fi
 ALIAS="$1"
 ACTION="${2:-both}"
 
-# ── 레지스트리에서 .indd 경로 + pages 읽기 ──
+# ── 레지스트리에서 .indd 경로 + pages 읽기 (과목/단원 형식) ──
 CASE_INFO=$(python3 -c "
 import json, sys
 d = json.load(open('$CASES_FILE'))
-c = d.get('cases', {}).get('$ALIAS')
-if not c:
-    print('NOTFOUND', file=sys.stderr)
+alias = '$ALIAS'
+if '/' not in alias:
+    print('NOTFOUND: use 과목/단원 format', file=sys.stderr)
     sys.exit(1)
-pages = c.get('pages', '')
-print(c['indd'] + '|' + str(pages))
+subj_key, unit_key = alias.split('/', 1)
+subj = d.get('cases', {}).get(subj_key)
+if not subj:
+    print(f'NOTFOUND: subject \"{subj_key}\"', file=sys.stderr)
+    sys.exit(1)
+unit = subj.get('units', {}).get(unit_key)
+if not unit:
+    print(f'NOTFOUND: unit \"{unit_key}\" in \"{subj_key}\"', file=sys.stderr)
+    sys.exit(1)
+pages = unit.get('pages', '')
+print(unit['indd'] + '|' + str(pages))
 " 2>/dev/null)
 
 if [ $? -ne 0 ] || [ -z "$CASE_INFO" ]; then
     echo "Error: Unknown case '$ALIAS'"
-    echo "Available cases:"
+    echo "Use 과목/단원 format. Available cases:"
     python3 -c "
 import json
 d = json.load(open('$CASES_FILE'))
-for k in d.get('cases', {}).keys():
-    print(f'  {k}')
+for sk, sv in d.get('cases', {}).items():
+    for uk in sv.get('units', {}).keys():
+        print(f'  {sk}/{uk}')
 " 2>/dev/null
     exit 1
 fi

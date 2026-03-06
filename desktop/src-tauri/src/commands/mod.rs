@@ -210,13 +210,14 @@ pub struct ConvertOptions {
     pub spread_based: bool,
     pub vector_dpi: u32,
     pub include_images: bool,
-    pub links_directory: Option<String>,
     #[serde(default)]
     pub resolved_json_path: Option<String>,
     #[serde(default = "default_layout_mode")]
     pub layout_mode: String,
     #[serde(default)]
     pub font_map: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
+    pub links_directory: Option<String>,
 }
 
 fn default_layout_mode() -> String {

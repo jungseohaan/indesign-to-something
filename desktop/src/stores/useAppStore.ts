@@ -392,14 +392,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     );
 
-    // INDD 원본 경로가 있으면 해당 디렉토리의 Links/ 폴더를 links_directory로 지정
-    let linksDir: string | null = null;
-    if (inddPath) {
-      const inddDir = inddPath.replace(/[/\\][^/\\]+$/, "");
-      linksDir = inddDir + "/Links";
-    }
-
     try {
+      // INDD에서 추출한 경우 원본 옆 Links 폴더 경로를 전달
+      const linksDir = inddPath ? inddPath.replace(/[/\\][^/\\]+$/, "") + "/Links" : null;
+
       const result = await invoke<ConvertResult>("convert_idml", {
         inputPath: idmlPath,
         outputPath,
@@ -407,10 +403,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           spread_based: spreadBased,
           vector_dpi: vectorDpi,
           include_images: true,
-          links_directory: linksDir,
           resolved_json_path: resolvedJsonPath,
           layout_mode: layoutMode,
           font_map: Object.keys(fontMappings).length > 0 ? fontMappings : null,
+          links_directory: linksDir,
         },
         jarPath,
       });
@@ -603,11 +599,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         const inddFilename = inddPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
         const hwpxOutputPath = `${outputSubdir}/${inddFilename}.hwpx`;
 
-        // INDD 원본 디렉토리의 Links/ 폴더
-        const inddDir = inddPath.replace(/[/\\][^/\\]+$/, "");
-        const linksDir = `${inddDir}/Links`;
-
         // 3. HWPX 변환
+        const batchLinksDir = inddPath.replace(/[/\\][^/\\]+$/, "") + "/Links";
         await invoke<ConvertResult>("convert_idml", {
           inputPath: extractResult.idml_path,
           outputPath: hwpxOutputPath,
@@ -615,10 +608,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             spread_based: spreadBased,
             vector_dpi: vectorDpi,
             include_images: true,
-            links_directory: linksDir,
             resolved_json_path: extractResult.resolved_json_path,
             layout_mode: layoutMode,
             font_map: Object.keys(fontMappings).length > 0 ? fontMappings : null,
+            links_directory: batchLinksDir,
           },
           jarPath,
         });
