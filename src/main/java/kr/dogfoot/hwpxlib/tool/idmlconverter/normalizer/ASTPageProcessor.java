@@ -265,6 +265,11 @@ class ASTPageProcessor {
             if (block == null) continue;
             block.storyId(storyId);
 
+            // 같은 그룹의 형제 도형과 겹침 조정
+            if (fo.fromGroup() && fo.parentGroupId() != null) {
+                adjustGroupSiblingOverlap(block, fo, pool);
+            }
+
             // 스토리 → 단락 변환
             convertStoryToParagraphs(story, block, pool, tf, page, fo.zOrder(),
                     idmlDoc, colorResolver, imageLoader, resolvedData);
@@ -274,6 +279,68 @@ class ASTPageProcessor {
 
             if (hasContent(block)) {
                 section.addBlock(block);
+            }
+        }
+    }
+
+    // ── 그룹 형제 겹침 조정 ─────────────────────────────────
+
+    /**
+     * 같은 그룹 내 형제 벡터 도형과 겹치는 텍스트 프레임의 폭/위치를 조정한다.
+     * InDesign에서는 투명 텍스트 프레임이 다른 요소와 겹쳐도 시각적 문제가 없지만,
+     * HWPX에서는 글상자 경계가 보이므로 겹침을 해소해야 한다.
+     */
+    private static void adjustGroupSiblingOverlap(ASTTextFrameBlock block, FlatObject fo,
+                                                   FlattenedObjectPool pool) {
+        double[] tfBbox = fo.absoluteBbox();
+        if (tfBbox == null) return;
+
+        double tfW = tfBbox[2] - tfBbox[0];
+        if (tfW <= 0) return;
+
+        String groupId = fo.parentGroupId();
+
+        for (FlatObject sibling : pool.all()) {
+            if (sibling == fo) continue;
+            if (sibling.pageNumber() != fo.pageNumber()) continue;
+            if (!groupId.equals(sibling.parentGroupId())) continue;
+            if (sibling.contentType() != FlatObject.ContentType.VECTOR_SHAPE) continue;
+
+            // 채우기가 있는 가시적 도형만
+            Object srcObj = sibling.sourceObject();
+            if (!(srcObj instanceof IDMLVectorShape)) continue;
+            IDMLVectorShape vs = (IDMLVectorShape) srcObj;
+            String fill = vs.fillColor();
+            if (fill == null || fill.contains("None") || fill.contains("Paper")) continue;
+
+            double[] sBbox = sibling.absoluteBbox();
+            if (sBbox == null) continue;
+
+            double sW = sBbox[2] - sBbox[0];
+            // 형제 도형이 텍스트 프레임보다 크면 배경 → 건너뛰기
+            if (sW >= tfW * 0.7) continue;
+
+            // X, Y 겹침 확인
+            double xOverlap = Math.min(tfBbox[2], sBbox[2]) - Math.max(tfBbox[0], sBbox[0]);
+            if (xOverlap <= 0) continue;
+            double yOverlap = Math.min(tfBbox[3], sBbox[3]) - Math.max(tfBbox[1], sBbox[1]);
+            if (yOverlap <= 0) continue;
+
+            // 겹침이 텍스트 프레임 폭의 30% 이하일 때만 조정
+            if (xOverlap / tfW > 0.3) continue;
+
+            long trimHwp = CoordinateConverter.pointsToHwpunits(xOverlap);
+
+            double tfCenterX = (tfBbox[0] + tfBbox[2]) / 2;
+            double sCenterX = (sBbox[0] + sBbox[2]) / 2;
+
+            if (sCenterX < tfCenterX) {
+                // 도형이 왼쪽 → 텍스트 프레임 왼쪽 트리밍
+                block.x(block.x() + trimHwp);
+                block.width(block.width() - trimHwp);
+            } else {
+                // 도형이 오른쪽 → 텍스트 프레임 오른쪽 트리밍
+                block.width(block.width() - trimHwp);
             }
         }
     }

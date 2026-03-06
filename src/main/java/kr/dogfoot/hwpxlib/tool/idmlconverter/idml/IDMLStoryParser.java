@@ -386,7 +386,7 @@ class IDMLStoryParser {
             }
 
             // CharacterStyleRange 끝: 남은 내용을 현재 단락에 추가
-            String text = contentBuilder.toString();
+            String text = replacePUA(contentBuilder.toString());
             if (!text.isEmpty()) {
                 currentRun.content(text);
             }
@@ -1550,5 +1550,53 @@ class IDMLStoryParser {
             // 변환 불가한 InDesign 전용 문법은 무시
             return null;
         }
+    }
+
+    // ===== PUA → 표준 유니코드 변환 =====
+
+    /**
+     * Private Use Area(PUA) 문자를 표준 유니코드로 변환한다.
+     * InDesign 전용 폰트가 PUA 코드포인트에 IPA 발음 기호 등을 매핑하는데,
+     * HWPX에서는 해당 폰트가 없어 한글고어 등으로 잘못 표시된다.
+     */
+    private static final Map<Character, String> PUA_MAP = new HashMap<>();
+    static {
+        // IPA 발음 기호
+        PUA_MAP.put('\uE1B5', "\u00E6");         // æ
+        PUA_MAP.put('\uE194', "\u0259");         // ə
+        PUA_MAP.put('\uE121', "\u0251");         // ɑ
+        PUA_MAP.put('\uE13A', "\u02D0");         // ː
+        // 기호
+        PUA_MAP.put('\uE288', "\u2713");         // ✓
+    }
+
+    static String replacePUA(String text) {
+        if (text == null || text.isEmpty()) return text;
+        boolean hasPUA = false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch >= '\uE000' && ch <= '\uF8FF') {
+                hasPUA = true;
+                break;
+            }
+        }
+        if (!hasPUA) return text;
+
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            String replacement = PUA_MAP.get(ch);
+            if (replacement != null) {
+                sb.append(replacement);
+            } else if (ch >= '\uE000' && ch <= '\uF8FF') {
+                // 매핑 없는 PUA → 그대로 유지하되 경고
+                System.err.println("[PUA-WARN] Unmapped PUA character U+"
+                        + String.format("%04X", (int) ch));
+                sb.append(ch);
+            } else {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
     }
 }
