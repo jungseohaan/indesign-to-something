@@ -97,7 +97,7 @@ class IDMLResourceParser {
             doc.putCharacterStyle(styleDef.selfRef(), styleDef);
         }
 
-        // ObjectStyle (stroke 색상/두께 최소 파싱)
+        // ObjectStyle (stroke 색상/두께 + CornerRadius 파싱)
         NodeList objStyles = stylesDoc.getElementsByTagName("ObjectStyle");
         for (int i = 0; i < objStyles.getLength(); i++) {
             Element elem = (Element) objStyles.item(i);
@@ -107,6 +107,13 @@ class IDMLResourceParser {
             String strokeTint = getAttrOrNull(elem, "StrokeTint");
             if (self != null && strokeColor != null) {
                 doc.putObjectStyle(self, strokeColor, strokeWeight, strokeTint);
+            }
+            // CornerRadius 저장 (ObjectStyle 상속용)
+            if (self != null) {
+                double cr = parseDoubleAttrDef(elem, "CornerRadius", 0);
+                if (cr > 0) {
+                    doc.putObjectStyleCornerRadius(self, cr);
+                }
             }
         }
     }

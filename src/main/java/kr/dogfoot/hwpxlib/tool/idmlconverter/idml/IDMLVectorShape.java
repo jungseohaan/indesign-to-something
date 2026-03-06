@@ -130,6 +130,10 @@ public class IDMLVectorShape {
     // stroke 유형 힌트 ("solid", "dot", "dash" — 밑줄 변환용)
     private String strokeTypeHint;     // null = solid
 
+    // ObjectStyle 상속용
+    private String appliedObjectStyle; // "ObjectStyle/..." 참조
+    private String cornerOption;       // "RoundedCorner", "None" 등
+
     // 인라인/앵커 객체 플래그
     private boolean isInline;          // Story 내 인라인 그래픽 여부
     private String parentStoryId;      // 인라인 그래픽의 부모 Story ID
@@ -221,6 +225,12 @@ public class IDMLVectorShape {
 
     public String strokeTypeHint() { return strokeTypeHint; }
     public void strokeTypeHint(String v) { this.strokeTypeHint = v; }
+
+    public String appliedObjectStyle() { return appliedObjectStyle; }
+    public void appliedObjectStyle(String v) { this.appliedObjectStyle = v; }
+
+    public String cornerOption() { return cornerOption; }
+    public void cornerOption(String v) { this.cornerOption = v; }
 
     public double fillTint() { return fillTint; }
     public void fillTint(double v) { this.fillTint = v; }

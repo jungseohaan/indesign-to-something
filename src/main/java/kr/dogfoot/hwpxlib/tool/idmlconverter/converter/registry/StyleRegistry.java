@@ -65,15 +65,9 @@ public class StyleRegistry {
         CharPr charPr = hwpxFile.headerXMLFile().refList().charProperties().addNew();
         buildCharPr(charPr, charPrId, styleDef);
 
-        // 스타일 내 탭 정지점 → TabPr 생성
-        String tabPrId = "0";
-        if (styleDef.hasTabStops()) {
-            tabPrId = createInlineTabPr(styleDef.tabStops());
-        }
-
         String paraPrId = String.valueOf(nextParaPrIndex++);
         ParaPr paraPr = hwpxFile.headerXMLFile().refList().paraProperties().addNew();
-        buildParaPr(paraPr, paraPrId, styleDef, tabPrId);
+        buildParaPr(paraPr, paraPrId, styleDef);
 
         String styleId = String.valueOf(nextStyleIndex++);
         Style style = hwpxFile.headerXMLFile().refList().styles().addNew();
@@ -225,7 +219,43 @@ public class StyleRegistry {
                 null, null);
     }
 
-    private void buildParaPr(ParaPr paraPr, String id, ASTStyleDef styleDef, String tabPrId) {
+    private void buildParaPr(ParaPr paraPr, String id, ASTStyleDef styleDef) {
+        int indent = styleDef.firstLineIndent() != null ? styleDef.firstLineIndent().intValue() : 0;
+        int left = styleDef.leftMargin() != null ? styleDef.leftMargin().intValue() : 0;
+        int right = styleDef.rightMargin() != null ? styleDef.rightMargin().intValue() : 0;
+        int prev = styleDef.spaceBefore() != null ? styleDef.spaceBefore().intValue() : 0;
+        int next = styleDef.spaceAfter() != null ? styleDef.spaceAfter().intValue() : 0;
+
+        // HWPX 탭 위치는 leftMargin 기준이므로,
+        // 행잉 인덴트(indent < 0)일 때 leftMargin=0으로 설정
+        if (indent < 0 && left > 0 && styleDef.hasTabStops()) {
+            int origLeft = left;
+            int origFirstLine = left + indent;
+            indent = origFirstLine;
+            left = 0;
+
+            // InDesign 행잉 인덴트 + 탭 패턴: 탭이 LeftIndent 위치로 이동
+            boolean hasTabAtLeft = false;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop ts : styleDef.tabStops()) {
+                if (Math.abs(ts.position() - origLeft) < 50) {
+                    hasTabAtLeft = true;
+                    break;
+                }
+            }
+            if (!hasTabAtLeft) {
+                java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop> tabs
+                        = new java.util.ArrayList<>(styleDef.tabStops());
+                tabs.add(new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop(origLeft, "left", null));
+                styleDef.tabStops(tabs);
+            }
+        }
+
+        // 스타일 내 탭 정지점 → TabPr 생성 (마진 조정 후에 실행해야 암시적 탭 포함)
+        String tabPrId = "0";
+        if (styleDef.hasTabStops()) {
+            tabPrId = createInlineTabPr(styleDef.tabStops());
+        }
+
         paraPr.idAnd(id)
                 .tabPrIDRefAnd(tabPrId)
                 .condenseAnd((byte) 0)
@@ -253,20 +283,6 @@ public class StyleRegistry {
 
         paraPr.createAutoSpacing();
         paraPr.autoSpacing().eAsianEngAnd(false).eAsianNum(false);
-
-        int indent = styleDef.firstLineIndent() != null ? styleDef.firstLineIndent().intValue() : 0;
-        int left = styleDef.leftMargin() != null ? styleDef.leftMargin().intValue() : 0;
-        int right = styleDef.rightMargin() != null ? styleDef.rightMargin().intValue() : 0;
-        int prev = styleDef.spaceBefore() != null ? styleDef.spaceBefore().intValue() : 0;
-        int next = styleDef.spaceAfter() != null ? styleDef.spaceAfter().intValue() : 0;
-
-        // HWPX 탭 위치는 leftMargin 기준이므로,
-        // 행잉 인덴트(indent < 0)일 때 leftMargin=0으로 설정
-        if (indent < 0 && left > 0 && styleDef.hasTabStops()) {
-            int origFirstLine = left + indent;
-            indent = origFirstLine;
-            left = 0;
-        }
 
         paraPr.createMargin();
         paraPr.margin().createIntent();

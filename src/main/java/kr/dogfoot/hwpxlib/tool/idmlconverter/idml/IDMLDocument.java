@@ -14,6 +14,7 @@ public class IDMLDocument {
     private Map<String, IDMLFontDef> fonts;
     private Map<String, String> colors;
     private Map<String, String[]> objectStyles; // selfRef → [strokeColor, strokeWeight, strokeTint]
+    private Map<String, Double> objectStyleCornerRadii; // selfRef → cornerRadius (pt)
     private Map<String, double[]> dashedStrokeStyles; // selfRef → dashArray (e.g., [3, 2])
     private Set<String> hiddenLayerIds;
     private Map<String, IDMLSpread> masterSpreads;
@@ -29,6 +30,7 @@ public class IDMLDocument {
         this.fonts = new LinkedHashMap<String, IDMLFontDef>();
         this.colors = new LinkedHashMap<String, String>();
         this.objectStyles = new LinkedHashMap<String, String[]>();
+        this.objectStyleCornerRadii = new LinkedHashMap<String, Double>();
         this.dashedStrokeStyles = new LinkedHashMap<String, double[]>();
         this.hiddenLayerIds = new HashSet<String>();
         this.masterSpreads = new LinkedHashMap<String, IDMLSpread>();
@@ -63,6 +65,15 @@ public class IDMLDocument {
         objectStyles.put(selfRef, new String[]{strokeColor, strokeWeight, strokeTint});
     }
     public String[] getObjectStyle(String selfRef) { return objectStyles.get(selfRef); }
+
+    /** ObjectStyle CornerRadius: selfRef → cornerRadius (pt) */
+    public void putObjectStyleCornerRadius(String selfRef, double cornerRadius) {
+        objectStyleCornerRadii.put(selfRef, cornerRadius);
+    }
+    public double getObjectStyleCornerRadius(String selfRef) {
+        Double v = objectStyleCornerRadii.get(selfRef);
+        return v != null ? v : 0;
+    }
 
     /** DashedStrokeStyle: selfRef → dashArray */
     public void putDashedStrokeStyle(String selfRef, double[] dashArray) {

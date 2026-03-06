@@ -504,6 +504,8 @@ class IDMLSpreadParser {
             }
         }
         shape.cornerRadius(parseDoubleAttrDef(shapeElem, "CornerRadius", 0));
+        shape.appliedObjectStyle(getAttrOrNull(shapeElem, "AppliedObjectStyle"));
+        shape.cornerOption(getAttrOrNull(shapeElem, "CornerOption"));
 
         // 개별 모서리 둥글기 (TopLeftCornerRadius, TopRightCornerRadius, BottomLeftCornerRadius, BottomRightCornerRadius)
         double tlRadius = parseDoubleAttrDef(shapeElem, "TopLeftCornerRadius", -1);
@@ -1251,4 +1253,5 @@ class IDMLSpreadParser {
             frame.localPath(px, py);
         }
     }
+
 }

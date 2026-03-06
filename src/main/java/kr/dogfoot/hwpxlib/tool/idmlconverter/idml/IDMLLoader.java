@@ -190,6 +190,10 @@ public class IDMLLoader {
             // 10. GREP 스타일에서 BT수식M 폰트가 동적 적용되는 런 해석
             IDMLStoryParser.resolveGrepMathStyles(doc);
 
+            // 11. ObjectStyle 상속: CornerRadius가 없고 CornerOption=RoundedCorner인 벡터/프레임에
+            //     ObjectStyle의 CornerRadius 적용
+            resolveInheritedCornerRadius(doc);
+
         } catch (ConvertException ce) {
             throw ce;
         } catch (Exception e) {
@@ -273,4 +277,44 @@ public class IDMLLoader {
         String marker;
     }
 
+    /**
+     * ObjectStyle 상속: CornerRadius가 0이고 CornerOption이 RoundedCorner인 요소에
+     * ObjectStyle의 CornerRadius를 적용한다.
+     */
+    private static void resolveInheritedCornerRadius(IDMLDocument doc) {
+        for (IDMLSpread spread : doc.spreads()) {
+            for (IDMLVectorShape vs : spread.vectorShapes()) {
+                resolveVectorShapeCornerRadius(vs, doc);
+            }
+            for (IDMLGroup grp : spread.groups()) {
+                resolveGroupCornerRadius(grp, doc);
+            }
+        }
+        for (IDMLSpread spread : doc.masterSpreads().values()) {
+            for (IDMLVectorShape vs : spread.vectorShapes()) {
+                resolveVectorShapeCornerRadius(vs, doc);
+            }
+        }
+    }
+
+    private static void resolveVectorShapeCornerRadius(IDMLVectorShape vs, IDMLDocument doc) {
+        if (vs.cornerRadius() > 0) return;
+        String co = vs.cornerOption();
+        if (co == null || !co.contains("RoundedCorner")) return;
+        String style = vs.appliedObjectStyle();
+        if (style == null) return;
+        double inherited = doc.getObjectStyleCornerRadius(style);
+        if (inherited > 0) {
+            vs.cornerRadius(inherited);
+        }
+    }
+
+    private static void resolveGroupCornerRadius(IDMLGroup grp, IDMLDocument doc) {
+        for (IDMLVectorShape vs : grp.vectorShapes()) {
+            resolveVectorShapeCornerRadius(vs, doc);
+        }
+        for (IDMLGroup child : grp.childGroups()) {
+            resolveGroupCornerRadius(child, doc);
+        }
+    }
 }

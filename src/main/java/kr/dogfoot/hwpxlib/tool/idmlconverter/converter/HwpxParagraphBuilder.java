@@ -273,16 +273,51 @@ class HwpxParagraphBuilder {
         String newId = ctx.styleRegistry.nextParaPrId();
         ParaPr paraPr = ctx.hwpxFile.headerXMLFile().refList().paraProperties().addNew();
 
-        // 인라인 탭 정지점 → TabPr 생성
-        String tabPrId = "0";
-        if (astPara.hasTabStops()) {
-            tabPrId = ctx.styleRegistry.createInlineTabPr(astPara.tabStops());
-        }
-
         // 문단 배경 → BorderFill 생성
         String borderFillRef = "2";
         if (astPara.shadingOn() && astPara.shadingColor() != null) {
             borderFillRef = createParaShadingBorderFill(astPara.shadingColor(), astPara.shadingTint());
+        }
+
+        // 마진: 단락 오버라이드 → 스타일 → 0
+        int indent = resolveParaLong(astPara.firstLineIndent(),
+                baseStyle != null ? baseStyle.firstLineIndent() : null);
+        int left = resolveParaLong(astPara.leftMargin(),
+                baseStyle != null ? baseStyle.leftMargin() : null);
+        int right = resolveParaLong(astPara.rightMargin(),
+                baseStyle != null ? baseStyle.rightMargin() : null);
+        int prev = resolveParaLong(astPara.spaceBefore(),
+                baseStyle != null ? baseStyle.spaceBefore() : null);
+        int next = resolveParaLong(astPara.spaceAfter(),
+                baseStyle != null ? baseStyle.spaceAfter() : null);
+
+        // HWPX 탭 위치는 leftMargin 기준이므로,
+        // 행잉 인덴트(indent < 0)일 때 탭 위치를 leftMargin만큼 감산하고 leftMargin=0으로 설정
+        if (indent < 0 && left > 0 && astPara.hasTabStops()) {
+            int origLeft = left;
+            // 첫 줄 시작 위치를 보존하면서 leftMargin=0, indent=원래첫줄위치
+            int origFirstLine = left + indent; // 원래 첫 줄 시작 위치
+            indent = origFirstLine; // left=0이므로 indent만으로 첫줄 위치 결정
+            left = 0;
+
+            // InDesign 행잉 인덴트 + 탭 패턴: 탭이 LeftIndent 위치로 이동
+            // 기존 탭 중 origLeft 이상인 것이 없으면 origLeft 위치에 암시적 탭 추가
+            boolean hasTabAtLeft = false;
+            for (ASTTabStop ts : astPara.tabStops()) {
+                if (Math.abs(ts.position() - origLeft) < 50) { // 0.5pt 이내
+                    hasTabAtLeft = true;
+                    break;
+                }
+            }
+            if (!hasTabAtLeft) {
+                astPara.addTabStop(new ASTTabStop(origLeft, "left", null));
+            }
+        }
+
+        // 인라인 탭 정지점 → TabPr 생성 (마진 조정 후에 실행해야 암시적 탭 포함)
+        String tabPrId = "0";
+        if (astPara.hasTabStops()) {
+            tabPrId = ctx.styleRegistry.createInlineTabPr(astPara.tabStops());
         }
 
         paraPr.idAnd(newId)
@@ -323,27 +358,6 @@ class HwpxParagraphBuilder {
 
         paraPr.createAutoSpacing();
         paraPr.autoSpacing().eAsianEngAnd(false).eAsianNum(false);
-
-        // 마진: 단락 오버라이드 → 스타일 → 0
-        int indent = resolveParaLong(astPara.firstLineIndent(),
-                baseStyle != null ? baseStyle.firstLineIndent() : null);
-        int left = resolveParaLong(astPara.leftMargin(),
-                baseStyle != null ? baseStyle.leftMargin() : null);
-        int right = resolveParaLong(astPara.rightMargin(),
-                baseStyle != null ? baseStyle.rightMargin() : null);
-        int prev = resolveParaLong(astPara.spaceBefore(),
-                baseStyle != null ? baseStyle.spaceBefore() : null);
-        int next = resolveParaLong(astPara.spaceAfter(),
-                baseStyle != null ? baseStyle.spaceAfter() : null);
-
-        // HWPX 탭 위치는 leftMargin 기준이므로,
-        // 행잉 인덴트(indent < 0)일 때 탭 위치를 leftMargin만큼 감산하고 leftMargin=0으로 설정
-        if (indent < 0 && left > 0 && astPara.hasTabStops()) {
-            // 첫 줄 시작 위치를 보존하면서 leftMargin=0, indent=원래첫줄위치
-            int origFirstLine = left + indent; // 원래 첫 줄 시작 위치
-            indent = origFirstLine; // left=0이므로 indent만으로 첫줄 위치 결정
-            left = 0;
-        }
 
         paraPr.createMargin();
         paraPr.margin().createIntent();

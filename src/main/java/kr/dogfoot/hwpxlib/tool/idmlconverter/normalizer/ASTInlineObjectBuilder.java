@@ -235,7 +235,29 @@ class ASTInlineObjectBuilder {
      */
     static GroupBackground extractGroupBackground(IDMLCharacterRun.InlineGraphic ig,
                                                    ColorResolver colorResolver) {
-        if (!"group".equals(ig.type())) return null;
+        if (!"group".equals(ig.type())) {
+            // 비-그룹(Rectangle/Oval 등)이 자식 TextFrame을 포함하면 자체 vectorShape에서 배경 추출
+            if (ig.hasVectorShape() && ig.childTextFrames() != null && !ig.childTextFrames().isEmpty()) {
+                IDMLVectorShape shape = ig.vectorShape();
+                if (shape.fillColor() != null) {
+                    String hex = resolveColorHex(shape.fillColor(), colorResolver);
+                    if (hex != null) {
+                        GroupBackground bg = new GroupBackground();
+                        bg.fillHex = blendColorWithWhite(hex, shape.fillTint() / 100.0);
+                        bg.fillTint = 100;
+                        String sHex = resolveColorHex(shape.strokeColor(), colorResolver);
+                        bg.strokeHex = sHex != null
+                                ? blendColorWithWhite(sHex, shape.strokeTint() / 100.0) : null;
+                        bg.strokeWeight = shape.strokeWeight();
+                        bg.strokeTint = 100;
+                        bg.cornerRadius = shape.cornerRadius();
+                        // 비-그룹: hasBounds 설정 안 함 (좌표계가 자식 TF와 다르므로 마진 계산 불가)
+                        return bg;
+                    }
+                }
+            }
+            return null;
+        }
         // 1. 직접 자식 그래픽에서 배경 벡터 도형 찾기
         for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
             if (child.hasVectorShape()) {
@@ -483,7 +505,9 @@ class ASTInlineObjectBuilder {
                 obj.pixelWidth(result.pixelWidth);
                 obj.pixelHeight(result.pixelHeight);
             }
-        } else if (ig.hasVectorShape() && imageLoader != null) {
+        } else if (ig.hasVectorShape() && imageLoader != null
+                && !hasChildTextFramesRecursive(ig)) {
+            // 자식 TextFrame이 있으면 래스터화 건너뜀 (배경+텍스트 배지 패턴은 래퍼 글상자로 처리)
             IDMLVectorShape shape = ig.vectorShape();
 
             // 벡터 도형 (글리프 아웃라인 등) → PNG 래스터화
