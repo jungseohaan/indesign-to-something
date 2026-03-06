@@ -343,6 +343,9 @@ class ASTPageProcessor {
         List<IDMLVectorShape> vectorShapes = spread.getVectorShapesOnPage(page);
         vectorShapes.removeIf(s -> !isShapeCenterOnPage(s, page));
 
+        // 퇴화된 도형 제거 (열린 경로에 점이 1개뿐인 도형 — 렌더링 불가)
+        vectorShapes.removeIf(s -> isDegenerateShape(s));
+
         // 그룹 소속 도형과 개별 도형 분리
         Map<String, List<IDMLVectorShape>> groupedShapes = new LinkedHashMap<>();
         List<IDMLVectorShape> ungrouped = new ArrayList<>();
@@ -364,13 +367,17 @@ class ASTPageProcessor {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
-        // 그룹별 합성 래스터화
+
+        // 그룹별 합성 래스터화 (넓게 분산된 도형은 클러스터별 분할)
         for (List<IDMLVectorShape> group : groupedShapes.values()) {
-            ASTFigure fig = ASTFigureBuilder.createFigureFromVectorGroup(
-                    group, finalPage, imageLoader, colorResolver,
-                    resolvedData, resolvedPage);
-            if (fig != null) {
-                vectorFigures.add(fig);
+            List<List<IDMLVectorShape>> clusters = clusterGroupShapes(group);
+            for (List<IDMLVectorShape> cluster : clusters) {
+                ASTFigure fig = ASTFigureBuilder.createFigureFromVectorGroup(
+                        cluster, finalPage, imageLoader, colorResolver,
+                        resolvedData, resolvedPage);
+                if (fig != null) {
+                    vectorFigures.add(fig);
+                }
             }
         }
 
@@ -662,6 +669,79 @@ class ASTPageProcessor {
     /**
      * 도형의 중심점이 페이지 영역 안에 있는지 확인.
      */
+    /**
+     * 그룹 내 도형을 공간적 클러스터로 분할.
+     * 도형 간 간격이 GAP_THRESHOLD(50pt) 이상이면 별도 클러스터로 분리하여
+     * 불필요한 투명 영역이 큰 합성 PNG를 방지한다.
+     */
+    private static List<List<IDMLVectorShape>> clusterGroupShapes(List<IDMLVectorShape> shapes) {
+        if (shapes.size() <= 1) {
+            return Collections.singletonList(shapes);
+        }
+
+        final double GAP_THRESHOLD = 50.0; // points
+
+        // 각 도형의 변환된 bounding box 계산
+        double[][] bounds = new double[shapes.size()][];
+        for (int i = 0; i < shapes.size(); i++) {
+            IDMLVectorShape s = shapes.get(i);
+            bounds[i] = IDMLGeometry.getTransformedBoundingBox(
+                    s.geometricBounds(), s.itemTransform());
+        }
+
+        // Union-Find 기반 클러스터링: 두 도형의 bbox가 GAP_THRESHOLD 이내이면 같은 클러스터
+        int[] parent = new int[shapes.size()];
+        for (int i = 0; i < parent.length; i++) parent[i] = i;
+
+        for (int i = 0; i < shapes.size(); i++) {
+            if (bounds[i] == null) continue;
+            for (int j = i + 1; j < shapes.size(); j++) {
+                if (bounds[j] == null) continue;
+                if (bboxGap(bounds[i], bounds[j]) <= GAP_THRESHOLD) {
+                    union(parent, i, j);
+                }
+            }
+        }
+
+        // 클러스터별 그룹화
+        Map<Integer, List<IDMLVectorShape>> clusterMap = new LinkedHashMap<>();
+        for (int i = 0; i < shapes.size(); i++) {
+            int root = find(parent, i);
+            clusterMap.computeIfAbsent(root, k -> new ArrayList<>()).add(shapes.get(i));
+        }
+
+        return new ArrayList<>(clusterMap.values());
+    }
+
+    /** 두 bounding box 사이의 최소 간격 (겹치면 0). */
+    private static double bboxGap(double[] a, double[] b) {
+        // a = [top, left, bottom, right], b = [top, left, bottom, right]
+        double gapX = Math.max(0, Math.max(a[1] - b[3], b[1] - a[3]));
+        double gapY = Math.max(0, Math.max(a[0] - b[2], b[0] - a[2]));
+        return Math.max(gapX, gapY);
+    }
+
+    private static int find(int[] parent, int i) {
+        while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+        return i;
+    }
+
+    private static void union(int[] parent, int i, int j) {
+        int ri = find(parent, i), rj = find(parent, j);
+        if (ri != rj) parent[ri] = rj;
+    }
+
+    /**
+     * 퇴화된(degenerate) 도형 판별.
+     * 열린 경로에 점이 1개뿐이면 선도 면도 그릴 수 없으므로 렌더링 불가.
+     */
+    private static boolean isDegenerateShape(IDMLVectorShape shape) {
+        if (!shape.pathOpen()) return false;
+        if (shape.hasSubPaths()) return false;
+        List<IDMLVectorShape.PathPoint> pts = shape.pathPoints();
+        return pts == null || pts.size() < 2;
+    }
+
     static boolean isShapeCenterOnPage(IDMLVectorShape shape, IDMLPage page) {
         double[] bounds = shape.geometricBounds();
         double[] transform = shape.itemTransform();

@@ -753,7 +753,12 @@ class ASTFigureBuilder {
         figure.y(yHwp);
         figure.width(wHwp);
         figure.height(hHwp);
-        figure.zOrder(shapes.get(0).zOrder());
+        // 그룹 내 z-order: 최댓값 사용 (그룹 내 이미지 위에 렌더링되도록)
+        int maxZ = shapes.get(0).zOrder();
+        for (IDMLVectorShape s : shapes) {
+            if (s.zOrder() > maxZ) maxZ = s.zOrder();
+        }
+        figure.zOrder(maxZ);
         figure.imageData(result.imageData);
         figure.imageFormat(result.format);
         figure.pixelWidth(result.pixelWidth);

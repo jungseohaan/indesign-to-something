@@ -70,10 +70,12 @@ class IDMLSpreadParser {
                                 elem.getAttribute("ItemTransform"));
                         extractGroupsFromFrame(elem, spread, frameTransform,
                                 hiddenLayerIds, zOrderCounter);
+                        int tfCountAfter = spread.textFrames().size();
                         // 래퍼 Rectangle이 TextFrame을 포함하면 벡터 도형(채우기 이미지)으로 렌더링 억제
-                        if (vectorShape != null && spread.textFrames().size() > tfCountBefore) {
+                        if (vectorShape != null && tfCountAfter > tfCountBefore) {
                             spread.vectorShapes().remove(vectorShape);
                         }
+
                     }
                 }
             } else if ("GraphicLine".equals(elem.getTagName())) {
@@ -772,8 +774,7 @@ class IDMLSpreadParser {
         double wrapperCornerRadius = parseDoubleAttrDef(frameElem, "CornerRadius", 0);
 
         // 유효한 채우기/선이 있는지 확인
-        boolean hasWrapperFill = wrapperFill != null && !wrapperFill.contains("None")
-                && !wrapperFill.contains("Paper");
+        boolean hasWrapperFill = wrapperFill != null && !wrapperFill.contains("None");
         boolean hasWrapperStroke = wrapperStroke != null && !wrapperStroke.contains("None")
                 && wrapperStrokeWeight > 0;
 
@@ -819,7 +820,7 @@ class IDMLSpreadParser {
                                            String fillColor, double fillTint,
                                            String strokeColor, double strokeWeight,
                                            String strokeType, double cornerRadius) {
-        if (fillColor != null && !fillColor.contains("None") && !fillColor.contains("Paper")) {
+        if (fillColor != null && !fillColor.contains("None")) {
             frame.wrapperFillColor(fillColor);
             frame.wrapperFillTint(fillTint);
         }

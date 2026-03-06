@@ -647,8 +647,14 @@ class HwpxTextBoxBuilder {
         setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
                 block.strokeType(), block.strokeTint());
 
-        // FillBrush (배경색)
-        setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint());
+        // FillBrush (배경색) — 프레임 자체 fill이 없으면 래퍼 배경(흰색) 사용
+        String fillColor = block.fillColor();
+        double fillTint = block.fillTint();
+        if ((fillColor == null || !fillColor.startsWith("#")) && block.hasWrapperFill()) {
+            fillColor = "#FFFFFF";
+            fillTint = 100;
+        }
+        setupTextBoxFillBrush(rect, fillColor, fillTint);
 
         // DrawText (글상자 내용)
         rect.createDrawText();
