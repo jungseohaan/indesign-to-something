@@ -206,6 +206,7 @@ class ASTFigureBuilder {
             if (frac > minCropThreshold) figure.cropBottomFraction(frac);
         }
 
+        figure.fromGroup(imgFrame.fromGroup());
         figure.sourceId(imgFrame.selfId());
         return figure;
     }

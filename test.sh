@@ -6,6 +6,7 @@
 #   ./test.sh <과목/단원> convert      빌드 + 변환만
 #   ./test.sh <과목/단원> diagnose     빌드 + 진단만
 #   ./test.sh <과목/단원> extract      추출만 (InDesign 필요)
+#   ./test.sh <과목/단원> pdf          PDF만 재내보내기 (InDesign 필요)
 #   ./test.sh list                     등록된 케이스 목록
 #
 # 케이스 등록: test-data/cases.json 편집
@@ -64,7 +65,7 @@ for subj_key, subj in d.get('cases', {}).items():
 fi
 
 if [ -z "$1" ]; then
-    echo "Usage: ./test.sh <과목/단원> [convert|diagnose|both|extract]"
+    echo "Usage: ./test.sh <과목/단원> [convert|diagnose|both|extract|pdf]"
     echo "       ./test.sh list"
     exit 1
 fi
@@ -72,7 +73,9 @@ fi
 ALIAS="$1"
 ACTION="${2:-both}"
 
-# ── 레지스트리에서 .indd 경로 + pages 읽기 (과목/단원 형식) ──
+# ── 레지스트리에서 경로 + pages 읽기 (과목/단원 형식) ──
+# cases.json의 path 필드: 디렉토리 경로 (output.idml, resolved.json, Links/ 포함)
+#                          또는 .indd 파일 경로
 CASE_INFO=$(python3 -c "
 import json, sys
 d = json.load(open('$CASES_FILE'))
@@ -90,7 +93,8 @@ if not unit:
     print(f'NOTFOUND: unit \"{unit_key}\" in \"{subj_key}\"', file=sys.stderr)
     sys.exit(1)
 pages = unit.get('pages', '')
-print(unit['indd'] + '|' + str(pages))
+path = unit.get('path', unit.get('indd', ''))
+print(path + '|' + str(pages))
 " 2>/dev/null)
 
 if [ $? -ne 0 ] || [ -z "$CASE_INFO" ]; then
@@ -106,15 +110,24 @@ for sk, sv in d.get('cases', {}).items():
     exit 1
 fi
 
-INDD_PATH="${CASE_INFO%%|*}"
+CASE_PATH="${CASE_INFO%%|*}"
 PAGES_RAW="${CASE_INFO##*|}"
 
-if [ ! -f "$INDD_PATH" ]; then
-    echo "Error: .indd file not found: $INDD_PATH"
+# path가 디렉토리이면 INDD_DIR로, .indd 파일이면 기존 방식으로 처리
+if [ -d "$CASE_PATH" ]; then
+    INDD_DIR="$CASE_PATH"
+    # 디렉토리 안에서 .indd 파일 탐색
+    INDD_PATH=$(find "$CASE_PATH" -maxdepth 1 -name "*.indd" | head -1)
+    if [ -z "$INDD_PATH" ]; then
+        INDD_PATH="(none)"  # .indd 없어도 output.idml이 있으면 진행 가능
+    fi
+elif [ -f "$CASE_PATH" ]; then
+    INDD_PATH="$CASE_PATH"
+    INDD_DIR="$(dirname "$INDD_PATH")"
+else
+    echo "Error: path not found: $CASE_PATH"
     exit 1
 fi
-
-INDD_DIR="$(dirname "$INDD_PATH")"
 
 # ── pages 파싱 ("5" → 5-5, "8-10" → 8-10, "" → 0-0 전체) ──
 START_PAGE=0
@@ -302,6 +315,63 @@ if [ "$ACTION" = "extract" ]; then
     run_extraction
     echo "  IDML: $IDML"
     [ -n "$RESOLVED" ] && echo "  Resolved: $RESOLVED"
+    exit 0
+fi
+
+# ── pdf 전용 커맨드 (IDML/resolved 생략, PDF만 내보내기) ──
+if [ "$ACTION" = "pdf" ]; then
+    echo "--- Exporting PDF only via InDesign ---"
+
+    local_app_name=""
+    for year in 2026 2025 2024 2023; do
+        local_app_path="/Applications/Adobe InDesign ${year}/Adobe InDesign ${year}.app"
+        if [ -d "$local_app_path" ]; then
+            local_app_name="Adobe InDesign ${year}"
+            break
+        fi
+    done
+
+    if [ -z "$local_app_name" ]; then
+        echo "Error: Adobe InDesign not found"
+        exit 1
+    fi
+
+    # 기존 추출 디렉토리 찾기, 없으면 새로 생성
+    find_extracted_files
+    if [ $? -ne 0 ] || [ -z "$EXTRACT_DIR" ]; then
+        local_tmpdir="${TMPDIR:-/tmp}"
+        local_ts=$(date +%s%3N 2>/dev/null || date +%s)
+        EXTRACT_DIR="$local_tmpdir/indd-extract-$local_ts"
+        mkdir -p "$EXTRACT_DIR"
+    fi
+
+    echo "  App: $local_app_name"
+    echo "  Output: $EXTRACT_DIR/preview.pdf"
+
+    osascript -e "
+tell application \"$local_app_name\"
+    activate
+    with timeout of 600 seconds
+        do script (read POSIX file \"$JSX\") language javascript with arguments {\"$INDD_PATH\", \"$EXTRACT_DIR\", \"$START_PAGE\", \"$END_PAGE\", \"0\", \"1\"}
+    end timeout
+end tell
+" 2>&1
+
+    # .done 대기
+    echo "  Waiting for PDF export..."
+    local_wait=0
+    while [ ! -f "$EXTRACT_DIR/.done" ] && [ $local_wait -lt 300 ]; do
+        sleep 1
+        local_wait=$((local_wait + 1))
+    done
+
+    if [ -f "$EXTRACT_DIR/preview.pdf" ]; then
+        echo "  PDF exported: $EXTRACT_DIR/preview.pdf"
+        open "$EXTRACT_DIR/preview.pdf"
+    else
+        echo "  Error: PDF export failed"
+        exit 1
+    fi
     exit 0
 fi
 

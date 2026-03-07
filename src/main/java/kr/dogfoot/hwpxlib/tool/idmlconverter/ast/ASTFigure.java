@@ -42,6 +42,9 @@ public class ASTFigure extends ASTBlock {
     // 번들 내 이미지 경로 (예: "images/fig_001.png")
     private String bundlePath;
 
+    // Group 내에서 추출된 이미지 여부
+    private boolean fromGroup;
+
     public BlockType blockType() { return BlockType.FIGURE; }
 
     public FigureKind kind() { return kind; }
@@ -118,6 +121,9 @@ public class ASTFigure extends ASTBlock {
 
     public long textWrapRight() { return textWrapRight; }
     public void textWrapRight(long v) { this.textWrapRight = v; }
+
+    public boolean fromGroup() { return fromGroup; }
+    public void fromGroup(boolean v) { this.fromGroup = v; }
 
     public boolean hasCrop() {
         return cropLeftFraction > 0 || cropTopFraction > 0

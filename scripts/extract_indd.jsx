@@ -99,6 +99,8 @@ function main(args) {
     var endPage = parseInt(args[3], 10) || 0;
     // 스프레드 모드 ("1"이면 PDF를 스프레드 단위로 내보냄)
     var spreadMode = (args[4] === "1");
+    // PDF 전용 모드 ("1"이면 IDML/resolved 생략, PDF만 내보냄)
+    var pdfOnly = (args[5] === "1");
 
     // --- 기존 환경설정 저장 ---
     var savedInteractionLevel = app.scriptPreferences.userInteractionLevel;
@@ -142,41 +144,82 @@ function main(args) {
         if (endPage < 1 || endPage > pageCount) endPage = pageCount;
         var rangePageCount = endPage - startPage + 1;
 
-        writeProgress(outputDir, "idml", 0, pageCount);
+        if (!pdfOnly) {
+            writeProgress(outputDir, "idml", 0, pageCount);
 
-        // 2. IDML 내보내기 (전체 — API 제한)
-        var idmlFile = File(outputDir + "/output.idml");
-        doc.exportFile(ExportFormat.INDESIGN_MARKUP, idmlFile);
+            // 2. IDML 내보내기 (전체 — API 제한)
+            var idmlFile = File(outputDir + "/output.idml");
+            doc.exportFile(ExportFormat.INDESIGN_MARKUP, idmlFile);
 
-        writeProgress(outputDir, "resolved", 0, rangePageCount);
+            writeProgress(outputDir, "resolved", 0, rangePageCount);
 
-        // 3. resolved 속성 수집 (페이지 범위 필터링)
-        var resolved = collectResolved(doc, outputDir, rangePageCount, startPage, endPage);
-        writeJson(outputDir + "/resolved.json", resolved);
+            // 3. resolved 속성 수집 (페이지 범위 필터링)
+            var resolved = collectResolved(doc, outputDir, rangePageCount, startPage, endPage);
+            writeJson(outputDir + "/resolved.json", resolved);
+        }
 
         writeProgress(outputDir, "pdf", rangePageCount, rangePageCount);
 
-        // 4. PDF 프리뷰 (페이지 범위 + 스프레드 모드 적용)
+        // 4. 링크 업데이트 (PDF 고해상도 이미지용)
+        try {
+            var linksDir = File(inddPath).parent;
+            var linksDirLinks = Folder(linksDir + "/Links");
+            for (var li = 0; li < doc.links.length; li++) {
+                var link = doc.links[li];
+                try {
+                    if (link.status === LinkStatus.NORMAL) continue;
+                    if (link.status === LinkStatus.LINK_OUT_OF_DATE) {
+                        link.update();
+                    } else if (link.status === LinkStatus.LINK_MISSING && linksDirLinks.exists) {
+                        var linkFile = File(linksDirLinks + "/" + link.name);
+                        if (linkFile.exists) {
+                            link.relink(linkFile);
+                            link.update();
+                        }
+                    }
+                } catch (le) {}
+            }
+        } catch (e) {
+            // 링크 업데이트 실패는 무시
+        }
+
+        // 5. PDF 프리뷰
         try {
             var pdfFile = File(outputDir + "/preview.pdf");
-            // 페이지 범위가 있으면 해당 범위만 PDF 내보내기
-            if (startPage >= 1 && endPage <= pageCount && rangePageCount < pageCount) {
-                app.pdfExportPreferences.pageRange = "" + startPage + "-" + endPage;
-            } else {
-                app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
-            }
-            // 스프레드 모드: 맞붙은 페이지를 하나의 PDF 페이지로 내보냄
+
             app.pdfExportPreferences.exportReaderSpreads = spreadMode;
+
+            // 이미지: 300 DPI 다운샘플링 + JPEG HIGH 압축
+            app.pdfExportPreferences.colorBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
+            app.pdfExportPreferences.colorBitmapSamplingDPI = 300;
+            app.pdfExportPreferences.colorBitmapCompression = BitmapCompression.JPEG;
+            app.pdfExportPreferences.colorBitmapQuality = CompressionQuality.HIGH;
+            app.pdfExportPreferences.grayscaleBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
+            app.pdfExportPreferences.grayscaleBitmapSamplingDPI = 300;
+            app.pdfExportPreferences.grayscaleBitmapCompression = BitmapCompression.JPEG;
+            app.pdfExportPreferences.grayscaleBitmapQuality = CompressionQuality.HIGH;
+            app.pdfExportPreferences.monochromeBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
+            app.pdfExportPreferences.monochromeBitmapSamplingDPI = 1200;
+
+            // 프레임 밖 이미지 제외, 텍스트/벡터 압축
+            app.pdfExportPreferences.cropImagesToFrames = true;
+            app.pdfExportPreferences.compressTextAndLineArt = true;
+
+            // PDF 버전, 폰트 서브셋
+            app.pdfExportPreferences.acrobatCompatibility = AcrobatCompatibility.ACROBAT_7;
+            app.pdfExportPreferences.subsetFontsBelow = 100;
+            app.pdfExportPreferences.optimizePDF = true;
+
             doc.exportFile(ExportFormat.PDF_TYPE, pdfFile);
         } catch (e) {
             // PDF 내보내기 실패는 무시
         }
 
-        // 5. 문서 닫기 (저장 안 함)
+        // 6. 문서 닫기 (저장 안 함)
         doc.close(SaveOptions.NO);
         doc = null;
 
-        // 6. 성공 시그널
+        // 7. 성공 시그널
         writeDone(outputDir, "ok", null);
     } catch (e) {
         // 에러 시그널

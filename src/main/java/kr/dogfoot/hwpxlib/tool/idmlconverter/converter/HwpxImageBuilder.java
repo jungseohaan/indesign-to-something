@@ -433,11 +433,16 @@ class HwpxImageBuilder {
         Picture pic = anchorRun.addNewPicture();
         String picId = ASTToHwpxConverter.nextShapeId();
 
+        // 그룹 내부 이미지는 IN_FRONT_OF_TEXT로 배치 (형제 배경 위에 표시)
+        TextWrapMethod figWrap = figure.fromGroup()
+                ? TextWrapMethod.IN_FRONT_OF_TEXT
+                : TextWrapMethod.BEHIND_TEXT;
+
         // ShapeObject
         pic.idAnd(picId)
                 .zOrderAnd(figure.zOrder())
                 .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
+                .textWrapAnd(figWrap)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None)

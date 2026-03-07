@@ -269,13 +269,14 @@ public class ASTToHwpxConverter {
         // SecPr 단락 생성 — 이 단락 하나에 모든 플로팅 객체 + secPr을 넣는다.
         Para secPrPara = createSectionPara(sectionFile);
 
-        // 1) FIGURE 먼저: BEHIND_TEXT 이미지를 XML에서 먼저 배치하여
-        //    동일 z-order인 배경 블록보다 아래 레이어로 렌더링되게 한다.
+        // 1) BEHIND_TEXT FIGURE: 배경 이미지 (그룹 외부)를 먼저 배치
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 ASTFigure fig = (ASTFigure) block;
-                imageBuilder.convertFigure(secPrPara, fig);
-                ctx.framesConverted++;
+                if (!fig.fromGroup()) {
+                    imageBuilder.convertFigure(secPrPara, fig);
+                    ctx.framesConverted++;
+                }
             }
         }
 
@@ -303,6 +304,17 @@ public class ASTToHwpxConverter {
         for (ASTTextFrameBlock block : floatingBlocks) {
             textBoxBuilder.convertTextFrameBlock(secPrPara, block);
             ctx.framesConverted++;
+        }
+
+        // 3.5) 그룹 내부 FIGURE: IN_FRONT_OF_TEXT — 형제 배경 위에 표시
+        for (ASTBlock block : otherBlocks) {
+            if (block.blockType() == ASTBlock.BlockType.FIGURE) {
+                ASTFigure fig = (ASTFigure) block;
+                if (fig.fromGroup()) {
+                    imageBuilder.convertFigure(secPrPara, fig);
+                    ctx.framesConverted++;
+                }
+            }
         }
 
         // 4) 셀 내부에서 승격된 오버레이 텍스트박스: PAPER 기준 IN_FRONT_OF_TEXT
