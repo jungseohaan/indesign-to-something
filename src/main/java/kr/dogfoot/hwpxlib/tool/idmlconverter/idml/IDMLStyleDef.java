@@ -26,6 +26,7 @@ public class IDMLStyleDef {
     private Double tracking;
     private Boolean underline;     // 밑줄
     private Boolean strikeThrough; // 취소선
+    private Boolean ruleBelowOn;   // 단락 아래선 (RuleBelow)
 
     // 어절 간격 (Word Spacing)
     private Double desiredWordSpacing;    // 기본값 100%
@@ -153,6 +154,9 @@ public class IDMLStyleDef {
 
     public Boolean strikeThrough() { return strikeThrough; }
     public void strikeThrough(Boolean v) { this.strikeThrough = v; }
+
+    public Boolean ruleBelowOn() { return ruleBelowOn; }
+    public void ruleBelowOn(Boolean v) { this.ruleBelowOn = v; }
 
     public Integer dropCapLines() { return dropCapLines; }
     public void dropCapLines(Integer v) { this.dropCapLines = v; }

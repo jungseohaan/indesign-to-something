@@ -14,16 +14,16 @@ public class Stage1_Flatten {
 
     public static FlattenedObjectPool flatten(IDMLDocument idmlDoc) {
         FlattenedObjectPool pool = new FlattenedObjectPool();
-        int zOrderCounter = 0;
 
         for (IDMLSpread spread : idmlDoc.spreads()) {
             List<IDMLPage> pages = spread.pages();
 
             // TextFrames — 스프레드 양쪽 페이지에 걸친 프레임은 각 페이지에 복제
+            // z-order는 IDMLSpreadParser에서 할당된 원본 값 사용 (타입 간 인터리빙 보존)
             for (IDMLTextFrame tf : spread.textFrames()) {
                 if (tf.geometricBounds() == null || tf.itemTransform() == null) continue;
 
-                int z = zOrderCounter++;
+                int z = tf.zOrder();
                 List<Integer> overlapping = assignPages(tf.geometricBounds(), tf.itemTransform(), pages);
                 for (int pageNum : overlapping) {
                     FlatObject fo = new FlatObject();
@@ -57,7 +57,7 @@ public class Stage1_Flatten {
                 fo.absoluteBbox(IDMLGeometry.getTransformedBoundingBox(
                         img.geometricBounds(), img.itemTransform()));
                 fo.sourceObject(img);
-                fo.zOrder(zOrderCounter++);
+                fo.zOrder(img.zOrder());
                 fo.pageNumber(assignPage(img.geometricBounds(), img.itemTransform(), pages));
                 fo.fromGroup(img.fromGroup());
                 pool.add(fo);
@@ -75,7 +75,7 @@ public class Stage1_Flatten {
                 fo.absoluteBbox(IDMLGeometry.getTransformedBoundingBox(
                         vs.geometricBounds(), vs.itemTransform()));
                 fo.sourceObject(vs);
-                fo.zOrder(zOrderCounter++);
+                fo.zOrder(vs.zOrder());
                 fo.pageNumber(assignPage(vs.geometricBounds(), vs.itemTransform(), pages));
                 fo.fromGroup(vs.fromGroup());
 
@@ -90,7 +90,7 @@ public class Stage1_Flatten {
 
             // Groups (그룹 자체를 등록 — PNG 렌더링용)
             for (IDMLGroup grp : spread.groups()) {
-                flattenGroup(grp, pool, pages, zOrderCounter++, null);
+                flattenGroup(grp, pool, pages, grp.zOrder(), null);
             }
         }
 

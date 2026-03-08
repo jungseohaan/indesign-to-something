@@ -139,6 +139,19 @@ function main(args) {
         doc = app.open(inddFile, false);
         var pageCount = doc.pages.length;
 
+        // 문서 페이지 번호 → 물리 인덱스 변환
+        // cases.json의 pages는 문서 페이지 번호(예: "10-29")이므로
+        // InDesign 페이지 이름과 비교하여 물리 인덱스로 변환
+        if (startPage > 0 || endPage > 0) {
+            for (var pi = 0; pi < pageCount; pi++) {
+                var pageName = parseInt(doc.pages[pi].name, 10);
+                if (!isNaN(pageName)) {
+                    if (pageName === startPage) startPage = pi + 1;
+                    if (pageName === endPage) endPage = pi + 1;
+                }
+            }
+        }
+
         // 페이지 범위 보정
         if (startPage < 1) startPage = 1;
         if (endPage < 1 || endPage > pageCount) endPage = pageCount;
@@ -151,10 +164,15 @@ function main(args) {
             var idmlFile = File(outputDir + "/output.idml");
             doc.exportFile(ExportFormat.INDESIGN_MARKUP, idmlFile);
 
+            // 2.5. 짧은 텍스트 프레임 렌더링
+            writeProgress(outputDir, "rendered_frames", 0, rangePageCount);
+            var renderedFrames = exportRenderedTextFrames(doc, outputDir, startPage, endPage);
+
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
             // 3. resolved 속성 수집 (페이지 범위 필터링)
             var resolved = collectResolved(doc, outputDir, rangePageCount, startPage, endPage);
+            resolved.renderedTextFrames = renderedFrames;
             writeJson(outputDir + "/resolved.json", resolved);
         }
 
@@ -162,22 +180,40 @@ function main(args) {
 
         // 4. 링크 업데이트 (PDF 고해상도 이미지용)
         try {
-            var linksDir = File(inddPath).parent;
-            var linksDirLinks = Folder(linksDir + "/Links");
+            var inddParent = File(inddPath).parent;
+            // Links 폴더 후보: INDD 옆 Links/, INDD와 같은 폴더
+            var linksFolders = [
+                Folder(inddParent + "/Links"),
+                Folder(inddParent)
+            ];
+            var fixedCount = 0;
+            var missingCount = 0;
             for (var li = 0; li < doc.links.length; li++) {
                 var link = doc.links[li];
                 try {
                     if (link.status === LinkStatus.NORMAL) continue;
                     if (link.status === LinkStatus.LINK_OUT_OF_DATE) {
                         link.update();
-                    } else if (link.status === LinkStatus.LINK_MISSING && linksDirLinks.exists) {
-                        var linkFile = File(linksDirLinks + "/" + link.name);
-                        if (linkFile.exists) {
-                            link.relink(linkFile);
-                            link.update();
+                        fixedCount++;
+                    } else if (link.status === LinkStatus.LINK_MISSING) {
+                        var found = false;
+                        for (var fi = 0; fi < linksFolders.length; fi++) {
+                            if (!linksFolders[fi].exists) continue;
+                            var linkFile = File(linksFolders[fi] + "/" + link.name);
+                            if (linkFile.exists) {
+                                link.relink(linkFile);
+                                link.update();
+                                fixedCount++;
+                                found = true;
+                                break;
+                            }
                         }
+                        if (!found) missingCount++;
                     }
                 } catch (le) {}
+            }
+            if (fixedCount > 0 || missingCount > 0) {
+                $.writeln("[Links] fixed=" + fixedCount + " missing=" + missingCount);
             }
         } catch (e) {
             // 링크 업데이트 실패는 무시
@@ -235,6 +271,230 @@ function main(args) {
         app.linkingPreferences.checkLinksAtOpen = savedCheckLinks;
         app.linkingPreferences.findMissingLinksAtOpen = savedFindMissing;
     }
+}
+
+// --- 그룹 합성 이미지 렌더링 ---
+
+/**
+ * 20자 미만의 짧은 텍스트 프레임을 개별 PNG로 렌더링한다.
+ * 짧은 텍스트 = 원본 폰트로 꾸민 장식 텍스트 → HWPX에서 폰트 재현 불가 → 이미지로 보존.
+ */
+function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    var renderedFrames = [];
+    var renderedIds = {}; // 이미 렌더링된 ID 중복 방지
+    var allItems = doc.allPageItems;
+
+    // PNG 내보내기 설정 (한 번만)
+    app.pngExportPreferences.exportResolution = 300;
+    app.pngExportPreferences.antiAlias = true;
+    app.pngExportPreferences.transparentBackground = true;
+    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
+
+    for (var i = 0; i < allItems.length; i++) {
+        var item = allItems[i];
+
+        // TextFrame 또는 TextPath 부모(Polygon/GraphicLine 등) 판별
+        var isTextFrame = (item.constructor.name === "TextFrame");
+        var hasTextPath = false;
+        try { hasTextPath = item.textPaths && item.textPaths.length > 0; } catch (e) {}
+
+        if (!isTextFrame && !hasTextPath) continue;
+
+        // 페이지 범위 필터
+        var parentPage = null;
+        try { parentPage = item.parentPage; } catch (e) {}
+        if (!parentPage) continue;
+        var pgIdx = parentPage.documentOffset + 1; // 1-based
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        // TextFrame은 기존 선별 로직, TextPath 부모는 항상 렌더링
+        if (isTextFrame && !isRenderableTextFrame(item)) continue;
+
+        // 부모가 PageItem 컨테이너(Rectangle/Group 등)이면 부모를 렌더링
+        // 배경, 둥근 모서리, 테두리 등 시각적 속성이 포함되도록
+        var renderTarget = item;
+        var parentItem = null;
+        try {
+            parentItem = item.parent;
+            var pName = parentItem ? parentItem.constructor.name : "";
+            if (parentItem && parentItem.id
+                && (pName === "Rectangle" || pName === "Polygon"
+                    || pName === "GraphicLine" || pName === "Oval")) {
+                renderTarget = parentItem;
+            }
+        } catch (e) {}
+
+        var domId = renderTarget.id;
+        // 같은 부모 컨테이너가 여러 자식 TextFrame에 의해 중복 렌더링되지 않도록
+        if (renderedIds[domId]) {
+            // 이미 렌더링됨 — 자식 ID만 추가 등록
+            if (renderTarget !== item) {
+                renderedFrames.push({
+                    id: item.id,
+                    file: renderedIds[domId].file,
+                    bounds: renderedIds[domId].bounds,
+                    pageIndex: renderedIds[domId].pageIndex
+                });
+            }
+            continue;
+        }
+        var fileName = "frame_" + domId + ".png";
+        var outFile = File(renderDir + "/" + fileName);
+
+        try {
+            renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
+
+            // visibleBounds = PNG 렌더링 영역과 일치하는 실제 표시 범위
+            var bounds = null;
+            try { bounds = arrCopy(renderTarget.visibleBounds); } catch (e) {}
+            if (!bounds) {
+                try { bounds = arrCopy(renderTarget.geometricBounds); } catch (e) {}
+            }
+
+            // 스프레드 기준 → 페이지 기준 좌표 변환
+            if (bounds) {
+                var pageBounds = parentPage.bounds;
+                bounds[0] -= pageBounds[0];
+                bounds[1] -= pageBounds[1];
+                bounds[2] -= pageBounds[0];
+                bounds[3] -= pageBounds[1];
+            }
+
+            // 렌더링 대상 ID 등록
+            var entry = {
+                id: domId,
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: parentPage.documentOffset
+            };
+            renderedFrames.push(entry);
+            renderedIds[domId] = entry;
+
+            // 자식 TextFrame ID도 등록 (IDML AST에서 자식 ID로 참조할 수 있으므로)
+            if (renderTarget !== item) {
+                renderedFrames.push({
+                    id: item.id,
+                    file: "rendered_frames/" + fileName,
+                    bounds: bounds,
+                    pageIndex: parentPage.documentOffset
+                });
+            }
+        } catch (e) {
+            // 렌더링 실패 — 건너뜀
+        }
+    }
+
+    return renderedFrames;
+}
+
+/**
+ * TextFrame이 이미지 렌더링 대상인지 판별한다.
+ * 30자 미만의 독립 텍스트 프레임 = 장식 텍스트로 간주.
+ */
+function isRenderableTextFrame(tf) {
+    // 스레드된 프레임 제외 (본문 흐름 체인)
+    try {
+        if (tf.parentStory.textContainers.length > 1) return false;
+    } catch (e) { return false; }
+
+    // 인라인/앵커/표 셀 제외
+    try {
+        var pType = tf.parent.constructor.name;
+        if (pType === "Character" || pType === "InsertionPoint"
+            || pType === "Story" || pType === "Cell") return false;
+    } catch (e) {}
+
+    // Story의 텍스트 내용으로 판정
+    var text = "";
+    try { text = tf.parentStory.contents; } catch (e) { return false; }
+
+    // 제어문자나 앵커 객체 마커(U+FFFC)가 포함된 텍스트 제외
+    // 단, \t(0x09), \n(0x0A), \r(0x0D)은 정상적인 단락/줄 구분자이므로 허용
+    if (/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFC]/.test(text)) return false;
+
+    // 공백 제거 후 길이 판정
+    var trimmed = text.replace(/[\s\uFEFF]/g, "");
+    if (trimmed.length === 0) return false;
+    if (trimmed.length >= 30) return false;
+
+    // 회전된 프레임 → 항상 렌더링 (HWPX에서 회전 텍스트 재현 불가)
+    try {
+        if (Math.abs(tf.rotationAngle) > 0.1) return true;
+    } catch (e) {}
+
+    // 흰색/희미한 글자 → 항상 렌더링 (배경 없이는 보이지 않는 텍스트)
+    if (isLightColoredText(tf)) return true;
+
+    // Spread/Page/MasterSpread 직속 → 큰 글씨(≥16pt)만 통과
+    try {
+        var pType = tf.parent.constructor.name;
+        if (pType === "Spread" || pType === "Page" || pType === "MasterSpread") {
+            try {
+                if (tf.parentStory.characters[0].pointSize >= 16) { /* 통과 */ }
+                else return false;
+            } catch (e3) { return false; }
+        }
+    } catch (e) {}
+
+    // 노말 텍스트 제외: 장식 효과가 없으면 콘텐츠 텍스트 → 렌더링 불필요
+    // 장식 = 비흑색 채움, 보이는 외곽선, 또는 시각적 부모 컨테이너
+    try {
+        var firstChar = tf.parentStory.characters[0];
+        var isDecorative = false;
+        // 텍스트 채움색이 Black이 아닌 경우 (Paper, 색상 등)
+        try {
+            if (firstChar.fillColor.name !== "Black") isDecorative = true;
+        } catch (e2) {}
+        // 텍스트 외곽선이 보이는 경우 (strokeColor != None)
+        if (!isDecorative) {
+            try {
+                if (firstChar.strokeColor.name !== "None") isDecorative = true;
+            } catch (e2) {}
+        }
+        // 부모 컨테이너(Rectangle/Polygon/Oval)에 채움이 있는 경우
+        if (!isDecorative) {
+            try {
+                var pType2 = tf.parent.constructor.name;
+                if (pType2 === "Rectangle" || pType2 === "Polygon" || pType2 === "Oval") {
+                    var pFill = tf.parent.fillColor.name;
+                    if (pFill !== "None" && pFill !== "[None]") isDecorative = true;
+                }
+            } catch (e2) {}
+        }
+        if (!isDecorative) return false;
+    } catch (e) {}
+
+    return true;
+}
+
+/**
+ * 텍스트가 흰색 또는 희미한 색상인지 판별.
+ * 배경이 없으면 보이지 않는 텍스트 → 렌더링 대상.
+ */
+function isLightColoredText(tf) {
+    try {
+        var firstChar = tf.parentStory.characters[0];
+        var fillName = firstChar.fillColor.name;
+        // Paper = 흰색
+        if (fillName === "Paper" || fillName === "[Paper]") return true;
+        // tint가 매우 낮은 경우 (어떤 색이든 희미함)
+        try {
+            var tint = firstChar.fillTint;
+            if (tint >= 0 && tint <= 30) return true;
+        } catch (e) {}
+        // CMYK 밝은 색 판별 (잉크량 합계가 매우 낮음)
+        try {
+            var cv = firstChar.fillColor.colorValue;
+            var space = firstChar.fillColor.space;
+            if (space.toString() === "ColorSpace.CMYK") {
+                if (cv[0] + cv[1] + cv[2] + cv[3] <= 20) return true;
+            }
+        } catch (e) {}
+    } catch (e) {}
+    return false;
 }
 
 // --- resolved 속성 수집 ---

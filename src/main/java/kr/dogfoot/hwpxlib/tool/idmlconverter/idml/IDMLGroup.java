@@ -14,6 +14,7 @@ public class IDMLGroup {
     private List<IDMLImageFrame> imageFrames;
     private List<IDMLVectorShape> vectorShapes;
     private List<IDMLGroup> childGroups;
+    private int zOrder;
 
     public IDMLGroup() {
         this.textFrames = new ArrayList<IDMLTextFrame>();
@@ -42,4 +43,7 @@ public class IDMLGroup {
 
     public List<IDMLGroup> childGroups() { return childGroups; }
     public void addChildGroup(IDMLGroup group) { childGroups.add(group); }
+
+    public int zOrder() { return zOrder; }
+    public void zOrder(int v) { this.zOrder = v; }
 }

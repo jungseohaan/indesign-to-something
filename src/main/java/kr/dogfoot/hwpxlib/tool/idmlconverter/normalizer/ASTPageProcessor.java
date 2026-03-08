@@ -536,7 +536,7 @@ class ASTPageProcessor {
                 String storyId = mtf.parentStoryId();
                 IDMLStory story = storyId != null ? idmlDoc.getStory(storyId) : null;
                 if (story != null) {
-                    String footerText = resolveFooterText(story, page);
+                    String footerText = resolveFooterText(story, page, idmlDoc);
                     if (footerText != null && !footerText.trim().isEmpty()) {
                         ASTTextFrameBlock footerBlock = createFooterBlock(
                                 mtf, masterPage, page, footerText, colorResolver);
@@ -1121,13 +1121,16 @@ class ASTPageProcessor {
 
     /**
      * 마스터 페이지 스토리의 텍스트를 해석하여 푸터 텍스트를 생성.
+     * \uFFFE → 페이지 번호, \uFFFF → 섹션 마커, \uFFFC → 인라인 TextFrame 텍스트.
      */
-    private static String resolveFooterText(IDMLStory story, IDMLPage docPage) {
+    private static String resolveFooterText(IDMLStory story, IDMLPage docPage, IDMLDocument idmlDoc) {
         StringBuilder sb = new StringBuilder();
         for (IDMLParagraph para : story.paragraphs()) {
             for (IDMLCharacterRun run : para.characterRuns()) {
                 String content = run.content();
                 if (content == null) continue;
+                int anchorIdx = 0;
+                List<IDMLCharacterRun.InlineAnchor> anchors = run.inlineAnchors();
                 for (int i = 0; i < content.length(); i++) {
                     char c = content.charAt(i);
                     if (c == '\uFFFE') {
@@ -1137,6 +1140,20 @@ class ASTPageProcessor {
                         if (marker != null) {
                             sb.append(marker);
                         }
+                    } else if (c == '\uFFFC') {
+                        // 인라인 TextFrame의 스토리 텍스트로 치환
+                        if (anchorIdx < anchors.size()) {
+                            IDMLCharacterRun.InlineAnchor anchor = anchors.get(anchorIdx++);
+                            if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                                    && anchor.index() < run.inlineFrames().size()) {
+                                IDMLTextFrame inlineTf = run.inlineFrames().get(anchor.index());
+                                String inlineText = extractStoryPlainText(inlineTf.parentStoryId(), idmlDoc);
+                                if (inlineText != null) {
+                                    sb.append(inlineText);
+                                }
+                            }
+                        }
+                        // 매칭 없으면 FFFC 제거 (출력하지 않음)
                     } else {
                         sb.append(c);
                     }
@@ -1144,6 +1161,25 @@ class ASTPageProcessor {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * 스토리의 순수 텍스트를 추출한다 (ACE 플레이스홀더 제거).
+     */
+    private static String extractStoryPlainText(String storyId, IDMLDocument idmlDoc) {
+        if (storyId == null) return null;
+        IDMLStory story = idmlDoc.getStory(storyId);
+        if (story == null) return null;
+        StringBuilder sb = new StringBuilder();
+        for (IDMLParagraph para : story.paragraphs()) {
+            for (IDMLCharacterRun run : para.characterRuns()) {
+                String content = run.content();
+                if (content != null) {
+                    sb.append(stripACEPlaceholders(content));
+                }
+            }
+        }
+        return sb.length() > 0 ? sb.toString() : null;
     }
 
     /**

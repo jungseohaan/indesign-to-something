@@ -23,6 +23,7 @@ public class IDMLImageFrame {
     private double[] imageTransform;     // 이미지의 transform (프레임 내 위치/스케일)
     private double[] graphicBounds;      // 원본 이미지 크기 [left, top, right, bottom]
     private boolean fromGroup;           // Group 내에서 추출된 요소 여부
+    private String parentGroupId;        // 소속 그룹의 IDML Self ID
 
     // PSD 레이어 가시성 오버라이드 (GraphicLayerOption)
     // InDesign에서 같은 PSD를 여러 프레임에 배치할 때 프레임별로 다른 레이어를 보여줄 수 있다.
@@ -81,6 +82,9 @@ public class IDMLImageFrame {
 
     public boolean fromGroup() { return fromGroup; }
     public void fromGroup(boolean v) { this.fromGroup = v; }
+
+    public String parentGroupId() { return parentGroupId; }
+    public void parentGroupId(String v) { this.parentGroupId = v; }
 
     public double widthPoints() {
         return geometricBounds != null ? IDMLGeometry.width(geometricBounds) : 0;

@@ -45,6 +45,9 @@ public class ASTParagraph {
     // 장식 선(GraphicLine)의 stroke 색상 → 후속 텍스트 런에 underline으로 전파
     private String pendingUnderlineColor;
 
+    // RuleBelow → 문단 하단 테두리 (답안 밑줄선)
+    private boolean ruleBelowBorder;
+
     // 인라인 항목 (읽기 순서)
     private List<ASTInlineItem> items;
 
@@ -123,6 +126,9 @@ public class ASTParagraph {
 
     public String pendingUnderlineColor() { return pendingUnderlineColor; }
     public void pendingUnderlineColor(String v) { this.pendingUnderlineColor = v; }
+
+    public boolean ruleBelowBorder() { return ruleBelowBorder; }
+    public void ruleBelowBorder(boolean v) { this.ruleBelowBorder = v; }
 
     public List<ASTInlineItem> items() { return items; }
     public void addItem(ASTInlineItem item) { items.add(item); }

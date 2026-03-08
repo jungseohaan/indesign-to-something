@@ -384,6 +384,7 @@ class ASTFigureBuilder {
             }
         }
 
+        figure.fromGroup(shape.fromGroup());
         figure.sourceId(shape.selfId());
         return figure;
     }
@@ -433,6 +434,7 @@ class ASTFigureBuilder {
         figure.imageFormat(result.format);
         figure.pixelWidth(result.pixelWidth);
         figure.pixelHeight(result.pixelHeight);
+        figure.fromGroup(shape.fromGroup());
         figure.sourceId(shape.selfId());
         return figure;
     }
@@ -550,6 +552,7 @@ class ASTFigureBuilder {
         figure.imageFormat(result.format);
         figure.pixelWidth(result.pixelWidth);
         figure.pixelHeight(result.pixelHeight);
+        figure.fromGroup(clipFrame.fromGroup());
         figure.sourceId(clipFrame.selfId());
 
         return figure;
@@ -645,6 +648,7 @@ class ASTFigureBuilder {
         figure.imageFormat(result.format);
         figure.pixelWidth(result.pixelWidth);
         figure.pixelHeight(result.pixelHeight);
+        figure.fromGroup(clipFrame.fromGroup());
         figure.sourceId(clipFrame.selfId());
         return figure;
     }
@@ -764,6 +768,7 @@ class ASTFigureBuilder {
         figure.imageFormat(result.format);
         figure.pixelWidth(result.pixelWidth);
         figure.pixelHeight(result.pixelHeight);
+        figure.fromGroup(shapes.get(0).fromGroup());
         figure.sourceId(groupId);
         return figure;
     }

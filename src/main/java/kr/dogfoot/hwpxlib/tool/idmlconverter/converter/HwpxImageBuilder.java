@@ -433,10 +433,15 @@ class HwpxImageBuilder {
         Picture pic = anchorRun.addNewPicture();
         String picId = ASTToHwpxConverter.nextShapeId();
 
-        // 그룹 내부 이미지는 IN_FRONT_OF_TEXT로 배치 (형제 배경 위에 표시)
-        TextWrapMethod figWrap = figure.fromGroup()
-                ? TextWrapMethod.IN_FRONT_OF_TEXT
-                : TextWrapMethod.BEHIND_TEXT;
+        // 그룹 내부 이미지: 소형 장식 요소는 IN_FRONT_OF_TEXT (배지, 라벨 등),
+        // 대형 요소(200pt 이상)는 BEHIND_TEXT (배경 이미지)
+        TextWrapMethod figWrap;
+        if (figure.fromGroup()) {
+            boolean isLarge = figure.width() > 20000 || figure.height() > 20000; // 200pt = 20000 hwpunit
+            figWrap = isLarge ? TextWrapMethod.BEHIND_TEXT : TextWrapMethod.IN_FRONT_OF_TEXT;
+        } else {
+            figWrap = TextWrapMethod.BEHIND_TEXT;
+        }
 
         // ShapeObject
         pic.idAnd(picId)

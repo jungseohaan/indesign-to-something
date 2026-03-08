@@ -371,6 +371,12 @@ class IDMLStoryParser {
                     IDMLCharacterRun.InlineGraphic inlineGroup = parseInlineGroup(elem);
                     currentRun.addInlineGraphic(inlineGroup);
                     currentRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, graphicIdx);
+                } else if ("TextVariableInstance".equals(tag)) {
+                    // 텍스트 변수 (페이지 번호, 단원명 등) → ResultText를 콘텐츠로 삽입
+                    String resultText = getAttrOrNull(elem, "ResultText");
+                    if (resultText != null && !resultText.isEmpty()) {
+                        contentBuilder.append(resultText);
+                    }
                 } else if ("Rectangle".equals(tag) || "Polygon".equals(tag)
                         || "Oval".equals(tag) || "GraphicLine".equals(tag)) {
                     if (pendingAce8 > 0) {

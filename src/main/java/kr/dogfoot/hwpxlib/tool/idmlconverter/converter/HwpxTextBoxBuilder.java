@@ -382,27 +382,33 @@ class HwpxTextBoxBuilder {
     }
 
     /**
-     * 래퍼 사각형(부모 Rectangle)의 fill을 라운드 사각형 아웃라인으로 변환.
-     * InDesign에서 "큰 채우기 사각형 + 안쪽 흰 텍스트 프레임" 패턴을
-     * HWPX에서 "라운드 스트로크 사각형 + 셀" 패턴으로 근사한다.
+     * 래퍼 사각형(부모 Rectangle)의 fill을 배경 사각형으로 변환.
+     * InDesign에서 "큰 채우기 사각형 + 안쪽 텍스트 프레임" 패턴을
+     * HWPX에서 "배경 채움 사각형 + 셀" 패턴으로 근사한다.
      */
     private void addWrapperRoundedRect(Para framePara, ASTTextFrameBlock block,
                                         long w, long h) {
-        // 래퍼 fill을 stroke(아웃라인) 색으로 사용
-        String strokeColor = null;
-        double strokeWeightPt = 1.0; // 기본 1pt 아웃라인
-        boolean hasOwnFill = block.fillColor() != null && block.fillColor().startsWith("#")
-                && !block.fillColor().equals("#FFFFFF");
+        // 배경 fill: 래퍼 fill → 프레임 자체 fill → 없음
+        String bgColor = null;
+        double bgTint = 100;
         if (block.hasWrapperFill()) {
             double tint = block.wrapperFillTint();
             if (tint < 0) tint = 100;
-            strokeColor = blendColorWithWhite(block.wrapperFillColor(), tint / 100.0);
-        } else if (block.strokeColor() != null && block.strokeColor().startsWith("#")) {
+            bgColor = blendColorWithWhite(block.wrapperFillColor(), tint / 100.0);
+        } else if (block.fillColor() != null && block.fillColor().startsWith("#")) {
+            bgColor = block.fillColor();
+            bgTint = block.fillTint();
+        }
+        // 스트로크 (프레임 자체 stroke 속성)
+        String strokeColor = null;
+        double strokeWeightPt = 0;
+        if (block.strokeColor() != null && block.strokeColor().startsWith("#")) {
             strokeColor = block.strokeColor();
             strokeWeightPt = block.strokeWeight();
         }
-        // strokeColor가 없어도 프레임 자체 fill이 있거나 라운드 코너이면 배경 사각형 생성
-        if (strokeColor == null && !hasOwnFill && block.cornerRadius() <= 0) return;
+        boolean hasBg = bgColor != null && bgColor.startsWith("#");
+        // 배경도 스트로크도 라운드 코너도 없으면 건너뜀
+        if (!hasBg && strokeColor == null && block.cornerRadius() <= 0) return;
 
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
@@ -437,17 +443,15 @@ class HwpxTextBoxBuilder {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        // 아웃라인 스트로크 (래퍼 fill → stroke)
+        // 스트로크 (프레임 자체 stroke)
         setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, "Solid", 100);
 
-        // 배경은 흰색(Paper) 또는 프레임 자체 fill
-        String bgColor = block.fillColor();
-        double bgTint = block.fillTint();
-        if (bgColor == null || !bgColor.startsWith("#")) {
-            bgColor = "#FFFFFF";
-            bgTint = 100;
+        // 배경 fill (래퍼 fill 또는 프레임 fill)
+        if (hasBg) {
+            setupTextBoxFillBrush(rect, bgColor, bgTint);
+        } else {
+            setupTextBoxFillBrush(rect, "#FFFFFF", 100);
         }
-        setupTextBoxFillBrush(rect, bgColor, bgTint);
 
         // 라운드 코너
         rect.ratioAnd(computeCornerRatio(block.cornerRadius(), w, h));

@@ -43,6 +43,7 @@ class IDMLSpreadParser {
             } else if ("TextFrame".equals(elem.getTagName())) {
                 IDMLTextFrame frame = parseTextFrame(elem);
                 if (frame != null) {
+                    frame.zOrder(zOrderCounter[0]++);
                     spread.addTextFrame(frame);
                 }
             } else if ("Rectangle".equals(elem.getTagName())
@@ -90,11 +91,13 @@ class IDMLSpreadParser {
                 double[] groupTransform = IDMLGeometry.parseTransform(
                         elem.getAttribute("ItemTransform"));
                 String groupSelfId = elem.getAttribute("Self");
+                int groupZOrder = zOrderCounter[0]; // 그룹 자체의 z-order (자식 파싱 전 캡처)
                 parseGroupForFrames(elem, spread, groupTransform, hiddenLayerIds, zOrderCounter, groupSelfId);
 
                 // 그룹 구조도 보존 (글상자 변환용)
                 IDMLGroup group = parseGroupAsObject(elem, groupTransform, hiddenLayerIds);
                 if (group != null) {
+                    group.zOrder(groupZOrder);
                     spread.addGroup(group);
                 }
             }
@@ -789,6 +792,7 @@ class IDMLSpreadParser {
                 if (frame != null) {
                     frame.itemTransform(CoordinateConverter.combineTransforms(
                             frameTransform, frame.itemTransform()));
+                    frame.zOrder(zOrderCounter[0]++);
                     // 부모 프레임의 시각 속성 전파
                     if (hasWrapperFill || hasWrapperStroke) {
                         applyWrapperStyle(frame, wrapperFill, wrapperFillTint,
@@ -898,6 +902,10 @@ class IDMLSpreadParser {
         String groupLayer = getAttrOrNull(groupElem, "ItemLayer");
         if (groupLayer != null && hiddenLayerIds.contains(groupLayer)) return;
 
+        // 도형 안에서 추출된 TextFrame을 모아두고, 그룹 자식 처리 완료 후 z-order 부여
+        // → InDesign에서 도형 안의 텍스트는 항상 형제 도형 위에 렌더링됨
+        List<IDMLTextFrame> deferredTextFrames = new ArrayList<>();
+
         NodeList children = groupElem.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node node = children.item(i);
@@ -909,13 +917,13 @@ class IDMLSpreadParser {
             if (itemLayer != null && hiddenLayerIds.contains(itemLayer)) continue;
 
             if ("TextFrame".equals(elem.getTagName())) {
+                // 그룹의 직접 자식 TextFrame — 즉시 등록 (도형 안이 아니므로 지연 불필요)
                 IDMLTextFrame frame = parseTextFrame(elem);
                 if (frame != null) {
-                    // 프레임의 ItemTransform에 Group 변환을 결합
                     frame.itemTransform(CoordinateConverter.combineTransforms(
                             accumulatedTransform, frame.itemTransform()));
+                    frame.zOrder(zOrderCounter[0]++);
                     frame.parentGroupId(groupSelfId);
-                    // 부모 프레임의 시각 속성 전파
                     if (wrapperFill != null || wrapperStroke != null) {
                         applyWrapperStyle(frame, wrapperFill, wrapperFillTint,
                                 wrapperStroke, wrapperStrokeWeight, wrapperStrokeType,
@@ -928,35 +936,44 @@ class IDMLSpreadParser {
                     || "Oval".equals(elem.getTagName())) {
                 IDMLImageFrame imageFrame = tryParseImageFrame(elem);
                 if (imageFrame != null) {
-                    // 이미지 프레임의 ItemTransform에 Group 변환을 결합
                     imageFrame.itemTransform(CoordinateConverter.combineTransforms(
                             accumulatedTransform, imageFrame.itemTransform()));
                     imageFrame.fromGroup(true);
                     imageFrame.zOrder(zOrderCounter[0]++);
                     spread.addImageFrame(imageFrame);
                 } else {
-                    // 순수 벡터 도형으로 파싱
                     IDMLVectorShape vectorShape = tryParseVectorShape(elem);
                     if (vectorShape != null) {
                         double[] combinedTransform = CoordinateConverter.combineTransforms(
                                 accumulatedTransform, vectorShape.itemTransform());
-
                         vectorShape.itemTransform(combinedTransform);
                         vectorShape.fromGroup(true);
                         vectorShape.parentGroupId(groupSelfId);
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
-                    // 프레임 내부의 Group/TextFrame 자식도 탐색
+                    // 프레임 내부의 TextFrame 자식 수집 (지연 등록)
                     double[] rectTransform = IDMLGeometry.parseTransform(
                             elem.getAttribute("ItemTransform"));
                     double[] combinedForChildren = CoordinateConverter.combineTransforms(
                             accumulatedTransform, rectTransform);
+                    int tfCountBefore = spread.textFrames().size();
                     extractGroupsFromFrame(elem, spread, combinedForChildren,
                             hiddenLayerIds, zOrderCounter);
+                    int tfCountAfter = spread.textFrames().size();
+                    if (tfCountAfter > tfCountBefore) {
+                        // 래퍼 도형 제거 (TextFrame에 스타일 전파됨)
+                        if (vectorShape != null) {
+                            spread.vectorShapes().remove(vectorShape);
+                        }
+                        // 추출된 TextFrame을 spread에서 빼고 지연 목록으로 이동
+                        for (int d = tfCountBefore; d < tfCountAfter; d++) {
+                            IDMLTextFrame deferred = spread.textFrames().remove(tfCountBefore);
+                            deferredTextFrames.add(deferred);
+                        }
+                    }
                 }
             } else if ("GraphicLine".equals(elem.getTagName())) {
-                // 그래픽 라인도 벡터 도형으로 처리
                 IDMLVectorShape vectorShape = tryParseVectorShape(elem);
                 if (vectorShape != null) {
                     vectorShape.shapeType(IDMLVectorShape.ShapeType.GRAPHIC_LINE);
@@ -968,15 +985,22 @@ class IDMLSpreadParser {
                     spread.addVectorShape(vectorShape);
                 }
             } else if ("Group".equals(elem.getTagName())) {
-                // 중첩 Group: 누적 변환에 현재 Group 변환을 결합
                 double[] childGroupTransform = IDMLGeometry.parseTransform(
                         elem.getAttribute("ItemTransform"));
                 double[] combined = CoordinateConverter.combineTransforms(
                         accumulatedTransform, childGroupTransform);
-                parseGroupForFrames(elem, spread, combined, hiddenLayerIds, zOrderCounter, groupSelfId,
+                // 자식 그룹의 selfId를 parentGroupId로 전달 (서브그룹별 VectorGroup 분리)
+                String childGroupSelfId = elem.getAttribute("Self");
+                parseGroupForFrames(elem, spread, combined, hiddenLayerIds, zOrderCounter, childGroupSelfId,
                         wrapperFill, wrapperFillTint, wrapperStroke, wrapperStrokeWeight,
                         wrapperStrokeType, wrapperCornerRadius);
             }
+        }
+
+        // 도형 안에서 추출된 TextFrame에 최종 z-order 부여 (모든 형제 도형보다 높은 값)
+        for (IDMLTextFrame deferred : deferredTextFrames) {
+            deferred.zOrder(zOrderCounter[0]++);
+            spread.addTextFrame(deferred);
         }
     }
 

@@ -66,6 +66,11 @@ public class IDMLTextFrame {
     private double columnRuleOffset;            // 가로 위치 (gutter 중심 기준 오프셋)
     private double columnRuleInsetWidth;        // 경계선 길이 (0=전체)
 
+    private int zOrder;                          // 파싱 순서 (렌더링 z-order)
+
+    public int zOrder() { return zOrder; }
+    public void zOrder(int v) { this.zOrder = v; }
+
     public String selfId() { return selfId; }
     public void selfId(String v) { this.selfId = v; }
 

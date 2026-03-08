@@ -142,6 +142,10 @@ class IDMLResourceParser {
         String strikeThru = getAttrOrNull(styleElem, "StrikeThru");
         if ("true".equalsIgnoreCase(strikeThru)) def.strikeThrough(true);
 
+        // 단락 아래선 (RuleBelow)
+        String ruleBelow = getAttrOrNull(styleElem, "RuleBelow");
+        if ("true".equalsIgnoreCase(ruleBelow)) def.ruleBelowOn(true);
+
         // 두문자 (DropCap)
         Integer dropCapLines = parseIntAttrNullable(styleElem, "DropCapLines");
         Integer dropCapChars = parseIntAttrNullable(styleElem, "DropCapCharacters");

@@ -451,6 +451,33 @@ class ASTStoryConverter {
             if (hasContent) break;
         }
         if (!hasContent && inlineStory.tables().isEmpty()) {
+            // RuleBelow가 있는 빈 답안 상자 → 밑줄 있는 공백 인라인 프레임
+            boolean hasRuleBelow = false;
+            for (IDMLParagraph p : inlineStory.paragraphs()) {
+                if (hasRuleBelowOn(p, idmlDoc)) { hasRuleBelow = true; break; }
+            }
+            if (hasRuleBelow) {
+                double w0 = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
+                double h0 = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+                ASTInlineObject obj0 = new ASTInlineObject();
+                obj0.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+                obj0.sourceId(tf.selfId());
+                obj0.width(CoordinateConverter.pointsToHwpunits(w0));
+                obj0.height(CoordinateConverter.pointsToHwpunits(h0));
+                // 밑줄 공백으로 답안 밑줄선 표현 (줄바꿈 방지: 공백 1개 ≈ 4pt 가정)
+                ASTParagraph ulPara = new ASTParagraph();
+                ASTTextRun ulRun = new ASTTextRun();
+                int spaceCount = Math.max(3, (int) (w0 / 4.0));
+                StringBuilder spaces = new StringBuilder(spaceCount);
+                for (int si = 0; si < spaceCount; si++) spaces.append(' ');
+                ulRun.text(spaces.toString());
+                ulRun.underline(true);
+                ulPara.addItem(ulRun);
+                obj0.addParagraph(ulPara);
+                obj0.anchoredPosition(tf.anchoredPosition());
+                obj0.textWrapMode(tf.textWrapMode());
+                return obj0;
+            }
             // 채움색이 있는 시각 요소는 빈 콘텐츠여도 유지 (핑크 원 등)
             double w0 = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
             double h0 = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
@@ -506,6 +533,14 @@ class ASTStoryConverter {
         for (IDMLParagraph idmlPara : inlineStory.paragraphs()) {
             ASTParagraph astPara = convertParagraph(idmlPara, emptyPool, idmlDoc, colorResolver, imageLoader, false, null);
             if (astPara != null && !astPara.items().isEmpty()) {
+                // RuleBelow → 텍스트 런에 밑줄 전파 (답안 밑줄선)
+                if (hasRuleBelowOn(idmlPara, idmlDoc)) {
+                    for (ASTInlineItem item : astPara.items()) {
+                        if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                            ((ASTTextRun) item).underline(true);
+                        }
+                    }
+                }
                 for (ASTParagraph split : splitParagraphAtLargeImages(astPara)) {
                     obj.addParagraph(split);
                 }
@@ -536,6 +571,21 @@ class ASTStoryConverter {
      *   (2) 첫 단락에 RuleBelow가 설정됨 (단락 아래선 = 분수선)
      * 2개 단락 구조: 분자(para1) / 분모(para2).
      */
+
+    /**
+     * 단락에 RuleBelow가 설정되어 있는지 확인 (로컬 오버라이드 + 스타일 정의 폴백).
+     */
+    private static boolean hasRuleBelowOn(IDMLParagraph para, IDMLDocument idmlDoc) {
+        if (para.ruleBelowOn()) return true;
+        // 스타일 정의에서 RuleBelow 확인
+        String styleRef = para.appliedParagraphStyle();
+        if (styleRef != null && idmlDoc != null) {
+            IDMLStyleDef styleDef = idmlDoc.getParagraphStyle(styleRef);
+            if (styleDef != null && Boolean.TRUE.equals(styleDef.ruleBelowOn())) return true;
+        }
+        return false;
+    }
+
     static ASTEquation tryConvertFractionTextFrame(IDMLTextFrame tf, IDMLDocument idmlDoc) {
         // 1. ObjectStyle 확인
         String objStyle = tf.appliedObjectStyle();

@@ -18,6 +18,8 @@ public class ResolvedData {
     private final Map<String, ResolvedPageItem> pageItemMap = new HashMap<>();  // DOM id → pageItem
     private final List<ResolvedPage> pages = new ArrayList<>();
     private final Map<String, ResolvedPage> pageByName = new HashMap<>();  // page name ("240") → page
+    private final Map<String, RenderedGroup> renderedGroupMap = new HashMap<>();  // DOM id → RenderedGroup
+    private final Map<String, RenderedGroup> renderedTextFrameMap = new HashMap<>();  // DOM id → rendered TextFrame
 
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
@@ -126,6 +128,53 @@ public class ResolvedData {
         return pageByName.get(name);
     }
 
+    // --- RenderedGroup ---
+
+    public void addRenderedGroup(RenderedGroup group) {
+        renderedGroupMap.put(String.valueOf(group.id()), group);
+    }
+
+    /** DOM decimal ID로 렌더링된 그룹 조회 */
+    public RenderedGroup getRenderedGroup(String domId) {
+        return renderedGroupMap.get(domId);
+    }
+
+    /**
+     * IDML hex ID ("u1735") → DOM decimal ID ("5941") 변환 후 렌더링된 그룹 조회.
+     */
+    public RenderedGroup getRenderedGroupByIdmlId(String idmlId) {
+        if (idmlId == null || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return null;
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
+            return renderedGroupMap.get(decimalId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    public int renderedGroupCount() { return renderedGroupMap.size(); }
+
+    // --- RenderedTextFrame ---
+
+    public void addRenderedTextFrame(RenderedGroup frame) {
+        renderedTextFrameMap.put(String.valueOf(frame.id()), frame);
+    }
+
+    /**
+     * IDML hex ID ("u1735") → DOM decimal ID ("5941") 변환 후 렌더링된 텍스트 프레임 조회.
+     */
+    public RenderedGroup getRenderedTextFrameByIdmlId(String idmlId) {
+        if (idmlId == null || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return null;
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
+            return renderedTextFrameMap.get(decimalId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    public int renderedTextFrameCount() { return renderedTextFrameMap.size(); }
+
     // --- 좌표 단위 정규화 ---
 
     /**
@@ -177,6 +226,13 @@ public class ResolvedData {
             scaleDoubleArray(tf.insetSpacing(), s);
             tf.columnGutter(tf.columnGutter() * s);
             scaleDoubleArray(tf.paragraphYOffsets(), s);
+        }
+        // renderedGroups / renderedTextFrames: bounds
+        for (RenderedGroup rg : renderedGroupMap.values()) {
+            scaleDoubleArray(rg.bounds(), s);
+        }
+        for (RenderedGroup rt : renderedTextFrameMap.values()) {
+            scaleDoubleArray(rt.bounds(), s);
         }
     }
 
