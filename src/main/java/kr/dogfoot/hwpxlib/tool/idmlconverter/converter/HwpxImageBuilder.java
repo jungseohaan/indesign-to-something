@@ -17,13 +17,13 @@ import java.io.ByteArrayOutputStream;
 /**
  * ASTFigure / ASTInlineObject(IMAGE) / ASTPageBackground → HWPX Picture로 변환한다.
  */
-class HwpxImageBuilder {
+public class HwpxImageBuilder {
 
     private static final long INLINE_IMAGE_HEIGHT_THRESHOLD = ConverterConstants.INLINE_IMAGE_HEIGHT_THRESHOLD;
 
     private final HwpxConverterContext ctx;
 
-    HwpxImageBuilder(HwpxConverterContext ctx) {
+    public HwpxImageBuilder(HwpxConverterContext ctx) {
         this.ctx = ctx;
     }
 
@@ -38,8 +38,8 @@ class HwpxImageBuilder {
 
         long displayW = obj.width() > 0 ? obj.width() : 1000;
         long displayH = obj.height() > 0 ? obj.height() : 1000;
-        long clipW = (long) obj.pixelWidth() * 75;
-        long clipH = (long) obj.pixelHeight() * 75;
+        long clipW = clipDimension(obj.pixelWidth(), format);
+        long clipH = clipDimension(obj.pixelHeight(), format);
         if (clipW <= 0) clipW = displayW;
         if (clipH <= 0) clipH = displayH;
 
@@ -63,7 +63,7 @@ class HwpxImageBuilder {
         Run run = para.addNewRun();
         run.charPrIDRef("0");
         Picture pic = run.addNewPicture();
-        String picId = ASTToHwpxConverter.nextShapeId();
+        String picId = HwpxUtil.nextShapeId();
 
         // ShapeObject
         pic.idAnd(picId)
@@ -78,7 +78,7 @@ class HwpxImageBuilder {
         // ShapeComponent
         pic.hrefAnd("");
         pic.groupLevelAnd((short) 0);
-        pic.instidAnd(ASTToHwpxConverter.nextShapeId());
+        pic.instidAnd(HwpxUtil.nextShapeId());
 
         pic.createOffset();
         pic.offset().set(0L, 0L);
@@ -200,8 +200,8 @@ class HwpxImageBuilder {
 
         long imgW = obj.width() > 0 ? obj.width() : 1000;
         long imgH = obj.height() > 0 ? obj.height() : 1000;
-        long clipW = (long) obj.pixelWidth() * 75;
-        long clipH = (long) obj.pixelHeight() * 75;
+        long clipW = clipDimension(obj.pixelWidth(), format);
+        long clipH = clipDimension(obj.pixelHeight(), format);
         if (clipW <= 0) clipW = imgW;
         if (clipH <= 0) clipH = imgH;
 
@@ -283,7 +283,7 @@ class HwpxImageBuilder {
         run.charPrIDRef("0");
 
         Picture pic = run.addNewPicture();
-        String picId = ASTToHwpxConverter.nextShapeId();
+        String picId = HwpxUtil.nextShapeId();
 
         pic.idAnd(picId)
                 .zOrderAnd(0)
@@ -296,7 +296,7 @@ class HwpxImageBuilder {
 
         pic.hrefAnd("");
         pic.groupLevelAnd((short) 0);
-        pic.instidAnd(ASTToHwpxConverter.nextShapeId());
+        pic.instidAnd(HwpxUtil.nextShapeId());
 
         pic.createOffset();
         pic.offset().set(0L, 0L);
@@ -368,7 +368,7 @@ class HwpxImageBuilder {
     /**
      * 공유 앵커 단락을 사용하는 figure 변환 (페이지 넘침 방지).
      */
-    void convertFigure(Para anchorPara, ASTFigure figure) {
+    public void convertFigure(Para anchorPara, ASTFigure figure) {
         convertFigureImage(anchorPara, figure);
     }
 
@@ -376,7 +376,7 @@ class HwpxImageBuilder {
      * 개별 앵커 단락을 생성하는 figure 변환 (배경 이미지 등).
      */
     void convertFigure(SectionXMLFile sectionFile, ASTFigure figure) {
-        Para framePara = ASTToHwpxConverter.createFloatingObjectPara(sectionFile);
+        Para framePara = HwpxUtil.createFloatingObjectPara(sectionFile);
         convertFigureImage(framePara, figure);
     }
 
@@ -394,34 +394,42 @@ class HwpxImageBuilder {
         int pixelW = figure.pixelWidth();
         int pixelH = figure.pixelHeight();
 
-        // 페이지 크롭 적용 (스프레드 걸침 이미지) — 픽셀 레벨 크롭
+        // 페이지 크롭 적용 (스프레드 걸침 이미지)
+        boolean useImgClipCrop = false;
         if (figure.hasCrop()) {
-            // 표시 크기를 보이는 영역으로 축소
-            displayW = Math.round(figure.width() * (1.0 - figure.cropLeftFraction() - figure.cropRightFraction()));
-            displayH = Math.round(figure.height() * (1.0 - figure.cropTopFraction() - figure.cropBottomFraction()));
-
             // 위치 조정
             if (x < 0) x = 0;
             if (y < 0) y = 0;
 
-            // 이미지 데이터를 직접 픽셀 크롭 (imgClip 대신)
-            imageData = pixelCrop(imageData, pixelW, pixelH,
+            // 픽셀 레벨 크롭 시도
+            byte[] cropped = pixelCrop(imageData, pixelW, pixelH,
                     figure.cropLeftFraction(), figure.cropTopFraction(),
                     figure.cropRightFraction(), figure.cropBottomFraction());
-            if (imageData == null || imageData.length == 0) return;
 
-            // 크롭된 이미지의 픽셀 크기 재계산
-            int cropX = (int) Math.round(pixelW * figure.cropLeftFraction());
-            int cropY = (int) Math.round(pixelH * figure.cropTopFraction());
-            int cropR = (int) Math.round(pixelW * figure.cropRightFraction());
-            int cropB = (int) Math.round(pixelH * figure.cropBottomFraction());
-            pixelW = Math.max(1, pixelW - cropX - cropR);
-            pixelH = Math.max(1, pixelH - cropY - cropB);
-            format = "png";
+            // 크롭된 표시 크기
+            displayW = Math.round(figure.width() * (1.0 - figure.cropLeftFraction() - figure.cropRightFraction()));
+            displayH = Math.round(figure.height() * (1.0 - figure.cropTopFraction() - figure.cropBottomFraction()));
+
+            if (cropped != imageData) {
+                // 크롭 성공 — 픽셀 크기도 축소
+                imageData = cropped;
+                if (imageData == null || imageData.length == 0) return;
+
+                int cropX = (int) Math.round(pixelW * figure.cropLeftFraction());
+                int cropY = (int) Math.round(pixelH * figure.cropTopFraction());
+                int cropR = (int) Math.round(pixelW * figure.cropRightFraction());
+                int cropB = (int) Math.round(pixelH * figure.cropBottomFraction());
+                pixelW = Math.max(1, pixelW - cropX - cropR);
+                pixelH = Math.max(1, pixelH - cropY - cropB);
+                format = "png";
+            } else {
+                // 크롭 실패 (PSB 등 미지원 형식) — imgClip으로 시각적 크롭
+                useImgClipCrop = true;
+            }
         }
 
-        long clipW = (long) pixelW * 75;
-        long clipH = (long) pixelH * 75;
+        long clipW = clipDimension(pixelW, format);
+        long clipH = clipDimension(pixelH, format);
         if (clipW <= 0) clipW = displayW;
         if (clipH <= 0) clipH = displayH;
 
@@ -431,7 +439,7 @@ class HwpxImageBuilder {
         anchorRun.charPrIDRef("0");
 
         Picture pic = anchorRun.addNewPicture();
-        String picId = ASTToHwpxConverter.nextShapeId();
+        String picId = HwpxUtil.nextShapeId();
 
         // 그룹 내부 이미지: 소형 장식 요소는 IN_FRONT_OF_TEXT (배지, 라벨 등),
         // 대형 요소(200pt 이상)는 BEHIND_TEXT (배경 이미지)
@@ -456,7 +464,7 @@ class HwpxImageBuilder {
         // ShapeComponent
         pic.hrefAnd("");
         pic.groupLevelAnd((short) 0);
-        pic.instidAnd(ASTToHwpxConverter.nextShapeId());
+        pic.instidAnd(HwpxUtil.nextShapeId());
 
         pic.createOffset();
         pic.offset().set(0L, 0L);
@@ -522,10 +530,20 @@ class HwpxImageBuilder {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, displayH);
 
-        // ImageClip — 픽셀 크롭 완료이므로 전체 영역
+        // ImageClip — 소스 이미지 클리핑 영역
         pic.createImgClip();
-        pic.imgClip().leftAnd(0L).rightAnd(clipW)
-                .topAnd(0L).bottomAnd(clipH);
+        if (useImgClipCrop) {
+            // 픽셀 크롭 실패 시 imgClip으로 시각적 크롭
+            long imgClipL = Math.round(clipW * figure.cropLeftFraction());
+            long imgClipT = Math.round(clipH * figure.cropTopFraction());
+            long imgClipR = Math.round(clipW * (1.0 - figure.cropRightFraction()));
+            long imgClipB = Math.round(clipH * (1.0 - figure.cropBottomFraction()));
+            pic.imgClip().leftAnd(imgClipL).rightAnd(imgClipR)
+                    .topAnd(imgClipT).bottomAnd(imgClipB);
+        } else {
+            pic.imgClip().leftAnd(0L).rightAnd(clipW)
+                    .topAnd(0L).bottomAnd(clipH);
+        }
 
         pic.createInMargin();
         pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
@@ -545,7 +563,7 @@ class HwpxImageBuilder {
 
     // ── 배경 PNG ──
 
-    void addBackgroundImage(SectionXMLFile sectionFile, ASTPageBackground bg) {
+    public void addBackgroundImage(SectionXMLFile sectionFile, ASTPageBackground bg) {
         byte[] pngData = bg.pngData();
         if (pngData == null || pngData.length == 0) return;
 
@@ -563,11 +581,11 @@ class HwpxImageBuilder {
             bgClipH = h;
         }
 
-        Para framePara = ASTToHwpxConverter.createFloatingObjectPara(sectionFile);
+        Para framePara = HwpxUtil.createFloatingObjectPara(sectionFile);
         Run anchorRun = framePara.runs().iterator().next();
 
         Picture pic = anchorRun.addNewPicture();
-        String picId = ASTToHwpxConverter.nextShapeId();
+        String picId = HwpxUtil.nextShapeId();
 
         // ShapeObject — 배경: z-order=0, BEHIND_TEXT
         pic.idAnd(picId)
@@ -581,7 +599,7 @@ class HwpxImageBuilder {
 
         pic.hrefAnd("");
         pic.groupLevelAnd((short) 0);
-        pic.instidAnd(ASTToHwpxConverter.nextShapeId());
+        pic.instidAnd(HwpxUtil.nextShapeId());
 
         pic.createOffset();
         pic.offset().set(0L, 0L);
@@ -660,7 +678,7 @@ class HwpxImageBuilder {
      * pathPointsX/Y는 페이지 상대 HWPUNIT 좌표. 블록의 x,y,w,h가 뷰포트(클리핑 영역).
      * 캔버스가 클리핑된 영역이므로, 폴리곤이 자연스럽게 페이지 경계에서 잘린다.
      */
-    void convertNonRectBackground(Para anchorPara, ASTTextFrameBlock block) {
+    public void convertNonRectBackground(Para anchorPara, ASTTextFrameBlock block) {
         long[] px = block.pathPointsX();
         long[] py = block.pathPointsY();
         if (px == null || py == null || px.length < 3) return;
@@ -731,7 +749,7 @@ class HwpxImageBuilder {
         anchorRun.charPrIDRef("0");
 
         Picture pic = anchorRun.addNewPicture();
-        String picId = ASTToHwpxConverter.nextShapeId();
+        String picId = HwpxUtil.nextShapeId();
 
         pic.idAnd(picId)
                 .zOrderAnd(block.zOrder())
@@ -744,7 +762,7 @@ class HwpxImageBuilder {
 
         pic.hrefAnd("");
         pic.groupLevelAnd((short) 0);
-        pic.instidAnd(ASTToHwpxConverter.nextShapeId());
+        pic.instidAnd(HwpxUtil.nextShapeId());
 
         pic.createOffset();
         pic.offset().set(0L, 0L);
@@ -863,5 +881,17 @@ class HwpxImageBuilder {
 
     static TextFlowSide mapTextFlowSide(String idmlSide) {
         return HwpxEnumMapper.mapTextFlowSide(idmlSide);
+    }
+
+    /**
+     * 이미지 포맷에 따른 클립/dim 변환.
+     * PNG: pixel * 75 (96 DPI 기준, 1px = 0.75pt = 75 HWPUNIT)
+     * SVG: pt * 100 (pixelWidth가 pt 단위, 1pt = 100 HWPUNIT)
+     */
+    private static long clipDimension(int pixelOrPt, String format) {
+        if ("svg".equalsIgnoreCase(format)) {
+            return (long) pixelOrPt * 100;
+        }
+        return (long) pixelOrPt * 75;
     }
 }

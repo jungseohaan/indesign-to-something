@@ -96,9 +96,8 @@ class ASTTableConverter {
             }
         }
 
-        // 주의: 실제 IDML 테이블에서는 spacer merger를 호출하지 않는다.
-        // 빈 행은 사용자가 채울 수 있도록 의도적으로 비워둔 것이다.
-        // spacer merger는 그리드 TextFrame → 테이블 변환에서만 사용한다.
+        // 빈 스페이서 행을 위 행에 여백으로 흡수
+        ASTTableSpacerMerger.merge(table);
         return table;
     }
 

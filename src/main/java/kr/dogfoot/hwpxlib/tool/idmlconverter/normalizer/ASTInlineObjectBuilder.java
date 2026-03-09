@@ -539,10 +539,9 @@ class ASTInlineObjectBuilder {
 
             if (fillHex != null || strokeHex != null || !childVectorShapes.isEmpty()) {
                 obj.kind(ASTInlineObject.ObjectKind.IMAGE);
-                ASTImageLoader.ImageResult result;
 
+                ASTImageLoader.ImageResult result;
                 if (!childVectorShapes.isEmpty()) {
-                    // 부모 도형 + 자식 도형 합성 래스터화
                     List<ASTImageLoader.ShapeWithColor> allShapes = new ArrayList<>();
                     if (fillHex != null || strokeHex != null) {
                         allShapes.add(new ASTImageLoader.ShapeWithColor(shape, fillHex, strokeHex, null));
@@ -558,7 +557,6 @@ class ASTInlineObjectBuilder {
                     obj.imageFormat(result.format);
                     obj.pixelWidth(result.pixelWidth);
                     obj.pixelHeight(result.pixelHeight);
-                    // 래스터화된 실제 크기 반영 (GraphicLine 등 한 축이 0인 도형)
                     if (result.widthPts > 0 && result.heightPts > 0) {
                         obj.width(CoordinateConverter.pointsToHwpunits(result.widthPts));
                         obj.height(CoordinateConverter.pointsToHwpunits(result.heightPts));

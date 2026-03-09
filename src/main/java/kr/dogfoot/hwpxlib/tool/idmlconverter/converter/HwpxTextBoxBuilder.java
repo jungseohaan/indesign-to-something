@@ -20,12 +20,12 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
  * ASTTextFrameBlock / ASTInlineObject(INLINE_TEXT_FRAME) → HWPX 글상자(Rectangle+DrawText)
  * 또는 1x1 테이블(플로팅 텍스트 프레임)로 변환한다.
  */
-class HwpxTextBoxBuilder {
+public class HwpxTextBoxBuilder {
 
     private final HwpxConverterContext ctx;
     private final HwpxParagraphBuilder paragraphBuilder;
 
-    HwpxTextBoxBuilder(HwpxConverterContext ctx, HwpxParagraphBuilder paragraphBuilder) {
+    public HwpxTextBoxBuilder(HwpxConverterContext ctx, HwpxParagraphBuilder paragraphBuilder) {
         this.ctx = ctx;
         this.paragraphBuilder = paragraphBuilder;
     }
@@ -38,7 +38,7 @@ class HwpxTextBoxBuilder {
     void addTextBox(SectionXMLFile sectionFile, ASTTextFrameBlock block) {
         // 앵커 단락
         Para framePara = sectionFile.addNewPara();
-        framePara.idAnd(ASTToHwpxConverter.nextParaId())
+        framePara.idAnd(HwpxUtil.nextParaId())
                 .paraPrIDRefAnd("3")
                 .styleIDRefAnd("0")
                 .pageBreakAnd(false)
@@ -52,7 +52,7 @@ class HwpxTextBoxBuilder {
         if (w < ConverterConstants.MIN_TEXT_BOX_WIDTH) w = ConverterConstants.MIN_TEXT_BOX_WIDTH;
 
         Rectangle rect = anchorRun.addNewRectangle();
-        String shapeId = ASTToHwpxConverter.nextShapeId();
+        String shapeId = HwpxUtil.nextShapeId();
 
         // ShapeObject
         rect.idAnd(shapeId)
@@ -66,7 +66,7 @@ class HwpxTextBoxBuilder {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.instidAnd(HwpxUtil.nextShapeId());
         rect.createOffset();
         rect.offset().set(0L, 0L);
         long textBoxMinH = ConverterConstants.MIN_TEXT_BOX_HEIGHT;
@@ -238,7 +238,7 @@ class HwpxTextBoxBuilder {
      * 회전이 있는 경우 Table은 회전을 지원하지 않으므로 Rectangle(DrawTextBox)을 사용.
      * 글상자(rect+drawText) 대신 1x1 테이블을 사용하여 클릭만으로 텍스트 편집 가능.
      */
-    void convertTextFrameBlock(Para framePara, ASTTextFrameBlock block) {
+    public void convertTextFrameBlock(Para framePara, ASTTextFrameBlock block) {
         long w = block.effectiveWidth();
         long h = block.height();
 
@@ -310,7 +310,7 @@ class HwpxTextBoxBuilder {
         anchorRun.charPrIDRef("0");
 
         Rectangle rect = anchorRun.addNewRectangle();
-        String shapeId = ASTToHwpxConverter.nextShapeId();
+        String shapeId = HwpxUtil.nextShapeId();
 
         rect.idAnd(shapeId)
                 .zOrderAnd(0)
@@ -323,7 +323,7 @@ class HwpxTextBoxBuilder {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.instidAnd(HwpxUtil.nextShapeId());
         rect.createOffset();
         rect.offset().set(0L, 0L);
         rect.createOrgSz();
@@ -414,7 +414,7 @@ class HwpxTextBoxBuilder {
         anchorRun.charPrIDRef("0");
 
         Rectangle rect = anchorRun.addNewRectangle();
-        String shapeId = ASTToHwpxConverter.nextShapeId();
+        String shapeId = HwpxUtil.nextShapeId();
 
         rect.idAnd(shapeId)
                 .zOrderAnd(0)
@@ -426,7 +426,7 @@ class HwpxTextBoxBuilder {
 
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.instidAnd(HwpxUtil.nextShapeId());
         rect.createOffset();
         rect.offset().set(0L, 0L);
         rect.createOrgSz();
@@ -496,7 +496,7 @@ class HwpxTextBoxBuilder {
         anchorRun.charPrIDRef("0");
 
         Rectangle rect = anchorRun.addNewRectangle();
-        String shapeId = ASTToHwpxConverter.nextShapeId();
+        String shapeId = HwpxUtil.nextShapeId();
 
         TextWrapMethod wrapMethod = block.isBackgroundOnly()
                 ? TextWrapMethod.BEHIND_TEXT
@@ -514,7 +514,7 @@ class HwpxTextBoxBuilder {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.instidAnd(HwpxUtil.nextShapeId());
         rect.createOffset();
         rect.offset().set(0L, 0L);
         rect.createOrgSz();
@@ -612,7 +612,7 @@ class HwpxTextBoxBuilder {
         anchorRun.charPrIDRef("0");
 
         Rectangle rect = anchorRun.addNewRectangle();
-        String shapeId = ASTToHwpxConverter.nextShapeId();
+        String shapeId = HwpxUtil.nextShapeId();
 
         TextWrapMethod wrapMethod = block.isBackgroundOnly()
                 ? TextWrapMethod.BEHIND_TEXT
@@ -630,7 +630,7 @@ class HwpxTextBoxBuilder {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.instidAnd(HwpxUtil.nextShapeId());
         rect.createOffset();
         rect.offset().set(0L, 0L);
         rect.createOrgSz();
@@ -745,7 +745,7 @@ class HwpxTextBoxBuilder {
                 ? TextWrapMethod.BEHIND_TEXT
                 : TextWrapMethod.IN_FRONT_OF_TEXT;
         int zOrder = block.isBackgroundOnly() ? 0 : block.zOrder();
-        String tableId = ASTToHwpxConverter.nextShapeId();
+        String tableId = HwpxUtil.nextShapeId();
         table.idAnd(tableId)
                 .zOrderAnd(zOrder)
                 .numberingTypeAnd(NumberingType.TABLE)
@@ -1119,7 +1119,7 @@ class HwpxTextBoxBuilder {
         run.charPrIDRef("0");
 
         Rectangle rect = run.addNewRectangle();
-        String shapeId = ASTToHwpxConverter.nextShapeId();
+        String shapeId = HwpxUtil.nextShapeId();
 
         // ShapeObject
         rect.idAnd(shapeId)
@@ -1133,7 +1133,7 @@ class HwpxTextBoxBuilder {
         // ShapeComponent
         rect.hrefAnd("");
         rect.groupLevelAnd((short) 0);
-        rect.instidAnd(ASTToHwpxConverter.nextShapeId());
+        rect.instidAnd(HwpxUtil.nextShapeId());
         rect.createOffset();
         rect.offset().set(0L, 0L);
         rect.createOrgSz();
@@ -1274,7 +1274,7 @@ class HwpxTextBoxBuilder {
      * 한글(HWPX 렌더러)이 테이블 셀 SubList 내부의 플로팅 객체를 지원하지 않으므로,
      * 오버레이 텍스트프레임을 페이지 레벨 IN_FRONT_OF_TEXT로 승격한다.
      */
-    void addPageLevelOverlay(Para anchorPara, ASTInlineObject obj, long pageX, long pageY) {
+    public void addPageLevelOverlay(Para anchorPara, ASTInlineObject obj, long pageX, long pageY) {
         if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return;
 
         long w = obj.width() > 0 ? obj.width() : 5000;
@@ -1287,7 +1287,7 @@ class HwpxTextBoxBuilder {
         // hp:tbl (1x1 table) — 한글에서 hp:rect의 IN_FRONT_OF_TEXT가
         // 이미지 위에 올바르게 렌더링되지 않으므로 hp:tbl 사용
         Table table = run.addNewTable();
-        String tableId = ASTToHwpxConverter.nextShapeId();
+        String tableId = HwpxUtil.nextShapeId();
 
         table.idAnd(tableId)
                 .zOrderAnd(1000)
@@ -1448,7 +1448,7 @@ class HwpxTextBoxBuilder {
         run.charPrIDRef("0");
 
         Picture pic = run.addNewPicture();
-        String picId = ASTToHwpxConverter.nextShapeId();
+        String picId = HwpxUtil.nextShapeId();
 
         pic.idAnd(picId)
                 .zOrderAnd(0)
@@ -1460,7 +1460,7 @@ class HwpxTextBoxBuilder {
 
         pic.hrefAnd("");
         pic.groupLevelAnd((short) 0);
-        pic.instidAnd(ASTToHwpxConverter.nextShapeId());
+        pic.instidAnd(HwpxUtil.nextShapeId());
         pic.createOffset();
         pic.offset().set(0L, 0L);
         pic.createOrgSz();

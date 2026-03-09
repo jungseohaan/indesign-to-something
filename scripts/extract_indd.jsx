@@ -395,9 +395,10 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
  * 30자 미만의 독립 텍스트 프레임 = 장식 텍스트로 간주.
  */
 function isRenderableTextFrame(tf) {
-    // 스레드된 프레임 제외 (본문 흐름 체인)
+    // 스레드된 프레임은 짧은 텍스트(< 30자)일 때만 여기까지 오므로 제외하지 않음
+    // (장식 텍스트가 스레드 체인에 포함될 수 있음)
     try {
-        if (tf.parentStory.textContainers.length > 1) return false;
+        if (!tf.parentStory) return false;
     } catch (e) { return false; }
 
     // 인라인/앵커/표 셀 제외
@@ -427,6 +428,12 @@ function isRenderableTextFrame(tf) {
 
     // 흰색/희미한 글자 → 항상 렌더링 (배경 없이는 보이지 않는 텍스트)
     if (isLightColoredText(tf)) return true;
+
+    // 16pt 이상 + 비블랙 채움 → 어디에 속하든 렌더링 (장식 대형 텍스트)
+    try {
+        var firstChar0 = tf.parentStory.characters[0];
+        if (firstChar0.pointSize >= 16 && firstChar0.fillColor.name !== "Black") return true;
+    } catch (e) {}
 
     // Spread/Page/MasterSpread 직속 → 큰 글씨(≥16pt)만 통과
     try {

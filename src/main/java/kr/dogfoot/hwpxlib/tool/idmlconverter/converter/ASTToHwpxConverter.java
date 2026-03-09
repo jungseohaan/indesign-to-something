@@ -20,7 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
+
 
 /**
  * ASTDocument를 HWPXFile로 변환한다.
@@ -40,8 +40,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class ASTToHwpxConverter {
 
-    private static final AtomicLong PARA_ID_COUNTER = new AtomicLong(2000000000L);
-    private static final AtomicLong SHAPE_ID_COUNTER = new AtomicLong(8000000L);
+    // ID 카운터는 HwpxUtil로 이전됨
 
     // ── 정적 팩토리 ──
 
@@ -110,7 +109,7 @@ public class ASTToHwpxConverter {
         StyleRegistry styleRegistry = new StyleRegistry(hwpxFile, fontRegistry);
 
         // 3. 컨텍스트 + 빌더 생성
-        ctx = new HwpxConverterContext(hwpxFile, styleRegistry, fontRegistry, doc);
+        ctx = new HwpxConverterContext(hwpxFile, styleRegistry, fontRegistry, doc.paragraphStyles());
 
         paragraphBuilder = new HwpxParagraphBuilder(ctx);
         textBoxBuilder = new HwpxTextBoxBuilder(ctx, paragraphBuilder);
@@ -477,23 +476,7 @@ public class ASTToHwpxConverter {
     // ── 유틸리티 (section-level) ──
 
     static Para createFloatingObjectPara(SectionXMLFile section) {
-        Para para = section.addNewPara();
-        para.idAnd(nextParaId())
-                .paraPrIDRefAnd("3")
-                .styleIDRefAnd("0")
-                .pageBreakAnd(false)
-                .columnBreakAnd(false)
-                .merged(false);
-        Run run = para.addNewRun();
-        run.charPrIDRef("0");
-        run.addNewT();
-        para.createLineSegArray();
-        kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.LineSeg lineSeg =
-                para.lineSegArray().addNew();
-        lineSeg.textposAnd(0).vertposAnd(0).vertsizeAnd(1000)
-                .textheightAnd(1000).baselineAnd(850).spacingAnd(600)
-                .horzposAnd(0).horzsizeAnd(42520).flagsAnd(393216);
-        return para;
+        return HwpxUtil.createFloatingObjectPara(section);
     }
 
     private void addEmptyPara(SectionXMLFile section) {
@@ -509,14 +492,14 @@ public class ASTToHwpxConverter {
         run.addNewT();
     }
 
-    // ── 정적 유틸리티 (다른 Builder에서 호출) ──
+    // ── 정적 유틸리티 (Builder + FlatToHwpxConverter에서 호출) ──
 
-    static String nextParaId() {
-        return String.valueOf(PARA_ID_COUNTER.incrementAndGet());
+    public static String nextParaId() {
+        return HwpxUtil.nextParaId();
     }
 
-    static String nextShapeId() {
-        return String.valueOf(SHAPE_ID_COUNTER.incrementAndGet());
+    public static String nextShapeId() {
+        return HwpxUtil.nextShapeId();
     }
 
     /**
@@ -524,36 +507,14 @@ public class ASTToHwpxConverter {
      * AST에서는 "01_발문" 형태이고, StyleRegistry는 "ParagraphStyle/01_발문"으로 등록됨.
      */
     static String resolveStyleRef(String ref, StyleRegistry styleRegistry) {
-        if (ref == null) return null;
-        // 그대로 찾아보기
-        if (styleRegistry.getParaPrId(ref) != null) return ref;
-        // ParagraphStyle/ 접두어 붙여서 찾기
-        String withPrefix = "ParagraphStyle/" + ref;
-        if (styleRegistry.getParaPrId(withPrefix) != null) return withPrefix;
-        // CharacterStyle/ 접두어 붙여서 찾기
-        String withCharPrefix = "CharacterStyle/" + ref;
-        if (styleRegistry.getCharPrId(withCharPrefix) != null) return withCharPrefix;
-        return ref;
+        return HwpxUtil.resolveStyleRef(ref, styleRegistry);
     }
 
     static String sanitizeText(String text) {
-        if (text == null) return null;
-        // 제어 문자 및 XML 허용 범위 밖 문자 제거 (탭, 줄바꿈은 유지)
-        StringBuilder sb = new StringBuilder(text.length());
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            // PUA → 표준 유니코드 (윤고딕 폰트 전용 글리프)
-            if (c == '\uE288') { c = '\u25A1'; } // □ 네모 기호
-            if (c == '\t' || c == '\n' || c == '\r'
-                    || (c >= 0x20 && c <= 0xD7FF)
-                    || (c >= 0xE000 && c <= 0xFFFD)) {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
+        return HwpxUtil.sanitizeText(text);
     }
 
     static HorizontalAlign2 mapAlignment(String alignment) {
-        return HwpxEnumMapper.mapAlignment(alignment);
+        return HwpxUtil.mapAlignment(alignment);
     }
 }

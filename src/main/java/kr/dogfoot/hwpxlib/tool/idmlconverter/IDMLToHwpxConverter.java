@@ -3,7 +3,9 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter;
 import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.writer.HWPXWriter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.flat.ASTToFlatConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.flat.FlatDocument;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.flat.FlatToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
@@ -132,6 +134,11 @@ public class IDMLToHwpxConverter {
                 inlineReplacedTexts = replaceInlineRenderedTextFrames(astDoc, resolvedData, options);
             }
 
+            // Phase 2.9: 플로팅 렌더 텍스트 프레임 → 이미지 교체 (AST 좌표 기반)
+            if (resolvedData != null && resolvedData.renderedTextFrameCount() > 0) {
+                replaceFloatingRenderedTextFrames(astDoc, resolvedData, options);
+            }
+
             // 인라인 이미지로 교체된 텍스트와 동일한 플로팅 텍스트 프레임 블록 제거
             if (!inlineReplacedTexts.isEmpty()) {
                 removeFloatingDuplicates(astDoc, inlineReplacedTexts);
@@ -161,9 +168,9 @@ public class IDMLToHwpxConverter {
                 }
             }
 
-            // Phase 3: AST -> HWPX (페이지별 진행률: 10~90)
-            int totalPages = astDoc.sections().size();
-            ConvertResult result = ASTToHwpxConverter.convert(astDoc, reporter, 10, totalPages, customFontMap);
+            // Phase 3: AST -> Flat -> HWPX (페이지별 진행률: 10~90)
+            FlatDocument flatDoc = ASTToFlatConverter.convert(astDoc);
+            ConvertResult result = FlatToHwpxConverter.convert(flatDoc, reporter, customFontMap);
 
             // Phase 4: HWPX 파일 저장
             reporter.reportProgress(95, 100, "HWPX 파일 저장 중...");
@@ -196,7 +203,8 @@ public class IDMLToHwpxConverter {
         try {
             String sourceFileName = new File(idmlPath).getName();
             ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
-            ConvertResult result = ASTToHwpxConverter.convert(astDoc, ProgressReporter.NONE, 0, 0);
+            FlatDocument flatDoc = ASTToFlatConverter.convert(astDoc);
+            ConvertResult result = FlatToHwpxConverter.convert(flatDoc);
             return result.hwpxFile();
         } finally {
             idmlDoc.cleanup();
@@ -225,23 +233,11 @@ public class IDMLToHwpxConverter {
      * 렌더링된 텍스트 프레임을 합성 이미지로 교체한다.
      * 20자 미만의 장식 텍스트를 PNG 이미지로 대체.
      */
-    private static void replaceRenderedTextFrames(IDMLDocument idmlDoc,
+    static void replaceRenderedTextFrames(IDMLDocument idmlDoc,
                                                    ResolvedData resolvedData,
                                                    ConvertOptions options) {
         String resolvedDir = getResolvedDir(options);
         if (resolvedDir == null) return;
-
-        // IDML 페이지 순서 → 스프레드 좌표 매핑 (pageIndex → page absolute top-left)
-        java.util.List<double[]> pageOrigins = new java.util.ArrayList<>();
-        for (IDMLSpread spread : idmlDoc.spreads()) {
-            for (IDMLPage page : spread.pages()) {
-                double[] gb = page.geometricBounds();
-                double[] t = page.itemTransform();
-                double pageLeft = (t != null && t.length >= 6) ? t[4] + gb[1] : gb[1];
-                double pageTop = (t != null && t.length >= 6) ? t[5] + gb[0] : gb[0];
-                pageOrigins.add(new double[]{pageTop, pageLeft});
-            }
-        }
 
         int replacedCount = 0;
 
@@ -258,66 +254,18 @@ public class IDMLToHwpxConverter {
                 }
             }
 
-            // 2단계: TextFrame 루프 — TextPath가 처리하는 파일은 건너뛰기
+            // 2단계: TextPath와 중복되는 TextFrame만 제거 (이미지 교체는 AST 단계에서)
             java.util.Iterator<IDMLTextFrame> it = spread.textFrames().iterator();
             while (it.hasNext()) {
                 IDMLTextFrame tf = it.next();
                 RenderedGroup rendered = resolvedData.getRenderedTextFrameByIdmlId(tf.selfId());
                 if (rendered == null) continue;
-
-                // TextPath가 같은 파일을 처리하면 TextFrame 제거만 하고 이미지 생성 안 함
                 if (textPathRenderedFiles.contains(rendered.file())) {
                     it.remove();
                     System.out.println("[RenderedTextFrame] " + tf.selfId()
                             + " → SKIP (TextPath가 " + rendered.file() + " 처리)");
-                    continue;
                 }
-
-                double[] rb = rendered.bounds();
-                if (rb == null || rb.length < 4) continue;
-
-                int pgIdx = rendered.pageIndex();
-                double offsetTop = 0, offsetLeft = 0;
-                if (pgIdx >= 0 && pgIdx < pageOrigins.size()) {
-                    offsetTop = pageOrigins.get(pgIdx)[0];
-                    offsetLeft = pageOrigins.get(pgIdx)[1];
-                }
-
-                java.io.File pngFile = new java.io.File(resolvedDir, rendered.file());
-                double spreadCenterY = offsetTop + (rb[0] + rb[2]) / 2.0;
-                double spreadCenterX = offsetLeft + (rb[1] + rb[3]) / 2.0;
-                double boundsW = rb[3] - rb[1];
-                double boundsH = adjustHeightByPngRatio(pngFile, boundsW, rb[2] - rb[0]);
-
-                double[] absBounds = new double[]{
-                        spreadCenterY - boundsH / 2.0, spreadCenterX - boundsW / 2.0,
-                        spreadCenterY + boundsH / 2.0, spreadCenterX + boundsW / 2.0
-                };
-
-                // TextFrame 전용 렌더: z+10000으로 페이지 장식 요소 위에 표시
-                int zOrder = tf.zOrder() + 10000;
-                it.remove();
-
-                IDMLImageFrame syn = new IDMLImageFrame();
-                syn.selfId(tf.selfId() + "_rendered");
-                syn.geometricBounds(absBounds);
-                syn.itemTransform(new double[]{1, 0, 0, 1, 0, 0});
-                syn.zOrder(zOrder);
-                syn.fromGroup(true);  // IN_FRONT_OF_TEXT로 배치
-
-                String absPath = pngFile.getAbsolutePath();
-                syn.linkResourceURI(absPath);
-                syn.linkStoredState("Normal");
-                syn.linkResourceFormat("PNG");
-
-                spread.addImageFrame(syn);
-                replacedCount++;
-
-                System.out.println("[RenderedTextFrame] " + tf.selfId()
-                        + " → " + rendered.file()
-                        + " page=" + pgIdx + " z=" + zOrder
-                        + " bounds=[" + String.format("%.1f,%.1f,%.1f,%.1f",
-                            absBounds[0], absBounds[1], absBounds[2], absBounds[3]) + "]");
+                // TextPath와 중복되지 않는 렌더 TextFrame은 AST에서 처리
             }
 
             // 3단계: TextPath(VectorShape) 루프 — 그룹 z-order 보존
@@ -333,26 +281,11 @@ public class IDMLToHwpxConverter {
                     continue;
                 }
 
-                double[] rb = rendered.bounds();
-                if (rb == null || rb.length < 4) continue;
-
-                int pgIdx = rendered.pageIndex();
-                double offsetTop = 0, offsetLeft = 0;
-                if (pgIdx >= 0 && pgIdx < pageOrigins.size()) {
-                    offsetTop = pageOrigins.get(pgIdx)[0];
-                    offsetLeft = pageOrigins.get(pgIdx)[1];
-                }
-
                 java.io.File pngFile = new java.io.File(resolvedDir, rendered.file());
-                double spreadCenterY = offsetTop + (rb[0] + rb[2]) / 2.0;
-                double spreadCenterX = offsetLeft + (rb[1] + rb[3]) / 2.0;
-                double boundsW = rb[3] - rb[1];
-                double boundsH = adjustHeightByPngRatio(pngFile, boundsW, rb[2] - rb[0]);
 
-                double[] absBounds = new double[]{
-                        spreadCenterY - boundsH / 2.0, spreadCenterX - boundsW / 2.0,
-                        spreadCenterY + boundsH / 2.0, spreadCenterX + boundsW / 2.0
-                };
+                // VectorShape의 IDML 좌표를 직접 사용
+                double[] vsBounds = vs.geometricBounds();
+                double[] vsTransform = vs.itemTransform();
 
                 // TextPath는 그룹 소속이면 원래 z-order (A/B/C 등과 정확한 stacking)
                 int zOrder = (vs.parentGroupId() != null) ? vs.zOrder() : vs.zOrder() + 10000;
@@ -360,8 +293,8 @@ public class IDMLToHwpxConverter {
 
                 IDMLImageFrame syn = new IDMLImageFrame();
                 syn.selfId(vs.selfId() + "_rendered");
-                syn.geometricBounds(absBounds);
-                syn.itemTransform(new double[]{1, 0, 0, 1, 0, 0});
+                syn.geometricBounds(vsBounds);
+                syn.itemTransform(vsTransform);
                 syn.zOrder(zOrder);
                 syn.fromGroup(true);  // IN_FRONT_OF_TEXT로 배치
                 syn.linkResourceURI(pngFile.getAbsolutePath());
@@ -372,7 +305,7 @@ public class IDMLToHwpxConverter {
 
                 System.out.println("[RenderedTextPath] " + vs.selfId()
                         + " → " + rendered.file()
-                        + " page=" + pgIdx + " z=" + zOrder);
+                        + " z=" + zOrder);
             }
         }
 
@@ -382,11 +315,117 @@ public class IDMLToHwpxConverter {
     }
 
     /**
+     * AST의 플로팅 텍스트 프레임 블록 중 렌더링 대상을 이미지(ASTFigure)로 교체한다.
+     * AST 좌표(페이지 상대, HWPUNIT)를 직접 사용하므로 좌표 변환 오류가 없다.
+     */
+    static void replaceFloatingRenderedTextFrames(
+            ASTDocument astDoc, ResolvedData resolvedData, ConvertOptions options) {
+        String resolvedDir = getResolvedDir(options);
+        if (resolvedDir == null) return;
+
+        int replaced = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection sec : astDoc.sections()) {
+            java.util.ListIterator<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock> it =
+                    sec.blocks().listIterator();
+            while (it.hasNext()) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk = it.next();
+                if (!(blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock))
+                    continue;
+
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock tfb =
+                        (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock) blk;
+                if (tfb.sourceId() == null) continue;
+
+                RenderedGroup rendered = resolvedData.getRenderedTextFrameByIdmlId(tfb.sourceId());
+                if (rendered == null) continue;
+
+                java.io.File pngFile = new java.io.File(resolvedDir, rendered.file());
+                if (!pngFile.exists()) continue;
+
+                try {
+                    byte[] data = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+                    if (img == null) continue;
+
+                    // resolved.json의 geometricBounds로 실제 페이지 위치/크기 결정
+                    // (회전 포함 축 정렬 바운딩 박스 — 회전/비회전 공통 처리)
+                    long figX, figY, figW, figH;
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem ri =
+                            resolvedData.getPageItemByIdmlId(tfb.sourceId());
+                    if (ri != null && ri.geometricBounds() != null && ri.pageIndex() >= 0) {
+                        double[] gb = ri.geometricBounds();
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage rp =
+                                resolvedData.getPage(ri.pageIndex());
+                        if (rp != null && rp.bounds() != null) {
+                            double[] rel = rp.toPageRelative(gb);
+                            double rW = gb[3] - gb[1];
+                            double rH = gb[2] - gb[0];
+                            figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                    .pointsToHwpunits(rel[0]);
+                            figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                    .pointsToHwpunits(rel[1]);
+                            figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                    .pointsToHwpunits(rW);
+                            figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                    .pointsToHwpunits(rH);
+                        } else {
+                            // resolved page 없으면 AST 폴백
+                            figX = tfb.x(); figY = tfb.y();
+                            figW = tfb.width(); figH = tfb.height();
+                        }
+                    } else {
+                        // resolved pageItem 없으면 AST + PNG 비율 폴백
+                        figX = tfb.x();
+                        figW = tfb.width();
+                        if (img.getWidth() > 0) {
+                            figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
+                        } else {
+                            figH = tfb.height();
+                        }
+                        figY = tfb.y() - (figH - tfb.height()) / 2;
+                    }
+
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
+                            new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
+                    fig.x(figX);
+                    fig.y(figY);
+                    fig.width(figW);
+                    fig.height(figH);
+                    fig.zOrder(tfb.zOrder());
+                    fig.imageData(data);
+                    fig.imageFormat("png");
+                    fig.pixelWidth(img.getWidth());
+                    fig.pixelHeight(img.getHeight());
+                    fig.fromGroup(true); // IN_FRONT_OF_TEXT
+                    fig.imagePath(pngFile.getAbsolutePath());
+                    fig.sourceId(tfb.sourceId());
+
+                    it.set(fig);
+                    replaced++;
+                    System.out.println("[FloatingRendered] " + tfb.sourceId()
+                            + " → " + rendered.file()
+                            + " astPos=(" + tfb.x() + "," + tfb.y() + ")"
+                            + " astSize=(" + tfb.width() + "," + tfb.height() + ")"
+                            + " figPos=(" + figX + "," + figY + ")"
+                            + " figSize=(" + figW + "," + figH + ")"
+                            + (Math.abs(tfb.rotationAngle()) > 0.5 ? " rot=" + tfb.rotationAngle() : ""));
+                } catch (Exception e) {
+                    System.err.println("[FloatingRendered] " + tfb.sourceId()
+                            + " 교체 실패: " + e.getMessage());
+                }
+            }
+        }
+        if (replaced > 0) {
+            System.out.println("[FloatingRendered] " + replaced + "개 플로팅 텍스트 프레임을 이미지로 교체");
+        }
+    }
+
+    /**
      * AST의 인라인 앵커 텍스트 프레임 중 렌더링 대상을 이미지로 교체한다.
      * spread 레벨이 아닌 스토리 내부에 앵커된 TextFrame (e.g. "e.g." 라벨)은
      * replaceRenderedTextFrames()에서 처리할 수 없으므로 AST 단계에서 교체한다.
      */
-    private static java.util.Set<String> replaceInlineRenderedTextFrames(
+    static java.util.Set<String> replaceInlineRenderedTextFrames(
             ASTDocument astDoc, ResolvedData resolvedData, ConvertOptions options) {
         java.util.Set<String> replacedTexts = new java.util.HashSet<>();
         String resolvedDir = getResolvedDir(options);
@@ -433,7 +472,7 @@ public class IDMLToHwpxConverter {
      * InDesign에서 앵커된 TextFrame의 스토리가 독립 텍스트 프레임으로도 처리되어
      * 동일 텍스트가 중복 출현하는 문제를 해결한다.
      */
-    private static void removeFloatingDuplicates(ASTDocument astDoc, java.util.Set<String> replacedTexts) {
+    static void removeFloatingDuplicates(ASTDocument astDoc, java.util.Set<String> replacedTexts) {
         int removed = 0;
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection sec : astDoc.sections()) {
             java.util.Iterator<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock> it = sec.blocks().iterator();
@@ -541,24 +580,9 @@ public class IDMLToHwpxConverter {
         return text.isEmpty() ? null : text;
     }
 
-    /**
-     * PNG 파일의 가로세로 비율을 읽어 boundsH를 보정한다.
-     * 읽기 실패 시 boundsH를 그대로 반환한다.
-     */
-    private static double adjustHeightByPngRatio(java.io.File pngFile, double boundsW, double boundsH) {
-        try {
-            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-            if (img != null && img.getWidth() > 0) {
-                return boundsW * ((double) img.getHeight() / img.getWidth());
-            }
-        } catch (Exception e) {
-            // fallback: 원래 boundsH
-        }
-        return boundsH;
-    }
 
     /** resolved.json의 부모 디렉토리를 반환한다. */
-    private static String getResolvedDir(ConvertOptions options) {
+    static String getResolvedDir(ConvertOptions options) {
         if (options.resolvedJsonPath() == null) return null;
         java.io.File resolvedFile = new java.io.File(options.resolvedJsonPath());
         if (!resolvedFile.isAbsolute()) {

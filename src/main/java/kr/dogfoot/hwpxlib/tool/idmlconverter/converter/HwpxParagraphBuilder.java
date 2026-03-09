@@ -20,7 +20,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.CharPrBuilder;
 /**
  * AST 단락/텍스트 런/수식/줄바꿈을 HWPX SubList 내 Para로 변환한다.
  */
-class HwpxParagraphBuilder {
+public class HwpxParagraphBuilder {
 
     final HwpxConverterContext ctx;
 
@@ -29,11 +29,11 @@ class HwpxParagraphBuilder {
     private HwpxTableBuilder tableBuilder;
     private HwpxImageBuilder imageBuilder;
 
-    HwpxParagraphBuilder(HwpxConverterContext ctx) {
+    public HwpxParagraphBuilder(HwpxConverterContext ctx) {
         this.ctx = ctx;
     }
 
-    void setBuilders(HwpxTextBoxBuilder tb, HwpxTableBuilder tab, HwpxImageBuilder img) {
+    public void setBuilders(HwpxTextBoxBuilder tb, HwpxTableBuilder tab, HwpxImageBuilder img) {
         this.textBoxBuilder = tb;
         this.tableBuilder = tab;
         this.imageBuilder = img;
@@ -52,7 +52,7 @@ class HwpxParagraphBuilder {
 
         // 스타일 해결
         if (astPara.paragraphStyleRef() != null) {
-            String ref = ASTToHwpxConverter.resolveStyleRef(astPara.paragraphStyleRef(), ctx.styleRegistry);
+            String ref = HwpxUtil.resolveStyleRef(astPara.paragraphStyleRef(), ctx.styleRegistry);
             String mapped = ctx.styleRegistry.getParaPrId(ref);
             if (mapped != null) paraPrId = mapped;
             String mappedStyle = ctx.styleRegistry.getStyleId(ref);
@@ -85,7 +85,7 @@ class HwpxParagraphBuilder {
         }
 
         Para para = subList.addNewPara();
-        para.idAnd(ASTToHwpxConverter.nextParaId())
+        para.idAnd(HwpxUtil.nextParaId())
                 .paraPrIDRefAnd(paraPrId)
                 .styleIDRefAnd(styleId)
                 .pageBreakAnd(false)
@@ -255,11 +255,11 @@ class HwpxParagraphBuilder {
 
     ASTStyleDef findParagraphStyle(String styleRef) {
         if (styleRef == null) return null;
-        for (ASTStyleDef sd : ctx.doc.paragraphStyles()) {
+        for (ASTStyleDef sd : ctx.paragraphStyles) {
             if (styleRef.equals(sd.styleId())) return sd;
         }
         // ParagraphStyle/ 접두어 없이 검색
-        for (ASTStyleDef sd : ctx.doc.paragraphStyles()) {
+        for (ASTStyleDef sd : ctx.paragraphStyles) {
             String id = sd.styleId();
             if (id != null && id.endsWith("/" + styleRef)) return sd;
         }
@@ -339,7 +339,7 @@ class HwpxParagraphBuilder {
         if (alignStr == null && baseStyle != null) {
             alignStr = baseStyle.alignment();
         }
-        HorizontalAlign2 hAlign = ASTToHwpxConverter.mapAlignment(alignStr);
+        HorizontalAlign2 hAlign = HwpxUtil.mapAlignment(alignStr);
         paraPr.createAlign();
         paraPr.align().horizontalAnd(hAlign).vertical(VerticalAlign1.BASELINE);
 
@@ -452,7 +452,7 @@ class HwpxParagraphBuilder {
     // ── 텍스트 런 변환 ──
 
     void addTextRun(Para para, ASTTextRun textRun, String defaultCharPrId) {
-        String text = ASTToHwpxConverter.sanitizeText(textRun.text());
+        String text = HwpxUtil.sanitizeText(textRun.text());
         if (text == null || text.isEmpty()) return;
 
         String charPrId = defaultCharPrId;
@@ -461,7 +461,7 @@ class HwpxParagraphBuilder {
         if (hasCharacterOverrides(textRun)) {
             charPrId = createOverrideCharPr(textRun);
         } else if (textRun.characterStyleRef() != null) {
-            String charRef = ASTToHwpxConverter.resolveStyleRef(textRun.characterStyleRef(), ctx.styleRegistry);
+            String charRef = HwpxUtil.resolveStyleRef(textRun.characterStyleRef(), ctx.styleRegistry);
             String mapped = ctx.styleRegistry.getCharPrId(charRef);
             if (mapped != null) charPrId = mapped;
         }
@@ -696,7 +696,7 @@ class HwpxParagraphBuilder {
 
     // ── LineSeg ──
 
-    void addLineSegArray(Para para) {
+    public void addLineSegArray(Para para) {
         para.createLineSegArray();
         LineSeg lineSeg = para.lineSegArray().addNew();
         lineSeg.textposAnd(0).vertposAnd(0).vertsizeAnd(1000)
@@ -711,19 +711,18 @@ class HwpxParagraphBuilder {
     }
 
     void addEmptySubListPara(SubList subList, long cellHeight) {
-        // 셀 높이가 기본 폰트 줄 높이(약 1600 hwpunit)보다 작으면
-        // 전용 charPr(1pt) + paraPr(FIXED 줄간격)을 사용하여
-        // 한컴이 최소 행 높이로 셀을 늘리는 것을 방지
+        // 빈 셀은 항상 tiny 스타일(1pt 폰트 + FIXED 줄간격)을 적용하여
+        // 한컴의 기본 줄 간격이 셀 높이를 늘리는 것을 방지
         String paraPrId = "3";
         String charPrId = "0";
 
-        if (cellHeight > 0 && cellHeight < ConverterConstants.MIN_TEXT_BOX_HEIGHT) {
+        if (cellHeight > 0) {
             charPrId = getOrCreateTinyCharPr();
             paraPrId = getOrCreateTinyParaPr(cellHeight);
         }
 
         Para emptyPara = subList.addNewPara();
-        emptyPara.idAnd(ASTToHwpxConverter.nextParaId())
+        emptyPara.idAnd(HwpxUtil.nextParaId())
                 .paraPrIDRefAnd(paraPrId)
                 .styleIDRefAnd("0")
                 .pageBreakAnd(false)
@@ -794,7 +793,7 @@ class HwpxParagraphBuilder {
      */
     void addColPrResetParagraph(SubList subList) {
         Para colPrPara = subList.addNewPara();
-        colPrPara.idAnd(ASTToHwpxConverter.nextParaId())
+        colPrPara.idAnd(HwpxUtil.nextParaId())
                 .paraPrIDRefAnd("3")
                 .styleIDRefAnd("0")
                 .pageBreakAnd(false)

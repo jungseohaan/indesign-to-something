@@ -1,7 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.HWPXFile;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
 
@@ -19,9 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class HwpxConverterContext {
     final HWPXFile hwpxFile;
-    final StyleRegistry styleRegistry;
-    final FontRegistry fontRegistry;
-    final ASTDocument doc;
+    public final StyleRegistry styleRegistry;
+    public final FontRegistry fontRegistry;
+    public final List<ASTStyleDef> paragraphStyles;
     final AtomicInteger borderFillIdCounter;
 
     // CharPr 캐시: 동일한 인라인 오버라이드 조합을 재사용
@@ -34,25 +34,25 @@ public class HwpxConverterContext {
     final Map<Long, String> tinyParaPrCache = new LinkedHashMap<>();
 
     // HwpxTextBoxBuilder.addInlineTextFrame() 에서 인라인 테이블 처리를 위한 참조
-    HwpxTableBuilder tableBuilderRef;
+    public HwpxTableBuilder tableBuilderRef;
 
     // 현재 섹션의 컬럼 너비 (HWPUNIT) — 오버레이 위치 계산에 사용
-    long currentColumnWidth;
+    public long currentColumnWidth;
 
     // 연결 글상자 링크 추적
     // storyId → 사전 할당된 linkListIDRef 배열 (블록 순서대로)
-    final Map<String, java.util.List<String>> storyLinkIds = new LinkedHashMap<>();
+    public final Map<String, java.util.List<String>> storyLinkIds = new LinkedHashMap<>();
     // storyId → 현재까지 변환된 블록 인덱스
-    final Map<String, Integer> storyLinkIndex = new LinkedHashMap<>();
+    public final Map<String, Integer> storyLinkIndex = new LinkedHashMap<>();
 
     // ── 오버레이 페이지 레벨 승격 ──
     // 테이블 셀 내부의 오버레이 rect는 한글에서 정상 렌더링되지 않으므로
     // 페이지 레벨(PAPER-relative)로 승격하여 렌더링한다.
-    static class DeferredOverlay {
-        ASTInlineObject overlay;
-        long pageX, pageY;
+    public static class DeferredOverlay {
+        public ASTInlineObject overlay;
+        public long pageX, pageY;
     }
-    final List<DeferredOverlay> deferredOverlays = new ArrayList<>();
+    public final List<DeferredOverlay> deferredOverlays = new ArrayList<>();
 
     // 현재 처리 중인 블록의 페이지 좌표 (오버레이 좌표 계산용)
     long blockPageX, blockPageY;
@@ -66,16 +66,16 @@ public class HwpxConverterContext {
     String spacerImageId;
 
     // 변환 통계
-    int imagesConverted;
-    int equationsConverted;
-    int framesConverted;
+    public int imagesConverted;
+    public int equationsConverted;
+    public int framesConverted;
 
     public HwpxConverterContext(HWPXFile hwpxFile, StyleRegistry styleRegistry,
-                                FontRegistry fontRegistry, ASTDocument doc) {
+                                FontRegistry fontRegistry, List<ASTStyleDef> paragraphStyles) {
         this.hwpxFile = hwpxFile;
         this.styleRegistry = styleRegistry;
         this.fontRegistry = fontRegistry;
-        this.doc = doc;
+        this.paragraphStyles = paragraphStyles;
         this.borderFillIdCounter = new AtomicInteger(3);
     }
 }

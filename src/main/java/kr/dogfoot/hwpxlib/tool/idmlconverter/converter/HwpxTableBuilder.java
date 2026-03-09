@@ -15,19 +15,19 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 /**
  * ASTTable → HWPX Table(플로팅 또는 인라인)로 변환한다.
  */
-class HwpxTableBuilder {
+public class HwpxTableBuilder {
 
     private final HwpxConverterContext ctx;
     private final HwpxParagraphBuilder paragraphBuilder;
 
-    HwpxTableBuilder(HwpxConverterContext ctx, HwpxParagraphBuilder paragraphBuilder) {
+    public HwpxTableBuilder(HwpxConverterContext ctx, HwpxParagraphBuilder paragraphBuilder) {
         this.ctx = ctx;
         this.paragraphBuilder = paragraphBuilder;
     }
 
     // ── 플로팅 테이블 변환 ──
 
-    void convertTable(Para framePara, ASTTable astTable) {
+    public void convertTable(Para framePara, ASTTable astTable) {
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
 
@@ -38,7 +38,7 @@ class HwpxTableBuilder {
         Table table = anchorRun.addNewTable();
 
         // ShapeObject
-        String tableId = ASTToHwpxConverter.nextShapeId();
+        String tableId = HwpxUtil.nextShapeId();
         table.idAnd(tableId)
                 .zOrderAnd(astTable.zOrder())
                 .numberingTypeAnd(NumberingType.TABLE)
@@ -100,7 +100,7 @@ class HwpxTableBuilder {
         long totalWidth = astTable.width();
 
         Para tablePara = subList.addNewPara();
-        tablePara.idAnd(ASTToHwpxConverter.nextParaId())
+        tablePara.idAnd(HwpxUtil.nextParaId())
                 .paraPrIDRefAnd("3")
                 .styleIDRefAnd("0")
                 .pageBreakAnd(false)
@@ -111,7 +111,7 @@ class HwpxTableBuilder {
         run.charPrIDRef("0");
 
         Table table = run.addNewTable();
-        String tableId = ASTToHwpxConverter.nextShapeId();
+        String tableId = HwpxUtil.nextShapeId();
 
         table.idAnd(tableId)
                 .zOrderAnd(0)

@@ -50,9 +50,19 @@ public class ASTTableSpacerMerger {
             ASTTableRow below = (runEnd < rows.size() && !isSpacer[runEnd])
                     ? rows.get(runEnd) : null;
 
-            // spacer 높이는 인접 행에 추가하지 않고 단순 제거 (테이블 전체 높이 축소)
-            if (above != null || below != null) {
-                // 제거 진행 (아무 작업 없음)
+            // spacer 높이를 축소하여 위 행의 셀 여백(bottom)으로 흡수
+            long absorbedHeight = runHeight * 3 / 4;
+            removedHeight += runHeight - absorbedHeight;
+            if (above != null) {
+                above.rowHeight(above.rowHeight() + absorbedHeight);
+                for (ASTTableCell ac : above.cells()) {
+                    ac.marginBottom(ac.marginBottom() + absorbedHeight);
+                }
+            } else if (below != null) {
+                below.rowHeight(below.rowHeight() + absorbedHeight);
+                for (ASTTableCell bc : below.cells()) {
+                    bc.marginTop(bc.marginTop() + absorbedHeight);
+                }
             } else {
                 // 양쪽 모두 spacer 또는 없음 → 제거 취소
                 for (int k = runEnd - 1; k >= runStart; k--) {
