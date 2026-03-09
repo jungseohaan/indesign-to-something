@@ -166,13 +166,13 @@ public class IDMLLoader {
             // 6. 스프레드에서 참조하는 Story들 수집
             Set<String> neededStoryIds = IDMLStoryParser.collectNeededStoryIds(doc);
 
-            // 7. Story 로드
+            // 7. Story 로드 (TextVariable 해결 값도 함께 수집)
             File storiesDir = new File(dir, "Stories");
             if (storiesDir.exists() && storiesDir.isDirectory()) {
                 for (String storyId : neededStoryIds) {
                     File storyFile = new File(storiesDir, "Story_" + storyId + ".xml");
                     if (storyFile.exists()) {
-                        IDMLStory story = IDMLStoryParser.parseStory(parseXML(storyFile), storyId);
+                        IDMLStory story = IDMLStoryParser.parseStory(parseXML(storyFile), storyId, doc);
                         doc.putStory(storyId, story);
                     }
                 }

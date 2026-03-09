@@ -96,11 +96,6 @@ public class IDMLToHwpxConverter {
                 replaceRenderedTextFrames(idmlDoc, resolvedData, options);
             }
 
-            // Phase 1.7b: 렌더링된 그룹 교체 — 하위 호환 (그룹 자식 → 단일 합성 이미지)
-            if (resolvedData != null && resolvedData.renderedGroupCount() > 0) {
-                replaceRenderedGroups(idmlDoc, resolvedData, options);
-            }
-
             // Phase 2: IDML -> ASTDocument (4단계 정규화, resolved 좌표 활용)
             reporter.reportProgress(5, 100, "IDML 정규화 중...");
             ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
@@ -292,17 +287,7 @@ public class IDMLToHwpxConverter {
                 double spreadCenterY = offsetTop + (rb[0] + rb[2]) / 2.0;
                 double spreadCenterX = offsetLeft + (rb[1] + rb[3]) / 2.0;
                 double boundsW = rb[3] - rb[1];
-                double boundsH = rb[2] - rb[0];
-
-                try {
-                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-                    if (img != null && img.getWidth() > 0) {
-                        double pngRatio = (double) img.getHeight() / img.getWidth();
-                        boundsH = boundsW * pngRatio;
-                    }
-                } catch (Exception e) {
-                    // fallback: resolved bounds 크기 그대로
-                }
+                double boundsH = adjustHeightByPngRatio(pngFile, boundsW, rb[2] - rb[0]);
 
                 double[] absBounds = new double[]{
                         spreadCenterY - boundsH / 2.0, spreadCenterX - boundsW / 2.0,
@@ -362,15 +347,7 @@ public class IDMLToHwpxConverter {
                 double spreadCenterY = offsetTop + (rb[0] + rb[2]) / 2.0;
                 double spreadCenterX = offsetLeft + (rb[1] + rb[3]) / 2.0;
                 double boundsW = rb[3] - rb[1];
-                double boundsH = rb[2] - rb[0];
-
-                try {
-                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-                    if (img != null && img.getWidth() > 0) {
-                        double pngRatio = (double) img.getHeight() / img.getWidth();
-                        boundsH = boundsW * pngRatio;
-                    }
-                } catch (Exception e) {}
+                double boundsH = adjustHeightByPngRatio(pngFile, boundsW, rb[2] - rb[0]);
 
                 double[] absBounds = new double[]{
                         spreadCenterY - boundsH / 2.0, spreadCenterX - boundsW / 2.0,
@@ -564,6 +541,22 @@ public class IDMLToHwpxConverter {
         return text.isEmpty() ? null : text;
     }
 
+    /**
+     * PNG 파일의 가로세로 비율을 읽어 boundsH를 보정한다.
+     * 읽기 실패 시 boundsH를 그대로 반환한다.
+     */
+    private static double adjustHeightByPngRatio(java.io.File pngFile, double boundsW, double boundsH) {
+        try {
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+            if (img != null && img.getWidth() > 0) {
+                return boundsW * ((double) img.getHeight() / img.getWidth());
+            }
+        } catch (Exception e) {
+            // fallback: 원래 boundsH
+        }
+        return boundsH;
+    }
+
     /** resolved.json의 부모 디렉토리를 반환한다. */
     private static String getResolvedDir(ConvertOptions options) {
         if (options.resolvedJsonPath() == null) return null;
@@ -572,188 +565,6 @@ public class IDMLToHwpxConverter {
             resolvedFile = resolvedFile.getAbsoluteFile();
         }
         return resolvedFile.getParent();
-    }
-
-    /**
-     * 렌더링된 그룹을 단일 합성 이미지 프레임으로 교체한다.
-     * resolved.json의 renderedGroups 배열에 기록된 그룹의 자식 요소들을
-     * 스프레드에서 제거하고, pre-rendered JPEG을 참조하는 단일 IDMLImageFrame으로 대체한다.
-     */
-    private static void replaceRenderedGroups(IDMLDocument idmlDoc,
-                                               ResolvedData resolvedData,
-                                               ConvertOptions options) {
-        // resolved.json 기준 디렉토리 (group_renders/ 경로 해석용)
-        String resolvedDir = null;
-        if (options.resolvedJsonPath() != null) {
-            File resolvedFile = new File(options.resolvedJsonPath());
-            // 상대 경로일 때 절대 경로로 변환
-            if (!resolvedFile.isAbsolute()) {
-                resolvedFile = resolvedFile.getAbsoluteFile();
-            }
-            resolvedDir = resolvedFile.getParent();
-        }
-        if (resolvedDir == null) return;
-
-        int replacedCount = 0;
-
-        for (IDMLSpread spread : idmlDoc.spreads()) {
-            for (IDMLGroup group : spread.groups()) {
-                String groupIdmlId = group.selfId();  // e.g., "u1735"
-                RenderedGroup rendered = resolvedData.getRenderedGroupByIdmlId(groupIdmlId);
-                if (rendered == null) continue;
-
-                // 1. 그룹 자식의 최소 z-order 확보 (제거 전)
-                int groupZOrder = findMinZOrderOfGroup(spread, groupIdmlId);
-
-                // 2. 그룹의 자식 요소들을 스프레드에서 제거 (보존 대상 TextFrame 제외)
-                removeGroupChildren(spread, groupIdmlId, rendered);
-
-                // 3. 합성 이미지 프레임 생성
-                // PNG는 이미 회전/스케일 적용된 최종 이미지이므로
-                // 절대 위치(spread 좌표)로 배치하고 identity transform 사용
-                double[] origBounds = group.geometricBounds();
-                double[] origTransform = group.itemTransform();
-                double[] absBox = IDMLGeometry.getTransformedBoundingBox(origBounds, origTransform);
-                // absBox: [minX, minY, maxX, maxY] → IDML bounds: [top, left, bottom, right]
-                double[] absBounds = new double[]{absBox[1], absBox[0], absBox[3], absBox[2]};
-
-                // visibleBounds 보정: PNG exportFile은 visibleBounds 영역을 내보내므로
-                // geometricBounds와의 비율/오프셋으로 IDML bounds를 확장
-                double[] ve = rendered.visibleExpansion();
-                if (ve != null && ve.length >= 4) {
-                    double idmlW = absBounds[3] - absBounds[1]; // right - left
-                    double idmlH = absBounds[2] - absBounds[0]; // bottom - top
-                    double centerX = (absBounds[1] + absBounds[3]) / 2.0;
-                    double centerY = (absBounds[0] + absBounds[2]) / 2.0;
-                    // ve: [widthRatio, heightRatio, offsetRatioX, offsetRatioY]
-                    double newW = idmlW * ve[0];
-                    double newH = idmlH * ve[1];
-                    double newCenterX = centerX + idmlW * ve[2];
-                    double newCenterY = centerY + idmlH * ve[3];
-                    absBounds[0] = newCenterY - newH / 2.0;  // top
-                    absBounds[1] = newCenterX - newW / 2.0;  // left
-                    absBounds[2] = newCenterY + newH / 2.0;  // bottom
-                    absBounds[3] = newCenterX + newW / 2.0;  // right
-                }
-
-                IDMLImageFrame syntheticFrame = new IDMLImageFrame();
-                syntheticFrame.selfId(groupIdmlId + "_rendered");
-                syntheticFrame.geometricBounds(absBounds);
-                syntheticFrame.itemTransform(new double[]{1, 0, 0, 1, 0, 0});  // identity
-                syntheticFrame.zOrder(groupZOrder);
-                syntheticFrame.fromGroup(false);  // 합성된 이미지이므로 일반 이미지로 취급
-
-                // 절대 경로로 이미지 참조
-                String absPath = new File(resolvedDir, rendered.file()).getAbsolutePath();
-                boolean pngExists = new File(absPath).exists();
-                syntheticFrame.linkResourceURI(absPath);
-                syntheticFrame.linkStoredState("Normal");
-                syntheticFrame.linkResourceFormat("PNG");
-
-                spread.addImageFrame(syntheticFrame);
-                replacedCount++;
-
-                int preservedCount = rendered.preservedTextFrameIdmlIds().size();
-                System.out.println("[RenderedGroup] " + groupIdmlId
-                        + " → " + rendered.file()
-                        + (pngExists ? "" : " [PNG NOT FOUND: " + absPath + "]")
-                        + " bounds=[" + String.format("%.1f,%.1f,%.1f,%.1f",
-                            absBounds[0], absBounds[1], absBounds[2], absBounds[3]) + "]"
-                        + (preservedCount > 0 ? " preserved=" + preservedCount : "")
-                        + " z=" + groupZOrder + ")");
-            }
-        }
-
-        if (replacedCount > 0) {
-            System.out.println("[RenderedGroup] " + replacedCount + "개 그룹을 합성 이미지로 교체");
-        }
-    }
-
-    /**
-     * 특정 그룹에서 추출된 자식 요소들을 스프레드에서 제거한다.
-     * 중첩 그룹의 자식도 모두 제거한다.
-     * 보존 대상 TextFrame(긴 텍스트)은 제거하지 않고 글상자로 유지한다.
-     */
-    private static void removeGroupChildren(IDMLSpread spread, String groupIdmlId,
-                                            RenderedGroup rendered) {
-        // 중첩 그룹 포함 전체 그룹 ID 수집
-        java.util.Set<String> allGroupIds = new java.util.HashSet<String>();
-        allGroupIds.add(groupIdmlId);
-        for (IDMLGroup grp : spread.groups()) {
-            if (groupIdmlId.equals(grp.selfId())) {
-                collectChildGroupIds(grp, allGroupIds);
-                break;
-            }
-        }
-
-        int removedTF = 0, removedIF = 0, removedVS = 0;
-
-        java.util.Iterator<IDMLTextFrame> tfIter = spread.textFrames().iterator();
-        while (tfIter.hasNext()) {
-            IDMLTextFrame tf = tfIter.next();
-            if (allGroupIds.contains(tf.parentGroupId())) {
-                if (rendered.isPreservedTextFrame(tf.selfId())) {
-                    continue;
-                }
-                tfIter.remove();
-                removedTF++;
-            }
-        }
-        java.util.Iterator<IDMLImageFrame> ifIter = spread.imageFrames().iterator();
-        while (ifIter.hasNext()) {
-            if (allGroupIds.contains(ifIter.next().parentGroupId())) {
-                ifIter.remove();
-                removedIF++;
-            }
-        }
-        java.util.Iterator<IDMLVectorShape> vsIter = spread.vectorShapes().iterator();
-        while (vsIter.hasNext()) {
-            if (allGroupIds.contains(vsIter.next().parentGroupId())) {
-                vsIter.remove();
-                removedVS++;
-            }
-        }
-
-        if (allGroupIds.size() > 1) {
-            System.out.println("[RenderedGroup] " + groupIdmlId
-                    + " nested groups: " + (allGroupIds.size() - 1)
-                    + ", removed: TF=" + removedTF + " IF=" + removedIF + " VS=" + removedVS);
-        }
-    }
-
-    /** 그룹의 모든 자식 그룹 ID를 재귀적으로 수집한다. */
-    private static void collectChildGroupIds(IDMLGroup group, java.util.Set<String> ids) {
-        for (IDMLGroup child : group.childGroups()) {
-            ids.add(child.selfId());
-            collectChildGroupIds(child, ids);
-        }
-    }
-
-    /**
-     * 그룹(중첩 포함)에 속한 자식 요소들의 최소 z-order를 반환한다.
-     * 합성 이미지 프레임이 원본 그룹의 스태킹 위치를 유지하도록 사용.
-     */
-    private static int findMinZOrderOfGroup(IDMLSpread spread, String groupIdmlId) {
-        java.util.Set<String> allGroupIds = new java.util.HashSet<String>();
-        allGroupIds.add(groupIdmlId);
-        for (IDMLGroup grp : spread.groups()) {
-            if (groupIdmlId.equals(grp.selfId())) {
-                collectChildGroupIds(grp, allGroupIds);
-                break;
-            }
-        }
-        int minZ = Integer.MAX_VALUE;
-        for (IDMLImageFrame imgF : spread.imageFrames()) {
-            if (allGroupIds.contains(imgF.parentGroupId()) && imgF.zOrder() < minZ) {
-                minZ = imgF.zOrder();
-            }
-        }
-        for (IDMLVectorShape vs : spread.vectorShapes()) {
-            if (allGroupIds.contains(vs.parentGroupId()) && vs.zOrder() < minZ) {
-                minZ = vs.zOrder();
-            }
-        }
-        return minZ == Integer.MAX_VALUE ? 0 : minZ;
     }
 
     /**

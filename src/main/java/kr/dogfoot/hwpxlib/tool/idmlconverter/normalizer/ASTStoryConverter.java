@@ -518,6 +518,7 @@ class ASTStoryConverter {
         }
         obj.fillTint(tf.fillTint());
         obj.cornerRadius(tf.cornerRadius());
+        obj.verticalJustification(tf.verticalJustification());
 
         // 내부 여백 전달
         if (tf.insetSpacing() != null) {

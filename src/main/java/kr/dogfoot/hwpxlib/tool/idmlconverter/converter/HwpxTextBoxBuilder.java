@@ -1011,7 +1011,7 @@ class HwpxTextBoxBuilder {
 
         bf.idAnd(bfId)
                 .threeDAnd(false)
-                .shadowAnd(false)
+                .shadowAnd(block.dropShadow())
                 .centerLineAnd(CenterLineSort.NONE)
                 .breakCellSeparateLine(false);
 
@@ -1070,6 +1070,18 @@ class HwpxTextBoxBuilder {
         boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
         boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
         if (!hasParagraphs && !hasInlineTables) return;
+
+        // 테이블 셀 내부 오버레이 → 페이지 레벨로 승격
+        // 한글(HWPX 렌더러)이 테이블 셀 SubList 내부의 플로팅 객체를 지원하지 않으므로
+        // 페이지 레벨 PAPER 기준 절대 좌표로 변환한다.
+        if (obj.isOverlay() && ctx.insideTableCell) {
+            HwpxConverterContext.DeferredOverlay d = new HwpxConverterContext.DeferredOverlay();
+            d.overlay = obj;
+            d.pageX = ctx.blockPageX + ctx.blockInsetLeft + obj.overlayX();
+            d.pageY = ctx.blockPageY + ctx.blockInsetTop + obj.overlayY();
+            ctx.deferredOverlays.add(d);
+            return;
+        }
 
         long w = obj.width() > 0 ? obj.width() : 5000;
         if (w < ConverterConstants.MIN_TEXT_BOX_WIDTH) w = ConverterConstants.MIN_TEXT_BOX_WIDTH;
@@ -1336,15 +1348,17 @@ class HwpxTextBoxBuilder {
         tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
         tc.createCellSz();
         tc.cellSz().widthAnd(w).heightAnd(h);
+        // 셀 여백: 페이지 레벨 승격된 오버레이는 위치가 절대 좌표로 이미 처리되므로
+        // applyImplicitTextMargin()이 설정한 위치 기반 여백은 사용하지 않는다.
         tc.createCellMargin();
-        tc.cellMargin().leftAnd(obj.textMarginLeft()).rightAnd(obj.textMarginRight())
-                .topAnd(obj.textMarginTop()).bottomAnd(obj.textMarginBottom());
+        tc.cellMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         tc.createSubList();
         SubList subList = tc.subList();
+        VerticalAlign2 vAlign = mapVerticalJustification(obj.verticalJustification());
         subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
                 .lineWrapAnd(LineWrapMethod.BREAK)
-                .vertAlignAnd(VerticalAlign2.TOP)
+                .vertAlignAnd(vAlign)
                 .linkListIDRefAnd("0").linkListNextIDRefAnd("0");
 
         for (ASTParagraph astPara : obj.paragraphs()) {

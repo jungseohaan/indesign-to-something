@@ -15,6 +15,10 @@ class IDMLStoryParser {
     // ===== Story XML 파싱 =====
 
     static IDMLStory parseStory(Document storyDoc, String storyId) {
+        return parseStory(storyDoc, storyId, null);
+    }
+
+    static IDMLStory parseStory(Document storyDoc, String storyId, IDMLDocument doc) {
         IDMLStory story = new IDMLStory();
         story.selfId(storyId);
 
@@ -71,7 +75,7 @@ class IDMLStoryParser {
                 }
             }
 
-            List<IDMLParagraph> parsedParas = parseParagraphs(paraRange);
+            List<IDMLParagraph> parsedParas = parseParagraphs(paraRange, doc);
             for (IDMLParagraph para : parsedParas) {
                 story.addParagraph(para);
             }
@@ -305,6 +309,10 @@ class IDMLStoryParser {
      * ParagraphStyleRange → IDMLParagraph 리스트.
      */
     static List<IDMLParagraph> parseParagraphs(Element paraRange) {
+        return parseParagraphs(paraRange, null);
+    }
+
+    static List<IDMLParagraph> parseParagraphs(Element paraRange, IDMLDocument doc) {
         List<IDMLParagraph> result = new ArrayList<>();
         IDMLParagraph currentPara = createParagraphFromRange(paraRange);
 
@@ -376,6 +384,13 @@ class IDMLStoryParser {
                     String resultText = getAttrOrNull(elem, "ResultText");
                     if (resultText != null && !resultText.isEmpty()) {
                         contentBuilder.append(resultText);
+                        // 해결된 값(비플레이스홀더)을 문서에 저장
+                        if (doc != null && !resultText.startsWith("<#")) {
+                            String varName = getAttrOrNull(elem, "Name");
+                            if (varName != null) {
+                                doc.putTextVariableValue(varName, resultText);
+                            }
+                        }
                     }
                 } else if ("Rectangle".equals(tag) || "Polygon".equals(tag)
                         || "Oval".equals(tag) || "GraphicLine".equals(tag)) {
@@ -710,6 +725,16 @@ class IDMLStoryParser {
                 tf.appliedObjectStyle(getAttrOrNull(child, "AppliedObjectStyle"));
                 tf.geometricBounds(IDMLSpreadParser.resolveGeometricBounds(child));
                 tf.itemTransform(IDMLGeometry.parseTransform(child.getAttribute("ItemTransform")));
+
+                // TextFramePreference — VerticalJustification 파싱
+                Element tfPref = getFirstChildElement(child, "TextFramePreference");
+                if (tfPref != null) {
+                    String vJust = getAttrOrNull(tfPref, "VerticalJustification");
+                    if (vJust != null) {
+                        tf.verticalJustification(vJust);
+                    }
+                }
+
                 target.addChildTextFrame(tf);
 
                 // 장식용 TextFrame(fill 있고 PathGeometry 도형) → 벡터 도형으로도 파싱 (체크마크 등)
@@ -967,6 +992,7 @@ class IDMLStoryParser {
         }
     }
 
+
     // ===== Story ID 수집 =====
 
     /**
@@ -1013,7 +1039,7 @@ class IDMLStoryParser {
             File storyFile = new File(storiesDir, "Story_" + storyId + ".xml");
             if (!storyFile.exists()) continue;
 
-            IDMLStory story = parseStory(parseXML(storyFile), storyId);
+            IDMLStory story = parseStory(parseXML(storyFile), storyId, doc);
             doc.putStory(storyId, story);
 
             // 새로 로드된 스토리에서 또 다른 인라인 참조 수집

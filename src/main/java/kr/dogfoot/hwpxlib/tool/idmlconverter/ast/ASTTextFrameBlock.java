@@ -44,6 +44,9 @@ public class ASTTextFrameBlock extends ASTBlock {
     private String wrapperFillColor;
     private double wrapperFillTint = -1;
 
+    // 드롭 섀도우
+    private boolean dropShadow;
+
     // 폴리곤 경로 (비사각형 프레임용, 페이지 상대 HWPUNIT 좌표)
     private long[] pathPointsX; // null이면 사각형
     private long[] pathPointsY;
@@ -133,6 +136,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public long narrowedWidth() { return narrowedWidth; }
     public void narrowedWidth(long v) { this.narrowedWidth = v; }
+
+    public boolean dropShadow() { return dropShadow; }
+    public void dropShadow(boolean v) { this.dropShadow = v; }
 
     /** 실제 렌더링에 사용할 폭. narrowedWidth가 설정되면 그 값, 아니면 원래 width. */
     public long effectiveWidth() {

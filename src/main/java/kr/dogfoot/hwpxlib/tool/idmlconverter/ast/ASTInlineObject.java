@@ -82,6 +82,9 @@ public class ASTInlineObject extends ASTInlineItem {
     private java.util.List<ASTParagraph> paragraphs;
     private java.util.List<ASTTable> inlineTables;
 
+    // 텍스트 프레임 수직 정렬 (TopAlign, CenterAlign, BottomAlign)
+    private String verticalJustification;
+
     public ItemType itemType() { return ItemType.INLINE_OBJECT; }
 
     public ObjectKind kind() { return kind; }
@@ -222,4 +225,7 @@ public class ASTInlineObject extends ASTInlineItem {
         if (this.inlineTables == null) this.inlineTables = new java.util.ArrayList<>();
         this.inlineTables.add(t);
     }
+
+    public String verticalJustification() { return verticalJustification; }
+    public void verticalJustification(String v) { this.verticalJustification = v; }
 }

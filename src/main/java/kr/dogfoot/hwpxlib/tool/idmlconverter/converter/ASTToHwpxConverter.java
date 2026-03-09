@@ -245,29 +245,20 @@ public class ASTToHwpxConverter {
             }
         }
 
-        // 텍스트 프레임 → 인라인 글상자 또는 플로팅 테이블로 변환
-        List<ASTTextFrameBlock> inlineBlocks = new ArrayList<>();
+        // 텍스트 프레임 → 플로팅 테이블로 변환 (모든 프레임은 절대 좌표 기반)
         List<ASTTextFrameBlock> floatingBlocks = new ArrayList<>();
         List<ASTTextFrameBlock> backgroundBlocks = new ArrayList<>();
         for (ASTTextFrameBlock block : textFrameBlocks) {
-            if (!needsFloatingPosition(block, layout)) {
-                inlineBlocks.add(block);
-            } else if (block.isBackgroundOnly()) {
+            if (block.isBackgroundOnly()) {
                 backgroundBlocks.add(block);
             } else {
                 floatingBlocks.add(block);
             }
         }
 
-        // 인라인 글상자: 읽기 순서 정렬 후 변환
-        sortInReadingOrder(inlineBlocks);
-        for (ASTTextFrameBlock block : inlineBlocks) {
-            textBoxBuilder.addTextBox(sectionFile, block);
-            ctx.framesConverted++;
-        }
-
         // SecPr 단락 생성 — 이 단락 하나에 모든 플로팅 객체 + secPr을 넣는다.
-        Para secPrPara = createSectionPara(sectionFile);
+        // 첫 페이지 이후에는 pageBreak=true로 설정 → 플로팅 객체가 올바른 페이지에 위치
+        Para secPrPara = createSectionPara(sectionFile, pagesConverted > 0);
 
         // 1) BEHIND_TEXT FIGURE: 배경 이미지 (그룹 외부)를 먼저 배치
         for (ASTBlock block : otherBlocks) {
@@ -332,44 +323,17 @@ public class ASTToHwpxConverter {
 
     // ── 프레임 배치 판별 / 정렬 ──
 
-    /**
-     * 텍스트 프레임이 플로팅 배치가 필요한지 판별.
-     * IDML의 모든 텍스트 프레임은 절대 좌표를 가지므로 플로팅으로 배치한다.
-     */
-    private boolean needsFloatingPosition(ASTTextFrameBlock block, ASTPageLayout layout) {
-        return true;
-    }
-
-    /**
-     * TEXT_FRAME_BLOCK 리스트를 읽기 순서 (위→아래, 왼→오른)로 정렬.
-     */
-    private void sortInReadingOrder(List<ASTTextFrameBlock> blocks) {
-        long minHeight = Long.MAX_VALUE;
-        for (ASTTextFrameBlock b : blocks) {
-            if (b.height() > 0 && b.height() < minHeight) minHeight = b.height();
-        }
-        final long tolerance = minHeight > 0 && minHeight < Long.MAX_VALUE ? minHeight / 5 : 500;
-
-        blocks.sort((a, b) -> {
-            long yDiff = a.y() - b.y();
-            if (Math.abs(yDiff) <= tolerance) {
-                return Long.compare(a.x(), b.x());
-            }
-            return Long.compare(a.y(), b.y());
-        });
-    }
-
     // ── SecPr 생성 ──
 
     /**
      * 섹션 단락 생성 (플로팅 객체 + secPr을 담을 단일 단락).
      */
-    private Para createSectionPara(SectionXMLFile sectionFile) {
+    private Para createSectionPara(SectionXMLFile sectionFile, boolean pageBreak) {
         Para para = sectionFile.addNewPara();
         para.idAnd(nextParaId())
                 .paraPrIDRefAnd("3")
                 .styleIDRefAnd("0")
-                .pageBreakAnd(false)
+                .pageBreakAnd(pageBreak)
                 .columnBreakAnd(false)
                 .merged(false);
         return para;

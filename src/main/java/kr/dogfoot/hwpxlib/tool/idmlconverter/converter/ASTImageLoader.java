@@ -715,6 +715,7 @@ public class ASTImageLoader {
             awtShape = createAwtShape(renderTarget, scale);
         }
 
+
         // 채우기 (tint는 색상 농도로 RGB에 적용, opacity만 alpha에 적용)
         if (actualFillHex != null && renderTarget.hasFill()) {
             Color fillColor = hexToColor(actualFillHex);

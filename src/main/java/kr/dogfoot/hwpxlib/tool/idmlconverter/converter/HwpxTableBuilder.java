@@ -85,7 +85,7 @@ class HwpxTableBuilder {
         table.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         // 행(Tr) 생성
-        buildTableRows(table, astTable);
+        buildTableRows(table, astTable, x, y);
 
         // 테이블 뒤에 빈 텍스트 요소 추가 (한글 렌더링 필수)
         anchorRun.addNewT().addText("");
@@ -154,8 +154,10 @@ class HwpxTableBuilder {
         table.createInMargin();
         table.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
-        // 행(Tr) 생성
-        buildTableRows(table, astTable);
+        // 행(Tr) 생성 — 인라인 테이블은 텍스트 프레임 내부이므로 현재 블록 좌표 사용
+        long inlineTableX = ctx.blockPageX + ctx.blockInsetLeft;
+        long inlineTableY = ctx.blockPageY + ctx.blockInsetTop + ctx.cellContentYCursor;
+        buildTableRows(table, astTable, inlineTableX, inlineTableY);
 
         // 테이블 뒤에 빈 텍스트 요소 추가 (한글 렌더링 필수)
         run.addNewT().addText("");
@@ -163,11 +165,36 @@ class HwpxTableBuilder {
 
     // ── 공통 행/셀 생성 ──
 
-    private void buildTableRows(Table table, ASTTable astTable) {
+    private void buildTableRows(Table table, ASTTable astTable, long tablePageX, long tablePageY) {
+        // 오버레이 승격을 위해 컨텍스트 저장/복원
+        boolean savedInsideTableCell = ctx.insideTableCell;
+        long savedBlockPageX = ctx.blockPageX;
+        long savedBlockPageY = ctx.blockPageY;
+        long savedBlockInsetLeft = ctx.blockInsetLeft;
+        long savedBlockInsetTop = ctx.blockInsetTop;
+        long savedCellContentYCursor = ctx.cellContentYCursor;
+
+        ctx.insideTableCell = true;
+        long rowYOffset = 0;
+
         for (ASTTableRow astRow : astTable.rows()) {
             Tr tr = table.addNewTr();
 
             for (ASTTableCell astCell : astRow.cells()) {
+                // 셀의 컬럼 X 오프셋 계산
+                long cellColX = 0;
+                java.util.List<Long> colWidths = astTable.columnWidths();
+                for (int c = 0; c < astCell.columnIndex() && c < colWidths.size(); c++) {
+                    cellColX += colWidths.get(c);
+                }
+
+                // 오버레이 좌표 계산용 컨텍스트 설정
+                ctx.blockPageX = tablePageX + cellColX;
+                ctx.blockPageY = tablePageY + rowYOffset;
+                ctx.blockInsetLeft = astCell.marginLeft();
+                ctx.blockInsetTop = astCell.marginTop();
+                ctx.cellContentYCursor = 0;
+
                 Tc tc = tr.addNewTc();
 
                 String cellBorderFillId = createCellBorderFill(astCell);
@@ -227,7 +254,17 @@ class HwpxTableBuilder {
                     paragraphBuilder.addEmptySubListPara(subList, astCell.height());
                 }
             }
+
+            rowYOffset += astRow.rowHeight();
         }
+
+        // 컨텍스트 복원
+        ctx.insideTableCell = savedInsideTableCell;
+        ctx.blockPageX = savedBlockPageX;
+        ctx.blockPageY = savedBlockPageY;
+        ctx.blockInsetLeft = savedBlockInsetLeft;
+        ctx.blockInsetTop = savedBlockInsetTop;
+        ctx.cellContentYCursor = savedCellContentYCursor;
     }
 
     // ── 셀 BorderFill 생성 ──

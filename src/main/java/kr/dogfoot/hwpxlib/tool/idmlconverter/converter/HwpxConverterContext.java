@@ -59,6 +59,9 @@ public class HwpxConverterContext {
     long blockInsetLeft, blockInsetTop;
     long cellContentYCursor; // 셀 내 처리된 단락의 누적 높이
 
+    // 현재 테이블 셀 내부 처리 중 여부 (오버레이 승격 판별용)
+    boolean insideTableCell;
+
     // 스페이서 이미지 캐시 (1x1 투명 PNG, 한 번 등록 후 재사용)
     String spacerImageId;
 

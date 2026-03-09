@@ -79,14 +79,7 @@ public class ResolvedDataReader {
             }
         }
 
-        // renderedGroups (하위 호환)
-        if (root.has("renderedGroups")) {
-            for (JsonElement e : root.getAsJsonArray("renderedGroups")) {
-                data.addRenderedGroup(parseRenderedGroup(e.getAsJsonObject()));
-            }
-        }
-
-        // renderedTextFrames (새 포맷)
+        // renderedTextFrames
         if (root.has("renderedTextFrames")) {
             for (JsonElement e : root.getAsJsonArray("renderedTextFrames")) {
                 data.addRenderedTextFrame(parseRenderedGroup(e.getAsJsonObject()));
@@ -305,12 +298,6 @@ public class ResolvedDataReader {
         group.pageIndex(getInt(o, "pageIndex", 0));
         if (o.has("bounds")) {
             group.bounds(parseDoubleArray(o.getAsJsonArray("bounds")));
-        }
-        if (o.has("preservedTextFrameIds")) {
-            JsonArray arr = o.getAsJsonArray("preservedTextFrameIds");
-            for (int i = 0; i < arr.size(); i++) {
-                group.addPreservedTextFrameDomId(arr.get(i).getAsInt());
-            }
         }
         if (o.has("visibleExpansion")) {
             group.visibleExpansion(parseDoubleArray(o.getAsJsonArray("visibleExpansion")));

@@ -102,12 +102,19 @@ public class ASTTableSpacerMerger {
     }
 
     /**
-     * 셀이 비어있는지 확인: paragraphs가 없거나, 모든 단락의 items가 비어있음.
+     * 셀이 비어있는지 확인: paragraphs가 없거나, 모든 단락이 빈 텍스트만 포함.
+     * InDesign의 빈 셀도 빈 CharacterStyleRange를 포함하여 빈 텍스트 런이 생성되므로
+     * 텍스트 런의 내용까지 확인한다.
      */
     static boolean isCellEmpty(ASTTableCell cell) {
         if (cell.paragraphs().isEmpty()) return true;
         for (ASTParagraph p : cell.paragraphs()) {
-            if (p.items() != null && !p.items().isEmpty()) return false;
+            if (p.items() == null || p.items().isEmpty()) continue;
+            for (ASTInlineItem item : p.items()) {
+                if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) return false;
+                ASTTextRun run = (ASTTextRun) item;
+                if (run.text() != null && !run.text().trim().isEmpty()) return false;
+            }
         }
         return true;
     }

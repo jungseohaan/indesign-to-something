@@ -10,6 +10,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
 import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -884,7 +885,12 @@ class ASTPageProcessor {
                     int cropW = Math.max(1, Math.min((int) Math.round(imgW * (rightRatio - leftRatio)), imgW - cropX));
                     int cropH = Math.max(1, Math.min((int) Math.round(imgH * (bottomRatio - topRatio)), imgH - cropY));
 
-                    BufferedImage cropped = img.getSubimage(cropX, cropY, cropW, cropH);
+                    // 명시적으로 새 ARGB 이미지에 복사 (getSubimage 알파 손실 방지)
+                    BufferedImage cropped = new BufferedImage(cropW, cropH, BufferedImage.TYPE_INT_ARGB);
+                    Graphics2D cg = cropped.createGraphics();
+                    cg.drawImage(img, 0, 0, cropW, cropH,
+                            cropX, cropY, cropX + cropW, cropY + cropH, null);
+                    cg.dispose();
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
                     ImageIO.write(cropped, "png", baos);
                     fig.imageData(baos.toByteArray());
@@ -1084,6 +1090,14 @@ class ASTPageProcessor {
         block.cornerRadius(cornerRadius);
         block.rotationAngle(rotation);
 
+        // 드롭 섀도우 (resolved 데이터에서)
+        if (resolvedData != null && tf.selfId() != null) {
+            ResolvedPageItem ri = resolvedData.getPageItemByIdmlId(tf.selfId());
+            if (ri != null && ri.hasDropShadow()) {
+                block.dropShadow(true);
+            }
+        }
+
         // 비사각형 폴리곤 경로
         if (tf.localPathX() != null && tf.localPathX().length > 4) {
             double[] lpx = tf.localPathX();
@@ -1160,7 +1174,24 @@ class ASTPageProcessor {
                 }
             }
         }
-        return sb.toString();
+        // TextVariable 플레이스홀더 치환: <#VarName> → 해결된 값
+        String raw = sb.toString();
+        if (!raw.contains("<#")) return raw;
+
+        StringBuilder out = new StringBuilder(raw.length());
+        int i = 0;
+        while (i < raw.length()) {
+            int start = raw.indexOf("<#", i);
+            if (start < 0) { out.append(raw, i, raw.length()); break; }
+            out.append(raw, i, start);
+            int end = raw.indexOf('>', start);
+            if (end < 0) { out.append(raw, start, raw.length()); break; }
+            String varName = raw.substring(start + 1, end); // "#단원 숫자" 등
+            String resolved = idmlDoc.getTextVariableValue(varName);
+            out.append(resolved != null ? resolved : raw.substring(start, end + 1));
+            i = end + 1;
+        }
+        return out.toString();
     }
 
     /**

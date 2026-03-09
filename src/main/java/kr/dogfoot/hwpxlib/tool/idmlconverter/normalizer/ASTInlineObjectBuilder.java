@@ -178,8 +178,28 @@ class ASTInlineObjectBuilder {
                     }
                     if (Math.abs(totalTx) > 5 || Math.abs(totalTy) > 5) {
                         childObj.isOverlay(true);
-                        childObj.overlayX(CoordinateConverter.pointsToHwpunits(totalTx));
-                        childObj.overlayY(CoordinateConverter.pointsToHwpunits(totalTy));
+                        double overlayTx = totalTx;
+                        double overlayTy = totalTy;
+                        // IDML 좌표계 아티팩트 보정: 부모 InlineGraphic의 PathPoint가
+                        // 원점에서 멀리 떨어진 경우 (예: pathMinY=8000), 자식 ItemTransform도
+                        // 이를 반영하여 큰 값을 가짐. 시각적 오프셋은 작지만 원시 값이 크므로
+                        // 부모/자식의 geometricBounds(PathPoint 경계)를 사용하여 정규화.
+                        double[] parentGB = ig.geometricBounds();
+                        if (parentGB != null) {
+                            double parentH = Math.abs(parentGB[2] - parentGB[0]);
+                            double parentW = Math.abs(parentGB[3] - parentGB[1]);
+                            if (parentH > 0 && parentW > 0
+                                    && (Math.abs(overlayTy) > parentH * 2
+                                        || Math.abs(overlayTx) > parentW * 2)) {
+                                double[] childGB = childTf.geometricBounds();
+                                if (childGB != null) {
+                                    overlayTx = (overlayTx + childGB[1]) - parentGB[1];
+                                    overlayTy = (overlayTy + childGB[0]) - parentGB[0];
+                                }
+                            }
+                        }
+                        childObj.overlayX(CoordinateConverter.pointsToHwpunits(overlayTx));
+                        childObj.overlayY(CoordinateConverter.pointsToHwpunits(overlayTy));
                     }
                     para.addItem(childObj);
                 }

@@ -250,8 +250,7 @@ class HwpxParagraphBuilder {
                 || para.spaceAfter() != null
                 || para.lineSpacing() != null
                 || para.hasTabStops()
-                || para.shadingOn()
-                || para.ruleBelowBorder();
+                || para.shadingOn();
     }
 
     ASTStyleDef findParagraphStyle(String styleRef) {
@@ -274,11 +273,9 @@ class HwpxParagraphBuilder {
         String newId = ctx.styleRegistry.nextParaPrId();
         ParaPr paraPr = ctx.hwpxFile.headerXMLFile().refList().paraProperties().addNew();
 
-        // 문단 배경/하단 테두리 → BorderFill 생성
+        // 문단 배경 → BorderFill 생성
         String borderFillRef = "2";
-        if (astPara.ruleBelowBorder()) {
-            borderFillRef = createRuleBelowBorderFill();
-        } else if (astPara.shadingOn() && astPara.shadingColor() != null) {
+        if (astPara.shadingOn() && astPara.shadingColor() != null) {
             borderFillRef = createParaShadingBorderFill(astPara.shadingColor(), astPara.shadingTint());
         }
 
@@ -446,35 +443,6 @@ class HwpxParagraphBuilder {
     /**
      * RuleBelow 답안 밑줄선 → 하단만 SOLID인 BorderFill 생성.
      */
-    String createRuleBelowBorderFill() {
-        String bfId = String.valueOf(ctx.borderFillIdCounter.getAndIncrement());
-        BorderFill bf = ctx.hwpxFile.headerXMLFile().refList().borderFills().addNew();
-
-        bf.idAnd(bfId)
-                .threeDAnd(false)
-                .shadowAnd(false)
-                .centerLineAnd(CenterLineSort.NONE)
-                .breakCellSeparateLine(false);
-
-        bf.createSlash();
-        bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
-        bf.createBackSlash();
-        bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
-
-        bf.createLeftBorder();
-        bf.leftBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
-        bf.createRightBorder();
-        bf.rightBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
-        bf.createTopBorder();
-        bf.topBorder().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
-        bf.createBottomBorder();
-        bf.bottomBorder().typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
-        bf.createDiagonal();
-        bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
-
-        return bfId;
-    }
-
     static int resolveParaLong(Long paraOverride, Long styleValue) {
         if (paraOverride != null) return paraOverride.intValue();
         if (styleValue != null) return styleValue.intValue();
