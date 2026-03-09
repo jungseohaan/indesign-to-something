@@ -347,34 +347,25 @@ public class IDMLToHwpxConverter {
                     java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
                     if (img == null) continue;
 
-                    // resolved.json의 geometricBounds로 실제 페이지 위치/크기 결정
-                    // (회전 포함 축 정렬 바운딩 박스 — 회전/비회전 공통 처리)
+                    // 크기: RenderedGroup.bounds() (ExtendScript visibleBounds, 회전 포함 AABB)
+                    // 위치: AST 중심점 기반 (pageRelativeCenter, 페이지 좌표 항상 정확)
+                    // bounds 좌표는 스프레드 페이지2에서 음수가 될 수 있어 위치용으로 부적합
                     long figX, figY, figW, figH;
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem ri =
-                            resolvedData.getPageItemByIdmlId(tfb.sourceId());
-                    if (ri != null && ri.geometricBounds() != null && ri.pageIndex() >= 0) {
-                        double[] gb = ri.geometricBounds();
-                        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage rp =
-                                resolvedData.getPage(ri.pageIndex());
-                        if (rp != null && rp.bounds() != null) {
-                            double[] rel = rp.toPageRelative(gb);
-                            double rW = gb[3] - gb[1];
-                            double rH = gb[2] - gb[0];
-                            figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                    .pointsToHwpunits(rel[0]);
-                            figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                    .pointsToHwpunits(rel[1]);
-                            figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                    .pointsToHwpunits(rW);
-                            figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                    .pointsToHwpunits(rH);
-                        } else {
-                            // resolved page 없으면 AST 폴백
-                            figX = tfb.x(); figY = tfb.y();
-                            figW = tfb.width(); figH = tfb.height();
-                        }
+                    double[] bounds = rendered.bounds();
+                    if (bounds != null && bounds.length == 4) {
+                        double rW = bounds[3] - bounds[1];
+                        double rH = bounds[2] - bounds[0];
+                        figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                .pointsToHwpunits(rW);
+                        figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                .pointsToHwpunits(rH);
+                        // AST center = pageRelativeCenter (항상 정확)
+                        long centerX = tfb.x() + tfb.width() / 2;
+                        long centerY = tfb.y() + tfb.height() / 2;
+                        figX = centerX - figW / 2;
+                        figY = centerY - figH / 2;
                     } else {
-                        // resolved pageItem 없으면 AST + PNG 비율 폴백
+                        // bounds 없으면 AST + PNG 비율 폴백
                         figX = tfb.x();
                         figW = tfb.width();
                         if (img.getWidth() > 0) {
