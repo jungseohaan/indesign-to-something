@@ -302,7 +302,25 @@ public class ResolvedDataReader {
         if (o.has("visibleExpansion")) {
             group.visibleExpansion(parseDoubleArray(o.getAsJsonArray("visibleExpansion")));
         }
+        // 배지 그룹 필드
+        group.type(getString(o, "type"));
+        if (o.has("childIds")) {
+            group.childIds(parseIntArray(o.getAsJsonArray("childIds")));
+        }
+        if (o.has("childTextFrameIds")) {
+            group.childTextFrameIds(parseIntArray(o.getAsJsonArray("childTextFrameIds")));
+        }
+        group.badgeGroupId(getInt(o, "badgeGroupId", 0));
         return group;
+    }
+
+    private static int[] parseIntArray(JsonArray arr) {
+        int[] result = new int[arr.size()];
+        for (int i = 0; i < arr.size(); i++) {
+            JsonElement el = arr.get(i);
+            result[i] = (el == null || el.isJsonNull()) ? 0 : el.getAsInt();
+        }
+        return result;
     }
 
     // ─── JSON helpers ────────────────────────────────────────

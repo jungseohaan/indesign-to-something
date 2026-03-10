@@ -285,6 +285,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
 
     var renderedFrames = [];
     var renderedIds = {}; // 이미 렌더링된 ID 중복 방지
+    var badgeGroupChildIds = {}; // 배지 그룹 자식 TextFrame ID → true (개별 렌더링 스킵)
     var allItems = doc.allPageItems;
 
     // PNG 내보내기 설정 (한 번만)
@@ -293,6 +294,88 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
     app.pngExportPreferences.transparentBackground = true;
     app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
 
+    // Pass 1: 배지 그룹 감지 및 렌더링
+    for (var gi = 0; gi < allItems.length; gi++) {
+        var grp = allItems[gi];
+        if (grp.constructor.name !== "Group") continue;
+        if (!isBadgeGroup(grp)) continue;
+
+        // 페이지 범위 필터
+        var grpPage = null;
+        try { grpPage = grp.parentPage; } catch (e) {}
+        if (!grpPage) continue;
+        var grpPgIdx = grpPage.documentOffset + 1;
+        if (grpPgIdx < startPage || grpPgIdx > endPage) continue;
+
+        var grpDomId = grp.id;
+        if (renderedIds[grpDomId]) continue;
+
+        // 자식 도형/텍스트 ID 수집
+        var childIds = [];
+        var childTextFrameIds = [];
+        try {
+            var grpItems = grp.allPageItems;
+            for (var ci = 0; ci < grpItems.length; ci++) {
+                var child = grpItems[ci];
+                childIds.push(child.id);
+                if (child.constructor.name === "TextFrame") {
+                    childTextFrameIds.push(child.id);
+                    badgeGroupChildIds[child.id] = true;
+                }
+            }
+        } catch (e) {}
+
+        var grpFileName = "badge_" + grpDomId + ".png";
+        var grpOutFile = File(renderDir + "/" + grpFileName);
+
+        try {
+            grp.exportFile(ExportFormat.PNG_FORMAT, grpOutFile);
+
+            var grpBounds = null;
+            try { grpBounds = arrCopy(grp.visibleBounds); } catch (e) {}
+            if (!grpBounds) {
+                try { grpBounds = arrCopy(grp.geometricBounds); } catch (e) {}
+            }
+
+            if (grpBounds) {
+                var grpPageBounds = grpPage.bounds;
+                grpBounds[0] -= grpPageBounds[0];
+                grpBounds[1] -= grpPageBounds[1];
+                grpBounds[2] -= grpPageBounds[0];
+                grpBounds[3] -= grpPageBounds[1];
+            }
+
+            var grpEntry = {
+                id: grpDomId,
+                file: "rendered_frames/" + grpFileName,
+                bounds: grpBounds,
+                pageIndex: grpPage.documentOffset,
+                type: "badge_group",
+                childIds: childIds,
+                childTextFrameIds: childTextFrameIds
+            };
+            renderedFrames.push(grpEntry);
+            renderedIds[grpDomId] = grpEntry;
+
+            // 자식 TextFrame ID로도 등록 (Java에서 IDML TF ID로 조회 시 badge_group_child로 매핑)
+            for (var ti = 0; ti < childTextFrameIds.length; ti++) {
+                var tfChildId = childTextFrameIds[ti];
+                renderedFrames.push({
+                    id: tfChildId,
+                    file: "rendered_frames/" + grpFileName,
+                    bounds: grpBounds,
+                    pageIndex: grpPage.documentOffset,
+                    type: "badge_group_child",
+                    badgeGroupId: grpDomId
+                });
+                renderedIds[tfChildId] = grpEntry;
+            }
+        } catch (e) {
+            // 배지 그룹 렌더링 실패 — 건너뜀
+        }
+    }
+
+    // Pass 2: 개별 TextFrame / TextPath 렌더링 (기존 로직)
     for (var i = 0; i < allItems.length; i++) {
         var item = allItems[i];
 
@@ -302,6 +385,9 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
         try { hasTextPath = item.textPaths && item.textPaths.length > 0; } catch (e) {}
 
         if (!isTextFrame && !hasTextPath) continue;
+
+        // 배지 그룹 자식이면 개별 렌더링 스킵
+        if (badgeGroupChildIds[item.id]) continue;
 
         // 페이지 범위 필터
         var parentPage = null;
@@ -388,6 +474,63 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
     }
 
     return renderedFrames;
+}
+
+/**
+ * Group이 배지(badge)인지 판별한다.
+ * 배지 = 채워진 도형(배경) + 짧은 텍스트(라벨) 조합, 이미지 없음.
+ * 예: "활동 방법", "수업 준비", "Helpful Tips" 등.
+ */
+function isBadgeGroup(group) {
+    var hasShape = false;
+    var hasShortText = false;
+    var hasImage = false;
+    var hasSubGroup = false;
+
+    try {
+        var items = group.allPageItems;
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var cName = item.constructor.name;
+            if (cName === "Rectangle" || cName === "Polygon"
+                || cName === "Oval" || cName === "GraphicLine") {
+                // 이미지가 포함된 Rectangle은 도형이 아닌 이미지 컨테이너
+                try {
+                    if (item.images && item.images.length > 0) { hasImage = true; continue; }
+                    if (item.epss && item.epss.length > 0) { hasImage = true; continue; }
+                    if (item.pdfs && item.pdfs.length > 0) { hasImage = true; continue; }
+                } catch (e) {}
+                hasShape = true;
+            } else if (cName === "TextFrame") {
+                var txt = "";
+                try { txt = item.contents; } catch (e) {}
+                var trimmed = txt.replace(/[\s\uFEFF]/g, "");
+                if (trimmed.length > 0 && trimmed.length <= 15) {
+                    hasShortText = true;
+                }
+            } else if (cName === "Group") {
+                hasSubGroup = true;
+            } else if (cName === "Image" || cName === "EPS" || cName === "PDF") {
+                hasImage = true;
+            }
+        }
+    } catch (e) {
+        return false;
+    }
+
+    if (!(hasShape && hasShortText && !hasImage && !hasSubGroup)) return false;
+
+    // 크기 제한: 배지는 작은 UI 요소 (최대 150pt ≈ 53mm)
+    try {
+        var gb = group.geometricBounds; // [top, left, bottom, right]
+        var gw = gb[3] - gb[1];
+        var gh = gb[2] - gb[0];
+        if (gw > 150 || gh > 150) return false;
+    } catch (e) {
+        return false;
+    }
+
+    return true;
 }
 
 /**

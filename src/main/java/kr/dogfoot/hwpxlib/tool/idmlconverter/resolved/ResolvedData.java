@@ -2,8 +2,10 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * resolved.json 최상위 컨테이너.
@@ -19,6 +21,7 @@ public class ResolvedData {
     private final List<ResolvedPage> pages = new ArrayList<>();
     private final Map<String, ResolvedPage> pageByName = new HashMap<>();  // page name ("240") → page
     private final Map<String, RenderedGroup> renderedTextFrameMap = new HashMap<>();  // DOM id → rendered TextFrame
+    private Set<String> badgeGroupShapeIdmlIds;  // 배지 그룹 소속 도형 IDML hex ID ("u1735")
 
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
@@ -146,6 +149,11 @@ public class ResolvedData {
         }
     }
 
+    /** DOM decimal ID로 렌더링된 텍스트 프레임/배지 그룹 조회 */
+    public RenderedGroup getRenderedTextFrameByDomId(String domId) {
+        return renderedTextFrameMap.get(domId);
+    }
+
     public int renderedTextFrameCount() { return renderedTextFrameMap.size(); }
 
     // --- 좌표 단위 정규화 ---
@@ -211,6 +219,41 @@ public class ResolvedData {
         for (int i = 0; i < arr.length; i++) {
             arr[i] *= s;
         }
+    }
+
+    // --- 배지 그룹 인덱스 ---
+
+    /**
+     * 배지 그룹 인덱스를 빌드한다.
+     * renderedTextFrames에서 type="badge_group"인 항목의 childIds를 수집하여
+     * IDML hex ID 형식으로 변환, 배지 소속 도형 조회에 사용한다.
+     */
+    public void buildBadgeGroupIndex() {
+        badgeGroupShapeIdmlIds = new HashSet<>();
+        int badgeCount = 0;
+        for (RenderedGroup rg : renderedTextFrameMap.values()) {
+            if (rg.isBadgeGroup() && rg.childIds() != null) {
+                badgeCount++;
+                for (int childDomId : rg.childIds()) {
+                    // DOM decimal → IDML hex ("u" + hex)
+                    String idmlId = "u" + Integer.toHexString(childDomId);
+                    badgeGroupShapeIdmlIds.add(idmlId);
+                }
+            }
+        }
+        if (badgeCount > 0) {
+            System.out.println("[ResolvedData] 배지 그룹 " + badgeCount + "개, "
+                    + "자식 도형 " + badgeGroupShapeIdmlIds.size() + "개 인덱싱");
+        }
+    }
+
+    /**
+     * 도형이 배지 그룹에 소속되었는지 조회한다.
+     * @param idmlId IDML hex ID (예: "u1735")
+     */
+    public boolean isShapeInBadgeGroup(String idmlId) {
+        if (badgeGroupShapeIdmlIds == null || idmlId == null) return false;
+        return badgeGroupShapeIdmlIds.contains(idmlId);
     }
 
     // --- 통계 ---

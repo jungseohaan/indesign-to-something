@@ -414,6 +414,11 @@ class ASTPageProcessor {
         // 퇴화된 도형 제거 (열린 경로에 점이 1개뿐인 도형 — 렌더링 불가)
         vectorShapes.removeIf(s -> isDegenerateShape(s));
 
+        // 배지 그룹 소속 도형 제거 (배지 그룹은 통합 PNG로 처리)
+        if (resolvedData != null) {
+            vectorShapes.removeIf(s -> resolvedData.isShapeInBadgeGroup(s.selfId()));
+        }
+
         // 그룹 소속 도형과 개별 도형 분리
         Map<String, List<IDMLVectorShape>> groupedShapes = new LinkedHashMap<>();
         List<IDMLVectorShape> ungrouped = new ArrayList<>();
@@ -437,14 +442,36 @@ class ASTPageProcessor {
 
 
         // 그룹별 합성 래스터화 (넓게 분산된 도형은 클러스터별 분할)
-        for (List<IDMLVectorShape> group : groupedShapes.values()) {
-            List<List<IDMLVectorShape>> clusters = clusterGroupShapes(group);
-            for (List<IDMLVectorShape> cluster : clusters) {
-                ASTFigure fig = ASTFigureBuilder.createFigureFromVectorGroup(
-                        cluster, finalPage, imageLoader, colorResolver,
-                        resolvedData, resolvedPage);
-                if (fig != null) {
-                    vectorFigures.add(fig);
+        // 그룹 내 텍스트 프레임이 벡터 도형 사이에 끼어 있으면
+        // 텍스트 프레임 z-order 경계에서 분할하여 z-order 역전 방지
+        for (Map.Entry<String, List<IDMLVectorShape>> entry : groupedShapes.entrySet()) {
+            String groupId = entry.getKey();
+            List<IDMLVectorShape> group = entry.getValue();
+
+            // 같은 그룹의 텍스트 프레임 z-order 수집
+            List<Integer> tfZOrders = new ArrayList<>();
+            for (IDMLTextFrame tf : spread.textFrames()) {
+                if (groupId.equals(tf.parentGroupId())) {
+                    tfZOrders.add(tf.zOrder());
+                }
+            }
+
+            List<List<IDMLVectorShape>> subGroups;
+            if (tfZOrders.isEmpty()) {
+                subGroups = Collections.singletonList(group);
+            } else {
+                subGroups = splitGroupAtTextFrameBoundaries(group, tfZOrders);
+            }
+
+            for (List<IDMLVectorShape> subGroup : subGroups) {
+                List<List<IDMLVectorShape>> clusters = clusterGroupShapes(subGroup);
+                for (List<IDMLVectorShape> cluster : clusters) {
+                    ASTFigure fig = ASTFigureBuilder.createFigureFromVectorGroup(
+                            cluster, finalPage, imageLoader, colorResolver,
+                            resolvedData, resolvedPage);
+                    if (fig != null) {
+                        vectorFigures.add(fig);
+                    }
                 }
             }
         }
@@ -737,6 +764,42 @@ class ASTPageProcessor {
     /**
      * 도형의 중심점이 페이지 영역 안에 있는지 확인.
      */
+    /**
+     * 같은 그룹 내 벡터 도형을 텍스트 프레임 z-order 경계에서 분할.
+     * 그룹 내 텍스트 프레임이 벡터 도형 사이에 끼어 있을 때,
+     * VectorGroup의 MAX z-order가 텍스트 프레임을 덮는 문제를 방지한다.
+     */
+    private static List<List<IDMLVectorShape>> splitGroupAtTextFrameBoundaries(
+            List<IDMLVectorShape> shapes, List<Integer> tfZOrders) {
+        List<IDMLVectorShape> sorted = new ArrayList<>(shapes);
+        Collections.sort(sorted, new Comparator<IDMLVectorShape>() {
+            public int compare(IDMLVectorShape a, IDMLVectorShape b) {
+                return Integer.compare(a.zOrder(), b.zOrder());
+            }
+        });
+        List<Integer> sortedTfZ = new ArrayList<>(tfZOrders);
+        Collections.sort(sortedTfZ);
+
+        List<List<IDMLVectorShape>> result = new ArrayList<>();
+        List<IDMLVectorShape> current = new ArrayList<>();
+        int tfIdx = 0;
+
+        for (IDMLVectorShape s : sorted) {
+            while (tfIdx < sortedTfZ.size() && sortedTfZ.get(tfIdx) < s.zOrder()) {
+                if (!current.isEmpty()) {
+                    result.add(current);
+                    current = new ArrayList<>();
+                }
+                tfIdx++;
+            }
+            current.add(s);
+        }
+        if (!current.isEmpty()) {
+            result.add(current);
+        }
+        return result;
+    }
+
     /**
      * 그룹 내 도형을 공간적 클러스터로 분할.
      * 도형 간 간격이 GAP_THRESHOLD(50pt) 이상이면 별도 클러스터로 분리하여

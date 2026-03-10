@@ -11,6 +11,10 @@ public class RenderedGroup {
     private int pageIndex;       // 0-based 페이지 인덱스
     private double[] visibleExpansion;  // [widthRatio, heightRatio, offsetRatioX, offsetRatioY]
                                         // geometricBounds → visibleBounds 보정 비율
+    private String type;         // null(기존 text_frame) | "badge_group" | "badge_group_child"
+    private int[] childIds;      // 배지 그룹 자식 DOM ID 목록 (type=badge_group일 때)
+    private int[] childTextFrameIds;  // 배지 그룹 자식 TextFrame DOM ID (type=badge_group일 때)
+    private int badgeGroupId;    // 배지 그룹 부모 DOM ID (type=badge_group_child일 때)
 
     public int id() { return id; }
     public void id(int v) { this.id = v; }
@@ -26,4 +30,19 @@ public class RenderedGroup {
 
     public double[] visibleExpansion() { return visibleExpansion; }
     public void visibleExpansion(double[] v) { this.visibleExpansion = v; }
+
+    public String type() { return type; }
+    public void type(String v) { this.type = v; }
+
+    public int[] childIds() { return childIds; }
+    public void childIds(int[] v) { this.childIds = v; }
+
+    public int[] childTextFrameIds() { return childTextFrameIds; }
+    public void childTextFrameIds(int[] v) { this.childTextFrameIds = v; }
+
+    public int badgeGroupId() { return badgeGroupId; }
+    public void badgeGroupId(int v) { this.badgeGroupId = v; }
+
+    public boolean isBadgeGroup() { return "badge_group".equals(type); }
+    public boolean isBadgeGroupChild() { return "badge_group_child".equals(type); }
 }
