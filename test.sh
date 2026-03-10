@@ -12,21 +12,18 @@
 # 케이스 등록: test-data/cases.json 편집
 #   {
 #     "cases": {
-#       "과목": {
-#         "desc": "과목 설명",
-#         "units": {
-#           "단원": {
-#             "indd": "/path/to/file.indd",
-#             "pages": "8-10",       ← 선택, 생략 시 전체 페이지
-#             "desc": "설명"
-#           }
+#       "중3과학교과서": {
+#         "u1": {
+#           "indd": "/path/to/file.indd",
+#           "pages": "8-10",       ← 선택, 생략 시 전체 페이지
+#           "desc": "중3과학교과서 1단원"
 #         }
 #       }
 #     }
 #   }
 #
 # 예시:
-#   ./test.sh eng/u1 convert     → eng 과목의 u1 단원 변환
+#   ./test.sh 중3과학교과서/u1 convert
 #
 # pages 형식:
 #   "5"      → 5페이지만
@@ -56,8 +53,10 @@ if [ "$1" = "list" ]; then
 import json
 d = json.load(open('$CASES_FILE'))
 for subj_key, subj in d.get('cases', {}).items():
-    print(f'  [{subj_key}] {subj.get(\"desc\", \"\")}')
-    for unit_key, unit in subj.get('units', {}).items():
+    print(f'  [{subj_key}]')
+    for unit_key, unit in subj.items():
+        if not isinstance(unit, dict) or 'indd' not in unit:
+            continue
         pages = unit.get('pages', 'all')
         print(f'    {subj_key}/{unit_key:12s} {unit.get(\"desc\", \"\")}  pages: {pages}')
 " 2>/dev/null || echo "  (no cases registered)"
@@ -88,8 +87,8 @@ subj = d.get('cases', {}).get(subj_key)
 if not subj:
     print(f'NOTFOUND: subject \"{subj_key}\"', file=sys.stderr)
     sys.exit(1)
-unit = subj.get('units', {}).get(unit_key)
-if not unit:
+unit = subj.get(unit_key)
+if not unit or not isinstance(unit, dict) or 'indd' not in unit:
     print(f'NOTFOUND: unit \"{unit_key}\" in \"{subj_key}\"', file=sys.stderr)
     sys.exit(1)
 pages = unit.get('pages', '')
@@ -104,8 +103,9 @@ if [ $? -ne 0 ] || [ -z "$CASE_INFO" ]; then
 import json
 d = json.load(open('$CASES_FILE'))
 for sk, sv in d.get('cases', {}).items():
-    for uk in sv.get('units', {}).keys():
-        print(f'  {sk}/{uk}')
+    for uk, uv in sv.items():
+        if isinstance(uv, dict) and 'indd' in uv:
+            print(f'  {sk}/{uk}')
 " 2>/dev/null
     exit 1
 fi

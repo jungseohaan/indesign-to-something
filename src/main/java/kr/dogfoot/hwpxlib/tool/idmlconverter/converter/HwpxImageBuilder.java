@@ -441,12 +441,12 @@ public class HwpxImageBuilder {
         Picture pic = anchorRun.addNewPicture();
         String picId = HwpxUtil.nextShapeId();
 
-        // 그룹 내부 이미지: 소형 장식 요소는 IN_FRONT_OF_TEXT (배지, 라벨 등),
-        // 대형 요소(200pt 이상)는 BEHIND_TEXT (배경 이미지)
+        // 그룹 소속 요소는 모두 IN_FRONT_OF_TEXT — 같은 레이어에서 z-order로 순서 결정.
+        // 크기 기반 분리를 하면 같은 그룹 내 요소가 서로 다른 레이어에 배치되어
+        // z-order가 무시되는 문제가 발생한다 (예: 배지 위에 노출되어야 할 사각형이 아래로).
         TextWrapMethod figWrap;
         if (figure.fromGroup()) {
-            boolean isLarge = figure.width() > 20000 || figure.height() > 20000; // 200pt = 20000 hwpunit
-            figWrap = isLarge ? TextWrapMethod.BEHIND_TEXT : TextWrapMethod.IN_FRONT_OF_TEXT;
+            figWrap = TextWrapMethod.IN_FRONT_OF_TEXT;
         } else {
             figWrap = TextWrapMethod.BEHIND_TEXT;
         }

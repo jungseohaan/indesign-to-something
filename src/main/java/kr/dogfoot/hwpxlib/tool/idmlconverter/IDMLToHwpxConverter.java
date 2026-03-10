@@ -625,18 +625,6 @@ public class IDMLToHwpxConverter {
             // 텍스트 내용 추출 (중복 감지용)
             String textContent = extractInlineTextContent(obj);
 
-            if (textContent != null && replacedTexts.contains(textContent)) {
-                // 동일 텍스트의 중복 매칭 → 제거 (0 크기 스페이서로 변환)
-                obj.kind(kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject.ObjectKind.SPACER_RECT);
-                obj.width(0);
-                obj.height(0);
-                obj.paragraphs(null);
-                if (obj.inlineTables() != null) obj.inlineTables().clear();
-                removed++;
-                System.out.println("[InlineRendered] " + obj.sourceId() + " → 중복 제거 (\"" + textContent + "\")");
-                continue;
-            }
-
             // PNG 파일 읽기
             java.io.File pngFile = new java.io.File(resolvedDir, rendered.file());
             if (!pngFile.exists()) continue;
