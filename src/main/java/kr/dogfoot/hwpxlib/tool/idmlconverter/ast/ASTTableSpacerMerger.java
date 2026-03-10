@@ -94,13 +94,19 @@ public class ASTTableSpacerMerger {
 
     /**
      * spacer row 판별: 모든 셀이 비어있고, 외부 rowSpan에 포함되지 않음.
+     * 추가 조건: 1컬럼 테이블에서 배경색 투명 + 모든 테두리 색 없음이면 spacer.
      */
     static boolean isSpacerRow(ASTTableRow row, ASTTable table) {
         // 1. 모든 셀이 비어있는지 확인
         for (ASTTableCell cell : row.cells()) {
             if (!isCellEmpty(cell)) return false;
         }
-        // 2. 다른 행의 셀이 이 행을 rowSpan으로 걸치는지 확인
+        // 2. 배경색이나 유효 테두리가 있으면 기입란이므로 spacer 아님
+        for (ASTTableCell cell : row.cells()) {
+            if (!isTransparentFill(cell.fillColor())) return false;
+            if (!allBordersTransparent(cell)) return false;
+        }
+        // 3. 다른 행의 셀이 이 행을 rowSpan으로 걸치는지 확인
         int ri = row.rowIndex();
         for (ASTTableRow otherRow : table.rows()) {
             if (otherRow.rowIndex() >= ri) break;
@@ -109,6 +115,24 @@ public class ASTTableSpacerMerger {
             }
         }
         return true;
+    }
+
+    private static boolean isTransparentFill(String fillColor) {
+        return fillColor == null || fillColor.isEmpty() || fillColor.contains("None");
+    }
+
+    private static boolean isBorderTransparent(ASTTableCell.CellBorder border) {
+        if (border == null) return true;
+        if (border.weight() <= 0) return true;
+        String c = border.color();
+        return c == null || c.isEmpty() || c.contains("None");
+    }
+
+    private static boolean allBordersTransparent(ASTTableCell cell) {
+        return isBorderTransparent(cell.topBorder())
+                && isBorderTransparent(cell.bottomBorder())
+                && isBorderTransparent(cell.leftBorder())
+                && isBorderTransparent(cell.rightBorder());
     }
 
     /**
