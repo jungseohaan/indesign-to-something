@@ -43,17 +43,9 @@ public class SvgGenerator {
                 "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 %.2f %.2f\" width=\"%.2fpt\" height=\"%.2fpt\">\n",
                 svgW, svgH, svgW, svgH));
 
-        // 둥근 사각형 최적화
-        if (shape.shapeType() == IDMLVectorShape.ShapeType.RECTANGLE
-                && shape.hasRoundedCorners()
-                && !hasNonRectangularPath(shape)) {
-            double maxR = Math.min(wPts, hPts) / 2.0;
-            double r = Math.min(shape.cornerRadius(), maxR);
-            sb.append(String.format(Locale.US,
-                    "  <rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\"",
-                    strokePad, strokePad, wPts, hPts, r, r));
-            appendStyleAttrs(sb, fillHex, strokeHex, shape);
-            sb.append("/>\n");
+        // 둥근 사각형 최적화 (Rectangle 또는 직선 4점 Polygon)
+        if (isRoundableRect(shape)) {
+            appendRoundedRect(sb, shape, strokePad, strokePad, wPts, hPts, fillHex, strokeHex);
         } else {
             // 일반 path
             String pathD = buildSvgPathD(shape, strokePad, strokePad);
@@ -115,17 +107,9 @@ public class SvgGenerator {
             double sh = tb[2] - tb[0];
             if ((sw <= 0 || sh <= 0) && sc.accTransform == null) continue;
 
-            // 둥근 사각형 최적화
-            if (sc.shape.shapeType() == IDMLVectorShape.ShapeType.RECTANGLE
-                    && sc.shape.hasRoundedCorners()
-                    && !hasNonRectangularPath(sc.shape)) {
-                double maxR = Math.min(sw, sh) / 2.0;
-                double r = Math.min(sc.shape.cornerRadius(), maxR);
-                sb.append(String.format(Locale.US,
-                        "  <rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\"",
-                        offX, offY, sw, sh, r, r));
-                appendStyleAttrs(sb, sc.fillHex, sc.strokeHex, sc.shape);
-                sb.append("/>\n");
+            // 둥근 사각형 최적화 (Rectangle 또는 직선 4점 Polygon)
+            if (isRoundableRect(sc.shape)) {
+                appendRoundedRect(sb, sc.shape, offX, offY, sw, sh, sc.fillHex, sc.strokeHex);
             } else {
                 String pathD;
                 if (sc.accTransform != null) {
@@ -401,6 +385,73 @@ public class SvgGenerator {
         } else if (strokeHex == null) {
             sb.append(" stroke=\"none\"");
         }
+    }
+
+    /**
+     * 둥근 사각형을 SVG에 추가한다.
+     * per-corner 반경이 있으면 &lt;path&gt;, 균일하면 &lt;rect rx ry&gt; 사용.
+     */
+    private static void appendRoundedRect(StringBuilder sb, IDMLVectorShape shape,
+                                           double x, double y, double w, double h,
+                                           String fillHex, String strokeHex) {
+        double maxR = Math.min(w, h) / 2.0;
+        double[] radii = shape.cornerRadii();
+
+        if (radii != null && hasVariedRadii(radii)) {
+            // per-corner: [topLeft, topRight, bottomLeft, bottomRight]
+            double rTL = Math.min(radii[0] >= 0 ? radii[0] : shape.cornerRadius(), maxR);
+            double rTR = Math.min(radii[1] >= 0 ? radii[1] : shape.cornerRadius(), maxR);
+            double rBL = Math.min(radii[2] >= 0 ? radii[2] : shape.cornerRadius(), maxR);
+            double rBR = Math.min(radii[3] >= 0 ? radii[3] : shape.cornerRadius(), maxR);
+
+            String d = String.format(Locale.US,
+                    "M %.2f %.2f L %.2f %.2f A %.2f %.2f 0 0 1 %.2f %.2f " +
+                    "L %.2f %.2f A %.2f %.2f 0 0 1 %.2f %.2f " +
+                    "L %.2f %.2f A %.2f %.2f 0 0 1 %.2f %.2f " +
+                    "L %.2f %.2f A %.2f %.2f 0 0 1 %.2f %.2f Z",
+                    // 상단변 (TL → TR)
+                    x + rTL, y,
+                    x + w - rTR, y,
+                    rTR, rTR, x + w, y + rTR,
+                    // 우측변 (TR → BR)
+                    x + w, y + h - rBR,
+                    rBR, rBR, x + w - rBR, y + h,
+                    // 하단변 (BR → BL)
+                    x + rBL, y + h,
+                    rBL, rBL, x, y + h - rBL,
+                    // 좌측변 (BL → TL)
+                    x, y + rTL,
+                    rTL, rTL, x + rTL, y);
+            sb.append(String.format("  <path d=\"%s\"", d));
+        } else {
+            double r = Math.min(shape.cornerRadius(), maxR);
+            sb.append(String.format(Locale.US,
+                    "  <rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\"",
+                    x, y, w, h, r, r));
+        }
+        appendStyleAttrs(sb, fillHex, strokeHex, shape);
+        sb.append("/>\n");
+    }
+
+    /**
+     * 둥근 사각형으로 처리할 수 있는 도형인지 판별.
+     * Rectangle 또는 직선 4점 Polygon이면서 CornerRadius가 있는 경우.
+     */
+    private static boolean isRoundableRect(IDMLVectorShape shape) {
+        if (!shape.hasRoundedCorners()) return false;
+        if (hasNonRectangularPath(shape)) return false;
+        IDMLVectorShape.ShapeType st = shape.shapeType();
+        return st == IDMLVectorShape.ShapeType.RECTANGLE
+                || st == IDMLVectorShape.ShapeType.POLYGON;
+    }
+
+    private static boolean hasVariedRadii(double[] radii) {
+        if (radii == null || radii.length < 4) return false;
+        double first = radii[0];
+        for (int i = 1; i < 4; i++) {
+            if (Math.abs(radii[i] - first) > 0.01) return true;
+        }
+        return false;
     }
 
     // =========================================================================

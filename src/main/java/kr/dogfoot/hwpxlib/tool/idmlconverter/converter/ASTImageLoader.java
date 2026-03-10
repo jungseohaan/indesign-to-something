@@ -163,6 +163,22 @@ public class ASTImageLoader {
                                   double[] graphicBounds,
                                   List<Integer> visibleLayerIndices, String layerSignature,
                                   List<double[]> framePath) {
+        return loadImage(linkResourceURI, displayWidthHwp, displayHeightHwp,
+                imageTransform, frameBoundsPoints, graphicBounds,
+                visibleLayerIndices, layerSignature, framePath, 0);
+    }
+
+    /**
+     * 이미지를 로드하고 프레임 클리핑 + 둥근 모서리를 적용한다.
+     * @param framePath 비사각형 프레임 경로 (null이면 사각형 클리핑만 적용)
+     * @param cornerRadius 둥근 모서리 반경 (points, 0이면 적용 안함)
+     */
+    public ImageResult loadImage(String linkResourceURI,
+                                  long displayWidthHwp, long displayHeightHwp,
+                                  double[] imageTransform, double[] frameBoundsPoints,
+                                  double[] graphicBounds,
+                                  List<Integer> visibleLayerIndices, String layerSignature,
+                                  List<double[]> framePath, double cornerRadius) {
         if (linkResourceURI == null || linkResourceURI.isEmpty()) {
             return createPlaceholderResult(displayWidthHwp, displayHeightHwp, null);
         }
@@ -220,7 +236,7 @@ public class ASTImageLoader {
 
             // 클리핑 적용
             if (imageTransform != null && frameBoundsPoints != null) {
-                imageData = applyClipping(imageData, imageTransform, frameBoundsPoints, graphicBounds, framePath);
+                imageData = applyClipping(imageData, imageTransform, frameBoundsPoints, graphicBounds, framePath, cornerRadius);
                 outputFormat = "png";
             }
 
@@ -343,7 +359,7 @@ public class ASTImageLoader {
 
     private byte[] applyClipping(byte[] imageData, double[] imageTransform,
                                   double[] frameBounds, double[] graphicBounds,
-                                  List<double[]> framePath) throws IOException {
+                                  List<double[]> framePath, double cornerRadius) throws IOException {
         BufferedImage srcImage = ImageIO.read(new ByteArrayInputStream(imageData));
         if (srcImage == null) return imageData;
 
@@ -386,6 +402,10 @@ public class ASTImageLoader {
             System.err.printf("[PATH-MASK] Applying path mask: %d points, frame=[%.1f,%.1f,%.1f,%.1f]%n",
                     framePath.size(), fLeft, fTop, frameW, frameH);
             clipped = applyPathMask(clipped, framePath, fLeft, fTop, frameW, frameH);
+        }
+        // 둥근 모서리가 있으면 라운드 렉트 마스크 적용
+        else if (cornerRadius > 0) {
+            clipped = applyRoundedCornerMask(clipped, cornerRadius, frameW, frameH);
         }
 
         return clipped;
@@ -489,6 +509,40 @@ public class ASTImageLoader {
         Graphics2D g = masked.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setClip(path);
+        g.drawImage(img, 0, 0, null);
+        g.dispose();
+
+        return encodePng(masked);
+    }
+
+    /**
+     * 둥근 모서리 마스크를 적용한다.
+     * 프레임의 cornerRadius를 RoundRectangle2D로 클리핑.
+     */
+    private byte[] applyRoundedCornerMask(byte[] imageData, double cornerRadius,
+                                           double frameW, double frameH) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(imageData));
+        if (img == null) return imageData;
+
+        int pixW = img.getWidth();
+        int pixH = img.getHeight();
+
+        // InDesign 클램핑: radius <= min(width,height)/2
+        double maxR = Math.min(frameW, frameH) / 2.0;
+        double r = Math.min(cornerRadius, maxR);
+
+        double scaleX = pixW / frameW;
+        double scaleY = pixH / frameH;
+        double rPx = r * Math.min(scaleX, scaleY);
+
+        java.awt.geom.RoundRectangle2D.Double clip =
+                new java.awt.geom.RoundRectangle2D.Double(
+                        0, 0, pixW, pixH, rPx * 2, rPx * 2);
+
+        BufferedImage masked = new BufferedImage(pixW, pixH, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = masked.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setClip(clip);
         g.drawImage(img, 0, 0, null);
         g.dispose();
 
@@ -926,12 +980,13 @@ public class ASTImageLoader {
 
             Shape awtShape;
             // 둥근 사각형은 PathPoints에 코너 정보가 없으므로 RoundRectangle2D 사용
-            if (sc.shape.shapeType() == IDMLVectorShape.ShapeType.RECTANGLE
+            if ((sc.shape.shapeType() == IDMLVectorShape.ShapeType.RECTANGLE
+                    || sc.shape.shapeType() == IDMLVectorShape.ShapeType.POLYGON)
                     && sc.shape.hasRoundedCorners()
                     && !hasNonRectangularPath(sc.shape)) {
                 // InDesign은 cornerRadius를 min(width,height)/2로 클램핑 (원형 모서리)
                 double maxR = Math.min(sw, sh) / 2.0;
-                double r = Math.min(sc.shape.cornerRadius(), maxR) * scale;
+                double r = Math.min(effectiveCornerRadius(sc.shape), maxR) * scale;
                 awtShape = new RoundRectangle2D.Double(
                         offX * scale, offY * scale, sw * scale, sh * scale, r * 2, r * 2);
             } else if (sc.accTransform != null) {
@@ -1991,9 +2046,8 @@ public class ASTImageLoader {
                     return buildPathFromPoints(shape, scale);
                 }
                 if (shape.hasRoundedCorners()) {
-                    // InDesign은 cornerRadius를 min(width,height)/2로 클램핑
                     double maxRPts = Math.min(shape.widthPoints(), shape.heightPoints()) / 2.0;
-                    double r = Math.min(shape.cornerRadius(), maxRPts) * scale;
+                    double r = Math.min(effectiveCornerRadius(shape), maxRPts) * scale;
                     return new RoundRectangle2D.Double(0, 0, w, h, r * 2, r * 2);
                 }
                 return new Rectangle2D.Double(0, 0, w, h);
@@ -2006,12 +2060,34 @@ public class ASTImageLoader {
                 return new Ellipse2D.Double(0, 0, w, h);
 
             case POLYGON:
+                // 직선 4점 + 둥근 모서리 Polygon은 RoundRectangle2D 처리
+                if (shape.hasRoundedCorners() && !hasNonRectangularPath(shape)) {
+                    double maxRPts = Math.min(shape.widthPoints(), shape.heightPoints()) / 2.0;
+                    double r = Math.min(effectiveCornerRadius(shape), maxRPts) * scale;
+                    return new RoundRectangle2D.Double(0, 0, w, h, r * 2, r * 2);
+                }
+                return buildPathFromPoints(shape, scale);
             case GRAPHIC_LINE:
                 return buildPathFromPoints(shape, scale);
 
             default:
                 return new Rectangle2D.Double(0, 0, w, h);
         }
+    }
+
+    /**
+     * per-corner radii가 있으면 최소값 반환, 없으면 uniform cornerRadius 반환.
+     */
+    private static double effectiveCornerRadius(IDMLVectorShape shape) {
+        double[] radii = shape.cornerRadii();
+        if (radii != null && radii.length >= 4) {
+            double min = Double.MAX_VALUE;
+            for (double r : radii) {
+                if (r >= 0 && r < min) min = r;
+            }
+            if (min < Double.MAX_VALUE) return min;
+        }
+        return shape.cornerRadius();
     }
 
     /**

@@ -448,11 +448,22 @@ class ASTPageProcessor {
             String groupId = entry.getKey();
             List<IDMLVectorShape> group = entry.getValue();
 
-            // 같은 그룹의 텍스트 프레임 z-order 수집
+            // 같은 그룹 + 서브그룹의 텍스트 프레임 z-order 수집
+            // 벡터 셰이프 z-order 범위 내의 모든 텍스트 프레임을 포함
+            // (서브그룹 텍스트 프레임이 셰이프 사이에 끼어 있으면 분할 필요)
+            int minShapeZ = Integer.MAX_VALUE, maxShapeZ = Integer.MIN_VALUE;
+            for (IDMLVectorShape s : group) {
+                minShapeZ = Math.min(minShapeZ, s.zOrder());
+                maxShapeZ = Math.max(maxShapeZ, s.zOrder());
+            }
             List<Integer> tfZOrders = new ArrayList<>();
             for (IDMLTextFrame tf : spread.textFrames()) {
+                int tfZ = tf.zOrder();
                 if (groupId.equals(tf.parentGroupId())) {
-                    tfZOrders.add(tf.zOrder());
+                    tfZOrders.add(tfZ);
+                } else if (tfZ > minShapeZ && tfZ < maxShapeZ) {
+                    // 서브그룹 텍스트 프레임: 셰이프 z-order 범위 내에 있으면 포함
+                    tfZOrders.add(tfZ);
                 }
             }
 
@@ -1105,11 +1116,13 @@ class ASTPageProcessor {
         double fillTint = tf.fillTint();
         double strokeTint = tf.strokeTint();
         double cornerRadius = tf.cornerRadius();
-        // per-corner radii fallback (TopLeftCornerRadius 등 개별 속성만 있는 경우)
-        if (cornerRadius <= 0 && tf.cornerRadii() != null) {
+        // per-corner radii: HWPX는 uniform ratio만 지원하므로 최소값 사용 (과도한 둥글기 방지)
+        if (tf.cornerRadii() != null) {
+            double min = Double.MAX_VALUE;
             for (double r : tf.cornerRadii()) {
-                cornerRadius = Math.max(cornerRadius, r);
+                if (r >= 0 && r < min) min = r;
             }
+            if (min < Double.MAX_VALUE) cornerRadius = min;
         }
 
         // 래퍼 사각형 속성 병합: 프레임 자체에 유효한 stroke가 없고 래퍼에 fill이 있으면

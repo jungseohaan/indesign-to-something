@@ -270,7 +270,7 @@ class ASTInlineObjectBuilder {
                                 ? blendColorWithWhite(sHex, shape.strokeTint() / 100.0) : null;
                         bg.strokeWeight = shape.strokeWeight();
                         bg.strokeTint = 100;
-                        bg.cornerRadius = shape.cornerRadius();
+                        bg.cornerRadius = effectiveCornerRadius(shape);
                         // 비-그룹: hasBounds 설정 안 함 (좌표계가 자식 TF와 다르므로 마진 계산 불가)
                         return bg;
                     }
@@ -293,7 +293,7 @@ class ASTInlineObjectBuilder {
                                 ? blendColorWithWhite(sHex, shape.strokeTint() / 100.0) : null;
                         bg.strokeWeight = shape.strokeWeight();
                         bg.strokeTint = 100;
-                        bg.cornerRadius = shape.cornerRadius();
+                        bg.cornerRadius = effectiveCornerRadius(shape);
                         double[] gb = child.geometricBounds();
                         double[] ct = child.itemTransform();
                         if (gb != null && ct != null) {
@@ -318,7 +318,7 @@ class ASTInlineObjectBuilder {
                     bg.strokeHex = blendColorWithWhite(sHex, shape.strokeTint() / 100.0);
                     bg.strokeWeight = shape.strokeWeight();
                     bg.strokeTint = 100;
-                    bg.cornerRadius = shape.cornerRadius();
+                    bg.cornerRadius = effectiveCornerRadius(shape);
                     double[] gb = child.geometricBounds();
                     double[] ct = child.itemTransform();
                     if (gb != null && ct != null) {
@@ -427,6 +427,22 @@ class ASTInlineObjectBuilder {
         if (colorRef == null || "None".equals(colorRef) || colorRef.contains("[None]")) return null;
         String hex = colorResolver.resolve(colorRef);
         return (hex != null && !hex.isEmpty()) ? hex : null;
+    }
+
+    /**
+     * HWPX는 uniform corner ratio만 지원하므로,
+     * per-corner radii가 있으면 최소값을 사용하여 과도한 둥글기를 방지한다.
+     */
+    static double effectiveCornerRadius(IDMLVectorShape shape) {
+        double[] radii = shape.cornerRadii();
+        if (radii != null && radii.length >= 4) {
+            double min = Double.MAX_VALUE;
+            for (double r : radii) {
+                if (r >= 0 && r < min) min = r;
+            }
+            if (min < Double.MAX_VALUE) return min;
+        }
+        return shape.cornerRadius();
     }
 
     /**

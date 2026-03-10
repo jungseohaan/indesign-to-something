@@ -349,6 +349,10 @@ class IDMLSpreadParser {
         // 프레임 경로 추출 (비사각형 클리핑용)
         frame.framePath(extractFramePath(shapeElem));
 
+        // 둥근 모서리
+        frame.cornerRadius(parseDoubleAttrDef(shapeElem, "CornerRadius", 0));
+        frame.cornerOption(getAttrOrNull(shapeElem, "CornerOption"));
+
         // ItemTransform: actualContainer까지의 모든 중간 요소 transform을 결합.
         // 예: Rectangle → Group → Rectangle(actualContainer) 구조에서 중간 Group의 transform도 포함.
         double[] frameTransform = IDMLGeometry.parseTransform(
@@ -789,6 +793,18 @@ class IDMLSpreadParser {
             }
         }
         double wrapperCornerRadius = parseDoubleAttrDef(frameElem, "CornerRadius", 0);
+        // per-corner radii가 있으면 최소값 사용 (HWPX uniform ratio 호환)
+        double wTL = parseDoubleAttrDef(frameElem, "TopLeftCornerRadius", -1);
+        double wTR = parseDoubleAttrDef(frameElem, "TopRightCornerRadius", -1);
+        double wBL = parseDoubleAttrDef(frameElem, "BottomLeftCornerRadius", -1);
+        double wBR = parseDoubleAttrDef(frameElem, "BottomRightCornerRadius", -1);
+        if (wTL >= 0 || wTR >= 0 || wBL >= 0 || wBR >= 0) {
+            double min = Double.MAX_VALUE;
+            for (double r : new double[]{wTL, wTR, wBL, wBR}) {
+                if (r >= 0 && r < min) min = r;
+            }
+            if (min < Double.MAX_VALUE) wrapperCornerRadius = min;
+        }
 
         // 유효한 채우기/선이 있는지 확인
         boolean hasWrapperFill = wrapperFill != null && !wrapperFill.contains("None");

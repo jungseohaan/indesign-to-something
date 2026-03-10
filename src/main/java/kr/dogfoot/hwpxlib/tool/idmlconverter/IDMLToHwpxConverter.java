@@ -363,7 +363,7 @@ public class IDMLToHwpxConverter {
                             String.valueOf(badgeGrpId));
                     if (badgeGroup != null && badgeGroup.isBadgeGroup()) {
                         kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
-                                createRenderedFigure(badgeGroup, tfb, resolvedDir);
+                                createRenderedFigure(badgeGroup, tfb, resolvedDir, resolvedData);
                         if (fig != null) {
                             it.set(fig);
                             placedBadgeGroups.add(badgeGrpId);
@@ -460,12 +460,13 @@ public class IDMLToHwpxConverter {
 
     /**
      * 배지 그룹 PNG를 ASTFigure로 생성한다.
-     * AST TF 중심점 기반 배치 — resolved bounds는 크기 산출에만 사용.
+     * 배지 그룹 bounds + 페이지 데이터로 정확한 위치 산출.
      */
     private static kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure createRenderedFigure(
             RenderedGroup badgeGroup,
             kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock tfb,
-            String resolvedDir) {
+            String resolvedDir,
+            ResolvedData resolvedData) {
         java.io.File pngFile = new java.io.File(resolvedDir, badgeGroup.file());
         if (!pngFile.exists()) return null;
 
@@ -493,11 +494,37 @@ public class IDMLToHwpxConverter {
                 figH = tfb.height();
             }
 
-            // AST TF 중심점 기반 배치 (AST 좌표는 항상 정확한 페이지 상대 좌표)
-            long centerX = tfb.x() + tfb.width() / 2;
-            long centerY = tfb.y() + tfb.height() / 2;
-            figX = centerX - figW / 2;
-            figY = centerY - figH / 2;
+            // 배지 그룹 bounds + 페이지 폭으로 위치 산출
+            // InDesign DOM 좌표: 오른쪽 페이지는 x가 음수(오른쪽 끝 기준), 왼쪽 페이지는 x가 양수
+            boolean usedBounds = false;
+            figX = 0;
+            figY = 0;
+            if (bounds != null && bounds.length == 4 && resolvedData != null) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage page =
+                        resolvedData.getPage(badgeGroup.pageIndex());
+                if (page != null) {
+                    double pageW = page.width();  // pts
+                    if (bounds[1] < 0) {
+                        // 오른쪽 페이지: 페이지 우측 끝 기준 음수 좌표
+                        figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                .pointsToHwpunits(pageW + bounds[1]);
+                    } else {
+                        // 왼쪽 페이지: 페이지 좌측 기준 양수 좌표
+                        figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                .pointsToHwpunits(bounds[1]);
+                    }
+                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[0]);
+                    usedBounds = true;
+                }
+            }
+            if (!usedBounds) {
+                // 폴백: AST TF 중심점 기반 배치
+                long centerX = tfb.x() + tfb.width() / 2;
+                long centerY = tfb.y() + tfb.height() / 2;
+                figX = centerX - figW / 2;
+                figY = centerY - figH / 2;
+            }
 
             kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
                     new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();

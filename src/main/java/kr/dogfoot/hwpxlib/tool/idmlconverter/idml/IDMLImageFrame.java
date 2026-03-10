@@ -42,6 +42,10 @@ public class IDMLImageFrame {
     // 각 포인트: [anchorX, anchorY, leftDirX, leftDirY, rightDirX, rightDirY]
     private List<double[]> framePath;    // null이면 사각형 프레임
 
+    // 둥근 모서리
+    private double cornerRadius;
+    private String cornerOption;         // "RoundedCorner", "None" 등
+
     // 텍스트 감싸기 (TextWrapPreference)
     private String textWrapMode;         // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap", "Contour"
     private String textWrapSide;         // "BothSides", "LeftSide", "RightSide", "LargestArea"
@@ -100,6 +104,16 @@ public class IDMLImageFrame {
 
     public List<double[]> framePath() { return framePath; }
     public void framePath(List<double[]> v) { this.framePath = v; }
+
+    public double cornerRadius() { return cornerRadius; }
+    public void cornerRadius(double v) { this.cornerRadius = v; }
+
+    public String cornerOption() { return cornerOption; }
+    public void cornerOption(String v) { this.cornerOption = v; }
+
+    public boolean hasRoundedCorners() {
+        return cornerRadius > 0 && "RoundedCorner".equals(cornerOption);
+    }
 
     /**
      * 프레임이 비사각형인지 확인한다.

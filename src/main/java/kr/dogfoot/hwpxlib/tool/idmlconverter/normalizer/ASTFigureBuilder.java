@@ -133,10 +133,11 @@ class ASTFigureBuilder {
         String layerSig = imgFrame.hasLayerOverrides()
                 ? imgFrame.layerSignature() : null;
 
+        double cornerR = imgFrame.hasRoundedCorners() ? imgFrame.cornerRadius() : 0;
         ASTImageLoader.ImageResult result = imageLoader.loadImage(
                 imgFrame.linkResourceURI(), wHwp, hHwp,
                 imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds(),
-                visibleLayers, layerSig, imgFrame.framePath());
+                visibleLayers, layerSig, imgFrame.framePath(), cornerR);
 
         if (result == null || result.imageData == null) return null;
 

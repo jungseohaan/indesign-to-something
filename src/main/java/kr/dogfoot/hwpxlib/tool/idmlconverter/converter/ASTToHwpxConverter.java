@@ -16,10 +16,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.StyleRegistry;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 
 /**
@@ -290,21 +287,33 @@ public class ASTToHwpxConverter {
             }
         }
 
-        // 일반 플로팅 테이블: IN_FRONT_OF_TEXT
+        // 일반 플로팅 텍스트 프레임 + 그룹 내부 FIGURE: z-order 순으로 인터리빙
+        // (동일 그룹 내 텍스트 프레임과 벡터 셰이프 간 올바른 겹침 순서 보장)
+        List<ASTBlock> inFrontBlocks = new ArrayList<>();
         for (ASTTextFrameBlock block : floatingBlocks) {
-            textBoxBuilder.convertTextFrameBlock(secPrPara, block);
-            ctx.framesConverted++;
+            inFrontBlocks.add(block);
         }
-
-        // 3.5) 그룹 내부 FIGURE: IN_FRONT_OF_TEXT — 형제 배경 위에 표시
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 ASTFigure fig = (ASTFigure) block;
                 if (fig.fromGroup()) {
-                    imageBuilder.convertFigure(secPrPara, fig);
-                    ctx.framesConverted++;
+                    inFrontBlocks.add(fig);
                 }
             }
+        }
+        Collections.sort(inFrontBlocks, new Comparator<ASTBlock>() {
+            @Override
+            public int compare(ASTBlock a, ASTBlock b) {
+                return Integer.compare(zOrderOf(a), zOrderOf(b));
+            }
+        });
+        for (ASTBlock block : inFrontBlocks) {
+            if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
+                textBoxBuilder.convertTextFrameBlock(secPrPara, (ASTTextFrameBlock) block);
+            } else if (block.blockType() == ASTBlock.BlockType.FIGURE) {
+                imageBuilder.convertFigure(secPrPara, (ASTFigure) block);
+            }
+            ctx.framesConverted++;
         }
 
         // 4) 셀 내부에서 승격된 오버레이 텍스트박스: PAPER 기준 IN_FRONT_OF_TEXT
@@ -318,6 +327,12 @@ public class ASTToHwpxConverter {
 
         // SecPr run을 마지막에 추가 (페이지 레이아웃 정의)
         addSecPrRun(secPrPara, layout);
+    }
+
+    private static int zOrderOf(ASTBlock block) {
+        if (block instanceof ASTTextFrameBlock) return ((ASTTextFrameBlock) block).zOrder();
+        if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
+        return 0;
     }
 
     // ── 프레임 배치 판별 / 정렬 ──
