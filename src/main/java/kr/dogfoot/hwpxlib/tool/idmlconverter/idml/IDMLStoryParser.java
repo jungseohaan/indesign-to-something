@@ -382,12 +382,18 @@ class IDMLStoryParser {
                 } else if ("TextVariableInstance".equals(tag)) {
                     // 텍스트 변수 (페이지 번호, 단원명 등) → ResultText를 콘텐츠로 삽입
                     String resultText = getAttrOrNull(elem, "ResultText");
+                    String varName = getAttrOrNull(elem, "Name");
                     if (resultText != null && !resultText.isEmpty()) {
-                        contentBuilder.append(resultText);
-                        // 해결된 값(비플레이스홀더)을 문서에 저장
-                        if (doc != null && !resultText.startsWith("<#")) {
-                            String varName = getAttrOrNull(elem, "Name");
-                            if (varName != null) {
+                        // 미해결 플레이스홀더 감지: <VarName> 또는 <#VarName> 형태
+                        boolean isUnresolved = resultText.startsWith("<#")
+                                || (varName != null && resultText.equals("<" + varName + ">"));
+                        if (isUnresolved && varName != null) {
+                            // 푸터 해석기가 인식할 수 있는 <#VarName> 형태로 정규화
+                            contentBuilder.append("<#").append(varName).append(">");
+                        } else {
+                            contentBuilder.append(resultText);
+                            // 해결된 값을 문서에 저장
+                            if (doc != null && varName != null) {
                                 doc.putTextVariableValue(varName, resultText);
                             }
                         }

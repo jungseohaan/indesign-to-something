@@ -1249,7 +1249,7 @@ class ASTPageProcessor {
             out.append(raw, i, start);
             int end = raw.indexOf('>', start);
             if (end < 0) { out.append(raw, start, raw.length()); break; }
-            String varName = raw.substring(start + 1, end); // "#단원 숫자" 등
+            String varName = raw.substring(start + 2, end); // "단원 숫자" 등 (<# 이후 > 이전)
             String resolved = idmlDoc.getTextVariableValue(varName);
             out.append(resolved != null ? resolved : raw.substring(start, end + 1));
             i = end + 1;

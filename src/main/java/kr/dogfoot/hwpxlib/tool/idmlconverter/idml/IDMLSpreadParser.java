@@ -349,13 +349,27 @@ class IDMLSpreadParser {
         // 프레임 경로 추출 (비사각형 클리핑용)
         frame.framePath(extractFramePath(shapeElem));
 
-        // ItemTransform: 자식 컨테이너를 사용하는 경우 부모 + 자식 transform 결합
+        // ItemTransform: actualContainer까지의 모든 중간 요소 transform을 결합.
+        // 예: Rectangle → Group → Rectangle(actualContainer) 구조에서 중간 Group의 transform도 포함.
         double[] frameTransform = IDMLGeometry.parseTransform(
                 shapeElem.getAttribute("ItemTransform"));
         if (actualContainer != shapeElem) {
-            double[] childTransform = IDMLGeometry.parseTransform(
-                    actualContainer.getAttribute("ItemTransform"));
-            frameTransform = CoordinateConverter.combineTransforms(frameTransform, childTransform);
+            // actualContainer에서 shapeElem까지 역방향으로 올라가며 transform 수집
+            List<double[]> chain = new ArrayList<>();
+            Element current = actualContainer;
+            while (current != null && current != shapeElem) {
+                String ta = current.getAttribute("ItemTransform");
+                if (ta != null && !ta.isEmpty()) {
+                    chain.add(IDMLGeometry.parseTransform(ta));
+                }
+                Node pn = current.getParentNode();
+                current = pn instanceof Element ? (Element) pn : null;
+            }
+            // bottom-up → top-down 순서로 뒤집어서 결합
+            Collections.reverse(chain);
+            for (double[] t : chain) {
+                frameTransform = CoordinateConverter.combineTransforms(frameTransform, t);
+            }
         }
         frame.itemTransform(frameTransform);
         frame.appliedObjectStyle(getAttrOrNull(shapeElem, "AppliedObjectStyle"));
