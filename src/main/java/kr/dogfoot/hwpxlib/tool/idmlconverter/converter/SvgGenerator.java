@@ -84,6 +84,26 @@ public class SvgGenerator {
             if (b[3] > maxX) maxX = b[3];
             if (b[2] > maxY) maxY = b[2];
         }
+        // 수평/수직 GraphicLine 등 한 축이 0인 경우 stroke width만큼 확장
+        if (minY >= maxY || minX >= maxX) {
+            double maxStroke = 0;
+            for (ASTImageLoader.ShapeWithColor sc : shapes) {
+                if (sc.shape.strokeWeight() > 0 && sc.strokeHex != null) {
+                    maxStroke = Math.max(maxStroke, sc.shape.strokeWeight());
+                }
+            }
+            if (maxStroke > 0) {
+                // 점선 패턴이 화면에서 보이려면 최소 3pt 높이 필요
+                boolean hasDash = false;
+                for (ASTImageLoader.ShapeWithColor sc : shapes) {
+                    if (sc.shape.hasDashPattern()) { hasDash = true; break; }
+                }
+                double minPad = hasDash ? 1.5 : (maxStroke / 2.0 + 0.5);
+                double pad = Math.max(maxStroke / 2.0 + 0.5, minPad);
+                if (minY >= maxY) { minY -= pad; maxY += pad; }
+                if (minX >= maxX) { minX -= pad; maxX += pad; }
+            }
+        }
         if (minX >= maxX || minY >= maxY) return null;
 
         double wPts = maxX - minX;

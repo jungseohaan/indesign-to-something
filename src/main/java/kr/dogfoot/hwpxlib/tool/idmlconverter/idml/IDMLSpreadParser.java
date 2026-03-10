@@ -60,23 +60,21 @@ class IDMLSpreadParser {
                         vectorShape.zOrder(zOrderCounter[0]++);
                         spread.addVectorShape(vectorShape);
                     }
-                    // 클리핑 자식이 수집된 경우, 내부 Group의 도형은 이미 clippedChildren에 포함되므로
-                    // extractGroupsFromFrame을 호출하면 GraphicLine 등이 개별 벡터로 중복 등록된다.
-                    // → 클리핑 프레임이면 TextFrame 추출만 건너뛴다.
-                    if (vectorShape == null || !vectorShape.hasClippedChildren()) {
-                        // 클리핑 자식 수집은 벡터 도형만 대상이므로,
-                        // TextFrame 등 다른 자식은 항상 extractGroupsFromFrame으로 추출해야 한다.
+                    // 내부 TextFrame 추출 (클리핑 자식 유무에 관계없이 항상 수행)
+                    // collectClippedChildrenFromGroup은 벡터 도형만 수집하므로 TextFrame은 별도 추출 필요
+                    {
                         int tfCountBefore = spread.textFrames().size();
                         double[] frameTransform = IDMLGeometry.parseTransform(
                                 elem.getAttribute("ItemTransform"));
                         extractGroupsFromFrame(elem, spread, frameTransform,
                                 hiddenLayerIds, zOrderCounter);
                         int tfCountAfter = spread.textFrames().size();
-                        // 래퍼 Rectangle이 TextFrame을 포함하면 벡터 도형(채우기 이미지)으로 렌더링 억제
-                        if (vectorShape != null && tfCountAfter > tfCountBefore) {
+                        // 래퍼 Rectangle이 TextFrame을 포함하고 클리핑 자식이 없으면
+                        // 벡터 도형(채우기 이미지)으로 렌더링 억제 (래퍼 스타일이 TextFrame에 전파됨)
+                        if (vectorShape != null && tfCountAfter > tfCountBefore
+                                && !vectorShape.hasClippedChildren()) {
                             spread.vectorShapes().remove(vectorShape);
                         }
-
                     }
                 }
             } else if ("GraphicLine".equals(elem.getTagName())) {
@@ -854,7 +852,11 @@ class IDMLSpreadParser {
                                            String fillColor, double fillTint,
                                            String strokeColor, double strokeWeight,
                                            String strokeType, double cornerRadius) {
-        if (fillColor != null && !fillColor.contains("None")) {
+        // TextFrame이 자체 채우기(Paper 등)를 가지면 래퍼 채우기 전파 생략
+        // (InDesign에서 내부 프레임이 래퍼를 시각적으로 덮음)
+        boolean frameHasOwnFill = frame.fillColor() != null
+                && !frame.fillColor().contains("None");
+        if (!frameHasOwnFill && fillColor != null && !fillColor.contains("None")) {
             frame.wrapperFillColor(fillColor);
             frame.wrapperFillTint(fillTint);
         }

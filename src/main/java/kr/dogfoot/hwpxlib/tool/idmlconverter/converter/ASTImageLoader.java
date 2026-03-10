@@ -924,6 +924,26 @@ public class ASTImageLoader {
             if (b[3] > maxX) maxX = b[3];
             if (b[2] > maxY) maxY = b[2];
         }
+        // 수평/수직 GraphicLine 등 한 축이 0인 경우 stroke width만큼 확장
+        if (minY >= maxY || minX >= maxX) {
+            double maxStroke = 0;
+            for (ShapeWithColor sc : shapes) {
+                if (sc.shape.strokeWeight() > 0 && sc.strokeHex != null) {
+                    maxStroke = Math.max(maxStroke, sc.shape.strokeWeight());
+                }
+            }
+            if (maxStroke > 0) {
+                // 점선 패턴이 화면에서 보이려면 최소 3pt 높이 필요 (96DPI에서 4px)
+                boolean hasDash = false;
+                for (ShapeWithColor sc : shapes) {
+                    if (sc.shape.hasDashPattern()) { hasDash = true; break; }
+                }
+                double minPad = hasDash ? 1.5 : (maxStroke / 2.0 + 0.5);
+                double pad = Math.max(maxStroke / 2.0 + 0.5, minPad);
+                if (minY >= maxY) { minY -= pad; maxY += pad; }
+                if (minX >= maxX) { minX -= pad; maxX += pad; }
+            }
+        }
         if (minX >= maxX || minY >= maxY) return null;
 
         // 페이지 클리핑: 합산 bounding box를 페이지 경계로 제한
@@ -1012,6 +1032,10 @@ public class ASTImageLoader {
                     Color tintedStroke = applyTint(strokeColor, sc.shape.strokeTint());
                     g.setColor(tintedStroke);
                     float strokeW = (float) (sc.shape.strokeWeight() * scale);
+                    // 점선 패턴이 있는 얇은 선은 최소 1pt로 렌더링 (화면 96DPI에서 1px 보장)
+                    if (sc.shape.hasDashPattern() && sc.shape.strokeWeight() < 1.0) {
+                        strokeW = (float) (1.0 * scale);
+                    }
 
                     int cap = java.awt.BasicStroke.CAP_BUTT;
                     int join = java.awt.BasicStroke.JOIN_MITER;
