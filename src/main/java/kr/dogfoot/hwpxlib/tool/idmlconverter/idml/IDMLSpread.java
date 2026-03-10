@@ -117,19 +117,7 @@ public class IDMLSpread {
                         frame.geometricBounds(), frame.itemTransform(),
                         page.geometricBounds(), page.itemTransform())) {
                     result.add(frame);
-                } else {
-                    String uri = frame.linkResourceURI();
-                    try { uri = java.net.URLDecoder.decode(uri, "UTF-8"); } catch (Exception ignored) {}
-                    System.err.println("[IMG-NOPAGE] page=" + page.name()
-                            + " frame=" + frame.selfId()
-                            + " URI=" + uri
-                            + " bounds=" + java.util.Arrays.toString(frame.geometricBounds())
-                            + " transform=" + java.util.Arrays.toString(frame.itemTransform()));
                 }
-            } else {
-                System.err.println("[IMG-NULL] frame=" + frame.selfId()
-                        + " bounds=" + (frame.geometricBounds() != null)
-                        + " transform=" + (frame.itemTransform() != null));
             }
         }
         return result;

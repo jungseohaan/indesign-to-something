@@ -289,6 +289,9 @@ public class IDMLLoader {
             for (IDMLGroup grp : spread.groups()) {
                 resolveGroupCornerRadius(grp, doc);
             }
+            for (IDMLImageFrame imgFrame : spread.imageFrames()) {
+                resolveImageFrameCornerRadius(imgFrame, doc);
+            }
         }
         for (IDMLSpread spread : doc.masterSpreads().values()) {
             for (IDMLVectorShape vs : spread.vectorShapes()) {
@@ -306,6 +309,19 @@ public class IDMLLoader {
         double inherited = doc.getObjectStyleCornerRadius(style);
         if (inherited > 0) {
             vs.cornerRadius(inherited);
+        }
+    }
+
+    private static void resolveImageFrameCornerRadius(IDMLImageFrame imgFrame, IDMLDocument doc) {
+        if (imgFrame.cornerRadius() > 0) return;
+        String style = imgFrame.appliedObjectStyle();
+        if (style == null) return;
+        double inherited = doc.getObjectStyleCornerRadius(style);
+        if (inherited > 0) {
+            imgFrame.cornerRadius(inherited);
+            if (imgFrame.cornerOption() == null) {
+                imgFrame.cornerOption("RoundedCorner");
+            }
         }
     }
 

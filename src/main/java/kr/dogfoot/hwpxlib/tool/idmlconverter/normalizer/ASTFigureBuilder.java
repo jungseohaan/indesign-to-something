@@ -111,22 +111,6 @@ class ASTFigureBuilder {
         // 프레임 bounds (points) — 클리핑용
         double[] frameBounds = imgFrame.geometricBounds();
 
-        // [DEBUG] 이미지 프레임 클리핑 정보 출력
-        {
-            String uri = imgFrame.linkResourceURI();
-            String fn = uri != null && uri.contains("/") ? uri.substring(uri.lastIndexOf('/') + 1) : uri;
-            try { fn = java.net.URLDecoder.decode(fn != null ? fn : "?", "UTF-8"); } catch (Exception ignored) {}
-            double[] gb = frameBounds;
-            double[] it = imgFrame.imageTransform();
-            double[] gBounds = imgFrame.graphicBounds();
-            System.err.printf("[IMG-CLIP] id=%s file=%s frameBounds=%s imgTransform=%s graphicBounds=%s pos=(%d,%d) size=(%d,%d)%n",
-                    imgFrame.selfId(), fn,
-                    gb != null ? String.format("[%.1f,%.1f,%.1f,%.1f]", gb[0], gb[1], gb[2], gb[3]) : "null",
-                    it != null ? String.format("[%.3f,%.3f,%.3f,%.3f,%.1f,%.1f]", it[0], it[1], it[2], it[3], it[4], it[5]) : "null",
-                    gBounds != null ? String.format("[%.1f,%.1f,%.1f,%.1f]", gBounds[0], gBounds[1], gBounds[2], gBounds[3]) : "null",
-                    xHwp, yHwp, wHwp, hHwp);
-        }
-
         // PSD 레이어 가시성 오버라이드
         java.util.List<Integer> visibleLayers = imgFrame.hasLayerOverrides()
                 ? imgFrame.visibleLayerIndices() : null;

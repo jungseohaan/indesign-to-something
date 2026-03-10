@@ -399,8 +399,6 @@ public class ASTImageLoader {
 
         // 비사각형 프레임 경로가 있으면 알파 마스크 적용
         if (framePath != null && isNonRectangularPath(framePath)) {
-            System.err.printf("[PATH-MASK] Applying path mask: %d points, frame=[%.1f,%.1f,%.1f,%.1f]%n",
-                    framePath.size(), fLeft, fTop, frameW, frameH);
             clipped = applyPathMask(clipped, framePath, fLeft, fTop, frameW, frameH);
         }
         // 둥근 모서리가 있으면 라운드 렉트 마스크 적용
