@@ -18,6 +18,7 @@ public class IDMLParagraph {
     private Double spaceBefore;        // 단락 앞 간격 (points)
     private Double spaceAfter;         // 단락 뒤 간격 (points)
     private Double leading;            // 줄간격 (points, Auto일 경우 null)
+    private String leadingType;        // "Auto" = 자동 줄간격 (스타일 고정값 오버라이드)
     private Double tracking;           // 자간 (1/1000 em)
 
     // 탭 정지점 (인라인 오버라이드)
@@ -66,6 +67,9 @@ public class IDMLParagraph {
 
     public Double leading() { return leading; }
     public void leading(Double v) { this.leading = v; }
+
+    public String leadingType() { return leadingType; }
+    public void leadingType(String v) { this.leadingType = v; }
 
     public Double tracking() { return tracking; }
     public void tracking(Double v) { this.tracking = v; }

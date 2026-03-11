@@ -194,13 +194,30 @@ public class HwpxParagraphBuilder {
 
     /**
      * 인라인 TextFrame의 단일 문단 콘텐츠를 부모 문단에 직접 삽입.
+     * 작은 글꼴의 짧은 텍스트(어휘 번호 등)는 위첨자로 표시.
      */
     private void flattenInlineTextFrame(Para para, ASTInlineObject obj) {
         ASTParagraph innerPara = obj.paragraphs().get(0);
+
+        // 인라인 TextFrame이 위첨자 후보인지 판별:
+        // - 단일 텍스트 런, 3글자 이하, 글꼴 크기 ≤ 8pt (800 HWPUNIT)
+        boolean applySuperscript = false;
+        if (innerPara.items().size() == 1
+                && innerPara.items().get(0).itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+            ASTTextRun tr = (ASTTextRun) innerPara.items().get(0);
+            String text = tr.text();
+            int fontSize = tr.fontSizeHwpunits() != null ? tr.fontSizeHwpunits() : 0;
+            if (text != null && text.trim().length() <= 3 && fontSize > 0 && fontSize <= 800) {
+                applySuperscript = true;
+            }
+        }
+
         for (ASTInlineItem item : innerPara.items()) {
             switch (item.itemType()) {
                 case TEXT_RUN:
-                    addTextRun(para, (ASTTextRun) item, "0");
+                    ASTTextRun textRun = (ASTTextRun) item;
+                    if (applySuperscript) textRun.superscript(true);
+                    addTextRun(para, textRun, "0");
                     break;
                 case INLINE_OBJECT:
                     addInlineObject(para, (ASTInlineObject) item);
@@ -222,6 +239,9 @@ public class HwpxParagraphBuilder {
         for (ASTInlineItem item : astPara.items()) {
             if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                 ASTInlineObject obj = (ASTInlineObject) item;
+                // TextWrapMode="None"인 앵커 객체는 텍스트 위에 겹쳐 표시되며
+                // InDesign에서 줄 간격에 영향을 주지 않으므로 제외
+                if ("None".equals(obj.textWrapMode())) continue;
                 if (obj.height() > max) {
                     max = obj.height();
                 }

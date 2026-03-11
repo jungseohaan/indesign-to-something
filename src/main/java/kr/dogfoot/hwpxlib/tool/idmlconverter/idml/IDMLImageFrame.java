@@ -44,6 +44,7 @@ public class IDMLImageFrame {
 
     // 둥근 모서리
     private double cornerRadius;
+    private double[] cornerRadii;        // [topLeft, topRight, bottomLeft, bottomRight]
     private String cornerOption;         // "RoundedCorner", "None" 등
 
     // 텍스트 감싸기 (TextWrapPreference)
@@ -108,11 +109,30 @@ public class IDMLImageFrame {
     public double cornerRadius() { return cornerRadius; }
     public void cornerRadius(double v) { this.cornerRadius = v; }
 
+    public double[] cornerRadii() { return cornerRadii; }
+    public void cornerRadii(double[] v) { this.cornerRadii = v; }
+
     public String cornerOption() { return cornerOption; }
     public void cornerOption(String v) { this.cornerOption = v; }
 
     public boolean hasRoundedCorners() {
-        return cornerRadius > 0 && "RoundedCorner".equals(cornerOption);
+        if (!"RoundedCorner".equals(cornerOption)) return false;
+        if (cornerRadii != null && cornerRadii.length >= 4) {
+            for (double r : cornerRadii) {
+                if (r > 0) return true;
+            }
+            return false;
+        }
+        return cornerRadius > 0;
+    }
+
+    /**
+     * Per-corner radii가 있고 값이 다른지 확인한다.
+     */
+    public boolean hasPerCornerRadii() {
+        if (cornerRadii == null || cornerRadii.length < 4) return false;
+        return cornerRadii[0] != cornerRadii[1] || cornerRadii[0] != cornerRadii[2]
+                || cornerRadii[0] != cornerRadii[3];
     }
 
     /**

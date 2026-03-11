@@ -359,8 +359,8 @@ class ASTRunConverter {
             }
         }
 
-        if (textCharsBefore < 10) {
-            // 탭+리더 방식: 선행 텍스트가 짧은 경우 (e.g., "1. \t[___]")
+        if (textCharsBefore < 3) {
+            // 탭+리더 방식: 선행 텍스트가 매우 짧은 경우 (e.g., "1. \t[___]")
             long lastTabPos = 0;
             if (para.hasTabStops()) {
                 for (ASTTabStop ts : para.tabStops()) {

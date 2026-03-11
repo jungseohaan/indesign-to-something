@@ -125,10 +125,11 @@ class ASTFigureBuilder {
                 ? imgFrame.layerSignature() : null;
 
         double cornerR = imgFrame.hasRoundedCorners() ? imgFrame.cornerRadius() : 0;
+        double[] cornerRadii = imgFrame.hasRoundedCorners() ? imgFrame.cornerRadii() : null;
         ASTImageLoader.ImageResult result = imageLoader.loadImage(
                 imgFrame.linkResourceURI(), wHwp, hHwp,
                 imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds(),
-                visibleLayers, layerSig, imgFrame.framePath(), cornerR);
+                visibleLayers, layerSig, imgFrame.framePath(), cornerR, cornerRadii);
 
         if (result == null || result.imageData == null) return null;
 

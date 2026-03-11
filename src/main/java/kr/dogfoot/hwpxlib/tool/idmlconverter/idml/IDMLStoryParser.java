@@ -490,10 +490,14 @@ class IDMLStoryParser {
         Element paraProps = getFirstChildElement(paraRange, "Properties");
         if (paraProps != null) {
             String leadingText = getPropertyText(paraProps, "Leading");
-            if (leadingText != null && !"Auto".equalsIgnoreCase(leadingText)) {
-                try {
-                    para.leading(Double.parseDouble(leadingText));
-                } catch (NumberFormatException ignored) {}
+            if (leadingText != null) {
+                if ("Auto".equalsIgnoreCase(leadingText)) {
+                    para.leadingType("Auto");
+                } else {
+                    try {
+                        para.leading(Double.parseDouble(leadingText));
+                    } catch (NumberFormatException ignored) {}
+                }
             }
 
             // 인라인 탭 정지점 오버라이드
@@ -514,16 +518,20 @@ class IDMLStoryParser {
         // ParagraphStyleRange에 Leading이 없으면 첫 번째 CharacterStyleRange에서 폴백.
         // InDesign에서 Leading은 character-level 속성이므로 CharacterStyleRange/Properties에
         // 지정되는 경우가 많다.
-        if (para.leading() == null) {
+        if (para.leading() == null && para.leadingType() == null) {
             Element firstCharRange = getFirstChildElement(paraRange, "CharacterStyleRange");
             if (firstCharRange != null) {
                 Element charProps = getFirstChildElement(firstCharRange, "Properties");
                 if (charProps != null) {
                     String charLeading = getPropertyText(charProps, "Leading");
-                    if (charLeading != null && !"Auto".equalsIgnoreCase(charLeading)) {
-                        try {
-                            para.leading(Double.parseDouble(charLeading));
-                        } catch (NumberFormatException ignored) {}
+                    if (charLeading != null) {
+                        if ("Auto".equalsIgnoreCase(charLeading)) {
+                            para.leadingType("Auto");
+                        } else {
+                            try {
+                                para.leading(Double.parseDouble(charLeading));
+                            } catch (NumberFormatException ignored) {}
+                        }
                     }
                 }
             }

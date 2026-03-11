@@ -62,6 +62,10 @@ class ASTStoryConverter {
         if (idmlPara.leading() != null) {
             para.lineSpacingType("fixed");
             para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(idmlPara.leading()));
+        } else if ("Auto".equalsIgnoreCase(idmlPara.leadingType())) {
+            // Leading="Auto" — 스타일의 고정 줄간격을 오버라이드하여 자동 줄간격 사용
+            para.lineSpacingType("percent");
+            para.lineSpacing(160);  // HWPX 기본 퍼센트 (글꼴 크기 기준 160%)
         }
 
         // 단락 배경

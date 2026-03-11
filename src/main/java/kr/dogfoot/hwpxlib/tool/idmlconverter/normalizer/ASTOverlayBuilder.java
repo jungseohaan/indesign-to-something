@@ -420,8 +420,8 @@ class ASTOverlayBuilder {
             }
         });
 
-        // 텍스트 여백 계산: 배경 사각형과 자식 텍스트프레임들의 전체 바운드 차이
-        if (bg.hasBounds && !childFrames.isEmpty()) {
+        // 자식 텍스트프레임들의 전체 바운드 계산
+        if (!childFrames.isEmpty()) {
             double tfMinX = Double.MAX_VALUE, tfMinY = Double.MAX_VALUE;
             double tfMaxX = -Double.MAX_VALUE, tfMaxY = -Double.MAX_VALUE;
             for (TextFrameWithPosition tfp : childFrames) {
@@ -430,19 +430,38 @@ class ASTOverlayBuilder {
                 tfMaxX = Math.max(tfMaxX, tfp.x + tfp.w);
                 tfMaxY = Math.max(tfMaxY, tfp.y + tfp.h);
             }
-            double insetLeft = tfMinX - bg.bgLeft;
-            double insetTop = tfMinY - bg.bgTop;
-            double insetRight = bg.bgRight - tfMaxX;
-            double insetBottom = bg.bgBottom - tfMaxY;
-            if (insetLeft < 0) insetLeft = 0;
-            if (insetTop < 0) insetTop = 0;
-            if (insetRight < 0) insetRight = 0;
-            if (insetBottom < 0) insetBottom = 0;
-            if (insetLeft + insetTop + insetRight + insetBottom >= 1.0) {
-                wrapper.textMarginLeft(CoordinateConverter.pointsToHwpunits(insetLeft));
-                wrapper.textMarginTop(CoordinateConverter.pointsToHwpunits(insetTop));
-                wrapper.textMarginRight(CoordinateConverter.pointsToHwpunits(insetRight));
-                wrapper.textMarginBottom(CoordinateConverter.pointsToHwpunits(insetBottom));
+
+            // 래퍼 크기가 자식 텍스트프레임보다 작으면 확장
+            // (배경 사각형이 실제로는 장식 요소일 경우 — 자식 TF 크기 기준으로 보정)
+            double contentW = tfMaxX - tfMinX;
+            double contentH = tfMaxY - tfMinY;
+            long contentWHwp = CoordinateConverter.pointsToHwpunits(contentW);
+            long contentHHwp = CoordinateConverter.pointsToHwpunits(contentH);
+            if (contentWHwp > wrapperW) {
+                wrapperW = contentWHwp;
+                wrapper.width(wrapperW);
+            }
+            if (contentHHwp > wrapperH) {
+                wrapperH = contentHHwp;
+                wrapper.height(wrapperH);
+            }
+
+            // 텍스트 여백 계산: 배경 사각형과 자식 텍스트프레임들의 전체 바운드 차이
+            if (bg.hasBounds) {
+                double insetLeft = tfMinX - bg.bgLeft;
+                double insetTop = tfMinY - bg.bgTop;
+                double insetRight = bg.bgRight - tfMaxX;
+                double insetBottom = bg.bgBottom - tfMaxY;
+                if (insetLeft < 0) insetLeft = 0;
+                if (insetTop < 0) insetTop = 0;
+                if (insetRight < 0) insetRight = 0;
+                if (insetBottom < 0) insetBottom = 0;
+                if (insetLeft + insetTop + insetRight + insetBottom >= 1.0) {
+                    wrapper.textMarginLeft(CoordinateConverter.pointsToHwpunits(insetLeft));
+                    wrapper.textMarginTop(CoordinateConverter.pointsToHwpunits(insetTop));
+                    wrapper.textMarginRight(CoordinateConverter.pointsToHwpunits(insetRight));
+                    wrapper.textMarginBottom(CoordinateConverter.pointsToHwpunits(insetBottom));
+                }
             }
         }
 

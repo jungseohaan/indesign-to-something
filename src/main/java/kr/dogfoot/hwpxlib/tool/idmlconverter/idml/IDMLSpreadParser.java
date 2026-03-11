@@ -84,9 +84,8 @@ class IDMLSpreadParser {
                             vectorShape.zOrder(zOrderCounter[0]++);
                             spread.addVectorShape(vectorShape);
                         }
-                        // 내부 TextFrame 추출 (클리핑 자식 유무에 관계없이 항상 수행)
-                        // collectClippedChildrenFromGroup은 벡터 도형만 수집하므로 TextFrame은 별도 추출 필요
-                        {
+                        // 내부 TextFrame 추출 (자식 Group이 클리핑으로 수집된 경우 건너뜀)
+                        if (vectorShape == null || !vectorShape.hasClippedChildren()) {
                             int tfCountBefore = spread.textFrames().size();
                             double[] frameTransform = IDMLGeometry.parseTransform(
                                     elem.getAttribute("ItemTransform"));
@@ -95,8 +94,7 @@ class IDMLSpreadParser {
                             int tfCountAfter = spread.textFrames().size();
                             // 래퍼 Rectangle이 TextFrame을 포함하고 클리핑 자식이 없으면
                             // 벡터 도형(채우기 이미지)으로 렌더링 억제 (래퍼 스타일이 TextFrame에 전파됨)
-                            if (vectorShape != null && tfCountAfter > tfCountBefore
-                                    && !vectorShape.hasClippedChildren()) {
+                            if (vectorShape != null && tfCountAfter > tfCountBefore) {
                                 spread.vectorShapes().remove(vectorShape);
                             }
                         }
@@ -380,6 +378,13 @@ class IDMLSpreadParser {
                     && childBounds[2] == 0 && childBounds[3] == 0)) {
                 localBounds = childBounds;
                 actualContainer = imageParent;
+                // 실제 이미지 컨테이너가 외부 프레임과 다르면 selfId를 실제 컨테이너로 변경.
+                // 외부 프레임(shapeElem)의 resolved bounds는 장식 프레임 전체 크기이므로
+                // 내부 이미지 컨테이너의 ID를 사용해야 올바른 크기로 표시된다.
+                String childId = imageParent.getAttribute("Self");
+                if (childId != null && !childId.isEmpty()) {
+                    frame.selfId(childId);
+                }
             }
         }
 
@@ -390,7 +395,49 @@ class IDMLSpreadParser {
 
         // 둥근 모서리
         frame.cornerRadius(parseDoubleAttrDef(shapeElem, "CornerRadius", 0));
-        frame.cornerOption(getAttrOrNull(shapeElem, "CornerOption"));
+        String globalCornerOpt = getAttrOrNull(shapeElem, "CornerOption");
+        frame.cornerOption(globalCornerOpt);
+
+        // Per-corner radius + per-corner option
+        double tlR = parseDoubleAttrDef(shapeElem, "TopLeftCornerRadius", -1);
+        double trR = parseDoubleAttrDef(shapeElem, "TopRightCornerRadius", -1);
+        double blR = parseDoubleAttrDef(shapeElem, "BottomLeftCornerRadius", -1);
+        double brR = parseDoubleAttrDef(shapeElem, "BottomRightCornerRadius", -1);
+
+        // 개별 코너 옵션이 있으면 "RoundedCorner"가 아닌 코너의 반경을 0으로 설정
+        String tlOpt = getAttrOrNull(shapeElem, "TopLeftCornerOption");
+        String trOpt = getAttrOrNull(shapeElem, "TopRightCornerOption");
+        String blOpt = getAttrOrNull(shapeElem, "BottomLeftCornerOption");
+        String brOpt = getAttrOrNull(shapeElem, "BottomRightCornerOption");
+        boolean hasPerCornerOpt = tlOpt != null || trOpt != null || blOpt != null || brOpt != null;
+
+        if (tlR >= 0 || trR >= 0 || blR >= 0 || brR >= 0 || hasPerCornerOpt) {
+            double defaultR = frame.cornerRadius();
+            String defaultOpt = globalCornerOpt != null ? globalCornerOpt : "None";
+
+            double effTL = tlR >= 0 ? tlR : defaultR;
+            double effTR = trR >= 0 ? trR : defaultR;
+            double effBL = blR >= 0 ? blR : defaultR;
+            double effBR = brR >= 0 ? brR : defaultR;
+
+            // 개별 코너 옵션이 "RoundedCorner"가 아니면 반경 0
+            String effTLOpt = tlOpt != null ? tlOpt : defaultOpt;
+            String effTROpt = trOpt != null ? trOpt : defaultOpt;
+            String effBLOpt = blOpt != null ? blOpt : defaultOpt;
+            String effBROpt = brOpt != null ? brOpt : defaultOpt;
+
+            if (!"RoundedCorner".equals(effTLOpt)) effTL = 0;
+            if (!"RoundedCorner".equals(effTROpt)) effTR = 0;
+            if (!"RoundedCorner".equals(effBLOpt)) effBL = 0;
+            if (!"RoundedCorner".equals(effBROpt)) effBR = 0;
+
+            frame.cornerRadii(new double[]{ effTL, effTR, effBL, effBR });
+
+            // 글로벌 cornerOption이 없어도 개별 코너에 RoundedCorner가 있으면 설정
+            if (globalCornerOpt == null && (effTL > 0 || effTR > 0 || effBL > 0 || effBR > 0)) {
+                frame.cornerOption("RoundedCorner");
+            }
+        }
 
         // ItemTransform: actualContainer까지의 모든 중간 요소 transform을 결합.
         // 예: Rectangle → Group → Rectangle(actualContainer) 구조에서 중간 Group의 transform도 포함.
@@ -542,23 +589,29 @@ class IDMLSpreadParser {
         // 클리핑 프레임 패턴 감지:
         // 1) 외부 Rectangle(채우기 없음)이 내부 자식 도형을 클리핑
         // 2) ContentType=GraphicType인 프레임이 내부 자식 도형을 클리핑 (채우기 유무 무관)
+        // 3) 채우기가 있는 도형도 자식 Group이 있으면 클리핑 (hatching 선 등)
         boolean isGraphicFrame = "GraphicType".equals(shapeElem.getAttribute("ContentType"));
-        if (!shape.hasFill() || isGraphicFrame) {
+        {
             NodeList childNodes = shapeElem.getChildNodes();
             for (int i = 0; i < childNodes.getLength(); i++) {
                 Node child = childNodes.item(i);
                 if (child.getNodeType() != Node.ELEMENT_NODE) continue;
                 Element childElem = (Element) child;
                 String childTag = childElem.getTagName();
-                if ("Rectangle".equals(childTag) || "Polygon".equals(childTag)
-                        || "Oval".equals(childTag)) {
-                    IDMLVectorShape childShape = tryParseVectorShape(childElem);
-                    if (childShape != null && childShape.hasFill()) {
-                        shape.clippedChild(childShape);
-                        break;
+                if (!shape.hasFill() || isGraphicFrame) {
+                    // 채우기 없는 외부 프레임 또는 GraphicType: 자식 도형을 단일 클리핑 대상으로
+                    if ("Rectangle".equals(childTag) || "Polygon".equals(childTag)
+                            || "Oval".equals(childTag)) {
+                        IDMLVectorShape childShape = tryParseVectorShape(childElem);
+                        if (childShape != null && childShape.hasFill()) {
+                            shape.clippedChild(childShape);
+                            break;
+                        }
                     }
-                } else if ("Group".equals(childTag)) {
+                }
+                if ("Group".equals(childTag)) {
                     // Group 자식 클리핑: 외부 프레임이 클리핑 마스크, 내부 Group의 도형이 피클리핑 대상
+                    // (채우기 유무와 관계없이 — 채우기 있는 도형 위에 hatching 선 등이 클리핑됨)
                     double[] groupTransform = IDMLGeometry.parseTransform(
                             childElem.getAttribute("ItemTransform"));
                     collectClippedChildrenFromGroup(childElem, shape, groupTransform);
@@ -1080,23 +1133,27 @@ class IDMLSpreadParser {
                             spread.addVectorShape(vectorShape);
                         }
                         // 프레임 내부의 TextFrame 자식 수집 (지연 등록)
-                        double[] rectTransform = IDMLGeometry.parseTransform(
-                                elem.getAttribute("ItemTransform"));
-                        double[] combinedForChildren = CoordinateConverter.combineTransforms(
-                                accumulatedTransform, rectTransform);
-                        int tfCountBefore = spread.textFrames().size();
-                        extractGroupsFromFrame(elem, spread, combinedForChildren,
-                                hiddenLayerIds, zOrderCounter);
-                        int tfCountAfter = spread.textFrames().size();
-                        if (tfCountAfter > tfCountBefore) {
-                            // 래퍼 도형 제거 (TextFrame에 스타일 전파됨)
-                            if (vectorShape != null) {
-                                spread.vectorShapes().remove(vectorShape);
-                            }
-                            // 추출된 TextFrame을 spread에서 빼고 지연 목록으로 이동
-                            for (int d = tfCountBefore; d < tfCountAfter; d++) {
-                                IDMLTextFrame deferred = spread.textFrames().remove(tfCountBefore);
-                                deferredTextFrames.add(deferred);
+                        // 단, 자식 Group이 이미 클리핑 자식으로 수집된 경우 건너뜀
+                        // (재귀 parseGroupForFrames로 개별 벡터가 중복 추가되는 것 방지)
+                        if (vectorShape == null || !vectorShape.hasClippedChildren()) {
+                            double[] rectTransform = IDMLGeometry.parseTransform(
+                                    elem.getAttribute("ItemTransform"));
+                            double[] combinedForChildren = CoordinateConverter.combineTransforms(
+                                    accumulatedTransform, rectTransform);
+                            int tfCountBefore = spread.textFrames().size();
+                            extractGroupsFromFrame(elem, spread, combinedForChildren,
+                                    hiddenLayerIds, zOrderCounter);
+                            int tfCountAfter = spread.textFrames().size();
+                            if (tfCountAfter > tfCountBefore) {
+                                // 래퍼 도형 제거 (TextFrame에 스타일 전파됨)
+                                if (vectorShape != null) {
+                                    spread.vectorShapes().remove(vectorShape);
+                                }
+                                // 추출된 TextFrame을 spread에서 빼고 지연 목록으로 이동
+                                for (int d = tfCountBefore; d < tfCountAfter; d++) {
+                                    IDMLTextFrame deferred = spread.textFrames().remove(tfCountBefore);
+                                    deferredTextFrames.add(deferred);
+                                }
                             }
                         }
                     }
@@ -1151,6 +1208,14 @@ class IDMLSpreadParser {
             if (groupImages.isEmpty()) groupImages = getDescendantElements(child, "PDF");
             if (groupImages.size() <= 1) continue;
 
+            // 부모 컨테이너의 per-corner radius 파싱
+            double[] parentCornerRadii = parsePerCornerRadii(containerElem);
+            String parentCornerOption = null;
+            if (parentCornerRadii != null) {
+                for (double r : parentCornerRadii) {
+                    if (r > 0) { parentCornerOption = "RoundedCorner"; break; }
+                }
+            }
             // 자식 Group의 transform 결합
             double[] groupTransform = IDMLGeometry.parseTransform(
                     child.getAttribute("ItemTransform"));
@@ -1159,11 +1224,63 @@ class IDMLSpreadParser {
             String groupSelfId = child.getAttribute("Self");
 
             // 자식 Group 재귀 순회 → 개별 이미지 프레임 추출
+            int imgCountBefore = spread.imageFrames().size();
             parseGroupForFrames(child, spread, combined, hiddenLayerIds,
                     zOrderCounter, groupSelfId);
+
+            // 부모의 per-corner radius를 자식 이미지 프레임에 전파
+            if (parentCornerRadii != null && parentCornerOption != null) {
+                double parentCornerR = parseDoubleAttrDef(containerElem, "CornerRadius", 0);
+                for (int j = imgCountBefore; j < spread.imageFrames().size(); j++) {
+                    IDMLImageFrame imgFrame = spread.imageFrames().get(j);
+                    imgFrame.cornerRadii(parentCornerRadii);
+                    imgFrame.cornerOption(parentCornerOption);
+                    imgFrame.cornerRadius(parentCornerR);
+                }
+            }
+
             return true;
         }
         return false;
+    }
+
+    /**
+     * 요소의 per-corner CornerRadius + CornerOption을 파싱하여
+     * [topLeft, topRight, bottomLeft, bottomRight] 배열로 반환한다.
+     * per-corner 속성이 없거나 모두 0이면 null.
+     */
+    private static double[] parsePerCornerRadii(Element elem) {
+        double globalR = parseDoubleAttrDef(elem, "CornerRadius", 0);
+        String globalOpt = getAttrOrNull(elem, "CornerOption");
+
+        double tlR = parseDoubleAttrDef(elem, "TopLeftCornerRadius", -1);
+        double trR = parseDoubleAttrDef(elem, "TopRightCornerRadius", -1);
+        double blR = parseDoubleAttrDef(elem, "BottomLeftCornerRadius", -1);
+        double brR = parseDoubleAttrDef(elem, "BottomRightCornerRadius", -1);
+
+        String tlOpt = getAttrOrNull(elem, "TopLeftCornerOption");
+        String trOpt = getAttrOrNull(elem, "TopRightCornerOption");
+        String blOpt = getAttrOrNull(elem, "BottomLeftCornerOption");
+        String brOpt = getAttrOrNull(elem, "BottomRightCornerOption");
+
+        boolean hasPerCorner = tlR >= 0 || trR >= 0 || blR >= 0 || brR >= 0
+                || tlOpt != null || trOpt != null || blOpt != null || brOpt != null;
+        if (!hasPerCorner && (globalOpt == null || "None".equals(globalOpt))) return null;
+        if (!hasPerCorner && globalR <= 0) return null;
+
+        String defaultOpt = globalOpt != null ? globalOpt : "None";
+        double effTL = tlR >= 0 ? tlR : globalR;
+        double effTR = trR >= 0 ? trR : globalR;
+        double effBL = blR >= 0 ? blR : globalR;
+        double effBR = brR >= 0 ? brR : globalR;
+
+        if (!"RoundedCorner".equals(tlOpt != null ? tlOpt : defaultOpt)) effTL = 0;
+        if (!"RoundedCorner".equals(trOpt != null ? trOpt : defaultOpt)) effTR = 0;
+        if (!"RoundedCorner".equals(blOpt != null ? blOpt : defaultOpt)) effBL = 0;
+        if (!"RoundedCorner".equals(brOpt != null ? brOpt : defaultOpt)) effBR = 0;
+
+        if (effTL <= 0 && effTR <= 0 && effBL <= 0 && effBR <= 0) return null;
+        return new double[]{ effTL, effTR, effBL, effBR };
     }
 
     /**

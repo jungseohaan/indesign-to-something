@@ -165,7 +165,7 @@ public class ASTImageLoader {
                                   List<double[]> framePath) {
         return loadImage(linkResourceURI, displayWidthHwp, displayHeightHwp,
                 imageTransform, frameBoundsPoints, graphicBounds,
-                visibleLayerIndices, layerSignature, framePath, 0);
+                visibleLayerIndices, layerSignature, framePath, 0, null);
     }
 
     /**
@@ -178,7 +178,8 @@ public class ASTImageLoader {
                                   double[] imageTransform, double[] frameBoundsPoints,
                                   double[] graphicBounds,
                                   List<Integer> visibleLayerIndices, String layerSignature,
-                                  List<double[]> framePath, double cornerRadius) {
+                                  List<double[]> framePath, double cornerRadius,
+                                  double[] cornerRadii) {
         if (linkResourceURI == null || linkResourceURI.isEmpty()) {
             return createPlaceholderResult(displayWidthHwp, displayHeightHwp, null);
         }
@@ -236,7 +237,7 @@ public class ASTImageLoader {
 
             // 클리핑 적용
             if (imageTransform != null && frameBoundsPoints != null) {
-                imageData = applyClipping(imageData, imageTransform, frameBoundsPoints, graphicBounds, framePath, cornerRadius);
+                imageData = applyClipping(imageData, imageTransform, frameBoundsPoints, graphicBounds, framePath, cornerRadius, cornerRadii);
                 outputFormat = "png";
             }
 
@@ -359,7 +360,8 @@ public class ASTImageLoader {
 
     private byte[] applyClipping(byte[] imageData, double[] imageTransform,
                                   double[] frameBounds, double[] graphicBounds,
-                                  List<double[]> framePath, double cornerRadius) throws IOException {
+                                  List<double[]> framePath, double cornerRadius,
+                                  double[] cornerRadii) throws IOException {
         BufferedImage srcImage = ImageIO.read(new ByteArrayInputStream(imageData));
         if (srcImage == null) return imageData;
 
@@ -402,7 +404,9 @@ public class ASTImageLoader {
             clipped = applyPathMask(clipped, framePath, fLeft, fTop, frameW, frameH);
         }
         // 둥근 모서리가 있으면 라운드 렉트 마스크 적용
-        else if (cornerRadius > 0) {
+        else if (cornerRadii != null && cornerRadii.length >= 4) {
+            clipped = applyPerCornerMask(clipped, cornerRadii, frameW, frameH);
+        } else if (cornerRadius > 0) {
             clipped = applyRoundedCornerMask(clipped, cornerRadius, frameW, frameH);
         }
 
@@ -541,6 +545,72 @@ public class ASTImageLoader {
         Graphics2D g = masked.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setClip(clip);
+        g.drawImage(img, 0, 0, null);
+        g.dispose();
+
+        return encodePng(masked);
+    }
+
+    /**
+     * Per-corner 둥근 모서리 마스크를 적용한다.
+     * 각 모서리별로 다른 반경을 Path2D로 그려서 클리핑.
+     * @param cornerRadii [topLeft, topRight, bottomLeft, bottomRight] (points)
+     */
+    private byte[] applyPerCornerMask(byte[] imageData, double[] cornerRadii,
+                                       double frameW, double frameH) throws IOException {
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(imageData));
+        if (img == null) return imageData;
+
+        int pixW = img.getWidth();
+        int pixH = img.getHeight();
+
+        double scaleX = pixW / frameW;
+        double scaleY = pixH / frameH;
+        double scale = Math.min(scaleX, scaleY);
+
+        // InDesign 클램핑: radius <= min(width,height)/2
+        double maxR = Math.min(frameW, frameH) / 2.0;
+        double rTL = Math.min(cornerRadii[0], maxR) * scale;
+        double rTR = Math.min(cornerRadii[1], maxR) * scale;
+        double rBL = Math.min(cornerRadii[2], maxR) * scale;
+        double rBR = Math.min(cornerRadii[3], maxR) * scale;
+
+        // Path2D로 per-corner rounded rect 생성
+        java.awt.geom.Path2D.Double path = new java.awt.geom.Path2D.Double();
+
+        // 왼쪽 위 모서리에서 시작 (TL arc 끝)
+        path.moveTo(rTL, 0);
+
+        // 상단 → 오른쪽 위 모서리
+        path.lineTo(pixW - rTR, 0);
+        if (rTR > 0) {
+            path.quadTo(pixW, 0, pixW, rTR);
+        }
+
+        // 오른쪽 → 오른쪽 아래 모서리
+        path.lineTo(pixW, pixH - rBR);
+        if (rBR > 0) {
+            path.quadTo(pixW, pixH, pixW - rBR, pixH);
+        }
+
+        // 하단 → 왼쪽 아래 모서리
+        path.lineTo(rBL, pixH);
+        if (rBL > 0) {
+            path.quadTo(0, pixH, 0, pixH - rBL);
+        }
+
+        // 왼쪽 → 왼쪽 위 모서리
+        path.lineTo(0, rTL);
+        if (rTL > 0) {
+            path.quadTo(0, 0, rTL, 0);
+        }
+
+        path.closePath();
+
+        BufferedImage masked = new BufferedImage(pixW, pixH, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = masked.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setClip(path);
         g.drawImage(img, 0, 0, null);
         g.dispose();
 
