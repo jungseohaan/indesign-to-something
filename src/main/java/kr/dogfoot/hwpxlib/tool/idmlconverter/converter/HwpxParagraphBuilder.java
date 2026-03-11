@@ -189,6 +189,20 @@ public class HwpxParagraphBuilder {
         // anchoredPosition이 있는 앵커 객체는 펼치지 않음
         String ap = obj.anchoredPosition();
         if (ap != null && !"InlinePosition".equals(ap)) return false;
+        // 프레임 폭이 텍스트 내용 대비 과도하게 크면 펼치지 않음
+        // (숫자 배지 등 시각적 간격을 제공하는 컨테이너)
+        if (obj.width() > 1500) {
+            ASTParagraph innerPara = obj.paragraphs().get(0);
+            int charCount = 0;
+            for (ASTInlineItem item : innerPara.items()) {
+                if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null) charCount += text.length();
+                }
+            }
+            // 프레임 폭 > 추정 텍스트 폭의 2배이면 컨테이너로 간주
+            if (charCount > 0 && obj.width() > charCount * 700 * 2) return false;
+        }
         return true;
     }
 

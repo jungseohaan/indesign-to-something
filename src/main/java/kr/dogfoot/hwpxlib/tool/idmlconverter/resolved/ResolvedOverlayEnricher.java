@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -13,8 +14,22 @@ import java.util.List;
  */
 public class ResolvedOverlayEnricher {
 
+    /** 페이지 폭/높이 (points, 좌표 검증용) */
+    private static double pageWidthPts;
+    private static double pageHeightPts;
+
     public static void enrich(ASTDocument astDoc, ResolvedData resolved) {
         if (astDoc == null || resolved == null) return;
+
+        // 페이지 크기 캐시 (검증용)
+        if (!resolved.pages().isEmpty()) {
+            ResolvedPage p = resolved.pages().get(0);
+            pageWidthPts = p.width();
+            pageHeightPts = p.height();
+        } else {
+            pageWidthPts = 0;
+            pageHeightPts = 0;
+        }
 
         for (ASTSection section : astDoc.sections()) {
             for (ASTBlock block : section.blocks()) {
@@ -51,8 +66,12 @@ public class ResolvedOverlayEnricher {
             List<ASTInlineObject> overlays = obj.overlayFrames();
             if (overlays == null || overlays.isEmpty()) continue;
 
-            for (ASTInlineObject overlay : overlays) {
-                enrichOverlay(overlay, resolved);
+            Iterator<ASTInlineObject> it = overlays.iterator();
+            while (it.hasNext()) {
+                ASTInlineObject overlay = it.next();
+                if (!enrichOverlay(overlay, resolved)) {
+                    it.remove();
+                }
             }
         }
     }
@@ -64,19 +83,34 @@ public class ResolvedOverlayEnricher {
      * 페이지 기준 상대 좌표 (rulerOrigin=PAGE_ORIGIN)이므로
      * 페이지 오프셋 빼기 없이 직접 사용한다.
      */
-    private static void enrichOverlay(ASTInlineObject overlay, ResolvedData resolved) {
+    /**
+     * @return true = 유지, false = 페이지 범위 밖 → 제거 대상
+     */
+    private static boolean enrichOverlay(ASTInlineObject overlay, ResolvedData resolved) {
         String sourceId = overlay.sourceId();
-        if (sourceId == null) return;
+        if (sourceId == null) return true;
 
         ResolvedPageItem item = resolved.getPageItemByIdmlId(sourceId);
-        if (item == null || item.geometricBounds() == null) return;
+        if (item == null || item.geometricBounds() == null) return true;
 
         double[] gb = item.geometricBounds(); // [top, left, bottom, right] (points, normalized)
-        // resolved 좌표는 이미 페이지 기준 상대 좌표 — HWPX PAPER 좌표로 직접 변환
         double x = gb[1];
         double y = gb[0];
         double w = gb[3] - gb[1];
         double h = gb[2] - gb[0];
+
+        // 페이지 범위 검증 — 앵커드 객체가 연결 스토리 체인 내에서 다른 페이지에 있으면
+        // resolved.json 좌표가 스프레드/스토리 상대 좌표로 반환될 수 있음 → 제거
+        if (pageWidthPts > 0 && pageHeightPts > 0) {
+            if (x < -10 || y < -10 || x + w > pageWidthPts + 10 || y + h > pageHeightPts + 10) {
+                System.out.println("[ResolvedOverlay] REMOVE " + sourceId
+                        + " — out of page bounds: (" + String.format("%.1f", x)
+                        + "," + String.format("%.1f", y) + ") page("
+                        + String.format("%.0f", pageWidthPts) + "x"
+                        + String.format("%.0f", pageHeightPts) + ")");
+                return false;
+            }
+        }
 
         overlay.resolvedPageX(CoordinateConverter.pointsToHwpunits(x));
         overlay.resolvedPageY(CoordinateConverter.pointsToHwpunits(y));
@@ -88,5 +122,6 @@ public class ResolvedOverlayEnricher {
                 + " size(" + String.format("%.1f", w) + "x" + String.format("%.1f", h) + ") pts"
                 + " → HWPUNIT(" + overlay.resolvedPageX() + "," + overlay.resolvedPageY() + ")"
                 + " " + overlay.resolvedWidth() + "x" + overlay.resolvedHeight());
+        return true;
     }
 }
