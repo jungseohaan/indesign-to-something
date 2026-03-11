@@ -571,18 +571,21 @@ class ASTPageProcessor {
 
         List<IDMLTextFrame> masterTFs = masterSpread.getTextFramesOnPage(masterPage);
         for (IDMLTextFrame mtf : masterTFs) {
-            if (isFooterTextFrame(mtf, masterPage)) {
+            boolean isFooter = isFooterTextFrame(mtf, masterPage);
+            boolean isHeader = isHeaderTextFrame(mtf, masterPage);
+            if (isFooter || isHeader) {
                 String storyId = mtf.parentStoryId();
                 IDMLStory story = storyId != null ? idmlDoc.getStory(storyId) : null;
                 if (story != null) {
-                    String footerText = resolveFooterText(story, page, idmlDoc);
-                    if (footerText != null && !footerText.trim().isEmpty()) {
-                        ASTTextFrameBlock footerBlock = createFooterBlock(
-                                mtf, masterPage, page, footerText, colorResolver);
-                        if (footerBlock != null) {
-                            section.addBlock(footerBlock);
+                    String text = resolveFooterText(story, page, idmlDoc);
+                    if (text != null && !text.trim().isEmpty()) {
+                        ASTTextFrameBlock block = createFooterBlock(
+                                mtf, masterPage, page, text, colorResolver);
+                        if (block != null) {
+                            section.addBlock(block);
+                            String pos = isHeader ? "header" : "footer";
                             System.err.println("[Stage4] Page " + page.pageNumber()
-                                    + " footer: \"" + footerText.trim() + "\"");
+                                    + " " + pos + ": \"" + text.trim() + "\"");
                         }
                     }
                 }
@@ -1223,6 +1226,23 @@ class ASTPageProcessor {
     }
 
     /**
+     * 마스터 페이지 텍스트프레임이 헤더에 위치하는지 판별 (상단 15%).
+     */
+    private static boolean isHeaderTextFrame(IDMLTextFrame tf, IDMLPage page) {
+        if (tf.geometricBounds() == null || tf.itemTransform() == null
+                || page.geometricBounds() == null || page.itemTransform() == null) {
+            return false;
+        }
+        double[] relPos = IDMLGeometry.pageRelativePosition(
+                tf.geometricBounds(), tf.itemTransform(),
+                page.geometricBounds(), page.itemTransform());
+        double pageHeight = IDMLGeometry.height(page.geometricBounds());
+        // 프레임 하단(relPos[1] + height)이 상단 15% 이내
+        double tfHeight = IDMLGeometry.height(tf.geometricBounds());
+        return pageHeight > 0 && (relPos[1] + tfHeight) < pageHeight * 0.15;
+    }
+
+    /**
      * 마스터 페이지 스토리의 텍스트를 해석하여 푸터 텍스트를 생성.
      * \uFFFE → 페이지 번호, \uFFFF → 섹션 마커, \uFFFC → 인라인 TextFrame 텍스트.
      */
@@ -1275,12 +1295,51 @@ class ASTPageProcessor {
             out.append(raw, i, start);
             int end = raw.indexOf('>', start);
             if (end < 0) { out.append(raw, start, raw.length()); break; }
-            String varName = raw.substring(start + 2, end); // "단원 숫자" 등 (<# 이후 > 이전)
+            String varName = raw.substring(start + 2, end); // "1T", "01 T" 등 (<# 이후 > 이전)
             String resolved = idmlDoc.getTextVariableValue(varName);
-            out.append(resolved != null ? resolved : raw.substring(start, end + 1));
+            // 캐시 미스: 스타일 기반 Running Header 변수 → 해당 페이지 텍스트에서 검색
+            if (resolved == null) {
+                resolved = resolveRunningHeaderVariable(varName, docPage, idmlDoc);
+            }
+            out.append(resolved != null ? resolved : "");
             i = end + 1;
         }
         return out.toString();
+    }
+
+    /**
+     * MatchCharacterStyleType / MatchParagraphStyleType 기반 Running Header 변수 해결.
+     * 해당 페이지의 텍스트프레임 스토리에서 지정된 CharacterStyle이 적용된 첫 번째 텍스트를 반환.
+     */
+    private static String resolveRunningHeaderVariable(String varName, IDMLPage docPage, IDMLDocument idmlDoc) {
+        String styleRef = idmlDoc.getTextVariableStyleRef(varName);
+        if (styleRef == null) return null;
+
+        // Running Header: 문서 순서로 해당 페이지가 속한 스프레드까지 스캔.
+        // 마지막으로 발견된 매칭 텍스트를 사용 (SearchStrategy=FirstOnPage).
+        String lastFound = null;
+        for (IDMLSpread spread : idmlDoc.spreads()) {
+            for (IDMLTextFrame tf : spread.textFrames()) {
+                String storyId = tf.parentStoryId();
+                IDMLStory story = storyId != null ? idmlDoc.getStory(storyId) : null;
+                if (story == null) continue;
+                for (IDMLParagraph para : story.paragraphs()) {
+                    for (IDMLCharacterRun run : para.characterRuns()) {
+                        String runStyle = run.appliedCharacterStyle();
+                        if (runStyle != null && runStyle.equals(styleRef)) {
+                            String content = run.content();
+                            if (content != null) {
+                                String text = stripACEPlaceholders(content).trim();
+                                if (!text.isEmpty()) lastFound = text;
+                            }
+                        }
+                    }
+                }
+            }
+            // 해당 페이지가 속한 스프레드까지 도달하면 종료
+            if (spread.pages().contains(docPage)) break;
+        }
+        return lastFound;
     }
 
     /**

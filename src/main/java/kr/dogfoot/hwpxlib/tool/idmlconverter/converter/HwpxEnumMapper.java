@@ -25,7 +25,13 @@ public final class HwpxEnumMapper {
                 return HorizontalAlign2.CENTER;
             case "right": case "rightjustify": case "rightalign":
                 return HorizontalAlign2.RIGHT;
-            case "justify": case "fulljustify": case "leftjustified": case "fullyjustified":
+            case "leftjustified":
+                return HorizontalAlign2.LEFT;
+            case "centerjustified":
+                return HorizontalAlign2.CENTER;
+            case "rightjustified":
+                return HorizontalAlign2.RIGHT;
+            case "justify": case "fulljustify": case "fullyjustified":
                 return HorizontalAlign2.JUSTIFY;
             default:
                 return HorizontalAlign2.JUSTIFY;

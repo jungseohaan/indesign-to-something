@@ -380,22 +380,37 @@ class ASTRunConverter {
             para.addItem(tabRun);
         } else {
             // 고정폭 공백 방식: 본문 중간의 빈칸 밑줄 (e.g., "I like [___] the most")
-            // en-space (U+2002) = 0.5em 폭으로 정밀한 너비 제어
-            int enSpaceWidth = lastFontSize / 2;
-            if (enSpaceWidth <= 0) enSpaceWidth = 675;
-            int count = Math.max(1, (int) Math.round((double) inlineObj.width() / enSpaceWidth));
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < count; i++) sb.append('\u2002');
+            // DOT 스타일: 가운뎃점(·) 문자열로 변환 (중간 점선은 밑줄이 아닌 중간 높이)
+            if ("DOT".equals(ulShape)) {
+                int dotWidth = lastFontSize / 2;
+                if (dotWidth <= 0) dotWidth = 675;
+                int count = Math.max(1, (int) Math.round((double) inlineObj.width() / dotWidth));
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < count; i++) sb.append('\u00B7'); // middle dot
+                ASTTextRun dotRun = new ASTTextRun();
+                dotRun.text(sb.toString());
+                dotRun.textColor(blended);
+                dotRun.fontSizeHwpunits(lastFontSize);
+                if (lastFontFamily != null) dotRun.fontFamily(lastFontFamily);
+                para.addItem(dotRun);
+            } else {
+                // en-space (U+2002) = 0.5em 폭으로 정밀한 너비 제어
+                int enSpaceWidth = lastFontSize / 2;
+                if (enSpaceWidth <= 0) enSpaceWidth = 675;
+                int count = Math.max(1, (int) Math.round((double) inlineObj.width() / enSpaceWidth));
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < count; i++) sb.append('\u2002');
 
-            ASTTextRun spaceRun = new ASTTextRun();
-            spaceRun.text(sb.toString());
-            spaceRun.underline(true);
-            spaceRun.underlineColor(blended);
-            spaceRun.underlineShape(ulShape);
-            spaceRun.textColor(blended);
-            spaceRun.fontSizeHwpunits(lastFontSize);
-            if (lastFontFamily != null) spaceRun.fontFamily(lastFontFamily);
-            para.addItem(spaceRun);
+                ASTTextRun spaceRun = new ASTTextRun();
+                spaceRun.text(sb.toString());
+                spaceRun.underline(true);
+                spaceRun.underlineColor(blended);
+                spaceRun.underlineShape(ulShape);
+                spaceRun.textColor(blended);
+                spaceRun.fontSizeHwpunits(lastFontSize);
+                if (lastFontFamily != null) spaceRun.fontFamily(lastFontFamily);
+                para.addItem(spaceRun);
+            }
         }
         return true;
     }

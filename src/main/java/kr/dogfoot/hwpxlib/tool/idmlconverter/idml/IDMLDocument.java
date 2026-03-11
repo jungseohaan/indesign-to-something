@@ -22,6 +22,7 @@ public class IDMLDocument {
     private File tempDir;  // ZIP에서 추출한 임시 디렉토리 (cleanup 대상)
     private int pageNumberStart;
     private Map<String, String> textVariableValues;  // TextVariable Name → resolved ResultText
+    private Map<String, String> textVariableStyleRefs;  // TextVariable Name → AppliedCharacterStyle/ParagraphStyle ref
 
     public IDMLDocument() {
         this.spreads = new ArrayList<IDMLSpread>();
@@ -36,6 +37,7 @@ public class IDMLDocument {
         this.hiddenLayerIds = new HashSet<String>();
         this.masterSpreads = new LinkedHashMap<String, IDMLSpread>();
         this.textVariableValues = new LinkedHashMap<String, String>();
+        this.textVariableStyleRefs = new LinkedHashMap<String, String>();
         this.pageNumberStart = 1;
     }
 
@@ -105,6 +107,11 @@ public class IDMLDocument {
     /** TextVariable 해결된 값 저장 (Name → ResultText) */
     public void putTextVariableValue(String name, String value) { textVariableValues.put(name, value); }
     public String getTextVariableValue(String name) { return textVariableValues.get(name); }
+
+    /** TextVariable 스타일 참조 저장 (Name → CharacterStyle/ParagraphStyle ref) */
+    public void putTextVariableStyleRef(String name, String styleRef) { textVariableStyleRefs.put(name, styleRef); }
+    public String getTextVariableStyleRef(String name) { return textVariableStyleRefs.get(name); }
+    public Map<String, String> textVariableStyleRefs() { return textVariableStyleRefs; }
 
     /**
      * ZIP에서 추출한 임시 디렉토리가 있으면 삭제한다.

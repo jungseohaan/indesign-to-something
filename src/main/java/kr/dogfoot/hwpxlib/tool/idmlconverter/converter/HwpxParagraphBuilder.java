@@ -146,7 +146,11 @@ public class HwpxParagraphBuilder {
 
     private void addInlineObject(Para para, ASTInlineObject obj) {
         if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) {
-            textBoxBuilder.addInlineTextFrame(para, obj);
+            if (shouldFlattenInlineTextFrame(obj)) {
+                flattenInlineTextFrame(para, obj);
+            } else {
+                textBoxBuilder.addInlineTextFrame(para, obj);
+            }
         } else if (obj.kind() == ASTInlineObject.ObjectKind.RENDERED_GROUP) {
             // 단락 콘텐츠 또는 인라인 테이블이 있는 그룹은 글상자로, 없으면 이미지로
             boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
@@ -167,6 +171,47 @@ public class HwpxParagraphBuilder {
             }
         } else if (obj.kind() == ASTInlineObject.ObjectKind.SPACER_RECT) {
             textBoxBuilder.addSpacerRect(para, obj);
+        }
+    }
+
+    // ── 인라인 TextFrame 펼침 (단순 구조일 때 hp:rect 없이 부모 문단에 직접 삽입) ──
+
+    /**
+     * 단순 인라인 TextFrame인지 판별:
+     * - 단일 문단, 테이블 없음, 배경/테두리 없음, 오버레이 아님
+     */
+    private boolean shouldFlattenInlineTextFrame(ASTInlineObject obj) {
+        if (obj.isOverlay()) return false;
+        if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
+        if (obj.paragraphs() == null || obj.paragraphs().size() != 1) return false;
+        if (obj.fillColor() != null && !obj.fillColor().isEmpty()) return false;
+        if (obj.strokeWeight() > 0.5) return false;
+        // anchoredPosition이 있는 앵커 객체는 펼치지 않음
+        String ap = obj.anchoredPosition();
+        if (ap != null && !"InlinePosition".equals(ap)) return false;
+        return true;
+    }
+
+    /**
+     * 인라인 TextFrame의 단일 문단 콘텐츠를 부모 문단에 직접 삽입.
+     */
+    private void flattenInlineTextFrame(Para para, ASTInlineObject obj) {
+        ASTParagraph innerPara = obj.paragraphs().get(0);
+        for (ASTInlineItem item : innerPara.items()) {
+            switch (item.itemType()) {
+                case TEXT_RUN:
+                    addTextRun(para, (ASTTextRun) item, "0");
+                    break;
+                case INLINE_OBJECT:
+                    addInlineObject(para, (ASTInlineObject) item);
+                    break;
+                case BREAK:
+                    addBreak(para, (ASTBreak) item);
+                    break;
+                case EQUATION:
+                    addEquationRun(para, (ASTEquation) item);
+                    break;
+            }
         }
     }
 

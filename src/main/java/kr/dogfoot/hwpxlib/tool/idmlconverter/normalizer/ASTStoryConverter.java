@@ -364,7 +364,10 @@ class ASTStoryConverter {
             if (text == null) continue;
             if (text.indexOf('\u0008') >= 0) {
                 found = true;
-                run.content(text.replace("\u0008", ""));
+                // InDesign "Indent to Here" (ACE 7): 탭+U+0008 조합에서 탭도 함께 제거
+                text = text.replace("\t\u0008", "");
+                text = text.replace("\u0008", "");
+                run.content(text);
             }
         }
         return found;

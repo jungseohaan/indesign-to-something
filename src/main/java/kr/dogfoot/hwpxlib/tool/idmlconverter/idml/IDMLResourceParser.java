@@ -45,6 +45,25 @@ class IDMLResourceParser {
                 si.name = elem.getAttribute("Name");
                 si.marker = elem.getAttribute("Marker");
                 sections.add(si);
+            } else if ("TextVariable".equals(tagName)) {
+                // MatchCharacterStyleType / MatchParagraphStyleType 변수 → 스타일 기반 Running Header
+                String varType = getAttrOrNull(elem, "VariableType");
+                String varName = getAttrOrNull(elem, "Name");
+                if (varName != null && ("MatchCharacterStyleType".equals(varType)
+                        || "MatchParagraphStyleType".equals(varType))) {
+                    // 자식 요소에서 AppliedCharacterStyle/AppliedParagraphStyle 추출
+                    NodeList varChildren = elem.getChildNodes();
+                    for (int vc = 0; vc < varChildren.getLength(); vc++) {
+                        Node vcNode = varChildren.item(vc);
+                        if (vcNode.getNodeType() != Node.ELEMENT_NODE) continue;
+                        Element pref = (Element) vcNode;
+                        String styleRef = getAttrOrNull(pref, "AppliedCharacterStyle");
+                        if (styleRef == null) styleRef = getAttrOrNull(pref, "AppliedParagraphStyle");
+                        if (styleRef != null) {
+                            doc.putTextVariableStyleRef(varName, styleRef);
+                        }
+                    }
+                }
             } else if ("Layer".equals(tagName)) {
                 String layerVisible = elem.getAttribute("Visible");
                 if ("false".equals(layerVisible)) {
