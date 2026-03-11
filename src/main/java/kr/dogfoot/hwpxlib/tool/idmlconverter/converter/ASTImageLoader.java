@@ -804,6 +804,9 @@ public class ASTImageLoader {
                 }
                 g.setStroke(stroke);
                 g.draw(awtShape);
+
+                // 선 끝 장식 (CircleArrowHead 등) — 열린 경로의 시작/끝점에 원 그리기
+                drawLineEndDecorations(g, renderTarget, awtShape, strokeColor, tintedStroke, alpha, strokeW, scale);
             }
         }
 
@@ -1057,6 +1060,9 @@ public class ASTImageLoader {
                     }
                     g.setStroke(stroke);
                     g.draw(awtShape);
+
+                    // 선 끝 장식 (CircleArrowHead 등)
+                    drawLineEndDecorations(g, sc.shape, awtShape, strokeColor, tintedStroke, 1.0f, strokeW, scale);
                 }
             }
         }
@@ -1309,6 +1315,9 @@ public class ASTImageLoader {
                 }
                 g.setStroke(stroke);
                 g.draw(transformedShape);
+
+                // 선 끝 장식 (CircleArrowHead 등)
+                drawLineEndDecorations(g, renderTarget, transformedShape, strokeColor, tintedStroke, alpha, strokeW, scale);
             }
         }
 
@@ -2400,6 +2409,60 @@ public class ASTImageLoader {
             return result;
         } catch (IOException e) {
             return null;
+        }
+    }
+
+    /**
+     * 열린 경로의 시작/끝점에 선 끝 장식(CircleArrowHead 등)을 그린다.
+     */
+    private void drawLineEndDecorations(Graphics2D g, IDMLVectorShape shape,
+                                         Shape awtShape, Color baseColor,
+                                         Color tintedColor, float alpha,
+                                         float strokeW, double scale) {
+        String leftEnd = shape.leftLineEnd();
+        String rightEnd = shape.rightLineEnd();
+        if (leftEnd == null && rightEnd == null) return;
+        if (!shape.pathOpen()) return;
+
+        // 경로의 시작점/끝점 추출
+        PathIterator pi = awtShape.getPathIterator(null);
+        double[] firstPt = null;
+        double[] lastPt = null;
+        double[] coords = new double[6];
+        while (!pi.isDone()) {
+            int type = pi.currentSegment(coords);
+            switch (type) {
+                case PathIterator.SEG_MOVETO:
+                    if (firstPt == null) firstPt = new double[]{coords[0], coords[1]};
+                    lastPt = new double[]{coords[0], coords[1]};
+                    break;
+                case PathIterator.SEG_LINETO:
+                    lastPt = new double[]{coords[0], coords[1]};
+                    break;
+                case PathIterator.SEG_CUBICTO:
+                    lastPt = new double[]{coords[4], coords[5]};
+                    break;
+                case PathIterator.SEG_QUADTO:
+                    lastPt = new double[]{coords[2], coords[3]};
+                    break;
+            }
+            pi.next();
+        }
+
+        // CircleArrowHead: 스트로크 두께의 약 3배 직경의 채워진 원
+        double circleR = strokeW * 1.5;
+
+        if (leftEnd != null && leftEnd.contains("Circle") && firstPt != null) {
+            g.setColor(withAlpha(tintedColor, alpha));
+            g.fill(new Ellipse2D.Double(
+                    firstPt[0] - circleR, firstPt[1] - circleR,
+                    circleR * 2, circleR * 2));
+        }
+        if (rightEnd != null && rightEnd.contains("Circle") && lastPt != null) {
+            g.setColor(withAlpha(tintedColor, alpha));
+            g.fill(new Ellipse2D.Double(
+                    lastPt[0] - circleR, lastPt[1] - circleR,
+                    circleR * 2, circleR * 2));
         }
     }
 

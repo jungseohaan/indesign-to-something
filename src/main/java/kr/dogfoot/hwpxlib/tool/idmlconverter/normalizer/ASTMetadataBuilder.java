@@ -69,6 +69,7 @@ class ASTMetadataBuilder {
             if (s.autoLeading() != null) sd.autoLeading(s.autoLeading());
             // 밑줄 / 취소선
             sd.underline(s.underline());
+            sd.underlineType(s.underlineType());
             sd.strikeThrough(s.strikeThrough());
             // 두문자 (DropCap)
             if (s.dropCapLines() != null && s.dropCapLines() > 0) {
@@ -106,6 +107,7 @@ class ASTMetadataBuilder {
             sd.italic(s.italic());
             if (s.horizontalScale() != null) sd.horizontalScale((short) Math.round(s.horizontalScale()));
             sd.underline(s.underline());
+            sd.underlineType(s.underlineType());
             sd.strikeThrough(s.strikeThrough());
             doc.addCharacterStyle(sd);
         }

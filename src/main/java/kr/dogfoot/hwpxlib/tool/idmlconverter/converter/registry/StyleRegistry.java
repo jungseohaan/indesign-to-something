@@ -206,6 +206,7 @@ public class StyleRegistry {
         }
         boolean underline = Boolean.TRUE.equals(styleDef.underline());
         boolean strikeThrough = Boolean.TRUE.equals(styleDef.strikeThrough());
+        LineType3 ulShape = mapIdmlUnderlineType(styleDef.underlineType());
         CharPrBuilder.build(charPr, id, height, textColor,
                 styleDef.fontFamily(), fontRegistry,
                 styleDef.letterSpacing(),
@@ -213,7 +214,7 @@ public class StyleRegistry {
                 false, false,
                 underline ? UnderlineType.BOTTOM : UnderlineType.NONE,
                 underline ? textColor : "#000000",
-                null, // underlineShape
+                ulShape,
                 styleDef.horizontalScale(),
                 strikeThrough,
                 null, null);
@@ -319,5 +320,18 @@ public class StyleRegistry {
 
     private static HorizontalAlign2 mapAlignment(String alignment) {
         return kr.dogfoot.hwpxlib.tool.idmlconverter.converter.HwpxEnumMapper.mapAlignment(alignment);
+    }
+
+    /**
+     * IDML UnderlineType → HWPX LineType3 매핑.
+     * IDML: "StrokeStyle/$ID/Wavy", "StrokeStyle/$ID/Dashed", etc.
+     */
+    static LineType3 mapIdmlUnderlineType(String idmlType) {
+        if (idmlType == null) return null;
+        String lower = idmlType.toLowerCase();
+        if (lower.contains("wavy") || lower.contains("wave")) return LineType3.WAVE;
+        if (lower.contains("dashed") || lower.contains("dash")) return LineType3.DASH;
+        if (lower.contains("dotted") || lower.contains("dot")) return LineType3.DOT;
+        return null;  // Solid는 기본값
     }
 }

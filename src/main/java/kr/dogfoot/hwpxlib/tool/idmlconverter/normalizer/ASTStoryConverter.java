@@ -398,6 +398,7 @@ class ASTStoryConverter {
         merged.italic(style.italic() != null ? style.italic() : parent.italic());
         merged.tracking(style.tracking() != null ? style.tracking() : parent.tracking());
         merged.underline(style.underline() != null ? style.underline() : parent.underline());
+        merged.underlineType(style.underlineType() != null ? style.underlineType() : parent.underlineType());
         merged.strikeThrough(style.strikeThrough() != null ? style.strikeThrough() : parent.strikeThrough());
         merged.leading(style.leading() != null ? style.leading() : parent.leading());
         merged.leadingType(style.leadingType() != null ? style.leadingType() : parent.leadingType());

@@ -559,6 +559,11 @@ class IDMLStoryParser {
             if (fontFamily != null) {
                 run.fontFamily(fontFamily);
             }
+            // UnderlineType (Properties 안: <UnderlineType type="object">StrokeStyle/$ID/Wavy</UnderlineType>)
+            String ulType = getPropertyText(props, "UnderlineType");
+            if (ulType != null) {
+                run.underlineType(ulType);
+            }
         }
         return run;
     }
@@ -1564,6 +1569,7 @@ class IDMLStoryParser {
         clone.position(source.position());
         clone.tracking(source.tracking());
         clone.underline(source.underline());
+        clone.underlineType(source.underlineType());
         clone.strikeThrough(source.strikeThrough());
         clone.content(newText);
         return clone;

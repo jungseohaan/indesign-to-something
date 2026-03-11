@@ -911,6 +911,19 @@ class ASTPageProcessor {
             return true;
         }
 
+        // 도형이 페이지와 10% 이상 겹치면 포함 (페이지 경계의 도형이 잘리지 않도록)
+        double overlapMinX = Math.max(shapeBox[0], pageMinX);
+        double overlapMaxX = Math.min(shapeBox[2], pageMaxX);
+        double overlapW = overlapMaxX - overlapMinX;
+        if (shapeW > 0 && overlapW / shapeW >= 0.10) {
+            double overlapMinY = Math.max(shapeBox[1], pageMinY);
+            double overlapMaxY = Math.min(shapeBox[3], pageMaxY);
+            double overlapH = overlapMaxY - overlapMinY;
+            if (shapeH > 0 && overlapH / shapeH >= 0.10) {
+                return true;
+            }
+        }
+
         double cx = (bounds[1] + bounds[3]) / 2.0;
         double cy = (bounds[0] + bounds[2]) / 2.0;
         double[] absCenter = CoordinateConverter.applyTransform(transform, cx, cy);

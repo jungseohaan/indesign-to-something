@@ -69,12 +69,19 @@ class ASTFigureBuilder {
             double rW = gb[3] - gb[1];
             double rH = gb[2] - gb[0];
             if (rW > 0 && rH > 0) {
-                double[] rel = resolvedPage.toPageRelative(gb);
-                xHwp = CoordinateConverter.pointsToHwpunits(rel[0]);
-                yHwp = CoordinateConverter.pointsToHwpunits(rel[1]);
-                wHwp = CoordinateConverter.pointsToHwpunits(rW);
-                hHwp = CoordinateConverter.pointsToHwpunits(rH);
-                usedResolved = true;
+                // resolved geometry가 페이지 폭의 1.5배를 초과하면 스프레드 전체를 덮는
+                // 컨테이너일 수 있음 → 이미지 클리핑과 표시 크기 불일치 방지를 위해 IDML 폴백
+                double pageW = IDMLGeometry.width(page.geometricBounds());
+                double pageH = IDMLGeometry.height(page.geometricBounds());
+                boolean spreadSpanning = rW > pageW * 1.5 || rH > pageH * 1.5;
+                if (!spreadSpanning) {
+                    double[] rel = resolvedPage.toPageRelative(gb);
+                    xHwp = CoordinateConverter.pointsToHwpunits(rel[0]);
+                    yHwp = CoordinateConverter.pointsToHwpunits(rel[1]);
+                    wHwp = CoordinateConverter.pointsToHwpunits(rW);
+                    hHwp = CoordinateConverter.pointsToHwpunits(rH);
+                    usedResolved = true;
+                }
             }
         }
 
@@ -190,6 +197,11 @@ class ASTFigureBuilder {
             double frac = (double) (yHwp + hHwp - pageH) / hHwp;
             if (frac > minCropThreshold) figure.cropBottomFraction(frac);
         }
+
+        // 페이지에 10% 미만만 보이는 이미지는 건너뛰기 (스프레드 경계 슬리버 방지)
+        double visibleFracW = 1.0 - figure.cropLeftFraction() - figure.cropRightFraction();
+        double visibleFracH = 1.0 - figure.cropTopFraction() - figure.cropBottomFraction();
+        if (visibleFracW < 0.10 || visibleFracH < 0.10) return null;
 
         figure.fromGroup(imgFrame.fromGroup());
         figure.sourceId(imgFrame.selfId());

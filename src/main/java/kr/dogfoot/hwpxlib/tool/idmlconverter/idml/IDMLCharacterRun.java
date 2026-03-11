@@ -24,6 +24,7 @@ public class IDMLCharacterRun {
     private Double tracking;
     private boolean grepMathFont;  // GREP 스타일에서 BT수식M이 동적 적용된 런
     private Boolean underline;     // 밑줄 (IDML Underline="true")
+    private String underlineType;  // 밑줄 타입 (IDML UnderlineType: "StrokeStyle/$ID/Wavy" 등)
     private Double underlineTint;  // 밑줄 틴트 % (IDML UnderlineTint)
     private Boolean strikeThrough; // 취소선 (IDML StrikeThru="true")
 
@@ -267,6 +268,9 @@ public class IDMLCharacterRun {
 
     public Boolean underline() { return underline; }
     public void underline(Boolean v) { this.underline = v; }
+
+    public String underlineType() { return underlineType; }
+    public void underlineType(String v) { this.underlineType = v; }
 
     public Double underlineTint() { return underlineTint; }
     public void underlineTint(Double v) { this.underlineTint = v; }

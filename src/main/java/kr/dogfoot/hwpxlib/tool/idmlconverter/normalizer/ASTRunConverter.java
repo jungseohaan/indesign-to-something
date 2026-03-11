@@ -509,6 +509,7 @@ class ASTRunConverter {
         String fontStyle = run.fontStyle();
         Double tracking = run.tracking();
         Boolean underline = run.underline();
+        String underlineType = run.underlineType();
         Boolean strikeThrough = run.strikeThrough();
 
         // CharacterStyle에서 빈 속성 채우기
@@ -521,6 +522,7 @@ class ASTRunConverter {
                 if (fontStyle == null) fontStyle = charStyle.fontStyle();
                 if (tracking == null) tracking = charStyle.tracking();
                 if (underline == null) underline = charStyle.underline();
+                if (underlineType == null) underlineType = charStyle.underlineType();
                 if (strikeThrough == null) strikeThrough = charStyle.strikeThrough();
             }
         }
@@ -536,6 +538,7 @@ class ASTRunConverter {
                 if (fontStyle == null) fontStyle = paraStyle.fontStyle();
                 if (tracking == null) tracking = paraStyle.tracking();
                 if (underline == null) underline = paraStyle.underline();
+                if (underlineType == null) underlineType = paraStyle.underlineType();
                 if (strikeThrough == null) strikeThrough = paraStyle.strikeThrough();
             }
         }
@@ -566,6 +569,17 @@ class ASTRunConverter {
         textRun.superscript(run.isSuperscript());
         textRun.grepMathFont(run.grepMathFont());
         textRun.underline(Boolean.TRUE.equals(underline));
+        // 밑줄 타입 매핑 (IDML "StrokeStyle/$ID/Wavy" → AST "WAVE")
+        if (Boolean.TRUE.equals(underline) && underlineType != null) {
+            String lower = underlineType.toLowerCase();
+            if (lower.contains("wavy") || lower.contains("wave")) {
+                textRun.underlineShape("WAVE");
+            } else if (lower.contains("dashed") || lower.contains("dash")) {
+                textRun.underlineShape("DASH");
+            } else if (lower.contains("dotted") || lower.contains("dot")) {
+                textRun.underlineShape("DOT");
+            }
+        }
         // 밑줄 틴트가 있으면 Black을 틴트 비율로 흰색과 블렌딩하여 밑줄 색상 계산
         if (Boolean.TRUE.equals(underline) && run.underlineTint() != null) {
             double tint = run.underlineTint() / 100.0;

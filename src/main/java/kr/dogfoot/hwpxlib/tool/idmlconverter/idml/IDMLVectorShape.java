@@ -140,6 +140,10 @@ public class IDMLVectorShape {
     private boolean fromGroup;         // Group 내에서 추출된 요소 여부
     private String parentGroupId;      // 소속 그룹 ID (fromGroup=true일 때)
 
+    // 선 끝 장식 (LeftLineEnd, RightLineEnd: "CircleArrowHead", "BarArrowHead" 등)
+    private String leftLineEnd;   // null = 장식 없음
+    private String rightLineEnd;  // null = 장식 없음
+
     // 클리핑 자식 도형 (외부 Rectangle이 클리핑 프레임 역할, 내부 자식이 실제 채우기)
     private IDMLVectorShape clippedChild;  // null이면 클리핑 없음
     // 복수 클리핑 자식 (Group 내부의 여러 도형을 클리핑 프레임으로 제한)
@@ -231,6 +235,12 @@ public class IDMLVectorShape {
 
     public String cornerOption() { return cornerOption; }
     public void cornerOption(String v) { this.cornerOption = v; }
+
+    public String leftLineEnd() { return leftLineEnd; }
+    public void leftLineEnd(String v) { this.leftLineEnd = v; }
+
+    public String rightLineEnd() { return rightLineEnd; }
+    public void rightLineEnd(String v) { this.rightLineEnd = v; }
 
     public double fillTint() { return fillTint; }
     public void fillTint(double v) { this.fillTint = v; }

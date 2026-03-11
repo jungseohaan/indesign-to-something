@@ -160,6 +160,12 @@ class IDMLResourceParser {
             def.basedOn(getPropertyText(props, "BasedOn"));
             def.fontFamily(getPropertyText(props, "AppliedFont"));
 
+            // UnderlineType (Properties 안: <UnderlineType type="object">StrokeStyle/$ID/Wavy</UnderlineType>)
+            String ulType = getPropertyText(props, "UnderlineType");
+            if (ulType != null) {
+                def.underlineType(ulType);
+            }
+
             // Leading (행간)
             String leadingText = getPropertyText(props, "Leading");
             if (leadingText != null) {

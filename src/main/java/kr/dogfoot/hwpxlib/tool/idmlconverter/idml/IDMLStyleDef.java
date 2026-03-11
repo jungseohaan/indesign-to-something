@@ -25,6 +25,7 @@ public class IDMLStyleDef {
     private Double horizontalScale;
     private Double tracking;
     private Boolean underline;     // 밑줄
+    private String underlineType;  // 밑줄 타입 ("StrokeStyle/$ID/Wavy" 등)
     private Boolean strikeThrough; // 취소선
     private Boolean ruleBelowOn;   // 단락 아래선 (RuleBelow)
 
@@ -151,6 +152,9 @@ public class IDMLStyleDef {
 
     public Boolean underline() { return underline; }
     public void underline(Boolean v) { this.underline = v; }
+
+    public String underlineType() { return underlineType; }
+    public void underlineType(String v) { this.underlineType = v; }
 
     public Boolean strikeThrough() { return strikeThrough; }
     public void strikeThrough(Boolean v) { this.strikeThrough = v; }
