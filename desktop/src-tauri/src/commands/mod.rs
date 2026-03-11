@@ -1,11 +1,13 @@
 mod preview;
 mod conversion;
 mod extract;
+mod semantic;
 
 // Re-export all commands for lib.rs
 pub use preview::*;
 pub use conversion::*;
 pub use extract::*;
+pub use semantic::*;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};

@@ -9,9 +9,12 @@ import { FontMappingModal } from "./components/FontMappingModal";
 import { InddBatchModal } from "./components/InddBatchModal";
 import { PlaygroundPage } from "./components/PlaygroundPage";
 import { ExtractPage } from "./components/ExtractPage";
+import { SemanticPage } from "./components/SemanticPage";
+import { ReextractReviewModal } from "./components/ReextractReviewModal";
 import { useAppStore } from "./stores/useAppStore";
+import { useSemanticStore } from "./stores/useSemanticStore";
 
-type Tab = "playground" | "extract" | "converter";
+type Tab = "playground" | "extract" | "converter" | "semantic";
 type RightPanel = "ast" | "pdf";
 
 function App() {
@@ -64,10 +67,13 @@ function App() {
     };
   }, [initJarPath, selectInddFile, selectInddFolder, selectHwpxFile]);
 
+  const showReextractReview = useSemanticStore((s) => s.showReextractReview);
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "playground", label: "Playground - 자동조판기" },
     { key: "extract", label: "문제 추출하기" },
     { key: "converter", label: "HWPX 내보내기" },
+    { key: "semantic", label: "시멘틱 레이어" },
   ];
 
   return (
@@ -94,6 +100,8 @@ function App() {
         <PlaygroundPage />
       ) : currentTab === "extract" ? (
         <ExtractPage />
+      ) : currentTab === "semantic" ? (
+        <SemanticPage />
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
           <FileSelector />
@@ -146,6 +154,9 @@ function App() {
 
       {/* Batch Processing Modal */}
       <InddBatchModal />
+
+      {/* Reextract Review Modal */}
+      {showReextractReview && <ReextractReviewModal />}
 
       {/* About Dialog */}
       {showAbout && (

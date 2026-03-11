@@ -82,6 +82,15 @@ pub fn run() {
             commands::create_dir,
             commands::scan_indd_folder,
             commands::read_file_base64,
+            // Semantic Layer
+            commands::save_semantic_layer,
+            commands::load_semantic_layer,
+            commands::save_pptx,
+            commands::save_schema,
+            commands::load_schema_file,
+            commands::list_user_schemas,
+            commands::save_user_schema,
+            commands::delete_user_schema,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

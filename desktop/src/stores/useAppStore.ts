@@ -106,6 +106,10 @@ interface AppState {
   startBatch: (selectedPaths: string[]) => Promise<void>;
   closeBatchModal: () => void;
   cancelBatch: () => void;
+  // 시멘틱 레이어: INDD → 추출 → AST 로드만
+  extractForSemantic: () => Promise<void>;
+  isExtractingForSemantic: boolean;
+  extractSemanticError: string | null;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -153,6 +157,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   batchResults: [],
   isBatchProcessing: false,
   batchCancelled: false,
+  isExtractingForSemantic: false,
+  extractSemanticError: null,
 
   initJarPath: async () => {
     try {
@@ -635,6 +641,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         }));
 
         completedFiles.push({ hwpx: hwpxOutputPath, pdf: pdfOutputPath });
+
+        // 단일 파일일 때 AST 자동 로드 (시멘틱 레이어 탭용)
+        if (selectedPaths.length === 1 && jarPath) {
+          useAstStore.getState().loadAST(extractResult.idml_path, jarPath);
+          if (extractResult.resolved_json_path) {
+            useAstStore.getState().loadResolved(extractResult.resolved_json_path);
+          }
+          set({ idmlPath: extractResult.idml_path, resolvedJsonPath: extractResult.resolved_json_path ?? null });
+        }
       } catch (e: any) {
         // 실패 — 다음 파일 계속
         set((s) => ({
@@ -653,6 +668,47 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (f.pdf) {
         try { await invoke("open_file", { path: f.pdf }); } catch {}
       }
+    }
+  },
+
+  extractForSemantic: async () => {
+    const { lastOpenDir } = get();
+    const path = await open({
+      filters: [{ name: "InDesign", extensions: ["indd"] }],
+      defaultPath: lastOpenDir ?? undefined,
+    });
+    if (!path) return;
+
+    const parentDir = path.substring(0, path.lastIndexOf("/"));
+    localStorage.setItem("lastOpenDir", parentDir);
+    set({ lastOpenDir: parentDir, isExtractingForSemantic: true, extractSemanticError: null, inddPath: path });
+
+    try {
+      const jarPath = get().jarPath;
+      if (!jarPath) throw new Error("JAR 경로를 찾을 수 없습니다");
+
+      // 1. InDesign ExtendScript로 추출
+      const extractResult = await invoke<InddExtractResult>("extract_indd", {
+        inddPath: path,
+        jarPath,
+        spreadMode: false,
+      });
+
+      // 2. AST 로드
+      await useAstStore.getState().loadAST(extractResult.idml_path, jarPath);
+
+      // 3. Resolved 사이드카 로드
+      if (extractResult.resolved_json_path) {
+        await useAstStore.getState().loadResolved(extractResult.resolved_json_path);
+      }
+
+      set({
+        idmlPath: extractResult.idml_path,
+        resolvedJsonPath: extractResult.resolved_json_path ?? null,
+        isExtractingForSemantic: false,
+      });
+    } catch (e: any) {
+      set({ isExtractingForSemantic: false, extractSemanticError: String(e) });
     }
   },
 

@@ -1,0 +1,258 @@
+{
+  "schemaId": "math-reference-v1",
+  "schemaName": "수학 참고서",
+  "version": "1.0.0",
+  "subject": "수학",
+  "documentType": "참고서",
+  "extends": "common",
+  "labels": [
+    {
+      "id": "CHAPTER_TITLE",
+      "name": "대단원 제목",
+      "description": "대단원 번호와 제목 (예: Ⅱ. 방정식과 부등식)",
+      "color": "#0D47A1",
+      "icon": "",
+      "category": "structure",
+      "allowedChildren": []
+    },
+    {
+      "id": "SECTION_TITLE",
+      "name": "중단원 제목",
+      "description": "중단원 번호와 제목 (예: 1. 이차방정식)",
+      "color": "#1565C0",
+      "icon": "",
+      "category": "structure",
+      "allowedChildren": []
+    },
+    {
+      "id": "SUBSECTION_TITLE",
+      "name": "소단원 제목",
+      "description": "소단원 번호와 제목",
+      "color": "#1976D2",
+      "icon": "",
+      "category": "structure",
+      "allowedChildren": []
+    },
+    {
+      "id": "CONCEPT_BOX",
+      "name": "개념 상자",
+      "description": "개념 설명 박스 (배경색 + 테두리)",
+      "color": "#4FC3F7",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": ["FORMULA"]
+    },
+    {
+      "id": "FORMULA",
+      "name": "공식",
+      "description": "수학 공식 블록",
+      "color": "#7E57C2",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": []
+    },
+    {
+      "id": "EXAMPLE",
+      "name": "예제",
+      "description": "예제 문제 (풀이 포함)",
+      "color": "#26A69A",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": ["SOLUTION"]
+    },
+    {
+      "id": "PROBLEM",
+      "name": "문제",
+      "description": "연습문제, 확인문제",
+      "color": "#FF6B6B",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": ["SUB_PROBLEM", "CHOICES"]
+    },
+    {
+      "id": "SUB_PROBLEM",
+      "name": "소문항",
+      "description": "문제 내 하위 문항 (①②③ 등)",
+      "color": "#FF8A80",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": []
+    },
+    {
+      "id": "CHOICES",
+      "name": "선택지",
+      "description": "객관식 보기 (①~⑤)",
+      "color": "#FFAB91",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": []
+    },
+    {
+      "id": "SOLUTION",
+      "name": "풀이",
+      "description": "예제/문제의 풀이 과정",
+      "color": "#81C784",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": []
+    },
+    {
+      "id": "ANSWER",
+      "name": "정답",
+      "description": "문제의 정답",
+      "color": "#A5D6A7",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": []
+    },
+    {
+      "id": "TIP_BOX",
+      "name": "참고 상자",
+      "description": "참고, 주의, 보충 설명 박스",
+      "color": "#FFF176",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": []
+    },
+    {
+      "id": "SIDEBAR",
+      "name": "사이드바",
+      "description": "페이지 측면 보충 설명",
+      "color": "#BCAAA4",
+      "icon": "",
+      "category": "content",
+      "allowedChildren": []
+    }
+  ],
+  "rules": [
+    {
+      "id": "rule-chapter-title",
+      "label": "CHAPTER_TITLE",
+      "priority": 20,
+      "conditions": [
+        { "field": "hasNumberPrefix", "operator": "eq", "value": true },
+        { "field": "numberPrefixPattern", "operator": "eq", "value": "roman" },
+        { "field": "dominantFontSize", "operator": "gte", "value": 1600 }
+      ],
+      "confidence": 0.9
+    },
+    {
+      "id": "rule-section-title-math",
+      "label": "SECTION_TITLE",
+      "priority": 25,
+      "conditions": [
+        { "field": "hasNumberPrefix", "operator": "eq", "value": true },
+        { "field": "numberPrefixPattern", "operator": "eq", "value": "arabic_dot" },
+        { "field": "dominantFontSize", "operator": "gte", "value": 1400 },
+        { "field": "paragraphCount", "operator": "lte", "value": 3 }
+      ],
+      "confidence": 0.85
+    },
+    {
+      "id": "rule-concept-box",
+      "label": "CONCEPT_BOX",
+      "priority": 30,
+      "conditions": [
+        { "field": "hasFill", "operator": "eq", "value": true },
+        { "field": "hasStroke", "operator": "eq", "value": true },
+        { "field": "textLength", "operator": "gt", "value": 20 }
+      ],
+      "confidence": 0.75
+    },
+    {
+      "id": "rule-formula",
+      "label": "FORMULA",
+      "priority": 35,
+      "conditions": [
+        { "field": "hasEquation", "operator": "eq", "value": true },
+        { "field": "paragraphCount", "operator": "lte", "value": 3 },
+        { "field": "dominantAlignment", "operator": "eq", "value": "CenterJustify" }
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "rule-problem",
+      "label": "PROBLEM",
+      "priority": 40,
+      "conditions": [
+        { "field": "hasNumberPrefix", "operator": "eq", "value": true },
+        { "field": "numberPrefixPattern", "operator": "eq", "value": "arabic_dot" },
+        { "field": "dominantFontSize", "operator": "lte", "value": 1200 }
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": "rule-sub-problem-circled",
+      "label": "SUB_PROBLEM",
+      "priority": 45,
+      "conditions": [
+        { "field": "hasNumberPrefix", "operator": "eq", "value": true },
+        { "field": "numberPrefixPattern", "operator": "in", "value": ["circled", "parenthesized_arabic"] }
+      ],
+      "confidence": 0.75
+    },
+    {
+      "id": "rule-example",
+      "label": "EXAMPLE",
+      "priority": 38,
+      "conditions": [
+        { "field": "firstLineText", "operator": "contains", "value": "예제" }
+      ],
+      "confidence": 0.85
+    },
+    {
+      "id": "rule-tip-box",
+      "label": "TIP_BOX",
+      "priority": 50,
+      "conditions": [
+        { "field": "hasFill", "operator": "eq", "value": true },
+        { "field": "textLength", "operator": "lt", "value": 200 },
+        { "field": "regionTag", "operator": "in", "value": ["LEFT", "RIGHT"] }
+      ],
+      "confidence": 0.7
+    },
+    {
+      "id": "rule-sidebar",
+      "label": "SIDEBAR",
+      "priority": 55,
+      "conditions": [
+        { "field": "regionTag", "operator": "in", "value": ["LEFT", "RIGHT"] },
+        { "field": "textLength", "operator": "gt", "value": 0 },
+        { "field": "textLength", "operator": "lt", "value": 100 }
+      ],
+      "confidence": 0.65
+    }
+  ],
+  "relationRules": [
+    {
+      "id": "rel-solution-example",
+      "type": "SOLUTION_FOR",
+      "sourceLabel": "SOLUTION",
+      "targetLabel": "EXAMPLE"
+    },
+    {
+      "id": "rel-answer-problem",
+      "type": "ANSWER_FOR",
+      "sourceLabel": "ANSWER",
+      "targetLabel": "PROBLEM"
+    },
+    {
+      "id": "rel-sub-problem",
+      "type": "PARENT_OF",
+      "sourceLabel": "PROBLEM",
+      "targetLabel": "SUB_PROBLEM"
+    },
+    {
+      "id": "rel-choices-problem",
+      "type": "PARENT_OF",
+      "sourceLabel": "PROBLEM",
+      "targetLabel": "CHOICES"
+    }
+  ],
+  "layoutHints": [
+    { "label": "CHAPTER_TITLE", "expectedRegions": ["TOP", "FULL_WIDTH"] },
+    { "label": "SECTION_TITLE", "expectedRegions": ["TOP", "FULL_WIDTH"] },
+    { "label": "SIDEBAR", "expectedRegions": ["LEFT", "RIGHT"] },
+    { "label": "TIP_BOX", "expectedRegions": ["LEFT", "RIGHT", "MIDDLE"] }
+  ]
+}
