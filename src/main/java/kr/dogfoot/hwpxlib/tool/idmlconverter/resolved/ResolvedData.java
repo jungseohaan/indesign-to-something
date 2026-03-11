@@ -149,7 +149,7 @@ public class ResolvedData {
         }
     }
 
-    /** DOM decimal ID로 렌더링된 텍스트 프레임/배지 그룹 조회 */
+    /** DOM decimal ID로 렌더링된 텍스트 프레임 조회 */
     public RenderedGroup getRenderedTextFrameByDomId(String domId) {
         return renderedTextFrameMap.get(domId);
     }

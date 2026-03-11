@@ -53,9 +53,11 @@ if [ "$1" = "list" ]; then
 import json
 d = json.load(open('$CASES_FILE'))
 for subj_key, subj in d.get('cases', {}).items():
-    print(f'  [{subj_key}]')
-    for unit_key, unit in subj.items():
-        if not isinstance(unit, dict) or 'indd' not in unit:
+    desc = subj.get('desc', '')
+    print(f'  [{subj_key}] {desc}')
+    units = subj.get('units', subj)
+    for unit_key, unit in units.items():
+        if not isinstance(unit, dict) or ('path' not in unit and 'indd' not in unit):
             continue
         pages = unit.get('pages', 'all')
         print(f'    {subj_key}/{unit_key:12s} {unit.get(\"desc\", \"\")}  pages: {pages}')
@@ -87,8 +89,9 @@ subj = d.get('cases', {}).get(subj_key)
 if not subj:
     print(f'NOTFOUND: subject \"{subj_key}\"', file=sys.stderr)
     sys.exit(1)
-unit = subj.get(unit_key)
-if not unit or not isinstance(unit, dict) or 'indd' not in unit:
+units = subj.get('units', subj)
+unit = units.get(unit_key)
+if not unit or not isinstance(unit, dict) or ('path' not in unit and 'indd' not in unit):
     print(f'NOTFOUND: unit \"{unit_key}\" in \"{subj_key}\"', file=sys.stderr)
     sys.exit(1)
 pages = unit.get('pages', '')
@@ -103,8 +106,9 @@ if [ $? -ne 0 ] || [ -z "$CASE_INFO" ]; then
 import json
 d = json.load(open('$CASES_FILE'))
 for sk, sv in d.get('cases', {}).items():
-    for uk, uv in sv.items():
-        if isinstance(uv, dict) and 'indd' in uv:
+    units = sv.get('units', sv)
+    for uk, uv in units.items():
+        if isinstance(uv, dict) and ('path' in uv or 'indd' in uv):
             print(f'  {sk}/{uk}')
 " 2>/dev/null
     exit 1

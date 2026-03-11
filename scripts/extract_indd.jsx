@@ -288,6 +288,9 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
     var badgeGroupChildIds = {}; // 배지 그룹 자식 TextFrame ID → true (개별 렌더링 스킵)
     var allItems = doc.allPageItems;
 
+    // 본문 폰트 사전 스캔: 문서에서 가장 많이 사용되는 폰트 상위 N개를 본문 폰트로 간주
+    var _bodyFonts = detectBodyFonts(doc);
+
     // PNG 내보내기 설정 (한 번만)
     app.pngExportPreferences.exportResolution = 300;
     app.pngExportPreferences.antiAlias = true;
@@ -392,12 +395,33 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
         // 페이지 범위 필터
         var parentPage = null;
         try { parentPage = item.parentPage; } catch (e) {}
+        // parentPage가 null인 경우 (Group 내부 등): 큰 타이틀이면 visibleBounds로 페이지 매칭
+        if (!parentPage && isTextFrame) {
+            try {
+                var _story = item.parentStory;
+                var _text = _story.contents.replace(/[\s\uFEFF]/g, "");
+                var _fontSize = _story.characters[0].pointSize;
+                if (_text.length > 0 && _text.length < 30 && _fontSize >= 16) {
+                    var _vb = item.visibleBounds;
+                    var _cy = (_vb[0] + _vb[2]) / 2;
+                    var _cx = (_vb[1] + _vb[3]) / 2;
+                    for (var pi = 0; pi < doc.pages.length; pi++) {
+                        var _pg = doc.pages[pi];
+                        var _pb = _pg.bounds;
+                        if (_cy >= _pb[0] && _cy <= _pb[2] && _cx >= _pb[1] && _cx <= _pb[3]) {
+                            parentPage = _pg;
+                            break;
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
         if (!parentPage) continue;
         var pgIdx = parentPage.documentOffset + 1; // 1-based
         if (pgIdx < startPage || pgIdx > endPage) continue;
 
         // TextFrame은 기존 선별 로직, TextPath 부모는 항상 렌더링
-        if (isTextFrame && !isRenderableTextFrame(item)) continue;
+        if (isTextFrame && !isRenderableTextFrame(item, _bodyFonts)) continue;
 
         // 부모가 PageItem 컨테이너(Rectangle/Group 등)이면 부모를 렌더링
         // 배경, 둥근 모서리, 테두리 등 시각적 속성이 포함되도록
@@ -534,10 +558,56 @@ function isBadgeGroup(group) {
 }
 
 /**
+ * 문서에서 가장 많이 사용되는 본문 폰트를 감지한다.
+ * 모든 Story의 첫 번째 문자 폰트를 수집하여 빈도순 상위 폰트를 반환.
+ * @return {Object} fontName → true 맵 (본문 폰트 집합)
+ */
+function detectBodyFonts(doc) {
+    var freq = {}; // fontFamily → 총 문자 수
+    try {
+        var stories = doc.stories;
+        for (var si = 0; si < stories.length; si++) {
+            var story = stories[si];
+            try {
+                // 짧은 텍스트(< 30자)는 장식일 수 있으므로 제외
+                if (story.contents.replace(/[\s\uFEFF]/g, "").length < 30) continue;
+                // 본문 스토리의 첫 문자 폰트를 대표 폰트로 사용
+                var ch = story.characters[0];
+                var fontName = ch.appliedFont.fontFamily;
+                var charCount = story.characters.length;
+                freq[fontName] = (freq[fontName] || 0) + charCount;
+            } catch (e) {}
+        }
+    } catch (e) {}
+
+    // 빈도순 정렬
+    var sorted = [];
+    for (var fn in freq) {
+        sorted.push({ name: fn, count: freq[fn] });
+    }
+    sorted.sort(function (a, b) { return b.count - a.count; });
+
+    // 상위 폰트를 본문 폰트로 간주
+    // 1위 대비 30% 이상 사용된 폰트까지 포함
+    var bodyFonts = {};
+    if (sorted.length > 0) {
+        var topCount = sorted[0].count;
+        for (var i = 0; i < sorted.length; i++) {
+            if (sorted[i].count >= topCount * 0.3) {
+                bodyFonts[sorted[i].name] = true;
+            } else {
+                break;
+            }
+        }
+    }
+    return bodyFonts;
+}
+
+/**
  * TextFrame이 이미지 렌더링 대상인지 판별한다.
  * 30자 미만의 독립 텍스트 프레임 = 장식 텍스트로 간주.
  */
-function isRenderableTextFrame(tf) {
+function isRenderableTextFrame(tf, bodyFonts) {
     // 스레드된 프레임은 짧은 텍스트(< 30자)일 때만 여기까지 오므로 제외하지 않음
     // (장식 텍스트가 스레드 체인에 포함될 수 있음)
     try {
@@ -578,12 +648,14 @@ function isRenderableTextFrame(tf) {
         if (firstChar0.pointSize >= 16 && firstChar0.fillColor.name !== "Black") return true;
     } catch (e) {}
 
-    // Spread/Page/MasterSpread 직속 → 큰 글씨(≥16pt)만 통과
+    // Spread/Page/MasterSpread 직속 → 큰 글씨(≥16pt) 또는 비블랙 채움만 통과
     try {
         var pType = tf.parent.constructor.name;
         if (pType === "Spread" || pType === "Page" || pType === "MasterSpread") {
             try {
-                if (tf.parentStory.characters[0].pointSize >= 16) { /* 통과 */ }
+                var _ch0 = tf.parentStory.characters[0];
+                if (_ch0.pointSize >= 16) { /* 통과 */ }
+                else if (_ch0.fillColor.name !== "Black") { /* 비블랙 장식 텍스트 → 통과 */ }
                 else return false;
             } catch (e3) { return false; }
         }
@@ -612,6 +684,13 @@ function isRenderableTextFrame(tf) {
                     var pFill = tf.parent.fillColor.name;
                     if (pFill !== "None" && pFill !== "[None]") isDecorative = true;
                 }
+            } catch (e2) {}
+        }
+        // 본문 폰트가 아닌 경우 → 장식 텍스트로 간주
+        if (!isDecorative && bodyFonts) {
+            try {
+                var fontFamily = firstChar.appliedFont.fontFamily;
+                if (!bodyFonts[fontFamily]) isDecorative = true;
             } catch (e2) {}
         }
         if (!isDecorative) return false;

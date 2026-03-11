@@ -82,7 +82,10 @@ public class ResolvedDataReader {
         // renderedTextFrames
         if (root.has("renderedTextFrames")) {
             for (JsonElement e : root.getAsJsonArray("renderedTextFrames")) {
-                data.addRenderedTextFrame(parseRenderedGroup(e.getAsJsonObject()));
+                RenderedGroup rg = parseRenderedGroup(e.getAsJsonObject());
+                // 가상 배지(badge_group/badge_group_child) 엔트리 무시
+                if (rg.isBadgeGroup() || rg.isBadgeGroupChild()) continue;
+                data.addRenderedTextFrame(rg);
             }
         }
 

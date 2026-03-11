@@ -328,12 +328,7 @@ public class IDMLToHwpxConverter {
         String resolvedDir = getResolvedDir(options);
         if (resolvedDir == null) return;
 
-        // 이미 배치된 배지 그룹 ID 추적 (중복 배치 방지)
-        java.util.Set<Integer> placedBadgeGroups = new java.util.HashSet<>();
-
         int replaced = 0;
-        int badgeReplaced = 0;
-        int badgeChildRemoved = 0;
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection sec : astDoc.sections()) {
             java.util.ListIterator<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock> it =
                     sec.blocks().listIterator();
@@ -348,35 +343,6 @@ public class IDMLToHwpxConverter {
 
                 RenderedGroup rendered = resolvedData.getRenderedTextFrameByIdmlId(tfb.sourceId());
                 if (rendered == null) continue;
-
-                // 배지 그룹 자식인 경우: 부모 배지 그룹 PNG로 교체 또는 제거
-                if (rendered.isBadgeGroupChild()) {
-                    int badgeGrpId = rendered.badgeGroupId();
-                    if (placedBadgeGroups.contains(badgeGrpId)) {
-                        // 이미 배지 그룹 PNG가 배치됨 — 이 자식 TF 제거
-                        it.remove();
-                        badgeChildRemoved++;
-                        continue;
-                    }
-                    // 첫 번째 자식: 배지 그룹 PNG 배치
-                    RenderedGroup badgeGroup = resolvedData.getRenderedTextFrameByDomId(
-                            String.valueOf(badgeGrpId));
-                    if (badgeGroup != null && badgeGroup.isBadgeGroup()) {
-                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
-                                createRenderedFigure(badgeGroup, tfb, resolvedDir, resolvedData);
-                        if (fig != null) {
-                            it.set(fig);
-                            placedBadgeGroups.add(badgeGrpId);
-                            badgeReplaced++;
-                            System.out.println("[BadgeGroup] " + tfb.sourceId()
-                                    + " → badge_" + badgeGrpId + ".png"
-                                    + " figPos=(" + fig.x() + "," + fig.y() + ")"
-                                    + " figSize=(" + fig.width() + "," + fig.height() + ")");
-                            continue;
-                        }
-                    }
-                    // 배지 그룹 PNG 없으면 일반 렌더 프레임으로 폴백
-                }
 
                 java.io.File pngFile = new java.io.File(resolvedDir, rendered.file());
                 if (!pngFile.exists()) continue;
@@ -451,100 +417,8 @@ public class IDMLToHwpxConverter {
                 }
             }
         }
-        if (replaced > 0 || badgeReplaced > 0) {
-            System.out.println("[FloatingRendered] " + replaced + "개 플로팅 텍스트 프레임을 이미지로 교체"
-                    + (badgeReplaced > 0 ? ", 배지 그룹 " + badgeReplaced + "개 통합 렌더링" : "")
-                    + (badgeChildRemoved > 0 ? ", 배지 자식 " + badgeChildRemoved + "개 제거" : ""));
-        }
-    }
-
-    /**
-     * 배지 그룹 PNG를 ASTFigure로 생성한다.
-     * 배지 그룹 bounds + 페이지 데이터로 정확한 위치 산출.
-     */
-    private static kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure createRenderedFigure(
-            RenderedGroup badgeGroup,
-            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock tfb,
-            String resolvedDir,
-            ResolvedData resolvedData) {
-        java.io.File pngFile = new java.io.File(resolvedDir, badgeGroup.file());
-        if (!pngFile.exists()) return null;
-
-        try {
-            byte[] data = java.nio.file.Files.readAllBytes(pngFile.toPath());
-            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-            if (img == null) return null;
-
-            long figX, figY, figW, figH;
-            double[] bounds = badgeGroup.bounds();
-            if (bounds != null && bounds.length == 4) {
-                double rW = bounds[3] - bounds[1];
-                figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                        .pointsToHwpunits(rW);
-                // PNG 비율로 높이 산출
-                if (img.getWidth() > 0) {
-                    figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
-                } else {
-                    double rH = bounds[2] - bounds[0];
-                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(rH);
-                }
-            } else {
-                figW = tfb.width();
-                figH = tfb.height();
-            }
-
-            // 배지 그룹 bounds + 페이지 폭으로 위치 산출
-            // InDesign DOM 좌표: 오른쪽 페이지는 x가 음수(오른쪽 끝 기준), 왼쪽 페이지는 x가 양수
-            boolean usedBounds = false;
-            figX = 0;
-            figY = 0;
-            if (bounds != null && bounds.length == 4 && resolvedData != null) {
-                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage page =
-                        resolvedData.getPage(badgeGroup.pageIndex());
-                if (page != null) {
-                    double pageW = page.width();  // pts
-                    if (bounds[1] < 0) {
-                        // 오른쪽 페이지: 페이지 우측 끝 기준 음수 좌표
-                        figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                .pointsToHwpunits(pageW + bounds[1]);
-                    } else {
-                        // 왼쪽 페이지: 페이지 좌측 기준 양수 좌표
-                        figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                .pointsToHwpunits(bounds[1]);
-                    }
-                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[0]);
-                    usedBounds = true;
-                }
-            }
-            if (!usedBounds) {
-                // 폴백: AST TF 중심점 기반 배치
-                long centerX = tfb.x() + tfb.width() / 2;
-                long centerY = tfb.y() + tfb.height() / 2;
-                figX = centerX - figW / 2;
-                figY = centerY - figH / 2;
-            }
-
-            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
-                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
-            fig.x(figX);
-            fig.y(figY);
-            fig.width(figW);
-            fig.height(figH);
-            fig.zOrder(tfb.zOrder());
-            fig.imageData(data);
-            fig.imageFormat("png");
-            fig.pixelWidth(img.getWidth());
-            fig.pixelHeight(img.getHeight());
-            fig.fromGroup(true); // IN_FRONT_OF_TEXT
-            fig.imagePath(pngFile.getAbsolutePath());
-            fig.sourceId(tfb.sourceId());
-
-            return fig;
-        } catch (Exception e) {
-            System.err.println("[BadgeGroup] 배지 그룹 렌더링 실패: " + e.getMessage());
-            return null;
+        if (replaced > 0) {
+            System.out.println("[FloatingRendered] " + replaced + "개 플로팅 텍스트 프레임을 이미지로 교체");
         }
     }
 
@@ -619,7 +493,8 @@ public class IDMLToHwpxConverter {
                     }
                 }
                 String text = sb.toString().trim();
-                if (!text.isEmpty() && replacedTexts.contains(text)) {
+                // 3글자 이하 텍스트는 오매칭 위험이 높으므로 중복 제거 건너뛰기
+                if (text.length() > 3 && replacedTexts.contains(text)) {
                     it.remove();
                     removed++;
                     System.out.println("[FloatingDup] " + tfb.sourceId() + " → 제거 (\"" + text + "\")");
