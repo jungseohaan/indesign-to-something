@@ -688,6 +688,13 @@ class IDMLSpreadParser {
                             break;
                         }
                     }
+                    // GraphicLine 자식: 채우기 없이 스트로크만으로도 클리핑 대상
+                    if ("GraphicLine".equals(childTag)) {
+                        IDMLVectorShape childShape = tryParseVectorShape(childElem);
+                        if (childShape != null && childShape.hasStroke()) {
+                            shape.addClippedChild(childShape);
+                        }
+                    }
                 }
                 if ("Group".equals(childTag)) {
                     // Group 자식 클리핑: 외부 프레임이 클리핑 마스크, 내부 Group의 도형이 피클리핑 대상
@@ -764,6 +771,26 @@ class IDMLSpreadParser {
             if (dash != null) {
                 shape.dashPattern(dash);
             }
+            // StrokeDashAndGap: 커스텀 대시-갭 패턴 (예: "1 4" → 1pt 대시, 4pt 갭)
+            String dashAndGap = getAttrOrNull(shapeElem, "StrokeDashAndGap");
+            if (dashAndGap != null && !dashAndGap.isEmpty()) {
+                String[] parts = dashAndGap.trim().split("\\s+");
+                if (parts.length >= 2) {
+                    double[] customDash = new double[parts.length];
+                    boolean valid = true;
+                    for (int di = 0; di < parts.length; di++) {
+                        try {
+                            customDash[di] = Double.parseDouble(parts[di]);
+                        } catch (NumberFormatException e) {
+                            valid = false;
+                            break;
+                        }
+                    }
+                    if (valid) {
+                        shape.dashPattern(customDash);
+                    }
+                }
+            }
             // Japanese Dots는 CAP_ROUND 필수 (0-길이 대시 → 둥근 점)
             if (strokeType.contains("Japanese Dots")) {
                 shape.startCap(IDMLVectorShape.LineCap.ROUND);
@@ -818,6 +845,14 @@ class IDMLSpreadParser {
             String tag = elem.getTagName();
 
             if ("TransparencySetting".equals(tag)) {
+                // BlendingSetting > Opacity 파싱
+                Element bls = getFirstChildElement(elem, "BlendingSetting");
+                if (bls != null) {
+                    double opacity = parseDoubleAttrDef(bls, "Opacity", 100);
+                    if (opacity < 100) {
+                        shape.opacity(opacity);
+                    }
+                }
                 // 메인 TransparencySetting > GradientFeatherSetting
                 Element gfs = getFirstChildElement(elem, "GradientFeatherSetting");
                 if (gfs != null) {

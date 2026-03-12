@@ -26,7 +26,8 @@ class ASTInlineObjectBuilder {
                                         IDMLDocument idmlDoc,
                                         ColorResolver colorResolver,
                                         ASTImageLoader imageLoader,
-                                        GroupBackground bg) {
+                                        GroupBackground bg,
+                                        ResolvedData resolvedData) {
         // 자식 TextFrame이 여러 개이면 bg fill 전파 안 함 (컨테이너 배경이지 개별 자식 배경이 아님)
         GroupBackground effectiveBg = bg;
         if (bg != null && bg.fillHex != null && countChildTextFramesRecursive(ig) > 1) {
@@ -42,7 +43,7 @@ class ASTInlineObjectBuilder {
             effectiveBg.hasBounds = bg.hasBounds;
         }
         collectChildTextFramesInternal(ig, para, null, idmlDoc, colorResolver, imageLoader, effectiveBg,
-                false, 0, 0, 0, 0, 0, 0, 0, 0, null);
+                false, 0, 0, 0, 0, 0, 0, 0, 0, null, resolvedData);
     }
 
     private static int countChildTextFramesRecursive(IDMLCharacterRun.InlineGraphic ig) {
@@ -64,7 +65,8 @@ class ASTInlineObjectBuilder {
                                       IDMLDocument idmlDoc,
                                       ColorResolver colorResolver,
                                       ASTImageLoader imageLoader,
-                                      GroupBackground bg) {
+                                      GroupBackground bg,
+                                      ResolvedData resolvedData) {
         double[] canvasBounds;
         if (countImageChildren(ig) >= 2) {
             // 합성 이미지 그룹: 비-텍스트 자식의 바운드 (합성 캔버스와 동일)
@@ -110,7 +112,7 @@ class ASTInlineObjectBuilder {
 
         collectChildTextFramesInternal(ig, null, imageObj, idmlDoc, colorResolver, imageLoader, bg,
                 true, imageObj.width(), imageObj.height(),
-                canvasWidthPts, canvasHeightPts, rootLeft, rootTop, 0, 0, ig);
+                canvasWidthPts, canvasHeightPts, rootLeft, rootTop, 0, 0, ig, resolvedData);
     }
 
     /**
@@ -133,12 +135,13 @@ class ASTInlineObjectBuilder {
                                                          double rootTop,
                                                          double accTx,
                                                          double accTy,
-                                                         IDMLCharacterRun.InlineGraphic rootGroup) {
+                                                         IDMLCharacterRun.InlineGraphic rootGroup,
+                                                         ResolvedData resolvedData) {
         for (IDMLTextFrame childTf : ig.childTextFrames()) {
             // 수식 폰트 전용 TextFrame 건너뛰기 (괄호/중괄호 장식 — HWPX에서 표현 불가)
             if (isMathFontOnlyStory(childTf, idmlDoc)) continue;
 
-            ASTInlineObject childObj = ASTStoryConverter.createInlineObjectFromTextFrame(childTf, idmlDoc, colorResolver, imageLoader);
+            ASTInlineObject childObj = ASTStoryConverter.createInlineObjectFromTextFrame(childTf, idmlDoc, colorResolver, imageLoader, resolvedData);
             if (childObj != null) {
                 // 부모 그룹의 anchoredPosition을 자식에 전달
                 if (childObj.anchoredPosition() == null && ig.anchoredPosition() != null) {
@@ -218,7 +221,7 @@ class ASTInlineObjectBuilder {
             collectChildTextFramesInternal(childIg, para, targetImageObj, idmlDoc, colorResolver, imageLoader, bg,
                     isOverlay, imageDisplayWidth, imageDisplayHeight,
                     groupWidthPts, groupHeightPts, rootLeft, rootTop,
-                    childAccTx, childAccTy, rootGroup);
+                    childAccTx, childAccTy, rootGroup, resolvedData);
         }
     }
 
@@ -423,6 +426,12 @@ class ASTInlineObjectBuilder {
      * IDML 색상 참조를 hex 문자열로 변환.
      * "None" 또는 null이면 null 반환.
      */
+    /** ItemTransform에 회전 성분이 있는지 확인 (b 또는 c가 0이 아닌 경우) */
+    private static boolean hasRotation(double[] transform) {
+        if (transform == null || transform.length < 4) return false;
+        return Math.abs(transform[1]) > 0.001 || Math.abs(transform[2]) > 0.001;
+    }
+
     static String resolveColorHex(String colorRef, ColorResolver colorResolver) {
         if (colorRef == null || "None".equals(colorRef) || colorRef.contains("[None]")) return null;
         String hex = colorResolver.resolve(colorRef);
@@ -576,6 +585,17 @@ class ASTInlineObjectBuilder {
                     }
                     allShapes.addAll(childVectorShapes);
                     result = imageLoader.rasterizeShapes(allShapes, ig.itemTransform());
+                } else if (hasRotation(ig.itemTransform())) {
+                    // ItemTransform에 회전이 포함된 인라인 도형 → 변환 적용하여 래스터화
+                    // (InDesign은 미회전 폭으로 텍스트 흐름을 계산하므로 표시 크기는 원본 유지)
+                    List<ASTImageLoader.ShapeWithColor> single = new ArrayList<>();
+                    single.add(new ASTImageLoader.ShapeWithColor(shape, fillHex, strokeHex, ig.itemTransform()));
+                    result = imageLoader.rasterizeShapes(single, null);
+                    // 래스터화 결과의 widthPts/heightPts를 미회전 크기로 복원
+                    if (result != null) {
+                        result.widthPts = ig.widthPoints();
+                        result.heightPts = ig.heightPoints();
+                    }
                 } else {
                     result = imageLoader.rasterizeShape(shape, fillHex, strokeHex);
                 }

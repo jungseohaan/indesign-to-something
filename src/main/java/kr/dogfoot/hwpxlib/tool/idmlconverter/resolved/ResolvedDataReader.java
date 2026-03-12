@@ -84,7 +84,7 @@ public class ResolvedDataReader {
         if (root.has("renderedTextFrames")) {
             for (JsonElement e : root.getAsJsonArray("renderedTextFrames")) {
                 RenderedGroup rg = parseRenderedGroup(e.getAsJsonObject());
-                // badge_group_child는 무시 (부모 badge_group에서 처리)
+                // badge_group_child는 부모 badge_group에서 처리하므로 개별 등록 불필요
                 if (rg.isBadgeGroupChild()) continue;
                 data.addRenderedTextFrame(rg);
             }

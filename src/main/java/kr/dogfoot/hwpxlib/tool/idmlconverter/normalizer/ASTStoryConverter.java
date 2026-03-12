@@ -244,13 +244,13 @@ class ASTStoryConverter {
                 // 다른 그룹이 열려있으면 먼저 flush
                 if (!mathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere, colorResolver);
-                    ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                     mathGroup.clear();
                     mathGroupFractions.clear();
                 }
                 if (!npMathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
-                    ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                     npMathGroup.clear();
                     npMathGroupFractions.clear();
                 }
@@ -260,13 +260,13 @@ class ASTStoryConverter {
                 // 다른 그룹이 열려있으면 먼저 flush
                 if (!mathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere, colorResolver);
-                    ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                     mathGroup.clear();
                     mathGroupFractions.clear();
                 }
                 if (!ehMathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushEHMathGroupWithFractions(ehMathGroup, para, ehMathGroupFractions, hasIndentToHere, colorResolver);
-                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                     ehMathGroup.clear();
                     ehMathGroupFractions.clear();
                 }
@@ -276,13 +276,13 @@ class ASTStoryConverter {
                 // 다른 그룹이 열려있으면 먼저 flush
                 if (!npMathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
-                    ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                     npMathGroup.clear();
                     npMathGroupFractions.clear();
                 }
                 if (!ehMathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushEHMathGroupWithFractions(ehMathGroup, para, ehMathGroupFractions, hasIndentToHere, colorResolver);
-                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                     ehMathGroup.clear();
                     ehMathGroupFractions.clear();
                 }
@@ -294,19 +294,19 @@ class ASTStoryConverter {
                 // 모두 종료 → 변환
                 if (!mathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere, colorResolver);
-                    ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                     mathGroup.clear();
                     mathGroupFractions.clear();
                 }
                 if (!npMathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
-                    ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                     npMathGroup.clear();
                     npMathGroupFractions.clear();
                 }
                 if (!ehMathGroup.isEmpty()) {
                     ASTMathFlushHelper.flushEHMathGroupWithFractions(ehMathGroup, para, ehMathGroupFractions, hasIndentToHere, colorResolver);
-                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader);
+                    ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                     ehMathGroup.clear();
                     ehMathGroupFractions.clear();
                 }
@@ -330,15 +330,15 @@ class ASTStoryConverter {
         // 마지막 수식 그룹 처리
         if (!mathGroup.isEmpty()) {
             ASTMathFlushHelper.flushMathGroupWithFractions(mathGroup, para, mathGroupFractions, hasIndentToHere, colorResolver);
-            ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader);
+            ASTMathFlushHelper.emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
         }
         if (!npMathGroup.isEmpty()) {
             ASTMathFlushHelper.flushNPMathGroupWithFractions(npMathGroup, para, npMathGroupFractions, hasIndentToHere, colorResolver);
-            ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader);
+            ASTMathFlushHelper.emitMathGroupInlineGraphics(npMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
         }
         if (!ehMathGroup.isEmpty()) {
             ASTMathFlushHelper.flushEHMathGroupWithFractions(ehMathGroup, para, ehMathGroupFractions, hasIndentToHere, colorResolver);
-            ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader);
+            ASTMathFlushHelper.emitMathGroupInlineGraphics(ehMathGroup, para, idmlDoc, colorResolver, imageLoader, resolvedData);
         }
         if (!patternMathGroup.isEmpty()) {
             ASTMathGrouper.flushPatternMathGroup(patternMathGroup, para, colorResolver);
@@ -498,7 +498,8 @@ class ASTStoryConverter {
     static ASTInlineObject createInlineObjectFromTextFrame(IDMLTextFrame tf,
                                                             IDMLDocument idmlDoc,
                                                             ColorResolver colorResolver,
-                                                            ASTImageLoader imageLoader) {
+                                                            ASTImageLoader imageLoader,
+                                                            ResolvedData resolvedData) {
         if (tf.parentStoryId() == null) return null;
 
         IDMLStory inlineStory = idmlDoc.getStory(tf.parentStoryId());
@@ -597,7 +598,7 @@ class ASTStoryConverter {
         // 인라인 스토리의 단락을 ASTParagraph로 변환 (큰 이미지는 별도 단락으로 분리)
         FlattenedObjectPool emptyPool = new FlattenedObjectPool();
         for (IDMLParagraph idmlPara : inlineStory.paragraphs()) {
-            ASTParagraph astPara = convertParagraph(idmlPara, emptyPool, idmlDoc, colorResolver, imageLoader, false, null);
+            ASTParagraph astPara = convertParagraph(idmlPara, emptyPool, idmlDoc, colorResolver, imageLoader, false, resolvedData);
             if (astPara != null && !astPara.items().isEmpty()) {
                 // RuleBelow → 텍스트 런에 밑줄 전파 (답안 밑줄선)
                 if (hasRuleBelowOn(idmlPara, idmlDoc)) {
@@ -863,7 +864,7 @@ class ASTStoryConverter {
             for (IDMLTableCell idmlCell : idmlRow.cells()) {
                 int colIdx = idmlCell.columnIndex();
                 ASTTableCell cell = ASTTableConverter.convertTableCell(idmlCell, rowIdx, colIdx,
-                        idmlDoc, colorResolver, imageLoader);
+                        idmlDoc, colorResolver, imageLoader, null);
                 row.addCell(cell);
             }
 

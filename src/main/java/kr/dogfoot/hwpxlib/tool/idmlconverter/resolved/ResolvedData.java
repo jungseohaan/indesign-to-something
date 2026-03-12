@@ -30,6 +30,10 @@ public class ResolvedData {
     private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TextFrame DOM id → 배지 그룹 RenderedGroup
     private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
     private final Map<String, FontMetricEntry> fontMetricMap = new HashMap<>();  // family → metric
+    private String basePath;  // resolved.json 부모 디렉토리 경로
+
+    public String basePath() { return basePath; }
+    public void basePath(String path) { this.basePath = path; }
 
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);

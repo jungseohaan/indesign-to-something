@@ -194,10 +194,19 @@ class ASTMathFlushHelper {
                                               IDMLDocument idmlDoc,
                                               ColorResolver colorResolver,
                                               ASTImageLoader imageLoader) {
+        emitMathGroupInlineGraphics(mathGroup, para, idmlDoc, colorResolver, imageLoader, null);
+    }
+
+    static void emitMathGroupInlineGraphics(List<IDMLCharacterRun> mathGroup,
+                                              ASTParagraph para,
+                                              IDMLDocument idmlDoc,
+                                              ColorResolver colorResolver,
+                                              ASTImageLoader imageLoader,
+                                              kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolvedData) {
         for (IDMLCharacterRun run : mathGroup) {
             if (run.inlineGraphics().isEmpty()) continue;
             for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
-                ASTRunConverter.processInlineGraphic(ig, para, idmlDoc, colorResolver, imageLoader, null);
+                ASTRunConverter.processInlineGraphic(ig, para, idmlDoc, colorResolver, imageLoader, resolvedData);
             }
         }
     }

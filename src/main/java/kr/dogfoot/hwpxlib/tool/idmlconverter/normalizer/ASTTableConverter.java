@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,7 +24,8 @@ class ASTTableConverter {
     static ASTTable convertTable(IDMLTable idmlTable, IDMLTextFrame tf,
                                   IDMLPage page, int zOrder,
                                   IDMLDocument idmlDoc, ColorResolver colorResolver,
-                                  ASTImageLoader imageLoader) {
+                                  ASTImageLoader imageLoader,
+                                  ResolvedData resolvedData) {
         ASTTable table = new ASTTable();
         table.sourceId(idmlTable.selfId());
         table.zOrder(zOrder);
@@ -55,7 +57,7 @@ class ASTTableConverter {
             for (IDMLTableCell idmlCell : idmlRow.cells()) {
                 int colIdx = idmlCell.columnIndex();
                 ASTTableCell cell = convertTableCell(idmlCell, rowIdx, colIdx,
-                        idmlDoc, colorResolver, imageLoader);
+                        idmlDoc, colorResolver, imageLoader, resolvedData);
                 row.addCell(cell);
             }
 
@@ -108,7 +110,8 @@ class ASTTableConverter {
                                           int rowIdx, int colIdx,
                                           IDMLDocument idmlDoc,
                                           ColorResolver colorResolver,
-                                          ASTImageLoader imageLoader) {
+                                          ASTImageLoader imageLoader,
+                                          ResolvedData resolvedData) {
         ASTTableCell cell = new ASTTableCell();
         cell.rowIndex(rowIdx);
         cell.columnIndex(colIdx);
@@ -145,7 +148,7 @@ class ASTTableConverter {
         // 셀 내용 → 미니 문서 (재귀)
         FlattenedObjectPool emptyPool = new FlattenedObjectPool(); // 셀 내 인라인은 별도 처리
         for (IDMLParagraph cellPara : idmlCell.paragraphs()) {
-            ASTParagraph astPara = ASTStoryConverter.convertParagraph(cellPara, emptyPool, idmlDoc, colorResolver, imageLoader, false, null);
+            ASTParagraph astPara = ASTStoryConverter.convertParagraph(cellPara, emptyPool, idmlDoc, colorResolver, imageLoader, false, resolvedData);
             if (astPara != null) {
                 cell.addParagraph(astPara);
             }

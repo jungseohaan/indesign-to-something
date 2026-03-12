@@ -276,7 +276,7 @@ class ASTPageProcessor {
                     idmlDoc, colorResolver, imageLoader, resolvedData);
 
             // 인라인 처리되지 않은 테이블
-            convertStoryTables(story, section, tf, page, fo.zOrder(), idmlDoc, colorResolver, imageLoader);
+            convertStoryTables(story, section, tf, page, fo.zOrder(), idmlDoc, colorResolver, imageLoader, resolvedData);
 
             if (hasContent(block)) {
                 section.addBlock(block);
@@ -600,7 +600,7 @@ class ASTPageProcessor {
             if (tablesHere != null) {
                 for (IDMLTable idmlTable : tablesHere) {
                     ASTTable astTable = ASTTableConverter.convertTable(
-                            idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader);
+                            idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader, resolvedData);
                     if (astTable != null) {
                         addInlineTableOrFlatten(astTable, block);
                     }
@@ -628,7 +628,7 @@ class ASTPageProcessor {
         if (tablesAfterLast != null) {
             for (IDMLTable idmlTable : tablesAfterLast) {
                 ASTTable astTable = ASTTableConverter.convertTable(
-                        idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader);
+                        idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader, resolvedData);
                 if (astTable != null) {
                     addInlineTableOrFlatten(astTable, block);
                 }
@@ -664,7 +664,8 @@ class ASTPageProcessor {
                                              IDMLTextFrame tf, IDMLPage page,
                                              int zOrder, IDMLDocument idmlDoc,
                                              ColorResolver colorResolver,
-                                             ASTImageLoader imageLoader) {
+                                             ASTImageLoader imageLoader,
+                                             ResolvedData resolvedData) {
         boolean tableOnlyStory = story.paragraphs().isEmpty();
         for (IDMLTable idmlTable : story.tables()) {
             // 인라인 처리된 테이블은 스킵 — 단, table-only 스토리는 인라인 처리 안 됨
@@ -672,7 +673,7 @@ class ASTPageProcessor {
                 continue;
             }
             ASTTable table = ASTTableConverter.convertTable(
-                    idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader);
+                    idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader, resolvedData);
             if (table != null) {
                 section.addBlock(table);
             }

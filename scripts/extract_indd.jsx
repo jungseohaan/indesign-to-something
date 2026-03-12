@@ -326,6 +326,22 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems) 
 
         var grpPage = null;
         try { grpPage = grp.parentPage; } catch (e) {}
+        // 인라인 Group은 parentPage가 null → visibleBounds로 페이지 매칭
+        if (!grpPage) {
+            try {
+                var _gb = grp.visibleBounds; // [top, left, bottom, right]
+                var _gcy = (_gb[0] + _gb[2]) / 2;
+                var _gcx = (_gb[1] + _gb[3]) / 2;
+                for (var pi = 0; pi < doc.pages.length; pi++) {
+                    var _pg = doc.pages[pi];
+                    var _pb = _pg.bounds;
+                    if (_gcy >= _pb[0] && _gcy <= _pb[2] && _gcx >= _pb[1] && _gcx <= _pb[3]) {
+                        grpPage = _pg;
+                        break;
+                    }
+                }
+            } catch (e) {}
+        }
         if (!grpPage) continue;
         var grpPgIdx = grpPage.documentOffset + 1;
         if (grpPgIdx < startPage || grpPgIdx > endPage) continue;
@@ -926,6 +942,8 @@ function isBadgeGroup(group) {
     var hasImage = false;
     var hasSubGroup = false;
     var totalTextLen = 0;
+    var subGroupCount = 0;
+    var singleSubGroup = null;
 
     try {
         var items = group.allPageItems;
@@ -974,7 +992,13 @@ function isBadgeGroup(group) {
                     hasLongText = true;
                 }
             } else if (cName === "Group") {
-                hasSubGroup = true;
+                // 직속 자식 Group만 카운트 (allPageItems는 재귀적이므로 parent로 확인)
+                try {
+                    if (item.parent && item.parent.id === group.id) {
+                        subGroupCount++;
+                        singleSubGroup = item;
+                    }
+                } catch (e) {}
             } else if (cName === "Image" || cName === "EPS" || cName === "PDF") {
                 hasImage = true;
             }
@@ -984,7 +1008,20 @@ function isBadgeGroup(group) {
     }
 
     // 배지: 도형+짧은텍스트, 이미지/서브그룹 없음, 긴 텍스트 없음
-    if (!(hasShape && hasShortText && !hasImage && !hasSubGroup && !hasLongText)) return false;
+    if (hasImage) return false;
+    if (hasSubGroup) return false;
+    if (hasLongText) return false;
+
+    // 직속 하위 Group이 없으면 기존 로직
+    if (subGroupCount === 0) {
+        if (!(hasShape && hasShortText)) return false;
+    } else if (subGroupCount === 1 && singleSubGroup) {
+        // 직속 하위 Group이 1개이고, 그 안에 배지 조건이 충족되면 허용
+        // (외부 래퍼 Group → 내부 배지 Group 패턴)
+        if (!(hasShape && hasShortText)) return false;
+    } else {
+        return false; // 직속 하위 Group이 2개 이상이면 배지 아님
+    }
 
     // 전체 텍스트가 너무 많으면 배지가 아님 (콘텐츠 박스)
     if (totalTextLen > 40) return false;

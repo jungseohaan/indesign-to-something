@@ -117,7 +117,7 @@ class ASTRunConverter {
                             } else if (!useAnchors && frameIdx < frames.size()) {
                                 IDMLTextFrame inlineTf = frames.get(frameIdx++);
                                 if (!ASTPageProcessor.shouldDeferInlineFrame(inlineTf)) {
-                                    addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
+                                    addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                                 }
                             } else {
                                 // \uFFFC without inline object = forced line break (ACE 8)
@@ -140,7 +140,7 @@ class ASTRunConverter {
             for (int i = frameIdx; i < frames.size(); i++) {
                 IDMLTextFrame inlineTf = frames.get(i);
                 if (ASTPageProcessor.shouldDeferInlineFrame(inlineTf)) continue;
-                addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
+                addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader, resolvedData);
             }
         }
 
@@ -166,7 +166,7 @@ class ASTRunConverter {
             if (anchor.index() < run.inlineFrames().size()) {
                 IDMLTextFrame inlineTf = run.inlineFrames().get(anchor.index());
                 if (!ASTPageProcessor.shouldDeferInlineFrame(inlineTf)) {
-                    addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader);
+                    addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                 }
             }
         } else {
@@ -189,6 +189,35 @@ class ASTRunConverter {
                                               ColorResolver colorResolver,
                                               ASTImageLoader imageLoader,
                                               ResolvedData resolvedData) {
+        // 배지 그룹이면 배지 PNG 이미지로 즉시 교체 (후속 래퍼/오버레이 처리 생략)
+        if (resolvedData != null && ig.selfId() != null) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup badgeRg =
+                    resolvedData.getRenderedTextFrameByIdmlId(ig.selfId());
+            if (badgeRg != null && badgeRg.isBadgeGroup() && badgeRg.file() != null) {
+                ASTInlineObject badgeObj = loadBadgeImage(ig, badgeRg, resolvedData);
+                if (badgeObj != null) {
+                    para.addItem(badgeObj);
+                    return;
+                }
+            }
+            // 자식 그래픽에서도 배지 매칭 시도 (중첩 Group: 외부 래퍼 → 내부 배지)
+            if (badgeRg == null && ig.childGraphics() != null) {
+                for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+                    if (child.selfId() == null) continue;
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup childRg =
+                            resolvedData.getRenderedTextFrameByIdmlId(child.selfId());
+                    if (childRg != null && childRg.isBadgeGroup() && childRg.file() != null) {
+                        ASTInlineObject badgeObj = loadBadgeImage(ig, childRg, resolvedData);
+                        if (badgeObj != null) {
+                            para.addItem(badgeObj);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        // ObjectStyle에서 stroke/fill 속성 상속 (인라인 도형에 직접 속성이 없는 경우)
+        applyObjectStyleDefaults(ig, idmlDoc);
         ASTInlineObject inlineObj = ASTInlineObjectBuilder.createInlineObjectFromGraphic(ig, imageLoader, colorResolver);
         if (inlineObj != null) {
             // 인라인 수평 GraphicLine → 언더라인 탭으로 변환 (빈칸 밑줄선)
@@ -237,7 +266,7 @@ class ASTRunConverter {
                 && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig);
         if (isImageGroup) {
             ASTInlineObjectBuilder.collectOverlayFrames(
-                    ig, inlineObj, idmlDoc, colorResolver, imageLoader, bg);
+                    ig, inlineObj, idmlDoc, colorResolver, imageLoader, bg, resolvedData);
         } else {
             // 배경 있는 그룹 + 자식 텍스트프레임 → 단일 래퍼 글상자로 변환
             // (벡터 화살표 등은 소실되지만 텍스트+배경 스타일은 보존)
@@ -272,8 +301,31 @@ class ASTRunConverter {
                     para.addItem(inlineObj);
                 }
             } else {
-                ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg);
+                ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg, resolvedData);
             }
+        }
+    }
+
+    /**
+     * 인라인 도형에 직접 stroke/fill 속성이 없으면 ObjectStyle에서 상속.
+     * (예: Polygon이 GradientStroke만 사용하고 StrokeColor 속성이 없는 경우)
+     */
+    private static void applyObjectStyleDefaults(IDMLCharacterRun.InlineGraphic ig,
+                                                   IDMLDocument idmlDoc) {
+        if (!ig.hasVectorShape() || ig.appliedObjectStyle() == null || idmlDoc == null) return;
+        IDMLVectorShape vs = ig.vectorShape();
+        if (vs.strokeColor() != null) return; // 이미 직접 설정된 경우 스킵
+        String[] osProps = idmlDoc.getObjectStyle(ig.appliedObjectStyle());
+        if (osProps == null || osProps[0] == null) return;
+        vs.strokeColor(osProps[0]);
+        if (osProps[1] != null) {
+            try { vs.strokeWeight(Double.parseDouble(osProps[1])); } catch (NumberFormatException ignored) {}
+        }
+        if (osProps[2] != null) {
+            try {
+                double tint = Double.parseDouble(osProps[2]);
+                if (tint >= 0) vs.strokeTint(tint); // -1은 IDML 기본값 (100%)
+            } catch (NumberFormatException ignored) {}
         }
     }
 
@@ -422,13 +474,13 @@ class ASTRunConverter {
      */
     private static void addInlineFrame(IDMLTextFrame inlineTf, ASTParagraph para,
                                         IDMLDocument idmlDoc, ColorResolver colorResolver,
-                                        ASTImageLoader imageLoader) {
+                                        ASTImageLoader imageLoader, ResolvedData resolvedData) {
         ASTEquation fractionEq = ASTStoryConverter.tryConvertFractionTextFrame(inlineTf, idmlDoc);
         if (fractionEq != null) {
             para.addItem(fractionEq);
             return;
         }
-        ASTInlineObject inlineObj = ASTStoryConverter.createInlineObjectFromTextFrame(inlineTf, idmlDoc, colorResolver, imageLoader);
+        ASTInlineObject inlineObj = ASTStoryConverter.createInlineObjectFromTextFrame(inlineTf, idmlDoc, colorResolver, imageLoader, resolvedData);
         if (inlineObj == null) {
             // 분수 스타일이지만 내용 없는 빈 답안 상자 → 테두리 있는 빈 사각형
             inlineObj = createAnswerBox(inlineTf, colorResolver);
@@ -651,5 +703,54 @@ class ASTRunConverter {
         }
 
         return textRun;
+    }
+
+    /**
+     * 배지 그룹의 PNG 이미지를 로드하여 ASTInlineObject(IMAGE)로 변환.
+     */
+    private static ASTInlineObject loadBadgeImage(
+            IDMLCharacterRun.InlineGraphic ig,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup badgeRg,
+            ResolvedData resolvedData) {
+        String basePath = resolvedData.basePath();
+        if (basePath == null) return null;
+
+        java.io.File pngFile = new java.io.File(basePath, badgeRg.file());
+        if (!pngFile.exists()) return null;
+
+        try {
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+            if (img == null) return null;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.sourceId(ig.selfId());
+            obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+            obj.imageData(imageData);
+            obj.imageFormat("png");
+            obj.pixelWidth(img.getWidth());
+            obj.pixelHeight(img.getHeight());
+
+            // 인라인 크기: resolved bounds 사용 (normalizeToPoints 후 points 단위)
+            double[] bounds = badgeRg.bounds();
+            if (bounds != null && bounds.length >= 4) {
+                double wPt = bounds[3] - bounds[1];
+                double hPt = bounds[2] - bounds[0];
+                obj.width(CoordinateConverter.pointsToHwpunits(wPt));
+                obj.height(CoordinateConverter.pointsToHwpunits(hPt));
+            } else {
+                obj.width(CoordinateConverter.pointsToHwpunits(ig.widthPoints()));
+                obj.height(CoordinateConverter.pointsToHwpunits(ig.heightPoints()));
+            }
+
+            // 앵커/래핑 속성 복사
+            obj.anchoredPosition(ig.anchoredPosition());
+            obj.textWrapMode(ig.textWrapMode());
+
+            System.out.println("[InlineBadge] " + ig.selfId() + " → " + badgeRg.file());
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

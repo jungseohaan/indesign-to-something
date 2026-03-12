@@ -82,6 +82,7 @@ public class IDMLToHwpxConverter {
                 try {
                     reporter.reportProgress(3, 100, "resolved 데이터 로딩 중...");
                     resolvedData = ResolvedDataReader.read(options.resolvedJsonPath());
+                    resolvedData.basePath(getResolvedDir(options));
                 } catch (Exception e) {
                     System.err.println("Warning: resolved.json 로드 실패 (무시): " + e.getMessage());
                     earlyWarnings.add("[Resolved] resolved.json 로드 실패: " + e.getMessage());
@@ -684,7 +685,9 @@ public class IDMLToHwpxConverter {
                 continue;
             kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject obj =
                     (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject) item;
-            if (obj.kind() != kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME)
+            // INLINE_TEXT_FRAME 또는 RENDERED_GROUP (인라인 배지 그룹 포함)
+            if (obj.kind() != kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
+                    && obj.kind() != kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject.ObjectKind.RENDERED_GROUP)
                 continue;
             if (obj.sourceId() == null) continue;
 

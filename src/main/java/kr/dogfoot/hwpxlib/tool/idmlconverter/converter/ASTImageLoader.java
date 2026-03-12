@@ -1385,12 +1385,15 @@ public class ASTImageLoader {
             }
             if (awtShape == null) continue;
 
-            // 채우기 (tint는 색상 농도로 RGB에 적용)
+            // 도형별 불투명도
+            float alpha = (float) (sc.shape.opacity() / 100.0);
+
+            // 채우기 (tint는 색상 농도로 RGB에 적용, opacity만 alpha에 적용)
             if (sc.fillHex != null) {
                 Color fillColor = hexToColor(sc.fillHex);
                 if (fillColor != null) {
                     Color tintedFill = applyTint(fillColor, sc.shape.fillTint());
-                    g.setColor(tintedFill);
+                    g.setColor(withAlpha(tintedFill, alpha));
                     g.fill(awtShape);
                 }
             }
@@ -1401,7 +1404,7 @@ public class ASTImageLoader {
                 Color strokeColor = hexToColor(sc.strokeHex);
                 if (strokeColor != null) {
                     Color tintedStroke = applyTint(strokeColor, sc.shape.strokeTint());
-                    g.setColor(tintedStroke);
+                    g.setColor(withAlpha(tintedStroke, alpha));
                     float strokeW = (float) (sc.shape.strokeWeight() * scale);
                     // 점선 패턴이 있는 얇은 선은 최소 1pt로 렌더링 (화면 96DPI에서 1px 보장)
                     if (sc.shape.hasDashPattern() && sc.shape.strokeWeight() < 1.0) {
@@ -1787,7 +1790,9 @@ public class ASTImageLoader {
             GeneralPath rawPath = buildRawPath(child);
             Shape childShape = childAt.createTransformedShape(rawPath);
 
-            float alpha = (float) (child.opacity() / 100.0);
+            // 부모 클리핑 프레임의 opacity를 자식에 합성
+            float parentAlpha = (float) (clipFrame.opacity() / 100.0);
+            float alpha = (float) (child.opacity() / 100.0) * parentAlpha;
 
             // 채우기
             String fillRef = child.fillColor();
