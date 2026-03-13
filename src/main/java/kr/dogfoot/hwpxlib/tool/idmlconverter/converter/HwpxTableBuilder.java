@@ -39,8 +39,10 @@ public class HwpxTableBuilder {
 
         // ShapeObject
         String tableId = HwpxUtil.nextShapeId();
+        // 테이블 z-order를 원래 값보다 높게 설정하여
+        // 동일 영역의 배경 이미지 위에 렌더링되도록 함
         table.idAnd(tableId)
-                .zOrderAnd(astTable.zOrder())
+                .zOrderAnd(astTable.zOrder() + 100)
                 .numberingTypeAnd(NumberingType.TABLE)
                 .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)

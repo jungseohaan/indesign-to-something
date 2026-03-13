@@ -538,19 +538,7 @@ public class IDMLToHwpxConverter {
                         removed += result[1];
                     }
                 }
-                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) {
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable tbl =
-                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) blk;
-                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow row : tbl.rows()) {
-                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell cell : row.cells()) {
-                            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para : cell.paragraphs()) {
-                                int[] result = replaceInlineRenderedInParagraph(para, resolvedData, resolvedDir, replacedTexts);
-                                replaced += result[0];
-                                removed += result[1];
-                            }
-                        }
-                    }
-                }
+                // 테이블 셀 내부의 인라인 TextFrame은 글상자로 유지 (이미지 교체 건너뛰기)
             }
         }
         if (replaced > 0 || removed > 0) {
@@ -683,6 +671,26 @@ public class IDMLToHwpxConverter {
                 if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure
                         && blk.sourceId() != null) {
                     usedSourceIds.add(blk.sourceId());
+                }
+                // 테이블 셀 내 인라인 TextFrame sourceId도 수집 (이미지 주입 방지)
+                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable tbl =
+                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) blk;
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow row : tbl.rows()) {
+                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell cell : row.cells()) {
+                            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para : cell.paragraphs()) {
+                                for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem item : para.items()) {
+                                    if (item.itemType() == kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem.ItemType.INLINE_OBJECT) {
+                                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject obj =
+                                                (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject) item;
+                                        if (obj.sourceId() != null) {
+                                            usedSourceIds.add(obj.sourceId());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -467,8 +467,12 @@ public class HwpxImageBuilder {
         String picId = HwpxUtil.nextShapeId();
 
         // 콘텐츠 이미지/그룹 요소 모두 IN_FRONT_OF_TEXT — z-order로 순서 결정.
-        // BEHIND_TEXT는 페이지 배경 전용 (별도 코드 경로에서 처리).
+        // 단, 페이지 대부분을 덮는 큰 배경 이미지는 BEHIND_TEXT로
+        // (테이블 등 본문 텍스트 선택/편집이 가능하도록).
         TextWrapMethod figWrap = TextWrapMethod.IN_FRONT_OF_TEXT;
+        if (figure.width() > 45000 && figure.height() > 60000) {
+            figWrap = TextWrapMethod.BEHIND_TEXT;
+        }
 
         // ShapeObject
         pic.idAnd(picId)
