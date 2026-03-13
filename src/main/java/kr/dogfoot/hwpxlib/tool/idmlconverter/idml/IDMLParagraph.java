@@ -30,6 +30,11 @@ public class IDMLParagraph {
     // 컬럼 브레이크 (이 단락 뒤에서 다음 컬럼으로 이동)
     private boolean columnBreakAfter;
 
+    // 단락 분리 제어
+    private boolean keepWithNext;       // 다음 단락과 같은 페이지 유지
+    private boolean keepLinesTogether;  // 단락 내 줄 분리 방지
+    private boolean pageBreakBefore;    // 이 단락 앞에서 페이지 나눔
+
     // 단락 음영 (Paragraph Shading)
     private boolean shadingOn;         // 음영 사용 여부
     private String shadingColor;       // 음영 색상 (Color 참조)
@@ -76,6 +81,15 @@ public class IDMLParagraph {
 
     public boolean columnBreakAfter() { return columnBreakAfter; }
     public void columnBreakAfter(boolean v) { this.columnBreakAfter = v; }
+
+    public boolean keepWithNext() { return keepWithNext; }
+    public void keepWithNext(boolean v) { this.keepWithNext = v; }
+
+    public boolean keepLinesTogether() { return keepLinesTogether; }
+    public void keepLinesTogether(boolean v) { this.keepLinesTogether = v; }
+
+    public boolean pageBreakBefore() { return pageBreakBefore; }
+    public void pageBreakBefore(boolean v) { this.pageBreakBefore = v; }
 
     public boolean ruleBelowOn() { return ruleBelowOn; }
     public void ruleBelowOn(boolean v) { this.ruleBelowOn = v; }

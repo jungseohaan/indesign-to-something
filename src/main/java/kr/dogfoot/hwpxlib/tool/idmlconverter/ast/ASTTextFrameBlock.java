@@ -175,7 +175,8 @@ public class ASTTextFrameBlock extends ASTBlock {
                 if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
                     String text = ((ASTTextRun) item).text();
                     if (text != null && !text.trim().isEmpty()) return false;
-                } else if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+                } else if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT
+                        || item.itemType() == ASTInlineItem.ItemType.EQUATION) {
                     return false;
                 }
             }

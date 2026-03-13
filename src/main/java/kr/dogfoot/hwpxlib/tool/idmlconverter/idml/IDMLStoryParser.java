@@ -486,6 +486,17 @@ class IDMLStoryParser {
         para.shadingOffsetTop(parseDoubleAttr(paraRange, "ParagraphShadingTopOffset"));
         para.shadingOffsetBottom(parseDoubleAttr(paraRange, "ParagraphShadingBottomOffset"));
 
+        // 단락 분리 제어 (인라인 오버라이드가 있으면 적용, 없으면 스타일 상속)
+        String kwn = getAttrOrNull(paraRange, "KeepWithNext");
+        if (kwn != null) para.keepWithNext("true".equalsIgnoreCase(kwn));
+        String kalt = getAttrOrNull(paraRange, "KeepAllLinesTogether");
+        if (kalt != null) para.keepLinesTogether("true".equalsIgnoreCase(kalt));
+        String startPara = getAttrOrNull(paraRange, "StartParagraph");
+        if (startPara != null) {
+            para.pageBreakBefore("true".equalsIgnoreCase(startPara)
+                    || "NextPage".equalsIgnoreCase(startPara));
+        }
+
         // Leading과 TabList는 Properties 안에 있을 수 있음
         Element paraProps = getFirstChildElement(paraRange, "Properties");
         if (paraProps != null) {
@@ -496,7 +507,9 @@ class IDMLStoryParser {
                 } else {
                     try {
                         para.leading(Double.parseDouble(leadingText));
-                    } catch (NumberFormatException ignored) {}
+                    } catch (NumberFormatException e) {
+                        System.err.println("[IDMLStoryParser] Leading 파싱 실패: " + leadingText);
+                    }
                 }
             }
 
@@ -530,7 +543,9 @@ class IDMLStoryParser {
                         } else {
                             try {
                                 para.leading(Double.parseDouble(charLeading));
-                            } catch (NumberFormatException ignored) {}
+                            } catch (NumberFormatException e) {
+                                System.err.println("[IDMLStoryParser] CharLeading 파싱 실패: " + charLeading);
+                            }
                         }
                     }
                 }
@@ -550,13 +565,19 @@ class IDMLStoryParser {
         run.fillColor(getAttrOrNull(charRange, "FillColor"));
         run.position(getAttrOrNull(charRange, "Position"));
         run.fontSize(parseDoubleAttr(charRange, "PointSize"));
+        run.tracking(parseDoubleAttr(charRange, "Tracking"));
+        run.baselineShift(parseDoubleAttr(charRange, "BaselineShift"));
+        run.horizontalScale(parseDoubleAttr(charRange, "HorizontalScale"));
+        run.capitalization(getAttrOrNull(charRange, "Capitalization"));
 
         // 밑줄 / 취소선
         String underline = getAttrOrNull(charRange, "Underline");
         if ("true".equalsIgnoreCase(underline)) run.underline(true);
         String underlineTint = getAttrOrNull(charRange, "UnderlineTint");
         if (underlineTint != null) {
-            try { run.underlineTint(Double.parseDouble(underlineTint)); } catch (NumberFormatException ignored) {}
+            try { run.underlineTint(Double.parseDouble(underlineTint)); } catch (NumberFormatException e) {
+                System.err.println("[IDMLStoryParser] UnderlineTint 파싱 실패: " + underlineTint);
+            }
         }
         String strikeThru = getAttrOrNull(charRange, "StrikeThru");
         if ("true".equalsIgnoreCase(strikeThru)) run.strikeThrough(true);
@@ -676,15 +697,21 @@ class IDMLStoryParser {
         group.groupFillColor(getAttrOrNull(groupElem, "FillColor"));
         String fillTintAttr = getAttrOrNull(groupElem, "FillTint");
         if (fillTintAttr != null) {
-            try { group.groupFillTint(Double.parseDouble(fillTintAttr)); } catch (NumberFormatException ignored) {}
+            try { group.groupFillTint(Double.parseDouble(fillTintAttr)); } catch (NumberFormatException e) {
+                System.err.println("[IDMLStoryParser] Group FillTint 파싱 실패: " + fillTintAttr);
+            }
         }
         String strokeTintAttr = getAttrOrNull(groupElem, "StrokeTint");
         if (strokeTintAttr != null) {
-            try { group.groupStrokeTint(Double.parseDouble(strokeTintAttr)); } catch (NumberFormatException ignored) {}
+            try { group.groupStrokeTint(Double.parseDouble(strokeTintAttr)); } catch (NumberFormatException e) {
+                System.err.println("[IDMLStoryParser] Group StrokeTint 파싱 실패: " + strokeTintAttr);
+            }
         }
         String strokeWeightAttr = getAttrOrNull(groupElem, "StrokeWeight");
         if (strokeWeightAttr != null) {
-            try { group.groupStrokeWeight(Double.parseDouble(strokeWeightAttr)); } catch (NumberFormatException ignored) {}
+            try { group.groupStrokeWeight(Double.parseDouble(strokeWeightAttr)); } catch (NumberFormatException e) {
+                System.err.println("[IDMLStoryParser] Group StrokeWeight 파싱 실패: " + strokeWeightAttr);
+            }
         }
 
         return group;
@@ -812,6 +839,15 @@ class IDMLStoryParser {
                 double right = parseDoubleAttrDef(graphicBoundsElem, "Right", 0);
                 double bottom = parseDoubleAttrDef(graphicBoundsElem, "Bottom", 0);
                 graphic.graphicBounds(new double[]{left, top, right, bottom});
+            }
+
+            // 내장 이미지 데이터: <Contents><![CDATA[base64...]]></Contents>
+            Element contentsElem = getFirstChildElement(imgProps, "Contents");
+            if (contentsElem != null) {
+                String base64Data = contentsElem.getTextContent();
+                if (base64Data != null && !base64Data.isEmpty()) {
+                    graphic.embeddedContents(base64Data.trim());
+                }
             }
         }
 

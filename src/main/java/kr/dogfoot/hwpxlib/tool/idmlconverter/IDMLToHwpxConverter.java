@@ -15,6 +15,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -72,6 +73,9 @@ public class IDMLToHwpxConverter {
         try {
             String sourceFileName = new File(idmlPath).getName();
 
+            // 초기 단계 경고 수집 (result 생성 전이므로 리스트에 보관)
+            List<String> earlyWarnings = new ArrayList<>();
+
             // Phase 1.5: Resolved 데이터 조기 로딩 (Stage4 래스터화에서 사용)
             ResolvedData resolvedData = null;
             if (options.resolvedJsonPath() != null) {
@@ -80,6 +84,7 @@ public class IDMLToHwpxConverter {
                     resolvedData = ResolvedDataReader.read(options.resolvedJsonPath());
                 } catch (Exception e) {
                     System.err.println("Warning: resolved.json 로드 실패 (무시): " + e.getMessage());
+                    earlyWarnings.add("[Resolved] resolved.json 로드 실패: " + e.getMessage());
                 }
             }
 
@@ -117,6 +122,7 @@ public class IDMLToHwpxConverter {
                             astDoc, resolvedData);
                 } catch (Exception e) {
                     System.err.println("Warning: resolved.json 병합 실패 (무시): " + e.getMessage());
+                    earlyWarnings.add("[Resolved] resolved.json 병합 실패: " + e.getMessage());
                 }
             }
 
@@ -127,6 +133,7 @@ public class IDMLToHwpxConverter {
                             astDoc, resolvedData);
                 } catch (Exception e) {
                     System.err.println("Warning: resolved overlay 보강 실패 (무시): " + e.getMessage());
+                    earlyWarnings.add("[Resolved] overlay 보강 실패: " + e.getMessage());
                 }
             }
 
@@ -147,6 +154,11 @@ public class IDMLToHwpxConverter {
             // 인라인 이미지로 교체된 텍스트와 동일한 플로팅 텍스트 프레임 블록 제거
             if (!inlineReplacedTexts.isEmpty()) {
                 removeFloatingDuplicates(astDoc, inlineReplacedTexts);
+            }
+
+            // Phase 2.10: VectorShape로 등록되지 않은 렌더 그래픽 프레임 주입
+            if (resolvedData != null) {
+                injectOrphanRenderedGraphics(astDoc, resolvedData, options);
             }
 
             // 정규화 완료 summary
@@ -176,6 +188,10 @@ public class IDMLToHwpxConverter {
             // Phase 3: AST -> Flat -> HWPX (페이지별 진행률: 10~90)
             FlatDocument flatDoc = ASTToFlatConverter.convert(astDoc);
             ConvertResult result = FlatToHwpxConverter.convert(flatDoc, reporter, customFontMap);
+
+            // 초기 단계 경고 + AST 정규화 경고를 결과에 병합
+            for (String w : earlyWarnings) { result.addWarning(w); }
+            for (String w : astDoc.warnings()) { result.addWarning(w); }
 
             // Phase 4: HWPX 파일 저장
             reporter.reportProgress(95, 100, "HWPX 파일 저장 중...");
@@ -292,6 +308,32 @@ public class IDMLToHwpxConverter {
                 double[] vsBounds = vs.geometricBounds();
                 double[] vsTransform = vs.itemTransform();
 
+                // 렌더 PNG는 이미 올바른 방향으로 출력되었으므로
+                // 변환 행렬의 반전(flip)을 제거하여 이미지가 뒤집히지 않게 한다.
+                if (vsTransform != null && vsTransform.length >= 6) {
+                    double a = vsTransform[0], b = vsTransform[1];
+                    double c = vsTransform[2], d = vsTransform[3];
+                    double tx = vsTransform[4], ty = vsTransform[5];
+                    boolean flipX = (a < 0 && Math.abs(b) < 0.01);
+                    boolean flipY = (d < 0 && Math.abs(c) < 0.01);
+                    if (flipX || flipY) {
+                        // bounds의 중심점 기준으로 반전 제거 후 위치 보정
+                        double bTop = vsBounds[0], bLeft = vsBounds[1];
+                        double bBottom = vsBounds[2], bRight = vsBounds[3];
+                        double cx = (bLeft + bRight) / 2.0;
+                        double cy = (bTop + bBottom) / 2.0;
+                        if (flipX) {
+                            tx = tx + 2 * a * cx; // 반전 보정
+                            a = Math.abs(a);
+                        }
+                        if (flipY) {
+                            ty = ty + 2 * d * cy; // 반전 보정
+                            d = Math.abs(d);
+                        }
+                        vsTransform = new double[]{a, b, c, d, tx, ty};
+                    }
+                }
+
                 // TextPath는 그룹 소속이면 원래 z-order (A/B/C 등과 정확한 stacking)
                 int zOrder = (vs.parentGroupId() != null) ? vs.zOrder() : vs.zOrder() + 10000;
                 vsIt.remove();
@@ -329,6 +371,29 @@ public class IDMLToHwpxConverter {
         if (resolvedDir == null) return;
 
         int replaced = 0;
+        // 배지 그룹 중복 교체 방지 + 최적 자식 선택:
+        // 같은 배지 그룹의 자식 TextFrame이 여러 개일 때 가장 넓은 자식의 위치를 기준으로 교체
+        java.util.Set<String> replacedBadgeFiles = new java.util.HashSet<>();
+        // badge file → 가장 넓은 자식 TextFrame (위치 기준으로 사용)
+        java.util.Map<String, kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock> badgeBestChild =
+                new java.util.HashMap<>();
+        // 1차 패스: 배지 그룹별 가장 넓은 자식 TextFrame 찾기
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection sec : astDoc.sections()) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : sec.blocks()) {
+                if (!(blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock))
+                    continue;
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock tfb =
+                        (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock) blk;
+                if (tfb.sourceId() == null) continue;
+                RenderedGroup rg = resolvedData.getBadgeGroupByChildTextFrameIdmlId(tfb.sourceId());
+                if (rg == null) continue;
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock prev = badgeBestChild.get(rg.file());
+                if (prev == null || tfb.width() * tfb.height() > prev.width() * prev.height()) {
+                    badgeBestChild.put(rg.file(), tfb);
+                }
+            }
+        }
+
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection sec : astDoc.sections()) {
             java.util.ListIterator<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock> it =
                     sec.blocks().listIterator();
@@ -342,7 +407,29 @@ public class IDMLToHwpxConverter {
                 if (tfb.sourceId() == null) continue;
 
                 RenderedGroup rendered = resolvedData.getRenderedTextFrameByIdmlId(tfb.sourceId());
+                boolean isBadgeFallback = false;
+                if (rendered == null) {
+                    rendered = resolvedData.getBadgeGroupByChildTextFrameIdmlId(tfb.sourceId());
+                    isBadgeFallback = (rendered != null);
+                }
                 if (rendered == null) continue;
+
+                // 같은 배지 그룹에서 이미 교체한 경우 중복 제거
+                if (isBadgeFallback && replacedBadgeFiles.contains(rendered.file())) {
+                    it.remove();
+                    continue;
+                }
+
+                // 배지 그룹: 가장 넓은 자식의 위치를 기준으로 사용
+                if (isBadgeFallback) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock best =
+                            badgeBestChild.get(rendered.file());
+                    if (best != null && !best.sourceId().equals(tfb.sourceId())) {
+                        // 현재 TextFrame이 최적 자식이 아니면 제거 (나중에 최적 자식 처리 시 교체)
+                        it.remove();
+                        continue;
+                    }
+                }
 
                 java.io.File pngFile = new java.io.File(resolvedDir, rendered.file());
                 if (!pngFile.exists()) continue;
@@ -404,6 +491,9 @@ public class IDMLToHwpxConverter {
 
                     it.set(fig);
                     replaced++;
+                    if (isBadgeFallback) {
+                        replacedBadgeFiles.add(rendered.file());
+                    }
                     System.out.println("[FloatingRendered] " + tfb.sourceId()
                             + " → " + rendered.file()
                             + " astPos=(" + tfb.x() + "," + tfb.y() + ")"
@@ -522,6 +612,10 @@ public class IDMLToHwpxConverter {
             if (obj.sourceId() == null) continue;
 
             RenderedGroup rendered = resolvedData.getRenderedTextFrameByIdmlId(obj.sourceId());
+            // 배지 자식 TextFrame → 배지 그룹 렌더 PNG 폴백
+            if (rendered == null) {
+                rendered = resolvedData.getBadgeGroupByChildTextFrameIdmlId(obj.sourceId());
+            }
             if (rendered == null) continue;
 
             // 텍스트 내용 추출 (중복 감지용)
@@ -572,6 +666,163 @@ public class IDMLToHwpxConverter {
     }
 
 
+    /**
+     * VectorShape로 등록되지 않은 렌더 그래픽 프레임을 AST에 주입한다.
+     * 깊이 중첩된 IDML 구조(TextFrame 내부 Oval 등)는 VectorShape 풀에 등록되지 않아
+     * ASTFigureBuilder에서 처리되지 못한다. 이들 중 렌더링된 PNG가 있으면 직접 주입한다.
+     */
+    static void injectOrphanRenderedGraphics(
+            ASTDocument astDoc, ResolvedData resolvedData, ConvertOptions options) {
+        String resolvedDir = getResolvedDir(options);
+        if (resolvedDir == null) return;
+
+        // 이미 AST에 사용된 rendered graphic sourceId 수집
+        java.util.Set<String> usedSourceIds = new java.util.HashSet<>();
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection sec : astDoc.sections()) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : sec.blocks()) {
+                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure
+                        && blk.sourceId() != null) {
+                    usedSourceIds.add(blk.sourceId());
+                }
+            }
+        }
+
+        // 페이지 bounds 캐시 (pageIndex → resolvedPage)
+        List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection> sections = astDoc.sections();
+
+        int injected = 0;
+        for (RenderedGroup rg : resolvedData.allRenderedGraphicFrames()) {
+            if (rg.file() == null || rg.bounds() == null) continue;
+
+            // DOM ID → IDML hex ID 변환하여 이미 사용된 것인지 확인
+            String idmlHexId = "u" + Integer.toHexString(rg.id());
+            if (usedSourceIds.contains(idmlHexId)) continue;
+
+            // 배경 프레임 필터: 페이지의 80% 이상이면 건너뜀
+            int pageIdx = rg.pageIndex();
+            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage resolvedPage =
+                    resolvedData.getPage(pageIdx);
+            if (resolvedPage != null && resolvedPage.bounds() != null) {
+                double[] rpb = resolvedPage.bounds();
+                double pageW = rpb[3] - rpb[1];
+                double pageH = rpb[2] - rpb[0];
+                double[] rb = rg.bounds();
+                double rW = rb[3] - rb[1];
+                double rH = rb[2] - rb[0];
+                if (rW > pageW * 0.8 && rH > pageH * 0.8) continue;
+            }
+
+            // PNG 로드
+            java.io.File pngFile = new java.io.File(resolvedDir, rg.file());
+            if (!pngFile.exists()) continue;
+
+            try {
+                byte[] data = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+                if (img == null) continue;
+
+                // 위치/크기 계산 (resolved bounds, 페이지 상대 좌표)
+                double[] bounds = rg.bounds();
+                long figX, figY, figW, figH;
+                if (resolvedPage != null && resolvedPage.bounds() != null) {
+                    double[] pb = resolvedPage.bounds();
+                    figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[1] - pb[1]);
+                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[0] - pb[0]);
+                    figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[3] - bounds[1]);
+                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[2] - bounds[0]);
+                } else {
+                    figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[1]);
+                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[0]);
+                    figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[3] - bounds[1]);
+                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[2] - bounds[0]);
+                }
+                // PNG 비율로 높이 보정
+                if (img.getWidth() > 0) {
+                    figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
+                }
+
+                // 페이지 밖 음수 좌표 → crop fraction 설정
+                // HwpxImageBuilder가 hasCrop일 때 x<0, y<0을 자동 클램핑하므로
+                // 원래 크기를 유지하고 fraction만 설정
+                double cropLeft = 0, cropTop = 0;
+                if (figX < 0) {
+                    cropLeft = (double) (-figX) / figW;
+                }
+                if (figY < 0) {
+                    cropTop = (double) (-figY) / figH;
+                }
+
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
+                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
+                fig.x(figX);
+                fig.y(figY);
+                fig.width(figW);
+                fig.height(figH);
+                fig.imageData(data);
+                fig.imageFormat("png");
+                fig.pixelWidth(img.getWidth());
+                fig.pixelHeight(img.getHeight());
+                fig.sourceId(idmlHexId);
+                fig.fromGroup(true);  // inFrontBlocks로 분류되도록
+                if (cropLeft > 0 || cropTop > 0) {
+                    fig.cropLeftFraction(cropLeft);
+                    fig.cropTopFraction(cropTop);
+                }
+
+                // 겹치는 유사 크기 도형의 최대 z-order 탐색
+                // → 렌더 그래픽을 그 위에 배치 (배경 위에 전경 오버레이)
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
+                int maxOverlapZ = 0;
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : section.blocks()) {
+                    if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) {
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure existing =
+                                (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) blk;
+                        long ew = existing.width(), eh = existing.height();
+                        // 크기 유사성 (±50%)
+                        if (ew < figW / 2 || ew > figW * 2
+                                || eh < figH / 2 || eh > figH * 2) {
+                            continue;
+                        }
+                        // 바운딩 박스 교차 확인
+                        long ox1 = Math.max(existing.x(), figX);
+                        long oy1 = Math.max(existing.y(), figY);
+                        long ox2 = Math.min(existing.x() + ew, figX + figW);
+                        long oy2 = Math.min(existing.y() + eh, figY + figH);
+                        if (ox2 > ox1 && oy2 > oy1) {
+                            if (existing.zOrder() > maxOverlapZ) {
+                                maxOverlapZ = existing.zOrder();
+                            }
+                        }
+                    }
+                }
+                fig.zOrder(maxOverlapZ + 1);
+
+                section.addBlock(fig);
+                injected++;
+                System.out.println("[OrphanGraphic] " + idmlHexId + " (DOM " + rg.id()
+                        + ") → page " + (pageIdx + 1) + " " + rg.file()
+                        + " pos=(" + figX + "," + figY + ") size=(" + figW + "x" + figH + ")"
+                        + " bounds=[" + bounds[0] + "," + bounds[1] + "," + bounds[2] + "," + bounds[3] + "]"
+                        + " px=" + img.getWidth() + "x" + img.getHeight());
+            } catch (Exception e) {
+                System.err.println("[OrphanGraphic] Failed: " + rg.file() + " — " + e.getMessage());
+            }
+        }
+        if (injected > 0) {
+            System.out.println("[OrphanGraphic] " + injected + "개 렌더 그래픽 프레임 주입 완료");
+        }
+    }
+
     /** resolved.json의 부모 디렉토리를 반환한다. */
     static String getResolvedDir(ConvertOptions options) {
         if (options.resolvedJsonPath() == null) return null;
@@ -615,8 +866,8 @@ public class IDMLToHwpxConverter {
 
             System.out.println("Conversion completed: " + result.summary());
             if (result.hasWarnings()) {
-                System.out.println("Warnings:");
-                for (String warning : result.warnings()) {
+                System.out.println("Warnings (" + result.warnings().size() + "):");
+                for (String warning : result.summarizedWarnings()) {
                     System.out.println("  - " + warning);
                 }
             }

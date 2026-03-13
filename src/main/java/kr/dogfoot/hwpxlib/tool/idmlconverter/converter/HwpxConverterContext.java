@@ -70,6 +70,15 @@ public class HwpxConverterContext {
     public int equationsConverted;
     public int framesConverted;
 
+    // 변환 경고 수집
+    private final List<String> warnings = new ArrayList<>();
+
+    public void addWarning(String category, String detail) {
+        warnings.add("[" + category + "] " + detail);
+    }
+
+    public List<String> warnings() { return warnings; }
+
     public HwpxConverterContext(HWPXFile hwpxFile, StyleRegistry styleRegistry,
                                 FontRegistry fontRegistry, List<ASTStyleDef> paragraphStyles) {
         this.hwpxFile = hwpxFile;

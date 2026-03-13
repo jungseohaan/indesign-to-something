@@ -1483,7 +1483,9 @@ public class IDMLPageRenderer {
                     try {
                         File cacheFile = new File(imageFile.getAbsolutePath() + ".png");
                         Files.write(cacheFile.toPath(), pngData);
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        System.err.println("[IDMLPageRenderer] 캐시 쓰기 실패: " + imageFile + " - " + e.getMessage());
+                    }
                 }
                 return ImageIO.read(new ByteArrayInputStream(pngData));
             } else {

@@ -170,6 +170,12 @@ public class ConverterCLI {
         // If not using progress reporter, report result now
         if (reporter == ProgressReporter.NONE) {
             System.out.println("Conversion completed: " + result.summary());
+            if (result.hasWarnings()) {
+                System.out.println("Warnings (" + result.warnings().size() + "):");
+                for (String warning : result.summarizedWarnings()) {
+                    System.out.println("  - " + warning);
+                }
+            }
         }
     }
 

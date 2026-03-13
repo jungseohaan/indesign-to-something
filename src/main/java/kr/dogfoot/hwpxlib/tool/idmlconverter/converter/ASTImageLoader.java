@@ -18,6 +18,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,10 @@ public class ASTImageLoader {
     private final ConcurrentHashMap<String, String> resolvedPathCache = new ConcurrentHashMap<>();
     // 디렉토리 파일 목록 캐시: dirPath → {lowerName → File} (대소문자 무시 검색 O(1))
     private final ConcurrentHashMap<String, Map<String, File>> dirListingCache = new ConcurrentHashMap<>();
+
+    // 이미지 로드 실패 경고 수집
+    private final List<String> warnings = new ArrayList<>();
+    public List<String> warnings() { return warnings; }
 
     public ASTImageLoader(IDMLDocument idmlDoc, ConvertOptions options) {
         this.idmlDoc = idmlDoc;
@@ -191,6 +196,7 @@ public class ASTImageLoader {
         String resolvedPath = resolveImagePath(path, filename);
         if (resolvedPath == null) {
             System.err.println("[ASTImageLoader] Image not found: " + filename);
+            warnings.add("[Image] 이미지 파일 없음: " + filename);
             return createPlaceholderResult(displayWidthHwp, displayHeightHwp, filename);
         }
 
@@ -223,7 +229,9 @@ public class ASTImageLoader {
                         try {
                             cacheFile.getParentFile().mkdirs();
                             Files.write(cacheFile.toPath(), imageData);
-                        } catch (Exception ignored) {}
+                        } catch (Exception e) {
+                            System.err.println("[ASTImageLoader] 캐시 쓰기 실패: " + cacheFile + " - " + e.getMessage());
+                        }
                     }
                 }
                 outputFormat = "png";
@@ -275,7 +283,186 @@ public class ASTImageLoader {
 
         } catch (Exception e) {
             System.err.println("[ASTImageLoader] Failed to load: " + filename + " - " + e.getMessage());
+            warnings.add("[Image] 이미지 로드 실패: " + filename + " - " + e.getMessage());
             return createPlaceholderResult(displayWidthHwp, displayHeightHwp, filename);
+        }
+    }
+
+    /**
+     * IDML 내장(embedded/pasted) 이미지 데이터를 로드한다.
+     * LinkResourceURI가 없는 이미지의 Contents 요소에 포함된 base64 데이터를 디코딩한다.
+     *
+     * @param base64Contents   base64 인코딩된 이미지 데이터 (줄바꿈 포함 가능)
+     * @param displayWidthHwp  표시 너비 (HWPUNIT)
+     * @param displayHeightHwp 표시 높이 (HWPUNIT)
+     * @param imageTransform   이미지 내부 transform (클리핑용, null 가능)
+     * @param frameBoundsPoints 프레임 bounds in points (클리핑용, null 가능)
+     * @param graphicBounds    원본 이미지 크기 bounds (클리핑용, null 가능)
+     * @param framePath        비사각형 프레임 경로 (null이면 사각형)
+     * @param cornerRadius     둥근 모서리 반경 (0이면 없음)
+     * @param cornerRadii      개별 모서리 반경 (null이면 균일)
+     * @return 이미지 로드 결과
+     */
+    public ImageResult loadEmbeddedImage(String base64Contents,
+                                          long displayWidthHwp, long displayHeightHwp,
+                                          double[] imageTransform, double[] frameBoundsPoints,
+                                          double[] graphicBounds,
+                                          List<double[]> framePath, double cornerRadius,
+                                          double[] cornerRadii) {
+        if (base64Contents == null || base64Contents.isEmpty()) {
+            return createPlaceholderResult(displayWidthHwp, displayHeightHwp, null);
+        }
+
+        try {
+            // base64 디코딩 (줄바꿈/공백 제거)
+            String cleaned = base64Contents.replaceAll("\\s+", "");
+            byte[] imageData = java.util.Base64.getDecoder().decode(cleaned);
+
+            if (imageData == null || imageData.length == 0) {
+                return createPlaceholderResult(displayWidthHwp, displayHeightHwp, "embedded");
+            }
+
+            // 포맷 감지: JPEG (/9j/), TIFF (II*\0 = 49492A00 or MM\0* = 4D4D002A), PNG (89504E47)
+            String outputFormat = detectEmbeddedFormat(imageData);
+
+            // TIFF → PNG 변환 (HWPX는 TIFF를 지원하지 않음)
+            if ("tiff".equals(outputFormat)) {
+                imageData = convertTiffToPng(imageData);
+                outputFormat = "png";
+                if (imageData == null || imageData.length == 0) {
+                    return createPlaceholderResult(displayWidthHwp, displayHeightHwp, "embedded");
+                }
+            }
+
+            // 클리핑 적용
+            if (imageTransform != null && frameBoundsPoints != null) {
+                imageData = applyClipping(imageData, imageTransform, frameBoundsPoints,
+                        graphicBounds, framePath, cornerRadius, cornerRadii);
+                outputFormat = "png";
+            }
+
+            // 픽셀 크기 감지
+            int pixelW, pixelH;
+            try {
+                int[] size = ImageInserter.detectPixelSize(imageData);
+                pixelW = size[0];
+                pixelH = size[1];
+            } catch (IOException e) {
+                pixelW = Math.max(10, (int)(displayWidthHwp / 75));
+                pixelH = Math.max(10, (int)(displayHeightHwp / 75));
+            }
+
+            // DPI 기반 리사이즈
+            int targetDpi = options.imageDpi();
+            int targetW = Math.max(10, (int) Math.round(displayWidthHwp * targetDpi / 7200.0));
+            int targetH = Math.max(10, (int) Math.round(displayHeightHwp * targetDpi / 7200.0));
+
+            if (targetW < pixelW && targetH < pixelH
+                    && (pixelW > targetW * 1.2 || pixelH > targetH * 1.2)) {
+                imageData = resizeImage(imageData, targetW, targetH);
+                pixelW = targetW;
+                pixelH = targetH;
+                outputFormat = "png";
+            }
+
+            ImageResult result = new ImageResult();
+            result.imageData = imageData;
+            result.format = outputFormat;
+            result.pixelWidth = pixelW;
+            result.pixelHeight = pixelH;
+            result.isPlaceholder = false;
+            return result;
+
+        } catch (Exception e) {
+            System.err.println("[ASTImageLoader] 내장 이미지 디코딩 실패: " + e.getMessage());
+            warnings.add("[Image] 내장 이미지 디코딩 실패: " + e.getMessage());
+            return createPlaceholderResult(displayWidthHwp, displayHeightHwp, "embedded");
+        }
+    }
+
+    /**
+     * InDesign에서 직접 렌더링된 PNG 이미지를 로드한다.
+     * rendered_frames/ 디렉토리의 pre-rendered 이미지를 resolved.json 기준 상대경로로 로드.
+     *
+     * @param relativePath  resolved.json 기준 상대 경로 (예: "rendered_frames/pdf_12345.png")
+     * @param displayWidthHwp  표시 너비 (HWPUNIT)
+     * @param displayHeightHwp 표시 높이 (HWPUNIT)
+     * @return 이미지 로드 결과, 파일 없으면 null
+     */
+    public ImageResult loadRenderedImage(String relativePath,
+                                          long displayWidthHwp, long displayHeightHwp) {
+        if (relativePath == null || relativePath.isEmpty()) return null;
+        if (options.resolvedJsonPath() == null) return null;
+
+        File resolvedFile = new File(options.resolvedJsonPath());
+        if (!resolvedFile.isAbsolute()) resolvedFile = resolvedFile.getAbsoluteFile();
+        File resolvedDir = resolvedFile.getParentFile();
+        if (resolvedDir == null) return null;
+
+        File pngFile = new File(resolvedDir, relativePath);
+        if (!pngFile.exists()) return null;
+
+        try {
+            byte[] imageData = Files.readAllBytes(pngFile.toPath());
+            if (imageData == null || imageData.length == 0) return null;
+
+            int pixelW, pixelH;
+            try {
+                int[] size = ImageInserter.detectPixelSize(imageData);
+                pixelW = size[0];
+                pixelH = size[1];
+            } catch (IOException e) {
+                pixelW = Math.max(10, (int) (displayWidthHwp / 75));
+                pixelH = Math.max(10, (int) (displayHeightHwp / 75));
+            }
+
+            ImageResult result = new ImageResult();
+            result.imageData = imageData;
+            result.format = "png";
+            result.pixelWidth = pixelW;
+            result.pixelHeight = pixelH;
+            result.isPlaceholder = false;
+            return result;
+        } catch (Exception e) {
+            System.err.println("[ASTImageLoader] 렌더링된 PDF 프레임 로드 실패: " + relativePath + " - " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 바이너리 데이터의 매직 바이트로 이미지 포맷을 감지한다.
+     */
+    private static String detectEmbeddedFormat(byte[] data) {
+        if (data.length < 4) return "png";
+        // JPEG: FF D8 FF
+        if ((data[0] & 0xFF) == 0xFF && (data[1] & 0xFF) == 0xD8 && (data[2] & 0xFF) == 0xFF) {
+            return "jpg";
+        }
+        // PNG: 89 50 4E 47
+        if ((data[0] & 0xFF) == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47) {
+            return "png";
+        }
+        // TIFF: II*\0 (little-endian) or MM\0* (big-endian)
+        if ((data[0] == 0x49 && data[1] == 0x49 && data[2] == 0x2A && data[3] == 0x00)
+                || (data[0] == 0x4D && data[1] == 0x4D && data[2] == 0x00 && data[3] == 0x2A)) {
+            return "tiff";
+        }
+        return "png";
+    }
+
+    /**
+     * TIFF 바이너리를 PNG로 변환한다.
+     */
+    private static byte[] convertTiffToPng(byte[] tiffData) {
+        try {
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(tiffData));
+            if (img == null) return null;
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(img, "png", baos);
+            return baos.toByteArray();
+        } catch (Exception e) {
+            System.err.println("[ASTImageLoader] TIFF→PNG 변환 실패: " + e.getMessage());
+            return null;
         }
     }
 
@@ -2644,7 +2831,9 @@ public class ASTImageLoader {
         }
         try {
             path = URLDecoder.decode(path, "UTF-8");
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            System.err.println("[ASTImageLoader] URL 디코딩 실패: " + path + " - " + e.getMessage());
+        }
         return path;
     }
 

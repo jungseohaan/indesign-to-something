@@ -38,6 +38,10 @@ public class IDMLImageFrame {
     private double imageFillTint = -1;   // Image 요소의 FillTint (0~100, -1=미지정)
     private String imageColorSpace;      // Image 요소의 Space (예: "$ID/#Links_Grayscale")
 
+    // IDML 내장 이미지 데이터 (base64 인코딩)
+    // LinkResourceURI가 없는 붙여넣기 이미지의 경우 <Contents> 요소에 바이너리 데이터가 포함됨
+    private String embeddedContents;
+
     // 프레임 경로 (비사각형 클리핑용)
     // 각 포인트: [anchorX, anchorY, leftDirX, leftDirY, rightDirX, rightDirY]
     private List<double[]> framePath;    // null이면 사각형 프레임
@@ -101,6 +105,17 @@ public class IDMLImageFrame {
 
     public boolean isEmbedded() {
         return "Embedded".equals(linkStoredState);
+    }
+
+    public String embeddedContents() { return embeddedContents; }
+    public void embeddedContents(String v) { this.embeddedContents = v; }
+
+    /**
+     * 내장 이미지 데이터가 있는지 확인한다.
+     * LinkResourceURI가 없어도 Contents에 바이너리 데이터가 있으면 true.
+     */
+    public boolean hasEmbeddedContents() {
+        return embeddedContents != null && !embeddedContents.isEmpty();
     }
 
     public List<double[]> framePath() { return framePath; }

@@ -153,6 +153,11 @@ public class FlatToHwpxConverter {
         result.equationsConverted(ctx.equationsConverted);
         result.stylesConverted(ctx.styleRegistry.totalStyleCount());
 
+        // 변환 중 수집된 경고를 결과에 전달
+        for (String w : ctx.warnings()) {
+            result.addWarning(w);
+        }
+
         System.err.println("[FlatToHwpxConverter] Done. " + result.summary());
         return result;
     }

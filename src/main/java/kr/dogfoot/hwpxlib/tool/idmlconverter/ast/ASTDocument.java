@@ -56,4 +56,9 @@ public class ASTDocument {
 
     public Map<String, String> colors() { return colors; }
     public void putColor(String ref, String hex) { colors.put(ref, hex); }
+
+    // 정규화 단계 경고 전달용
+    private final List<String> warnings = new ArrayList<>();
+    public List<String> warnings() { return warnings; }
+    public void addWarning(String w) { warnings.add(w); }
 }

@@ -28,6 +28,7 @@ public class ResolvedDataReader {
     public static ResolvedData fromJson(String json) {
         // ExtendScript JSON 폴리필이 제어 문자를 이스케이프하지 못할 수 있으므로 lenient 모드 사용
         JsonReader reader = new JsonReader(new StringReader(json));
+        try {
         reader.setLenient(true);
         JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
         ResolvedData data = new ResolvedData();
@@ -83,13 +84,34 @@ public class ResolvedDataReader {
         if (root.has("renderedTextFrames")) {
             for (JsonElement e : root.getAsJsonArray("renderedTextFrames")) {
                 RenderedGroup rg = parseRenderedGroup(e.getAsJsonObject());
-                // 가상 배지(badge_group/badge_group_child) 엔트리 무시
-                if (rg.isBadgeGroup() || rg.isBadgeGroupChild()) continue;
+                // badge_group_child는 무시 (부모 badge_group에서 처리)
+                if (rg.isBadgeGroupChild()) continue;
                 data.addRenderedTextFrame(rg);
             }
         }
 
+        // renderedPdfFrames (PDF 배치 프레임을 InDesign에서 직접 래스터화한 PNG)
+        if (root.has("renderedPdfFrames")) {
+            for (JsonElement e : root.getAsJsonArray("renderedPdfFrames")) {
+                RenderedGroup rg = parseRenderedGroup(e.getAsJsonObject());
+                data.addRenderedPdfFrame(rg);
+            }
+        }
+
+        // renderedGraphicFrames (복합 장식 그래픽을 InDesign에서 직접 래스터화한 PNG)
+        if (root.has("renderedGraphicFrames")) {
+            for (JsonElement e : root.getAsJsonArray("renderedGraphicFrames")) {
+                RenderedGroup rg = parseRenderedGroup(e.getAsJsonObject());
+                data.addRenderedGraphicFrame(rg);
+            }
+        }
+
         return data;
+        } finally {
+            try { reader.close(); } catch (IOException e) {
+                System.err.println("[ResolvedDataReader] JSON reader close 실패: " + e.getMessage());
+            }
+        }
     }
 
     private static ResolvedTextFrame parseTextFrame(JsonObject o) {

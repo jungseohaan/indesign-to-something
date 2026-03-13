@@ -168,7 +168,11 @@ class ASTTableConverter {
         border.strokeType(src.strokeType);
         border.tint(src.strokeTint);
         if (src.strokeColor != null) {
-            border.color(colorResolver.resolve(src.strokeColor));
+            String resolved = colorResolver.resolve(src.strokeColor);
+            if (src.strokeTint < 100 && resolved != null && resolved.startsWith("#") && resolved.length() >= 7) {
+                resolved = blendColorWithWhite(resolved, src.strokeTint / 100.0);
+            }
+            border.color(resolved);
         }
         return border;
     }

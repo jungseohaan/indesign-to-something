@@ -78,14 +78,26 @@ class IDMLSpreadParser {
                     if (handledAsMultiImage) {
                         // 자식 이미지 + 배경색 모두 처리 완료
                     } else {
-                        // 이미지가 없으면 순수 벡터 도형으로 파싱
-                        IDMLVectorShape vectorShape = tryParseVectorShape(elem);
-                        if (vectorShape != null) {
-                            vectorShape.zOrder(zOrderCounter[0]++);
-                            spread.addVectorShape(vectorShape);
+                        boolean isGraphicContainer = "GraphicType".equals(
+                                elem.getAttribute("ContentType"));
+                        // GraphicType 컨테이너: bgShape(배경)는 이미 등록됨.
+                        // composite VectorShape는 compound path 클리핑을 지원하지 않으므로
+                        // 개별 요소 추출만 사용. (사선 원 등은 renderedGraphicFrame으로 처리)
+                        IDMLVectorShape vectorShape = null;
+                        if (!isGraphicContainer) {
+                            vectorShape = tryParseVectorShape(elem);
+                            if (vectorShape != null) {
+                                vectorShape.zOrder(zOrderCounter[0]++);
+                                spread.addVectorShape(vectorShape);
+                            }
                         }
-                        // 내부 TextFrame 추출 (자식 Group이 클리핑으로 수집된 경우 건너뜀)
-                        if (vectorShape == null || !vectorShape.hasClippedChildren()) {
+                        // 내부 TextFrame/Group 추출
+                        // GraphicType Oval/Polygon(사선 원 등)은 renderedGraphicFrame으로 처리되므로
+                        // 내부 자식(GraphicLine 등)을 개별 추출하지 않음
+                        // Rectangle은 래퍼로 사용되어 내부 TextFrame이 있을 수 있으므로 항상 추출
+                        boolean skipExtract = isGraphicContainer
+                                && !"Rectangle".equals(elem.getTagName());
+                        if (!skipExtract) {
                             int tfCountBefore = spread.textFrames().size();
                             double[] frameTransform = IDMLGeometry.parseTransform(
                                     elem.getAttribute("ItemTransform"));
@@ -93,8 +105,9 @@ class IDMLSpreadParser {
                                     hiddenLayerIds, zOrderCounter);
                             int tfCountAfter = spread.textFrames().size();
                             // 래퍼 Rectangle이 TextFrame을 포함하고 클리핑 자식이 없으면
-                            // 벡터 도형(채우기 이미지)으로 렌더링 억제 (래퍼 스타일이 TextFrame에 전파됨)
-                            if (vectorShape != null && tfCountAfter > tfCountBefore) {
+                            // 벡터 도형(채우기 이미지)으로 렌더링 억제
+                            if (vectorShape != null && tfCountAfter > tfCountBefore
+                                    && !vectorShape.hasClippedChildren()) {
                                 spread.vectorShapes().remove(vectorShape);
                             }
                         }
@@ -218,7 +231,9 @@ class IDMLSpreadParser {
                 try {
                     double inset = Double.parseDouble(insetStr);
                     frame.insetSpacing(new double[]{inset, inset, inset, inset});
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException e) {
+                    System.err.println("[IDMLSpreadParser] InsetSpacing 파싱 실패: " + insetStr);
+                }
             }
             if (frame.insetSpacing() == null) {
                 Element tfProps = getFirstChildElement(tfPref, "Properties");
@@ -233,7 +248,9 @@ class IDMLSpreadParser {
                                     insets[si] = Double.parseDouble(items.get(si).getTextContent().trim());
                                 }
                                 frame.insetSpacing(insets);
-                            } catch (NumberFormatException ignored) {}
+                            } catch (NumberFormatException e) {
+                                System.err.println("[IDMLSpreadParser] InsetSpacing 리스트 파싱 실패");
+                            }
                         }
                     }
                 }
@@ -259,7 +276,9 @@ class IDMLSpreadParser {
                                 if (widthText != null && !widthText.isEmpty()) {
                                     try {
                                         widths[w] = Double.parseDouble(widthText.trim());
-                                    } catch (NumberFormatException ignored) {}
+                                    } catch (NumberFormatException e) {
+                                        System.err.println("[IDMLSpreadParser] ColumnWidth 파싱 실패: " + widthText);
+                                    }
                                 }
                             }
                             frame.columnWidths(widths);
@@ -483,7 +502,7 @@ class IDMLSpreadParser {
             frame.imageTransform(IDMLGeometry.parseTransform(imgTransformStr));
         }
 
-        // GraphicBounds (원본 이미지 크기)
+        // GraphicBounds (원본 이미지 크기) + Contents (내장 이미지 데이터)
         Element imgProps = getFirstChildElement(imageElem, "Properties");
         if (imgProps != null) {
             Element graphicBoundsElem = getFirstChildElement(imgProps, "GraphicBounds");
@@ -493,6 +512,15 @@ class IDMLSpreadParser {
                 double right = parseDoubleAttrDef(graphicBoundsElem, "Right", 0);
                 double bottom = parseDoubleAttrDef(graphicBoundsElem, "Bottom", 0);
                 frame.graphicBounds(new double[]{left, top, right, bottom});
+            }
+
+            // 내장 이미지 데이터: <Contents><![CDATA[base64...]]></Contents>
+            Element contentsElem = getFirstChildElement(imgProps, "Contents");
+            if (contentsElem != null) {
+                String base64Data = contentsElem.getTextContent();
+                if (base64Data != null && !base64Data.isEmpty()) {
+                    frame.embeddedContents(base64Data.trim());
+                }
             }
         }
 
@@ -754,7 +782,9 @@ class IDMLSpreadParser {
                                     shape.gradientFeatherStart(new double[]{
                                             Double.parseDouble(parts[0]),
                                             Double.parseDouble(parts[1])});
-                                } catch (NumberFormatException ignored) {}
+                                } catch (NumberFormatException e) {
+                                    System.err.println("[IDMLSpreadParser] GradientFeatherStart 파싱 실패: " + startStr);
+                                }
                             }
                         }
                     }
@@ -1122,20 +1152,25 @@ class IDMLSpreadParser {
 
                     if (handledAsMultiImage) {
                     } else {
-                        IDMLVectorShape vectorShape = tryParseVectorShape(elem);
-                        if (vectorShape != null) {
-                            double[] combinedTransform = CoordinateConverter.combineTransforms(
-                                    accumulatedTransform, vectorShape.itemTransform());
-                            vectorShape.itemTransform(combinedTransform);
-                            vectorShape.fromGroup(true);
-                            vectorShape.parentGroupId(groupSelfId);
-                            vectorShape.zOrder(zOrderCounter[0]++);
-                            spread.addVectorShape(vectorShape);
+                        boolean isGraphicContainer2 = "GraphicType".equals(
+                                elem.getAttribute("ContentType"));
+                        IDMLVectorShape vectorShape = null;
+                        if (!isGraphicContainer2) {
+                            vectorShape = tryParseVectorShape(elem);
+                            if (vectorShape != null) {
+                                double[] combinedTransform = CoordinateConverter.combineTransforms(
+                                        accumulatedTransform, vectorShape.itemTransform());
+                                vectorShape.itemTransform(combinedTransform);
+                                vectorShape.fromGroup(true);
+                                vectorShape.parentGroupId(groupSelfId);
+                                vectorShape.zOrder(zOrderCounter[0]++);
+                                spread.addVectorShape(vectorShape);
+                            }
                         }
-                        // 프레임 내부의 TextFrame 자식 수집 (지연 등록)
-                        // 단, 자식 Group이 이미 클리핑 자식으로 수집된 경우 건너뜀
-                        // (재귀 parseGroupForFrames로 개별 벡터가 중복 추가되는 것 방지)
-                        if (vectorShape == null || !vectorShape.hasClippedChildren()) {
+                        // 프레임 내부의 TextFrame 자식 수집
+                        // GraphicType 컨테이너(사선 원 등)는 renderedGraphicFrame으로 처리되므로
+                        // 내부 자식(GraphicLine 등)을 개별 추출하지 않음
+                        if (!isGraphicContainer2) {
                             double[] rectTransform = IDMLGeometry.parseTransform(
                                     elem.getAttribute("ItemTransform"));
                             double[] combinedForChildren = CoordinateConverter.combineTransforms(
@@ -1145,8 +1180,8 @@ class IDMLSpreadParser {
                                     hiddenLayerIds, zOrderCounter);
                             int tfCountAfter = spread.textFrames().size();
                             if (tfCountAfter > tfCountBefore) {
-                                // 래퍼 도형 제거 (TextFrame에 스타일 전파됨)
-                                if (vectorShape != null) {
+                                // 래퍼 도형 제거 (TextFrame에 스타일 전파됨, 클리핑 자식 없을 때만)
+                                if (vectorShape != null && !vectorShape.hasClippedChildren()) {
                                     spread.vectorShapes().remove(vectorShape);
                                 }
                                 // 추출된 TextFrame을 spread에서 빼고 지연 목록으로 이동

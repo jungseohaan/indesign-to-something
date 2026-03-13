@@ -3,7 +3,9 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter;
 import kr.dogfoot.hwpxlib.object.HWPXFile;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * IDML -> HWPX 변환 결과.
@@ -43,6 +45,42 @@ public class ConvertResult {
 
     public boolean hasWarnings() {
         return !warnings.isEmpty();
+    }
+
+    /**
+     * 카테고리별로 중복을 압축한 경고 목록을 반환한다.
+     * 예: "[Image] 이미지 파일 없음: photo1.psd" 외 99건
+     */
+    public List<String> summarizedWarnings() {
+        // 카테고리([] 내용) 별로 그룹핑
+        Map<String, List<String>> grouped = new LinkedHashMap<String, List<String>>();
+        for (String w : warnings) {
+            String category = extractCategory(w);
+            List<String> list = grouped.get(category);
+            if (list == null) {
+                list = new ArrayList<String>();
+                grouped.put(category, list);
+            }
+            list.add(w);
+        }
+
+        List<String> result = new ArrayList<String>();
+        for (Map.Entry<String, List<String>> entry : grouped.entrySet()) {
+            List<String> list = entry.getValue();
+            result.add(list.get(0));
+            if (list.size() > 1) {
+                result.add("  ... 외 " + (list.size() - 1) + "건");
+            }
+        }
+        return result;
+    }
+
+    private static String extractCategory(String warning) {
+        if (warning.startsWith("[")) {
+            int end = warning.indexOf(']');
+            if (end > 0) return warning.substring(0, end + 1);
+        }
+        return "";
     }
 
     public int pagesConverted() {

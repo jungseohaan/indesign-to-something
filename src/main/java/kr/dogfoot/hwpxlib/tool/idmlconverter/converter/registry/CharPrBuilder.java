@@ -71,21 +71,19 @@ public final class CharPrBuilder {
             charPr.createSubscript();
         }
 
-        // 폰트 참조
-        String fontId = fontRegistry.resolveFontId(fontFamily);
+        // 폰트 참조 (hangul/latin 슬롯 분리)
+        String[] fontIds = fontRegistry.resolveFontIdPair(fontFamily);
+        String hangulFontId = fontIds[0];
+        String latinFontId = fontIds[1];
         charPr.createFontRef();
-        charPr.fontRef().set(fontId, fontId, fontId, fontId, fontId, fontId, fontId);
+        charPr.fontRef().set(hangulFontId, latinFontId, hangulFontId, hangulFontId, hangulFontId, hangulFontId, hangulFontId);
 
-        short ratio = 90;
-        if (horizontalScale != null) {
-            ratio = (short)(90 * horizontalScale / 100);
-        }
+        short ratio = (horizontalScale != null) ? horizontalScale : 100;
         charPr.createRatio();
         charPr.ratio().set(ratio, ratio, ratio, ratio, ratio, ratio, ratio);
 
-        // 자간 — 전역 -10% 적용
-        short baseSpacing = letterSpacing != null ? letterSpacing : 0;
-        short spacing = (short) (baseSpacing - 10);
+        // 자간
+        short spacing = letterSpacing != null ? letterSpacing : 0;
         charPr.createSpacing();
         charPr.spacing().set(spacing, spacing, spacing, spacing, spacing, spacing, spacing);
 

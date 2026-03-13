@@ -28,7 +28,13 @@ public class ResolvedMerger {
             // AST storyId는 IDML hex 형식 ("u4f1"), resolved는 decimal ("1265")
             String decimalId = idmlIdToDecimal(storyId);
             ResolvedStory resolvedStory = resolved.getStory(decimalId);
-            if (resolvedStory == null) continue;
+            if (resolvedStory == null) {
+                if (entry.getValue().size() > 0) {
+                    System.err.println("[ResolvedMerger] story 매칭 실패: " + storyId
+                            + " (decimal=" + decimalId + "), " + entry.getValue().size() + "개 문단 보강 건너뜀");
+                }
+                continue;
+            }
 
             List<ASTParagraph> astParas = entry.getValue();
             List<ResolvedParagraph> resolvedParas = resolvedStory.paragraphs();
@@ -233,9 +239,16 @@ public class ResolvedMerger {
             // resolved 텍스트에서 AST 텍스트의 위치 검색
             int foundAt = resolvedFullText.indexOf(astText, searchFrom);
 
-            // 못 찾으면 첫 글자만으로 재시도 (공백/특수문자 차이 보정)
+            // 못 찾으면 공백/특수문자 제거 후 재시도
             if (foundAt < 0 && astText.length() > 1) {
-                // 첫 2글자로 시도
+                // 공백/NBSP/제어문자 정규화 후 재시도
+                String normalized = astText.replaceAll("[\\s\\u00A0\\u2002\\u2003\\u200B]+", " ").trim();
+                if (!normalized.equals(astText)) {
+                    foundAt = resolvedFullText.indexOf(normalized, searchFrom);
+                }
+            }
+            if (foundAt < 0 && astText.length() > 1) {
+                // 첫 3글자로 시도
                 String prefix = astText.substring(0, Math.min(3, astText.length()));
                 foundAt = resolvedFullText.indexOf(prefix, searchFrom);
             }

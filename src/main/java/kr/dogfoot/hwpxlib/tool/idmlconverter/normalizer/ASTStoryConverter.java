@@ -76,6 +76,19 @@ class ASTStoryConverter {
                 para.shadingColor(colorResolver.resolve(shadingColor));
             }
             para.shadingTint(idmlPara.shadingTint());
+            // 음영 오프셋 (points → HWPUNIT)
+            if (idmlPara.shadingOffsetLeft() != null) {
+                para.shadingLeftOffset(CoordinateConverter.pointsToHwpunits(idmlPara.shadingOffsetLeft()));
+            }
+            if (idmlPara.shadingOffsetRight() != null) {
+                para.shadingRightOffset(CoordinateConverter.pointsToHwpunits(idmlPara.shadingOffsetRight()));
+            }
+            if (idmlPara.shadingOffsetTop() != null) {
+                para.shadingTopOffset(CoordinateConverter.pointsToHwpunits(idmlPara.shadingOffsetTop()));
+            }
+            if (idmlPara.shadingOffsetBottom() != null) {
+                para.shadingBottomOffset(CoordinateConverter.pointsToHwpunits(idmlPara.shadingOffsetBottom()));
+            }
         }
 
         // 탭 정지점 (인라인 오버라이드 → 단락 스타일 → basedOn 체인)
@@ -101,6 +114,25 @@ class ASTStoryConverter {
         if (idmlPara.columnBreakAfter()) {
             para.columnBreakAfter(true);
         }
+
+        // 단락 분리 제어 (인라인 오버라이드 → 스타일 상속)
+        boolean kwn2 = idmlPara.keepWithNext();
+        boolean klt2 = idmlPara.keepLinesTogether();
+        boolean pbb2 = idmlPara.pageBreakBefore();
+        if (!kwn2 || !klt2 || !pbb2) {
+            // 인라인 값이 false이면 스타일에서 상속 시도
+            if (paraStyleRef != null) {
+                IDMLStyleDef paraStyle = resolveStyle(paraStyleRef, idmlDoc.paraStyles());
+                if (paraStyle != null) {
+                    if (!kwn2 && Boolean.TRUE.equals(paraStyle.keepWithNext())) kwn2 = true;
+                    if (!klt2 && Boolean.TRUE.equals(paraStyle.keepLinesTogether())) klt2 = true;
+                    if (!pbb2 && Boolean.TRUE.equals(paraStyle.pageBreakBefore())) pbb2 = true;
+                }
+            }
+        }
+        if (kwn2) para.keepWithNext(true);
+        if (klt2) para.keepLinesTogether(true);
+        if (pbb2) para.pageBreakBefore(true);
 
         // Character Runs → 인라인 항목
         // BT수식M 폰트 런은 그룹핑하여 ASTEquation으로 변환
@@ -411,6 +443,31 @@ class ASTStoryConverter {
         merged.leadingType(style.leadingType() != null ? style.leadingType() : parent.leadingType());
         merged.autoLeading(style.autoLeading() != null ? style.autoLeading() : parent.autoLeading());
         merged.tabStops(style.tabStops() != null ? style.tabStops() : parent.tabStops());
+        // 단락 속성
+        merged.textAlignment(style.textAlignment() != null ? style.textAlignment() : parent.textAlignment());
+        merged.firstLineIndent(style.firstLineIndent() != null ? style.firstLineIndent() : parent.firstLineIndent());
+        merged.leftIndent(style.leftIndent() != null ? style.leftIndent() : parent.leftIndent());
+        merged.rightIndent(style.rightIndent() != null ? style.rightIndent() : parent.rightIndent());
+        merged.spaceBefore(style.spaceBefore() != null ? style.spaceBefore() : parent.spaceBefore());
+        merged.spaceAfter(style.spaceAfter() != null ? style.spaceAfter() : parent.spaceAfter());
+        // 문자 속성
+        merged.horizontalScale(style.horizontalScale() != null ? style.horizontalScale() : parent.horizontalScale());
+        merged.baselineShift(style.baselineShift() != null ? style.baselineShift() : parent.baselineShift());
+        merged.capitalization(style.capitalization() != null ? style.capitalization() : parent.capitalization());
+        // 단락 분리 제어
+        merged.keepWithNext(style.keepWithNext() != null ? style.keepWithNext() : parent.keepWithNext());
+        merged.keepLinesTogether(style.keepLinesTogether() != null ? style.keepLinesTogether() : parent.keepLinesTogether());
+        merged.pageBreakBefore(style.pageBreakBefore() != null ? style.pageBreakBefore() : parent.pageBreakBefore());
+        merged.ruleBelowOn(style.ruleBelowOn() != null ? style.ruleBelowOn() : parent.ruleBelowOn());
+        // 두문자
+        merged.dropCapLines(style.dropCapLines() != null ? style.dropCapLines() : parent.dropCapLines());
+        merged.dropCapCharacters(style.dropCapCharacters() != null ? style.dropCapCharacters() : parent.dropCapCharacters());
+        // 어절 간격
+        merged.desiredWordSpacing(style.desiredWordSpacing() != null ? style.desiredWordSpacing() : parent.desiredWordSpacing());
+        merged.minimumWordSpacing(style.minimumWordSpacing() != null ? style.minimumWordSpacing() : parent.minimumWordSpacing());
+        merged.maximumWordSpacing(style.maximumWordSpacing() != null ? style.maximumWordSpacing() : parent.maximumWordSpacing());
+        // GREP 스타일
+        merged.grepStyles(style.grepStyles() != null ? style.grepStyles() : parent.grepStyles());
         return merged;
     }
 

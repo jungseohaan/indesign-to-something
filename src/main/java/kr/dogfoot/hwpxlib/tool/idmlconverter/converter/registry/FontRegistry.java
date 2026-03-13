@@ -81,6 +81,50 @@ public class FontRegistry {
     }
 
     /**
+     * 폰트 이름에 해당하는 HWPX 폰트 ID 쌍을 반환한다.
+     * [0] = hangul 슬롯용 ID, [1] = latin 슬롯용 ID
+     * 서양 폰트: hangul에 한글 폴백, latin에 원본 서양 폰트
+     * 한글 폰트: 양쪽 동일
+     */
+    public String[] resolveFontIdPair(String fontFamily) {
+        if (fontFamily == null) return new String[]{"1", "1"};
+
+        // 직접 등록 폰트 (수식 등 특수 폰트) → 양쪽 동일
+        String directId = fontNameToId.get(fontFamily);
+        if (directId != null) return new String[]{directId, directId};
+
+        if (fontFamily.contains("BT수식") || fontFamily.startsWith("EH")) {
+            String id = registerDirectFont(fontFamily);
+            return new String[]{id, id};
+        }
+
+        // FontMapper 쌍 매핑
+        String[] pair = FontMapper.mapToHwpxFontPair(fontFamily, customFontMap);
+        String hangulName = pair[0];
+        String latinName = pair[1];
+
+        String hangulId = ensureRegistered(hangulName);
+        String latinId = ensureRegistered(latinName);
+
+        return new String[]{hangulId, latinId};
+    }
+
+    /**
+     * 폰트 이름이 등록되어 있으면 ID 반환, 없으면 등록 후 반환.
+     */
+    private String ensureRegistered(String fontName) {
+        String id = fontNameToId.get(fontName);
+        if (id != null) return id;
+
+        String fontId = String.valueOf(nextFontId);
+        addFontToAllLanguages(fontName, fontId);
+        fontNameToId.put(fontName, fontId);
+        registeredFonts.add(fontName);
+        nextFontId++;
+        return fontId;
+    }
+
+    /**
      * HWPX 폰트 이름을 직접 등록한다.
      * FontMapper를 거치지 않고 지정된 이름 그대로 등록.
      */

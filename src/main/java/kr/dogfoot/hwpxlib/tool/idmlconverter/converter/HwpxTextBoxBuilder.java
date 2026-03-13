@@ -443,8 +443,8 @@ public class HwpxTextBoxBuilder {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        // 스트로크 (프레임 자체 stroke)
-        setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, "Solid", 100);
+        // 스트로크 (프레임 자체 stroke, tint 반영)
+        setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, "Solid", block.strokeTint());
 
         // 배경 fill (래퍼 fill 또는 프레임 fill)
         if (hasBg) {
@@ -902,6 +902,7 @@ public class HwpxTextBoxBuilder {
         long gutter = block.columnGutter();
         long totalGutter = gutter * (colCount - 1);
         long contentWidth = totalWidth - totalGutter;
+        if (contentWidth < colCount) contentWidth = totalWidth; // 거터가 과도하면 거터 무시
 
         long[] result = new long[colCount];
 
@@ -1600,9 +1601,12 @@ public class HwpxTextBoxBuilder {
         long cornerHwp = Math.round(cornerRadiusPts * 100); // 1pt = 100 HWPUNIT
         short ratio = (short) Math.min(50, Math.round(cornerHwp * 100.0 / minSide));
 
-        // ratio=50 + 비정사각형 → 타원 방지: maxSide 기준으로 재계산
-        if (ratio >= 50 && maxSide > minSide * 3 / 2) {
-            ratio = (short) Math.max(1, Math.round(minSide * 50.0 / maxSide));
+        // HWPX에서 ratio≈50이면 타원이 되므로, 비정사각형 도형에서 과도한 둥글기를 방지.
+        // InDesign은 절대 반지름으로 직선 변이 보존되지만,
+        // HWPX는 높은 ratio에서 형상이 타원에 수렴한다.
+        // ratio > 25이고 세로/가로 비율이 1.5:1 이상이면 장축 기준으로 전환.
+        if (ratio > 25 && maxSide > minSide * 3 / 2) {
+            ratio = (short) Math.max(1, Math.round(cornerHwp * 100.0 / maxSide));
         }
         return ratio > 0 ? ratio : 1;
     }

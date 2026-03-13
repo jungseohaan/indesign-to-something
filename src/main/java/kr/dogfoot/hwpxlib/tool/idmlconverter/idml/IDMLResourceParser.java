@@ -154,6 +154,8 @@ class IDMLResourceParser {
         def.spaceAfter(parseDoubleAttr(styleElem, "SpaceAfter"));
         def.horizontalScale(parseDoubleAttr(styleElem, "HorizontalScale"));
         def.tracking(parseDoubleAttr(styleElem, "Tracking"));
+        def.baselineShift(parseDoubleAttr(styleElem, "BaselineShift"));
+        def.capitalization(getAttrOrNull(styleElem, "Capitalization"));
 
         // 밑줄 / 취소선
         String underline = getAttrOrNull(styleElem, "Underline");
@@ -164,6 +166,18 @@ class IDMLResourceParser {
         // 단락 아래선 (RuleBelow)
         String ruleBelow = getAttrOrNull(styleElem, "RuleBelow");
         if ("true".equalsIgnoreCase(ruleBelow)) def.ruleBelowOn(true);
+
+        // 단락 분리 제어
+        String keepWithNext = getAttrOrNull(styleElem, "KeepWithNext");
+        if (keepWithNext != null) def.keepWithNext("true".equalsIgnoreCase(keepWithNext));
+        String keepAllLines = getAttrOrNull(styleElem, "KeepAllLinesTogether");
+        if (keepAllLines != null) def.keepLinesTogether("true".equalsIgnoreCase(keepAllLines));
+        String startPara = getAttrOrNull(styleElem, "StartParagraph");
+        if (startPara != null) {
+            def.pageBreakBefore("NextPage".equalsIgnoreCase(startPara)
+                    || "NextOddPage".equalsIgnoreCase(startPara)
+                    || "NextEvenPage".equalsIgnoreCase(startPara));
+        }
 
         // 두문자 (DropCap)
         Integer dropCapLines = parseIntAttrNullable(styleElem, "DropCapLines");
@@ -283,7 +297,9 @@ class IDMLResourceParser {
                             dashArray[j] = Double.parseDouble(parts[j]);
                         }
                         doc.putDashedStrokeStyle(self, dashArray);
-                    } catch (NumberFormatException ignored) {}
+                    } catch (NumberFormatException e) {
+                        System.err.println("[IDMLResourceParser] DashArray 파싱 실패: " + dashArrayStr);
+                    }
                 }
             }
         }
@@ -316,17 +332,21 @@ class IDMLResourceParser {
         if (colorValue == null || colorValue.isEmpty()) return null;
 
         String[] parts = colorValue.trim().split("\\s+");
-        if ("CMYK".equals(space) && parts.length >= 4) {
-            double c = Double.parseDouble(parts[0]) / 100.0;
-            double m = Double.parseDouble(parts[1]) / 100.0;
-            double y = Double.parseDouble(parts[2]) / 100.0;
-            double k = Double.parseDouble(parts[3]) / 100.0;
-            return kr.dogfoot.hwpxlib.tool.idmlconverter.util.CMYKColorConverter.cmykToHex(c, m, y, k);
-        } else if ("RGB".equals(space) && parts.length >= 3) {
-            int r = Math.max(0, Math.min(255, (int) Math.round(Double.parseDouble(parts[0]))));
-            int g = Math.max(0, Math.min(255, (int) Math.round(Double.parseDouble(parts[1]))));
-            int b = Math.max(0, Math.min(255, (int) Math.round(Double.parseDouble(parts[2]))));
-            return String.format("#%02X%02X%02X", r, g, b);
+        try {
+            if ("CMYK".equals(space) && parts.length >= 4) {
+                double c = Double.parseDouble(parts[0]) / 100.0;
+                double m = Double.parseDouble(parts[1]) / 100.0;
+                double y = Double.parseDouble(parts[2]) / 100.0;
+                double k = Double.parseDouble(parts[3]) / 100.0;
+                return kr.dogfoot.hwpxlib.tool.idmlconverter.util.CMYKColorConverter.cmykToHex(c, m, y, k);
+            } else if ("RGB".equals(space) && parts.length >= 3) {
+                int r = Math.max(0, Math.min(255, (int) Math.round(Double.parseDouble(parts[0]))));
+                int g = Math.max(0, Math.min(255, (int) Math.round(Double.parseDouble(parts[1]))));
+                int b = Math.max(0, Math.min(255, (int) Math.round(Double.parseDouble(parts[2]))));
+                return String.format("#%02X%02X%02X", r, g, b);
+            }
+        } catch (NumberFormatException e) {
+            System.err.println("[IDMLResourceParser] 색상값 파싱 실패: " + colorValue + " (" + space + ")");
         }
 
         return null;

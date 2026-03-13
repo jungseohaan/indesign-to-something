@@ -212,10 +212,18 @@ public class HwpxTableBuilder {
                 tc.cellAddr().colAddrAnd((short) astCell.columnIndex())
                         .rowAddrAnd((short) astCell.rowIndex());
 
-                // 셀 병합
+                // 셀 병합 (span은 최소 1, 테이블 범위 초과 방지)
                 tc.createCellSpan();
-                tc.cellSpan().colSpanAnd((short) astCell.columnSpan())
-                        .rowSpanAnd((short) astCell.rowSpan());
+                int colSpan = Math.max(1, astCell.columnSpan());
+                int rowSpan = Math.max(1, astCell.rowSpan());
+                if (astCell.columnIndex() + colSpan > colWidths.size()) {
+                    colSpan = Math.max(1, colWidths.size() - astCell.columnIndex());
+                }
+                if (astCell.rowIndex() + rowSpan > astTable.rowCount()) {
+                    rowSpan = Math.max(1, astTable.rowCount() - astCell.rowIndex());
+                }
+                tc.cellSpan().colSpanAnd((short) colSpan)
+                        .rowSpanAnd((short) rowSpan);
 
                 // 셀 크기
                 tc.createCellSz();

@@ -14,28 +14,27 @@ import java.util.List;
  */
 public class ResolvedOverlayEnricher {
 
-    /** 페이지 폭/높이 (points, 좌표 검증용) */
-    private static double pageWidthPts;
-    private static double pageHeightPts;
-
     public static void enrich(ASTDocument astDoc, ResolvedData resolved) {
         if (astDoc == null || resolved == null) return;
-
-        // 페이지 크기 캐시 (검증용)
-        if (!resolved.pages().isEmpty()) {
-            ResolvedPage p = resolved.pages().get(0);
-            pageWidthPts = p.width();
-            pageHeightPts = p.height();
-        } else {
-            pageWidthPts = 0;
-            pageHeightPts = 0;
-        }
 
         for (ASTSection section : astDoc.sections()) {
             for (ASTBlock block : section.blocks()) {
                 visitBlock(block, resolved);
             }
         }
+    }
+
+    /** 오버레이가 속한 페이지의 크기를 조회한다. 페이지를 찾지 못하면 첫 페이지 폴백. */
+    private static double[] getPageSize(ResolvedPageItem item, ResolvedData resolved) {
+        if (item != null && item.pageIndex() >= 0) {
+            ResolvedPage page = resolved.getPage(item.pageIndex());
+            if (page != null) return new double[]{page.width(), page.height()};
+        }
+        if (!resolved.pages().isEmpty()) {
+            ResolvedPage p = resolved.pages().get(0);
+            return new double[]{p.width(), p.height()};
+        }
+        return new double[]{0, 0};
     }
 
     private static void visitBlock(ASTBlock block, ResolvedData resolved) {
@@ -99,15 +98,17 @@ public class ResolvedOverlayEnricher {
         double w = gb[3] - gb[1];
         double h = gb[2] - gb[0];
 
-        // 페이지 범위 검증 — 앵커드 객체가 연결 스토리 체인 내에서 다른 페이지에 있으면
-        // resolved.json 좌표가 스프레드/스토리 상대 좌표로 반환될 수 있음 → 제거
-        if (pageWidthPts > 0 && pageHeightPts > 0) {
-            if (x < -10 || y < -10 || x + w > pageWidthPts + 10 || y + h > pageHeightPts + 10) {
+        // 페이지 범위 검증 — 오버레이가 속한 페이지 크기 기준으로 판별
+        double[] pageSize = getPageSize(item, resolved);
+        double pgW = pageSize[0];
+        double pgH = pageSize[1];
+        if (pgW > 0 && pgH > 0) {
+            if (x < -10 || y < -10 || x + w > pgW + 10 || y + h > pgH + 10) {
                 System.out.println("[ResolvedOverlay] REMOVE " + sourceId
                         + " — out of page bounds: (" + String.format("%.1f", x)
                         + "," + String.format("%.1f", y) + ") page("
-                        + String.format("%.0f", pageWidthPts) + "x"
-                        + String.format("%.0f", pageHeightPts) + ")");
+                        + String.format("%.0f", pgW) + "x"
+                        + String.format("%.0f", pgH) + ")");
                 return false;
             }
         }

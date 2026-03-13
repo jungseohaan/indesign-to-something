@@ -149,7 +149,8 @@ pub async fn convert_idml(
     let status = child.wait().await.map_err(|e| e.to_string())?;
 
     if !status.success() {
-        return Err("Conversion failed".to_string());
+        let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
+        return Err(format!("Conversion failed (exit code {})", code));
     }
 
     final_result.ok_or_else(|| "No result received".to_string())

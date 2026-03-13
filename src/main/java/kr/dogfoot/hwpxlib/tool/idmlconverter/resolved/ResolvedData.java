@@ -21,7 +21,10 @@ public class ResolvedData {
     private final List<ResolvedPage> pages = new ArrayList<>();
     private final Map<String, ResolvedPage> pageByName = new HashMap<>();  // page name ("240") → page
     private final Map<String, RenderedGroup> renderedTextFrameMap = new HashMap<>();  // DOM id → rendered TextFrame
+    private final Map<String, RenderedGroup> renderedPdfFrameMap = new HashMap<>();  // DOM id → rendered PDF frame
+    private final Map<String, RenderedGroup> renderedGraphicFrameMap = new HashMap<>();  // DOM id → rendered complex graphic
     private Set<String> badgeGroupShapeIdmlIds;  // 배지 그룹 소속 도형 IDML hex ID ("u1735")
+    private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TextFrame DOM id → 배지 그룹 RenderedGroup
 
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
@@ -156,6 +159,60 @@ public class ResolvedData {
 
     public int renderedTextFrameCount() { return renderedTextFrameMap.size(); }
 
+    // --- RenderedPdfFrame ---
+
+    public void addRenderedPdfFrame(RenderedGroup frame) {
+        renderedPdfFrameMap.put(String.valueOf(frame.id()), frame);
+    }
+
+    /**
+     * IDML hex ID ("u1735") → DOM decimal ID ("5941") 변환 후 렌더링된 PDF 프레임 조회.
+     */
+    public RenderedGroup getRenderedPdfFrameByIdmlId(String idmlId) {
+        if (idmlId == null || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return null;
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
+            return renderedPdfFrameMap.get(decimalId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    // --- RenderedGraphicFrame (복합 장식 그래픽) ---
+
+    public void addRenderedGraphicFrame(RenderedGroup frame) {
+        renderedGraphicFrameMap.put(String.valueOf(frame.id()), frame);
+    }
+
+    /**
+     * 모든 렌더링된 복합 그래픽 프레임을 반환한다.
+     */
+    public java.util.Collection<RenderedGroup> allRenderedGraphicFrames() {
+        return renderedGraphicFrameMap.values();
+    }
+
+    /**
+     * DOM decimal ID가 렌더 텍스트 프레임 또는 렌더 PDF 프레임에도 등록되어 있는지 확인한다.
+     * 이미 다른 경로로 처리된 프레임을 중복 주입하지 않기 위함.
+     */
+    public boolean isRenderedByOtherChannel(int domId) {
+        String key = String.valueOf(domId);
+        return renderedTextFrameMap.containsKey(key) || renderedPdfFrameMap.containsKey(key);
+    }
+
+    /**
+     * IDML hex ID ("u1735") → DOM decimal ID ("5941") 변환 후 렌더링된 복합 그래픽 프레임 조회.
+     */
+    public RenderedGroup getRenderedGraphicFrameByIdmlId(String idmlId) {
+        if (idmlId == null || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return null;
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
+            return renderedGraphicFrameMap.get(decimalId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     // --- 좌표 단위 정규화 ---
 
     /**
@@ -212,6 +269,14 @@ public class ResolvedData {
         for (RenderedGroup rt : renderedTextFrameMap.values()) {
             scaleDoubleArray(rt.bounds(), s);
         }
+        // renderedPdfFrames: bounds
+        for (RenderedGroup rt : renderedPdfFrameMap.values()) {
+            scaleDoubleArray(rt.bounds(), s);
+        }
+        // renderedGraphicFrames: bounds
+        for (RenderedGroup rt : renderedGraphicFrameMap.values()) {
+            scaleDoubleArray(rt.bounds(), s);
+        }
     }
 
     private static void scaleDoubleArray(double[] arr, double s) {
@@ -230,6 +295,7 @@ public class ResolvedData {
      */
     public void buildBadgeGroupIndex() {
         badgeGroupShapeIdmlIds = new HashSet<>();
+        badgeChildTextFrameMap = new HashMap<>();
         int badgeCount = 0;
         for (RenderedGroup rg : renderedTextFrameMap.values()) {
             if (rg.isBadgeGroup() && rg.childIds() != null) {
@@ -239,11 +305,32 @@ public class ResolvedData {
                     String idmlId = "u" + Integer.toHexString(childDomId);
                     badgeGroupShapeIdmlIds.add(idmlId);
                 }
+                // 배지 자식 TextFrame → 배지 그룹 역방향 매핑
+                if (rg.childTextFrameIds() != null) {
+                    for (int tfDomId : rg.childTextFrameIds()) {
+                        badgeChildTextFrameMap.put(String.valueOf(tfDomId), rg);
+                    }
+                }
             }
         }
         if (badgeCount > 0) {
             System.out.println("[ResolvedData] 배지 그룹 " + badgeCount + "개, "
                     + "자식 도형 " + badgeGroupShapeIdmlIds.size() + "개 인덱싱");
+        }
+    }
+
+    /**
+     * 배지 자식 TextFrame의 IDML hex ID로 배지 그룹 RenderedGroup을 조회한다.
+     * 인라인 배지 텍스트 프레임을 렌더 이미지로 교체할 때 사용.
+     */
+    public RenderedGroup getBadgeGroupByChildTextFrameIdmlId(String idmlId) {
+        if (badgeChildTextFrameMap == null || idmlId == null
+                || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return null;
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
+            return badgeChildTextFrameMap.get(decimalId);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

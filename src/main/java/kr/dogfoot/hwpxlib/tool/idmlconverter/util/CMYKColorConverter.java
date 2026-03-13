@@ -143,7 +143,8 @@ public class CMYKColorConverter {
                     return profile;
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 개별 프로파일 로드 실패는 다음 경로 시도
         }
         return null;
     }
@@ -157,7 +158,8 @@ public class CMYKColorConverter {
                     return profile;
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            // 개별 프로파일 로드 실패는 다음 경로 시도
         }
         return null;
     }

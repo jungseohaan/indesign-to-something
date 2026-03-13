@@ -27,6 +27,9 @@ public class IDMLCharacterRun {
     private String underlineType;  // 밑줄 타입 (IDML UnderlineType: "StrokeStyle/$ID/Wavy" 등)
     private Double underlineTint;  // 밑줄 틴트 % (IDML UnderlineTint)
     private Boolean strikeThrough; // 취소선 (IDML StrikeThru="true")
+    private Double baselineShift;  // 기준선 이동 (points, 양수=위)
+    private Double horizontalScale; // 장평 (%, 100=normal)
+    private String capitalization;  // "SmallCaps", "AllCaps", "Normal" 등
 
     /**
      * 인라인 앵커 타입 — FFFC 위치에 TextFrame 또는 InlineGraphic 중 어느 것이 오는지 구분.
@@ -86,6 +89,7 @@ public class IDMLCharacterRun {
         private String linkStoredState;
         private double[] imageTransform;    // 이미지의 transform (클리핑용)
         private double[] graphicBounds;     // 원본 이미지 크기
+        private String embeddedContents;    // 내장 이미지 base64 데이터
 
         public InlineGraphic() {
             this.childGraphics = new ArrayList<>();
@@ -137,7 +141,17 @@ public class IDMLCharacterRun {
         public double[] graphicBounds() { return graphicBounds; }
         public void graphicBounds(double[] v) { this.graphicBounds = v; }
 
-        public boolean hasImage() { return linkResourceURI != null && !linkResourceURI.isEmpty(); }
+        public String embeddedContents() { return embeddedContents; }
+        public void embeddedContents(String v) { this.embeddedContents = v; }
+
+        public boolean hasEmbeddedContents() {
+            return embeddedContents != null && !embeddedContents.isEmpty();
+        }
+
+        public boolean hasImage() {
+            return (linkResourceURI != null && !linkResourceURI.isEmpty())
+                    || hasEmbeddedContents();
+        }
 
         public String anchoredPosition() { return anchoredPosition; }
         public void anchoredPosition(String v) { this.anchoredPosition = v; }
@@ -277,4 +291,13 @@ public class IDMLCharacterRun {
 
     public Boolean strikeThrough() { return strikeThrough; }
     public void strikeThrough(Boolean v) { this.strikeThrough = v; }
+
+    public Double baselineShift() { return baselineShift; }
+    public void baselineShift(Double v) { this.baselineShift = v; }
+
+    public Double horizontalScale() { return horizontalScale; }
+    public void horizontalScale(Double v) { this.horizontalScale = v; }
+
+    public String capitalization() { return capitalization; }
+    public void capitalization(String v) { this.capitalization = v; }
 }

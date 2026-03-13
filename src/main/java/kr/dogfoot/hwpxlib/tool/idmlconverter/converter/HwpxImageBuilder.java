@@ -21,6 +21,47 @@ public class HwpxImageBuilder {
 
     private static final long INLINE_IMAGE_HEIGHT_THRESHOLD = ConverterConstants.INLINE_IMAGE_HEIGHT_THRESHOLD;
 
+    /** 96 DPI 기준 1px = 0.75pt = 75 HWPUNIT */
+    private static final int PIXEL_TO_HWPUNIT_96DPI = 75;
+
+    /** 이미지 크기가 0 이하일 때 사용하는 기본 크기 (HWPUNIT) */
+    private static final long DEFAULT_IMAGE_DIMENSION = 1000;
+
+    /**
+     * Picture 객체의 공통 geometry 속성을 초기화한다.
+     * (offset, orgSz, curSz, flip, rotationInfo, renderingInfo, sz)
+     */
+    private static void setupPictureGeometry(Picture pic, long w, long h,
+                                              boolean flipH, boolean flipV,
+                                              short rotAngle) {
+        pic.createOffset();
+        pic.offset().set(0L, 0L);
+        pic.createOrgSz();
+        pic.orgSz().set(w, h);
+        pic.createCurSz();
+        pic.curSz().set(w, h);
+        pic.createFlip();
+        pic.flip().horizontalAnd(flipH).verticalAnd(flipV);
+        pic.createRotationInfo();
+        pic.rotationInfo().angleAnd(rotAngle)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        pic.createRenderingInfo();
+        pic.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        pic.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        if (rotAngle != 0) {
+            double radians = Math.toRadians(rotAngle);
+            float cos = (float) Math.cos(radians);
+            float sin = (float) Math.sin(radians);
+            pic.renderingInfo().addNewRotMatrix().set(cos, -sin, 0f, sin, cos, 0f);
+        } else {
+            pic.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        }
+        pic.createSZ();
+        pic.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+    }
+
     private final HwpxConverterContext ctx;
 
     public HwpxImageBuilder(HwpxConverterContext ctx) {
@@ -36,8 +77,11 @@ public class HwpxImageBuilder {
         String format = obj.imageFormat() != null ? obj.imageFormat() : "png";
         String itemId = ImageInserter.registerImage(ctx.hwpxFile, imageData, format);
 
-        long displayW = obj.width() > 0 ? obj.width() : 1000;
-        long displayH = obj.height() > 0 ? obj.height() : 1000;
+        long displayW = obj.width() > 0 ? obj.width() : DEFAULT_IMAGE_DIMENSION;
+        long displayH = obj.height() > 0 ? obj.height() : DEFAULT_IMAGE_DIMENSION;
+        if (obj.width() <= 0 || obj.height() <= 0) {
+            System.err.println("[HwpxImageBuilder] 이미지 크기 0 → 기본값 사용: w=" + obj.width() + " h=" + obj.height());
+        }
         long clipW = clipDimension(obj.pixelWidth(), format);
         long clipH = clipDimension(obj.pixelHeight(), format);
         if (clipW <= 0) clipW = displayW;
@@ -198,8 +242,8 @@ public class HwpxImageBuilder {
         String format = obj.imageFormat() != null ? obj.imageFormat() : "png";
         String itemId = ImageInserter.registerImage(ctx.hwpxFile, imageData, format);
 
-        long imgW = obj.width() > 0 ? obj.width() : 1000;
-        long imgH = obj.height() > 0 ? obj.height() : 1000;
+        long imgW = obj.width() > 0 ? obj.width() : DEFAULT_IMAGE_DIMENSION;
+        long imgH = obj.height() > 0 ? obj.height() : DEFAULT_IMAGE_DIMENSION;
         long clipW = clipDimension(obj.pixelWidth(), format);
         long clipH = clipDimension(obj.pixelHeight(), format);
         if (clipW <= 0) clipW = imgW;
@@ -298,26 +342,7 @@ public class HwpxImageBuilder {
         pic.groupLevelAnd((short) 0);
         pic.instidAnd(HwpxUtil.nextShapeId());
 
-        pic.createOffset();
-        pic.offset().set(0L, 0L);
-        pic.createOrgSz();
-        pic.orgSz().set(frameW, frameH);
-        pic.createCurSz();
-        pic.curSz().set(frameW, frameH);
-        pic.createFlip();
-        pic.flip().horizontalAnd(false).verticalAnd(false);
-        pic.createRotationInfo();
-        pic.rotationInfo().angleAnd((short) 0)
-                .centerXAnd(frameW / 2).centerYAnd(frameH / 2).rotateimageAnd(true);
-        pic.createRenderingInfo();
-        pic.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        pic.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        pic.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-
-        pic.createSZ();
-        pic.sz().widthAnd(frameW).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(frameH).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+        setupPictureGeometry(pic, frameW, frameH, false, false, (short) 0);
 
         // 자리차지 (TOP_AND_BOTTOM) — 후속 텍스트가 이미지 아래로 밀림
         // treatAsChar=false + flowWithText=true → 단락 내 플로팅, 텍스트 위/아래로만 배치
@@ -460,40 +485,9 @@ public class HwpxImageBuilder {
         pic.groupLevelAnd((short) 0);
         pic.instidAnd(HwpxUtil.nextShapeId());
 
-        pic.createOffset();
-        pic.offset().set(0L, 0L);
-
-        pic.createOrgSz();
-        pic.orgSz().set(displayW, displayH);
-
-        pic.createCurSz();
-        pic.curSz().set(displayW, displayH);
-
-        pic.createFlip();
-        pic.flip().horizontalAnd(figure.flipHorizontal()).verticalAnd(figure.flipVertical());
-
-        pic.createRotationInfo();
         short rotAngle = (short) Math.round(figure.rotationAngle());
-        pic.rotationInfo().angleAnd(rotAngle)
-                .centerXAnd(displayW / 2).centerYAnd(displayH / 2).rotateimageAnd(true);
-
-        pic.createRenderingInfo();
-        pic.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        pic.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        if (rotAngle != 0) {
-            double radians = Math.toRadians(rotAngle);
-            float cos = (float) Math.cos(radians);
-            float sin = (float) Math.sin(radians);
-            pic.renderingInfo().addNewRotMatrix().set(cos, -sin, 0f, sin, cos, 0f);
-        } else {
-            pic.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        }
-
-        // ShapeSize
-        pic.createSZ();
-        pic.sz().widthAnd(displayW).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(displayH).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+        setupPictureGeometry(pic, displayW, displayH,
+                figure.flipHorizontal(), figure.flipVertical(), rotAngle);
 
         // ShapePosition — PAPER 기준 절대 좌표
         pic.createPos();
@@ -527,11 +521,17 @@ public class HwpxImageBuilder {
         // ImageClip — 소스 이미지 클리핑 영역
         pic.createImgClip();
         if (useImgClipCrop) {
-            // 픽셀 크롭 실패 시 imgClip으로 시각적 크롭
-            long imgClipL = Math.round(clipW * figure.cropLeftFraction());
-            long imgClipT = Math.round(clipH * figure.cropTopFraction());
-            long imgClipR = Math.round(clipW * (1.0 - figure.cropRightFraction()));
-            long imgClipB = Math.round(clipH * (1.0 - figure.cropBottomFraction()));
+            // 픽셀 크롭 실패 시 imgClip으로 시각적 크롭 (fraction 범위 검증)
+            double cropL = Math.max(0, Math.min(1, figure.cropLeftFraction()));
+            double cropT = Math.max(0, Math.min(1, figure.cropTopFraction()));
+            double cropR = Math.max(0, Math.min(1, figure.cropRightFraction()));
+            double cropB = Math.max(0, Math.min(1, figure.cropBottomFraction()));
+            if (cropL + cropR >= 1.0) { cropL = 0; cropR = 0; }
+            if (cropT + cropB >= 1.0) { cropT = 0; cropB = 0; }
+            long imgClipL = Math.round(clipW * cropL);
+            long imgClipT = Math.round(clipH * cropT);
+            long imgClipR = Math.round(clipW * (1.0 - cropR));
+            long imgClipB = Math.round(clipH * (1.0 - cropB));
             pic.imgClip().leftAnd(imgClipL).rightAnd(imgClipR)
                     .topAnd(imgClipT).bottomAnd(imgClipB);
         } else {
@@ -568,8 +568,8 @@ public class HwpxImageBuilder {
         long bgClipW, bgClipH;
         try {
             int[] sz = ImageInserter.detectPixelSize(pngData);
-            bgClipW = (long) sz[0] * 75;
-            bgClipH = (long) sz[1] * 75;
+            bgClipW = (long) sz[0] * PIXEL_TO_HWPUNIT_96DPI;
+            bgClipH = (long) sz[1] * PIXEL_TO_HWPUNIT_96DPI;
         } catch (Exception e) {
             bgClipW = w;
             bgClipH = h;
@@ -595,32 +595,7 @@ public class HwpxImageBuilder {
         pic.groupLevelAnd((short) 0);
         pic.instidAnd(HwpxUtil.nextShapeId());
 
-        pic.createOffset();
-        pic.offset().set(0L, 0L);
-
-        pic.createOrgSz();
-        pic.orgSz().set(w, h);
-
-        pic.createCurSz();
-        pic.curSz().set(w, h);
-
-        pic.createFlip();
-        pic.flip().horizontalAnd(false).verticalAnd(false);
-
-        pic.createRotationInfo();
-        pic.rotationInfo().angleAnd((short) 0)
-                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
-
-        pic.createRenderingInfo();
-        pic.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        pic.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        pic.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-
-        // ShapeSize
-        pic.createSZ();
-        pic.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+        setupPictureGeometry(pic, w, h, false, false, (short) 0);
 
         // ShapePosition — (0,0) from PAPER
         pic.createPos();
@@ -726,6 +701,7 @@ public class HwpxImageBuilder {
             pngData = baos.toByteArray();
         } catch (java.io.IOException e) {
             System.err.println("[NonRectBG] PNG encoding failed: " + e.getMessage());
+            ctx.addWarning("NonRectBG", "PNG 인코딩 실패: " + e.getMessage());
             return;
         }
 
@@ -736,8 +712,8 @@ public class HwpxImageBuilder {
         long y = block.y();
         long displayW = block.width();
         long displayH = block.height();
-        long clipW = (long) pixW * 75;
-        long clipH = (long) pixH * 75;
+        long clipW = (long) pixW * PIXEL_TO_HWPUNIT_96DPI;
+        long clipH = (long) pixH * PIXEL_TO_HWPUNIT_96DPI;
 
         Run anchorRun = anchorPara.addNewRun();
         anchorRun.charPrIDRef("0");
@@ -886,6 +862,6 @@ public class HwpxImageBuilder {
         if ("svg".equalsIgnoreCase(format)) {
             return (long) pixelOrPt * 100;
         }
-        return (long) pixelOrPt * 75;
+        return (long) pixelOrPt * PIXEL_TO_HWPUNIT_96DPI;
     }
 }

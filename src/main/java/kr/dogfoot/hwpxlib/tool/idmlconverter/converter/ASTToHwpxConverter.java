@@ -197,9 +197,10 @@ public class ASTToHwpxConverter {
         for (ASTSection section : doc.sections()) {
             for (ASTBlock block : section.blocks()) {
                 if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
-                    String sid = ((ASTTextFrameBlock) block).storyId();
-                    if (sid != null) {
-                        storyBlockCount.merge(sid, 1, Integer::sum);
+                    ASTTextFrameBlock tfb = (ASTTextFrameBlock) block;
+                    // distributed 블록은 독립 프레임이므로 링크 체인에서 제외
+                    if (!tfb.distributed() && tfb.storyId() != null) {
+                        storyBlockCount.merge(tfb.storyId(), 1, Integer::sum);
                     }
                 }
             }
@@ -228,7 +229,7 @@ public class ASTToHwpxConverter {
         // 현재 섹션의 컬럼 너비 계산 (오버레이 위치 계산용)
         long mLeft = layout.marginLeft() > 0 ? layout.marginLeft() : 1417;
         long mRight = layout.marginRight() > 0 ? layout.marginRight() : 1417;
-        ctx.currentColumnWidth = layout.pageWidth() - mLeft - mRight;
+        ctx.currentColumnWidth = Math.max(100, layout.pageWidth() - mLeft - mRight);
 
         // TEXT_FRAME_BLOCK 수집
         List<ASTTextFrameBlock> textFrameBlocks = new ArrayList<>();
@@ -317,11 +318,12 @@ public class ASTToHwpxConverter {
         }
 
         // 4) 셀 내부에서 승격된 오버레이 텍스트박스: PAPER 기준 IN_FRONT_OF_TEXT
-        if (!ctx.deferredOverlays.isEmpty()) {
+        try {
             for (HwpxConverterContext.DeferredOverlay d : ctx.deferredOverlays) {
                 textBoxBuilder.addPageLevelOverlay(secPrPara, d.overlay, d.pageX, d.pageY);
                 ctx.framesConverted++;
             }
+        } finally {
             ctx.deferredOverlays.clear();
         }
 

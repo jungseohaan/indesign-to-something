@@ -22,6 +22,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.CharPrBuilder;
  */
 public class HwpxParagraphBuilder {
 
+    /** 분수 수식 높이 배율: 분자(1) + 분수선(0.2) + 분모(1) + 여유(0.6) */
+    private static final double FRACTION_HEIGHT_MULTIPLIER = 2.8;
+    /** 일반 수식 높이 배율 */
+    private static final double NORMAL_EQUATION_HEIGHT_MULTIPLIER = 1.4;
+
     final HwpxConverterContext ctx;
 
     // 순환 의존 해소를 위해 setter 주입
@@ -271,8 +276,7 @@ public class HwpxParagraphBuilder {
                 ASTEquation eq = (ASTEquation) item;
                 String script = eq.hwpScript();
                 if (script != null && script.contains(" over ")) {
-                    // 분수 높이 추정: 분자(1) + 분수선(0.2) + 분모(1) + 여유(0.6) = 2.8배
-                    long estH = (long) (1100 * 2.8);  // 3080 HWPUNIT
+                    long estH = (long) (1100 * FRACTION_HEIGHT_MULTIPLIER);
                     if (estH > max) max = estH;
                 }
             }
@@ -292,8 +296,9 @@ public class HwpxParagraphBuilder {
                 && basePr.lineSpacing().value() < (int) inlineHeight) {
             // FIXED 줄 간격이 인라인 객체보다 작으면 확장
             needsExpand = true;
-        } else if (basePr.lineSpacing().type() == LineSpacingType.PERCENT) {
-            // PERCENT는 글꼴 크기 기준이라 큰 인라인 객체를 수용 못할 수 있음
+        } else if (basePr.lineSpacing().type() == LineSpacingType.PERCENT
+                && basePr.lineSpacing().value() < 160) {
+            // PERCENT가 160% 미만이면 큰 인라인 객체를 수용 못할 수 있음
             needsExpand = true;
         }
 
@@ -407,10 +412,15 @@ public class HwpxParagraphBuilder {
                 .suppressLineNumbersAnd(false)
                 .checked(false);
 
-        // 문단 배경이 있으면 border에 borderFillIDRef 설정
+        // 문단 배경이 있으면 border에 borderFillIDRef 설정 + 음영 오프셋 적용
         if (!"2".equals(borderFillRef)) {
             paraPr.createBorder();
             paraPr.border().borderFillIDRefAnd(borderFillRef);
+            // 단락 배경 여백 (InDesign shading offset → HWPX border offset)
+            if (astPara.shadingLeftOffset() != null) paraPr.border().offsetLeft(astPara.shadingLeftOffset().intValue());
+            if (astPara.shadingRightOffset() != null) paraPr.border().offsetRight(astPara.shadingRightOffset().intValue());
+            if (astPara.shadingTopOffset() != null) paraPr.border().offsetTop(astPara.shadingTopOffset().intValue());
+            if (astPara.shadingBottomOffset() != null) paraPr.border().offsetBottom(astPara.shadingBottomOffset().intValue());
         }
 
         // 정렬: 단락 오버라이드 → 스타일 → JUSTIFY
@@ -430,9 +440,9 @@ public class HwpxParagraphBuilder {
                 .breakLatinWordAnd(LineBreakForLatin.KEEP_WORD)
                 .breakNonLatinWordAnd(LineBreakForNonLatin.KEEP_WORD)
                 .widowOrphanAnd(false)
-                .keepWithNextAnd(false)
-                .keepLinesAnd(false)
-                .pageBreakBeforeAnd(false)
+                .keepWithNextAnd(astPara.keepWithNext())
+                .keepLinesAnd(astPara.keepLinesTogether())
+                .pageBreakBeforeAnd(astPara.pageBreakBefore())
                 .lineWrap(LineWrap.BREAK);
 
         paraPr.createAutoSpacing();
@@ -622,7 +632,8 @@ public class HwpxParagraphBuilder {
                 + "|" + textRun.underline()
                 + "|" + (textRun.underlineColor() != null ? textRun.underlineColor() : "")
                 + "|" + (textRun.underlineShape() != null ? textRun.underlineShape() : "")
-                + "|" + textRun.strikeThrough();
+                + "|" + textRun.strikeThrough()
+                + "|" + textRun.grepMathFont();
     }
 
     String createOverrideCharPr(ASTTextRun textRun) {
@@ -737,7 +748,8 @@ public class HwpxParagraphBuilder {
             long estW = (long) (script.length() * baseUnit * 0.7);
             // 분수(over) 수식은 분자+분수선+분모로 높이가 크므로 별도 추정
             boolean hasFraction = script.contains(" over ");
-            long estH = hasFraction ? (long) (baseUnit * 2.8) : (long) (baseUnit * 1.4);
+            long estH = hasFraction ? (long) (baseUnit * FRACTION_HEIGHT_MULTIPLIER)
+                    : (long) (baseUnit * NORMAL_EQUATION_HEIGHT_MULTIPLIER);
             hwpxEq.createSZ();
             hwpxEq.sz().widthAnd(estW).widthRelToAnd(WidthRelTo.ABSOLUTE)
                     .heightAnd(estH).heightRelToAnd(HeightRelTo.ABSOLUTE)
@@ -769,6 +781,9 @@ public class HwpxParagraphBuilder {
             ctx.equationsConverted++;
         } catch (Exception e) {
             // 수식 파싱 실패 시 텍스트로 표시
+            System.err.println("[HwpxParagraphBuilder] 수식 변환 실패: " + e.getMessage()
+                    + " (script=" + eq.hwpScript() + ")");
+            ctx.addWarning("Equation", "수식 변환 실패: " + eq.hwpScript());
             run.addNewT().addText("[수식: " + eq.hwpScript() + "]");
         }
     }

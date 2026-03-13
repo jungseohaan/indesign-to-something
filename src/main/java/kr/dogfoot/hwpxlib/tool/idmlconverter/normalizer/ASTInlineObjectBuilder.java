@@ -531,9 +531,21 @@ class ASTInlineObjectBuilder {
             String linkURI = imgSrc.linkResourceURI() != null
                     ? imgSrc.linkResourceURI() : ig.linkResourceURI();
 
-            ASTImageLoader.ImageResult result = imageLoader.loadImage(
-                    linkURI, displayW, displayH,
-                    imgTransform, frameBounds, graphicBounds);
+            // 내장 이미지 데이터 확인
+            String embeddedData = imgSrc.hasEmbeddedContents()
+                    ? imgSrc.embeddedContents()
+                    : (ig.hasEmbeddedContents() ? ig.embeddedContents() : null);
+
+            ASTImageLoader.ImageResult result;
+            if ((linkURI == null || linkURI.isEmpty()) && embeddedData != null) {
+                result = imageLoader.loadEmbeddedImage(
+                        embeddedData, displayW, displayH,
+                        imgTransform, frameBounds, graphicBounds, null, 0, null);
+            } else {
+                result = imageLoader.loadImage(
+                        linkURI, displayW, displayH,
+                        imgTransform, frameBounds, graphicBounds);
+            }
 
             if (result != null) {
                 obj.imageData(result.imageData);

@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -126,10 +127,34 @@ class ASTFigureBuilder {
 
         double cornerR = imgFrame.hasRoundedCorners() ? imgFrame.cornerRadius() : 0;
         double[] cornerRadii = imgFrame.hasRoundedCorners() ? imgFrame.cornerRadii() : null;
-        ASTImageLoader.ImageResult result = imageLoader.loadImage(
-                imgFrame.linkResourceURI(), wHwp, hHwp,
-                imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds(),
-                visibleLayers, layerSig, imgFrame.framePath(), cornerR, cornerRadii);
+
+        ASTImageLoader.ImageResult result = null;
+
+        // 1) InDesign에서 직접 렌더링된 PDF 프레임 PNG가 있으면 우선 사용
+        if (resolvedData != null && imgFrame.selfId() != null) {
+            RenderedGroup pdfFrame = resolvedData.getRenderedPdfFrameByIdmlId(imgFrame.selfId());
+            if (pdfFrame != null && pdfFrame.file() != null) {
+                result = imageLoader.loadRenderedImage(pdfFrame.file(), wHwp, hHwp);
+            }
+        }
+
+        // 2) 내장(붙여넣기) 이미지: Contents base64 데이터 사용
+        if (result == null
+                && (imgFrame.linkResourceURI() == null || imgFrame.linkResourceURI().isEmpty())
+                && imgFrame.hasEmbeddedContents()) {
+            result = imageLoader.loadEmbeddedImage(
+                    imgFrame.embeddedContents(), wHwp, hHwp,
+                    imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds(),
+                    imgFrame.framePath(), cornerR, cornerRadii);
+        }
+
+        // 3) 링크된 이미지 파일 로드 (Ghostscript PDF 변환 포함)
+        if (result == null) {
+            result = imageLoader.loadImage(
+                    imgFrame.linkResourceURI(), wHwp, hHwp,
+                    imgFrame.imageTransform(), frameBounds, imgFrame.graphicBounds(),
+                    visibleLayers, layerSig, imgFrame.framePath(), cornerR, cornerRadii);
+        }
 
         if (result == null || result.imageData == null) return null;
 
@@ -228,6 +253,74 @@ class ASTFigureBuilder {
                                                   ColorResolver colorResolver,
                                                   ResolvedData resolvedData,
                                                   ResolvedPage resolvedPage) {
+        // Pre-rendered 복합 그래픽 프레임이 있으면 우선 사용
+        // 단, resolved bounds(visibleBounds)가 페이지의 80% 이상이면 배경으로 간주하여 폴백
+        if (resolvedData != null && shape.selfId() != null) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup renderedGraphic =
+                    resolvedData.getRenderedGraphicFrameByIdmlId(shape.selfId());
+            if (renderedGraphic != null && renderedGraphic.file() != null
+                    && renderedGraphic.bounds() != null && resolvedPage != null
+                    && resolvedPage.bounds() != null) {
+                double[] rb = renderedGraphic.bounds(); // normalized to points
+                double rW = rb[3] - rb[1];
+                double rH = rb[2] - rb[0];
+                double[] rpb = resolvedPage.bounds();
+                double pageW = rpb[3] - rpb[1];
+                double pageH = rpb[2] - rpb[0];
+                if (rW > pageW * 0.8 && rH > pageH * 0.8) {
+                    renderedGraphic = null; // 배경 프레임은 벡터 래스터화로 폴백
+                }
+            }
+            if (renderedGraphic != null && renderedGraphic.file() != null) {
+                ASTImageLoader.ImageResult imgResult = imageLoader.loadRenderedImage(
+                        renderedGraphic.file(),
+                        CoordinateConverter.pointsToHwpunits(
+                                IDMLGeometry.width(shape.geometricBounds())),
+                        CoordinateConverter.pointsToHwpunits(
+                                IDMLGeometry.height(shape.geometricBounds())));
+                if (imgResult != null) {
+                    double[] bounds = renderedGraphic.bounds();
+                    long figX, figY, figW, figH;
+                    if (bounds != null && bounds.length == 4 && resolvedPage != null
+                            && resolvedPage.bounds() != null) {
+                        // resolved bounds (페이지 상대 좌표, points)
+                        double[] pb = resolvedPage.bounds();
+                        figX = CoordinateConverter.pointsToHwpunits(bounds[1] - pb[1]);
+                        figY = CoordinateConverter.pointsToHwpunits(bounds[0] - pb[0]);
+                        figW = CoordinateConverter.pointsToHwpunits(bounds[3] - bounds[1]);
+                        figH = CoordinateConverter.pointsToHwpunits(bounds[2] - bounds[0]);
+                    } else {
+                        // IDML fallback
+                        double[] bbox = IDMLGeometry.getTransformedBoundingBox(
+                                shape.geometricBounds(), shape.itemTransform());
+                        double[] pageAbs = IDMLGeometry.absoluteTopLeft(
+                                page.geometricBounds(), page.itemTransform());
+                        figX = CoordinateConverter.pointsToHwpunits(bbox[0] - pageAbs[0]);
+                        figY = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
+                        figW = CoordinateConverter.pointsToHwpunits(bbox[2] - bbox[0]);
+                        figH = CoordinateConverter.pointsToHwpunits(bbox[3] - bbox[1]);
+                    }
+                    // PNG 비율로 높이 보정
+                    if (imgResult.pixelWidth > 0) {
+                        figH = Math.round(figW * ((double) imgResult.pixelHeight / imgResult.pixelWidth));
+                    }
+                    ASTFigure fig = new ASTFigure();
+                    fig.x(figX);
+                    fig.y(figY);
+                    fig.width(figW);
+                    fig.height(figH);
+                    fig.imageData(imgResult.imageData);
+                    fig.imageFormat(imgResult.format);
+                    fig.pixelWidth(imgResult.pixelWidth);
+                    fig.pixelHeight(imgResult.pixelHeight);
+                    fig.sourceId(shape.selfId());
+                    System.out.println("[RenderedGraphic] " + shape.selfId()
+                            + " → " + renderedGraphic.file());
+                    return fig;
+                }
+            }
+        }
+
         // 복수 클리핑 자식 처리
         if (shape.hasClippedChildren()) {
             return createFigureFromClippedGroup(shape, page, imageLoader, colorResolver,

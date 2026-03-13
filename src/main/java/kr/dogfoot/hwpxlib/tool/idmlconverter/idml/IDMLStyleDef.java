@@ -28,6 +28,13 @@ public class IDMLStyleDef {
     private String underlineType;  // 밑줄 타입 ("StrokeStyle/$ID/Wavy" 등)
     private Boolean strikeThrough; // 취소선
     private Boolean ruleBelowOn;   // 단락 아래선 (RuleBelow)
+    private Double baselineShift;  // 기준선 이동 (points)
+    private String capitalization;  // "SmallCaps", "AllCaps", "Normal"
+
+    // 단락 분리 제어
+    private Boolean keepWithNext;       // 다음 단락과 같은 페이지 유지
+    private Boolean keepLinesTogether;  // 단락 내 줄 분리 방지
+    private Boolean pageBreakBefore;    // 이 단락 앞에서 페이지 나눔
 
     // 어절 간격 (Word Spacing)
     private Double desiredWordSpacing;    // 기본값 100%
@@ -161,6 +168,21 @@ public class IDMLStyleDef {
 
     public Boolean ruleBelowOn() { return ruleBelowOn; }
     public void ruleBelowOn(Boolean v) { this.ruleBelowOn = v; }
+
+    public Double baselineShift() { return baselineShift; }
+    public void baselineShift(Double v) { this.baselineShift = v; }
+
+    public String capitalization() { return capitalization; }
+    public void capitalization(String v) { this.capitalization = v; }
+
+    public Boolean keepWithNext() { return keepWithNext; }
+    public void keepWithNext(Boolean v) { this.keepWithNext = v; }
+
+    public Boolean keepLinesTogether() { return keepLinesTogether; }
+    public void keepLinesTogether(Boolean v) { this.keepLinesTogether = v; }
+
+    public Boolean pageBreakBefore() { return pageBreakBefore; }
+    public void pageBreakBefore(Boolean v) { this.pageBreakBefore = v; }
 
     public Integer dropCapLines() { return dropCapLines; }
     public void dropCapLines(Integer v) { this.dropCapLines = v; }

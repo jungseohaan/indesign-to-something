@@ -85,6 +85,13 @@ public class Stage4_BuildAST {
         // 메타데이터: 폰트, 스타일, 색상
         ASTMetadataBuilder.populateMetadata(doc, idmlDoc, colorResolver);
 
+        // 이미지 로더 경고를 AST 문서에 전파
+        if (imageLoader != null) {
+            for (String w : imageLoader.warnings()) {
+                doc.addWarning(w);
+            }
+        }
+
         System.err.println("[Stage4_BuildAST] Built " + doc.sections().size() + " sections.");
         return doc;
     }

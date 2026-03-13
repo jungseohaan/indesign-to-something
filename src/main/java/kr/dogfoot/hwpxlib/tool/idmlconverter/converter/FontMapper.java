@@ -7,6 +7,7 @@ import java.io.FileReader;
 import java.io.Reader;
 import java.lang.reflect.Type;
 import java.util.*;
+import java.util.LinkedHashSet;
 
 /**
  * IDML 폰트 → Intermediate/HWPX 폰트 매핑.
@@ -113,29 +114,48 @@ public class FontMapper {
         KOREAN_FONT_MAP.put("신명조", "함초롬바탕");
     }
 
-    /** 서양 폰트 매핑: IDML 폰트명 (정확 매치) → HWPX 폰트명 */
-    private static final Map<String, String> WESTERN_FONT_MAP = new LinkedHashMap<String, String>();
+    /** 서양 폰트 → 한글 폴백 매핑 (hangul 슬롯용) */
+    private static final Map<String, String> WESTERN_FONT_HANGUL_MAP = new LinkedHashMap<String, String>();
+    /** 서양 폰트 세트 (latin 슬롯에 원본 폰트명 유지 대상) */
+    private static final Set<String> WESTERN_FONT_SET = new LinkedHashSet<String>();
     static {
-        // Serif
-        WESTERN_FONT_MAP.put("Minion Pro", "함초롬바탕");
-        WESTERN_FONT_MAP.put("Times New Roman", "함초롬바탕");
-        WESTERN_FONT_MAP.put("Georgia", "함초롬바탕");
-        WESTERN_FONT_MAP.put("Palatino", "함초롬바탕");
-        WESTERN_FONT_MAP.put("Cambria", "함초롬바탕");
-        WESTERN_FONT_MAP.put("Book Antiqua", "함초롬바탕");
+        // Serif → hangul 폴백: 함초롬바탕
+        String[] serifFonts = {
+            "Minion Pro", "Times New Roman", "Georgia", "Palatino", "Cambria",
+            "Book Antiqua", "Garamond", "Baskerville", "Caslon", "Bodoni",
+            "Century", "Source Serif Pro"
+        };
+        for (String f : serifFonts) {
+            WESTERN_FONT_HANGUL_MAP.put(f, "함초롬바탕");
+            WESTERN_FONT_SET.add(f);
+        }
 
-        // Sans-serif
-        WESTERN_FONT_MAP.put("Myriad Pro", "함초롬돋움");
-        WESTERN_FONT_MAP.put("Arial", "함초롬돋움");
-        WESTERN_FONT_MAP.put("Arial Rounded MT Bold", "함초롬돋움");
-        WESTERN_FONT_MAP.put("Helvetica", "함초롬돋움");
-        WESTERN_FONT_MAP.put("Calibri", "함초롬돋움");
-        WESTERN_FONT_MAP.put("Verdana", "함초롬돋움");
-        WESTERN_FONT_MAP.put("Tahoma", "함초롬돋움");
-        WESTERN_FONT_MAP.put("Segoe UI", "함초롬돋움");
-        WESTERN_FONT_MAP.put("Roboto", "함초롬돋움");
-        WESTERN_FONT_MAP.put("DIN", "함초롬돋움");
+        // Sans-serif → hangul 폴백: 함초롬돋움
+        String[] sansFonts = {
+            "Myriad Pro", "Arial", "Arial Rounded MT Bold", "Helvetica",
+            "Helvetica Neue", "Calibri", "Verdana", "Tahoma", "Segoe UI",
+            "Roboto", "DIN", "Montserrat", "Futura", "Lato", "Open Sans",
+            "Source Sans Pro", "Proxima Nova", "Gotham", "Avenir", "Gill Sans",
+            "Century Gothic", "Trebuchet MS", "Franklin Gothic", "Frutiger",
+            "Univers", "Impact"
+        };
+        for (String f : sansFonts) {
+            WESTERN_FONT_HANGUL_MAP.put(f, "함초롬돋움");
+            WESTERN_FONT_SET.add(f);
+        }
+
+        // Monospace → hangul 폴백: 함초롬돋움
+        String[] monoFonts = {
+            "Courier", "Courier New", "Consolas", "Monaco", "Menlo", "Source Code Pro"
+        };
+        for (String f : monoFonts) {
+            WESTERN_FONT_HANGUL_MAP.put(f, "함초롬돋움");
+            WESTERN_FONT_SET.add(f);
+        }
     }
+
+    // 하위 호환용: 기존 WESTERN_FONT_MAP → hangul 폴백 반환
+    private static final Map<String, String> WESTERN_FONT_MAP = WESTERN_FONT_HANGUL_MAP;
 
     /** 기본 대체 폰트 */
     public static final String DEFAULT_HWPX_FONT = "함초롬바탕";
@@ -201,19 +221,108 @@ public class FontMapper {
             return "함초롬돋움";
         }
 
-        // 4. 영문 키워드 폴백
+        // 4. 영문 키워드 폴백 (sans를 serif보다 먼저 검사 — "sans-serif" 오분류 방지)
         String lower = idmlFontFamily.toLowerCase();
-        if (lower.contains("serif") || lower.contains("roman") || lower.contains("garamond")
-                || lower.contains("minion") || lower.contains("times") || lower.contains("palatino")) {
-            return "함초롬바탕";
-        }
         if (lower.contains("sans") || lower.contains("gothic") || lower.contains("grotesque")
                 || lower.contains("arial") || lower.contains("helvetica") || lower.contains("myriad")
                 || lower.contains("rounded")) {
             return "함초롬돋움";
         }
+        if (lower.contains("serif") || lower.contains("roman") || lower.contains("garamond")
+                || lower.contains("minion") || lower.contains("times") || lower.contains("palatino")) {
+            return "함초롬바탕";
+        }
 
         return DEFAULT_HWPX_FONT;
+    }
+
+    /**
+     * 서양 폰트 여부 판별.
+     * 등록된 서양 폰트 이름에 정확히 매치하거나, 영문 키워드 폴백에 해당하면 true.
+     */
+    public static boolean isWesternFont(String fontFamily) {
+        if (fontFamily == null) return false;
+        if (WESTERN_FONT_SET.contains(fontFamily)) return true;
+        // 정확 매치 안 되면 키워드 기반 판별
+        String lower = fontFamily.toLowerCase();
+        // 한글 문자가 포함되면 서양 폰트 아님
+        for (int i = 0; i < fontFamily.length(); i++) {
+            char c = fontFamily.charAt(i);
+            if (c >= 0xAC00 && c <= 0xD7AF) return false; // 한글 음절
+            if (c >= 0x3131 && c <= 0x318E) return false; // 한글 자모
+        }
+        // 한글 키워드가 포함되면 서양 폰트 아님
+        if (lower.contains("명조") || lower.contains("부리") || lower.contains("고딕")
+                || lower.contains("돋움") || lower.contains("굴림") || lower.contains("바탕")) {
+            return false;
+        }
+        // 순수 영문+숫자+공백+기호로만 이루어진 경우 서양 폰트로 판별
+        return fontFamily.matches("[\\x20-\\x7E]+");
+    }
+
+    /**
+     * IDML 폰트 → HWPX 폰트 매핑 결과 (hangul + latin 슬롯).
+     */
+    public static String[] mapToHwpxFontPair(String idmlFontFamily, Map<String, String> customMap) {
+        if (idmlFontFamily == null) return new String[]{DEFAULT_HWPX_FONT, DEFAULT_HWPX_FONT};
+
+        // 커스텀 맵 (양쪽 슬롯 동일)
+        if (customMap != null) {
+            String custom = customMap.get(idmlFontFamily);
+            if (custom != null) return new String[]{custom, custom};
+        }
+
+        return mapToHwpxFontPair(idmlFontFamily);
+    }
+
+    /**
+     * IDML 폰트 → HWPX 폰트 매핑 결과 (hangul + latin 슬롯).
+     * 서양 폰트: [한글 폴백, 원본 서양 폰트명]
+     * 한글 폰트: [매핑 폰트, 매핑 폰트] (동일)
+     */
+    public static String[] mapToHwpxFontPair(String idmlFontFamily) {
+        if (idmlFontFamily == null) return new String[]{DEFAULT_HWPX_FONT, DEFAULT_HWPX_FONT};
+
+        // 1. 한글 폰트 매핑 → hangul, latin 동일
+        for (Map.Entry<String, String> entry : KOREAN_FONT_MAP.entrySet()) {
+            if (idmlFontFamily.contains(entry.getKey())) {
+                String mapped = entry.getValue();
+                return new String[]{mapped, mapped};
+            }
+        }
+
+        // 2. 서양 폰트 → hangul 폴백 + latin 원본
+        String hangulFallback = WESTERN_FONT_HANGUL_MAP.get(idmlFontFamily);
+        if (hangulFallback != null) {
+            return new String[]{hangulFallback, idmlFontFamily};
+        }
+
+        // 3. 한국어 키워드 폴백 → 동일
+        if (idmlFontFamily.contains("명조") || idmlFontFamily.contains("부리")) {
+            return new String[]{"함초롬바탕", "함초롬바탕"};
+        }
+        if (idmlFontFamily.contains("고딕") || idmlFontFamily.contains("돋움")) {
+            return new String[]{"함초롬돋움", "함초롬돋움"};
+        }
+
+        // 4. 영문 키워드 폴백 — 서양 폰트로 간주
+        String lower = idmlFontFamily.toLowerCase();
+        if (isWesternFont(idmlFontFamily)) {
+            String fallback;
+            if (lower.contains("sans") || lower.contains("gothic") || lower.contains("grotesque")
+                    || lower.contains("arial") || lower.contains("helvetica") || lower.contains("myriad")
+                    || lower.contains("rounded")) {
+                fallback = "함초롬돋움";
+            } else if (lower.contains("serif") || lower.contains("roman") || lower.contains("garamond")
+                    || lower.contains("minion") || lower.contains("times") || lower.contains("palatino")) {
+                fallback = "함초롬바탕";
+            } else {
+                fallback = DEFAULT_HWPX_FONT;
+            }
+            return new String[]{fallback, idmlFontFamily};
+        }
+
+        return new String[]{DEFAULT_HWPX_FONT, DEFAULT_HWPX_FONT};
     }
 
     /**

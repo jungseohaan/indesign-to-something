@@ -168,11 +168,19 @@ function main(args) {
             writeProgress(outputDir, "rendered_frames", 0, rangePageCount);
             var renderedFrames = exportRenderedTextFrames(doc, outputDir, startPage, endPage);
 
+            // 2.6. PDF 배치 프레임 렌더링 (멀티페이지 PDF 지원)
+            var renderedPdfFrames = exportPdfPlacedFrames(doc, outputDir, startPage, endPage);
+
+            // 2.7. 복합 장식 그래픽 렌더링 (중첩 도형, 사선 패턴 등)
+            var renderedGraphicFrames = exportComplexGraphicFrames(doc, outputDir, startPage, endPage);
+
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
             // 3. resolved 속성 수집 (페이지 범위 필터링)
             var resolved = collectResolved(doc, outputDir, rangePageCount, startPage, endPage);
             resolved.renderedTextFrames = renderedFrames;
+            resolved.renderedPdfFrames = renderedPdfFrames;
+            resolved.renderedGraphicFrames = renderedGraphicFrames;
             writeJson(outputDir + "/resolved.json", resolved);
         }
 
@@ -498,6 +506,172 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
     }
 
     return renderedFrames;
+}
+
+// --- 복합 장식 그래픽 프레임 렌더링 ---
+
+/**
+ * 복합 장식 그래픽 프레임을 개별 PNG로 렌더링한다.
+ * ContentType=GraphicType이면서 단순 배치 이미지가 아닌 프레임
+ * (중첩 도형, 사선 패턴 등)을 InDesign에서 직접 래스터화한다.
+ */
+function exportComplexGraphicFrames(doc, outputDir, startPage, endPage) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    var renderedGraphicFrames = [];
+    var allItems = doc.allPageItems;
+
+    app.pngExportPreferences.exportResolution = 300;
+    app.pngExportPreferences.antiAlias = true;
+    app.pngExportPreferences.transparentBackground = true;
+    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
+
+    for (var i = 0; i < allItems.length; i++) {
+        var item = allItems[i];
+        var cName = item.constructor.name;
+
+        if (cName !== "Rectangle" && cName !== "Oval"
+            && cName !== "Polygon") continue;
+
+        // GraphicType 프레임만 대상
+        try {
+            if (item.contentType !== ContentType.GRAPHIC_TYPE) continue;
+        } catch (e) { continue; }
+
+        // 단순 배치 이미지(PDF, EPS, 이미지)가 있으면 건너뜀
+        var hasPlacedContent = false;
+        try { hasPlacedContent = item.images && item.images.length > 0; } catch (e) {}
+        if (!hasPlacedContent) {
+            try { hasPlacedContent = item.pdfs && item.pdfs.length > 0; } catch (e) {}
+        }
+        if (!hasPlacedContent) {
+            try { hasPlacedContent = item.epss && item.epss.length > 0; } catch (e) {}
+        }
+        if (hasPlacedContent) continue;
+
+        // 내부에 중첩된 페이지 아이템이 있는지 확인 (복합 구조)
+        var hasNestedItems = false;
+        try { hasNestedItems = item.allPageItems && item.allPageItems.length > 0; } catch (e) {}
+        if (!hasNestedItems) continue;
+
+        // 페이지 범위 필터
+        var parentPage = null;
+        try { parentPage = item.parentPage; } catch (e) {}
+        if (!parentPage) continue;
+        var pgIdx = parentPage.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        var domId = item.id;
+        var fileName = "graphic_" + domId + ".png";
+        var outFile = File(renderDir + "/" + fileName);
+
+        try {
+            item.exportFile(ExportFormat.PNG_FORMAT, outFile);
+
+            var bounds = null;
+            try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
+            if (!bounds) {
+                try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
+            }
+
+            if (bounds) {
+                var pageBounds = parentPage.bounds;
+                bounds[0] -= pageBounds[0];
+                bounds[1] -= pageBounds[1];
+                bounds[2] -= pageBounds[0];
+                bounds[3] -= pageBounds[1];
+            }
+
+            renderedGraphicFrames.push({
+                id: domId,
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: parentPage.documentOffset
+            });
+        } catch (e) {
+            // 복합 그래픽 렌더링 실패 — 건너뜀
+        }
+    }
+
+    return renderedGraphicFrames;
+}
+
+// --- PDF 배치 프레임 렌더링 ---
+
+/**
+ * PDF가 배치된 프레임을 개별 PNG로 렌더링한다.
+ * 멀티페이지 PDF의 각 배치가 올바른 페이지를 보여주도록
+ * InDesign에서 직접 래스터화하여 내보낸다.
+ */
+function exportPdfPlacedFrames(doc, outputDir, startPage, endPage) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    var renderedPdfFrames = [];
+    var allItems = doc.allPageItems;
+
+    // PNG 내보내기 설정
+    app.pngExportPreferences.exportResolution = 300;
+    app.pngExportPreferences.antiAlias = true;
+    app.pngExportPreferences.transparentBackground = true;
+    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
+
+    for (var i = 0; i < allItems.length; i++) {
+        var item = allItems[i];
+        var cName = item.constructor.name;
+
+        // Rectangle, Oval 등 이미지 컨테이너만 대상
+        if (cName !== "Rectangle" && cName !== "Oval"
+            && cName !== "Polygon" && cName !== "GraphicLine") continue;
+
+        // PDF가 배치되어 있는지 확인
+        var hasPdf = false;
+        try { hasPdf = item.pdfs && item.pdfs.length > 0; } catch (e) {}
+        if (!hasPdf) continue;
+
+        // 페이지 범위 필터
+        var parentPage = null;
+        try { parentPage = item.parentPage; } catch (e) {}
+        if (!parentPage) continue;
+        var pgIdx = parentPage.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        var domId = item.id;
+        var fileName = "pdf_" + domId + ".png";
+        var outFile = File(renderDir + "/" + fileName);
+
+        try {
+            item.exportFile(ExportFormat.PNG_FORMAT, outFile);
+
+            // visibleBounds로 정확한 렌더링 영역 기록
+            var bounds = null;
+            try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
+            if (!bounds) {
+                try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
+            }
+
+            // 스프레드 기준 → 페이지 기준 좌표 변환
+            if (bounds) {
+                var pageBounds = parentPage.bounds;
+                bounds[0] -= pageBounds[0];
+                bounds[1] -= pageBounds[1];
+                bounds[2] -= pageBounds[0];
+                bounds[3] -= pageBounds[1];
+            }
+
+            renderedPdfFrames.push({
+                id: domId,
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: parentPage.documentOffset
+            });
+        } catch (e) {
+            // PDF 프레임 렌더링 실패 — 건너뜀
+        }
+    }
+
+    return renderedPdfFrames;
 }
 
 /**

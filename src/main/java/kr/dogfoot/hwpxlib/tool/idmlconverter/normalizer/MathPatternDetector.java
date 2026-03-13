@@ -94,6 +94,10 @@ class MathPatternDetector {
         // 수학 함수 키워드 + 괄호/첨자 → 수식
         if (hasMathFunction(cleaned)) return true;
 
+        // 자연어 문장 (3단어 이상, 하이픈만 연산자) → 수식 아님
+        // "a pink-colored lake in Australia" 같은 영어 문장을 수식으로 오인식 방지
+        if (looksLikeNaturalLanguage(cleaned)) return false;
+
         // 변수+연산자 조합 패턴 → 수식
         if (MATH_EXPR_PATTERN.matcher(cleaned).find()) return true;
 
@@ -182,6 +186,26 @@ class MathPatternDetector {
             }
         }
         return false;
+    }
+
+    /**
+     * 자연어 문장인지 판별.
+     * 공백으로 구분된 3단어 이상이고, 하이픈 외 수학 연산자가 없으면 자연어로 판정.
+     * "a pink-colored lake in Australia" 같은 영어 문장이 수식으로 오인식되는 것을 방지.
+     */
+    private static boolean looksLikeNaturalLanguage(String text) {
+        String[] words = text.trim().split("\\s+");
+        if (words.length < 3) return false;
+        // 하이픈 외 수학 연산자(+, =, <, > 등)가 있으면 자연어 아님
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '+' || c == '=' || c == '<' || c == '>'
+                    || c == '×' || c == '÷' || c == '±'
+                    || c == '≤' || c == '≥' || c == '≠') {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 일반 영단어인지 확인 (3글자 이상 연속 알파벳) */

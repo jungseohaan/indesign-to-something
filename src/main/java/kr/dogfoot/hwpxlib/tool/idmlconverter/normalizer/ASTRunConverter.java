@@ -329,7 +329,9 @@ class ASTRunConverter {
             if (objStyle != null) {
                 strokeHex = ASTInlineObjectBuilder.resolveColorHex(objStyle[0], colorResolver);
                 if (objStyle[2] != null) {
-                    try { tint = Double.parseDouble(objStyle[2]); } catch (NumberFormatException e) { /* ignore */ }
+                    try { tint = Double.parseDouble(objStyle[2]); } catch (NumberFormatException e) {
+                        System.err.println("[ASTRunConverter] StrokeTint 파싱 실패: " + objStyle[2]);
+                    }
                 }
             }
         }
@@ -526,6 +528,9 @@ class ASTRunConverter {
         Boolean underline = run.underline();
         String underlineType = run.underlineType();
         Boolean strikeThrough = run.strikeThrough();
+        Double baselineShift = run.baselineShift();
+        Double horizontalScale = run.horizontalScale();
+        String capitalization = run.capitalization();
 
         // CharacterStyle에서 빈 속성 채우기
         if (charStyleRef != null) {
@@ -539,7 +544,15 @@ class ASTRunConverter {
                 if (underline == null) underline = charStyle.underline();
                 if (underlineType == null) underlineType = charStyle.underlineType();
                 if (strikeThrough == null) strikeThrough = charStyle.strikeThrough();
+                if (baselineShift == null) baselineShift = charStyle.baselineShift();
+                if (horizontalScale == null) horizontalScale = charStyle.horizontalScale();
+                if (capitalization == null) capitalization = charStyle.capitalization();
             }
+        }
+
+        // ParagraphStyleRange 인라인 오버라이드에서 빈 속성 채우기
+        if (parentPara != null) {
+            if (tracking == null) tracking = parentPara.tracking();
         }
 
         // ParagraphStyle에서 빈 속성 채우기
@@ -555,6 +568,9 @@ class ASTRunConverter {
                 if (underline == null) underline = paraStyle.underline();
                 if (underlineType == null) underlineType = paraStyle.underlineType();
                 if (strikeThrough == null) strikeThrough = paraStyle.strikeThrough();
+                if (baselineShift == null) baselineShift = paraStyle.baselineShift();
+                if (horizontalScale == null) horizontalScale = paraStyle.horizontalScale();
+                if (capitalization == null) capitalization = paraStyle.capitalization();
             }
         }
 
@@ -602,6 +618,24 @@ class ASTRunConverter {
             textRun.underlineColor(String.format("#%02X%02X%02X", gray, gray, gray));
         }
         textRun.strikeThrough(Boolean.TRUE.equals(strikeThrough));
+
+        // 기준선 이동 (points → HWPX %, 폰트 크기 기준)
+        if (baselineShift != null && baselineShift != 0) {
+            // IDML: points 단위. HWPX: 폰트 크기 대비 % (양수=위)
+            double fSize = fontSize != null ? fontSize : 10.0;
+            short shiftPercent = (short) Math.round(baselineShift / fSize * 100);
+            textRun.baselineShift(shiftPercent);
+        }
+
+        // 장평 (%, 100=normal)
+        if (horizontalScale != null && horizontalScale != 100.0) {
+            textRun.horizontalScale((short) Math.round(horizontalScale));
+        }
+
+        // Capitalization → 텍스트 변환 (SmallCaps는 HWPX 미지원이므로 AllCaps만 처리)
+        if ("AllCaps".equals(capitalization) && textRun.text() != null) {
+            textRun.text(textRun.text().toUpperCase());
+        }
 
         return textRun;
     }

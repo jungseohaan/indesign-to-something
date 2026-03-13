@@ -101,7 +101,7 @@ public class ConvertOptions {
     }
 
     public ConvertOptions imageDpi(int imageDpi) {
-        this.imageDpi = imageDpi;
+        this.imageDpi = Math.max(72, Math.min(600, imageDpi));
         return this;
     }
 
@@ -115,7 +115,7 @@ public class ConvertOptions {
     }
 
     public ConvertOptions vectorDpi(int vectorDpi) {
-        this.vectorDpi = vectorDpi;
+        this.vectorDpi = Math.max(72, Math.min(600, vectorDpi));
         return this;
     }
 

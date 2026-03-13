@@ -42,6 +42,11 @@ public class ASTParagraph {
     // 컬럼 브레이크 (이 단락 뒤에서 다음 컬럼으로 이동)
     private boolean columnBreakAfter;
 
+    // 단락 분리 제어
+    private boolean keepWithNext;
+    private boolean keepLinesTogether;
+    private boolean pageBreakBefore;
+
     // 장식 선(GraphicLine)의 stroke 색상 → 후속 텍스트 런에 underline으로 전파
     private String pendingUnderlineColor;
 
@@ -120,6 +125,15 @@ public class ASTParagraph {
 
     public boolean columnBreakAfter() { return columnBreakAfter; }
     public void columnBreakAfter(boolean v) { this.columnBreakAfter = v; }
+
+    public boolean keepWithNext() { return keepWithNext; }
+    public void keepWithNext(boolean v) { this.keepWithNext = v; }
+
+    public boolean keepLinesTogether() { return keepLinesTogether; }
+    public void keepLinesTogether(boolean v) { this.keepLinesTogether = v; }
+
+    public boolean pageBreakBefore() { return pageBreakBefore; }
+    public void pageBreakBefore(boolean v) { this.pageBreakBefore = v; }
 
     public String pendingUnderlineColor() { return pendingUnderlineColor; }
     public void pendingUnderlineColor(String v) { this.pendingUnderlineColor = v; }
