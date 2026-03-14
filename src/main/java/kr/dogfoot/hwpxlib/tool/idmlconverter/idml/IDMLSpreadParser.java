@@ -186,7 +186,11 @@ class IDMLSpreadParser {
         // Stroke/Outline properties
         frame.strokeColor(getAttrOrNull(frameElem, "StrokeColor"));
         frame.strokeWeight(parseDoubleAttrDef(frameElem, "StrokeWeight", 0));
-        frame.cornerRadius(parseDoubleAttrDef(frameElem, "CornerRadius", 0));
+        // CornerOption이 없으면 InDesign 기본값 "None" → 직각 (CornerRadius 무시)
+        String tfCornerOpt = getAttrOrNull(frameElem, "CornerOption");
+        if ("RoundedCorner".equals(tfCornerOpt)) {
+            frame.cornerRadius(parseDoubleAttrDef(frameElem, "CornerRadius", 0));
+        }
         frame.fillTint(parseDoubleAttrDef(frameElem, "FillTint", 100));
         frame.strokeTint(parseDoubleAttrDef(frameElem, "StrokeTint", 100));
 
@@ -204,19 +208,30 @@ class IDMLSpreadParser {
             }
         }
 
-        // Per-corner radius
+        // Per-corner radius (CornerOption 고려)
         double tlRadius = parseDoubleAttrDef(frameElem, "TopLeftCornerRadius", -1);
         double trRadius = parseDoubleAttrDef(frameElem, "TopRightCornerRadius", -1);
         double blRadius = parseDoubleAttrDef(frameElem, "BottomLeftCornerRadius", -1);
         double brRadius = parseDoubleAttrDef(frameElem, "BottomRightCornerRadius", -1);
         if (tlRadius >= 0 || trRadius >= 0 || blRadius >= 0 || brRadius >= 0) {
             double defaultRadius = frame.cornerRadius();
-            frame.cornerRadii(new double[]{
-                    tlRadius >= 0 ? tlRadius : defaultRadius,
-                    trRadius >= 0 ? trRadius : defaultRadius,
-                    blRadius >= 0 ? blRadius : defaultRadius,
-                    brRadius >= 0 ? brRadius : defaultRadius
-            });
+            String defaultOpt = tfCornerOpt != null ? tfCornerOpt : "None";
+            String tlOpt2 = getAttrOrNull(frameElem, "TopLeftCornerOption");
+            String trOpt2 = getAttrOrNull(frameElem, "TopRightCornerOption");
+            String blOpt2 = getAttrOrNull(frameElem, "BottomLeftCornerOption");
+            String brOpt2 = getAttrOrNull(frameElem, "BottomRightCornerOption");
+            double effTL = (tlRadius >= 0 ? tlRadius : defaultRadius);
+            double effTR = (trRadius >= 0 ? trRadius : defaultRadius);
+            double effBL = (blRadius >= 0 ? blRadius : defaultRadius);
+            double effBR = (brRadius >= 0 ? brRadius : defaultRadius);
+            if (!"RoundedCorner".equals(tlOpt2 != null ? tlOpt2 : defaultOpt)) effTL = 0;
+            if (!"RoundedCorner".equals(trOpt2 != null ? trOpt2 : defaultOpt)) effTR = 0;
+            if (!"RoundedCorner".equals(blOpt2 != null ? blOpt2 : defaultOpt)) effBL = 0;
+            if (!"RoundedCorner".equals(brOpt2 != null ? brOpt2 : defaultOpt)) effBR = 0;
+            frame.cornerRadii(new double[]{ effTL, effTR, effBL, effBR });
+            if (effTL <= 0 && effTR <= 0 && effBL <= 0 && effBR <= 0) {
+                frame.cornerRadius(0);
+            }
         }
 
         // TextFramePreference에서 컬럼 정보 파싱
@@ -452,8 +467,11 @@ class IDMLSpreadParser {
 
             frame.cornerRadii(new double[]{ effTL, effTR, effBL, effBR });
 
-            // 글로벌 cornerOption이 없어도 개별 코너에 RoundedCorner가 있으면 설정
-            if (globalCornerOpt == null && (effTL > 0 || effTR > 0 || effBL > 0 || effBR > 0)) {
+            // 모든 유효 코너가 0이면 글로벌 cornerRadius도 0으로 리셋
+            // (CornerOption 없이 CornerRadius만 있는 경우 InDesign은 직각으로 표시)
+            if (effTL <= 0 && effTR <= 0 && effBL <= 0 && effBR <= 0) {
+                frame.cornerRadius(0);
+            } else if (globalCornerOpt == null) {
                 frame.cornerOption("RoundedCorner");
             }
         }

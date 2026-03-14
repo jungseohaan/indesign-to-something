@@ -290,7 +290,9 @@ public class IDMLToHwpxConverter {
                 // TextPath와 중복되지 않는 렌더 TextFrame은 AST에서 처리
             }
 
-            // 3단계: TextPath(VectorShape) 루프 — 그룹 z-order 보존
+            // 3단계: TextPath(VectorShape) 교체
+            java.util.Set<String> replacedGroupIds = new java.util.HashSet<>();
+
             java.util.Iterator<IDMLVectorShape> vsIt = spread.vectorShapes().iterator();
             while (vsIt.hasNext()) {
                 IDMLVectorShape vs = vsIt.next();
@@ -305,38 +307,67 @@ public class IDMLToHwpxConverter {
 
                 java.io.File pngFile = new java.io.File(resolvedDir, rendered.file());
 
-                // VectorShape의 IDML 좌표를 직접 사용
                 double[] vsBounds = vs.geometricBounds();
                 double[] vsTransform = vs.itemTransform();
 
-                // 렌더 PNG는 이미 올바른 방향으로 출력되었으므로
-                // 변환 행렬의 반전(flip)을 제거하여 이미지가 뒤집히지 않게 한다.
+                // 렌더 PNG는 이미 올바른 방향(회전/반전 포함)으로 출력되었으므로
+                // 변환 행렬의 회전/반전을 제거하여 이미지가 이중 변환되지 않게 한다.
                 if (vsTransform != null && vsTransform.length >= 6) {
                     double a = vsTransform[0], b = vsTransform[1];
                     double c = vsTransform[2], d = vsTransform[3];
-                    double tx = vsTransform[4], ty = vsTransform[5];
-                    boolean flipX = (a < 0 && Math.abs(b) < 0.01);
-                    boolean flipY = (d < 0 && Math.abs(c) < 0.01);
-                    if (flipX || flipY) {
-                        // bounds의 중심점 기준으로 반전 제거 후 위치 보정
-                        double bTop = vsBounds[0], bLeft = vsBounds[1];
-                        double bBottom = vsBounds[2], bRight = vsBounds[3];
-                        double cx = (bLeft + bRight) / 2.0;
-                        double cy = (bTop + bBottom) / 2.0;
-                        if (flipX) {
-                            tx = tx + 2 * a * cx; // 반전 보정
-                            a = Math.abs(a);
+                    boolean hasRotation = (Math.abs(b) > 0.01 || Math.abs(c) > 0.01);
+                    boolean flipX = (a < 0 && !hasRotation);
+                    boolean flipY = (d < 0 && !hasRotation);
+
+                    if (hasRotation || flipX || flipY) {
+                        // resolved bounds → spread 좌표로 변환
+                        double[] resolvedBounds = rendered.bounds();
+                        boolean usedResolved = false;
+                        if (resolvedBounds != null && resolvedBounds.length >= 4) {
+                            int renderPageIdx = rendered.pageIndex();
+                            IDMLPage targetPage = findPageByIndex(idmlDoc, renderPageIdx);
+                            if (targetPage != null && targetPage.itemTransform() != null) {
+                                double pageTx = targetPage.itemTransform()[4];
+                                double pageTy = targetPage.itemTransform()[5];
+                                double rTop = resolvedBounds[0], rLeft = resolvedBounds[1];
+                                double rBottom = resolvedBounds[2], rRight = resolvedBounds[3];
+                                vsBounds = new double[]{rTop + pageTy, rLeft + pageTx,
+                                        rBottom + pageTy, rRight + pageTx};
+                                usedResolved = true;
+                            }
                         }
-                        if (flipY) {
-                            ty = ty + 2 * d * cy; // 반전 보정
-                            d = Math.abs(d);
+                        if (!usedResolved) {
+                            double[] aabb = IDMLGeometry.getTransformedBoundingBox(vsBounds, vsTransform);
+                            vsBounds = new double[]{aabb[1], aabb[0], aabb[3], aabb[2]};
                         }
-                        vsTransform = new double[]{a, b, c, d, tx, ty};
+                        // PNG 실제 비율로 bounds 보정 (visibleBounds ≠ PNG export 영역일 수 있음)
+                        try {
+                            java.awt.image.BufferedImage pngImg = javax.imageio.ImageIO.read(pngFile);
+                            if (pngImg != null) {
+                                double pngAspect = (double) pngImg.getWidth() / pngImg.getHeight();
+                                double bW = vsBounds[3] - vsBounds[1]; // right - left
+                                double bH = vsBounds[2] - vsBounds[0]; // bottom - top
+                                double boundsAspect = bW / bH;
+                                if (Math.abs(pngAspect - boundsAspect) > 0.05) {
+                                    // 너비 기준으로 높이 조정
+                                    double centerY = (vsBounds[0] + vsBounds[2]) / 2.0;
+                                    double newH = bW / pngAspect;
+                                    vsBounds[0] = centerY - newH / 2.0;
+                                    vsBounds[2] = centerY + newH / 2.0;
+                                }
+                            }
+                        } catch (Exception imgErr) {
+                            // PNG 읽기 실패 시 무시
+                        }
+                        vsTransform = new double[]{1, 0, 0, 1, 0, 0};
                     }
                 }
 
                 // TextPath는 그룹 소속이면 원래 z-order (A/B/C 등과 정확한 stacking)
                 int zOrder = (vs.parentGroupId() != null) ? vs.zOrder() : vs.zOrder() + 10000;
+                if (vs.parentGroupId() != null) {
+                    replacedGroupIds.add(vs.parentGroupId());
+                }
                 vsIt.remove();
 
                 IDMLImageFrame syn = new IDMLImageFrame();
@@ -353,7 +384,32 @@ public class IDMLToHwpxConverter {
 
                 System.out.println("[RenderedTextPath] " + vs.selfId()
                         + " → " + rendered.file()
-                        + " z=" + zOrder);
+                        + " z=" + zOrder
+                        + (vs.parentGroupId() != null ? " group=" + vs.parentGroupId() : ""));
+            }
+
+            // 4단계: 교체된 그룹의 형제 VectorShape 제거
+            // (같은 그룹의 다른 폴리곤 — 예: 스트로크 경로 — 이 사각형 박스로 남는 것을 방지)
+            if (!replacedGroupIds.isEmpty()) {
+                java.util.Iterator<IDMLVectorShape> sibIt = spread.vectorShapes().iterator();
+                while (sibIt.hasNext()) {
+                    IDMLVectorShape sib = sibIt.next();
+                    if (sib.parentGroupId() != null && replacedGroupIds.contains(sib.parentGroupId())) {
+                        sibIt.remove();
+                        System.out.println("[RenderedTextPath] 형제 " + sib.selfId()
+                                + " 제거 (group=" + sib.parentGroupId() + ")");
+                    }
+                }
+                // 같은 그룹의 TextFrame도 제거
+                java.util.Iterator<IDMLTextFrame> tfSibIt = spread.textFrames().iterator();
+                while (tfSibIt.hasNext()) {
+                    IDMLTextFrame tf = tfSibIt.next();
+                    if (tf.parentGroupId() != null && replacedGroupIds.contains(tf.parentGroupId())) {
+                        tfSibIt.remove();
+                        System.out.println("[RenderedTextPath] 형제 TF " + tf.selfId()
+                                + " 제거 (group=" + tf.parentGroupId() + ")");
+                    }
+                }
             }
         }
 
@@ -897,6 +953,18 @@ public class IDMLToHwpxConverter {
         if (injected > 0) {
             System.out.println("[OrphanGraphic] " + injected + "개 렌더 그래픽 프레임 주입 완료");
         }
+    }
+
+    /** 문서 전체 페이지 인덱스(0-based)로 IDMLPage를 찾는다. */
+    private static IDMLPage findPageByIndex(IDMLDocument doc, int pageIndex) {
+        int idx = 0;
+        for (IDMLSpread sp : doc.spreads()) {
+            for (IDMLPage pg : sp.pages()) {
+                if (idx == pageIndex) return pg;
+                idx++;
+            }
+        }
+        return null;
     }
 
     /** resolved.json의 부모 디렉토리를 반환한다. */

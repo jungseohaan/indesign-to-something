@@ -443,6 +443,11 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
                     || pName === "GraphicLine" || pName === "Oval")) {
                 renderTarget = parentItem;
             }
+            // TextPath 부모(Polygon 등)의 부모가 Group이면 Group 전체를 렌더링
+            // (곡선 경로 스트로크 + 텍스트를 함께 포함)
+            if (hasTextPath && pName === "Group" && parentItem && parentItem.id) {
+                renderTarget = parentItem;
+            }
         } catch (e) {}
 
         var domId = renderTarget.id;
