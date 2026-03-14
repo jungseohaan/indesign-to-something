@@ -541,6 +541,17 @@ class ASTOverlayBuilder {
             double y = accTy + (tt != null ? tt[5] : 0) + (tb != null ? tb[0] : 0);
             double w = tb != null ? tb[3] - tb[1] : 0;
             double h = tb != null ? tb[2] - tb[0] : 0;
+
+            // 부모 그래픽 영역 밖 자식 TextFrame 클리핑 (InDesign에서 숨김 처리되는 요소)
+            double[] igBounds = ig.geometricBounds();
+            if (igBounds != null && igBounds.length >= 4) {
+                double parentH = igBounds[2] - igBounds[0];
+                double parentW = igBounds[3] - igBounds[1];
+                if (y + h < 0 || y > parentH || x + w < 0 || x > parentW) {
+                    continue;
+                }
+            }
+
             result.add(new TextFrameWithPosition(childTf, x, y, w, h));
         }
         // 중첩 그래픽(Group 등)도 재귀 탐색
