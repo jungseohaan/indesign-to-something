@@ -149,7 +149,7 @@ public class IDMLToHwpxConverter {
             // 테이블 셀 인라인 텍스트와 동일한 플로팅 텍스트 프레임 블록 제거
             // (플로팅 교체 전에 실행해야 ASTFigure로 변환되기 전에 매칭 가능)
             if (!inlineReplacedTexts.isEmpty()) {
-                removeFloatingDuplicates(astDoc, inlineReplacedTexts);
+                removeFloatingDuplicates(astDoc, inlineReplacedTexts, resolvedData);
             }
 
             // Phase 2.9: 플로팅 렌더 텍스트 프레임 → 이미지 교체 (AST 좌표 기반)
@@ -631,7 +631,8 @@ public class IDMLToHwpxConverter {
      * InDesign에서 앵커된 TextFrame의 스토리가 독립 텍스트 프레임으로도 처리되어
      * 동일 텍스트가 중복 출현하는 문제를 해결한다.
      */
-    static void removeFloatingDuplicates(ASTDocument astDoc, java.util.Set<String> replacedTexts) {
+    static void removeFloatingDuplicates(ASTDocument astDoc, java.util.Set<String> replacedTexts,
+                                         ResolvedData resolvedData) {
         int removed = 0;
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection sec : astDoc.sections()) {
             java.util.Iterator<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock> it = sec.blocks().iterator();
@@ -640,6 +641,11 @@ public class IDMLToHwpxConverter {
                 if (!(blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock)) continue;
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock tfb =
                         (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock) blk;
+                // 배지 그룹 자식 TextFrame은 제거하지 않음 (배지 이미지로 교체 대상)
+                if (resolvedData != null && tfb.sourceId() != null
+                        && resolvedData.getBadgeGroupByChildTextFrameIdmlId(tfb.sourceId()) != null) {
+                    continue;
+                }
                 // 텍스트 내용 추출
                 StringBuilder sb = new StringBuilder();
                 for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph p : tfb.paragraphs()) {
