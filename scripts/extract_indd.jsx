@@ -881,8 +881,9 @@ function isRenderableTextFrame(tf, bodyFonts) {
                 }
             } catch (e2) {}
         }
-        // 본문 폰트가 아닌 경우 → 장식 텍스트로 간주
-        if (!isDecorative && bodyFonts) {
+        // 본문 폰트가 아닌 경우 → 짧은 텍스트(≤10자)만 장식으로 간주
+        // 긴 텍스트는 제목/소제목일 수 있으므로 폰트만으로 장식 판정하지 않음
+        if (!isDecorative && bodyFonts && trimmed.length <= 10) {
             try {
                 var fontFamily = firstChar.appliedFont.fontFamily;
                 if (!bodyFonts[fontFamily]) isDecorative = true;
