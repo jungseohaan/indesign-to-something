@@ -60,6 +60,7 @@ public class Stage1_Flatten {
                 fo.zOrder(img.zOrder());
                 fo.pageNumber(assignPage(img.geometricBounds(), img.itemTransform(), pages));
                 fo.fromGroup(img.fromGroup());
+                fo.parentGroupId(img.parentGroupId());
                 pool.add(fo);
             }
 

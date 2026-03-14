@@ -492,7 +492,14 @@ class ASTFigureBuilder {
 
         double rW = gb[3] - gb[1];
         double rH = gb[2] - gb[0];
-        if (rW <= 0 || rH <= 0) return null;
+        // 수평/수직 GraphicLine은 한 축이 0일 수 있음 → strokeWeight으로 최소 크기 보정
+        if (rW <= 0 && rH <= 0) return null;
+        if (rW <= 0 || rH <= 0) {
+            double minDim = shape.hasStroke() ? shape.strokeWeight() : 0.5;
+            if (minDim < 0.5) minDim = 0.5;
+            if (rW <= 0) rW = minDim;
+            if (rH <= 0) rH = minDim;
+        }
 
         double[] rel = resolvedPage.toPageRelative(gb);
         double rLeft = rel[0];

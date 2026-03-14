@@ -376,6 +376,9 @@ public class IDMLToHwpxConverter {
                 syn.itemTransform(vsTransform);
                 syn.zOrder(zOrder);
                 syn.fromGroup(true);  // IN_FRONT_OF_TEXT로 배치
+                if (vs.parentGroupId() != null) {
+                    syn.parentGroupId(vs.parentGroupId());
+                }
                 syn.linkResourceURI(pngFile.getAbsolutePath());
                 syn.linkStoredState("Normal");
                 syn.linkResourceFormat("PNG");
@@ -400,14 +403,18 @@ public class IDMLToHwpxConverter {
                                 + " 제거 (group=" + sib.parentGroupId() + ")");
                     }
                 }
-                // 같은 그룹의 TextFrame도 제거
+                // 같은 그룹의 TextFrame 중 렌더링된 것만 제거
+                // (콘텐츠 텍스트 프레임은 유지)
                 java.util.Iterator<IDMLTextFrame> tfSibIt = spread.textFrames().iterator();
                 while (tfSibIt.hasNext()) {
                     IDMLTextFrame tf = tfSibIt.next();
                     if (tf.parentGroupId() != null && replacedGroupIds.contains(tf.parentGroupId())) {
-                        tfSibIt.remove();
-                        System.out.println("[RenderedTextPath] 형제 TF " + tf.selfId()
-                                + " 제거 (group=" + tf.parentGroupId() + ")");
+                        RenderedGroup tfRendered = resolvedData.getRenderedTextFrameByIdmlId(tf.selfId());
+                        if (tfRendered != null) {
+                            tfSibIt.remove();
+                            System.out.println("[RenderedTextPath] 형제 TF " + tf.selfId()
+                                    + " 제거 (group=" + tf.parentGroupId() + ")");
+                        }
                     }
                 }
             }

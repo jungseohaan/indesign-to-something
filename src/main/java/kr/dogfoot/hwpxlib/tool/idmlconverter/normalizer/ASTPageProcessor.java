@@ -301,18 +301,33 @@ class ASTPageProcessor {
 
         String groupId = fo.parentGroupId();
 
+        // 같은 부모 그룹의 자식 그룹 ID 수집 (서브그룹 내 요소도 형제로 간주)
+        java.util.Set<String> siblingGroupIds = new java.util.HashSet<>();
+        siblingGroupIds.add(groupId);
+        for (FlatObject obj : pool.all()) {
+            if (obj.contentType() == FlatObject.ContentType.GROUP
+                    && groupId.equals(obj.parentGroupId())) {
+                siblingGroupIds.add(obj.selfId());
+            }
+        }
+
         for (FlatObject sibling : pool.all()) {
             if (sibling == fo) continue;
             if (sibling.pageNumber() != fo.pageNumber()) continue;
-            if (!groupId.equals(sibling.parentGroupId())) continue;
-            if (sibling.contentType() != FlatObject.ContentType.VECTOR_SHAPE) continue;
+            if (!siblingGroupIds.contains(sibling.parentGroupId())) continue;
 
-            // 채우기가 있는 가시적 도형만
-            Object srcObj = sibling.sourceObject();
-            if (!(srcObj instanceof IDMLVectorShape)) continue;
-            IDMLVectorShape vs = (IDMLVectorShape) srcObj;
-            String fill = vs.fillColor();
-            if (fill == null || fill.contains("None") || fill.contains("Paper")) continue;
+            // 가시적 도형(VectorShape 또는 ImageFrame)만 처리
+            boolean isVisualSibling = false;
+            if (sibling.contentType() == FlatObject.ContentType.VECTOR_SHAPE) {
+                Object srcObj = sibling.sourceObject();
+                if (srcObj instanceof IDMLVectorShape) {
+                    String fill = ((IDMLVectorShape) srcObj).fillColor();
+                    isVisualSibling = fill != null && !fill.contains("None") && !fill.contains("Paper");
+                }
+            } else if (sibling.contentType() == FlatObject.ContentType.IMAGE_FRAME) {
+                isVisualSibling = true;
+            }
+            if (!isVisualSibling) continue;
 
             double[] sBbox = sibling.absoluteBbox();
             if (sBbox == null) continue;
@@ -915,16 +930,19 @@ class ASTPageProcessor {
         }
 
         // 도형이 페이지와 10% 이상 겹치면 포함 (페이지 경계의 도형이 잘리지 않도록)
+        // 수평/수직 라인(한 축이 0)은 겹치는 축만 검사
         double overlapMinX = Math.max(shapeBox[0], pageMinX);
         double overlapMaxX = Math.min(shapeBox[2], pageMaxX);
         double overlapW = overlapMaxX - overlapMinX;
-        if (shapeW > 0 && overlapW / shapeW >= 0.10) {
-            double overlapMinY = Math.max(shapeBox[1], pageMinY);
-            double overlapMaxY = Math.min(shapeBox[3], pageMaxY);
-            double overlapH = overlapMaxY - overlapMinY;
-            if (shapeH > 0 && overlapH / shapeH >= 0.10) {
-                return true;
-            }
+        boolean xOverlap = (shapeW <= 0) || (overlapW / shapeW >= 0.10);
+
+        double overlapMinY = Math.max(shapeBox[1], pageMinY);
+        double overlapMaxY = Math.min(shapeBox[3], pageMaxY);
+        double overlapH = overlapMaxY - overlapMinY;
+        boolean yOverlap = (shapeH <= 0) || (overlapH / shapeH >= 0.10);
+
+        if (xOverlap && yOverlap && (overlapW > 0 || shapeW <= 0) && (overlapH > 0 || shapeH <= 0)) {
+            return true;
         }
 
         double cx = (bounds[1] + bounds[3]) / 2.0;
