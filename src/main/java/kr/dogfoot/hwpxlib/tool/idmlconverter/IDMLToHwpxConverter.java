@@ -146,14 +146,15 @@ public class IDMLToHwpxConverter {
                 inlineReplacedTexts = replaceInlineRenderedTextFrames(astDoc, resolvedData, options);
             }
 
+            // 테이블 셀 인라인 텍스트와 동일한 플로팅 텍스트 프레임 블록 제거
+            // (플로팅 교체 전에 실행해야 ASTFigure로 변환되기 전에 매칭 가능)
+            if (!inlineReplacedTexts.isEmpty()) {
+                removeFloatingDuplicates(astDoc, inlineReplacedTexts);
+            }
+
             // Phase 2.9: 플로팅 렌더 텍스트 프레임 → 이미지 교체 (AST 좌표 기반)
             if (resolvedData != null && resolvedData.renderedTextFrameCount() > 0) {
                 replaceFloatingRenderedTextFrames(astDoc, resolvedData, options);
-            }
-
-            // 인라인 이미지로 교체된 텍스트와 동일한 플로팅 텍스트 프레임 블록 제거
-            if (!inlineReplacedTexts.isEmpty()) {
-                removeFloatingDuplicates(astDoc, inlineReplacedTexts);
             }
 
             // Phase 2.10: VectorShape로 등록되지 않은 렌더 그래픽 프레임 주입
@@ -538,7 +539,22 @@ public class IDMLToHwpxConverter {
                         removed += result[1];
                     }
                 }
-                // 테이블 셀 내부의 인라인 TextFrame은 글상자로 유지 (이미지 교체 건너뛰기)
+                // 테이블 셀 내부: 배지 자식 인라인 TextFrame은 이미지로 교체,
+                // 직접 렌더 매치(콘텐츠 텍스트)는 글상자로 유지
+                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable tbl =
+                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) blk;
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow row : tbl.rows()) {
+                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell cell : row.cells()) {
+                            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para : cell.paragraphs()) {
+                                int[] result = replaceInlineRenderedInParagraph_badgeOnly(
+                                        para, resolvedData, resolvedDir, replacedTexts);
+                                replaced += result[0];
+                                removed += result[1];
+                            }
+                        }
+                    }
+                }
             }
         }
         if (replaced > 0 || removed > 0) {
@@ -630,6 +646,58 @@ public class IDMLToHwpxConverter {
                 if (textContent != null) replacedTexts.add(textContent);
                 replaced++;
                 System.out.println("[InlineRendered] " + obj.sourceId() + " → " + rendered.file());
+            } catch (Exception e) {
+                // 읽기 실패 — 텍스트 프레임 유지
+            }
+        }
+        return new int[]{replaced, removed};
+    }
+
+    /**
+     * 테이블 셀 전용: 배지 자식 인라인 TextFrame만 이미지로 교체.
+     * 직접 렌더 매치(콘텐츠 텍스트)는 건너뛰어 글상자로 유지.
+     */
+    private static int[] replaceInlineRenderedInParagraph_badgeOnly(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para,
+            ResolvedData resolvedData, String resolvedDir,
+            java.util.Set<String> replacedTexts) {
+        int replaced = 0;
+        int removed = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem item : para.items()) {
+            if (item.itemType() != kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem.ItemType.INLINE_OBJECT)
+                continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject obj =
+                    (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject) item;
+            if (obj.kind() != kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME)
+                continue;
+            if (obj.sourceId() == null) continue;
+
+            // 직접 렌더 매치는 건너뛰기 (테이블 셀 콘텐츠 텍스트 유지)
+            if (resolvedData.getRenderedTextFrameByIdmlId(obj.sourceId()) != null) continue;
+
+            // 배지 자식만 교체
+            RenderedGroup rendered = resolvedData.getBadgeGroupByChildTextFrameIdmlId(obj.sourceId());
+            if (rendered == null) continue;
+
+            String textContent = extractInlineTextContent(obj);
+            java.io.File pngFile = new java.io.File(resolvedDir, rendered.file());
+            if (!pngFile.exists()) continue;
+            try {
+                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+                if (img == null) continue;
+
+                obj.kind(kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject.ObjectKind.IMAGE);
+                obj.imageData(imageData);
+                obj.imageFormat("png");
+                obj.pixelWidth(img.getWidth());
+                obj.pixelHeight(img.getHeight());
+                obj.paragraphs(null);
+                if (obj.inlineTables() != null) obj.inlineTables().clear();
+
+                if (textContent != null) replacedTexts.add(textContent);
+                replaced++;
+                System.out.println("[InlineRendered-Badge] " + obj.sourceId() + " → " + rendered.file());
             } catch (Exception e) {
                 // 읽기 실패 — 텍스트 프레임 유지
             }
