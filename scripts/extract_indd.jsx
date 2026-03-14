@@ -687,8 +687,10 @@ function exportPdfPlacedFrames(doc, outputDir, startPage, endPage) {
 function isBadgeGroup(group) {
     var hasShape = false;
     var hasShortText = false;
+    var hasLongText = false;
     var hasImage = false;
     var hasSubGroup = false;
+    var totalTextLen = 0;
 
     try {
         var items = group.allPageItems;
@@ -708,8 +710,12 @@ function isBadgeGroup(group) {
                 var txt = "";
                 try { txt = item.contents; } catch (e) {}
                 var trimmed = txt.replace(/[\s\uFEFF]/g, "");
+                totalTextLen += trimmed.length;
                 if (trimmed.length > 0 && trimmed.length <= 15) {
                     hasShortText = true;
+                }
+                if (trimmed.length > 30) {
+                    hasLongText = true;
                 }
             } else if (cName === "Group") {
                 hasSubGroup = true;
@@ -721,14 +727,24 @@ function isBadgeGroup(group) {
         return false;
     }
 
-    if (!(hasShape && hasShortText && !hasImage && !hasSubGroup)) return false;
+    // 배지: 도형+짧은텍스트, 이미지/서브그룹 없음, 긴 텍스트 없음
+    if (!(hasShape && hasShortText && !hasImage && !hasSubGroup && !hasLongText)) return false;
 
-    // 크기 제한: 배지는 작은 UI 요소 (최대 150pt ≈ 53mm)
+    // 전체 텍스트가 너무 많으면 배지가 아님 (콘텐츠 박스)
+    if (totalTextLen > 40) return false;
+
+    // 크기 제한: geometricBounds는 문서 측정 단위로 반환되므로
+    // points로 변환하여 비교 (최대 150pt)
     try {
         var gb = group.geometricBounds; // [top, left, bottom, right]
         var gw = gb[3] - gb[1];
         var gh = gb[2] - gb[0];
-        if (gw > 150 || gh > 150) return false;
+        // 문서 단위 → points 변환 (페이지 폭 비교)
+        var pageW = group.parentPage.bounds[3] - group.parentPage.bounds[1];
+        var scale = 1;
+        if (pageW > 0 && pageW < 300) scale = 72 / 25.4; // mm → pt
+        else if (pageW > 0 && pageW < 30) scale = 72; // inch → pt
+        if (gw * scale > 150 || gh * scale > 150) return false;
     } catch (e) {
         return false;
     }
