@@ -933,6 +933,8 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
     var fonts = collectFonts(doc);
 
     // 범위 내 페이지의 텍스트프레임에 연결된 스토리 ID 수집
+    // (1) parentPage가 있는 텍스트프레임 (최상위 레벨)
+    // (2) 그룹 내부 텍스트프레임 — allPageItems를 통해 수집
     var rangeStoryIds = {};
     try {
         var tfs = doc.textFrames.everyItem().getElements();
@@ -949,6 +951,23 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
                     }
                 }
             } catch (e) {}
+        }
+    } catch (e) {}
+    // 그룹 내부 TextFrame은 parentPage가 null이므로
+    // 페이지의 allPageItems에서 TextFrame을 추가 수집
+    try {
+        for (var pi = 0; pi < doc.pages.length; pi++) {
+            var page = doc.pages[pi];
+            var pgIdx2 = page.documentOffset + 1;
+            if (pgIdx2 < startPage || pgIdx2 > endPage) continue;
+            var allItems = page.allPageItems;
+            for (var ai = 0; ai < allItems.length; ai++) {
+                try {
+                    if (allItems[ai].constructor.name === "TextFrame") {
+                        rangeStoryIds[allItems[ai].parentStory.id.toString()] = true;
+                    }
+                } catch (e3) {}
+            }
         }
     } catch (e) {}
 
