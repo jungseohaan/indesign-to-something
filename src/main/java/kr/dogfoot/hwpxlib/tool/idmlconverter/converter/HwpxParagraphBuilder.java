@@ -258,9 +258,8 @@ public class HwpxParagraphBuilder {
         for (ASTInlineItem item : astPara.items()) {
             if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                 ASTInlineObject obj = (ASTInlineObject) item;
-                // TextWrapMode="None"인 앵커 객체는 텍스트 위에 겹쳐 표시되며
-                // InDesign에서 줄 간격에 영향을 주지 않으므로 제외
-                if ("None".equals(obj.textWrapMode())) continue;
+                // HWPX에서는 모든 인라인 객체가 줄 간격에 영향을 주므로
+                // textWrapMode와 무관하게 높이를 반영한다
                 if (obj.height() > max) {
                     max = obj.height();
                 }
@@ -296,9 +295,10 @@ public class HwpxParagraphBuilder {
                 && basePr.lineSpacing().value() < (int) inlineHeight) {
             // FIXED 줄 간격이 인라인 객체보다 작으면 확장
             needsExpand = true;
-        } else if (basePr.lineSpacing().type() == LineSpacingType.PERCENT
-                && basePr.lineSpacing().value() < 160) {
-            // PERCENT가 160% 미만이면 큰 인라인 객체를 수용 못할 수 있음
+        } else if (basePr.lineSpacing().type() == LineSpacingType.PERCENT) {
+            // PERCENT 모드: 인라인 객체가 크면 FIXED로 전환
+            // PERCENT 값은 글자 크기 기준이므로, 인라인 높이와 직접 비교 불가
+            // → 인라인 높이가 충분히 크면 항상 FIXED로 전환
             needsExpand = true;
         }
 

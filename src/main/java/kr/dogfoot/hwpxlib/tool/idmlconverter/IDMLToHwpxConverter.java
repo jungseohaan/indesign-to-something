@@ -792,6 +792,22 @@ public class IDMLToHwpxConverter {
     }
 
 
+    private static void collectInlineSourceIds(
+            java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph> paragraphs,
+            java.util.Set<String> usedSourceIds) {
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para : paragraphs) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem item : para.items()) {
+                if (item.itemType() == kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem.ItemType.INLINE_OBJECT) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject obj =
+                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject) item;
+                    if (obj.sourceId() != null) {
+                        usedSourceIds.add(obj.sourceId());
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * VectorShape로 등록되지 않은 렌더 그래픽 프레임을 AST에 주입한다.
      * 깊이 중첩된 IDML 구조(TextFrame 내부 Oval 등)는 VectorShape 풀에 등록되지 않아
@@ -810,23 +826,19 @@ public class IDMLToHwpxConverter {
                         && blk.sourceId() != null) {
                     usedSourceIds.add(blk.sourceId());
                 }
-                // 테이블 셀 내 인라인 TextFrame sourceId도 수집 (이미지 주입 방지)
+                // TextFrameBlock 내 인라인 객체 sourceId 수집
+                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock tfb =
+                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock) blk;
+                    collectInlineSourceIds(tfb.paragraphs(), usedSourceIds);
+                }
+                // 테이블 셀 내 인라인 객체 sourceId 수집
                 if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) {
                     kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable tbl =
                             (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) blk;
                     for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow row : tbl.rows()) {
                         for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell cell : row.cells()) {
-                            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para : cell.paragraphs()) {
-                                for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem item : para.items()) {
-                                    if (item.itemType() == kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem.ItemType.INLINE_OBJECT) {
-                                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject obj =
-                                                (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject) item;
-                                        if (obj.sourceId() != null) {
-                                            usedSourceIds.add(obj.sourceId());
-                                        }
-                                    }
-                                }
-                            }
+                            collectInlineSourceIds(cell.paragraphs(), usedSourceIds);
                         }
                     }
                 }
@@ -835,6 +847,20 @@ public class IDMLToHwpxConverter {
 
         // 페이지 bounds 캐시 (pageIndex → resolvedPage)
         List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection> sections = astDoc.sections();
+
+        // 페이지별 기존 ASTFigure bounds 수집 (orphan 중복 주입 방지용)
+        Map<Integer, java.util.List<long[]>> pageFigureBounds = new java.util.HashMap<>();
+        for (int si = 0; si < sections.size(); si++) {
+            java.util.List<long[]> bounds = new java.util.ArrayList<>();
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : sections.get(si).blocks()) {
+                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
+                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) blk;
+                    bounds.add(new long[]{fig.x(), fig.y(), fig.x() + fig.width(), fig.y() + fig.height()});
+                }
+            }
+            pageFigureBounds.put(si, bounds);
+        }
 
         int injected = 0;
         for (RenderedGroup rg : resolvedData.allRenderedGraphicFrames()) {
@@ -899,6 +925,20 @@ public class IDMLToHwpxConverter {
                 if (img.getWidth() > 0) {
                     figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
                 }
+
+                // 기존 ASTFigure에 완전히 포함되는 도형 건너뜀 (인라인 자식 도형 중복 방지)
+                boolean containedInExisting = false;
+                java.util.List<long[]> existingBounds = pageFigureBounds.get(pageIdx);
+                if (existingBounds != null) {
+                    for (long[] eb : existingBounds) {
+                        if (figX >= eb[0] && figY >= eb[1]
+                                && figX + figW <= eb[2] && figY + figH <= eb[3]) {
+                            containedInExisting = true;
+                            break;
+                        }
+                    }
+                }
+                if (containedInExisting) continue;
 
                 // 페이지 밖 음수 좌표 → crop fraction 설정
                 // HwpxImageBuilder가 hasCrop일 때 x<0, y<0을 자동 클램핑하므로
