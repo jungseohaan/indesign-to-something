@@ -12,9 +12,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -258,19 +255,8 @@ class ASTFigureBuilder {
         if (resolvedData != null && shape.selfId() != null) {
             kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup renderedGraphic =
                     resolvedData.getRenderedGraphicFrameByIdmlId(shape.selfId());
-            if (renderedGraphic != null && renderedGraphic.file() != null
-                    && renderedGraphic.bounds() != null && resolvedPage != null
-                    && resolvedPage.bounds() != null) {
-                double[] rb = renderedGraphic.bounds(); // normalized to points
-                double rW = rb[3] - rb[1];
-                double rH = rb[2] - rb[0];
-                double[] rpb = resolvedPage.bounds();
-                double pageW = rpb[3] - rpb[1];
-                double pageH = rpb[2] - rpb[0];
-                if (rW > pageW * 0.8 && rH > pageH * 0.8) {
-                    renderedGraphic = null; // 배경 프레임은 벡터 래스터화로 폴백
-                }
-            }
+            // 배경 필터 제거 — InDesign 렌더링 PNG를 그대로 사용
+            // (이전에는 Java 래스터라이즈 폴백이 있었으나 제거됨)
             if (renderedGraphic != null && renderedGraphic.file() != null) {
                 ASTImageLoader.ImageResult imgResult = imageLoader.loadRenderedImage(
                         renderedGraphic.file(),
@@ -279,18 +265,9 @@ class ASTFigureBuilder {
                         CoordinateConverter.pointsToHwpunits(
                                 IDMLGeometry.height(shape.geometricBounds())));
                 if (imgResult != null) {
-                    double[] bounds = renderedGraphic.bounds();
                     long figX, figY, figW, figH;
-                    if (bounds != null && bounds.length == 4 && resolvedPage != null
-                            && resolvedPage.bounds() != null) {
-                        // resolved bounds (페이지 상대 좌표, points)
-                        double[] pb = resolvedPage.bounds();
-                        figX = CoordinateConverter.pointsToHwpunits(bounds[1] - pb[1]);
-                        figY = CoordinateConverter.pointsToHwpunits(bounds[0] - pb[0]);
-                        figW = CoordinateConverter.pointsToHwpunits(bounds[3] - bounds[1]);
-                        figH = CoordinateConverter.pointsToHwpunits(bounds[2] - bounds[0]);
-                    } else {
-                        // IDML fallback
+                    // IDML 좌표 사용 (facing pages에서 resolved bounds 좌표 오류 방지)
+                    {
                         double[] bbox = IDMLGeometry.getTransformedBoundingBox(
                                 shape.geometricBounds(), shape.itemTransform());
                         double[] pageAbs = IDMLGeometry.absoluteTopLeft(
@@ -305,14 +282,17 @@ class ASTFigureBuilder {
                         figH = Math.round(figW * ((double) imgResult.pixelHeight / imgResult.pixelWidth));
                     }
                     ASTFigure fig = new ASTFigure();
+                    fig.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
                     fig.x(figX);
                     fig.y(figY);
                     fig.width(figW);
                     fig.height(figH);
+                    fig.zOrder(shape.zOrder());
                     fig.imageData(imgResult.imageData);
                     fig.imageFormat(imgResult.format);
                     fig.pixelWidth(imgResult.pixelWidth);
                     fig.pixelHeight(imgResult.pixelHeight);
+                    fig.fromGroup(shape.fromGroup());
                     fig.sourceId(shape.selfId());
                     System.out.println("[RenderedGraphic] " + shape.selfId()
                             + " → " + renderedGraphic.file());
@@ -327,214 +307,9 @@ class ASTFigureBuilder {
                     resolvedData, resolvedPage);
         }
 
-        // 채우기/선 색상 해석
-        IDMLVectorShape renderTarget = shape.hasClippedChild() ? shape.clippedChild() : shape;
-        String fillHex = ASTInlineObjectBuilder.resolveColorHex(renderTarget.fillColor(), colorResolver);
-        String strokeHex = ASTInlineObjectBuilder.resolveColorHex(renderTarget.strokeColor(), colorResolver);
-
-        if (fillHex == null && strokeHex == null) {
-            return null;
-        }
-
-        // Resolved geometry path
-        ResolvedPageItem resolvedItem = null;
-        if (resolvedData != null && shape.selfId() != null) {
-            resolvedItem = resolvedData.getPageItemByIdmlId(shape.selfId());
-        }
-        if (resolvedItem != null && resolvedItem.geometricBounds() != null
-                && resolvedPage != null && resolvedPage.bounds() != null) {
-            ASTFigure resolved = createFigureResolvedShape(shape, resolvedItem, resolvedPage,
-                    imageLoader, fillHex, strokeHex);
-            if (resolved != null) return resolved;
-        }
-
-        // IDML fallback
-        double[] effectiveBounds = shape.geometricBounds();
-        double[] t = shape.itemTransform();
-        boolean hasRotOrFlip = t != null && (Math.abs(t[1]) > 0.001 || Math.abs(t[2]) > 0.001
-                || t[0] < 0 || t[3] < 0);
-
-        long wHwp, hHwp, xHwp, yHwp;
-        ASTImageLoader.ImageResult result;
-
-        if (hasRotOrFlip) {
-            double w = IDMLGeometry.transformedWidth(effectiveBounds, shape.itemTransform());
-            double h = IDMLGeometry.transformedHeight(effectiveBounds, shape.itemTransform());
-            wHwp = CoordinateConverter.pointsToHwpunits(w);
-            hHwp = CoordinateConverter.pointsToHwpunits(h);
-
-            double[] bbox = IDMLGeometry.getTransformedBoundingBox(
-                    effectiveBounds, shape.itemTransform());
-            double[] pageAbs = IDMLGeometry.absoluteTopLeft(
-                    page.geometricBounds(), page.itemTransform());
-            xHwp = CoordinateConverter.pointsToHwpunits(bbox[0] - pageAbs[0]);
-            yHwp = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
-
-            if (wHwp <= 0 || hHwp <= 0) {
-                if (shape.hasStroke() && shape.strokeWeight() > 0) {
-                    long minDim = CoordinateConverter.pointsToHwpunits(shape.strokeWeight());
-                    if (minDim < 100) minDim = 100;
-                    if (wHwp <= 0) wHwp = minDim;
-                    if (hHwp <= 0) hHwp = minDim;
-                } else {
-                    return null;
-                }
-            }
-
-            long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
-            long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-            if (wHwp > pageW * 3 || hHwp > pageH * 3) {
-                return null;
-            }
-
-            result = imageLoader.rasterizeShape(shape, fillHex, strokeHex, shape.itemTransform());
-
-            if (result != null && result.pixelWidth > 0 && result.pixelHeight > 0) {
-                double pixelAR = (double) result.pixelWidth / result.pixelHeight;
-                double displayAR = (double) wHwp / Math.max(1, hHwp);
-                if (Math.abs(pixelAR - displayAR) / Math.max(0.001, displayAR) > 0.03) {
-                    double area = (double) wHwp * hHwp;
-                    long newH = (long) Math.sqrt(area / pixelAR);
-                    long newW = (long) (newH * pixelAR);
-                    xHwp += (wHwp - newW) / 2;
-                    yHwp += (hHwp - newH) / 2;
-                    wHwp = newW;
-                    hHwp = newH;
-                }
-            }
-        } else {
-            double w = IDMLGeometry.scaledWidth(effectiveBounds, shape.itemTransform());
-            double h = IDMLGeometry.scaledHeight(effectiveBounds, shape.itemTransform());
-
-            double[] relCenter = IDMLGeometry.pageRelativeCenter(
-                    effectiveBounds, shape.itemTransform(),
-                    page.geometricBounds(), page.itemTransform());
-
-            wHwp = CoordinateConverter.pointsToHwpunits(w);
-            hHwp = CoordinateConverter.pointsToHwpunits(h);
-            xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
-            yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
-
-            if (wHwp <= 0 || hHwp <= 0) {
-                if (shape.hasStroke() && shape.strokeWeight() > 0) {
-                    long minDim = CoordinateConverter.pointsToHwpunits(shape.strokeWeight());
-                    if (minDim < 100) minDim = 100;
-                    if (wHwp <= 0) wHwp = minDim;
-                    if (hHwp <= 0) hHwp = minDim;
-                    xHwp = CoordinateConverter.pointsToHwpunits(relCenter[0]) - wHwp / 2;
-                    yHwp = CoordinateConverter.pointsToHwpunits(relCenter[1]) - hHwp / 2;
-                } else {
-                    return null;
-                }
-            }
-
-            long pageW = CoordinateConverter.pointsToHwpunits(IDMLGeometry.width(page.geometricBounds()));
-            long pageH = CoordinateConverter.pointsToHwpunits(IDMLGeometry.height(page.geometricBounds()));
-            if (wHwp > pageW * 3 || hHwp > pageH * 3) {
-                return null;
-            }
-
-            result = imageLoader.rasterizeShape(shape, fillHex, strokeHex);
-        }
-
-        if (result == null || result.imageData == null) {
-            return null;
-        }
-
-        ASTFigure figure = new ASTFigure();
-        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
-        figure.x(xHwp);
-        figure.y(yHwp);
-        figure.width(wHwp);
-        figure.height(hHwp);
-        figure.zOrder(shape.zOrder());
-        figure.imageData(result.imageData);
-        figure.imageFormat(result.format);
-        figure.pixelWidth(result.pixelWidth);
-        figure.pixelHeight(result.pixelHeight);
-
-        if (!hasRotOrFlip) {
-            if (IDMLGeometry.hasFlip(shape.itemTransform())) {
-                double rotation = IDMLGeometry.extractRotation(shape.itemTransform());
-                if (Math.abs(Math.abs(rotation) - 180) < 0.5) {
-                    result.imageData = ASTImageLoader.flipVertically(result.imageData);
-                    figure.imageData(result.imageData);
-                } else if (Math.abs(rotation) < 0.5) {
-                    result.imageData = ASTImageLoader.flipHorizontally(result.imageData);
-                    figure.imageData(result.imageData);
-                } else {
-                    result.imageData = ASTImageLoader.flipHorizontally(result.imageData);
-                    figure.imageData(result.imageData);
-                    figure.rotationAngle(rotation);
-                }
-            } else {
-                double rotation = IDMLGeometry.extractRotation(shape.itemTransform());
-                if (Math.abs(rotation) > 0.1) {
-                    figure.rotationAngle(rotation);
-                }
-            }
-        }
-
-        figure.fromGroup(shape.fromGroup());
-        figure.sourceId(shape.selfId());
-        return figure;
-    }
-
-    /**
-     * Resolved geometry로 단일 벡터 도형 → ASTFigure 변환.
-     */
-    private static ASTFigure createFigureResolvedShape(IDMLVectorShape shape,
-                                                         ResolvedPageItem ri,
-                                                         ResolvedPage resolvedPage,
-                                                         ASTImageLoader imageLoader,
-                                                         String fillHex, String strokeHex) {
-        double[] gb = ri.geometricBounds();
-
-        double rW = gb[3] - gb[1];
-        double rH = gb[2] - gb[0];
-        // 수평/수직 GraphicLine은 한 축이 0일 수 있음 → strokeWeight으로 최소 크기 보정
-        if (rW <= 0 && rH <= 0) return null;
-        if (rW <= 0 || rH <= 0) {
-            double minDim = shape.hasStroke() ? shape.strokeWeight() : 0.5;
-            if (minDim < 0.5) minDim = 0.5;
-            if (rW <= 0) rW = minDim;
-            if (rH <= 0) rH = minDim;
-        }
-
-        double[] rel = resolvedPage.toPageRelative(gb);
-        double rLeft = rel[0];
-        double rTop = rel[1];
-
-        double pageW = resolvedPage.width();
-        double pageH = resolvedPage.height();
-
-        long wHwp = CoordinateConverter.pointsToHwpunits(rW);
-        long hHwp = CoordinateConverter.pointsToHwpunits(rH);
-        long xHwp = CoordinateConverter.pointsToHwpunits(rLeft);
-        long yHwp = CoordinateConverter.pointsToHwpunits(rTop);
-
-        long pageWHwp = CoordinateConverter.pointsToHwpunits(pageW);
-        long pageHHwp = CoordinateConverter.pointsToHwpunits(pageH);
-        if (wHwp > pageWHwp * 3 || hHwp > pageHHwp * 3) return null;
-
-        ASTImageLoader.ImageResult result = imageLoader.rasterizeShapeAtSize(
-                shape, fillHex, strokeHex, rW, rH);
-        if (result == null || result.imageData == null) return null;
-
-        ASTFigure figure = new ASTFigure();
-        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
-        figure.x(xHwp);
-        figure.y(yHwp);
-        figure.width(wHwp);
-        figure.height(hHwp);
-        figure.zOrder(shape.zOrder());
-        figure.imageData(result.imageData);
-        figure.imageFormat(result.format);
-        figure.pixelWidth(result.pixelWidth);
-        figure.pixelHeight(result.pixelHeight);
-        figure.fromGroup(shape.fromGroup());
-        figure.sourceId(shape.selfId());
-        return figure;
+        // pre-rendered PNG 없으면 표시하지 않음 (Java 래스터라이즈 제거됨)
+        System.out.println("[VectorShape] " + shape.selfId() + " — no pre-rendered PNG, skipping");
+        return null;
     }
 
     /**
@@ -772,103 +547,68 @@ class ASTFigureBuilder {
                                                    ResolvedPage resolvedPage) {
         if (shapes == null || shapes.isEmpty()) return null;
 
-        List<IDMLVectorShape> sorted = new ArrayList<>(shapes);
-        Collections.sort(sorted, new Comparator<IDMLVectorShape>() {
-            public int compare(IDMLVectorShape a, IDMLVectorShape b) {
-                return Integer.compare(a.zOrder(), b.zOrder());
-            }
-        });
-
-        List<ASTImageLoader.ShapeWithColor> swcList = new ArrayList<>();
-        for (IDMLVectorShape s : sorted) {
-            String fillHex = ASTInlineObjectBuilder.resolveColorHex(s.fillColor(), colorResolver);
-            String strokeHex = ASTInlineObjectBuilder.resolveColorHex(s.strokeColor(), colorResolver);
-            // resolved data 폴백: IDML 색상이 없으면 InDesign DOM의 색상 이름으로 시도
-            if (fillHex == null && strokeHex == null && resolvedData != null && s.selfId() != null) {
-                ResolvedPageItem ri = resolvedData.getPageItemByIdmlId(s.selfId());
-                if (ri != null) {
-                    if (ri.fillColorName() != null) {
-                        fillHex = resolvedData.resolveColorHex(ri.fillColorName());
-                    }
-                    if (ri.strokeColorName() != null) {
-                        strokeHex = resolvedData.resolveColorHex(ri.strokeColorName());
-                    }
-                }
-            }
-            if (fillHex == null && strokeHex == null) {
-                continue;
-            }
-            swcList.add(new ASTImageLoader.ShapeWithColor(s, fillHex, strokeHex, s.itemTransform()));
-        }
-        if (swcList.isEmpty()) {
-            return null;
-        }
-
-        double[] pageAbs = IDMLGeometry.absoluteTopLeft(
-                page.geometricBounds(), page.itemTransform());
-        double pageW = IDMLGeometry.width(page.geometricBounds());
-        double pageH = IDMLGeometry.height(page.geometricBounds());
-        double[] pageClipBounds = {pageAbs[1], pageAbs[0],
-                pageAbs[1] + pageH, pageAbs[0] + pageW};
-
         String groupId = shapes.get(0).parentGroupId();
 
-        ASTImageLoader.ImageResult result = imageLoader.rasterizeShapes(swcList, null, pageClipBounds);
-        if (result == null || result.imageData == null) return null;
+        // Pre-rendered 벡터 그룹 PNG 확인 (InDesign에서 렌더링한 이미지)
+        if (resolvedData != null && groupId != null) {
+            RenderedGroup renderedGroup = resolvedData.getRenderedGraphicFrameByIdmlId(groupId);
+            if (renderedGroup != null && renderedGroup.file() != null
+                    && renderedGroup.bounds() != null && resolvedPage != null
+                    && resolvedPage.bounds() != null) {
+                double[] rb = renderedGroup.bounds();
+                double rW = rb[3] - rb[1];
+                double rH = rb[2] - rb[0];
+                double[] rpb = resolvedPage.bounds();
+                double pageW = rpb[3] - rpb[1];
+                double pageH = rpb[2] - rpb[0];
+                // 배경 프레임(>80% 페이지) 건너뜀
+                if (rW > pageW * 0.8 && rH > pageH * 0.8) {
+                    return null;
+                }
 
-        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;
-        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
-        for (ASTImageLoader.ShapeWithColor sc : swcList) {
-            double[] tb = sc.transformedBounds();
-            if (tb == null) {
-                continue;
+                ASTImageLoader.ImageResult imgResult = imageLoader.loadRenderedImage(
+                        renderedGroup.file(),
+                        CoordinateConverter.pointsToHwpunits(rW),
+                        CoordinateConverter.pointsToHwpunits(rH));
+                if (imgResult != null) {
+                    double[] pb = resolvedPage.bounds();
+                    long figX = CoordinateConverter.pointsToHwpunits(rb[1] - pb[1]);
+                    long figY = CoordinateConverter.pointsToHwpunits(rb[0] - pb[0]);
+                    long figW = CoordinateConverter.pointsToHwpunits(rW);
+                    long figH = CoordinateConverter.pointsToHwpunits(rH);
+                    // PNG 비율로 높이 보정
+                    if (imgResult.pixelWidth > 0) {
+                        figH = Math.round(figW * ((double) imgResult.pixelHeight / imgResult.pixelWidth));
+                    }
+
+                    ASTFigure figure = new ASTFigure();
+                    figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
+                    figure.x(figX);
+                    figure.y(figY);
+                    figure.width(figW);
+                    figure.height(figH);
+                    // z-order: 그룹 내 최대값
+                    int maxZ = shapes.get(0).zOrder();
+                    for (IDMLVectorShape s : shapes) {
+                        if (s.zOrder() > maxZ) maxZ = s.zOrder();
+                    }
+                    figure.zOrder(maxZ);
+                    figure.imageData(imgResult.imageData);
+                    figure.imageFormat(imgResult.format);
+                    figure.pixelWidth(imgResult.pixelWidth);
+                    figure.pixelHeight(imgResult.pixelHeight);
+                    figure.fromGroup(shapes.get(0).fromGroup());
+                    figure.sourceId(groupId);
+                    System.out.println("[RenderedVectorGroup] " + groupId
+                            + " → " + renderedGroup.file());
+                    return figure;
+                }
             }
-            if (tb[1] < minX) minX = tb[1];
-            if (tb[0] < minY) minY = tb[0];
-            if (tb[3] > maxX) maxX = tb[3];
-            if (tb[2] > maxY) maxY = tb[2];
         }
-        minX = Math.max(minX, pageAbs[0]);
-        minY = Math.max(minY, pageAbs[1]);
-        maxX = Math.min(maxX, pageAbs[0] + pageW);
-        maxY = Math.min(maxY, pageAbs[1] + pageH);
 
-        double groupCX = (minX + maxX) / 2.0;
-        double groupCY = (minY + maxY) / 2.0;
-
-        double relCX = groupCX - pageAbs[0];
-        double relCY = groupCY - pageAbs[1];
-
-        long wHwp = CoordinateConverter.pointsToHwpunits(result.widthPts);
-        long hHwp = CoordinateConverter.pointsToHwpunits(result.heightPts);
-        long xHwp = CoordinateConverter.pointsToHwpunits(relCX) - wHwp / 2;
-        long yHwp = CoordinateConverter.pointsToHwpunits(relCY) - hHwp / 2;
-
-        if (wHwp <= 0 || hHwp <= 0) return null;
-
-        long pageWHwp = CoordinateConverter.pointsToHwpunits(pageW);
-        long pageHHwp = CoordinateConverter.pointsToHwpunits(pageH);
-        if (wHwp > pageWHwp * 3 || hHwp > pageHHwp * 3) return null;
-
-        ASTFigure figure = new ASTFigure();
-        figure.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
-        figure.x(xHwp);
-        figure.y(yHwp);
-        figure.width(wHwp);
-        figure.height(hHwp);
-        // 그룹 내 z-order: 최댓값 사용 (그룹 내 이미지 위에 렌더링되도록)
-        int maxZ = shapes.get(0).zOrder();
-        for (IDMLVectorShape s : shapes) {
-            if (s.zOrder() > maxZ) maxZ = s.zOrder();
-        }
-        figure.zOrder(maxZ);
-        figure.imageData(result.imageData);
-        figure.imageFormat(result.format);
-        figure.pixelWidth(result.pixelWidth);
-        figure.pixelHeight(result.pixelHeight);
-        figure.fromGroup(shapes.get(0).fromGroup());
-        figure.sourceId(groupId);
-        return figure;
+        // pre-rendered PNG 없으면 표시하지 않음 (Java 래스터라이즈 제거됨)
+        System.out.println("[VectorGroup] " + groupId + " — no pre-rendered PNG, skipping");
+        return null;
     }
 
     /**

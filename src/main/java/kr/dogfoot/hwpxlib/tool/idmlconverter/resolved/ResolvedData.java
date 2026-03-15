@@ -25,6 +25,8 @@ public class ResolvedData {
     private final Map<String, RenderedGroup> renderedGraphicFrameMap = new HashMap<>();  // DOM id → rendered complex graphic
     private Set<String> badgeGroupShapeIdmlIds;  // 배지 그룹 소속 도형 IDML hex ID ("u1735")
     private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TextFrame DOM id → 배지 그룹 RenderedGroup
+    private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
+    private final Map<String, FontMetricEntry> fontMetricMap = new HashMap<>();  // family → metric
 
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
@@ -131,6 +133,21 @@ public class ResolvedData {
     /** 페이지 이름(실제 페이지 번호 문자열, "240")으로 조회 */
     public ResolvedPage getPageByName(String name) {
         return pageByName.get(name);
+    }
+
+    // --- FontMetrics ---
+
+    public void addFontMetric(FontMetricEntry entry) {
+        fontMetrics.add(entry);
+        if (entry.family() != null) {
+            fontMetricMap.put(entry.family(), entry);
+        }
+    }
+
+    public List<FontMetricEntry> fontMetrics() { return fontMetrics; }
+
+    public FontMetricEntry getFontMetric(String family) {
+        return fontMetricMap.get(family);
     }
 
     // --- RenderedTextFrame ---

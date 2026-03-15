@@ -26,6 +26,9 @@ public class FontRegistry {
 
     private final HWPXFile hwpxFile;
     private final Map<String, String> customFontMap;
+    private FontMapper fontMapperInstance;  // 3계층 매핑 인스턴스
+    private final Map<String, String[]> fontPairCache = new LinkedHashMap<>();
+    private final Map<String, FontMapper.MappingResult> fontPairMappingCache = new LinkedHashMap<>();
     private int nextFontId;
 
     public FontRegistry(HWPXFile hwpxFile) {
@@ -42,6 +45,17 @@ public class FontRegistry {
         registeredFonts.add("함초롬돋움");
         registeredFonts.add("함초롬바탕");
         nextFontId = 2;
+    }
+
+    /**
+     * 3계층 FontMapper 인스턴스를 설정한다.
+     */
+    public void setFontMapper(FontMapper mapper) {
+        this.fontMapperInstance = mapper;
+    }
+
+    public FontMapper fontMapper() {
+        return fontMapperInstance;
     }
 
     /**
@@ -89,24 +103,51 @@ public class FontRegistry {
     public String[] resolveFontIdPair(String fontFamily) {
         if (fontFamily == null) return new String[]{"1", "1"};
 
-        // 직접 등록 폰트 (수식 등 특수 폰트) → 양쪽 동일
-        String directId = fontNameToId.get(fontFamily);
-        if (directId != null) return new String[]{directId, directId};
-
-        if (fontFamily.contains("BT수식") || fontFamily.startsWith("EH")) {
-            String id = registerDirectFont(fontFamily);
+        // 수식 등 특수 폰트 → 양쪽 동일 (FontMapper를 거치면 안 됨)
+        if (fontFamily.contains("BT수식") || fontFamily.startsWith("EH")
+                || "HYhwpEQ".equals(fontFamily)) {
+            String id = ensureRegistered(fontFamily);
             return new String[]{id, id};
         }
 
-        // FontMapper 쌍 매핑
-        String[] pair = FontMapper.mapToHwpxFontPair(fontFamily, customFontMap);
-        String hangulName = pair[0];
-        String latinName = pair[1];
+        // 매핑 결과 캐시 조회
+        String[] cached = fontPairCache.get(fontFamily);
+        if (cached != null) {
+            lastMappingResult = fontPairMappingCache.get(fontFamily);
+            return cached;
+        }
 
-        String hangulId = ensureRegistered(hangulName);
-        String latinId = ensureRegistered(latinName);
+        String[] result;
 
-        return new String[]{hangulId, latinId};
+        // 3계층 FontMapper 인스턴스가 있으면 사용
+        if (fontMapperInstance != null) {
+            FontMapper.MappingResult mr = fontMapperInstance.mapFont(fontFamily);
+            lastMappingResult = mr;
+            String hangulId = ensureRegistered(mr.koFont);
+            String latinId = ensureRegistered(mr.enFont);
+            result = new String[]{hangulId, latinId};
+            fontPairMappingCache.put(fontFamily, mr);
+        } else {
+            // 폴백: 정적 매핑
+            String[] pair = FontMapper.mapToHwpxFontPair(fontFamily, customFontMap);
+            lastMappingResult = null;
+            String hangulId = ensureRegistered(pair[0]);
+            String latinId = ensureRegistered(pair[1]);
+            result = new String[]{hangulId, latinId};
+        }
+
+        fontPairCache.put(fontFamily, result);
+        return result;
+    }
+
+    /** 마지막 resolveFontIdPair 호출의 MappingResult (자간 보정값 포함) */
+    private FontMapper.MappingResult lastMappingResult;
+
+    /**
+     * 마지막 resolveFontIdPair() 호출 결과의 자간 보정값을 반환한다.
+     */
+    public int lastSpacingAdjust() {
+        return lastMappingResult != null ? lastMappingResult.spacingAdjustPercent : 0;
     }
 
     /**

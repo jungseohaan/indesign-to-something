@@ -106,6 +106,14 @@ public class ResolvedDataReader {
             }
         }
 
+        // fontMetrics (InDesign에서 측정한 폰트 메트릭)
+        if (root.has("fontMetrics")) {
+            for (JsonElement e : root.getAsJsonArray("fontMetrics")) {
+                FontMetricEntry fm = parseFontMetric(e.getAsJsonObject());
+                if (fm != null) data.addFontMetric(fm);
+            }
+        }
+
         return data;
         } finally {
             try { reader.close(); } catch (IOException e) {
@@ -251,6 +259,19 @@ public class ResolvedDataReader {
             page.marginRight(getDouble(mp, "right", 0));
         }
         return page;
+    }
+
+    private static FontMetricEntry parseFontMetric(JsonObject o) {
+        FontMetricEntry fm = new FontMetricEntry();
+        fm.family(getString(o, "family"));
+        fm.style(getString(o, "style"));
+        fm.korWidth(getDouble(o, "korWidth", 0));
+        fm.latWidth(getDouble(o, "latWidth", 0));
+        fm.weight((int) getDouble(o, "weight", 400));
+        fm.xHeight(getDouble(o, "xHeight", 0));
+        fm.ascent(getDouble(o, "ascent", 0));
+        fm.descent(getDouble(o, "descent", 0));
+        return fm;
     }
 
     private static ResolvedPageItem parsePageItem(JsonObject o) {

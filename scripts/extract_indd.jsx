@@ -166,13 +166,21 @@ function main(args) {
 
             // 2.5. 짧은 텍스트 프레임 렌더링
             writeProgress(outputDir, "rendered_frames", 0, rangePageCount);
-            var renderedFrames = exportRenderedTextFrames(doc, outputDir, startPage, endPage);
+            var renderedResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage);
+            var renderedFrames = renderedResult.frames;
+            var badgeChildIds = renderedResult.badgeChildIds;
 
             // 2.6. PDF 배치 프레임 렌더링 (멀티페이지 PDF 지원)
             var renderedPdfFrames = exportPdfPlacedFrames(doc, outputDir, startPage, endPage);
 
             // 2.7. 복합 장식 그래픽 렌더링 (중첩 도형, 사선 패턴 등)
             var renderedGraphicFrames = exportComplexGraphicFrames(doc, outputDir, startPage, endPage);
+
+            // 2.8. 벡터 도형/그룹 InDesign 렌더링
+            var renderedVectorFrames = exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds);
+            for (var vi = 0; vi < renderedVectorFrames.length; vi++) {
+                renderedGraphicFrames.push(renderedVectorFrames[vi]);
+            }
 
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
@@ -293,7 +301,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
 
     var renderedFrames = [];
     var renderedIds = {}; // 이미 렌더링된 ID 중복 방지
-    var badgeGroupChildIds = {}; // 배지 그룹 자식 TextFrame ID → true (개별 렌더링 스킵)
+    var badgeGroupChildIds = {}; // 배지 그룹 자식 ID → true (개별 렌더링 스킵, TextFrame + 도형 모두)
     var allItems = doc.allPageItems;
 
     // 본문 폰트 사전 스캔: 문서에서 가장 많이 사용되는 폰트 상위 N개를 본문 폰트로 간주
@@ -321,7 +329,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
         var grpDomId = grp.id;
         if (renderedIds[grpDomId]) continue;
 
-        // 자식 도형/텍스트 ID 수집
+        // 자식 도형/텍스트 ID 수집 (모든 자식을 badgeGroupChildIds에 등록)
         var childIds = [];
         var childTextFrameIds = [];
         try {
@@ -329,9 +337,9 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
             for (var ci = 0; ci < grpItems.length; ci++) {
                 var child = grpItems[ci];
                 childIds.push(child.id);
+                badgeGroupChildIds[child.id] = true;
                 if (child.constructor.name === "TextFrame") {
                     childTextFrameIds.push(child.id);
-                    badgeGroupChildIds[child.id] = true;
                 }
             }
         } catch (e) {}
@@ -510,7 +518,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
         }
     }
 
-    return renderedFrames;
+    return { frames: renderedFrames, badgeChildIds: badgeGroupChildIds };
 }
 
 // --- 복합 장식 그래픽 프레임 렌더링 ---
@@ -677,6 +685,105 @@ function exportPdfPlacedFrames(doc, outputDir, startPage, endPage) {
     }
 
     return renderedPdfFrames;
+}
+
+// --- 벡터 도형/그룹 InDesign 렌더링 ---
+
+/**
+ * 벡터 도형(Rectangle, Polygon, Oval, GraphicLine)과 그룹을
+ * InDesign에서 PNG로 렌더링한다.
+ * Java 래스터라이즈 대신 InDesign의 네이티브 렌더링을 사용하여
+ * 그라디언트, DropShadow, 투명도 등 모든 효과를 정확하게 캡처한다.
+ */
+function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    var results = [];
+    var allItems = doc.allPageItems;
+    var renderedIds = {};
+
+    app.pngExportPreferences.exportResolution = 300;
+    app.pngExportPreferences.antiAlias = true;
+    app.pngExportPreferences.transparentBackground = true;
+    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
+
+    // 모든 벡터 도형을 개별 렌더링 (그룹 내 도형 포함)
+    // 그룹 통째 렌더링은 z-order가 합쳐져 다른 요소를 가리므로 개별 렌더링
+    for (var si = 0; si < allItems.length; si++) {
+        var item = allItems[si];
+        var cName = item.constructor.name;
+
+        if (cName !== "Rectangle" && cName !== "Polygon"
+            && cName !== "Oval" && cName !== "GraphicLine") continue;
+
+        var domId = item.id;
+        if (renderedIds[domId]) continue;
+
+        // 배지 그룹 자식 도형 건너뜀 (배지 통째 렌더링에서 처리)
+        if (badgeChildIds && badgeChildIds[domId]) continue;
+
+        // 이미지 컨테이너 건너뜀
+        var hasPlaced = false;
+        try { hasPlaced = item.images && item.images.length > 0; } catch (e) {}
+        if (!hasPlaced) try { hasPlaced = item.pdfs && item.pdfs.length > 0; } catch (e) {}
+        if (!hasPlaced) try { hasPlaced = item.epss && item.epss.length > 0; } catch (e) {}
+        if (hasPlaced) continue;
+
+        // 인라인 앵커 도형 건너뜀
+        try {
+            var pName = item.parent.constructor.name;
+            if (pName === "TextFrame" || pName === "Character"
+                || pName === "InsertionPoint" || pName === "Cell"
+                || pName === "Story") continue;
+        } catch (e) {}
+
+        // 페이지 범위 필터
+        var parentPage = null;
+        try { parentPage = item.parentPage; } catch (e) {}
+        if (!parentPage) continue;
+        var pgIdx = parentPage.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        // 복합 그래픽 프레임 건너뜀 (exportComplexGraphicFrames에서 처리)
+        var hasNestedItems = false;
+        try { hasNestedItems = item.allPageItems && item.allPageItems.length > 0; } catch (e) {}
+        if (hasNestedItems) {
+            try { if (item.contentType === ContentType.GRAPHIC_TYPE) continue; } catch (e) {}
+        }
+
+        try {
+            var fileName = "shape_" + domId + ".png";
+            var outFile = File(renderDir + "/" + fileName);
+            item.exportFile(ExportFormat.PNG_FORMAT, outFile);
+
+            var bounds = null;
+            try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
+            if (!bounds) {
+                try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
+            }
+
+            if (bounds) {
+                var pageBounds = parentPage.bounds;
+                bounds[0] -= pageBounds[0];
+                bounds[1] -= pageBounds[1];
+                bounds[2] -= pageBounds[0];
+                bounds[3] -= pageBounds[1];
+            }
+
+            results.push({
+                id: domId,
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: parentPage.documentOffset
+            });
+            renderedIds[domId] = true;
+        } catch (e) {
+            // 개별 도형 렌더링 실패 — 건너뜀
+        }
+    }
+
+    return results;
 }
 
 /**
@@ -981,6 +1088,8 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
     var pages = collectPages(doc, startPage, endPage);
     var pageItems = collectPageItems(doc, startPage, endPage);
 
+    var fontMetrics = measureFontMetrics(doc);
+
     return {
         documentInfo: docInfo,
         paragraphStyles: paraStyles,
@@ -990,8 +1099,142 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
         stories: stories,
         textFrames: textFrames,
         pages: pages,
-        pageItems: pageItems
+        pageItems: pageItems,
+        fontMetrics: fontMetrics
     };
+}
+
+/**
+ * 문서에 사용된 폰트의 글리프 메트릭을 측정한다.
+ * 임시 TextFrame을 생성하여 한글/영문 샘플 텍스트의 폭, weight, x-height, ascent/descent를 측정.
+ */
+function measureFontMetrics(doc) {
+    var korSample = "\uAC00\uB098\uB2E4\uB77C\uB9C8\uBC14\uC0AC\uC544\uC790\uCC28\uCE74\uD0C0\uD30C\uD558"; // 가나다라마바사아자차카타파하
+    var latSample = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    var testSize = 10; // 10pt 기준
+
+    // 문서에서 사용된 폰트 패밀리 수집
+    var usedFonts = {};
+    var stories = doc.stories;
+    for (var i = 0; i < stories.length; i++) {
+        var chars = stories[i].characters;
+        var step = Math.max(1, Math.floor(chars.length / 20)); // 최대 20개 샘플링
+        for (var j = 0; j < chars.length; j += step) {
+            try {
+                var af = chars[j].appliedFont;
+                var ff = af.fontFamily;
+                if (!usedFonts[ff]) {
+                    usedFonts[ff] = {
+                        font: af,
+                        style: af.fontStyleName
+                    };
+                }
+            } catch(e) {}
+        }
+    }
+
+    var results = [];
+
+    // 임시 TextFrame 생성
+    var tf;
+    try {
+        tf = doc.pages[0].textFrames.add();
+        tf.geometricBounds = [0, 0, 100, 1000]; // 충분히 넓게
+        tf.textFramePreferences.autoSizingType = AutoSizingTypeEnum.OFF;
+    } catch(e) {
+        return results;
+    }
+
+    for (var family in usedFonts) {
+        try {
+            var fontInfo = usedFonts[family];
+            var fontRef = fontInfo.font;
+
+            // weight 추론 (fontStyleName에서)
+            var styleLower = fontInfo.style.toLowerCase();
+            var weight = 400;
+            if (styleLower.indexOf("thin") >= 0 || styleLower.indexOf("hairline") >= 0) weight = 100;
+            else if (styleLower.indexOf("ultralight") >= 0 || styleLower.indexOf("extralight") >= 0) weight = 200;
+            else if (styleLower.indexOf("light") >= 0) weight = 300;
+            else if (styleLower.indexOf("black") >= 0 || styleLower.indexOf("heavy") >= 0) weight = 900;
+            else if (styleLower.indexOf("extrabold") >= 0 || styleLower.indexOf("ultrabold") >= 0) weight = 800;
+            else if (styleLower.indexOf("bold") >= 0) weight = 700;
+            else if (styleLower.indexOf("semibold") >= 0 || styleLower.indexOf("demibold") >= 0) weight = 600;
+            else if (styleLower.indexOf("medium") >= 0) weight = 500;
+
+            // 한글 폭 측정
+            var avgKorWidth = 0;
+            try {
+                tf.contents = korSample;
+                tf.characters.everyItem().appliedFont = fontRef;
+                tf.characters.everyItem().pointSize = testSize;
+                tf.characters.everyItem().tracking = 0;
+                tf.characters.everyItem().desiredLetterSpacing = 0;
+                if (tf.lines.length > 0) {
+                    var korTotalWidth = tf.lines[0].endHorizontalOffset - tf.lines[0].horizontalOffset;
+                    avgKorWidth = korTotalWidth / korSample.length;
+                }
+            } catch(e2) { /* 한글 미지원 폰트 */ }
+
+            // 영문 폭 측정
+            var avgLatWidth = 0;
+            try {
+                tf.contents = latSample;
+                tf.characters.everyItem().appliedFont = fontRef;
+                tf.characters.everyItem().pointSize = testSize;
+                tf.characters.everyItem().tracking = 0;
+                tf.characters.everyItem().desiredLetterSpacing = 0;
+                if (tf.lines.length > 0) {
+                    var latTotalWidth = tf.lines[0].endHorizontalOffset - tf.lines[0].horizontalOffset;
+                    avgLatWidth = latTotalWidth / latSample.length;
+                }
+            } catch(e3) {}
+
+            // x-height 측정 (소문자 x)
+            var xHeight = 0;
+            try {
+                tf.contents = "x";
+                tf.characters.everyItem().appliedFont = fontRef;
+                tf.characters.everyItem().pointSize = testSize;
+                if (tf.lines.length > 0 && tf.characters.length > 0) {
+                    var charBounds = tf.characters[0].geometricBounds; // [top, left, bottom, right]
+                    xHeight = charBounds[2] - charBounds[0]; // 근사치
+                }
+            } catch(e4) {}
+
+            // ascent/descent — 대문자 기준
+            var ascent = 0, descent = 0;
+            try {
+                tf.contents = "Hg";
+                tf.characters.everyItem().appliedFont = fontRef;
+                tf.characters.everyItem().pointSize = testSize;
+                if (tf.characters.length >= 2) {
+                    var baseline = tf.characters[0].baseline;
+                    var topBound = tf.characters[0].geometricBounds[0];
+                    var bottomBound = tf.characters[1].geometricBounds[2]; // 'g' descender
+                    ascent = baseline - topBound;
+                    descent = bottomBound - baseline;
+                }
+            } catch(e5) {}
+
+            results.push({
+                family: family,
+                style: fontInfo.style,
+                korWidth: Math.round(avgKorWidth * 100) / 100,
+                latWidth: Math.round(avgLatWidth * 100) / 100,
+                weight: weight,
+                xHeight: Math.round(xHeight * 100) / 100,
+                ascent: Math.round(ascent * 100) / 100,
+                descent: Math.round(descent * 100) / 100
+            });
+        } catch(e6) {
+            // 폰트 측정 실패 — 스킵
+        }
+    }
+
+    try { tf.remove(); } catch(e) {}
+
+    return results;
 }
 
 function collectDocumentInfo(doc) {

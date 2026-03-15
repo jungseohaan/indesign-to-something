@@ -434,73 +434,16 @@ class ASTPageProcessor {
             vectorShapes.removeIf(s -> resolvedData.isShapeInBadgeGroup(s.selfId()));
         }
 
-        // 그룹 소속 도형과 개별 도형 분리
-        Map<String, List<IDMLVectorShape>> groupedShapes = new LinkedHashMap<>();
-        List<IDMLVectorShape> ungrouped = new ArrayList<>();
-        for (IDMLVectorShape s : vectorShapes) {
-            if (s.fromGroup() && s.parentGroupId() != null) {
-                groupedShapes.computeIfAbsent(s.parentGroupId(), k -> new ArrayList<>()).add(s);
-            } else {
-                ungrouped.add(s);
-            }
-        }
-
         IDMLPage finalPage = page;
 
-        // 개별 도형 래스터화
-        List<ASTFigure> vectorFigures = ungrouped.parallelStream()
+        // 모든 도형을 개별 처리 (그룹 소속 여부 무관)
+        // InDesign에서 개별 PNG 렌더링 → 각 도형의 z-order 보존
+        List<ASTFigure> vectorFigures = vectorShapes.parallelStream()
                 .map(shape -> ASTFigureBuilder.createFigureFromVectorShape(
                         shape, finalPage, imageLoader, colorResolver,
                         resolvedData, resolvedPage))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-
-
-        // 그룹별 합성 래스터화 (넓게 분산된 도형은 클러스터별 분할)
-        // 그룹 내 텍스트 프레임이 벡터 도형 사이에 끼어 있으면
-        // 텍스트 프레임 z-order 경계에서 분할하여 z-order 역전 방지
-        for (Map.Entry<String, List<IDMLVectorShape>> entry : groupedShapes.entrySet()) {
-            String groupId = entry.getKey();
-            List<IDMLVectorShape> group = entry.getValue();
-
-            // 같은 그룹 + 서브그룹의 텍스트 프레임 z-order 수집
-            // 벡터 셰이프 z-order 범위 내의 모든 텍스트 프레임을 포함
-            // (서브그룹 텍스트 프레임이 셰이프 사이에 끼어 있으면 분할 필요)
-            int minShapeZ = Integer.MAX_VALUE, maxShapeZ = Integer.MIN_VALUE;
-            for (IDMLVectorShape s : group) {
-                minShapeZ = Math.min(minShapeZ, s.zOrder());
-                maxShapeZ = Math.max(maxShapeZ, s.zOrder());
-            }
-            List<Integer> tfZOrders = new ArrayList<>();
-            for (IDMLTextFrame tf : spread.textFrames()) {
-                int tfZ = tf.zOrder();
-                if (groupId.equals(tf.parentGroupId())) {
-                    tfZOrders.add(tfZ);
-                } else if (tfZ > minShapeZ && tfZ < maxShapeZ) {
-                    // 서브그룹 텍스트 프레임: 셰이프 z-order 범위 내에 있으면 포함
-                    tfZOrders.add(tfZ);
-                }
-            }
-
-            List<List<IDMLVectorShape>> subGroups;
-            if (tfZOrders.isEmpty()) {
-                subGroups = Collections.singletonList(group);
-            } else {
-                subGroups = splitGroupAtTextFrameBoundaries(group, tfZOrders);
-            }
-
-            for (List<IDMLVectorShape> subGroup : subGroups) {
-                List<List<IDMLVectorShape>> clusters = clusterGroupShapes(subGroup);
-                for (List<IDMLVectorShape> cluster : clusters) {
-                    ASTFigure fig = ASTFigureBuilder.createFigureFromVectorGroup(
-                            cluster, finalPage, imageLoader, colorResolver,
-                            resolvedData, resolvedPage);
-                    if (fig != null) {
-                        vectorFigures.add(fig);
-                    }
-                }
-            }
-        }
 
         // 페이지 경계 클리핑
         long fullPageW = CoordinateConverter.pointsToHwpunits(

@@ -37,8 +37,14 @@ public class FlatToHwpxConverter {
 
     public static ConvertResult convert(FlatDocument flatDoc, ProgressReporter reporter,
                                          Map<String, String> customFontMap) throws ConvertException {
+        return convert(flatDoc, reporter, customFontMap, null);
+    }
+
+    public static ConvertResult convert(FlatDocument flatDoc, ProgressReporter reporter,
+                                         Map<String, String> customFontMap,
+                                         kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper fontMapper) throws ConvertException {
         try {
-            return new FlatToHwpxConverter(flatDoc, reporter, customFontMap).doConvert();
+            return new FlatToHwpxConverter(flatDoc, reporter, customFontMap, fontMapper).doConvert();
         } catch (ConvertException ce) {
             throw ce;
         } catch (Exception e) {
@@ -54,6 +60,7 @@ public class FlatToHwpxConverter {
     private final ConvertResult result;
     private final ProgressReporter reporter;
     private final Map<String, String> customFontMap;
+    private final kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper fontMapper;
 
     private int pagesConverted;
 
@@ -64,12 +71,14 @@ public class FlatToHwpxConverter {
     private HwpxImageBuilder imageBuilder;
 
     private FlatToHwpxConverter(FlatDocument flatDoc, ProgressReporter reporter,
-                                 Map<String, String> customFontMap) {
+                                 Map<String, String> customFontMap,
+                                 kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper fontMapper) {
         this.gateway = new FlatDocumentGateway(flatDoc);
         this.adapter = new FlatNodeAdapter(gateway);
         this.result = new ConvertResult();
         this.reporter = reporter;
         this.customFontMap = customFontMap;
+        this.fontMapper = fontMapper;
     }
 
     // ── 변환 메인 ──
@@ -85,6 +94,9 @@ public class FlatToHwpxConverter {
 
         // 2. 레지스트리 초기화
         FontRegistry fontRegistry = new FontRegistry(hwpxFile, customFontMap);
+        if (fontMapper != null) {
+            fontRegistry.setFontMapper(fontMapper);
+        }
         StyleRegistry styleRegistry = new StyleRegistry(hwpxFile, fontRegistry);
 
         // 3. 컨텍스트 + 빌더 생성

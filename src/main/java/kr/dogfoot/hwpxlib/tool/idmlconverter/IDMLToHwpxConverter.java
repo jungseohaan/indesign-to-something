@@ -177,18 +177,19 @@ public class IDMLToHwpxConverter {
                                 + tfCount + " 텍스트프레임, " + imgCount + " 이미지, " + tblCount + " 테이블");
             }
 
-            // Phase 2.8: 사용자 지정 폰트 매핑 로드 (선택적)
-            Map<String, String> customFontMap = null;
+            // Phase 2.8: 3계층 폰트 매퍼 초기화 (선택적)
+            FontMapper fontMapper = null;
             if (options.fontMapPath() != null) {
-                customFontMap = FontMapper.loadFontMapFromJson(options.fontMapPath());
-                if (customFontMap.isEmpty()) {
-                    customFontMap = null;
+                fontMapper = new FontMapper();
+                fontMapper.loadFontMapping(options.fontMapPath());
+                if (resolvedData != null) {
+                    fontMapper.setIdmlMetrics(resolvedData.fontMetrics());
                 }
             }
 
             // Phase 3: AST -> Flat -> HWPX (페이지별 진행률: 10~90)
             FlatDocument flatDoc = ASTToFlatConverter.convert(astDoc);
-            ConvertResult result = FlatToHwpxConverter.convert(flatDoc, reporter, customFontMap);
+            ConvertResult result = FlatToHwpxConverter.convert(flatDoc, reporter, null, fontMapper);
 
             // 초기 단계 경고 + AST 정규화 경고를 결과에 병합
             for (String w : earlyWarnings) { result.addWarning(w); }
@@ -843,6 +844,9 @@ public class IDMLToHwpxConverter {
             String idmlHexId = "u" + Integer.toHexString(rg.id());
             if (usedSourceIds.contains(idmlHexId)) continue;
 
+            // 배지 그룹 자식 도형 건너뜀 (배지 통째 렌더링에서 처리)
+            if (resolvedData.isShapeInBadgeGroup(idmlHexId)) continue;
+
             // 배경 프레임 필터: 페이지의 80% 이상이면 건너뜀
             int pageIdx = rg.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
@@ -924,20 +928,18 @@ public class IDMLToHwpxConverter {
                     fig.cropTopFraction(cropTop);
                 }
 
-                // 겹치는 유사 크기 도형의 최대 z-order 탐색
-                // → 렌더 그래픽을 그 위에 배치 (배경 위에 전경 오버레이)
+                // 겹치는 도형의 z-order 탐색
+                // 자기보다 작은 겹치는 도형이 있으면 그 아래에, 없으면 겹치는 최대 z-order 위에
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
-                int maxOverlapZ = 0;
+                long figArea = figW * figH;
+                int minSmallerZ = Integer.MAX_VALUE;  // 자기보다 작은 겹치는 도형의 최소 z-order
+                int maxOverlapZ = 0;                   // 겹치는 모든 도형의 최대 z-order
+                boolean hasSmallerOverlap = false;
                 for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : section.blocks()) {
                     if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) {
                         kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure existing =
                                 (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) blk;
                         long ew = existing.width(), eh = existing.height();
-                        // 크기 유사성 (±50%)
-                        if (ew < figW / 2 || ew > figW * 2
-                                || eh < figH / 2 || eh > figH * 2) {
-                            continue;
-                        }
                         // 바운딩 박스 교차 확인
                         long ox1 = Math.max(existing.x(), figX);
                         long oy1 = Math.max(existing.y(), figY);
@@ -947,10 +949,23 @@ public class IDMLToHwpxConverter {
                             if (existing.zOrder() > maxOverlapZ) {
                                 maxOverlapZ = existing.zOrder();
                             }
+                            long existArea = ew * eh;
+                            if (existArea < figArea) {
+                                hasSmallerOverlap = true;
+                                if (existing.zOrder() < minSmallerZ) {
+                                    minSmallerZ = existing.zOrder();
+                                }
+                            }
                         }
                     }
                 }
-                fig.zOrder(maxOverlapZ + 1);
+                // 자기보다 작은 도형이 겹치면 그 아래에 (큰 도형 = 배경)
+                // 아니면 겹치는 최대 위에
+                if (hasSmallerOverlap) {
+                    fig.zOrder(Math.max(0, minSmallerZ - 1));
+                } else {
+                    fig.zOrder(maxOverlapZ + 1);
+                }
 
                 section.addBlock(fig);
                 injected++;

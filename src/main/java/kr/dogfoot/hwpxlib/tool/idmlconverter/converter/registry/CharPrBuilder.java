@@ -82,8 +82,12 @@ public final class CharPrBuilder {
         charPr.createRatio();
         charPr.ratio().set(ratio, ratio, ratio, ratio, ratio, ratio, ratio);
 
-        // 자간
+        // 자간 (InDesign letterSpacing + 폰트 매핑 자간 보정)
         short spacing = letterSpacing != null ? letterSpacing : 0;
+        int fontSpacingAdjust = fontRegistry.lastSpacingAdjust();
+        if (fontSpacingAdjust != 0) {
+            spacing = (short) (spacing + fontSpacingAdjust);
+        }
         charPr.createSpacing();
         charPr.spacing().set(spacing, spacing, spacing, spacing, spacing, spacing, spacing);
 
