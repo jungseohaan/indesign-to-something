@@ -51,6 +51,11 @@ public class IDMLImageFrame {
     private double[] cornerRadii;        // [topLeft, topRight, bottomLeft, bottomRight]
     private String cornerOption;         // "RoundedCorner", "None" 등
 
+    // 그라디언트 페더 (Image 요소의 TransparencySetting > GradientFeatherSetting)
+    private double gradientFeatherAngle = Double.NaN;   // 각도 (degrees)
+    private double gradientFeatherLength;                // 길이 (points)
+    private double[] gradientFeatherStart;               // 시작점 [x, y] (로컬 좌표)
+
     // 텍스트 감싸기 (TextWrapPreference)
     private String textWrapMode;         // "None", "BoundingBoxTextWrap", "JumpObjectTextWrap", "Contour"
     private String textWrapSide;         // "BothSides", "LeftSide", "RightSide", "LargestArea"
@@ -187,6 +192,19 @@ public class IDMLImageFrame {
 
     public double textWrapRight() { return textWrapRight; }
     public void textWrapRight(double v) { this.textWrapRight = v; }
+
+    public double gradientFeatherAngle() { return gradientFeatherAngle; }
+    public void gradientFeatherAngle(double v) { this.gradientFeatherAngle = v; }
+
+    public double gradientFeatherLength() { return gradientFeatherLength; }
+    public void gradientFeatherLength(double v) { this.gradientFeatherLength = v; }
+
+    public double[] gradientFeatherStart() { return gradientFeatherStart; }
+    public void gradientFeatherStart(double[] v) { this.gradientFeatherStart = v; }
+
+    public boolean hasGradientFeather() {
+        return !Double.isNaN(gradientFeatherAngle) && gradientFeatherLength > 0;
+    }
 
     public String imageFillColor() { return imageFillColor; }
     public void imageFillColor(String v) { this.imageFillColor = v; }

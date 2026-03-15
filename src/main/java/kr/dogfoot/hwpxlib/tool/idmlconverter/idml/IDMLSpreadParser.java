@@ -574,6 +574,32 @@ class IDMLSpreadParser {
             }
         }
 
+        // Image 요소의 GradientFeatherSetting 파싱 (투명도 그라디언트)
+        Element imgTransparency = getFirstChildElement(imageElem, "TransparencySetting");
+        if (imgTransparency != null) {
+            Element gfs = getFirstChildElement(imgTransparency, "GradientFeatherSetting");
+            if (gfs != null) {
+                String applied = gfs.getAttribute("Applied");
+                double gfAngle = parseDoubleAttrDef(gfs, "Angle", Double.NaN);
+                double gfLength = parseDoubleAttrDef(gfs, "Length", 0);
+                if (("true".equals(applied) || !Double.isNaN(gfAngle)) && gfLength > 0) {
+                    frame.gradientFeatherAngle(Double.isNaN(gfAngle) ? 0 : gfAngle);
+                    frame.gradientFeatherLength(gfLength);
+                    String startStr = getAttrOrNull(gfs, "GradientStart");
+                    if (startStr != null) {
+                        String[] parts = startStr.trim().split("\\s+");
+                        if (parts.length >= 2) {
+                            try {
+                                frame.gradientFeatherStart(new double[]{
+                                        Double.parseDouble(parts[0]),
+                                        Double.parseDouble(parts[1])});
+                            } catch (NumberFormatException ignored) {}
+                        }
+                    }
+                }
+            }
+        }
+
         // TextWrapPreference 파싱
         List<Element> twpList = getDescendantElements(shapeElem, "TextWrapPreference");
         if (!twpList.isEmpty()) {
@@ -1186,9 +1212,8 @@ class IDMLSpreadParser {
                             }
                         }
                         // 프레임 내부의 TextFrame 자식 수집
-                        // GraphicType 컨테이너(사선 원 등)는 renderedGraphicFrame으로 처리되므로
-                        // 내부 자식(GraphicLine 등)을 개별 추출하지 않음
-                        if (!isGraphicContainer2) {
+                        // GraphicType 컨테이너도 TextFrame 자식이 있으면 텍스트로 추출
+                        {
                             double[] rectTransform = IDMLGeometry.parseTransform(
                                     elem.getAttribute("ItemTransform"));
                             double[] combinedForChildren = CoordinateConverter.combineTransforms(
@@ -1201,6 +1226,18 @@ class IDMLSpreadParser {
                                 // 래퍼 도형 제거 (TextFrame에 스타일 전파됨, 클리핑 자식 없을 때만)
                                 if (vectorShape != null && !vectorShape.hasClippedChildren()) {
                                     spread.vectorShapes().remove(vectorShape);
+                                }
+                                // GraphicType 컨테이너의 배경 도형도 제거 (렌더링 PNG 중복 방지)
+                                if (isGraphicContainer2) {
+                                    String elemSelfId = elem.getAttribute("Self");
+                                    java.util.Iterator<IDMLVectorShape> it = spread.vectorShapes().iterator();
+                                    while (it.hasNext()) {
+                                        IDMLVectorShape vs = it.next();
+                                        if (elemSelfId.equals(vs.selfId())) {
+                                            it.remove();
+                                            break;
+                                        }
+                                    }
                                 }
                                 // 추출된 TextFrame을 spread에서 빼고 지연 목록으로 이동
                                 for (int d = tfCountBefore; d < tfCountAfter; d++) {

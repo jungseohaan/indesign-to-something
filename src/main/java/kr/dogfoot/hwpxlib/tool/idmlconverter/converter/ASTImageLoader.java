@@ -1090,6 +1090,117 @@ public class ASTImageLoader {
     }
 
     /**
+     * 이미지 바이너리에 GradientFeather 알파 마스크를 적용하여 PNG로 반환한다.
+     * GradientStart는 이미지 로컬 좌표계(GraphicBounds 중심 기준)이므로
+     * imageTransform을 통해 프레임 좌표로 변환한다.
+     *
+     * @param imageData      원본 이미지 바이너리 (이미 프레임에 클리핑됨)
+     * @param angle          그라디언트 각도 (degrees, InDesign: 0°=오른쪽, 반시계)
+     * @param length         그라디언트 길이 (points, 이미지 좌표계)
+     * @param start          그라디언트 시작점 [x, y] (이미지 중심 기준 오프셋, null이면 중심)
+     * @param frameBounds    프레임 bounds [top, left, bottom, right] (로컬 좌표, points)
+     * @param imageTransform 이미지→프레임 변환 [a, b, c, d, tx, ty] (null 가능)
+     * @param graphicBounds  원본 이미지 크기 [left, top, right, bottom] (null 가능)
+     * @return 알파 마스크 적용된 PNG, 실패 시 null
+     */
+    public static byte[] applyGradientFeatherToImage(byte[] imageData, double angle,
+                                                      double length, double[] start,
+                                                      double[] frameBounds,
+                                                      double[] imageTransform,
+                                                      double[] graphicBounds) {
+        if (imageData == null || length <= 0) return null;
+        try {
+            BufferedImage src = ImageIO.read(new ByteArrayInputStream(imageData));
+            if (src == null) return null;
+
+            // ARGB로 변환
+            BufferedImage image = new BufferedImage(src.getWidth(), src.getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = image.createGraphics();
+            g.drawImage(src, 0, 0, null);
+            g.dispose();
+
+            double frameW = frameBounds[3] - frameBounds[1];
+            double frameH = frameBounds[2] - frameBounds[0];
+            double frameLeft = frameBounds[1];
+            double frameTop = frameBounds[0];
+
+            // GradientStart를 이미지 좌표 → 프레임 좌표로 변환
+            // GradientStart는 이미지 GraphicBounds 내 절대 좌표
+            double startImgX = start != null ? start[0] : 0;
+            double startImgY = start != null ? start[1] : 0;
+
+            // imageTransform으로 프레임 로컬 좌표로 변환
+            double frameStartX, frameStartY;
+            if (imageTransform != null) {
+                double sx = imageTransform[0], sy = imageTransform[3];
+                double tx = imageTransform[4], ty = imageTransform[5];
+                frameStartX = sx * startImgX + tx;
+                frameStartY = sy * startImgY + ty;
+            } else {
+                frameStartX = startImgX;
+                frameStartY = startImgY;
+            }
+
+            // 프레임 원점(top-left) 기준으로 조정
+            frameStartX -= frameLeft;
+            frameStartY -= frameTop;
+
+            // 그라디언트 길이도 이미지 스케일 적용
+            double scaledLength = length;
+            if (imageTransform != null) {
+                double sx = Math.abs(imageTransform[0]);
+                double sy = Math.abs(imageTransform[3]);
+                double rad0 = Math.toRadians(angle);
+                double dx0 = Math.cos(rad0);
+                double dy0 = Math.sin(rad0);
+                double effectiveScale = Math.sqrt(dx0 * dx0 * sx * sx + dy0 * dy0 * sy * sy);
+                scaledLength = length * effectiveScale;
+            }
+
+            // 각도 → 방향 벡터 (InDesign: 0°=오른쪽, 반시계)
+            double rad = Math.toRadians(angle);
+            double dirX = Math.cos(rad);
+            double dirY = -Math.sin(rad);  // Y축 반전 (화면 좌표계)
+
+            int pixW = image.getWidth();
+            int pixH = image.getHeight();
+            double pxPerPtX = frameW > 0 ? pixW / frameW : 1;
+            double pxPerPtY = frameH > 0 ? pixH / frameH : 1;
+
+            for (int py = 0; py < pixH; py++) {
+                for (int px = 0; px < pixW; px++) {
+                    // 픽셀 → 프레임 좌표 (points, 프레임 원점 기준)
+                    double ptX = px / pxPerPtX;
+                    double ptY = py / pxPerPtY;
+
+                    // 시작점으로부터 그라디언트 방향 투영
+                    double dx = ptX - frameStartX;
+                    double dy = ptY - frameStartY;
+                    double proj = dx * dirX + dy * dirY;
+
+                    double t = proj / scaledLength;
+                    t = Math.max(0, Math.min(1, t));
+
+                    double alphaFactor = 1.0 - t;
+
+                    int argb = image.getRGB(px, py);
+                    int a = (argb >> 24) & 0xFF;
+                    int newA = (int) Math.round(a * alphaFactor);
+                    image.setRGB(px, py, (newA << 24) | (argb & 0x00FFFFFF));
+                }
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            ImageIO.write(image, "png", out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            System.err.println("[GradientFeather] 이미지 알파 마스크 적용 실패: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * GradientFeather 알파 마스크를 이미지에 적용한다.
      * InDesign의 GradientFeather 효과는 도형의 투명도를 선형 그라디언트로 페이드한다.
      */

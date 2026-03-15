@@ -167,6 +167,22 @@ class ASTFigureBuilder {
             }
         }
 
+        // 그라디언트 페더 알파 마스크 적용
+        if (imgFrame.hasGradientFeather()) {
+            byte[] feathered = ASTImageLoader.applyGradientFeatherToImage(
+                    result.imageData,
+                    imgFrame.gradientFeatherAngle(),
+                    imgFrame.gradientFeatherLength(),
+                    imgFrame.gradientFeatherStart(),
+                    frameBounds,
+                    imgFrame.imageTransform(),
+                    imgFrame.graphicBounds());
+            if (feathered != null) {
+                result.imageData = feathered;
+                result.format = "png";
+            }
+        }
+
         // 회전/반전이 있으면 이미지를 픽셀 레벨에서 회전
         if (hasRotOrFlip) {
             ASTImageLoader.ImageResult rotated =
