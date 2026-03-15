@@ -628,6 +628,25 @@ class IDMLStoryParser {
         inlineFrame.strokeColor(getAttrOrNull(elem, "StrokeColor"));
         inlineFrame.strokeWeight(parseDoubleAttrDef(elem, "StrokeWeight", 0));
         inlineFrame.cornerRadius(parseDoubleAttrDef(elem, "CornerRadius", 0));
+        // TextFramePreference — VerticalJustification, InsetSpacing 파싱
+        Element tfPref = getFirstChildElement(elem, "TextFramePreference");
+        if (tfPref != null) {
+            String vJust = getAttrOrNull(tfPref, "VerticalJustification");
+            if (vJust != null) {
+                inlineFrame.verticalJustification(vJust);
+            }
+            String insetStr = getAttrOrNull(tfPref, "InsetSpacing");
+            if (insetStr != null && !insetStr.isEmpty()) {
+                String[] parts = insetStr.split("\\s+");
+                if (parts.length >= 4) {
+                    double[] inset = new double[4];
+                    for (int k = 0; k < 4; k++) {
+                        try { inset[k] = Double.parseDouble(parts[k]); } catch (NumberFormatException ignored) {}
+                    }
+                    inlineFrame.insetSpacing(inset);
+                }
+            }
+        }
         run.addInlineFrame(inlineFrame);
     }
 

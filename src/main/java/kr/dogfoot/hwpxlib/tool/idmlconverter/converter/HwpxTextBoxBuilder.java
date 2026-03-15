@@ -829,10 +829,10 @@ public class HwpxTextBoxBuilder {
         tc.createSubList();
         SubList subList = tc.subList();
         TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
-        // 플로팅 글상자: 절대 좌표로 배치되므로 TOP 강제 (CENTER 시 텍스트 흐름과 어긋남)
+        VerticalAlign2 cellVAlign = mapVerticalJustification(block.verticalJustification());
         subList.idAnd("").textDirectionAnd(textDir)
                 .lineWrapAnd(LineWrapMethod.BREAK)
-                .vertAlignAnd(VerticalAlign2.TOP);
+                .vertAlignAnd(cellVAlign);
 
         // 연결 글상자 링크 설정
         // resolved 기반 문단 재배치가 완료된 프레임은 링크 해제 (각 프레임이 독립적으로 표시)
@@ -1167,9 +1167,10 @@ public class HwpxTextBoxBuilder {
 
         dt.createSubList();
         SubList subList = dt.subList();
+        VerticalAlign2 inlineVAlign = mapVerticalJustification(obj.verticalJustification());
         subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
                 .lineWrapAnd(LineWrapMethod.BREAK)
-                .vertAlignAnd(VerticalAlign2.TOP)
+                .vertAlignAnd(inlineVAlign)
                 .linkListIDRefAnd("0")
                 .linkListNextIDRefAnd("0")
                 .textWidthAnd(0)

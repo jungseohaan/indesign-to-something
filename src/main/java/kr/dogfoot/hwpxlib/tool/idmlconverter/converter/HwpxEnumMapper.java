@@ -44,8 +44,8 @@ public final class HwpxEnumMapper {
     public static VerticalAlign2 mapVerticalJustification(String vj) {
         if (vj == null) return VerticalAlign2.TOP;
         switch (vj.toLowerCase()) {
-            case "centeralign": case "center": return VerticalAlign2.CENTER;
-            case "bottomalign": case "bottom": return VerticalAlign2.BOTTOM;
+            case "centeralign": case "center": case "center_align": return VerticalAlign2.CENTER;
+            case "bottomalign": case "bottom": case "bottom_align": return VerticalAlign2.BOTTOM;
             default: return VerticalAlign2.TOP;
         }
     }
