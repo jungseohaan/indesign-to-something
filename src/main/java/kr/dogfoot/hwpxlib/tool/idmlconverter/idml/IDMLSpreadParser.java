@@ -53,6 +53,14 @@ class IDMLSpreadParser {
                 if (imageFrame != null) {
                     imageFrame.zOrder(zOrderCounter[0]++);
                     spread.addImageFrame(imageFrame);
+                    // 이미지 프레임으로 파싱되었더라도 내부에 Group/TextFrame이 있으면 추출
+                    // (GraphicType 컨테이너 안에 렌더 텍스트 프레임이 함께 들어있는 경우)
+                    if ("Rectangle".equals(elem.getTagName())) {
+                        double[] frameTransform = IDMLGeometry.parseTransform(
+                                elem.getAttribute("ItemTransform"));
+                        extractGroupsFromFrame(elem, spread, frameTransform,
+                                hiddenLayerIds, zOrderCounter);
+                    }
                 } else {
                     // GraphicType 컨테이너의 자식 Group에 복수 이미지가 있으면
                     // 자식 Group을 재귀 순회하여 개별 이미지 프레임으로 추출

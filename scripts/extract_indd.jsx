@@ -1135,6 +1135,60 @@ function isRenderableTextFrame(tf, bodyFonts) {
         if (Math.abs(tf.rotationAngle) > 0.1) return true;
     } catch (e) {}
 
+    // 텍스트에 효과가 적용된 경우 → 렌더링 (HWPX에서 재현 불가)
+    try {
+        var firstChar = tf.parentStory.characters[0];
+
+        // 텍스트 스트로크(외곽선) — strokeWeight > 0이면 아웃라인 효과
+        try {
+            if (firstChar.strokeWeight > 0) return true;
+        } catch (e) {}
+
+        // 드롭 섀도우
+        try {
+            var dss = tf.transparencySettings.dropShadowSettings;
+            if (dss.mode != ShadowMode.NONE) return true;
+        } catch (e) {}
+
+        // 외부 광선 (Outer Glow)
+        try {
+            if (tf.transparencySettings.outerGlowSettings.applied) return true;
+        } catch (e) {}
+
+        // 내부 광선 (Inner Glow)
+        try {
+            if (tf.transparencySettings.innerGlowSettings.applied) return true;
+        } catch (e) {}
+
+        // 베벨/엠보스
+        try {
+            if (tf.transparencySettings.bevelAndEmbossSettings.applied) return true;
+        } catch (e) {}
+
+        // 새틴 (Satin)
+        try {
+            if (tf.transparencySettings.satinSettings.applied) return true;
+        } catch (e) {}
+
+        // 프레임 투명도 (불투명도 < 100%)
+        try {
+            var opacity = tf.transparencySettings.blendingSettings.opacity;
+            if (opacity < 100) return true;
+        } catch (e) {}
+
+        // 텍스트 수준 드롭 섀도우 (문자에 직접 적용)
+        try {
+            var charDss = firstChar.transparencySettings.dropShadowSettings;
+            if (charDss.mode != ShadowMode.NONE) return true;
+        } catch (e) {}
+
+        // 텍스트 수준 투명도
+        try {
+            var charOpacity = firstChar.transparencySettings.blendingSettings.opacity;
+            if (charOpacity < 100) return true;
+        } catch (e) {}
+    } catch (e) {}
+
     return false;
 }
 
