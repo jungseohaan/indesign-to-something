@@ -902,11 +902,11 @@ public class IDMLToHwpxConverter {
                 double[] bounds = rg.bounds();
                 long figX, figY, figW, figH;
                 if (resolvedPage != null && resolvedPage.bounds() != null) {
-                    double[] pb = resolvedPage.bounds();
+                    double[] rel = resolvedPage.toPageRelative(bounds);
                     figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[1] - pb[1]);
+                            .pointsToHwpunits(rel[0]);
                     figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[0] - pb[0]);
+                            .pointsToHwpunits(rel[1]);
                     figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
                             .pointsToHwpunits(bounds[3] - bounds[1]);
                     figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
@@ -927,14 +927,19 @@ public class IDMLToHwpxConverter {
                 }
 
                 // 기존 ASTFigure에 완전히 포함되는 도형 건너뜀 (인라인 자식 도형 중복 방지)
+                // 단, 면적비가 매우 작은 경우 (< 5%) 는 독립 도형으로 간주하여 통과
                 boolean containedInExisting = false;
+                long figArea = figW * figH;
                 java.util.List<long[]> existingBounds = pageFigureBounds.get(pageIdx);
                 if (existingBounds != null) {
                     for (long[] eb : existingBounds) {
                         if (figX >= eb[0] && figY >= eb[1]
                                 && figX + figW <= eb[2] && figY + figH <= eb[3]) {
-                            containedInExisting = true;
-                            break;
+                            long containerArea = (eb[2] - eb[0]) * (eb[3] - eb[1]);
+                            if (containerArea > 0 && (double) figArea / containerArea > 0.05) {
+                                containedInExisting = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -971,7 +976,6 @@ public class IDMLToHwpxConverter {
                 // 겹치는 도형의 z-order 탐색
                 // 자기보다 작은 겹치는 도형이 있으면 그 아래에, 없으면 겹치는 최대 z-order 위에
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
-                long figArea = figW * figH;
                 int minSmallerZ = Integer.MAX_VALUE;  // 자기보다 작은 겹치는 도형의 최소 z-order
                 int maxOverlapZ = 0;                   // 겹치는 모든 도형의 최대 z-order
                 boolean hasSmallerOverlap = false;
@@ -1070,11 +1074,11 @@ public class IDMLToHwpxConverter {
                 double[] bounds = rg.bounds();
                 long figX, figY, figW, figH;
                 if (resolvedPage != null && resolvedPage.bounds() != null) {
-                    double[] pb = resolvedPage.bounds();
+                    double[] rel = resolvedPage.toPageRelative(bounds);
                     figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[1] - pb[1]);
+                            .pointsToHwpunits(rel[0]);
                     figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[0] - pb[0]);
+                            .pointsToHwpunits(rel[1]);
                     figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
                             .pointsToHwpunits(bounds[3] - bounds[1]);
                     figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter

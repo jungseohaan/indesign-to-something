@@ -292,32 +292,10 @@ fn emit_progress(app: &AppHandle, phase: &str, message: &str) {
 }
 
 /// ExtendScript 파일 경로를 찾는다.
-/// 1. 번들 리소스: resources/scripts/extract_indd.jsx
-/// 2. 개발 경로: ../../scripts/extract_indd.jsx (프로젝트 루트 기준)
+/// 1. 개발 경로: ../../scripts/extract_indd.jsx (프로젝트 루트 기준) — 소스 수정 즉시 반영
+/// 2. 번들 리소스: resources/scripts/extract_indd.jsx
 pub fn find_extendscript(app: &AppHandle) -> Result<String, String> {
-    // 1. 번들 리소스 경로
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let bundled = resource_dir.join("scripts").join("extract_indd.jsx");
-        if bundled.exists() {
-            return Ok(bundled.to_string_lossy().to_string());
-        }
-        // tauri.conf.json resources 배열에 의해 직접 배치될 수도 있음
-        let bundled_flat = resource_dir.join("extract_indd.jsx");
-        if bundled_flat.exists() {
-            return Ok(bundled_flat.to_string_lossy().to_string());
-        }
-        // tauri가 상대경로 ../../를 _up_/_up_/로 변환
-        let bundled_up = resource_dir
-            .join("_up_")
-            .join("_up_")
-            .join("scripts")
-            .join("extract_indd.jsx");
-        if bundled_up.exists() {
-            return Ok(bundled_up.to_string_lossy().to_string());
-        }
-    }
-
-    // 2. 개발 경로 (src-tauri에서 상위 2단계 → 프로젝트 루트)
+    // 1. 개발 경로 우선 (src-tauri에서 상위 2단계 → 프로젝트 루트)
     let dev_paths = [
         "../../scripts/extract_indd.jsx",
         "../../../scripts/extract_indd.jsx",
@@ -332,6 +310,26 @@ pub fn find_extendscript(app: &AppHandle) -> Result<String, String> {
                     .to_string_lossy()
                     .to_string(),
             );
+        }
+    }
+
+    // 2. 번들 리소스 경로 (빌드된 앱에서 사용)
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("scripts").join("extract_indd.jsx");
+        if bundled.exists() {
+            return Ok(bundled.to_string_lossy().to_string());
+        }
+        let bundled_flat = resource_dir.join("extract_indd.jsx");
+        if bundled_flat.exists() {
+            return Ok(bundled_flat.to_string_lossy().to_string());
+        }
+        let bundled_up = resource_dir
+            .join("_up_")
+            .join("_up_")
+            .join("scripts")
+            .join("extract_indd.jsx");
+        if bundled_up.exists() {
+            return Ok(bundled_up.to_string_lossy().to_string());
         }
     }
 

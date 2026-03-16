@@ -530,6 +530,44 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
     return { frames: renderedFrames, badgeChildIds: badgeGroupChildIds };
 }
 
+// --- 렌더링 시 TextFrame 텍스트 제거 헬퍼 ---
+
+/**
+ * 렌더 대상 내부의 TextFrame 텍스트를 일시적으로 제거한다.
+ * 렌더링된 PNG에 텍스트가 포함되지 않도록 하기 위함.
+ * (텍스트는 별도 HWPX 글상자로 변환되므로 이미지에 중복 포함되면 안 됨)
+ * visible=false는 exportFile(PNG)에 반영되지 않으므로 텍스트 내용 자체를 비움.
+ * @return {Array} [{tf, text}] 배열 (restoreTextFrames에 전달)
+ */
+function hideTextFrames(renderTarget) {
+    var saved = [];
+    try {
+        var nested = renderTarget.allPageItems;
+        for (var hi = 0; hi < nested.length; hi++) {
+            if (nested[hi].constructor.name === "TextFrame") {
+                try {
+                    var tf = nested[hi];
+                    var txt = tf.contents;
+                    if (txt && txt.length > 0) {
+                        saved.push({ tf: tf, text: txt });
+                        tf.contents = "";
+                    }
+                } catch (e) {}
+            }
+        }
+    } catch (e) {}
+    return saved;
+}
+
+/**
+ * hideTextFrames로 제거한 TextFrame 텍스트를 복원한다.
+ */
+function restoreTextFrames(saved) {
+    for (var ri = 0; ri < saved.length; ri++) {
+        try { saved[ri].tf.contents = saved[ri].text; } catch (e) {}
+    }
+}
+
 // --- 복합 장식 그래픽 프레임 렌더링 ---
 
 /**
@@ -603,7 +641,10 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage) {
         var outFile = File(renderDir + "/" + fileName);
 
         try {
+            // 내부 TextFrame 숨김 → 렌더링 → 복원
+            var hiddenTFs = hideTextFrames(item);
             item.exportFile(ExportFormat.PNG_FORMAT, outFile);
+            restoreTextFrames(hiddenTFs);
 
             var bounds = null;
             try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
@@ -784,7 +825,10 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage) {
         var outFile = File(renderDir + "/" + fileName);
 
         try {
+            // 그룹 렌더링 시 내부 TextFrame 텍스트 제거 → 렌더링 → 복원
+            var hiddenTFs = isGroupRender ? hideTextFrames(renderTarget) : [];
             renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
+            if (hiddenTFs.length > 0) restoreTextFrames(hiddenTFs);
 
             var bounds = null;
             try { bounds = arrCopy(renderTarget.visibleBounds); } catch (e) {}
