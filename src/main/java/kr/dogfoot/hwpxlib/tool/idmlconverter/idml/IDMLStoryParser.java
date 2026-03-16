@@ -1535,6 +1535,12 @@ class IDMLStoryParser {
             // 매칭/비매칭 경계에서 분리
             modified = true;
             counts[1]++;
+            // 인라인 프레임/그래픽의 \uFFFC 앵커 위치별 배분 준비
+            List<IDMLTextFrame> srcFrames = run.inlineFrames();
+            List<IDMLCharacterRun.InlineGraphic> srcGraphics = run.inlineGraphics();
+            List<IDMLCharacterRun.InlineAnchor> srcAnchors = run.inlineAnchors();
+            int anchorIdx = 0;
+            int frameIdx = 0;
             int segStart = 0;
             for (int i = 1; i <= text.length(); i++) {
                 if (i == text.length()
@@ -1545,8 +1551,53 @@ class IDMLStoryParser {
                         subRun.grepAppliedCharStyle(charStylePerChar[segStart]);
                         counts[0]++;
                     }
+                    // 이 세그먼트에 포함된 \uFFFC 개수만큼 인라인 항목 배분
+                    for (int ci = 0; ci < segText.length(); ci++) {
+                        if (segText.charAt(ci) == '\uFFFC') {
+                            if (!srcAnchors.isEmpty() && anchorIdx < srcAnchors.size()) {
+                                IDMLCharacterRun.InlineAnchor anchor = srcAnchors.get(anchorIdx++);
+                                if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                                        && anchor.index() < srcFrames.size()) {
+                                    int newIdx = subRun.inlineFrames().size();
+                                    subRun.addInlineFrame(srcFrames.get(anchor.index()));
+                                    subRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.FRAME, newIdx);
+                                } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
+                                        && anchor.index() < srcGraphics.size()) {
+                                    int newIdx = subRun.inlineGraphics().size();
+                                    subRun.addInlineGraphic(srcGraphics.get(anchor.index()));
+                                    subRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, newIdx);
+                                }
+                            } else if (frameIdx < srcFrames.size()) {
+                                subRun.addInlineFrame(srcFrames.get(frameIdx));
+                                frameIdx++;
+                            }
+                        }
+                    }
                     newRuns.add(subRun);
                     segStart = i;
+                }
+            }
+            // 나머지 항목을 마지막 서브런에 전달
+            if (!newRuns.isEmpty()) {
+                IDMLCharacterRun lastSub = newRuns.get(newRuns.size() - 1);
+                if (!srcAnchors.isEmpty()) {
+                    for (int ai = anchorIdx; ai < srcAnchors.size(); ai++) {
+                        IDMLCharacterRun.InlineAnchor anchor = srcAnchors.get(ai);
+                        if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                                && anchor.index() < srcFrames.size()) {
+                            lastSub.addInlineFrame(srcFrames.get(anchor.index()));
+                        } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
+                                && anchor.index() < srcGraphics.size()) {
+                            lastSub.addInlineGraphic(srcGraphics.get(anchor.index()));
+                        }
+                    }
+                } else {
+                    for (int fi = frameIdx; fi < srcFrames.size(); fi++) {
+                        lastSub.addInlineFrame(srcFrames.get(fi));
+                    }
+                    for (IDMLCharacterRun.InlineGraphic ig : srcGraphics) {
+                        lastSub.addInlineGraphic(ig);
+                    }
                 }
             }
         }

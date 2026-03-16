@@ -364,6 +364,8 @@ public class ResolvedData {
                         badgeChildTextFrameMap.put(String.valueOf(tfDomId), rg);
                     }
                 }
+                // 배지 그룹 자체 ID도 매핑 (인라인 Group이 wrapper로 변환될 때 sourceId=Group ID)
+                badgeChildTextFrameMap.put(String.valueOf(rg.id()), rg);
             }
         }
         if (badgeCount > 0) {
