@@ -1008,6 +1008,10 @@ function isBadgeGroup(group) {
                 try { txt = item.contents; } catch (e) {}
                 var trimmed = txt.replace(/[\s\uFEFF]/g, "");
                 totalTextLen += trimmed.length;
+                // 폰트 크기 12pt 초과 → 배지 아님 (제목/장식 텍스트)
+                try {
+                    if (item.parentStory.characters[0].pointSize > 12) return false;
+                } catch (e) {}
                 if (trimmed.length > 0 && trimmed.length <= 15) {
                     hasShortText = true;
                 }
@@ -1131,54 +1135,7 @@ function isRenderableTextFrame(tf, bodyFonts) {
         if (Math.abs(tf.rotationAngle) > 0.1) return true;
     } catch (e) {}
 
-    // 흰색/희미한 글자 → 항상 렌더링 (배경 없이는 보이지 않는 텍스트)
-    if (isLightColoredText(tf)) return true;
-
-    // Spread/Page/MasterSpread 직속 → 큰 글씨(≥16pt)만 통과
-    try {
-        var pType = tf.parent.constructor.name;
-        if (pType === "Spread" || pType === "Page" || pType === "MasterSpread") {
-            try {
-                var _ch0 = tf.parentStory.characters[0];
-                if (_ch0.pointSize >= 16) { /* 통과 */ }
-                else return false;
-            } catch (e3) { return false; }
-        }
-    } catch (e) {}
-
-    // 노말 텍스트 제외: 장식 효과가 없으면 콘텐츠 텍스트 → 렌더링 불필요
-    // 장식 = 보이는 외곽선, 또는 시각적 부모 컨테이너
-    try {
-        var firstChar = tf.parentStory.characters[0];
-        var isDecorative = false;
-        // 텍스트 외곽선이 보이는 경우 (strokeColor != None)
-        {
-            try {
-                if (firstChar.strokeColor.name !== "None") isDecorative = true;
-            } catch (e2) {}
-        }
-        // 부모 컨테이너(Rectangle/Polygon/Oval)에 채움이 있는 경우
-        if (!isDecorative) {
-            try {
-                var pType2 = tf.parent.constructor.name;
-                if (pType2 === "Rectangle" || pType2 === "Polygon" || pType2 === "Oval") {
-                    var pFill = tf.parent.fillColor.name;
-                    if (pFill !== "None" && pFill !== "[None]") isDecorative = true;
-                }
-            } catch (e2) {}
-        }
-        // 본문 폰트가 아닌 경우 → 짧은 텍스트(≤10자)만 장식으로 간주
-        // 긴 텍스트는 제목/소제목일 수 있으므로 폰트만으로 장식 판정하지 않음
-        if (!isDecorative && bodyFonts && trimmed.length <= 10) {
-            try {
-                var fontFamily = firstChar.appliedFont.fontFamily;
-                if (!bodyFonts[fontFamily]) isDecorative = true;
-            } catch (e2) {}
-        }
-        if (!isDecorative) return false;
-    } catch (e) {}
-
-    return true;
+    return false;
 }
 
 /**
