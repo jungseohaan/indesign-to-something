@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter;
 
 import kr.dogfoot.hwpxlib.writer.HWPXWriter;
+// HwpxToHwpConverter는 리플렉션으로 호출 (hwpexport 패키지 컴파일 제외 시 대응)
 import kr.dogfoot.hwpxlib.tool.idmlconverter.analyzer.IDMLAnalyzer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBundleReader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBundleWriter;
@@ -164,8 +165,31 @@ public class ConverterCLI {
             }
         }
 
-        // Run conversion
-        ConvertResult result = IDMLToHwpxConverter.convert(inputPath, outputPath, options, reporter);
+        // .hwp 확장자 감지
+        boolean exportHwp = outputPath.toLowerCase().endsWith(".hwp");
+        String hwpxPath = exportHwp
+                ? outputPath.substring(0, outputPath.length() - 4) + ".hwpx"
+                : outputPath;
+
+        // Run conversion (IDML → HWPX)
+        ConvertResult result = IDMLToHwpxConverter.convert(inputPath, hwpxPath, options, reporter);
+
+        // HWP 내보내기
+        if (exportHwp) {
+            try {
+                if (reporter != ProgressReporter.NONE) {
+                    reporter.reportProgress(97, 100, "HWP 파일 변환 중...");
+                }
+                Class<?> cls = Class.forName("kr.dogfoot.hwpxlib.tool.idmlconverter.hwpexport.HwpxToHwpConverter");
+                cls.getMethod("toFile", String.class, String.class).invoke(null, result.hwpxFile(), outputPath);
+                if (reporter == ProgressReporter.NONE) {
+                    System.out.println("HWP export: " + outputPath);
+                }
+            } catch (Exception e) {
+                System.err.println("HWP export failed: " + e.getMessage());
+                e.printStackTrace(System.err);
+            }
+        }
 
         // If not using progress reporter, report result now
         if (reporter == ProgressReporter.NONE) {

@@ -854,6 +854,14 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
         var pgIdx = parentPage.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
 
+        // 최소 크기 필터 — 3pt 미만 도형은 시각적으로 무의미하므로 건너뜀
+        try {
+            var gb = item.geometricBounds; // [top, left, bottom, right]
+            var shapeW = gb[3] - gb[1];
+            var shapeH = gb[2] - gb[0];
+            if (shapeW < 3 && shapeH < 3) continue;
+        } catch (e) {}
+
         var hasNestedItems = false;
         try { hasNestedItems = item.allPageItems && item.allPageItems.length > 0; } catch (e) {}
         if (hasNestedItems) {
@@ -1052,9 +1060,13 @@ function isRenderableTextFrame(tf) {
     try {
         var firstChar = tf.parentStory.characters[0];
 
-        // 텍스트 스트로크(외곽선) — strokeWeight > 0이면 아웃라인 효과
+        // 텍스트 스트로크(외곽선) — strokeColor가 None이 아니면 렌더링
         try {
-            if (firstChar.strokeWeight > 0) return true;
+            if (firstChar.strokeWeight > 0) {
+                var _scName = "None";
+                try { _scName = firstChar.strokeColor ? firstChar.strokeColor.name : "None"; } catch (e) {}
+                if (_scName !== "None" && _scName !== "[None]") return true;
+            }
         } catch (e) {}
 
         // 드롭 섀도우
