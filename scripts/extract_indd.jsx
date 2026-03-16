@@ -1134,36 +1134,25 @@ function isRenderableTextFrame(tf, bodyFonts) {
     // 흰색/희미한 글자 → 항상 렌더링 (배경 없이는 보이지 않는 텍스트)
     if (isLightColoredText(tf)) return true;
 
-    // 16pt 이상 + 비블랙 채움 → 어디에 속하든 렌더링 (장식 대형 텍스트)
-    try {
-        var firstChar0 = tf.parentStory.characters[0];
-        if (firstChar0.pointSize >= 16 && firstChar0.fillColor.name !== "Black") return true;
-    } catch (e) {}
-
-    // Spread/Page/MasterSpread 직속 → 큰 글씨(≥16pt) 또는 비블랙 채움만 통과
+    // Spread/Page/MasterSpread 직속 → 큰 글씨(≥16pt)만 통과
     try {
         var pType = tf.parent.constructor.name;
         if (pType === "Spread" || pType === "Page" || pType === "MasterSpread") {
             try {
                 var _ch0 = tf.parentStory.characters[0];
                 if (_ch0.pointSize >= 16) { /* 통과 */ }
-                else if (_ch0.fillColor.name !== "Black") { /* 비블랙 장식 텍스트 → 통과 */ }
                 else return false;
             } catch (e3) { return false; }
         }
     } catch (e) {}
 
     // 노말 텍스트 제외: 장식 효과가 없으면 콘텐츠 텍스트 → 렌더링 불필요
-    // 장식 = 비흑색 채움, 보이는 외곽선, 또는 시각적 부모 컨테이너
+    // 장식 = 보이는 외곽선, 또는 시각적 부모 컨테이너
     try {
         var firstChar = tf.parentStory.characters[0];
         var isDecorative = false;
-        // 텍스트 채움색이 Black이 아닌 경우 (Paper, 색상 등)
-        try {
-            if (firstChar.fillColor.name !== "Black") isDecorative = true;
-        } catch (e2) {}
         // 텍스트 외곽선이 보이는 경우 (strokeColor != None)
-        if (!isDecorative) {
+        {
             try {
                 if (firstChar.strokeColor.name !== "None") isDecorative = true;
             } catch (e2) {}

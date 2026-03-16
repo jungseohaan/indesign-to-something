@@ -109,7 +109,8 @@ class MathPatternDetector {
 
     /**
      * 단락 컨텍스트에서 수식 가능성 판정.
-     * 이미 감지된 수식 폰트 또는 인접 수식 런이 있으면 격상.
+     * 수식 폰트가 적용된 런에서만 수식으로 판정한다.
+     * 패턴만으로는 수식 판정하지 않음 (예: "01-07" 같은 코드 번호 오인식 방지).
      */
     static boolean isMathInContext(IDMLCharacterRun run,
                                     List<IDMLCharacterRun> runs, int idx) {
@@ -119,10 +120,7 @@ class MathPatternDetector {
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
 
-        // 1차: 텍스트 자체가 수식 패턴
-        if (isMathPattern(text)) return true;
-
-        // 2차: 동적 레지스트리에 등록된 수식 폰트
+        // 동적 레지스트리에 등록된 수식 폰트인 경우만 수식 판정
         if (isRegisteredMathFont(run.fontFamily())) {
             // 등록된 수식 폰트지만 순수 숫자/단어이면 수식 아님
             if (isPlainNumberOrWord(text)) return false;
