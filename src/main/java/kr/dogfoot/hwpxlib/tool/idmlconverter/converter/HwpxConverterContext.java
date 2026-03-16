@@ -62,6 +62,9 @@ public class HwpxConverterContext {
     // 현재 테이블 셀 내부 처리 중 여부 (오버레이 승격 판별용)
     boolean insideTableCell;
 
+    // 현재 컨테이너(글상자 셀)의 내부 콘텐츠 폭 (HWPUNIT) — 인라인 텍스트 프레임 균등 분배에 사용
+    long currentContainerWidth;
+
     // 스페이서 이미지 캐시 (1x1 투명 PNG, 한 번 등록 후 재사용)
     String spacerImageId;
 

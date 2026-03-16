@@ -680,6 +680,11 @@ public class HwpxTextBoxBuilder {
                 .vertAlignAnd(cellVAlign);
         subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
 
+        // 인라인 텍스트 프레임 균등 분배
+        long roundedContentWidth = w - block.insetLeft() - block.insetRight();
+        ctx.currentContainerWidth = roundedContentWidth;
+        redistributeInlineTextFrameWidths(block.paragraphs(), roundedContentWidth);
+
         for (ASTParagraph para : block.paragraphs()) {
             paragraphBuilder.addParagraphToSubList(subList, para);
         }
@@ -848,6 +853,12 @@ public class HwpxTextBoxBuilder {
         ctx.blockInsetLeft = block.insetLeft();
         ctx.blockInsetTop = block.insetTop();
         ctx.cellContentYCursor = 0;
+        // 셀 내부 콘텐츠 폭 (인라인 텍스트 프레임 균등 분배용)
+        ctx.currentContainerWidth = w - block.insetLeft() - block.insetRight();
+
+        // 인라인 텍스트 프레임 균등 분배: 연속 단락에 각각 1개씩 인라인 TextFrame이 있으면
+        // 부모 컨테이너 폭 기준으로 균등 분배
+        redistributeInlineTextFrameWidths(paragraphs, ctx.currentContainerWidth);
 
         // 단락 추가 (인라인 테이블 포함)
         for (ASTParagraph para : paragraphs) {
@@ -862,6 +873,58 @@ public class HwpxTextBoxBuilder {
             paragraphBuilder.addEmptySubListPara(subList);
         }
     }
+
+    /**
+     * 연속 단락에 각각 1개의 인라인 TextFrame이 포함된 패턴을 감지하여
+     * 각 프레임의 폭을 컨테이너 폭 기준으로 균등 분배한다.
+     * (InDesign에서 인라인 TextFrame을 나란히 배치하여 다단처럼 보이는 레이아웃)
+     */
+    static void redistributeInlineTextFrameWidths(
+            java.util.List<ASTParagraph> paragraphs, long containerWidth) {
+        if (containerWidth <= 0 || paragraphs == null) return;
+
+        long halfWidth = containerWidth / 2;
+
+        // 모든 단락에 걸쳐 좁은 인라인 TextFrame을 수집
+        // (InDesign에서 각 인라인 TF가 별도 단락에 배치되는 경우가 많음)
+        java.util.List<ASTInlineObject> narrowFrames = new java.util.ArrayList<>();
+        for (ASTParagraph para : paragraphs) {
+            for (ASTInlineItem item : para.items()) {
+                if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+                    ASTInlineObject obj = (ASTInlineObject) item;
+                    if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
+                            && obj.width() < halfWidth) {
+                        narrowFrames.add(obj);
+                    }
+                }
+            }
+        }
+        if (narrowFrames.size() < 2) return;
+
+        // 한 행에 배치할 프레임 수 추정
+        long totalOrigWidth = 0;
+        for (ASTInlineObject f : narrowFrames) {
+            totalOrigWidth += f.width();
+        }
+        int framesPerRow;
+        if (totalOrigWidth <= containerWidth) {
+            framesPerRow = narrowFrames.size();
+        } else {
+            long avgWidth = totalOrigWidth / narrowFrames.size();
+            framesPerRow = Math.max(2, (int) (containerWidth / avgWidth));
+        }
+
+        long equalWidth = containerWidth * 95 / 100 / framesPerRow;
+        for (ASTInlineObject obj : narrowFrames) {
+            obj.width(equalWidth);
+        }
+        // 좌우 마진 제거 (줄바꿈 방지)
+        for (ASTParagraph para : paragraphs) {
+            para.leftMargin(0L);
+            para.rightMargin(0L);
+        }
+    }
+
 
     /**
      * SubList에 연결 글상자 링크를 설정한다.
@@ -902,32 +965,10 @@ public class HwpxTextBoxBuilder {
         long gutter = block.columnGutter();
         long totalGutter = gutter * (colCount - 1);
         long contentWidth = totalWidth - totalGutter;
-        if (contentWidth < colCount) contentWidth = totalWidth; // 거터가 과도하면 거터 무시
-
+        long baseWidth = contentWidth / colCount;
         long[] result = new long[colCount];
-
-        if (block.columnWidths() != null && block.columnWidths().length == colCount) {
-            // FlexibleWidth / FixedWidth: 비율 기반 분배
-            long specSum = 0;
-            for (long w : block.columnWidths()) specSum += w;
-            if (specSum > 0) {
-                long assigned = 0;
-                for (int i = 0; i < colCount - 1; i++) {
-                    result[i] = contentWidth * block.columnWidths()[i] / specSum;
-                    assigned += result[i];
-                }
-                result[colCount - 1] = contentWidth - assigned; // 나머지 보정
-            } else {
-                java.util.Arrays.fill(result, contentWidth / colCount);
-                result[colCount - 1] = contentWidth - (contentWidth / colCount) * (colCount - 1);
-            }
-        } else {
-            // FixedNumber (균등 분할)
-            long baseWidth = contentWidth / colCount;
-            java.util.Arrays.fill(result, baseWidth);
-            result[colCount - 1] = contentWidth - baseWidth * (colCount - 1);
-        }
-
+        java.util.Arrays.fill(result, baseWidth);
+        result[colCount - 1] = contentWidth - baseWidth * (colCount - 1); // 나머지 보정
         return result;
     }
 
@@ -1072,6 +1113,7 @@ public class HwpxTextBoxBuilder {
         boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
         if (!hasParagraphs && !hasInlineTables) return;
 
+
         // 테이블 셀 내부 오버레이 → 페이지 레벨로 승격
         // 한글(HWPX 렌더러)이 테이블 셀 SubList 내부의 플로팅 객체를 지원하지 않으므로
         // 페이지 레벨 PAPER 기준 절대 좌표로 변환한다.
@@ -1086,6 +1128,24 @@ public class HwpxTextBoxBuilder {
 
         long w = obj.width() > 0 ? obj.width() : 5000;
         if (w < ConverterConstants.MIN_TEXT_BOX_WIDTH) w = ConverterConstants.MIN_TEXT_BOX_WIDTH;
+
+        // 내부에 2개 이상의 인라인 TextFrame이 있는 중간 래퍼는
+        // 부모 컨테이너 폭으로 확장 (InDesign에서 나란히 배치되는 다단 레이아웃)
+        if (ctx.currentContainerWidth > w && obj.paragraphs() != null) {
+            int innerCount = 0;
+            for (ASTParagraph p : obj.paragraphs()) {
+                for (ASTInlineItem it : p.items()) {
+                    if (it.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT
+                            && ((ASTInlineObject) it).kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) {
+                        innerCount++;
+                    }
+                }
+            }
+            if (innerCount >= 2) {
+                w = ctx.currentContainerWidth;
+            }
+        }
+
         // IDML에서 높이가 명시된 경우 그대로 사용 (최소값 강제 안 함)
         long h = obj.height() > 0 ? obj.height() : ConverterConstants.MIN_TEXT_BOX_HEIGHT;
 
@@ -1177,6 +1237,15 @@ public class HwpxTextBoxBuilder {
                 .textHeightAnd(0)
                 .hasTextRefAnd(false)
                 .hasNumRefAnd(false);
+
+        // 인라인 텍스트 프레임 균등 분배 (재귀: 인라인 프레임 안에 또 인라인 프레임)
+        // 중간 래퍼의 좁은 폭이 아니라 부모 컨테이너 폭을 사용
+        if (obj.paragraphs() != null) {
+            long parentWidth = ctx.currentContainerWidth > 0
+                    ? ctx.currentContainerWidth
+                    : w - obj.textMarginLeft() - obj.textMarginRight();
+            redistributeInlineTextFrameWidths(obj.paragraphs(), parentWidth);
+        }
 
         // 내용 단락 (풀 버전 — 인라인 객체도 재귀 처리)
         if (obj.paragraphs() != null) {

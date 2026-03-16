@@ -255,6 +255,10 @@ public class HwpxTableBuilder {
                     subList.vertAlignAnd(VerticalAlign2.TOP);
                 }
 
+                // 인라인 텍스트 프레임 균등 분배 (셀 폭 기준)
+                long cellContentWidth = astCell.width() - astCell.marginLeft() - astCell.marginRight();
+                HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(astCell.paragraphs(), cellContentWidth);
+
                 // 셀 내용 (단락) 추가
                 for (ASTParagraph astPara : astCell.paragraphs()) {
                     paragraphBuilder.addParagraphToSubList(subList, astPara, astCell.height());
