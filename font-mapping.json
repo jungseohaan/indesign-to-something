@@ -1,6 +1,9 @@
 {
   "_comment": "InDesign 폰트 → HWPX 폰트 매핑. 새 폰트 추가 시 mappings에 등록. FontMetricsAnalyzer로 hwpxFontMetrics 재측정 가능.",
   "mappings": {
+    "Sandoll 곧은부리": { "ko": "한컴돋움", "en": "Arial", "spacing": 0 },
+    "Helvetica Neue": { "ko": "한컴돋움", "en": "Arial", "spacing": 0 },
+    "Times New Roman": { "ko": "한컴바탕", "en": "Times New Roman", "spacing": 0 }
   },
   "hwpxFontMetrics": {
     "_comment": "한/글 폰트 메트릭 (10pt 기준, FontMetricsAnalyzer로 측정)",
