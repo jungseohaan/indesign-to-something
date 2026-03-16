@@ -1388,6 +1388,176 @@ class IDMLStoryParser {
     }
 
     /**
+     * 문자 스타일 참조를 해결한다 (CharacterStyle/ 접두사 제거 후 맵 조회).
+     */
+    private static IDMLStyleDef findCharStyle(String ref, IDMLDocument doc) {
+        if (ref == null) return null;
+        IDMLStyleDef style = doc.charStyles().get(ref);
+        if (style != null) return style;
+        // "CharacterStyle/" 접두사 제거 시도
+        if (ref.startsWith("CharacterStyle/")) {
+            return doc.charStyles().get(ref.substring("CharacterStyle/".length()));
+        }
+        return null;
+    }
+
+    /**
+     * GREP 스타일에서 일반 문자 스타일 속성(FillColor 등)을 동적 적용한다.
+     * BT수식M 전용인 resolveGrepMathStyles와 달리, 모든 GREP 규칙의 문자 스타일을 적용한다.
+     */
+    static void resolveGrepGenericStyles(IDMLDocument doc) {
+        // BT수식M 문자 스타일 ID (이미 resolveGrepMathStyles에서 처리됨 → 제외)
+        Set<String> btMathCharStyleRefs = new HashSet<>();
+        for (Map.Entry<String, IDMLStyleDef> entry : doc.charStyles().entrySet()) {
+            IDMLStyleDef charStyle = entry.getValue();
+            String font = charStyle.fontFamily();
+            if (font != null && (font.contains("BT수식") || font.contains("BTM"))) {
+                btMathCharStyleRefs.add(entry.getKey());
+            }
+        }
+
+        // 단락 스타일별 비수식 GREP 규칙 수집: {charStyleRef, compiledPattern}
+        // 각 규칙에 적용할 문자 스타일 참조를 함께 저장
+        Map<String, List<Object[]>> paraStyleGrepRules = new HashMap<>();
+
+        for (Map.Entry<String, IDMLStyleDef> entry : doc.paraStyles().entrySet()) {
+            IDMLStyleDef paraStyle = entry.getValue();
+            if (paraStyle.grepStyles() == null) continue;
+
+            List<Object[]> rules = new ArrayList<>();
+            for (IDMLStyleDef.GrepStyleRule rule : paraStyle.grepStyles()) {
+                if (btMathCharStyleRefs.contains(rule.appliedCharacterStyle())) continue;
+                // 적용 대상 문자 스타일이 존재하는지 확인
+                IDMLStyleDef charStyle = findCharStyle(rule.appliedCharacterStyle(), doc);
+                if (charStyle == null) continue;
+                // 문자 스타일에 적용할 속성이 있는지 확인 (FillColor 등)
+                if (charStyle.fillColor() == null && charStyle.fontFamily() == null
+                        && charStyle.fontSize() == null && charStyle.fontStyle() == null) continue;
+
+                java.util.regex.Pattern pat = convertIdGrepToJavaPattern(rule.grepExpression());
+                if (pat != null) {
+                    rules.add(new Object[]{rule.appliedCharacterStyle(), pat});
+                }
+            }
+            if (!rules.isEmpty()) {
+                paraStyleGrepRules.put(entry.getKey(), rules);
+            }
+        }
+        if (paraStyleGrepRules.isEmpty()) return;
+
+        int[] counts = {0, 0}; // [resolvedCount, splitCount]
+        for (IDMLStory story : doc.stories().values()) {
+            for (IDMLParagraph para : story.paragraphs()) {
+                resolveGrepGenericForParagraph(para, paraStyleGrepRules, counts);
+            }
+            for (IDMLTable table : story.tables()) {
+                for (IDMLTableRow row : table.rows()) {
+                    for (IDMLTableCell cell : row.cells()) {
+                        for (IDMLParagraph para : cell.paragraphs()) {
+                            resolveGrepGenericForParagraph(para, paraStyleGrepRules, counts);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (counts[0] > 0 || counts[1] > 0) {
+            System.err.println("[IDMLLoader] GREP generic styles resolved: " + counts[0] + " runs"
+                    + ", split: " + counts[1] + " mixed runs"
+                    + " (paraStyles with GREP: " + paraStyleGrepRules.size() + ")");
+        }
+    }
+
+    /**
+     * 단락 내 CharacterRun에 일반 GREP 스타일 매칭을 수행한다.
+     */
+    static void resolveGrepGenericForParagraph(IDMLParagraph para,
+                                                Map<String, List<Object[]>> paraStyleGrepRules,
+                                                int[] counts) {
+        String paraStyleRef = para.appliedParagraphStyle();
+        List<Object[]> rules = paraStyleRef != null ? paraStyleGrepRules.get(paraStyleRef) : null;
+        if (rules == null || rules.isEmpty()) return;
+
+        List<IDMLCharacterRun> originalRuns = new ArrayList<>(para.characterRuns());
+        List<IDMLCharacterRun> newRuns = new ArrayList<>();
+        boolean modified = false;
+
+        for (IDMLCharacterRun run : originalRuns) {
+            String text = run.content();
+            if (text == null || text.isEmpty()) {
+                newRuns.add(run);
+                continue;
+            }
+
+            // 각 문자에 대해 가장 마지막으로 매칭된 GREP 규칙의 charStyleRef 저장
+            String[] charStylePerChar = new String[text.length()];
+            boolean anyMatch = false;
+            for (Object[] rule : rules) {
+                String charStyleRef = (String) rule[0];
+                java.util.regex.Pattern pat = (java.util.regex.Pattern) rule[1];
+                try {
+                    java.util.regex.Matcher m = pat.matcher(text);
+                    while (m.find()) {
+                        for (int i = m.start(); i < m.end(); i++) {
+                            charStylePerChar[i] = charStyleRef;
+                            anyMatch = true;
+                        }
+                    }
+                } catch (Exception e) { /* ignore */ }
+            }
+            if (!anyMatch) {
+                newRuns.add(run);
+                continue;
+            }
+
+            // 전체 매칭 확인
+            boolean allSame = true;
+            String firstStyle = charStylePerChar[0];
+            for (int i = 1; i < charStylePerChar.length; i++) {
+                if (!java.util.Objects.equals(charStylePerChar[i], firstStyle)) {
+                    allSame = false;
+                    break;
+                }
+            }
+            if (allSame && firstStyle != null) {
+                // 전체 런이 동일 GREP 스타일 → 분리 불필요
+                run.grepAppliedCharStyle(firstStyle);
+                counts[0]++;
+                newRuns.add(run);
+                continue;
+            }
+            if (allSame) {
+                // 전체 매칭 없음 (firstStyle == null)
+                newRuns.add(run);
+                continue;
+            }
+
+            // 매칭/비매칭 경계에서 분리
+            modified = true;
+            counts[1]++;
+            int segStart = 0;
+            for (int i = 1; i <= text.length(); i++) {
+                if (i == text.length()
+                        || !java.util.Objects.equals(charStylePerChar[i], charStylePerChar[segStart])) {
+                    String segText = text.substring(segStart, i);
+                    IDMLCharacterRun subRun = cloneRunWithText(run, segText);
+                    if (charStylePerChar[segStart] != null) {
+                        subRun.grepAppliedCharStyle(charStylePerChar[segStart]);
+                        counts[0]++;
+                    }
+                    newRuns.add(subRun);
+                    segStart = i;
+                }
+            }
+        }
+
+        if (modified) {
+            para.characterRuns().clear();
+            para.characterRuns().addAll(newRuns);
+        }
+    }
+
+    /**
      * 단락 내 CharacterRun에 GREP 수식 스타일 매칭을 수행한다.
      */
     static void resolveGrepForParagraph(IDMLParagraph para,
@@ -1634,6 +1804,7 @@ class IDMLStoryParser {
         clone.underline(source.underline());
         clone.underlineType(source.underlineType());
         clone.strikeThrough(source.strikeThrough());
+        clone.grepAppliedCharStyle(source.grepAppliedCharStyle());
         clone.content(newText);
         return clone;
     }

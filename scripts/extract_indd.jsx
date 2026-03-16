@@ -182,6 +182,14 @@ function main(args) {
                 renderedGraphicFrames.push(renderedVectorFrames[vi]);
             }
 
+            // 2.9. 이미지 배치 프레임 렌더링 (PSD, AI 등 → PNG)
+            var renderedImageFrames = [];
+            try {
+                renderedImageFrames = exportImagePlacedFrames(doc, outputDir, startPage, endPage);
+            } catch (imgEx) {
+                // 이미지 프레임 렌더링 실패 — 무시
+            }
+
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
             // 3. resolved 속성 수집 (페이지 범위 필터링)
@@ -189,6 +197,7 @@ function main(args) {
             resolved.renderedTextFrames = renderedFrames;
             resolved.renderedPdfFrames = renderedPdfFrames;
             resolved.renderedGraphicFrames = renderedGraphicFrames;
+            resolved.renderedImageFrames = renderedImageFrames;
             writeJson(outputDir + "/resolved.json", resolved);
         }
 
@@ -568,6 +577,20 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage) {
         try { hasNestedItems = item.allPageItems && item.allPageItems.length > 0; } catch (e) {}
         if (!hasNestedItems) continue;
 
+        // 중첩 아이템이 TextFrame만으로 구성된 경우 → 텍스트로 처리 가능하므로 렌더링 제외
+        // (말풍선 Polygon 안에 TextFrame이 있는 구조 등)
+        var onlyTextFrames = true;
+        try {
+            var nested = item.allPageItems;
+            for (var ni = 0; ni < nested.length; ni++) {
+                if (nested[ni].constructor.name !== "TextFrame") {
+                    onlyTextFrames = false;
+                    break;
+                }
+            }
+        } catch (e) { onlyTextFrames = false; }
+        if (onlyTextFrames) continue;
+
         // 페이지 범위 필터
         var parentPage = null;
         try { parentPage = item.parentPage; } catch (e) {}
@@ -685,6 +708,129 @@ function exportPdfPlacedFrames(doc, outputDir, startPage, endPage) {
     }
 
     return renderedPdfFrames;
+}
+
+// --- 이미지 배치 프레임 렌더링 ---
+
+/**
+ * 이미지가 배치된 프레임(Rectangle, Polygon, Oval)을 개별 PNG로 렌더링한다.
+ * PSD, AI 등 복잡한 포맷을 InDesign에서 직접 래스터화하여
+ * 클리핑, 크롭, 효과가 적용된 최종 이미지를 얻는다.
+ */
+function exportImagePlacedFrames(doc, outputDir, startPage, endPage) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    var renderedImageFrames = [];
+    var allItems = doc.allPageItems;
+    var processedGroupIds = {};
+
+    app.pngExportPreferences.exportResolution = 300;
+    app.pngExportPreferences.antiAlias = true;
+    app.pngExportPreferences.transparentBackground = true;
+    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
+
+    for (var i = 0; i < allItems.length; i++) {
+        var item = allItems[i];
+        var cName = item.constructor.name;
+
+        if (cName !== "Rectangle" && cName !== "Oval"
+            && cName !== "Polygon") continue;
+
+        // 이미지가 배치되어 있는지 확인
+        var hasImage = false;
+        try { hasImage = item.images && item.images.length > 0; } catch (e) {}
+        if (!hasImage) continue;
+
+        // PDF는 별도 함수에서 처리
+        var hasPdf = false;
+        try { hasPdf = item.pdfs && item.pdfs.length > 0; } catch (e) {}
+        if (hasPdf) continue;
+
+        // 부모가 Group이면 그룹 전체를 렌더링 (이미지 클리핑/스케일 보존)
+        var renderTarget = item;
+        var isGroupRender = false;
+        try {
+            if (item.parent && item.parent.constructor.name === "Group") {
+                var grp = item.parent;
+                if (!processedGroupIds[grp.id]) {
+                    renderTarget = grp;
+                    isGroupRender = true;
+                    processedGroupIds[grp.id] = true;
+                } else {
+                    continue; // 이 그룹은 이미 처리됨
+                }
+            }
+        } catch (e) {}
+
+        // 페이지 범위 필터
+        var parentPage = null;
+        try { parentPage = renderTarget.parentPage; } catch (e) {}
+        if (!parentPage) {
+            try {
+                var p = renderTarget.parent;
+                while (p && !parentPage) {
+                    try { parentPage = p.parentPage; } catch (e2) {}
+                    if (!parentPage) p = p.parent;
+                }
+            } catch (e) {}
+        }
+        if (!parentPage) continue;
+        var pgIdx = parentPage.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        var domId = renderTarget.id;
+        var fileName = "img_" + domId + ".png";
+        var outFile = File(renderDir + "/" + fileName);
+
+        try {
+            renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
+
+            var bounds = null;
+            try { bounds = arrCopy(renderTarget.visibleBounds); } catch (e) {}
+            if (!bounds) {
+                try { bounds = arrCopy(renderTarget.geometricBounds); } catch (e) {}
+            }
+
+            // 스프레드 기준 → 페이지 기준 좌표 변환
+            if (bounds) {
+                var pageBounds = parentPage.bounds;
+                bounds[0] -= pageBounds[0];
+                bounds[1] -= pageBounds[1];
+                bounds[2] -= pageBounds[0];
+                bounds[3] -= pageBounds[1];
+            }
+
+            // 그룹 렌더링 시 자식 이미지 프레임 ID도 기록
+            var childIds = null;
+            if (isGroupRender) {
+                childIds = [];
+                try {
+                    var nested = renderTarget.allPageItems;
+                    for (var ci = 0; ci < nested.length; ci++) {
+                        var cn = nested[ci].constructor.name;
+                        if (cn === "Rectangle" || cn === "Oval" || cn === "Polygon") {
+                            var hasImg = false;
+                            try { hasImg = nested[ci].images && nested[ci].images.length > 0; } catch (e3) {}
+                            if (hasImg) childIds.push(nested[ci].id);
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            renderedImageFrames.push({
+                id: domId,
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: parentPage.documentOffset,
+                childImageIds: childIds
+            });
+        } catch (e) {
+            // 이미지 프레임 렌더링 실패 — 건너뜀
+        }
+    }
+
+    return renderedImageFrames;
 }
 
 // --- 벡터 도형/그룹 InDesign 렌더링 ---

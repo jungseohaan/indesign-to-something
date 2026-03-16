@@ -106,6 +106,14 @@ public class ResolvedDataReader {
             }
         }
 
+        // renderedImageFrames (이미지 배치 프레임을 InDesign에서 직접 래스터화한 PNG)
+        if (root.has("renderedImageFrames")) {
+            for (JsonElement e : root.getAsJsonArray("renderedImageFrames")) {
+                RenderedGroup rg = parseRenderedGroup(e.getAsJsonObject());
+                data.addRenderedImageFrame(rg);
+            }
+        }
+
         // fontMetrics (InDesign에서 측정한 폰트 메트릭)
         if (root.has("fontMetrics")) {
             for (JsonElement e : root.getAsJsonArray("fontMetrics")) {
@@ -357,6 +365,9 @@ public class ResolvedDataReader {
             group.childTextFrameIds(parseIntArray(o.getAsJsonArray("childTextFrameIds")));
         }
         group.badgeGroupId(getInt(o, "badgeGroupId", 0));
+        if (o.has("childImageIds") && !o.get("childImageIds").isJsonNull()) {
+            group.childImageIds(parseIntArray(o.getAsJsonArray("childImageIds")));
+        }
         return group;
     }
 

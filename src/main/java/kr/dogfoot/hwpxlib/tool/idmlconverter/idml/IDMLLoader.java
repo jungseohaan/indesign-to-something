@@ -190,6 +190,9 @@ public class IDMLLoader {
             // 10. GREP 스타일에서 BT수식M 폰트가 동적 적용되는 런 해석
             IDMLStoryParser.resolveGrepMathStyles(doc);
 
+            // 10-1. GREP 스타일에서 일반 문자 스타일 속성(FillColor 등) 동적 적용
+            IDMLStoryParser.resolveGrepGenericStyles(doc);
+
             // 11. ObjectStyle 상속: CornerRadius가 없고 CornerOption=RoundedCorner인 벡터/프레임에
             //     ObjectStyle의 CornerRadius 적용
             resolveInheritedCornerRadius(doc);

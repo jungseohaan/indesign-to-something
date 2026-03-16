@@ -21,6 +21,7 @@ public class ASTTextRun extends ASTInlineItem {
     private Short horizontalScale; // 장평 (%, 100 = normal)
     private Short verticalScale;   // 세로 비율 (%, 100 = normal)
     private Short baselineShift;   // 기준선 이동 (%, 양수=위)
+    private boolean grepStyleApplied; // GREP 스타일에서 색상/폰트가 동적 적용됨 (resolved 보강 시 보호)
 
     public ItemType itemType() { return ItemType.TEXT_RUN; }
 
@@ -74,5 +75,8 @@ public class ASTTextRun extends ASTInlineItem {
 
     public Short baselineShift() { return baselineShift; }
     public void baselineShift(Short v) { this.baselineShift = v; }
+
+    public boolean grepStyleApplied() { return grepStyleApplied; }
+    public void grepStyleApplied(boolean v) { this.grepStyleApplied = v; }
 
 }

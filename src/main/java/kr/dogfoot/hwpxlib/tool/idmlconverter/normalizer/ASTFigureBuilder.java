@@ -126,6 +126,7 @@ class ASTFigureBuilder {
         double[] cornerRadii = imgFrame.hasRoundedCorners() ? imgFrame.cornerRadii() : null;
 
         ASTImageLoader.ImageResult result = null;
+        boolean usedRenderedImage = false;
 
         // 1) InDesign에서 직접 렌더링된 PDF 프레임 PNG가 있으면 우선 사용
         if (resolvedData != null && imgFrame.selfId() != null) {
@@ -135,7 +136,36 @@ class ASTFigureBuilder {
             }
         }
 
-        // 2) 내장(붙여넣기) 이미지: Contents base64 데이터 사용
+        // 2) 그룹 렌더링된 이미지 (PSD 스프라이트 등 — 자식 이미지 프레임이 그룹으로 렌더링된 경우)
+        if (result == null && resolvedData != null && imgFrame.selfId() != null) {
+            RenderedGroup imgRendered = resolvedData.getRenderedImageFrameByIdmlId(imgFrame.selfId());
+            if (imgRendered != null && imgRendered.file() != null
+                    && imgRendered.childImageIds() != null && imgRendered.childImageIds().length > 0) {
+                // 같은 그룹의 두 번째 이상 자식이면 건너뛰기 (중복 방지)
+                if (resolvedData.markImageGroupProcessed(imgRendered.id())) {
+                    return null;
+                }
+                // 렌더링된 이미지의 bounds로 위치/크기 보정
+                if (imgRendered.bounds() != null && resolvedPage != null && resolvedPage.bounds() != null) {
+                    double[] rb = imgRendered.bounds();
+                    double rW = rb[3] - rb[1];
+                    double rH = rb[2] - rb[0];
+                    if (rW > 0 && rH > 0) {
+                        double[] rel = resolvedPage.toPageRelative(rb);
+                        xHwp = CoordinateConverter.pointsToHwpunits(rel[0]);
+                        yHwp = CoordinateConverter.pointsToHwpunits(rel[1]);
+                        wHwp = CoordinateConverter.pointsToHwpunits(rW);
+                        hHwp = CoordinateConverter.pointsToHwpunits(rH);
+                    }
+                }
+                result = imageLoader.loadRenderedImage(imgRendered.file(), wHwp, hHwp);
+                if (result != null) {
+                    usedRenderedImage = true;
+                }
+            }
+        }
+
+        // 3) 내장(붙여넣기) 이미지: Contents base64 데이터 사용
         if (result == null
                 && (imgFrame.linkResourceURI() == null || imgFrame.linkResourceURI().isEmpty())
                 && imgFrame.hasEmbeddedContents()) {
@@ -145,7 +175,7 @@ class ASTFigureBuilder {
                     imgFrame.framePath(), cornerR, cornerRadii);
         }
 
-        // 3) 링크된 이미지 파일 로드 (Ghostscript PDF 변환 포함)
+        // 4) 링크된 이미지 파일 로드 (Ghostscript PDF 변환 포함)
         if (result == null) {
             result = imageLoader.loadImage(
                     imgFrame.linkResourceURI(), wHwp, hHwp,
@@ -153,7 +183,51 @@ class ASTFigureBuilder {
                     visibleLayers, layerSig, imgFrame.framePath(), cornerR, cornerRadii);
         }
 
+        // 5) 폴백: InDesign에서 렌더링된 단독 이미지 프레임 PNG (Links 로드 실패 시)
+        if ((result == null || result.imageData == null)
+                && resolvedData != null && imgFrame.selfId() != null) {
+            RenderedGroup imgRendered = resolvedData.getRenderedImageFrameByIdmlId(imgFrame.selfId());
+            if (imgRendered != null && imgRendered.file() != null && !usedRenderedImage) {
+                // rendered bounds로 위치/크기 보정
+                if (imgRendered.bounds() != null && resolvedPage != null && resolvedPage.bounds() != null) {
+                    double[] rb = imgRendered.bounds();
+                    double rW = rb[3] - rb[1];
+                    double rH = rb[2] - rb[0];
+                    if (rW > 0 && rH > 0) {
+                        double[] rel = resolvedPage.toPageRelative(rb);
+                        xHwp = CoordinateConverter.pointsToHwpunits(rel[0]);
+                        yHwp = CoordinateConverter.pointsToHwpunits(rel[1]);
+                        wHwp = CoordinateConverter.pointsToHwpunits(rW);
+                        hHwp = CoordinateConverter.pointsToHwpunits(rH);
+                    }
+                }
+                result = imageLoader.loadRenderedImage(imgRendered.file(), wHwp, hHwp);
+                if (result != null) {
+                    usedRenderedImage = true;
+                }
+            }
+        }
+
         if (result == null || result.imageData == null) return null;
+
+        // 렌더링된 이미지는 InDesign이 모든 효과를 적용했으므로 후처리 불필요
+        if (usedRenderedImage) {
+            ASTFigure figure = new ASTFigure();
+            figure.kind(ASTFigure.FigureKind.IMAGE);
+            figure.x(xHwp);
+            figure.y(yHwp);
+            figure.width(wHwp);
+            figure.height(hHwp);
+            figure.zOrder(imgFrame.zOrder());
+            figure.imageData(result.imageData);
+            figure.imageFormat(result.format);
+            figure.pixelWidth(result.pixelWidth);
+            figure.pixelHeight(result.pixelHeight);
+            figure.imagePath(decodeURI(imgFrame.linkResourceURI()));
+            figure.sourceId(imgFrame.selfId());
+            figure.fromGroup(imgFrame.fromGroup());
+            return figure;
+        }
 
         // 그레이스케일 모노톤 이미지: FillColor로 채색 (QR코드 등 검정 그레이스케일도 포함)
         if (imgFrame.needsGrayscaleColorization() && colorResolver != null) {

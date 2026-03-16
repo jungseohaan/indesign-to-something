@@ -1021,6 +1021,140 @@ public class IDMLToHwpxConverter {
         if (injected > 0) {
             System.out.println("[OrphanGraphic] " + injected + "개 렌더 그래픽 프레임 주입 완료");
         }
+
+        // === 렌더링된 이미지 프레임 orphan 주입 ===
+        int imgInjected = 0;
+        for (RenderedGroup rg : resolvedData.allRenderedImageFrames()) {
+            if (rg.file() == null || rg.bounds() == null) continue;
+
+            String idmlHexId = "u" + Integer.toHexString(rg.id());
+            if (usedSourceIds.contains(idmlHexId)) continue;
+
+            // 그룹 렌더의 자식 ID도 usedSourceIds에 있는지 확인
+            if (rg.childImageIds() != null) {
+                boolean anyChildUsed = false;
+                for (int childId : rg.childImageIds()) {
+                    String childHex = "u" + Integer.toHexString(childId);
+                    if (usedSourceIds.contains(childHex)) {
+                        anyChildUsed = true;
+                        break;
+                    }
+                }
+                if (anyChildUsed) continue;
+            }
+
+            int pageIdx = rg.pageIndex();
+            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+
+            // 배경 프레임 필터: 페이지의 80% 이상이면 건너뜀
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage resolvedPage =
+                    resolvedData.getPage(pageIdx);
+            if (resolvedPage != null && resolvedPage.bounds() != null) {
+                double[] rpb = resolvedPage.bounds();
+                double pageW = rpb[3] - rpb[1];
+                double pageH = rpb[2] - rpb[0];
+                double[] rb = rg.bounds();
+                double rW = rb[3] - rb[1];
+                double rH = rb[2] - rb[0];
+                if (rW > pageW * 0.8 && rH > pageH * 0.8) continue;
+            }
+
+            java.io.File pngFile = new java.io.File(resolvedDir, rg.file());
+            if (!pngFile.exists()) continue;
+
+            try {
+                byte[] data = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+                if (img == null) continue;
+
+                double[] bounds = rg.bounds();
+                long figX, figY, figW, figH;
+                if (resolvedPage != null && resolvedPage.bounds() != null) {
+                    double[] pb = resolvedPage.bounds();
+                    figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[1] - pb[1]);
+                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[0] - pb[0]);
+                    figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[3] - bounds[1]);
+                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[2] - bounds[0]);
+                } else {
+                    figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[1]);
+                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[0]);
+                    figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[3] - bounds[1]);
+                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                            .pointsToHwpunits(bounds[2] - bounds[0]);
+                }
+                if (img.getWidth() > 0) {
+                    figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
+                }
+
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
+
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
+                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
+                fig.x(figX);
+                fig.y(figY);
+                fig.width(figW);
+                fig.height(figH);
+                fig.imageData(data);
+                fig.imageFormat("png");
+                fig.pixelWidth(img.getWidth());
+                fig.pixelHeight(img.getHeight());
+                fig.sourceId(idmlHexId);
+                fig.fromGroup(true);
+
+                // z-order: 겹치는 도형 기준
+                long figArea = figW * figH;
+                int minSmallerZ = Integer.MAX_VALUE;
+                int maxOverlapZ = 0;
+                boolean hasSmallerOverlap = false;
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : section.blocks()) {
+                    if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) {
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure existing =
+                                (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) blk;
+                        long ew = existing.width(), eh = existing.height();
+                        long ox1 = Math.max(existing.x(), figX);
+                        long oy1 = Math.max(existing.y(), figY);
+                        long ox2 = Math.min(existing.x() + ew, figX + figW);
+                        long oy2 = Math.min(existing.y() + eh, figY + figH);
+                        if (ox2 > ox1 && oy2 > oy1) {
+                            if (existing.zOrder() > maxOverlapZ) {
+                                maxOverlapZ = existing.zOrder();
+                            }
+                            long existArea = ew * eh;
+                            if (existArea < figArea) {
+                                hasSmallerOverlap = true;
+                                if (existing.zOrder() < minSmallerZ) {
+                                    minSmallerZ = existing.zOrder();
+                                }
+                            }
+                        }
+                    }
+                }
+                if (hasSmallerOverlap) {
+                    fig.zOrder(Math.max(0, minSmallerZ - 1));
+                } else {
+                    fig.zOrder(maxOverlapZ + 1);
+                }
+
+                section.addBlock(fig);
+                imgInjected++;
+                System.out.println("[OrphanImage] " + idmlHexId + " (DOM " + rg.id()
+                        + ") → page " + (pageIdx + 1) + " " + rg.file()
+                        + " pos=(" + figX + "," + figY + ") size=(" + figW + "x" + figH + ")"
+                        + " px=" + img.getWidth() + "x" + img.getHeight());
+            } catch (Exception e) {
+                System.err.println("[OrphanImage] Failed: " + rg.file() + " — " + e.getMessage());
+            }
+        }
+        if (imgInjected > 0) {
+            System.out.println("[OrphanImage] " + imgInjected + "개 렌더 이미지 프레임 주입 완료");
+        }
     }
 
     /** 문서 전체 페이지 인덱스(0-based)로 IDMLPage를 찾는다. */

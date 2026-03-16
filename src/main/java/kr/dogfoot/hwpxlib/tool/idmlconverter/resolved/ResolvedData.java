@@ -23,6 +23,9 @@ public class ResolvedData {
     private final Map<String, RenderedGroup> renderedTextFrameMap = new HashMap<>();  // DOM id → rendered TextFrame
     private final Map<String, RenderedGroup> renderedPdfFrameMap = new HashMap<>();  // DOM id → rendered PDF frame
     private final Map<String, RenderedGroup> renderedGraphicFrameMap = new HashMap<>();  // DOM id → rendered complex graphic
+    private final Map<String, RenderedGroup> renderedImageFrameMap = new HashMap<>();  // DOM id → rendered image frame (PSD, AI 등)
+    private final Map<String, RenderedGroup> childImageToGroupMap = new HashMap<>();  // 자식 이미지 DOM id → 부모 그룹 RenderedGroup
+    private final Set<Integer> processedImageGroupIds = new HashSet<>();  // 이미 Figure로 변환된 그룹 렌더 ID
     private Set<String> badgeGroupShapeIdmlIds;  // 배지 그룹 소속 도형 IDML hex ID ("u1735")
     private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TextFrame DOM id → 배지 그룹 RenderedGroup
     private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
@@ -230,6 +233,35 @@ public class ResolvedData {
         }
     }
 
+    // --- RenderedImageFrame (이미지 배치 프레임) ---
+
+    public void addRenderedImageFrame(RenderedGroup frame) {
+        renderedImageFrameMap.put(String.valueOf(frame.id()), frame);
+        // 그룹 렌더링의 자식 이미지 ID → 부모 그룹 역방향 매핑
+        if (frame.childImageIds() != null) {
+            for (int childDomId : frame.childImageIds()) {
+                childImageToGroupMap.put(String.valueOf(childDomId), frame);
+            }
+        }
+    }
+
+    /**
+     * IDML hex ID ("u1735") → DOM decimal ID ("5941") 변환 후 렌더링된 이미지 프레임 조회.
+     * 직접 매핑이 없으면 자식 이미지 프레임 → 부모 그룹 역방향 매핑도 조회한다.
+     */
+    public RenderedGroup getRenderedImageFrameByIdmlId(String idmlId) {
+        if (idmlId == null || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return null;
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
+            RenderedGroup direct = renderedImageFrameMap.get(decimalId);
+            if (direct != null) return direct;
+            // 자식 이미지 프레임 → 부모 그룹 렌더링 폴백
+            return childImageToGroupMap.get(decimalId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     // --- 좌표 단위 정규화 ---
 
     /**
@@ -292,6 +324,10 @@ public class ResolvedData {
         }
         // renderedGraphicFrames: bounds
         for (RenderedGroup rt : renderedGraphicFrameMap.values()) {
+            scaleDoubleArray(rt.bounds(), s);
+        }
+        // renderedImageFrames: bounds
+        for (RenderedGroup rt : renderedImageFrameMap.values()) {
             scaleDoubleArray(rt.bounds(), s);
         }
     }
@@ -361,6 +397,16 @@ public class ResolvedData {
     }
 
     // --- 통계 ---
+
+    /** 모든 렌더링된 이미지 프레임을 반환한다. */
+    public java.util.Collection<RenderedGroup> allRenderedImageFrames() {
+        return renderedImageFrameMap.values();
+    }
+
+    /** 그룹 렌더 ID가 이미 처리되었는지 확인하고 마킹한다. 첫 호출만 false 반환. */
+    public boolean markImageGroupProcessed(int groupId) {
+        return !processedImageGroupIds.add(groupId);
+    }
 
     public int storyCount() { return storyMap.size(); }
     public int colorCount() { return colorHexMap.size(); }

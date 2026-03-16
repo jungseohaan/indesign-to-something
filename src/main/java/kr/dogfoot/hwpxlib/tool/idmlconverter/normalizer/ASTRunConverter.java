@@ -574,6 +574,19 @@ class ASTRunConverter {
             }
         }
 
+        // GREP 일반 문자 스타일 오버라이드 (FillColor 등)
+        if (run.grepAppliedCharStyle() != null) {
+            IDMLStyleDef grepCharStyle = ASTStoryConverter.resolveStyle(
+                    run.grepAppliedCharStyle(), idmlDoc.charStyles());
+            if (grepCharStyle != null) {
+                if (grepCharStyle.fillColor() != null) fillColor = grepCharStyle.fillColor();
+                if (grepCharStyle.fontFamily() != null) fontFamily = grepCharStyle.fontFamily();
+                if (grepCharStyle.fontSize() != null) fontSize = grepCharStyle.fontSize();
+                if (grepCharStyle.fontStyle() != null) fontStyle = grepCharStyle.fontStyle();
+                textRun.grepStyleApplied(true);
+            }
+        }
+
         // GREP 수식 폰트가 적용된 런: 스타일 상속 대신 BT수식M Italic 적용
         if (run.grepMathFont() && (fontFamily == null || !fontFamily.contains("BT수식"))) {
             fontFamily = "BT수식M";

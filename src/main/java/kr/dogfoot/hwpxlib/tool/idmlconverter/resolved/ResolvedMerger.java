@@ -298,9 +298,11 @@ public class ResolvedMerger {
                                             ResolvedData resolved) {
         // grepMathFont 보호: 수식 폰트 런은 fontFamily를 덮어씌우지 않음
         boolean protectFont = astRun.grepMathFont();
+        // GREP 일반 스타일 보호: GREP 스타일에서 색상/폰트가 적용된 런은 resolved로 덮어씌우지 않음
+        boolean protectGrep = astRun.grepStyleApplied();
 
         // fillColor → textColor (resolved hex)
-        if (resRun.fillColor() != null) {
+        if (!protectGrep && resRun.fillColor() != null) {
             String hex = resolved.resolveColorHex(resRun.fillColor());
             if (hex != null) {
                 astRun.textColor(hex);
@@ -308,17 +310,17 @@ public class ResolvedMerger {
         }
 
         // fontFamily (GREP 스타일 결과 반영)
-        if (!protectFont && resRun.fontFamily() != null) {
+        if (!protectFont && !protectGrep && resRun.fontFamily() != null) {
             astRun.fontFamily(resRun.fontFamily());
         }
 
         // fontStyle
-        if (!protectFont && resRun.fontStyle() != null) {
+        if (!protectFont && !protectGrep && resRun.fontStyle() != null) {
             astRun.fontStyle(resRun.fontStyle());
         }
 
         // fontSize → fontSizeHwpunits
-        if (resRun.fontSize() != null) {
+        if (!protectGrep && resRun.fontSize() != null) {
             astRun.fontSizeHwpunits((int) (resRun.fontSize() * 100));
         }
 
