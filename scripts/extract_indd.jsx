@@ -164,31 +164,32 @@ function main(args) {
             var idmlFile = File(outputDir + "/output.idml");
             doc.exportFile(ExportFormat.INDESIGN_MARKUP, idmlFile);
 
-            // 2.5. 짧은 텍스트 프레임 렌더링
+            // 2.5. allPageItems 1회 수집 (성능 최적화: 6회 → 1회)
+            var allItems = doc.allPageItems;
+
+            // 2.6. 짧은 텍스트 프레임 렌더링
             writeProgress(outputDir, "rendered_frames", 0, rangePageCount);
-            var renderedResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage);
+            var renderedResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems);
             var renderedFrames = renderedResult.frames;
             var badgeChildIds = renderedResult.badgeChildIds;
 
-            // 2.6. PDF 배치 프레임 렌더링 (멀티페이지 PDF 지원)
-            var renderedPdfFrames = exportPdfPlacedFrames(doc, outputDir, startPage, endPage);
+            // 2.7. PDF 배치 프레임 렌더링 (멀티페이지 PDF 지원)
+            var renderedPdfFrames = exportPdfPlacedFrames(doc, outputDir, startPage, endPage, allItems);
 
-            // 2.7. 복합 장식 그래픽 렌더링 (중첩 도형, 사선 패턴 등)
-            var renderedGraphicFrames = exportComplexGraphicFrames(doc, outputDir, startPage, endPage);
+            // 2.8. 복합 장식 그래픽 렌더링 (중첩 도형, 사선 패턴 등)
+            var renderedGraphicFrames = exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems);
 
-            // 2.8. 벡터 도형/그룹 InDesign 렌더링
-            var renderedVectorFrames = exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds);
+            // 2.9. 벡터 도형/그룹 InDesign 렌더링
+            var renderedVectorFrames = exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds, allItems);
             for (var vi = 0; vi < renderedVectorFrames.length; vi++) {
                 renderedGraphicFrames.push(renderedVectorFrames[vi]);
             }
 
-            // 2.9. 이미지 배치 프레임 렌더링 (PSD, AI 등 → PNG)
+            // 2.10. 이미지 배치 프레임 렌더링 (PSD, AI 등 → PNG)
             var renderedImageFrames = [];
             try {
-                renderedImageFrames = exportImagePlacedFrames(doc, outputDir, startPage, endPage);
-            } catch (imgEx) {
-                // 이미지 프레임 렌더링 실패 — 무시
-            }
+                renderedImageFrames = exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems);
+            } catch (imgEx) {}
 
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
@@ -298,25 +299,19 @@ function main(args) {
     }
 }
 
-// --- 그룹 합성 이미지 렌더링 ---
+// --- 통합 렌더링 (캐시 기반) ---
 
 /**
- * 20자 미만의 짧은 텍스트 프레임을 개별 PNG로 렌더링한다.
- * 짧은 텍스트 = 원본 폰트로 꾸민 장식 텍스트 → HWPX에서 폰트 재현 불가 → 이미지로 보존.
+ * 짧은 텍스트 프레임(장식 텍스트)과 배지 그룹을 PNG로 렌더링한다.
  */
-function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
+function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
     var renderedFrames = [];
-    var renderedIds = {}; // 이미 렌더링된 ID 중복 방지
-    var badgeGroupChildIds = {}; // 배지 그룹 자식 ID → true (개별 렌더링 스킵, TextFrame + 도형 모두)
-    var allItems = doc.allPageItems;
+    var renderedIds = {};
+    var badgeGroupChildIds = {};
 
-    // 본문 폰트 사전 스캔: 문서에서 가장 많이 사용되는 폰트 상위 N개를 본문 폰트로 간주
-    var _bodyFonts = detectBodyFonts(doc);
-
-    // PNG 내보내기 설정 (한 번만)
     app.pngExportPreferences.exportResolution = 300;
     app.pngExportPreferences.antiAlias = true;
     app.pngExportPreferences.transparentBackground = true;
@@ -326,9 +321,9 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
     for (var gi = 0; gi < allItems.length; gi++) {
         var grp = allItems[gi];
         if (grp.constructor.name !== "Group") continue;
+        if (isOnHiddenLayer(grp)) continue;
         if (!isBadgeGroup(grp)) continue;
 
-        // 페이지 범위 필터
         var grpPage = null;
         try { grpPage = grp.parentPage; } catch (e) {}
         if (!grpPage) continue;
@@ -338,7 +333,6 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
         var grpDomId = grp.id;
         if (renderedIds[grpDomId]) continue;
 
-        // 자식 도형/텍스트 ID 수집 (모든 자식을 badgeGroupChildIds에 등록)
         var childIds = [];
         var childTextFrameIds = [];
         try {
@@ -385,7 +379,6 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
             renderedFrames.push(grpEntry);
             renderedIds[grpDomId] = grpEntry;
 
-            // 자식 TextFrame ID로도 등록 (Java에서 IDML TF ID로 조회 시 badge_group_child로 매핑)
             for (var ti = 0; ti < childTextFrameIds.length; ti++) {
                 var tfChildId = childTextFrameIds[ti];
                 renderedFrames.push({
@@ -398,29 +391,23 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
                 });
                 renderedIds[tfChildId] = grpEntry;
             }
-        } catch (e) {
-            // 배지 그룹 렌더링 실패 — 건너뜀
-        }
+        } catch (e) {}
     }
 
-    // Pass 2: 개별 TextFrame / TextPath 렌더링 (기존 로직)
+    // Pass 2: 개별 TextFrame / TextPath 렌더링
     for (var i = 0; i < allItems.length; i++) {
         var item = allItems[i];
 
-        // TextFrame 또는 TextPath 부모(Polygon/GraphicLine 등) 판별
         var isTextFrame = (item.constructor.name === "TextFrame");
         var hasTextPath = false;
         try { hasTextPath = item.textPaths && item.textPaths.length > 0; } catch (e) {}
 
         if (!isTextFrame && !hasTextPath) continue;
-
-        // 배지 그룹 자식이면 개별 렌더링 스킵
+        if (isOnHiddenLayer(item)) continue;
         if (badgeGroupChildIds[item.id]) continue;
 
-        // 페이지 범위 필터
         var parentPage = null;
         try { parentPage = item.parentPage; } catch (e) {}
-        // parentPage가 null인 경우 (Group 내부 등): 큰 타이틀이면 visibleBounds로 페이지 매칭
         if (!parentPage && isTextFrame) {
             try {
                 var _story = item.parentStory;
@@ -442,14 +429,11 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
             } catch (e) {}
         }
         if (!parentPage) continue;
-        var pgIdx = parentPage.documentOffset + 1; // 1-based
+        var pgIdx = parentPage.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
 
-        // TextFrame은 기존 선별 로직, TextPath 부모는 항상 렌더링
-        if (isTextFrame && !isRenderableTextFrame(item, _bodyFonts)) continue;
+        if (isTextFrame && !isRenderableTextFrame(item)) continue;
 
-        // 부모가 PageItem 컨테이너(Rectangle/Group 등)이면 부모를 렌더링
-        // 배경, 둥근 모서리, 테두리 등 시각적 속성이 포함되도록
         var renderTarget = item;
         var parentItem = null;
         try {
@@ -460,17 +444,13 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
                     || pName === "GraphicLine" || pName === "Oval")) {
                 renderTarget = parentItem;
             }
-            // TextPath 부모(Polygon 등)의 부모가 Group이면 Group 전체를 렌더링
-            // (곡선 경로 스트로크 + 텍스트를 함께 포함)
             if (hasTextPath && pName === "Group" && parentItem && parentItem.id) {
                 renderTarget = parentItem;
             }
         } catch (e) {}
 
         var domId = renderTarget.id;
-        // 같은 부모 컨테이너가 여러 자식 TextFrame에 의해 중복 렌더링되지 않도록
         if (renderedIds[domId]) {
-            // 이미 렌더링됨 — 자식 ID만 추가 등록
             if (renderTarget !== item) {
                 renderedFrames.push({
                     id: item.id,
@@ -487,14 +467,12 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
         try {
             renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
 
-            // visibleBounds = PNG 렌더링 영역과 일치하는 실제 표시 범위
             var bounds = null;
             try { bounds = arrCopy(renderTarget.visibleBounds); } catch (e) {}
             if (!bounds) {
                 try { bounds = arrCopy(renderTarget.geometricBounds); } catch (e) {}
             }
 
-            // 스프레드 기준 → 페이지 기준 좌표 변환
             if (bounds) {
                 var pageBounds = parentPage.bounds;
                 bounds[0] -= pageBounds[0];
@@ -503,7 +481,6 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
                 bounds[3] -= pageBounds[1];
             }
 
-            // 렌더링 대상 ID 등록
             var entry = {
                 id: domId,
                 file: "rendered_frames/" + fileName,
@@ -513,7 +490,6 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
             renderedFrames.push(entry);
             renderedIds[domId] = entry;
 
-            // 자식 TextFrame ID도 등록 (IDML AST에서 자식 ID로 참조할 수 있으므로)
             if (renderTarget !== item) {
                 renderedFrames.push({
                     id: item.id,
@@ -522,9 +498,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
                     pageIndex: parentPage.documentOffset
                 });
             }
-        } catch (e) {
-            // 렌더링 실패 — 건너뜀
-        }
+        } catch (e) {}
     }
 
     return { frames: renderedFrames, badgeChildIds: badgeGroupChildIds };
@@ -532,26 +506,32 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage) {
 
 // --- 렌더링 시 TextFrame 텍스트 제거 헬퍼 ---
 
-/**
- * 렌더 대상 내부의 TextFrame 텍스트를 일시적으로 제거한다.
- * 렌더링된 PNG에 텍스트가 포함되지 않도록 하기 위함.
- * (텍스트는 별도 HWPX 글상자로 변환되므로 이미지에 중복 포함되면 안 됨)
- * visible=false는 exportFile(PNG)에 반영되지 않으므로 텍스트 내용 자체를 비움.
- * @return {Array} [{tf, text}] 배열 (restoreTextFrames에 전달)
- */
 function hideTextFrames(renderTarget) {
     var saved = [];
     try {
+        var noneColor = renderTarget.parentPage
+            ? renderTarget.parentPage.parent.parent.swatches.item("None")
+            : app.documents[0].swatches.item("None");
         var nested = renderTarget.allPageItems;
         for (var hi = 0; hi < nested.length; hi++) {
             if (nested[hi].constructor.name === "TextFrame") {
                 try {
                     var tf = nested[hi];
-                    var txt = tf.contents;
-                    if (txt && txt.length > 0) {
-                        saved.push({ tf: tf, text: txt });
-                        tf.contents = "";
+                    var chars = tf.parentStory.characters;
+                    if (chars.length === 0) continue;
+                    // 문자별 fillColor/strokeColor 저장 후 None으로 변경
+                    var charData = [];
+                    for (var ci = 0; ci < chars.length; ci++) {
+                        try {
+                            charData.push({
+                                fill: chars[ci].fillColor,
+                                stroke: chars[ci].strokeColor
+                            });
+                            chars[ci].fillColor = noneColor;
+                            chars[ci].strokeColor = noneColor;
+                        } catch (e2) { charData.push(null); }
                     }
+                    saved.push({ tf: tf, charData: charData });
                 } catch (e) {}
             }
         }
@@ -559,33 +539,32 @@ function hideTextFrames(renderTarget) {
     return saved;
 }
 
-/**
- * hideTextFrames로 제거한 TextFrame 텍스트를 복원한다.
- */
 function restoreTextFrames(saved) {
     for (var ri = 0; ri < saved.length; ri++) {
-        try { saved[ri].tf.contents = saved[ri].text; } catch (e) {}
+        try {
+            var tf = saved[ri].tf;
+            var charData = saved[ri].charData;
+            var chars = tf.parentStory.characters;
+            for (var ci = 0; ci < chars.length && ci < charData.length; ci++) {
+                if (charData[ci]) {
+                    try {
+                        chars[ci].fillColor = charData[ci].fill;
+                        chars[ci].strokeColor = charData[ci].stroke;
+                    } catch (e2) {}
+                }
+            }
+        } catch (e) {}
     }
 }
 
-// --- 복합 장식 그래픽 프레임 렌더링 ---
-
 /**
- * 복합 장식 그래픽 프레임을 개별 PNG로 렌더링한다.
- * ContentType=GraphicType이면서 단순 배치 이미지가 아닌 프레임
- * (중첩 도형, 사선 패턴 등)을 InDesign에서 직접 래스터화한다.
+ * 복합 장식 그래픽 프레임을 PNG로 렌더링한다.
  */
-function exportComplexGraphicFrames(doc, outputDir, startPage, endPage) {
+function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
     var renderedGraphicFrames = [];
-    var allItems = doc.allPageItems;
-
-    app.pngExportPreferences.exportResolution = 300;
-    app.pngExportPreferences.antiAlias = true;
-    app.pngExportPreferences.transparentBackground = true;
-    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
 
     for (var i = 0; i < allItems.length; i++) {
         var item = allItems[i];
@@ -593,13 +572,12 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage) {
 
         if (cName !== "Rectangle" && cName !== "Oval"
             && cName !== "Polygon") continue;
+        if (isOnHiddenLayer(item)) continue;
 
-        // GraphicType 프레임만 대상
         try {
             if (item.contentType !== ContentType.GRAPHIC_TYPE) continue;
         } catch (e) { continue; }
 
-        // 단순 배치 이미지(PDF, EPS, 이미지)가 있으면 건너뜀
         var hasPlacedContent = false;
         try { hasPlacedContent = item.images && item.images.length > 0; } catch (e) {}
         if (!hasPlacedContent) {
@@ -610,13 +588,10 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage) {
         }
         if (hasPlacedContent) continue;
 
-        // 내부에 중첩된 페이지 아이템이 있는지 확인 (복합 구조)
         var hasNestedItems = false;
         try { hasNestedItems = item.allPageItems && item.allPageItems.length > 0; } catch (e) {}
         if (!hasNestedItems) continue;
 
-        // 중첩 아이템이 TextFrame만으로 구성된 경우 → 텍스트로 처리 가능하므로 렌더링 제외
-        // (말풍선 Polygon 안에 TextFrame이 있는 구조 등)
         var onlyTextFrames = true;
         try {
             var nested = item.allPageItems;
@@ -629,7 +604,6 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage) {
         } catch (e) { onlyTextFrames = false; }
         if (onlyTextFrames) continue;
 
-        // 페이지 범위 필터
         var parentPage = null;
         try { parentPage = item.parentPage; } catch (e) {}
         if (!parentPage) continue;
@@ -641,7 +615,6 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage) {
         var outFile = File(renderDir + "/" + fileName);
 
         try {
-            // 내부 TextFrame 숨김 → 렌더링 → 복원
             var hiddenTFs = hideTextFrames(item);
             item.exportFile(ExportFormat.PNG_FORMAT, outFile);
             restoreTextFrames(hiddenTFs);
@@ -666,48 +639,33 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage) {
                 bounds: bounds,
                 pageIndex: parentPage.documentOffset
             });
-        } catch (e) {
-            // 복합 그래픽 렌더링 실패 — 건너뜀
-        }
+        } catch (e) {}
     }
 
     return renderedGraphicFrames;
 }
 
-// --- PDF 배치 프레임 렌더링 ---
-
 /**
- * PDF가 배치된 프레임을 개별 PNG로 렌더링한다.
- * 멀티페이지 PDF의 각 배치가 올바른 페이지를 보여주도록
- * InDesign에서 직접 래스터화하여 내보낸다.
+ * PDF 배치 프레임을 PNG로 렌더링한다.
  */
-function exportPdfPlacedFrames(doc, outputDir, startPage, endPage) {
+function exportPdfPlacedFrames(doc, outputDir, startPage, endPage, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
     var renderedPdfFrames = [];
-    var allItems = doc.allPageItems;
-
-    // PNG 내보내기 설정
-    app.pngExportPreferences.exportResolution = 300;
-    app.pngExportPreferences.antiAlias = true;
-    app.pngExportPreferences.transparentBackground = true;
-    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
 
     for (var i = 0; i < allItems.length; i++) {
         var item = allItems[i];
         var cName = item.constructor.name;
 
-        // Rectangle, Oval 등 이미지 컨테이너만 대상
         if (cName !== "Rectangle" && cName !== "Oval"
             && cName !== "Polygon" && cName !== "GraphicLine") continue;
+        if (isOnHiddenLayer(item)) continue;
 
-        // PDF가 배치되어 있는지 확인
         var hasPdf = false;
         try { hasPdf = item.pdfs && item.pdfs.length > 0; } catch (e) {}
         if (!hasPdf) continue;
 
-        // 페이지 범위 필터
         var parentPage = null;
         try { parentPage = item.parentPage; } catch (e) {}
         if (!parentPage) continue;
@@ -721,14 +679,12 @@ function exportPdfPlacedFrames(doc, outputDir, startPage, endPage) {
         try {
             item.exportFile(ExportFormat.PNG_FORMAT, outFile);
 
-            // visibleBounds로 정확한 렌더링 영역 기록
             var bounds = null;
             try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
             if (!bounds) {
                 try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
             }
 
-            // 스프레드 기준 → 페이지 기준 좌표 변환
             if (bounds) {
                 var pageBounds = parentPage.bounds;
                 bounds[0] -= pageBounds[0];
@@ -743,33 +699,21 @@ function exportPdfPlacedFrames(doc, outputDir, startPage, endPage) {
                 bounds: bounds,
                 pageIndex: parentPage.documentOffset
             });
-        } catch (e) {
-            // PDF 프레임 렌더링 실패 — 건너뜀
-        }
+        } catch (e) {}
     }
 
     return renderedPdfFrames;
 }
 
-// --- 이미지 배치 프레임 렌더링 ---
-
 /**
- * 이미지가 배치된 프레임(Rectangle, Polygon, Oval)을 개별 PNG로 렌더링한다.
- * PSD, AI 등 복잡한 포맷을 InDesign에서 직접 래스터화하여
- * 클리핑, 크롭, 효과가 적용된 최종 이미지를 얻는다.
+ * 이미지 배치 프레임(PSD, AI 등)을 PNG로 렌더링한다.
  */
-function exportImagePlacedFrames(doc, outputDir, startPage, endPage) {
+function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
     var renderedImageFrames = [];
-    var allItems = doc.allPageItems;
     var processedGroupIds = {};
-
-    app.pngExportPreferences.exportResolution = 300;
-    app.pngExportPreferences.antiAlias = true;
-    app.pngExportPreferences.transparentBackground = true;
-    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
 
     for (var i = 0; i < allItems.length; i++) {
         var item = allItems[i];
@@ -777,18 +721,16 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage) {
 
         if (cName !== "Rectangle" && cName !== "Oval"
             && cName !== "Polygon") continue;
+        if (isOnHiddenLayer(item)) continue;
 
-        // 이미지가 배치되어 있는지 확인
         var hasImage = false;
         try { hasImage = item.images && item.images.length > 0; } catch (e) {}
         if (!hasImage) continue;
 
-        // PDF는 별도 함수에서 처리
         var hasPdf = false;
         try { hasPdf = item.pdfs && item.pdfs.length > 0; } catch (e) {}
         if (hasPdf) continue;
 
-        // 부모가 Group이면 그룹 전체를 렌더링 (이미지 클리핑/스케일 보존)
         var renderTarget = item;
         var isGroupRender = false;
         try {
@@ -799,12 +741,11 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage) {
                     isGroupRender = true;
                     processedGroupIds[grp.id] = true;
                 } else {
-                    continue; // 이 그룹은 이미 처리됨
+                    continue;
                 }
             }
         } catch (e) {}
 
-        // 페이지 범위 필터
         var parentPage = null;
         try { parentPage = renderTarget.parentPage; } catch (e) {}
         if (!parentPage) {
@@ -825,7 +766,6 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage) {
         var outFile = File(renderDir + "/" + fileName);
 
         try {
-            // 그룹 렌더링 시 내부 TextFrame 텍스트 제거 → 렌더링 → 복원
             var hiddenTFs = isGroupRender ? hideTextFrames(renderTarget) : [];
             renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
             if (hiddenTFs.length > 0) restoreTextFrames(hiddenTFs);
@@ -836,7 +776,6 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage) {
                 try { bounds = arrCopy(renderTarget.geometricBounds); } catch (e) {}
             }
 
-            // 스프레드 기준 → 페이지 기준 좌표 변환
             if (bounds) {
                 var pageBounds = parentPage.bounds;
                 bounds[0] -= pageBounds[0];
@@ -845,7 +784,6 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage) {
                 bounds[3] -= pageBounds[1];
             }
 
-            // 그룹 렌더링 시 자식 이미지 프레임 ID도 기록
             var childIds = null;
             if (isGroupRender) {
                 childIds = [];
@@ -869,37 +807,22 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage) {
                 pageIndex: parentPage.documentOffset,
                 childImageIds: childIds
             });
-        } catch (e) {
-            // 이미지 프레임 렌더링 실패 — 건너뜀
-        }
+        } catch (e) {}
     }
 
     return renderedImageFrames;
 }
 
-// --- 벡터 도형/그룹 InDesign 렌더링 ---
-
 /**
- * 벡터 도형(Rectangle, Polygon, Oval, GraphicLine)과 그룹을
- * InDesign에서 PNG로 렌더링한다.
- * Java 래스터라이즈 대신 InDesign의 네이티브 렌더링을 사용하여
- * 그라디언트, DropShadow, 투명도 등 모든 효과를 정확하게 캡처한다.
+ * 벡터 도형을 PNG로 렌더링한다.
  */
-function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds) {
+function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
     var results = [];
-    var allItems = doc.allPageItems;
     var renderedIds = {};
 
-    app.pngExportPreferences.exportResolution = 300;
-    app.pngExportPreferences.antiAlias = true;
-    app.pngExportPreferences.transparentBackground = true;
-    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
-
-    // 모든 벡터 도형을 개별 렌더링 (그룹 내 도형 포함)
-    // 그룹 통째 렌더링은 z-order가 합쳐져 다른 요소를 가리므로 개별 렌더링
     for (var si = 0; si < allItems.length; si++) {
         var item = allItems[si];
         var cName = item.constructor.name;
@@ -909,18 +832,15 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
 
         var domId = item.id;
         if (renderedIds[domId]) continue;
-
-        // 배지 그룹 자식 도형 건너뜀 (배지 통째 렌더링에서 처리)
+        if (isOnHiddenLayer(item)) continue;
         if (badgeChildIds && badgeChildIds[domId]) continue;
 
-        // 이미지 컨테이너 건너뜀
         var hasPlaced = false;
         try { hasPlaced = item.images && item.images.length > 0; } catch (e) {}
         if (!hasPlaced) try { hasPlaced = item.pdfs && item.pdfs.length > 0; } catch (e) {}
         if (!hasPlaced) try { hasPlaced = item.epss && item.epss.length > 0; } catch (e) {}
         if (hasPlaced) continue;
 
-        // 인라인 앵커 도형 건너뜀
         try {
             var pName = item.parent.constructor.name;
             if (pName === "TextFrame" || pName === "Character"
@@ -928,14 +848,12 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
                 || pName === "Story") continue;
         } catch (e) {}
 
-        // 페이지 범위 필터
         var parentPage = null;
         try { parentPage = item.parentPage; } catch (e) {}
         if (!parentPage) continue;
         var pgIdx = parentPage.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
 
-        // 복합 그래픽 프레임 건너뜀 (exportComplexGraphicFrames에서 처리)
         var hasNestedItems = false;
         try { hasNestedItems = item.allPageItems && item.allPageItems.length > 0; } catch (e) {}
         if (hasNestedItems) {
@@ -968,19 +886,31 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
                 pageIndex: parentPage.documentOffset
             });
             renderedIds[domId] = true;
-        } catch (e) {
-            // 개별 도형 렌더링 실패 — 건너뜀
-        }
+        } catch (e) {}
     }
 
     return results;
 }
 
 /**
- * Group이 배지(badge)인지 판별한다.
- * 배지 = 채워진 도형(배경) + 짧은 텍스트(라벨) 조합, 이미지 없음.
- * 예: "활동 방법", "수업 준비", "Helpful Tips" 등.
+ * 아이템 또는 부모 체인에 숨김 레이어가 있는지 검사한다.
  */
+function isOnHiddenLayer(item) {
+    try {
+        var cur = item;
+        while (cur) {
+            try {
+                if (cur.itemLayer && !cur.itemLayer.visible) return true;
+            } catch (e) {}
+            try { cur = cur.parent; } catch (e) { break; }
+            if (!cur || cur.constructor.name === "Spread"
+                || cur.constructor.name === "Page"
+                || cur.constructor.name === "Document") break;
+        }
+    } catch (e) {}
+    return false;
+}
+
 function isBadgeGroup(group) {
     var hasShape = false;
     var hasShortText = false;
@@ -1003,6 +933,23 @@ function isBadgeGroup(group) {
                     if (item.pdfs && item.pdfs.length > 0) { hasImage = true; continue; }
                 } catch (e) {}
                 hasShape = true;
+                // TextPath가 있는 도형: 곡선 텍스트도 배지 텍스트로 인식
+                try {
+                    if (item.textPaths && item.textPaths.length > 0) {
+                        for (var tp = 0; tp < item.textPaths.length; tp++) {
+                            var tpTxt = "";
+                            try { tpTxt = item.textPaths[tp].texts[0].contents; } catch (e2) {}
+                            var tpTrimmed = tpTxt.replace(/[\s\uFEFF]/g, "");
+                            totalTextLen += tpTrimmed.length;
+                            if (tpTrimmed.length > 0 && tpTrimmed.length <= 15) {
+                                hasShortText = true;
+                            }
+                            if (tpTrimmed.length > 30) {
+                                hasLongText = true;
+                            }
+                        }
+                    }
+                } catch (e) {}
             } else if (cName === "TextFrame") {
                 var txt = "";
                 try { txt = item.contents; } catch (e) {}
@@ -1035,7 +982,19 @@ function isBadgeGroup(group) {
     if (totalTextLen > 40) return false;
 
     // 크기 제한: geometricBounds는 문서 측정 단위로 반환되므로
-    // points로 변환하여 비교 (최대 150pt)
+    // points로 변환하여 비교
+    // TextPath 포함 그룹은 곡선 경로로 인해 바운딩 박스가 크므로 제한 완화 (350pt)
+    var hasTextPathInGroup = false;
+    try {
+        for (var ti = 0; ti < items.length; ti++) {
+            try {
+                if (items[ti].textPaths && items[ti].textPaths.length > 0) {
+                    hasTextPathInGroup = true; break;
+                }
+            } catch (e) {}
+        }
+    } catch (e) {}
+    var maxSize = hasTextPathInGroup ? 350 : 150;
     try {
         var gb = group.geometricBounds; // [top, left, bottom, right]
         var gw = gb[3] - gb[1];
@@ -1045,7 +1004,7 @@ function isBadgeGroup(group) {
         var scale = 1;
         if (pageW > 0 && pageW < 300) scale = 72 / 25.4; // mm → pt
         else if (pageW > 0 && pageW < 30) scale = 72; // inch → pt
-        if (gw * scale > 150 || gh * scale > 150) return false;
+        if (gw * scale > maxSize || gh * scale > maxSize) return false;
     } catch (e) {
         return false;
     }
@@ -1054,56 +1013,10 @@ function isBadgeGroup(group) {
 }
 
 /**
- * 문서에서 가장 많이 사용되는 본문 폰트를 감지한다.
- * 모든 Story의 첫 번째 문자 폰트를 수집하여 빈도순 상위 폰트를 반환.
- * @return {Object} fontName → true 맵 (본문 폰트 집합)
- */
-function detectBodyFonts(doc) {
-    var freq = {}; // fontFamily → 총 문자 수
-    try {
-        var stories = doc.stories;
-        for (var si = 0; si < stories.length; si++) {
-            var story = stories[si];
-            try {
-                // 짧은 텍스트(< 30자)는 장식일 수 있으므로 제외
-                if (story.contents.replace(/[\s\uFEFF]/g, "").length < 30) continue;
-                // 본문 스토리의 첫 문자 폰트를 대표 폰트로 사용
-                var ch = story.characters[0];
-                var fontName = ch.appliedFont.fontFamily;
-                var charCount = story.characters.length;
-                freq[fontName] = (freq[fontName] || 0) + charCount;
-            } catch (e) {}
-        }
-    } catch (e) {}
-
-    // 빈도순 정렬
-    var sorted = [];
-    for (var fn in freq) {
-        sorted.push({ name: fn, count: freq[fn] });
-    }
-    sorted.sort(function (a, b) { return b.count - a.count; });
-
-    // 상위 폰트를 본문 폰트로 간주
-    // 1위 대비 30% 이상 사용된 폰트까지 포함
-    var bodyFonts = {};
-    if (sorted.length > 0) {
-        var topCount = sorted[0].count;
-        for (var i = 0; i < sorted.length; i++) {
-            if (sorted[i].count >= topCount * 0.3) {
-                bodyFonts[sorted[i].name] = true;
-            } else {
-                break;
-            }
-        }
-    }
-    return bodyFonts;
-}
-
-/**
  * TextFrame이 이미지 렌더링 대상인지 판별한다.
- * 30자 미만의 독립 텍스트 프레임 = 장식 텍스트로 간주.
+ * 회전, 스트로크, 그림자 등 HWPX에서 재현 불가한 효과가 있는 경우에만 렌더링.
  */
-function isRenderableTextFrame(tf, bodyFonts) {
+function isRenderableTextFrame(tf) {
     // 스레드된 프레임은 짧은 텍스트(< 30자)일 때만 여기까지 오므로 제외하지 않음
     // (장식 텍스트가 스레드 체인에 포함될 수 있음)
     try {
@@ -1230,8 +1143,6 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
     var fonts = collectFonts(doc);
 
     // 범위 내 페이지의 텍스트프레임에 연결된 스토리 ID 수집
-    // (1) parentPage가 있는 텍스트프레임 (최상위 레벨)
-    // (2) 그룹 내부 텍스트프레임 — allPageItems를 통해 수집
     var rangeStoryIds = {};
     try {
         var tfs = doc.textFrames.everyItem().getElements();
@@ -1240,7 +1151,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
             try {
                 var pp = tf.parentPage;
                 if (pp) {
-                    var pgIdx = pp.documentOffset + 1; // 1-based
+                    var pgIdx = pp.documentOffset + 1;
                     if (pgIdx >= startPage && pgIdx <= endPage) {
                         try {
                             rangeStoryIds[tf.parentStory.id.toString()] = true;

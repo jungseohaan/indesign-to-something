@@ -300,6 +300,9 @@ public class IDMLToHwpxConverter {
                 RenderedGroup rendered = resolvedData.getRenderedTextFrameByIdmlId(vs.selfId());
                 if (rendered == null) continue;
 
+                // 배지 그룹 자식이면 TextPath 교체 로직 스킵 (배지 통째 렌더링에서 처리)
+                if (rendered.isBadgeGroupChild() || rendered.isBadgeGroup()) continue;
+
                 if (vs.isInline()) {
                     vsIt.remove();
                     System.out.println("[RenderedInlineVS] " + vs.selfId() + " → spread에서 제거 (AST에서 처리)");
@@ -862,8 +865,17 @@ public class IDMLToHwpxConverter {
             pageFigureBounds.put(si, bounds);
         }
 
+        // TextFrame 자식이 없는 배지 그룹(TextPath 전용)을 OrphanGraphic 대상에 추가
+        java.util.List<RenderedGroup> orphanTargets = new java.util.ArrayList<>(
+                resolvedData.allRenderedGraphicFrames());
+        for (RenderedGroup rg : resolvedData.allRenderedTextFrames()) {
+            if (rg.isBadgeGroup() && (rg.childTextFrameIds() == null || rg.childTextFrameIds().length == 0)) {
+                orphanTargets.add(rg);
+            }
+        }
+
         int injected = 0;
-        for (RenderedGroup rg : resolvedData.allRenderedGraphicFrames()) {
+        for (RenderedGroup rg : orphanTargets) {
             if (rg.file() == null || rg.bounds() == null) continue;
 
             // DOM ID → IDML hex ID 변환하여 이미 사용된 것인지 확인

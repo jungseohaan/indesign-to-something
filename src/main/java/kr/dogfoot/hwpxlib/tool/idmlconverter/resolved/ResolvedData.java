@@ -179,6 +179,10 @@ public class ResolvedData {
 
     public int renderedTextFrameCount() { return renderedTextFrameMap.size(); }
 
+    public java.util.Collection<RenderedGroup> allRenderedTextFrames() {
+        return renderedTextFrameMap.values();
+    }
+
     // --- RenderedPdfFrame ---
 
     public void addRenderedPdfFrame(RenderedGroup frame) {
