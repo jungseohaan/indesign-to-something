@@ -79,6 +79,10 @@ public final class CharPrBuilder {
         charPr.fontRef().set(hangulFontId, latinFontId, hangulFontId, hangulFontId, hangulFontId, hangulFontId, hangulFontId);
 
         short ratio = (horizontalScale != null) ? horizontalScale : 100;
+        int fontScaleAdjust = fontRegistry.lastScaleAdjust();
+        if (fontScaleAdjust != 0) {
+            ratio = (short) (ratio + fontScaleAdjust);
+        }
         charPr.createRatio();
         charPr.ratio().set(ratio, ratio, ratio, ratio, ratio, ratio, ratio);
 

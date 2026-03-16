@@ -657,8 +657,8 @@ public class HwpxParagraphBuilder {
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), ctx.fontRegistry,
                 textRun.letterSpacing(),
-                fontStyle.contains("bold"),
-                fontStyle.contains("italic"),
+                isBoldStyle(fontStyle),
+                isItalicStyle(fontStyle),
                 textRun.superscript(), textRun.subscript(),
                 textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
                 textRun.underline()
@@ -672,6 +672,36 @@ public class HwpxParagraphBuilder {
 
         ctx.charPrCache.put(cacheKey, newId);
         return newId;
+    }
+
+    /**
+     * fontStyle에서 Bold 여부를 판별한다.
+     * 단어 경계 기반 매칭으로 장식 폰트 이름(예: "SusicBoldItalicB140") 오인식을 방지.
+     * Helvetica Neue 넘버링(65+)도 DemiBold 이상으로 판단.
+     */
+    static boolean isBoldStyle(String fontStyle) {
+        if (fontStyle == null || fontStyle.isEmpty()) return false;
+        String lower = fontStyle.toLowerCase();
+        // "Bold", "Semi Bold", "SemiBold", "DemiBold" 등 단어 경계 매칭
+        if (lower.matches(".*\\b(bold|semibold|demibold|heavy|black|extrabold)\\b.*")) return true;
+        // Helvetica Neue 넘버링: "65 Medium", "75 Bold" 등 — 65 이상은 DemiBold급
+        if (lower.matches("^(\\d{2,3})\\s+.*")) {
+            try {
+                int num = Integer.parseInt(lower.split("\\s+")[0]);
+                if (num >= 65) return true;
+            } catch (NumberFormatException ignored) {}
+        }
+        return false;
+    }
+
+    /**
+     * fontStyle에서 Italic 여부를 판별한다.
+     * 단어 경계 기반 매칭으로 장식 폰트 이름 오인식을 방지.
+     */
+    static boolean isItalicStyle(String fontStyle) {
+        if (fontStyle == null || fontStyle.isEmpty()) return false;
+        String lower = fontStyle.toLowerCase();
+        return lower.matches(".*\\b(italic|oblique)\\b.*");
     }
 
     static boolean isEquationFont(String fontFamily) {
@@ -698,8 +728,8 @@ public class HwpxParagraphBuilder {
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), ctx.fontRegistry,
                 textRun.letterSpacing(),
-                fontStyle.contains("bold"),
-                fontStyle.contains("italic"),
+                isBoldStyle(fontStyle),
+                isItalicStyle(fontStyle),
                 textRun.superscript(), textRun.subscript(),
                 UnderlineType.NONE, textColor,
                 null, // underlineShape

@@ -52,6 +52,7 @@ public class FontMapper {
                         me.ko = val.has("ko") ? val.get("ko").getAsString() : DEFAULT_SANS;
                         me.en = val.has("en") ? val.get("en").getAsString() : me.ko;
                         me.spacing = val.has("spacing") ? val.get("spacing").getAsInt() : 0;
+                        me.scaleAdjust = val.has("scaleAdjust") ? val.get("scaleAdjust").getAsInt() : 0;
                         externalMappings.put(entry.getKey(), me);
                     }
                 }
@@ -111,7 +112,7 @@ public class FontMapper {
         // [1] 외부 JSON 명시적 매핑
         MappingEntry ext = externalMappings.get(idmlFontFamily);
         if (ext != null) {
-            result = new MappingResult(ext.ko, ext.en, ext.spacing);
+            result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust);
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)");
         }
         // [2] 메트릭 기반 자동 매핑
@@ -491,11 +492,18 @@ public class FontMapper {
         public final String koFont;
         public final String enFont;
         public final int spacingAdjustPercent;
+        /** horizontalScale 보정값 (예: 5 → IDML 95% → HWPX 100%) */
+        public final int scaleAdjust;
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent) {
+            this(koFont, enFont, spacingAdjustPercent, 0);
+        }
+
+        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust) {
             this.koFont = koFont;
             this.enFont = enFont;
             this.spacingAdjustPercent = spacingAdjustPercent;
+            this.scaleAdjust = scaleAdjust;
         }
     }
 
@@ -503,6 +511,7 @@ public class FontMapper {
         String ko;
         String en;
         int spacing;
+        int scaleAdjust;
     }
 
     static class HwpxMetric {

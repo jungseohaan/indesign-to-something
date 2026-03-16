@@ -151,6 +151,13 @@ public class FontRegistry {
     }
 
     /**
+     * 마지막 resolveFontIdPair() 호출 결과의 장평(horizontalScale) 보정값을 반환한다.
+     */
+    public int lastScaleAdjust() {
+        return lastMappingResult != null ? lastMappingResult.scaleAdjust : 0;
+    }
+
+    /**
      * 폰트 이름이 등록되어 있으면 ID 반환, 없으면 등록 후 반환.
      */
     private String ensureRegistered(String fontName) {
