@@ -91,17 +91,11 @@ class ASTStoryConverter {
             }
         }
 
-        // 탭 정지점 (인라인 오버라이드 → 단락 스타일 → basedOn 체인)
+        // 탭 정지점 (인라인 오버라이드만 — 스타일 탭은 StyleRegistry에서 처리)
+        // 스타일 탭을 AST 단락에 복제하면 override paraPr이 스타일 tabPr을 동일 값으로 덮어쓰는데,
+        // 한글에서 텍스트 너비가 탭 위치에 근접할 때 탭이 무시되는 문제를 유발함.
+        // 인라인 오버라이드만 복사하면, override paraPr의 tabPrIDRef="0"이 기본 탭 동작을 활성화.
         java.util.List<IDMLStyleDef.TabStop> tabStops = idmlPara.tabStops();
-        if (tabStops == null || tabStops.isEmpty()) {
-            // 인라인 오버라이드가 없으면 단락 스타일에서 상속
-            if (paraStyleRef != null) {
-                IDMLStyleDef paraStyle = resolveStyle(paraStyleRef, idmlDoc.paraStyles());
-                if (paraStyle != null) {
-                    tabStops = paraStyle.tabStops();
-                }
-            }
-        }
         if (tabStops != null) {
             for (IDMLStyleDef.TabStop ts : tabStops) {
                 long posHwpunits = CoordinateConverter.pointsToHwpunits(ts.position());

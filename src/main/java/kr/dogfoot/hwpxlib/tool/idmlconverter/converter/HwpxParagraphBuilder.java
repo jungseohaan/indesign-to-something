@@ -574,39 +574,35 @@ public class HwpxParagraphBuilder {
 
         // 탭/줄바꿈 문자를 적절한 HWPX 요소로 변환
         if (text.indexOf('\t') >= 0 || text.indexOf('\n') >= 0 || text.indexOf('\u2028') >= 0) {
-            kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.T t = run.addNewT();
-            addTextWithSpecialChars(t, text, indentToHerePosition);
+            addTextWithSpecialChars(run, text, indentToHerePosition);
         } else {
             run.addNewT().addText(text);
         }
     }
 
     /**
-     * 텍스트 내의 탭(\t)과 줄바꿈(\n, U+2028) 문자를 HWPX 요소로 변환하여 T에 추가.
-     * \t → <tab />, \n/U+2028 → <lineBreak />
-     * indentToHerePosition > 0이면 lineBreak 직후 <tab />을 삽입하여 들여쓰기 재현.
+     * 텍스트 내의 탭(\t)과 줄바꿈(\n, U+2028) 문자를 HWPX 요소로 변환.
+     * 각 탭/줄바꿈은 별도의 T 요소로 분리 (한글 렌더링 호환).
+     * indentToHerePosition > 0이면 lineBreak 직후 탭을 삽입하여 들여쓰기 재현.
      */
-    void addTextWithSpecialChars(
-            kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.T t, String text,
-            long indentToHerePosition) {
+    void addTextWithSpecialChars(Run run, String text, long indentToHerePosition) {
         StringBuilder buf = new StringBuilder();
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c == '\t') {
                 if (buf.length() > 0) {
-                    t.addText(buf.toString());
+                    run.addNewT().addText(buf.toString());
                     buf.setLength(0);
                 }
-                t.addNewTab();
+                run.addNewT().addNewTab();
             } else if (c == '\n' || c == '\u2028') {
                 if (buf.length() > 0) {
-                    t.addText(buf.toString());
+                    run.addNewT().addText(buf.toString());
                     buf.setLength(0);
                 }
-                t.addNewLineBreak();
-                // "Indent to Here": 줄바꿈 후 탭을 삽입하여 들여쓰기 위치로 이동
+                run.addNewT().addNewLineBreak();
                 if (indentToHerePosition > 0) {
-                    t.addNewTab();
+                    run.addNewT().addNewTab();
                 }
             } else if (c == '\r') {
                 // \r 무시 (\r\n의 경우 \n이 처리)
@@ -615,7 +611,7 @@ public class HwpxParagraphBuilder {
             }
         }
         if (buf.length() > 0) {
-            t.addText(buf.toString());
+            run.addNewT().addText(buf.toString());
         }
     }
 

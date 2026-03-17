@@ -229,7 +229,8 @@ public class StyleRegistry {
 
         // HWPX 탭 위치는 leftMargin 기준이므로,
         // 행잉 인덴트(indent < 0)일 때 leftMargin=0으로 설정
-        if (indent < 0 && left > 0 && styleDef.hasTabStops()) {
+        boolean hangingIndent = indent < 0 && left > 0;
+        if (hangingIndent && styleDef.hasTabStops()) {
             int origLeft = left;
             int origFirstLine = left + indent;
             indent = origFirstLine;
@@ -251,9 +252,12 @@ public class StyleRegistry {
             }
         }
 
-        // 스타일 내 탭 정지점 → TabPr 생성 (마진 조정 후에 실행해야 암시적 탭 포함)
+        // 스타일 내 탭 정지점 → TabPr 생성
+        // 행잉 인덴트 패턴일 때만 커스텀 탭 생성.
+        // 일반 스타일 탭은 한글에서 텍스트 너비가 탭 위치에 근접할 때 무시되므로
+        // 기본 탭 동작(tabPrIDRef="0")에 위임.
         String tabPrId = "0";
-        if (styleDef.hasTabStops()) {
+        if (hangingIndent && styleDef.hasTabStops()) {
             tabPrId = createInlineTabPr(styleDef.tabStops());
         }
 
