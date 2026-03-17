@@ -866,7 +866,7 @@ public class IDMLToHwpxConverter {
         // 페이지 bounds 캐시 (pageIndex → resolvedPage)
         List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection> sections = astDoc.sections();
 
-        // 페이지별 기존 ASTFigure bounds 수집 (orphan 중복 주입 방지용)
+        // 페이지별 기존 ASTFigure + ASTTable bounds 수집 (orphan 중복 주입 방지용)
         Map<Integer, java.util.List<long[]>> pageFigureBounds = new java.util.HashMap<>();
         for (int si = 0; si < sections.size(); si++) {
             java.util.List<long[]> bounds = new java.util.ArrayList<>();
@@ -875,6 +875,12 @@ public class IDMLToHwpxConverter {
                     kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
                             (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) blk;
                     bounds.add(new long[]{fig.x(), fig.y(), fig.x() + fig.width(), fig.y() + fig.height()});
+                }
+                // 테이블 영역도 수집: 테이블과 동일 위치의 그래픽 프레임 중복 주입 방지
+                if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable tbl =
+                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable) blk;
+                    bounds.add(new long[]{tbl.x(), tbl.y(), tbl.x() + tbl.width(), tbl.y() + tbl.height()});
                 }
             }
             pageFigureBounds.put(si, bounds);
@@ -950,27 +956,37 @@ public class IDMLToHwpxConverter {
                 }
                 // PNG 비율로 높이 보정
                 if (img.getWidth() > 0) {
+                    long geoBottom = figY + figH;
                     figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
+                    // 음수 Y (페이지 위 확장) 시 바닥 가장자리 기하학적 위치 유지
+                    if (figY < 0) {
+                        figY = geoBottom - figH;
+                    }
                 }
 
-                // 기존 ASTFigure에 완전히 포함되는 도형 건너뜀 (인라인 자식 도형 중복 방지)
-                // 단, 면적비가 매우 작은 경우 (< 5%) 는 독립 도형으로 간주하여 통과
-                boolean containedInExisting = false;
+                // 기존 ASTFigure/ASTTable과 겹치는 도형 건너뜀 (중복 방지)
+                // 완전 포함 또는 50% 이상 겹침이면 건너뜀
+                boolean overlapsExisting = false;
                 long figArea = figW * figH;
                 java.util.List<long[]> existingBounds = pageFigureBounds.get(pageIdx);
-                if (existingBounds != null) {
+                if (existingBounds != null && figArea > 0) {
                     for (long[] eb : existingBounds) {
-                        if (figX >= eb[0] && figY >= eb[1]
-                                && figX + figW <= eb[2] && figY + figH <= eb[3]) {
-                            long containerArea = (eb[2] - eb[0]) * (eb[3] - eb[1]);
-                            if (containerArea > 0 && (double) figArea / containerArea > 0.05) {
-                                containedInExisting = true;
+                        // 겹침 영역 계산
+                        long overlapLeft = Math.max(figX, eb[0]);
+                        long overlapTop = Math.max(figY, eb[1]);
+                        long overlapRight = Math.min(figX + figW, eb[2]);
+                        long overlapBottom = Math.min(figY + figH, eb[3]);
+                        if (overlapLeft < overlapRight && overlapTop < overlapBottom) {
+                            long overlapArea = (overlapRight - overlapLeft) * (overlapBottom - overlapTop);
+                            double overlapRatio = (double) overlapArea / figArea;
+                            if (overlapRatio > 0.5) {
+                                overlapsExisting = true;
                                 break;
                             }
                         }
                     }
                 }
-                if (containedInExisting) continue;
+                if (overlapsExisting) continue;
 
                 // 페이지 밖 음수 좌표 → crop fraction 설정
                 // HwpxImageBuilder가 hasCrop일 때 x<0, y<0을 자동 클램핑하므로

@@ -221,7 +221,9 @@ class IDMLStoryParser {
         // Cell style
         cell.appliedCellStyle(getAttrOrNull(cellElem, "AppliedCellStyle"));
         cell.fillColor(getAttrOrNull(cellElem, "FillColor"));
-        cell.fillTint(parseDoubleAttrDef(cellElem, "FillTint", 100));
+        double cellFillTint = parseDoubleAttrDef(cellElem, "FillTint", 100);
+        if (cellFillTint < 0) cellFillTint = 100;  // IDML FillTint=-1은 기본값(100%) 의미
+        cell.fillTint(cellFillTint);
 
         // Cell insets/padding
         cell.topInset(parseDoubleAttrDef(cellElem, "TextTopInset", 4));

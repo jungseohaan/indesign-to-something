@@ -369,7 +369,12 @@ class ASTFigureBuilder {
                     }
                     // PNG 비율로 높이 보정
                     if (imgResult.pixelWidth > 0) {
+                        long geoBottom = figY + figH;
                         figH = Math.round(figW * ((double) imgResult.pixelHeight / imgResult.pixelWidth));
+                        // 음수 Y (페이지 위 확장) 시 바닥 가장자리 기하학적 위치 유지
+                        if (figY < 0) {
+                            figY = geoBottom - figH;
+                        }
                     }
                     ASTFigure fig = new ASTFigure();
                     fig.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
@@ -667,7 +672,12 @@ class ASTFigureBuilder {
                     long figH = CoordinateConverter.pointsToHwpunits(rH);
                     // PNG 비율로 높이 보정
                     if (imgResult.pixelWidth > 0) {
+                        long geoBottom = figY + figH;
                         figH = Math.round(figW * ((double) imgResult.pixelHeight / imgResult.pixelWidth));
+                        // 음수 Y (페이지 위 확장) 시 바닥 가장자리 기하학적 위치 유지
+                        if (figY < 0) {
+                            figY = geoBottom - figH;
+                        }
                     }
 
                     ASTFigure figure = new ASTFigure();

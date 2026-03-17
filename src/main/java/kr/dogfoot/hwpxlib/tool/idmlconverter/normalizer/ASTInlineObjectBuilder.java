@@ -692,7 +692,9 @@ class ASTInlineObjectBuilder {
     static List<ASTImageLoader.ShapeWithColor> collectChildVectorShapes(
             IDMLCharacterRun.InlineGraphic ig, ColorResolver colorResolver) {
         List<ASTImageLoader.ShapeWithColor> result = new ArrayList<>();
-        collectChildVectorShapesRecursive(ig, colorResolver, result, null);
+        // Group의 자체 회전 변환을 자식들에게 누적 (예: 45° 회전 그룹 → + 도형이 × 로 렌더링)
+        double[] initialParent = "group".equals(ig.type()) ? ig.itemTransform() : null;
+        collectChildVectorShapesRecursive(ig, colorResolver, result, initialParent);
         return result;
     }
 

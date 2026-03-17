@@ -119,10 +119,11 @@ class ASTTableConverter {
         cell.columnSpan(idmlCell.columnSpan());
 
         // 셀 스타일 (FillColor + FillTint 블렌딩)
+        // IDML FillTint=-1은 "기본값(100%)" 의미 → 0 이하는 100%로 처리
         if (idmlCell.fillColor() != null) {
             String resolved = colorResolver.resolve(idmlCell.fillColor());
             double tint = idmlCell.fillTint();
-            if (tint < 100 && resolved != null && resolved.startsWith("#") && resolved.length() >= 7) {
+            if (tint > 0 && tint < 100 && resolved != null && resolved.startsWith("#") && resolved.length() >= 7) {
                 resolved = blendColorWithWhite(resolved, tint / 100.0);
             }
             cell.fillColor(resolved);
@@ -172,7 +173,7 @@ class ASTTableConverter {
         border.tint(src.strokeTint);
         if (src.strokeColor != null) {
             String resolved = colorResolver.resolve(src.strokeColor);
-            if (src.strokeTint < 100 && resolved != null && resolved.startsWith("#") && resolved.length() >= 7) {
+            if (src.strokeTint > 0 && src.strokeTint < 100 && resolved != null && resolved.startsWith("#") && resolved.length() >= 7) {
                 resolved = blendColorWithWhite(resolved, src.strokeTint / 100.0);
             }
             border.color(resolved);
