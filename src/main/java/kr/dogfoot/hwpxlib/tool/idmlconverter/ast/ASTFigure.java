@@ -45,6 +45,9 @@ public class ASTFigure extends ASTBlock {
     // Group 내에서 추출된 이미지 여부
     private boolean fromGroup;
 
+    // 소속 그룹 ID (compositing용)
+    private String parentGroupId;
+
     public BlockType blockType() { return BlockType.FIGURE; }
 
     public FigureKind kind() { return kind; }
@@ -124,6 +127,9 @@ public class ASTFigure extends ASTBlock {
 
     public boolean fromGroup() { return fromGroup; }
     public void fromGroup(boolean v) { this.fromGroup = v; }
+
+    public String parentGroupId() { return parentGroupId; }
+    public void parentGroupId(String v) { this.parentGroupId = v; }
 
     public boolean hasCrop() {
         return cropLeftFraction > 0 || cropTopFraction > 0

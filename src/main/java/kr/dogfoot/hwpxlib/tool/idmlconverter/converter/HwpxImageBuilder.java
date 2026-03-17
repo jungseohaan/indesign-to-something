@@ -466,11 +466,14 @@ public class HwpxImageBuilder {
         Picture pic = anchorRun.addNewPicture();
         String picId = HwpxUtil.nextShapeId();
 
-        // 콘텐츠 이미지/그룹 요소 모두 IN_FRONT_OF_TEXT — z-order로 순서 결정.
-        // 단, 페이지 대부분을 덮는 큰 배경 이미지는 BEHIND_TEXT로
-        // (테이블 등 본문 텍스트 선택/편집이 가능하도록).
+        // 배경 역할 도형은 BEHIND_TEXT (텍스트 선택/편집 가능하도록):
+        // - 페이지 대부분을 덮는 큰 이미지
+        // - 그룹 소속 장식 도형 (RENDERED_SHAPE) — 텍스트 프레임 뒤에 배치
         TextWrapMethod figWrap = TextWrapMethod.IN_FRONT_OF_TEXT;
         if (figure.width() > 45000 && figure.height() > 60000) {
+            figWrap = TextWrapMethod.BEHIND_TEXT;
+        } else if (figure.fromGroup()
+                && figure.kind() == ASTFigure.FigureKind.RENDERED_SHAPE) {
             figWrap = TextWrapMethod.BEHIND_TEXT;
         }
 

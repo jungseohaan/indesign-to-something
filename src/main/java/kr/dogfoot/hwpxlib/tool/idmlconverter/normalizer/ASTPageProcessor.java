@@ -442,8 +442,6 @@ class ASTPageProcessor {
 
         IDMLPage finalPage = page;
 
-        // 모든 도형을 개별 처리 (그룹 소속 여부 무관)
-        // InDesign에서 개별 PNG 렌더링 → 각 도형의 z-order 보존
         List<ASTFigure> vectorFigures = vectorShapes.parallelStream()
                 .map(shape -> ASTFigureBuilder.createFigureFromVectorShape(
                         shape, finalPage, imageLoader, colorResolver,
@@ -457,6 +455,7 @@ class ASTPageProcessor {
         long fullPageH = CoordinateConverter.pointsToHwpunits(
                 IDMLGeometry.height(page.geometricBounds()));
         vectorFigures.removeIf(fig -> !clipFigureToPage(fig, fullPageW, fullPageH));
+
         vectorFigures.forEach(section::addBlock);
     }
 

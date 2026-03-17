@@ -88,11 +88,21 @@ class IDMLSpreadParser {
                     } else {
                         boolean isGraphicContainer = "GraphicType".equals(
                                 elem.getAttribute("ContentType"));
-                        // GraphicType 컨테이너: bgShape(배경)는 이미 등록됨.
-                        // composite VectorShape는 compound path 클리핑을 지원하지 않으므로
-                        // 개별 요소 추출만 사용. (사선 원 등은 renderedGraphicFrame으로 처리)
+                        // GraphicType이지만 이미지가 아닌 경우(장식 도형) —
+                        // 앞서 추가한 배경 도형을 제거하고 전체 도형으로 대체
+                        if (isGraphicContainer) {
+                            String elemSelfId = elem.getAttribute("Self");
+                            java.util.Iterator<IDMLVectorShape> it2 = spread.vectorShapes().iterator();
+                            while (it2.hasNext()) {
+                                IDMLVectorShape vs = it2.next();
+                                if (elemSelfId.equals(vs.selfId())) {
+                                    it2.remove();
+                                    break;
+                                }
+                            }
+                        }
                         IDMLVectorShape vectorShape = null;
-                        if (!isGraphicContainer) {
+                        {
                             vectorShape = tryParseVectorShape(elem);
                             if (vectorShape != null) {
                                 vectorShape.zOrder(zOrderCounter[0]++);
@@ -1241,8 +1251,21 @@ class IDMLSpreadParser {
                     } else {
                         boolean isGraphicContainer2 = "GraphicType".equals(
                                 elem.getAttribute("ContentType"));
+                        // GraphicType이지만 이미지가 아닌 경우(장식 도형) —
+                        // 앞서 추가한 배경 도형을 제거하고 전체 도형으로 대체
+                        if (isGraphicContainer2) {
+                            String elemSelfId = elem.getAttribute("Self");
+                            java.util.Iterator<IDMLVectorShape> it2 = spread.vectorShapes().iterator();
+                            while (it2.hasNext()) {
+                                IDMLVectorShape vs = it2.next();
+                                if (elemSelfId.equals(vs.selfId())) {
+                                    it2.remove();
+                                    break;
+                                }
+                            }
+                        }
                         IDMLVectorShape vectorShape = null;
-                        if (!isGraphicContainer2) {
+                        {
                             vectorShape = tryParseVectorShape(elem);
                             if (vectorShape != null) {
                                 double[] combinedTransform = CoordinateConverter.combineTransforms(

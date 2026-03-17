@@ -383,9 +383,8 @@ class ASTFigureBuilder {
                     fig.pixelWidth(imgResult.pixelWidth);
                     fig.pixelHeight(imgResult.pixelHeight);
                     fig.fromGroup(shape.fromGroup());
+                    fig.parentGroupId(shape.parentGroupId());
                     fig.sourceId(shape.selfId());
-                    System.out.println("[RenderedGraphic] " + shape.selfId()
-                            + " → " + renderedGraphic.file());
                     return fig;
                 }
             }
@@ -719,4 +718,5 @@ class ASTFigureBuilder {
 
         return uri + "|" + tx + "," + ty + "|" + w + "x" + h;
     }
+
 }
