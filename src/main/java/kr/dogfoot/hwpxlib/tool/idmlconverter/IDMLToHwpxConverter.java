@@ -286,7 +286,7 @@ public class IDMLToHwpxConverter {
                 if (rendered == null) continue;
                 if (textPathRenderedFiles.contains(rendered.file())) {
                     it.remove();
-                    System.out.println("[RenderedTextFrame] " + tf.selfId()
+                    System.err.println("[RenderedTextFrame] " + tf.selfId()
                             + " → SKIP (TextPath가 " + rendered.file() + " 처리)");
                 }
                 // TextPath와 중복되지 않는 렌더 TextFrame은 AST에서 처리
@@ -306,7 +306,7 @@ public class IDMLToHwpxConverter {
 
                 if (vs.isInline()) {
                     vsIt.remove();
-                    System.out.println("[RenderedInlineVS] " + vs.selfId() + " → spread에서 제거 (AST에서 처리)");
+                    System.err.println("[RenderedInlineVS] " + vs.selfId() + " → spread에서 제거 (AST에서 처리)");
                     continue;
                 }
 
@@ -390,7 +390,7 @@ public class IDMLToHwpxConverter {
                 spread.addImageFrame(syn);
                 replacedCount++;
 
-                System.out.println("[RenderedTextPath] " + vs.selfId()
+                System.err.println("[RenderedTextPath] " + vs.selfId()
                         + " → " + rendered.file()
                         + " z=" + zOrder
                         + (vs.parentGroupId() != null ? " group=" + vs.parentGroupId() : ""));
@@ -404,7 +404,7 @@ public class IDMLToHwpxConverter {
                     IDMLVectorShape sib = sibIt.next();
                     if (sib.parentGroupId() != null && replacedGroupIds.contains(sib.parentGroupId())) {
                         sibIt.remove();
-                        System.out.println("[RenderedTextPath] 형제 " + sib.selfId()
+                        System.err.println("[RenderedTextPath] 형제 " + sib.selfId()
                                 + " 제거 (group=" + sib.parentGroupId() + ")");
                     }
                 }
@@ -417,7 +417,7 @@ public class IDMLToHwpxConverter {
                         RenderedGroup tfRendered = resolvedData.getRenderedTextFrameByIdmlId(tf.selfId());
                         if (tfRendered != null) {
                             tfSibIt.remove();
-                            System.out.println("[RenderedTextPath] 형제 TF " + tf.selfId()
+                            System.err.println("[RenderedTextPath] 형제 TF " + tf.selfId()
                                     + " 제거 (group=" + tf.parentGroupId() + ")");
                         }
                     }
@@ -426,7 +426,7 @@ public class IDMLToHwpxConverter {
         }
 
         if (replacedCount > 0) {
-            System.out.println("[RenderedTextFrame] " + replacedCount + "개 텍스트 프레임을 이미지로 교체");
+            System.err.println("[RenderedTextFrame] " + replacedCount + "개 텍스트 프레임을 이미지로 교체");
         }
     }
 
@@ -514,7 +514,17 @@ public class IDMLToHwpxConverter {
                     // 위치: AST 중심점 기반 (pageRelativeCenter, 페이지 좌표 항상 정확)
                     long figX, figY, figW, figH;
                     double[] bounds = rendered.bounds();
-                    if (bounds != null && bounds.length == 4) {
+                    if (isBadgeFallback && bounds != null && bounds.length == 4) {
+                        // 배지: 그룹 bounds(페이지 상대) → 위치/크기 직접 사용
+                        figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                .pointsToHwpunits(bounds[1]);
+                        figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                .pointsToHwpunits(bounds[0]);
+                        figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                .pointsToHwpunits(bounds[3] - bounds[1]);
+                        figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                .pointsToHwpunits(bounds[2] - bounds[0]);
+                    } else if (bounds != null && bounds.length == 4) {
                         double rW = bounds[3] - bounds[1];
                         figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
                                 .pointsToHwpunits(rW);
@@ -532,15 +542,20 @@ public class IDMLToHwpxConverter {
                         figX = centerX - figW / 2;
                         figY = centerY - figH / 2;
                     } else {
-                        // bounds 없으면 AST + PNG 비율 폴백
+                        // bounds 없으면 AST 위치/크기 폴백
                         figX = tfb.x();
                         figW = tfb.width();
-                        if (img.getWidth() > 0) {
+                        if (isBadgeFallback) {
+                            // 배지: AST 높이 그대로 사용 (PNG 비율 적용하면 그룹 장식 영역 포함되어 높이 과대)
+                            figH = tfb.height();
+                            figY = tfb.y();
+                        } else if (img.getWidth() > 0) {
                             figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
+                            figY = tfb.y() - (figH - tfb.height()) / 2;
                         } else {
                             figH = tfb.height();
+                            figY = tfb.y();
                         }
-                        figY = tfb.y() - (figH - tfb.height()) / 2;
                     }
 
                     kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
@@ -563,13 +578,10 @@ public class IDMLToHwpxConverter {
                     if (isBadgeFallback) {
                         replacedBadgeFiles.add(rendered.file());
                     }
-                    System.out.println("[FloatingRendered] " + tfb.sourceId()
+                    System.err.println("[FloatingRendered] " + tfb.sourceId()
                             + " → " + rendered.file()
-                            + " astPos=(" + tfb.x() + "," + tfb.y() + ")"
-                            + " astSize=(" + tfb.width() + "," + tfb.height() + ")"
                             + " figPos=(" + figX + "," + figY + ")"
-                            + " figSize=(" + figW + "," + figH + ")"
-                            + (Math.abs(tfb.rotationAngle()) > 0.5 ? " rot=" + tfb.rotationAngle() : ""));
+                            + " figSize=(" + figW + "," + figH + ")");
                 } catch (Exception e) {
                     System.err.println("[FloatingRendered] " + tfb.sourceId()
                             + " 교체 실패: " + e.getMessage());
@@ -577,7 +589,7 @@ public class IDMLToHwpxConverter {
             }
         }
         if (replaced > 0) {
-            System.out.println("[FloatingRendered] " + replaced + "개 플로팅 텍스트 프레임을 이미지로 교체");
+            System.err.println("[FloatingRendered] " + replaced + "개 플로팅 텍스트 프레임을 이미지로 교체");
         }
     }
 
@@ -626,7 +638,7 @@ public class IDMLToHwpxConverter {
             }
         }
         if (replaced > 0 || removed > 0) {
-            System.out.println("[InlineRendered] " + replaced + "개 이미지 교체, " + removed + "개 중복 제거");
+            System.err.println("[InlineRendered] " + replaced + "개 이미지 교체, " + removed + "개 중복 제거");
         }
         return replacedTexts;
     }
@@ -665,12 +677,12 @@ public class IDMLToHwpxConverter {
                 if (text.length() > 3 && replacedTexts.contains(text)) {
                     it.remove();
                     removed++;
-                    System.out.println("[FloatingDup] " + tfb.sourceId() + " → 제거 (\"" + text + "\")");
+                    System.err.println("[FloatingDup] " + tfb.sourceId() + " → 제거 (\"" + text + "\")");
                 }
             }
         }
         if (removed > 0) {
-            System.out.println("[FloatingDup] " + removed + "개 플로팅 중복 블록 제거");
+            System.err.println("[FloatingDup] " + removed + "개 플로팅 중복 블록 제거");
         }
     }
 
@@ -721,7 +733,7 @@ public class IDMLToHwpxConverter {
 
                 if (textContent != null) replacedTexts.add(textContent);
                 replaced++;
-                System.out.println("[InlineRendered] " + obj.sourceId() + " → " + rendered.file());
+                System.err.println("[InlineRendered] " + obj.sourceId() + " → " + rendered.file());
             } catch (Exception e) {
                 // 읽기 실패 — 텍스트 프레임 유지
             }
@@ -773,7 +785,7 @@ public class IDMLToHwpxConverter {
 
                 if (textContent != null) replacedTexts.add(textContent);
                 replaced++;
-                System.out.println("[InlineRendered-Badge] " + obj.sourceId() + " → " + rendered.file());
+                System.err.println("[InlineRendered-Badge] " + obj.sourceId() + " → " + rendered.file());
             } catch (Exception e) {
                 // 읽기 실패 — 텍스트 프레임 유지
             }
@@ -1028,7 +1040,7 @@ public class IDMLToHwpxConverter {
 
                 section.addBlock(fig);
                 injected++;
-                System.out.println("[OrphanGraphic] " + idmlHexId + " (DOM " + rg.id()
+                System.err.println("[OrphanGraphic] " + idmlHexId + " (DOM " + rg.id()
                         + ") → page " + (pageIdx + 1) + " " + rg.file()
                         + " pos=(" + figX + "," + figY + ") size=(" + figW + "x" + figH + ")"
                         + " bounds=[" + bounds[0] + "," + bounds[1] + "," + bounds[2] + "," + bounds[3] + "]"
@@ -1038,7 +1050,7 @@ public class IDMLToHwpxConverter {
             }
         }
         if (injected > 0) {
-            System.out.println("[OrphanGraphic] " + injected + "개 렌더 그래픽 프레임 주입 완료");
+            System.err.println("[OrphanGraphic] " + injected + "개 렌더 그래픽 프레임 주입 완료");
         }
 
         // === 렌더링된 이미지 프레임 orphan 주입 ===
@@ -1164,7 +1176,7 @@ public class IDMLToHwpxConverter {
 
                 section.addBlock(fig);
                 imgInjected++;
-                System.out.println("[OrphanImage] " + idmlHexId + " (DOM " + rg.id()
+                System.err.println("[OrphanImage] " + idmlHexId + " (DOM " + rg.id()
                         + ") → page " + (pageIdx + 1) + " " + rg.file()
                         + " pos=(" + figX + "," + figY + ") size=(" + figW + "x" + figH + ")"
                         + " px=" + img.getWidth() + "x" + img.getHeight());
@@ -1173,7 +1185,7 @@ public class IDMLToHwpxConverter {
             }
         }
         if (imgInjected > 0) {
-            System.out.println("[OrphanImage] " + imgInjected + "개 렌더 이미지 프레임 주입 완료");
+            System.err.println("[OrphanImage] " + imgInjected + "개 렌더 이미지 프레임 주입 완료");
         }
     }
 
