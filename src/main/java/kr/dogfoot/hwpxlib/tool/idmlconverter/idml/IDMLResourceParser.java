@@ -128,10 +128,14 @@ class IDMLResourceParser {
                 doc.putObjectStyle(self, strokeColor, strokeWeight, strokeTint);
             }
             // CornerRadius 저장 (ObjectStyle 상속용)
+            // CornerOption이 "RoundedCorner"가 아니면 라운딩 비활성 → 저장 불필요
             if (self != null) {
-                double cr = parseDoubleAttrDef(elem, "CornerRadius", 0);
-                if (cr > 0) {
-                    doc.putObjectStyleCornerRadius(self, cr);
+                String cornerOpt = getAttrOrNull(elem, "CornerOption");
+                if (cornerOpt != null && cornerOpt.contains("RoundedCorner")) {
+                    double cr = parseDoubleAttrDef(elem, "CornerRadius", 0);
+                    if (cr > 0) {
+                        doc.putObjectStyleCornerRadius(self, cr);
+                    }
                 }
             }
         }

@@ -294,6 +294,9 @@ public class FlatNodeAdapter {
         // Column break
         para.columnBreakAfter(comp.columnBreakAfter());
 
+        // Indent to Here
+        para.indentToHerePosition(comp.indentToHerePosition());
+
         // Pending underline color
         para.pendingUnderlineColor(comp.pendingUnderlineColor());
 

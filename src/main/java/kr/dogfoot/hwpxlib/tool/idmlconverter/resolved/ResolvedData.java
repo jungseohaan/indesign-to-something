@@ -26,6 +26,7 @@ public class ResolvedData {
     private final Map<String, RenderedGroup> renderedImageFrameMap = new HashMap<>();  // DOM id → rendered image frame (PSD, AI 등)
     private final Map<String, RenderedGroup> childImageToGroupMap = new HashMap<>();  // 자식 이미지 DOM id → 부모 그룹 RenderedGroup
     private final Set<Integer> processedImageGroupIds = new HashSet<>();  // 이미 Figure로 변환된 그룹 렌더 ID
+    private final Set<String> suppressedRenderedImageFrameIds = new HashSet<>();  // TextFrame 포함으로 이미지 렌더링 억제된 그룹 DOM id
     private Set<String> badgeGroupShapeIdmlIds;  // 배지 그룹 소속 도형 IDML hex ID ("u1735")
     private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TextFrame DOM id → 배지 그룹 RenderedGroup
     private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
@@ -262,12 +263,30 @@ public class ResolvedData {
         try {
             String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
             RenderedGroup direct = renderedImageFrameMap.get(decimalId);
-            if (direct != null) return direct;
+            if (direct != null) {
+                if (suppressedRenderedImageFrameIds.contains(decimalId)) return null;
+                return direct;
+            }
             // 자식 이미지 프레임 → 부모 그룹 렌더링 폴백
-            return childImageToGroupMap.get(decimalId);
+            RenderedGroup parent = childImageToGroupMap.get(decimalId);
+            if (parent != null && suppressedRenderedImageFrameIds.contains(String.valueOf(parent.id()))) {
+                return null;
+            }
+            return parent;
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /**
+     * TextFrame을 포함하는 renderedImageFrame 그룹을 억제 — 이미지 렌더링 대신 텍스트 박스 유지.
+     */
+    public void suppressRenderedImageFrame(int domId) {
+        suppressedRenderedImageFrameIds.add(String.valueOf(domId));
+    }
+
+    public boolean isRenderedImageFrameSuppressed(int domId) {
+        return suppressedRenderedImageFrameIds.contains(String.valueOf(domId));
     }
 
     // --- 좌표 단위 정규화 ---

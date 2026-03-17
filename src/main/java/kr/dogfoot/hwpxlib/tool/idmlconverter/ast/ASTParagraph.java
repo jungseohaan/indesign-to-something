@@ -47,6 +47,10 @@ public class ASTParagraph {
     private boolean keepLinesTogether;
     private boolean pageBreakBefore;
 
+    // "Indent to Here" (ACE 7) 위치 (HWPUNIT). 0이면 미설정.
+    // U+2028 강제 줄바꿈 후 이 위치에 탭 삽입하여 들여쓰기 재현.
+    private long indentToHerePosition;
+
     // 장식 선(GraphicLine)의 stroke 색상 → 후속 텍스트 런에 underline으로 전파
     private String pendingUnderlineColor;
 
@@ -107,6 +111,9 @@ public class ASTParagraph {
 
     public Long shadingBottomOffset() { return shadingBottomOffset; }
     public void shadingBottomOffset(Long v) { this.shadingBottomOffset = v; }
+
+    public long indentToHerePosition() { return indentToHerePosition; }
+    public void indentToHerePosition(long v) { this.indentToHerePosition = v; }
 
     public List<ASTTabStop> tabStops() { return tabStops; }
     public boolean hasTabStops() { return tabStops != null && !tabStops.isEmpty(); }

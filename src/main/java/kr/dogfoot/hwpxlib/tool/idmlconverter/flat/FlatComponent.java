@@ -48,6 +48,9 @@ public class FlatComponent {
     // 컬럼 브레이크
     private boolean columnBreakAfter;
 
+    // "Indent to Here" 위치 (HWPUNIT)
+    private long indentToHerePosition;
+
     // 장식 선 stroke 색상 → 후속 텍스트 런에 underline으로 전파
     private String pendingUnderlineColor;
 
@@ -133,6 +136,9 @@ public class FlatComponent {
 
     public boolean columnBreakAfter() { return columnBreakAfter; }
     public void columnBreakAfter(boolean v) { this.columnBreakAfter = v; }
+
+    public long indentToHerePosition() { return indentToHerePosition; }
+    public void indentToHerePosition(long v) { this.indentToHerePosition = v; }
 
     public String pendingUnderlineColor() { return pendingUnderlineColor; }
     public void pendingUnderlineColor(String v) { this.pendingUnderlineColor = v; }

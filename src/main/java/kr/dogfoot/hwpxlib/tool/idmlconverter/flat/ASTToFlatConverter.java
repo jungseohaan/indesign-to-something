@@ -401,6 +401,9 @@ public class ASTToFlatConverter {
         // Column break
         comp.columnBreakAfter(astPara.columnBreakAfter());
 
+        // Indent to Here
+        comp.indentToHerePosition(astPara.indentToHerePosition());
+
         // Pending underline color
         comp.pendingUnderlineColor(astPara.pendingUnderlineColor());
 

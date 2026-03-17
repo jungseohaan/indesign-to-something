@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
@@ -202,6 +203,11 @@ class ASTPageProcessor {
         for (FlatObject fo : textFrames) {
             IDMLTextFrame tf = (IDMLTextFrame) fo.sourceObject();
             if (tf.isEditorialNote()) continue;
+
+            // 조상 그룹 중 renderedImageFrame이 있으면 → 이미지 렌더링 억제 (텍스트 박스 우선)
+            if (resolvedData != null) {
+                suppressAncestorRenderedImageFrames(fo, pool, resolvedData);
+            }
 
             String storyId = tf.parentStoryId();
             if (storyId == null) continue;
@@ -1489,5 +1495,26 @@ class ASTPageProcessor {
             }
         }
         return true;
+    }
+
+    /**
+     * FlatObject의 조상 그룹 중 renderedImageFrame에 등록된 것이 있으면 억제 마킹.
+     * 텍스트 프레임이 포함된 그룹의 렌더 이미지는 사용하지 않고 텍스트 박스를 유지한다.
+     */
+    private static void suppressAncestorRenderedImageFrames(FlatObject fo,
+                                                             FlattenedObjectPool pool,
+                                                             ResolvedData resolvedData) {
+        String groupId = fo.parentGroupId();
+        int depth = 0;
+        while (groupId != null && depth < 10) {
+            RenderedGroup rg = resolvedData.getRenderedImageFrameByIdmlId(groupId);
+            if (rg != null) {
+                resolvedData.suppressRenderedImageFrame(rg.id());
+            }
+            FlatObject parent = pool.get(groupId);
+            if (parent == null) break;
+            groupId = parent.parentGroupId();
+            depth++;
+        }
     }
 }

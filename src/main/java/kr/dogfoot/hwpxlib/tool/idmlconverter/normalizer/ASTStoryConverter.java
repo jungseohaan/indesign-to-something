@@ -140,11 +140,11 @@ class ASTStoryConverter {
         // BT/NP 런 사이에 끼인 짧은 일반 텍스트(변수명 등)는 "브릿지"로 수식 그룹에 포함
 
         // 전처리: 한국어+수식마커 혼합 런을 분리 (예: "_r를 구해" → "_r" + "를 구해")
-        List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(idmlPara.characterRuns());
+        // "Indent to Here" (ACE 7, U+0008) 처리 — split 전 원본 런에서 수행
+        // splitMathKoreanMixedRuns가 런을 복제할 수 있으므로 원본에서 먼저 처리
+        boolean hasIndentToHere = applyIndentToHere(para, idmlPara.characterRuns(), idmlPara, idmlDoc);
 
-        // "Indent to Here" (ACE 7, U+0008) 처리
-        // 원시 런 콘텐츠에서 U+0008 마커를 찾아 indent 계산 후 제거 (수식 그룹 변환 전에 처리)
-        boolean hasIndentToHere = applyIndentToHere(para, runs, idmlPara, idmlDoc);
+        List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(idmlPara.characterRuns());
 
         // r\d+par → 원문자(①②③...) 전처리 (수식 그룹화 전에 실행)
         ASTRunConverter.convertCircledNumberRuns(runs);
@@ -380,13 +380,10 @@ class ASTStoryConverter {
     }
 
     /**
-     * "Indent to Here" (U+0008) 마커를 원시 IDMLCharacterRun에서 제거한다.
+     * "Indent to Here" (U+0008) 마커를 원시 IDMLCharacterRun에서 제거하고,
+     * 마커 위치까지의 텍스트 폭을 추정하여 hanging indent를 설정한다.
      * U+0008은 XML에서 허용되지 않는 제어 문자이므로 반드시 제거해야 한다.
      * 수식 그룹 변환 전에 호출해야 한다 (U+0008이 수식 경로로 들어가는 것을 방지).
-     *
-     * 참고: HWPX의 leftMargin/firstLineIndent로 InDesign의 "Indent to Here"를
-     * 재현하면 탭 정지점이 margin 기준으로 이동하여 첫 줄이 밀리는 문제가 있어,
-     * 현재는 마커 제거만 수행한다.
      *
      * @return true if any U+0008 marker was found (수식 분할 여부 결정에 사용)
      */
@@ -395,17 +392,52 @@ class ASTStoryConverter {
                                             IDMLParagraph idmlPara,
                                             IDMLDocument idmlDoc) {
         boolean found = false;
+        int charsBeforeMarker = 0;
+        boolean markerFound = false;
+
         for (IDMLCharacterRun run : runs) {
             String text = run.content();
             if (text == null) continue;
-            if (text.indexOf('\u0008') >= 0) {
+            int markerPos = text.indexOf('\u0008');
+            if (markerPos >= 0) {
                 found = true;
+                markerFound = true;
+                // 마커 전 텍스트에서 가시 문자 수 계산
+                for (int i = 0; i < markerPos; i++) {
+                    char c = text.charAt(i);
+                    // 제로 폭 문자 제외
+                    if (c != '\u200c' && c != '\u200b' && c != '\u200d' && c != '\ufeff') {
+                        charsBeforeMarker++;
+                    }
+                }
                 // InDesign "Indent to Here" (ACE 7): 탭+U+0008 조합에서 탭도 함께 제거
                 text = text.replace("\t\u0008", "");
                 text = text.replace("\u0008", "");
                 run.content(text);
+            } else if (!markerFound) {
+                // 마커 전 런의 가시 문자 수 누적
+                for (int i = 0; i < text.length(); i++) {
+                    char c = text.charAt(i);
+                    if (c != '\u200c' && c != '\u200b' && c != '\u200d' && c != '\ufeff') {
+                        charsBeforeMarker++;
+                    }
+                }
             }
         }
+
+        // indentToHere 위치 저장 (lineBreak 후 탭 삽입에 사용)
+        if (found && charsBeforeMarker > 0) {
+            double fontSizePt = 10.0;
+            if (idmlDoc != null && idmlPara != null) {
+                IDMLStyleDef style = resolveStyle(idmlPara.appliedParagraphStyle(), idmlDoc.paraStyles());
+                if (style != null && style.fontSize() != null) {
+                    fontSizePt = style.fontSize();
+                }
+            }
+            long indentHwpunit = Math.round(charsBeforeMarker * fontSizePt * 0.45 * 100);
+            para.indentToHerePosition(indentHwpunit);
+        }
+
         return found;
     }
 

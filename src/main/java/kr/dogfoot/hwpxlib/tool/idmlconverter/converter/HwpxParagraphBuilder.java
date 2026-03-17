@@ -66,6 +66,11 @@ public class HwpxParagraphBuilder {
             if (mappedCharPr != null) paraCharPrId = mappedCharPr;
         }
 
+        // "Indent to Here" 탭 정지점 추가 (lineBreak 후 탭이 이 위치로 이동)
+        if (astPara.indentToHerePosition() > 0) {
+            astPara.addTabStop(new ASTTabStop(astPara.indentToHerePosition(), "left", null));
+        }
+
         // 단락 속성 오버라이드가 있으면 새 ParaPr 생성
         if (hasParagraphOverrides(astPara)) {
             paraPrId = createOverrideParaPr(astPara, paraPrId);
@@ -101,7 +106,7 @@ public class HwpxParagraphBuilder {
         for (ASTInlineItem item : astPara.items()) {
             switch (item.itemType()) {
                 case TEXT_RUN:
-                    addTextRun(para, (ASTTextRun) item, paraCharPrId);
+                    addTextRun(para, (ASTTextRun) item, paraCharPrId, astPara.indentToHerePosition());
                     break;
                 case INLINE_OBJECT:
                     addInlineObject(para, (ASTInlineObject) item);
@@ -541,6 +546,10 @@ public class HwpxParagraphBuilder {
     // ── 텍스트 런 변환 ──
 
     void addTextRun(Para para, ASTTextRun textRun, String defaultCharPrId) {
+        addTextRun(para, textRun, defaultCharPrId, 0);
+    }
+
+    void addTextRun(Para para, ASTTextRun textRun, String defaultCharPrId, long indentToHerePosition) {
         String text = HwpxUtil.sanitizeText(textRun.text());
         if (text == null || text.isEmpty()) return;
 
@@ -564,20 +573,22 @@ public class HwpxParagraphBuilder {
         run.charPrIDRef(charPrId);
 
         // 탭/줄바꿈 문자를 적절한 HWPX 요소로 변환
-        if (text.indexOf('\t') >= 0 || text.indexOf('\n') >= 0) {
+        if (text.indexOf('\t') >= 0 || text.indexOf('\n') >= 0 || text.indexOf('\u2028') >= 0) {
             kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.T t = run.addNewT();
-            addTextWithSpecialChars(t, text);
+            addTextWithSpecialChars(t, text, indentToHerePosition);
         } else {
             run.addNewT().addText(text);
         }
     }
 
     /**
-     * 텍스트 내의 탭(\t)과 줄바꿈(\n) 문자를 HWPX 요소로 변환하여 T에 추가.
-     * \t → <tab />, \n → <lineBreak />
+     * 텍스트 내의 탭(\t)과 줄바꿈(\n, U+2028) 문자를 HWPX 요소로 변환하여 T에 추가.
+     * \t → <tab />, \n/U+2028 → <lineBreak />
+     * indentToHerePosition > 0이면 lineBreak 직후 <tab />을 삽입하여 들여쓰기 재현.
      */
     void addTextWithSpecialChars(
-            kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.T t, String text) {
+            kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.T t, String text,
+            long indentToHerePosition) {
         StringBuilder buf = new StringBuilder();
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
@@ -587,12 +598,16 @@ public class HwpxParagraphBuilder {
                     buf.setLength(0);
                 }
                 t.addNewTab();
-            } else if (c == '\n') {
+            } else if (c == '\n' || c == '\u2028') {
                 if (buf.length() > 0) {
                     t.addText(buf.toString());
                     buf.setLength(0);
                 }
                 t.addNewLineBreak();
+                // "Indent to Here": 줄바꿈 후 탭을 삽입하여 들여쓰기 위치로 이동
+                if (indentToHerePosition > 0) {
+                    t.addNewTab();
+                }
             } else if (c == '\r') {
                 // \r 무시 (\r\n의 경우 \n이 처리)
             } else {

@@ -1045,6 +1045,7 @@ public class IDMLToHwpxConverter {
         int imgInjected = 0;
         for (RenderedGroup rg : resolvedData.allRenderedImageFrames()) {
             if (rg.file() == null || rg.bounds() == null) continue;
+            if (resolvedData.isRenderedImageFrameSuppressed(rg.id())) continue;
 
             String idmlHexId = "u" + Integer.toHexString(rg.id());
             if (usedSourceIds.contains(idmlHexId)) continue;
