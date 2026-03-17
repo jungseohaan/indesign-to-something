@@ -33,6 +33,8 @@ public class ASTImageLoader {
     private final IDMLDocument idmlDoc;
     private final ConvertOptions options;
 
+    public boolean drawMarginGuide() { return options.drawMarginGuide(); }
+
     // 경로 캐시: URI → 절대경로 (병렬 loadImage 대응)
     private final ConcurrentHashMap<String, String> resolvedPathCache = new ConcurrentHashMap<>();
     // 디렉토리 파일 목록 캐시: dirPath → {lowerName → File} (대소문자 무시 검색 O(1))

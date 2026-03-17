@@ -66,8 +66,8 @@ class ASTPageProcessor {
         processVectorShapes(spread, page, imageLoader,
                 colorResolver, resolvedData, resolvedPage, section);
 
-        // 여백 가이드라인
-        if (imageLoader != null) {
+        // 여백 가이드라인 (옵션)
+        if (imageLoader != null && imageLoader.drawMarginGuide()) {
             ASTFigure marginGuide = ASTTextWrapSimulator.createMarginGuideFigure(page);
             if (marginGuide != null) {
                 section.addBlock(marginGuide);

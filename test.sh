@@ -424,7 +424,7 @@ fi
 # ── 변환 ──
 if [ "$ACTION" = "convert" ] || [ "$ACTION" = "both" ]; then
     echo "--- Converting ---"
-    $JAVA -jar "$JAR" --convert "$IDML" "$HWPX" $RESOLVED_OPT $PAGE_OPT $LINKS_OPT --include-images
+    $JAVA -jar "$JAR" --convert "$IDML" "$HWPX" $RESOLVED_OPT $PAGE_OPT $LINKS_OPT --include-images --margin-guide
     echo ""
 
     # PDF 프리뷰 + HWPX 열기

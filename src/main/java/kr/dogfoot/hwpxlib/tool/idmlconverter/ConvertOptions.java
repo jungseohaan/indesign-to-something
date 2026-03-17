@@ -21,6 +21,7 @@ public class ConvertOptions {
     private String resolvedJsonPath;
     private String fontMapPath;
     private String linksDirectory;
+    private boolean drawMarginGuide;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -35,6 +36,7 @@ public class ConvertOptions {
         this.mergeAllPages = false;
         this.spreadBasedConversion = false;
         this.drawPageBoundary = false;
+        this.drawMarginGuide = false;
         this.layoutMode = "preserve";
     }
 
@@ -238,6 +240,19 @@ public class ConvertOptions {
      * INDD에서 추출한 IDML이 임시 디렉토리에 있을 때,
      * 원본 INDD 옆의 Links 폴더 경로를 지정한다.
      */
+    /**
+     * 여백 가이드라인 그리기 옵션.
+     * true이면 페이지 여백 경계를 회색 선으로 표시한다.
+     */
+    public boolean drawMarginGuide() {
+        return drawMarginGuide;
+    }
+
+    public ConvertOptions drawMarginGuide(boolean drawMarginGuide) {
+        this.drawMarginGuide = drawMarginGuide;
+        return this;
+    }
+
     public String linksDirectory() {
         return linksDirectory;
     }

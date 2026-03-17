@@ -130,6 +130,9 @@ public class ConverterCLI {
                 case "--include-images":
                     options = options.includeImages(true);
                     break;
+                case "--margin-guide":
+                    options = options.drawMarginGuide(true);
+                    break;
                 case "--start-page":
                     if (i + 1 < args.length) {
                         options = options.startPage(Integer.parseInt(args[++i]));
