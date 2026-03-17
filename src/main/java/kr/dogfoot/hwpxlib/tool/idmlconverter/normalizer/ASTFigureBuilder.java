@@ -366,11 +366,24 @@ class ASTFigureBuilder {
                         figY = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
                         figW = CoordinateConverter.pointsToHwpunits(bbox[2] - bbox[0]);
                         figH = CoordinateConverter.pointsToHwpunits(bbox[3] - bbox[1]);
+                        // 선 도형(수평/수직 GraphicLine): 한 축이 0이면 strokeWeight로 확장
+                        if (figW <= 0 && figH > 0 && shape.strokeWeight() > 0) {
+                            figW = Math.max(CoordinateConverter.pointsToHwpunits(
+                                    shape.strokeWeight()), 100);
+                        }
+                        if (figH <= 0 && figW > 0 && shape.strokeWeight() > 0) {
+                            figH = Math.max(CoordinateConverter.pointsToHwpunits(
+                                    shape.strokeWeight()), 100);
+                        }
                     }
-                    // PNG 비율로 높이 보정
-                    if (imgResult.pixelWidth > 0) {
+                    // PNG 비율로 높이 보정 (한 축이 0인 선 도형은 건너뜀)
+                    if (imgResult.pixelWidth > 0 && figW > 0 && figH > 0) {
                         long geoBottom = figY + figH;
-                        figH = Math.round(figW * ((double) imgResult.pixelHeight / imgResult.pixelWidth));
+                        long pngH = Math.round(figW * ((double) imgResult.pixelHeight / imgResult.pixelWidth));
+                        // 선 도형(한 축이 매우 작은 경우)은 비율 보정 적용하지 않음
+                        if (pngH > 0) {
+                            figH = pngH;
+                        }
                         // 음수 Y (페이지 위 확장) 시 바닥 가장자리 기하학적 위치 유지
                         if (figY < 0) {
                             figY = geoBottom - figH;

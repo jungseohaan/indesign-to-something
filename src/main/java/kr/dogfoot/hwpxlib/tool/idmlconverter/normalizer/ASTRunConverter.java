@@ -218,7 +218,7 @@ class ASTRunConverter {
         }
         // ObjectStyle에서 stroke/fill 속성 상속 (인라인 도형에 직접 속성이 없는 경우)
         applyObjectStyleDefaults(ig, idmlDoc);
-        ASTInlineObject inlineObj = ASTInlineObjectBuilder.createInlineObjectFromGraphic(ig, imageLoader, colorResolver);
+        ASTInlineObject inlineObj = ASTInlineObjectBuilder.createInlineObjectFromGraphic(ig, imageLoader, colorResolver, idmlDoc);
         if (inlineObj != null) {
             // 인라인 수평 GraphicLine → 언더라인 탭으로 변환 (빈칸 밑줄선)
             if (tryConvertGraphicLineToUnderlineTab(ig, inlineObj, para, colorResolver, idmlDoc)) {

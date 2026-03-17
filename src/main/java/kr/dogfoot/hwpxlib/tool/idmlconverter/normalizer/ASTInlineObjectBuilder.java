@@ -237,6 +237,41 @@ class ASTInlineObjectBuilder {
     }
 
     /**
+     * 자식 TextFrame 중 실제 텍스트 콘텐츠가 있는지 확인.
+     * 텍스트 없는 TextFrame(체크박스 채움용 등)은 false 반환.
+     */
+    static boolean hasChildTextFramesWithContent(IDMLCharacterRun.InlineGraphic ig,
+                                                  IDMLDocument idmlDoc) {
+        if (idmlDoc == null) return hasChildTextFramesRecursive(ig);
+        return hasChildTextFramesWithContentRecursive(ig, idmlDoc);
+    }
+
+    private static boolean hasChildTextFramesWithContentRecursive(IDMLCharacterRun.InlineGraphic ig,
+                                                                    IDMLDocument idmlDoc) {
+        if (ig.childTextFrames() != null) {
+            for (IDMLTextFrame tf : ig.childTextFrames()) {
+                String storyId = tf.parentStoryId();
+                if (storyId == null) continue;
+                IDMLStory story = idmlDoc.getStory(storyId);
+                if (story == null) continue;
+                if (story.hasTables()) return true;
+                for (IDMLParagraph p : story.paragraphs()) {
+                    for (IDMLCharacterRun run : p.characterRuns()) {
+                        String c = run.content();
+                        if (c != null && !c.trim().isEmpty()) return true;
+                    }
+                }
+            }
+        }
+        if (ig.childGraphics() != null) {
+            for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+                if (hasChildTextFramesWithContentRecursive(child, idmlDoc)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 배경 사각형 스타일 정보.
      */
     static class GroupBackground {
@@ -460,7 +495,8 @@ class ASTInlineObjectBuilder {
      */
     static ASTInlineObject createInlineObjectFromGraphic(IDMLCharacterRun.InlineGraphic ig,
                                                           ASTImageLoader imageLoader,
-                                                          ColorResolver colorResolver) {
+                                                          ColorResolver colorResolver,
+                                                          IDMLDocument idmlDoc) {
         ASTInlineObject obj = new ASTInlineObject();
         obj.sourceId(ig.selfId());
 
@@ -563,8 +599,9 @@ class ASTInlineObjectBuilder {
                 obj.pixelHeight(result.pixelHeight);
             }
         } else if (ig.hasVectorShape() && imageLoader != null
-                && !hasChildTextFramesRecursive(ig)) {
-            // 자식 TextFrame이 있으면 래스터화 건너뜀 (배경+텍스트 배지 패턴은 래퍼 글상자로 처리)
+                && !hasChildTextFramesWithContent(ig, idmlDoc)) {
+            // 자식 TextFrame에 실제 텍스트가 있으면 래스터화 건너뜀 (배경+텍스트 배지 패턴은 래퍼 글상자로 처리)
+            // 텍스트 없는 자식 TextFrame만 있으면 (체크박스 등) 벡터 래스터화 진행
             IDMLVectorShape shape = ig.vectorShape();
 
             // 벡터 도형 (글리프 아웃라인 등) → PNG 래스터화
@@ -616,11 +653,11 @@ class ASTInlineObjectBuilder {
                 obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
             }
         } else if (imageLoader != null) {
-            // 그룹 내 자식 텍스트프레임이 있으면 래스터화하지 않고 텍스트 우선 처리
+            // 그룹 내 자식 텍스트프레임에 실제 텍스트가 있으면 래스터화하지 않고 텍스트 우선 처리
             // (배경 사각형 + 텍스트프레임 구조는 processInlineGraphic에서 래퍼 글상자로 변환)
-            boolean hasChildTextFrames = hasChildTextFramesRecursive(ig);
+            boolean hasChildTextContent = hasChildTextFramesWithContent(ig, idmlDoc);
             List<ASTImageLoader.ShapeWithColor> childShapes = collectChildVectorShapes(ig, colorResolver);
-            if (!childShapes.isEmpty() && !hasChildTextFrames) {
+            if (!childShapes.isEmpty() && !hasChildTextContent) {
                 obj.kind(ASTInlineObject.ObjectKind.IMAGE);
                 ASTImageLoader.ImageResult result = imageLoader.rasterizeShapes(childShapes, ig.itemTransform());
                 if (result != null && result.imageData != null) {
@@ -635,7 +672,7 @@ class ASTInlineObjectBuilder {
                 } else {
                     obj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
                 }
-            } else if (hasChildTextFrames && countLeafChildren(ig) >= 5) {
+            } else if (hasChildTextContent && countLeafChildren(ig) >= 5) {
                 // 복잡 그룹 (리프 ≥5 + 텍스트) → 이미지+벡터 합성, 텍스트는 오버레이
                 obj.kind(ASTInlineObject.ObjectKind.IMAGE);
                 ASTImageLoader.ImageResult result = imageLoader.compositeGroupChildren(ig, colorResolver);
