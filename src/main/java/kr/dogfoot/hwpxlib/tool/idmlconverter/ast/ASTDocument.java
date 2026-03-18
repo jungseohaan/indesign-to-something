@@ -61,4 +61,9 @@ public class ASTDocument {
     private final List<String> warnings = new ArrayList<>();
     public List<String> warnings() { return warnings; }
     public void addWarning(String w) { warnings.add(w); }
+
+    // IDML selfId → z-order 맵 (orphan graphic z-order 복원용)
+    private Map<String, Integer> idmlZOrders;
+    public Map<String, Integer> idmlZOrders() { return idmlZOrders; }
+    public void idmlZOrders(Map<String, Integer> m) { this.idmlZOrders = m; }
 }

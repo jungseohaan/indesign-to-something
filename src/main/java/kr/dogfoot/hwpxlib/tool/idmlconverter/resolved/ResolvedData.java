@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,11 +23,10 @@ public class ResolvedData {
     private final Map<String, ResolvedPage> pageByName = new HashMap<>();  // page name ("240") → page
     private final Map<String, RenderedGroup> renderedTextFrameMap = new HashMap<>();  // DOM id → rendered TextFrame
     private final Map<String, RenderedGroup> renderedPdfFrameMap = new HashMap<>();  // DOM id → rendered PDF frame
-    private final Map<String, RenderedGroup> renderedGraphicFrameMap = new HashMap<>();  // DOM id → rendered complex graphic
+    private final Map<String, RenderedGroup> renderedGraphicFrameMap = new LinkedHashMap<>();  // DOM id → rendered complex graphic (순서 보존)
     private final Map<String, RenderedGroup> renderedImageFrameMap = new HashMap<>();  // DOM id → rendered image frame (PSD, AI 등)
     private final Map<String, RenderedGroup> childImageToGroupMap = new HashMap<>();  // 자식 이미지 DOM id → 부모 그룹 RenderedGroup
     private final Set<Integer> processedImageGroupIds = new HashSet<>();  // 이미 Figure로 변환된 그룹 렌더 ID
-    private final Set<String> suppressedRenderedImageFrameIds = new HashSet<>();  // TextFrame 포함으로 이미지 렌더링 억제된 그룹 DOM id
     private Set<String> badgeGroupShapeIdmlIds;  // 배지 그룹 소속 도형 IDML hex ID ("u1735")
     private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TextFrame DOM id → 배지 그룹 RenderedGroup
     private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
@@ -264,29 +264,28 @@ public class ResolvedData {
             String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
             RenderedGroup direct = renderedImageFrameMap.get(decimalId);
             if (direct != null) {
-                if (suppressedRenderedImageFrameIds.contains(decimalId)) return null;
                 return direct;
             }
             // 자식 이미지 프레임 → 부모 그룹 렌더링 폴백
-            RenderedGroup parent = childImageToGroupMap.get(decimalId);
-            if (parent != null && suppressedRenderedImageFrameIds.contains(String.valueOf(parent.id()))) {
-                return null;
-            }
-            return parent;
+            return childImageToGroupMap.get(decimalId);
         } catch (NumberFormatException e) {
             return null;
         }
     }
 
-    /**
-     * TextFrame을 포함하는 renderedImageFrame 그룹을 억제 — 이미지 렌더링 대신 텍스트 박스 유지.
-     */
-    public void suppressRenderedImageFrame(int domId) {
-        suppressedRenderedImageFrameIds.add(String.valueOf(domId));
-    }
 
-    public boolean isRenderedImageFrameSuppressed(int domId) {
-        return suppressedRenderedImageFrameIds.contains(String.valueOf(domId));
+    /**
+     * IDML hex ID로 renderedImageFrame 등록 여부 확인 (suppress 무시).
+     * 이미지 프레임 dedup용: 그룹이 렌더링되었으면 개별 이미지 불필요.
+     */
+    public boolean hasRenderedImageFrameByIdmlId(String idmlId) {
+        if (idmlId == null || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return false;
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
+            return renderedImageFrameMap.containsKey(decimalId);
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     // --- 좌표 단위 정규화 ---
@@ -423,6 +422,75 @@ public class ResolvedData {
     public boolean isShapeInBadgeGroup(String idmlId) {
         if (badgeGroupShapeIdmlIds == null || idmlId == null) return false;
         return badgeGroupShapeIdmlIds.contains(idmlId);
+    }
+
+    // --- ExtendScript 렌더 통합 조건 ---
+
+    private Set<String> renderedExtIdmlIds;  // ExtendScript가 렌더한 모든 객체의 IDML hex ID
+
+    /**
+     * ExtendScript가 렌더한 모든 객체의 IDML hex ID 집합을 빌드한다.
+     * 4가지 렌더 유형 + 자식 ID를 모두 수집:
+     * 1. renderedImageFrame: 그룹 ID + childImageIds
+     * 2. renderedGraphicFrame: 도형/그룹 ID
+     * 3. renderedTextFrame: 프레임 ID + badge childIds + badge childTextFrameIds
+     * 4. renderedPdfFrame: 도형 ID
+     *
+     * buildBadgeGroupIndex() 이후에 호출해야 한다.
+     */
+    public void buildRenderedIdSet() {
+        renderedExtIdmlIds = new HashSet<>();
+
+        // 1. renderedImageFrame: 그룹 자체 + 자식 이미지
+        for (RenderedGroup rg : renderedImageFrameMap.values()) {
+            renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
+            if (rg.childImageIds() != null) {
+                for (int childId : rg.childImageIds()) {
+                    renderedExtIdmlIds.add("u" + Integer.toHexString(childId));
+                }
+            }
+        }
+
+        // 2. renderedGraphicFrame: 도형/그룹 자체 + childIds (벡터 그룹)
+        for (RenderedGroup rg : renderedGraphicFrameMap.values()) {
+            renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
+            if (rg.childIds() != null) {
+                for (int childId : rg.childIds()) {
+                    renderedExtIdmlIds.add("u" + Integer.toHexString(childId));
+                }
+            }
+        }
+
+        // 3. renderedTextFrame: 프레임 자체 + badge childIds + badge childTextFrameIds
+        for (RenderedGroup rg : renderedTextFrameMap.values()) {
+            renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
+            if (rg.childIds() != null) {
+                for (int childId : rg.childIds()) {
+                    renderedExtIdmlIds.add("u" + Integer.toHexString(childId));
+                }
+            }
+            if (rg.childTextFrameIds() != null) {
+                for (int childId : rg.childTextFrameIds()) {
+                    renderedExtIdmlIds.add("u" + Integer.toHexString(childId));
+                }
+            }
+        }
+
+        // 4. renderedPdfFrame: 도형 자체
+        for (RenderedGroup rg : renderedPdfFrameMap.values()) {
+            renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
+        }
+
+        System.out.println("[ResolvedData] ExtendScript 렌더 ID " + renderedExtIdmlIds.size() + "개 인덱싱");
+    }
+
+    /**
+     * 주어진 IDML hex ID가 ExtendScript에 의해 렌더된 객체인지 확인한다.
+     * @param idmlId IDML hex ID (예: "u1735")
+     */
+    public boolean isRenderedByExtendScript(String idmlId) {
+        if (renderedExtIdmlIds == null || idmlId == null) return false;
+        return renderedExtIdmlIds.contains(idmlId);
     }
 
     // --- 통계 ---

@@ -8,7 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
+
 
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
@@ -34,7 +34,9 @@ class ASTPageProcessor {
                                    FlattenedObjectPool pool, IDMLDocument idmlDoc,
                                    ColorResolver colorResolver, ASTImageLoader imageLoader,
                                    ResolvedData resolvedData,
-                                   Set<String> processedStories, ASTDocument doc) {
+                                   Set<String> processedStories,
+                                   Set<String> processedImageIds,
+                                   ASTDocument doc) {
         ASTSection section = new ASTSection();
         section.pageNumber(page.pageNumber());
 
@@ -59,8 +61,8 @@ class ASTPageProcessor {
                 resolvedData, resolvedPage, processedStories, doc, section);
 
         // 이미지 프레임 처리
-        processImageFrames(spread, page, imageLoader, colorResolver,
-                resolvedData, resolvedPage, section);
+        processImageFrames(spread, page, pool, imageLoader, colorResolver,
+                resolvedData, resolvedPage, processedImageIds, section);
 
         // 벡터 도형 처리
         processVectorShapes(spread, page, imageLoader,
@@ -153,6 +155,7 @@ class ASTPageProcessor {
         layout.columnGutter(0);
         mergedSection.layout(layout);
 
+        Set<String> processedImageIds = new HashSet<>();
         for (IDMLPage page : pages) {
             // 페이지의 스프레드 내 X 오프셋 계산
             double[] gb = page.geometricBounds();
@@ -163,7 +166,7 @@ class ASTPageProcessor {
             // 페이지 단위로 처리
             ASTSection pageSection = processPage(
                     spread, page, pool, idmlDoc, colorResolver, imageLoader,
-                    resolvedData, processedStories, doc);
+                    resolvedData, processedStories, processedImageIds, doc);
 
             // 블록들의 X 좌표에 오프셋 적용하여 병합
             for (ASTBlock block : pageSection.blocks()) {
@@ -203,11 +206,6 @@ class ASTPageProcessor {
         for (FlatObject fo : textFrames) {
             IDMLTextFrame tf = (IDMLTextFrame) fo.sourceObject();
             if (tf.isEditorialNote()) continue;
-
-            // 조상 그룹 중 renderedImageFrame이 있으면 → 이미지 렌더링 억제 (텍스트 박스 우선)
-            if (resolvedData != null) {
-                suppressAncestorRenderedImageFrames(fo, pool, resolvedData);
-            }
 
             String storyId = tf.parentStoryId();
             if (storyId == null) continue;
@@ -370,10 +368,12 @@ class ASTPageProcessor {
     // ── 이미지 프레임 ──────────────────────────────────────
 
     private static void processImageFrames(IDMLSpread spread, IDMLPage page,
+                                            FlattenedObjectPool pool,
                                             ASTImageLoader imageLoader,
                                             ColorResolver colorResolver,
                                             ResolvedData resolvedData,
                                             ResolvedPage resolvedPage,
+                                            Set<String> processedImageIds,
                                             ASTSection section) {
         if (imageLoader == null) return;
 
@@ -381,6 +381,24 @@ class ASTPageProcessor {
         Set<String> processedFrameKeys = new HashSet<>();
         List<IDMLImageFrame> uniqueFrames = new ArrayList<>();
         for (IDMLImageFrame imgFrame : imageFrames) {
+            // spread 내 동일 프레임이 여러 페이지에 걸쳐 중복 처리되는 것을 방지
+            if (processedImageIds != null && imgFrame.selfId() != null) {
+                if (!processedImageIds.add(imgFrame.selfId())) {
+                    continue;
+                }
+            }
+            // ExtendScript 렌더 대상 이미지 제거:
+            // 1) 이미지 자체가 렌더 ID 셋에 등록 (renderedImageFrame의 childImageId 등)
+            // 2) 조상 그룹이 renderedImageFrame으로 등록
+            if (resolvedData != null) {
+                if (resolvedData.isRenderedByExtendScript(imgFrame.selfId())) {
+                    continue;
+                }
+                if (imgFrame.fromGroup()
+                        && hasRenderedAncestorGroup(imgFrame, pool, resolvedData)) {
+                    continue;
+                }
+            }
             String dedupKey = ASTFigureBuilder.buildImageFrameDedupKey(imgFrame);
             if (dedupKey != null && !processedFrameKeys.add(dedupKey)) {
                 continue;
@@ -435,9 +453,9 @@ class ASTPageProcessor {
         // 퇴화된 도형 제거 (열린 경로에 점이 1개뿐인 도형 — 렌더링 불가)
         vectorShapes.removeIf(s -> isDegenerateShape(s));
 
-        // 배지 그룹 소속 도형 제거 (배지 그룹은 통합 PNG로 처리)
+        // ExtendScript 렌더 대상 도형 제거 (배지, 복합 그래픽 등 모두 통합)
         if (resolvedData != null) {
-            vectorShapes.removeIf(s -> resolvedData.isShapeInBadgeGroup(s.selfId()));
+            vectorShapes.removeIf(s -> isRenderedByExtendScriptWithParent(s.selfId(), s.parentGroupId(), resolvedData));
         }
 
         IDMLPage finalPage = page;
@@ -1500,20 +1518,51 @@ class ASTPageProcessor {
      * FlatObject의 조상 그룹 중 renderedImageFrame에 등록된 것이 있으면 억제 마킹.
      * 텍스트 프레임이 포함된 그룹의 렌더 이미지는 사용하지 않고 텍스트 박스를 유지한다.
      */
-    private static void suppressAncestorRenderedImageFrames(FlatObject fo,
-                                                             FlattenedObjectPool pool,
-                                                             ResolvedData resolvedData) {
-        String groupId = fo.parentGroupId();
+    /**
+     * 이미지 프레임의 조상 그룹 중 renderedImageFrame에 등록된 것이 있는지 확인.
+     * 있으면 true → 개별 이미지 프레임을 건너뛰고 그룹 렌더 이미지를 사용.
+     */
+    /**
+     * 이미지 프레임의 조상 그룹 중 renderedImageFrame에 등록된 것이 있는지 확인.
+     * 있으면 true → 개별 이미지 프레임을 건너뛰고 렌더 PNG를 사용.
+     */
+    /**
+     * 이미지 프레임의 조상 그룹이 renderedImageFrame으로 등록되었는지 확인.
+     * 이미지 프레임은 renderedImageFrame 조상만 체크 — 그룹 PNG가 개별 이미지를 대체.
+     * (renderedGraphicFrame/renderedTextFrame은 이미지 대체 경로가 아니므로 제외)
+     */
+    private static boolean hasRenderedAncestorGroup(IDMLImageFrame imgFrame,
+                                                     FlattenedObjectPool pool,
+                                                     ResolvedData resolvedData) {
+        String groupId = imgFrame.parentGroupId();
+        if (groupId != null && resolvedData.hasRenderedImageFrameByIdmlId(groupId)) {
+            return true;
+        }
         int depth = 0;
         while (groupId != null && depth < 10) {
-            RenderedGroup rg = resolvedData.getRenderedImageFrameByIdmlId(groupId);
-            if (rg != null) {
-                resolvedData.suppressRenderedImageFrame(rg.id());
-            }
             FlatObject parent = pool.get(groupId);
             if (parent == null) break;
             groupId = parent.parentGroupId();
+            if (groupId != null && resolvedData.hasRenderedImageFrameByIdmlId(groupId)) {
+                return true;
+            }
             depth++;
         }
+        return false;
+    }
+
+    /**
+     * 객체 자체 또는 부모 그룹이 ExtendScript 렌더 대상인지 통합 확인.
+     * 배지, 복합 그래픽, 이미지 프레임, PDF 프레임, 효과 텍스트 등 모든 렌더 유형을 커버.
+     */
+    private static boolean isRenderedByExtendScriptWithParent(String selfId, String parentGroupId,
+                                                               ResolvedData resolvedData) {
+        if (resolvedData.isRenderedByExtendScript(selfId)) {
+            return true;
+        }
+        if (parentGroupId != null && resolvedData.isRenderedByExtendScript(parentGroupId)) {
+            return true;
+        }
+        return false;
     }
 }

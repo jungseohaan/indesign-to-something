@@ -72,28 +72,46 @@ public class ResolvedFrameDistributor {
             List<ResolvedTextFrame> sortedFrames = new ArrayList<>(resolvedFrames);
             sortedFrames.sort(Comparator.comparingInt(ResolvedTextFrame::paragraphStart));
 
+            // paragraphStart 순으로 블록 정렬 (첫 프레임부터 문단 배정)
+            List<ASTTextFrameBlock> sortedBlocks = new ArrayList<>(blocks);
+            final List<ResolvedTextFrame> rfList = resolvedFrames;
+            sortedBlocks.sort(new Comparator<ASTTextFrameBlock>() {
+                public int compare(ASTTextFrameBlock a, ASTTextFrameBlock b) {
+                    ResolvedTextFrame ra = matchFrame(a.sourceId(), rfList);
+                    ResolvedTextFrame rb = matchFrame(b.sourceId(), rfList);
+                    int sa = ra != null ? ra.paragraphStart() : Integer.MAX_VALUE;
+                    int sb = rb != null ? rb.paragraphStart() : Integer.MAX_VALUE;
+                    return Integer.compare(sa, sb);
+                }
+            });
+
             // 각 블록에 resolved 범위에 따라 문단 분배
+            // paragraphStart 순으로 처리하여 겹치는 문단은 첫 프레임이 소유
             boolean distributed = false;
-            for (ASTTextFrameBlock block : blocks) {
+            Set<Integer> claimedParaIndices = new HashSet<>();
+            Map<Integer, ASTParagraph> splitParaMap = new HashMap<>(); // 분할된 후반부
+            List<ASTTextFrameBlock> unmatchedBlocks = new ArrayList<>();
+
+            for (ASTTextFrameBlock block : sortedBlocks) {
                 ResolvedTextFrame rtf = matchFrame(block.sourceId(), resolvedFrames);
-                if (rtf == null || rtf.paragraphStart() < 0) continue;
+                if (rtf == null || rtf.paragraphStart() < 0) {
+                    unmatchedBlocks.add(block);
+                    continue;
+                }
 
                 int astStart, astEnd;
                 if (idxMap != null) {
-                    // 매핑된 AST 인덱스 사용
                     astStart = mapToAst(idxMap, rtf.paragraphStart());
+                    // 프레임 자체의 paragraphEnd 사용 (겹치는 문단도 포함)
+                    astEnd = mapToAst(idxMap, rtf.paragraphEnd());
 
-                    // 다음 프레임의 시작 인덱스로 이 프레임의 끝 결정
-                    // (AST에 extra 문단이 있을 수 있으므로 다음 프레임 시작-1이 정확한 끝)
+                    // 마지막 프레임이 아닌 경우에도, 다음 프레임 시작과 자체 pEnd 중 큰 값 사용
                     int nextResStart = findNextFrameResolvedStart(rtf, sortedFrames);
-                    if (nextResStart >= 0) {
-                        astEnd = mapToAst(idxMap, nextResStart) - 1;
-                    } else {
+                    if (nextResStart < 0) {
                         // 마지막 프레임: 나머지 전부
                         astEnd = allParas.size() - 1;
                     }
                 } else {
-                    // 매핑 불가시 원래 동작 (직접 인덱스)
                     astStart = rtf.paragraphStart();
                     astEnd = rtf.paragraphEnd();
                 }
@@ -104,7 +122,44 @@ public class ResolvedFrameDistributor {
 
                 block.paragraphs().clear();
                 for (int i = astStart; i <= astEnd; i++) {
-                    block.addParagraph(allParas.get(i));
+                    if (claimedParaIndices.contains(i)) {
+                        // 이전 프레임이 이미 가져간 문단이 이 프레임에서도 시작하면
+                        // → 문단이 두 프레임에 걸쳐있음. 이전 프레임에서 U+2028로 분할된 후반부를 가져옴.
+                        ASTParagraph splitTail = splitParaMap.get(i);
+                        if (splitTail != null) {
+                            block.addParagraph(splitTail);
+                        }
+                        continue;
+                    }
+
+                    // 이 문단이 다음 프레임에서도 시작하면 → 프레임 경계에서 분할
+                    boolean nextFrameAlsoStarts = false;
+                    if (i == astEnd) {
+                        int nextResStart = findNextFrameResolvedStart(rtf, sortedFrames);
+                        if (nextResStart >= 0) {
+                            int nextAstStart = mapToAst(idxMap, nextResStart);
+                            if (nextAstStart == i) {
+                                nextFrameAlsoStarts = true;
+                            }
+                        }
+                    }
+
+                    if (nextFrameAlsoStarts) {
+                        // U+2028 (LINE SEPARATOR) 또는 \n에서 분할
+                        ASTParagraph[] halves = splitParagraphAtLineSeparator(allParas.get(i));
+                        if (halves != null) {
+                            block.addParagraph(halves[0]);
+                            splitParaMap.put(i, halves[1]);
+                            claimedParaIndices.add(i);
+                        } else {
+                            // 분할점 없으면 전체를 이 프레임에 배정
+                            block.addParagraph(allParas.get(i));
+                            claimedParaIndices.add(i);
+                        }
+                    } else {
+                        block.addParagraph(allParas.get(i));
+                        claimedParaIndices.add(i);
+                    }
                 }
 
                 // resolved Y좌표를 각 단락에 전파
@@ -120,6 +175,30 @@ public class ResolvedFrameDistributor {
 
                 block.distributed(true);
                 distributed = true;
+            }
+
+            // resolved에 없는 블록에는 다른 프레임이 가져가지 않은 문단만 배정
+            if (distributed && !unmatchedBlocks.isEmpty()) {
+                List<ASTParagraph> unclaimed = new ArrayList<>();
+                for (int i = 0; i < allParas.size(); i++) {
+                    if (!claimedParaIndices.contains(i)) {
+                        unclaimed.add(allParas.get(i));
+                    }
+                }
+
+                if (!unclaimed.isEmpty()) {
+                    ASTTextFrameBlock firstUnmatched = unmatchedBlocks.get(0);
+                    firstUnmatched.paragraphs().clear();
+                    for (ASTParagraph para : unclaimed) {
+                        firstUnmatched.addParagraph(para);
+                    }
+                    firstUnmatched.distributed(true);
+                }
+
+                for (int i = 1; i < unmatchedBlocks.size(); i++) {
+                    unmatchedBlocks.get(i).paragraphs().clear();
+                    unmatchedBlocks.get(i).distributed(true);
+                }
             }
 
             if (distributed) {
@@ -315,6 +394,115 @@ public class ResolvedFrameDistributor {
                    .replace("\u0008", "")   // Backspace
                    .replace("\u00A0", "")   // Non-breaking Space
                    .trim();
+    }
+
+    // ─── 문단 분할 (프레임 경계) ─────────────────────────────
+
+    /**
+     * U+2028 (LINE SEPARATOR) 마지막 위치에서 문단을 앞/뒤 두 개로 분할한다.
+     * InDesign에서 연결 텍스트프레임 경계가 문단 중간에 올 때,
+     * forced line break (U+2028)가 분할점이 된다.
+     *
+     * @return [앞 문단, 뒷 문단] 또는 분할점 없으면 null
+     */
+    private static ASTParagraph[] splitParagraphAtLineSeparator(ASTParagraph original) {
+        // U+2028이 포함된 마지막 텍스트런 찾기
+        int splitRunIdx = -1;
+        int splitCharIdx = -1;
+        List<ASTInlineItem> items = original.items();
+
+        for (int ri = items.size() - 1; ri >= 0; ri--) {
+            ASTInlineItem item = items.get(ri);
+            if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text == null) continue;
+
+            int idx = text.lastIndexOf('\u2028');
+            if (idx < 0) idx = text.lastIndexOf('\n');
+            if (idx >= 0) {
+                splitRunIdx = ri;
+                splitCharIdx = idx;
+                break;
+            }
+        }
+
+        if (splitRunIdx < 0) return null;
+
+        ASTParagraph head = new ASTParagraph();
+        ASTParagraph tail = new ASTParagraph();
+
+        // 문단 속성 복사
+        copyParagraphProps(original, head);
+        copyParagraphProps(original, tail);
+
+        // 분할점 이전 아이템 → head
+        for (int i = 0; i < splitRunIdx; i++) {
+            head.addItem(items.get(i));
+        }
+
+        // 분할점이 있는 런을 앞/뒤로 분리
+        ASTTextRun splitRun = (ASTTextRun) items.get(splitRunIdx);
+        String fullText = splitRun.text();
+        String beforeText = fullText.substring(0, splitCharIdx); // U+2028 제외
+        String afterText = fullText.substring(splitCharIdx + 1); // U+2028 이후
+
+        if (!beforeText.isEmpty()) {
+            ASTTextRun headRun = cloneTextRun(splitRun);
+            headRun.text(beforeText);
+            head.addItem(headRun);
+        }
+        if (!afterText.isEmpty()) {
+            ASTTextRun tailRun = cloneTextRun(splitRun);
+            tailRun.text(afterText);
+            tail.addItem(tailRun);
+        }
+
+        // 분할점 이후 아이템 → tail
+        for (int i = splitRunIdx + 1; i < items.size(); i++) {
+            tail.addItem(items.get(i));
+        }
+
+        return new ASTParagraph[] { head, tail };
+    }
+
+    private static void copyParagraphProps(ASTParagraph src, ASTParagraph dst) {
+        dst.paragraphStyleRef(src.paragraphStyleRef());
+        dst.alignment(src.alignment());
+        dst.firstLineIndent(src.firstLineIndent());
+        dst.leftMargin(src.leftMargin());
+        dst.rightMargin(src.rightMargin());
+        dst.spaceBefore(src.spaceBefore());
+        dst.spaceAfter(src.spaceAfter());
+        dst.lineSpacing(src.lineSpacing());
+        dst.lineSpacingType(src.lineSpacingType());
+        dst.letterSpacing(src.letterSpacing());
+        dst.shadingOn(src.shadingOn());
+        dst.shadingColor(src.shadingColor());
+        dst.shadingTint(src.shadingTint());
+        dst.keepWithNext(src.keepWithNext());
+        dst.keepLinesTogether(src.keepLinesTogether());
+    }
+
+    private static ASTTextRun cloneTextRun(ASTTextRun src) {
+        ASTTextRun r = new ASTTextRun();
+        r.characterStyleRef(src.characterStyleRef());
+        r.fontFamily(src.fontFamily());
+        r.fontStyle(src.fontStyle());
+        r.fontSizeHwpunits(src.fontSizeHwpunits());
+        r.textColor(src.textColor());
+        r.letterSpacing(src.letterSpacing());
+        r.subscript(src.subscript());
+        r.superscript(src.superscript());
+        r.underline(src.underline());
+        r.underlineColor(src.underlineColor());
+        r.underlineShape(src.underlineShape());
+        r.strikeThrough(src.strikeThrough());
+        r.horizontalScale(src.horizontalScale());
+        r.verticalScale(src.verticalScale());
+        r.baselineShift(src.baselineShift());
+        r.grepMathFont(src.grepMathFont());
+        r.grepStyleApplied(src.grepStyleApplied());
+        return r;
     }
 
     // ─── 같은 페이지 프레임 병합 ────────────────────────────

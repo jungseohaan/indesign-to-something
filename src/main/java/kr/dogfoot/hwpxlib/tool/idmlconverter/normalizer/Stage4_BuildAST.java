@@ -69,6 +69,7 @@ public class Stage4_BuildAST {
 
             int pageIndex = 0;
             for (IDMLSpread spread : idmlDoc.spreads()) {
+                Set<String> processedImageIds = new HashSet<>();
                 for (IDMLPage page : spread.pages()) {
                     pageIndex++;
                     reporter.reportProgress(6, 100,
@@ -76,7 +77,7 @@ public class Stage4_BuildAST {
 
                     ASTSection section = ASTPageProcessor.processPage(
                             spread, page, pool, idmlDoc, colorResolver, imageLoader,
-                            resolvedData, processedStories, doc);
+                            resolvedData, processedStories, processedImageIds, doc);
                     doc.addSection(section);
                 }
             }
