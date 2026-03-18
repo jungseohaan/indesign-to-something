@@ -99,9 +99,10 @@ public class IDMLToHwpxConverter {
                 }
             }
 
-            // Phase 1.6b: 배지 그룹 인덱스 빌드 (배지 소속 도형을 개별 래스터화에서 제외하기 위해)
+            // Phase 1.6b: 배지 그룹 인덱스 빌드 + ExtendScript 렌더 ID 통합 인덱스 빌드
             if (resolvedData != null) {
                 resolvedData.buildBadgeGroupIndex();
+                resolvedData.buildRenderedIdSet();
             }
 
             // Phase 1.7a: 렌더링된 텍스트 프레임 교체 (짧은 텍스트 → 이미지)
@@ -895,36 +896,32 @@ public class IDMLToHwpxConverter {
             }
         }
 
-        int injected = 0;
+        Map<Integer, Integer> pageOrphanZCounter = new java.util.HashMap<>();
         for (RenderedGroup rg : orphanTargets) {
             if (rg.file() == null || rg.bounds() == null) continue;
 
             // DOM ID → IDML hex ID 변환하여 이미 사용된 것인지 확인
             String idmlHexId = "u" + Integer.toHexString(rg.id());
-            if (usedSourceIds.contains(idmlHexId)) continue;
+            if (usedSourceIds.contains(idmlHexId)) {
+                continue;
+            }
 
             // 배지 그룹 자식 도형 건너뜀 (배지 통째 렌더링에서 처리)
-            if (resolvedData.isShapeInBadgeGroup(idmlHexId)) continue;
+            if (resolvedData.isShapeInBadgeGroup(idmlHexId)) {
+                continue;
+            }
 
-            // 배경 프레임 필터: 페이지의 80% 이상이면 건너뜀
             int pageIdx = rg.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
             kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage resolvedPage =
                     resolvedData.getPage(pageIdx);
-            if (resolvedPage != null && resolvedPage.bounds() != null) {
-                double[] rpb = resolvedPage.bounds();
-                double pageW = rpb[3] - rpb[1];
-                double pageH = rpb[2] - rpb[0];
-                double[] rb = rg.bounds();
-                double rW = rb[3] - rb[1];
-                double rH = rb[2] - rb[0];
-                if (rW > pageW * 0.8 && rH > pageH * 0.8) continue;
-            }
 
             // PNG 로드
             java.io.File pngFile = new java.io.File(resolvedDir, rg.file());
-            if (!pngFile.exists()) continue;
+            if (!pngFile.exists()) {
+                continue;
+            }
 
             try {
                 byte[] data = java.nio.file.Files.readAllBytes(pngFile.toPath());
@@ -965,21 +962,24 @@ public class IDMLToHwpxConverter {
                 }
 
                 // 기존 ASTFigure/ASTTable과 겹치는 도형 건너뜀 (중복 방지)
-                // 완전 포함 또는 50% 이상 겹침이면 건너뜀
+                // 양방향 겹침: orphan과 기존 figure 모두 50% 이상 겹쳐야 중복으로 판단
+                // (배경 도형은 기존 figure보다 훨씬 크므로 단방향이면 잘못 필터됨)
                 boolean overlapsExisting = false;
                 long figArea = figW * figH;
                 java.util.List<long[]> existingBounds = pageFigureBounds.get(pageIdx);
                 if (existingBounds != null && figArea > 0) {
                     for (long[] eb : existingBounds) {
-                        // 겹침 영역 계산
                         long overlapLeft = Math.max(figX, eb[0]);
                         long overlapTop = Math.max(figY, eb[1]);
                         long overlapRight = Math.min(figX + figW, eb[2]);
                         long overlapBottom = Math.min(figY + figH, eb[3]);
                         if (overlapLeft < overlapRight && overlapTop < overlapBottom) {
                             long overlapArea = (overlapRight - overlapLeft) * (overlapBottom - overlapTop);
-                            double overlapRatio = (double) overlapArea / figArea;
-                            if (overlapRatio > 0.5) {
+                            double orphanRatio = (double) overlapArea / figArea;
+                            long ebArea = (eb[2] - eb[0]) * (eb[3] - eb[1]);
+                            double existingRatio = ebArea > 0 ? (double) overlapArea / ebArea : 0;
+                            // 양쪽 모두 50% 이상 겹쳐야 중복 (같은 크기/위치의 객체)
+                            if (orphanRatio > 0.5 && existingRatio > 0.5) {
                                 overlapsExisting = true;
                                 break;
                             }
@@ -1010,80 +1010,133 @@ public class IDMLToHwpxConverter {
                 fig.pixelWidth(img.getWidth());
                 fig.pixelHeight(img.getHeight());
                 fig.sourceId(idmlHexId);
-                fig.fromGroup(true);  // inFrontBlocks로 분류되도록
                 if (cropLeft > 0 || cropTop > 0) {
                     fig.cropLeftFraction(cropLeft);
                     fig.cropTopFraction(cropTop);
                 }
 
-                // 겹치는 도형의 z-order 탐색
-                // 자기보다 작은 겹치는 도형이 있으면 그 아래에, 없으면 겹치는 최대 z-order 위에
+                // z-order: IDML 스프레드 파싱 시 할당된 원본 z-order 사용
+                // (AST 텍스트 프레임과 동일한 스케일 → inFrontBlocks 정렬에서 올바른 스태킹)
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
-                int minSmallerZ = Integer.MAX_VALUE;  // 자기보다 작은 겹치는 도형의 최소 z-order
-                int maxOverlapZ = 0;                   // 겹치는 모든 도형의 최대 z-order
-                boolean hasSmallerOverlap = false;
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock blk : section.blocks()) {
-                    if (blk instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) {
-                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure existing =
-                                (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure) blk;
-                        long ew = existing.width(), eh = existing.height();
-                        // 바운딩 박스 교차 확인
-                        long ox1 = Math.max(existing.x(), figX);
-                        long oy1 = Math.max(existing.y(), figY);
-                        long ox2 = Math.min(existing.x() + ew, figX + figW);
-                        long oy2 = Math.min(existing.y() + eh, figY + figH);
-                        if (ox2 > ox1 && oy2 > oy1) {
-                            if (existing.zOrder() > maxOverlapZ) {
-                                maxOverlapZ = existing.zOrder();
-                            }
-                            long existArea = ew * eh;
-                            if (existArea < figArea) {
-                                hasSmallerOverlap = true;
-                                if (existing.zOrder() < minSmallerZ) {
-                                    minSmallerZ = existing.zOrder();
+                java.util.Map<String, Integer> zMap = astDoc.idmlZOrders();
+                Integer idmlZ = (zMap != null) ? zMap.get(idmlHexId) : null;
+                if (idmlZ == null) {
+                    // 폴백: 순차 카운터
+                    Integer orphanZ = pageOrphanZCounter.get(pageIdx);
+                    if (orphanZ == null) orphanZ = 0;
+                    idmlZ = orphanZ;
+                    pageOrphanZCounter.put(pageIdx, orphanZ + 1);
+                }
+                fig.zOrder(idmlZ);
+                fig.fromGroup(true);  // inFrontBlocks로 분류되도록
+
+                section.addBlock(fig);
+                // === 스프레드 걸침 감지: 그래픽이 인접 페이지까지 확장되면 추가 배치 ===
+                if (resolvedPage != null && resolvedPage.bounds() != null) {
+                    double pageRight = resolvedPage.bounds()[3];  // 현재 페이지 오른쪽 끝 (spread coords, pt)
+                    double graphicRight = bounds[3];              // 그래픽 오른쪽 끝
+                    int adjPageIdx = pageIdx + 1;
+                    // 그래픽이 현재 페이지를 넘어서고 다음 페이지가 존재하면
+                    if (graphicRight > pageRight + 10 && adjPageIdx < sections.size()) {
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage adjPage =
+                                resolvedData.getPage(adjPageIdx);
+                        if (adjPage != null && adjPage.bounds() != null) {
+                            double adjPageLeft = adjPage.bounds()[1];
+                            double graphicLeft = bounds[1];
+                            double totalW = graphicRight - graphicLeft;  // 전체 그래픽 폭
+                            double totalH = bounds[2] - bounds[0];
+                            if (totalW > 0 && totalH > 0) {
+                                // 인접 페이지 상대 좌표
+                                double adjRelX = graphicLeft - adjPageLeft;  // 음수 (페이지 왼쪽 바깥)
+                                double adjRelY = bounds[0] - adjPage.bounds()[0];
+                                long adjFigX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                        .pointsToHwpunits(adjRelX);
+                                long adjFigY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                        .pointsToHwpunits(adjRelY);
+                                long adjFigW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                        .pointsToHwpunits(totalW);
+                                long adjFigH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                        .pointsToHwpunits(totalH);
+                                // PNG 비율 보정
+                                if (img.getWidth() > 0) {
+                                    adjFigH = Math.round(adjFigW * ((double) img.getHeight() / img.getWidth()));
                                 }
+                                // crop fraction (왼쪽 부분 = 이전 페이지 영역)
+                                double adjCropLeft = 0, adjCropTop = 0;
+                                if (adjFigX < 0) {
+                                    adjCropLeft = (double) (-adjFigX) / adjFigW;
+                                }
+                                if (adjFigY < 0) {
+                                    adjCropTop = (double) (-adjFigY) / adjFigH;
+                                }
+
+                                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure adjFig =
+                                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
+                                adjFig.x(adjFigX);
+                                adjFig.y(adjFigY);
+                                adjFig.width(adjFigW);
+                                adjFig.height(adjFigH);
+                                adjFig.imageData(data);
+                                adjFig.imageFormat("png");
+                                adjFig.pixelWidth(img.getWidth());
+                                adjFig.pixelHeight(img.getHeight());
+                                adjFig.sourceId(idmlHexId + "_adj");
+                                adjFig.fromGroup(true);
+                                if (adjCropLeft > 0 || adjCropTop > 0) {
+                                    adjFig.cropLeftFraction(adjCropLeft);
+                                    adjFig.cropTopFraction(adjCropTop);
+                                }
+                                adjFig.zOrder(idmlZ);
+                                sections.get(adjPageIdx).addBlock(adjFig);
                             }
                         }
                     }
                 }
-                // 자기보다 작은 도형이 겹치면 그 아래에 (큰 도형 = 배경)
-                // 아니면 겹치는 최대 위에
-                if (hasSmallerOverlap) {
-                    fig.zOrder(Math.max(0, minSmallerZ - 1));
-                } else {
-                    fig.zOrder(maxOverlapZ + 1);
-                }
-
-                section.addBlock(fig);
-                injected++;
-                System.err.println("[OrphanGraphic] " + idmlHexId + " (DOM " + rg.id()
-                        + ") → page " + (pageIdx + 1) + " " + rg.file()
-                        + " pos=(" + figX + "," + figY + ") size=(" + figW + "x" + figH + ")"
-                        + " bounds=[" + bounds[0] + "," + bounds[1] + "," + bounds[2] + "," + bounds[3] + "]"
-                        + " px=" + img.getWidth() + "x" + img.getHeight());
             } catch (Exception e) {
-                System.err.println("[OrphanGraphic] Failed: " + rg.file() + " — " + e.getMessage());
+                // skip
             }
-        }
-        if (injected > 0) {
-            System.err.println("[OrphanGraphic] " + injected + "개 렌더 그래픽 프레임 주입 완료");
         }
 
         // === 렌더링된 이미지 프레임 orphan 주입 ===
-        int imgInjected = 0;
-        for (RenderedGroup rg : resolvedData.allRenderedImageFrames()) {
+        // renderedGraphicFrame이 이미 같은 영역을 커버하면 이미지 프레임 스킵
+        // (graphic 렌더는 배경 이미지까지 포함하므로 image 렌더가 중복됨)
+        Map<Integer, java.util.List<double[]>> graphicBoundsPerPage = new java.util.HashMap<>();
+        for (RenderedGroup gfx : resolvedData.allRenderedGraphicFrames()) {
+            if (gfx.bounds() != null && gfx.pageIndex() >= 0) {
+                graphicBoundsPerPage.computeIfAbsent(gfx.pageIndex(), k -> new java.util.ArrayList<>())
+                        .add(gfx.bounds());
+            }
+        }
+        // TextFrame 자식 없는 배지 그룹(TextPath 전용)도 graphic bounds에 추가
+        for (RenderedGroup rg2 : resolvedData.allRenderedTextFrames()) {
+            if (rg2.isBadgeGroup() && (rg2.childTextFrameIds() == null || rg2.childTextFrameIds().length == 0)
+                    && rg2.bounds() != null && rg2.pageIndex() >= 0) {
+                graphicBoundsPerPage.computeIfAbsent(rg2.pageIndex(), k -> new java.util.ArrayList<>())
+                        .add(rg2.bounds());
+            }
+        }
+        java.util.Set<Integer> coveredChildIds = new java.util.HashSet<>();
+        // 자식 수 내림차순 정렬 → 큰 그룹 먼저 처리
+        java.util.List<RenderedGroup> sortedImgFrames = new java.util.ArrayList<>(
+                resolvedData.allRenderedImageFrames());
+        sortedImgFrames.sort((a, b) -> {
+            int aLen = a.childImageIds() != null ? a.childImageIds().length : 0;
+            int bLen = b.childImageIds() != null ? b.childImageIds().length : 0;
+            return Integer.compare(bLen, aLen);
+        });
+
+        for (RenderedGroup rg : sortedImgFrames) {
             if (rg.file() == null || rg.bounds() == null) continue;
-            if (resolvedData.isRenderedImageFrameSuppressed(rg.id())) continue;
 
             String idmlHexId = "u" + Integer.toHexString(rg.id());
             if (usedSourceIds.contains(idmlHexId)) continue;
 
-            // 그룹 렌더의 자식 ID도 usedSourceIds에 있는지 확인
+            // 자식 이미지가 이미 사용되었거나 상위 그룹에 의해 커버됨
             if (rg.childImageIds() != null) {
                 boolean anyChildUsed = false;
                 for (int childId : rg.childImageIds()) {
                     String childHex = "u" + Integer.toHexString(childId);
-                    if (usedSourceIds.contains(childHex)) {
+                    if (usedSourceIds.contains(childHex) || coveredChildIds.contains(childId)) {
                         anyChildUsed = true;
                         break;
                     }
@@ -1091,21 +1144,44 @@ public class IDMLToHwpxConverter {
                 if (anyChildUsed) continue;
             }
 
+            // 이 그룹 자체가 상위 그룹에 의해 이미 커버된 경우
+            if (coveredChildIds.contains(rg.id())) continue;
+
             int pageIdx = rg.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
-            // 배경 프레임 필터: 페이지의 80% 이상이면 건너뜀
+            // 같은 페이지의 renderedGraphicFrame이 이 이미지와 대부분 겹치면 스킵
+            // (graphic 렌더는 배경 이미지까지 포함하므로 image 렌더가 중복됨)
+            if (rg.bounds() != null) {
+                java.util.List<double[]> gfxBounds = graphicBoundsPerPage.get(pageIdx);
+                if (gfxBounds != null) {
+                    boolean coveredByGraphic = false;
+                    double[] ib = rg.bounds(); // [top, left, bottom, right]
+                    double imgArea = (ib[2] - ib[0]) * (ib[3] - ib[1]);
+                    if (imgArea > 0) {
+                        for (double[] gb : gfxBounds) {
+                            // overlap 영역 계산
+                            double oTop = Math.max(gb[0], ib[0]);
+                            double oLeft = Math.max(gb[1], ib[1]);
+                            double oBottom = Math.min(gb[2], ib[2]);
+                            double oRight = Math.min(gb[3], ib[3]);
+                            if (oBottom > oTop && oRight > oLeft) {
+                                double overlapArea = (oBottom - oTop) * (oRight - oLeft);
+                                if (overlapArea / imgArea > 0.7) {
+                                    coveredByGraphic = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (coveredByGraphic) {
+                        continue;
+                    }
+                }
+            }
+
             kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage resolvedPage =
                     resolvedData.getPage(pageIdx);
-            if (resolvedPage != null && resolvedPage.bounds() != null) {
-                double[] rpb = resolvedPage.bounds();
-                double pageW = rpb[3] - rpb[1];
-                double pageH = rpb[2] - rpb[0];
-                double[] rb = rg.bounds();
-                double rW = rb[3] - rb[1];
-                double rH = rb[2] - rb[0];
-                if (rW > pageW * 0.8 && rH > pageH * 0.8) continue;
-            }
 
             java.io.File pngFile = new java.io.File(resolvedDir, rg.file());
             if (!pngFile.exists()) continue;
@@ -1140,6 +1216,11 @@ public class IDMLToHwpxConverter {
                 if (img.getWidth() > 0) {
                     figH = Math.round(figW * ((double) img.getHeight() / img.getWidth()));
                 }
+
+                // 음수 좌표 클램프: HWPX는 음수 오프셋을 지원하지 않음
+                // 크기는 유지하여 페이지 전체를 덮도록 함 (bleed 영역은 페이지 밖으로 확장)
+                if (figX < 0) figX = 0;
+                if (figY < 0) figY = 0;
 
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
 
@@ -1191,17 +1272,15 @@ public class IDMLToHwpxConverter {
                 }
 
                 section.addBlock(fig);
-                imgInjected++;
-                System.err.println("[OrphanImage] " + idmlHexId + " (DOM " + rg.id()
-                        + ") → page " + (pageIdx + 1) + " " + rg.file()
-                        + " pos=(" + figX + "," + figY + ") size=(" + figW + "x" + figH + ")"
-                        + " px=" + img.getWidth() + "x" + img.getHeight());
+                // 이 그룹의 자식 ID를 커버 목록에 추가 (하위 그룹 중복 방지)
+                if (rg.childImageIds() != null) {
+                    for (int childId : rg.childImageIds()) {
+                        coveredChildIds.add(childId);
+                    }
+                }
             } catch (Exception e) {
-                System.err.println("[OrphanImage] Failed: " + rg.file() + " — " + e.getMessage());
+                // skip
             }
-        }
-        if (imgInjected > 0) {
-            System.err.println("[OrphanImage] " + imgInjected + "개 렌더 이미지 프레임 주입 완료");
         }
     }
 

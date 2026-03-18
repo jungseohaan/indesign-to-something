@@ -52,7 +52,37 @@ public class IDMLNormalizer {
         reporter.reportProgress(6, 100, "IDML 정규화 중... (4/4 AST 구축)");
         ASTDocument ast = Stage4_BuildAST.build(pool, idmlDoc, options, sourceFileName, resolvedData, reporter);
 
+        // IDML selfId → z-order 맵 빌드 (orphan graphic z-order 복원용)
+        // 풀의 모든 객체 + 그룹 자식 객체도 부모 그룹 z-order로 등록
+        java.util.Map<String, Integer> zMap = new java.util.HashMap<>();
+        for (FlatObject fo : pool.all()) {
+            zMap.put(fo.selfId(), fo.zOrder());
+        }
+        // 그룹 내부 자식(TextFrame, ImageFrame, VectorShape)도 부모 z-order로 등록
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread spread : idmlDoc.spreads()) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLGroup grp : spread.groups()) {
+                addGroupChildrenToZMap(zMap, grp, grp.zOrder());
+            }
+        }
+        ast.idmlZOrders(zMap);
+
         System.err.println("[IDMLNormalizer] Normalization complete. Sections: " + ast.sections().size());
         return ast;
+    }
+
+    /**
+     * 그룹 내부 자식 객체의 selfId를 부모 그룹의 z-order로 등록 (재귀).
+     */
+    private static void addGroupChildrenToZMap(java.util.Map<String, Integer> zMap,
+                                                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLGroup grp,
+                                                int rootZ) {
+        // 파싱 성공 여부와 무관하게 모든 자식 Self ID를 루트 그룹의 z-order로 등록
+        for (String childId : grp.allChildSelfIds()) {
+            zMap.putIfAbsent(childId, rootZ);
+        }
+        // 하위 그룹도 같은 루트 z-order로 재귀 처리
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLGroup child : grp.childGroups()) {
+            addGroupChildrenToZMap(zMap, child, rootZ);
+        }
     }
 }

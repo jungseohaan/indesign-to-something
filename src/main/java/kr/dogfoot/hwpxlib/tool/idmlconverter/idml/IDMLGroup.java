@@ -15,12 +15,15 @@ public class IDMLGroup {
     private List<IDMLVectorShape> vectorShapes;
     private List<IDMLGroup> childGroups;
     private int zOrder;
+    /** 파싱 성공 여부와 무관하게 그룹 내 모든 자식의 Self ID */
+    private List<String> allChildSelfIds;
 
     public IDMLGroup() {
         this.textFrames = new ArrayList<IDMLTextFrame>();
         this.imageFrames = new ArrayList<IDMLImageFrame>();
         this.vectorShapes = new ArrayList<IDMLVectorShape>();
         this.childGroups = new ArrayList<IDMLGroup>();
+        this.allChildSelfIds = new ArrayList<String>();
     }
 
     public String selfId() { return selfId; }
@@ -46,4 +49,7 @@ public class IDMLGroup {
 
     public int zOrder() { return zOrder; }
     public void zOrder(int v) { this.zOrder = v; }
+
+    public List<String> allChildSelfIds() { return allChildSelfIds; }
+    public void addChildSelfId(String id) { if (id != null) allChildSelfIds.add(id); }
 }

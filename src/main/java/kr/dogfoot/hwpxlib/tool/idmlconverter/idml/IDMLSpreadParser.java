@@ -1217,6 +1217,7 @@ class IDMLSpreadParser {
                     imageFrame.itemTransform(CoordinateConverter.combineTransforms(
                             accumulatedTransform, imageFrame.itemTransform()));
                     imageFrame.fromGroup(true);
+                    imageFrame.parentGroupId(groupSelfId);
                     imageFrame.zOrder(zOrderCounter[0]++);
                     spread.addImageFrame(imageFrame);
                 } else {
@@ -1462,6 +1463,10 @@ class IDMLSpreadParser {
 
             String itemLayer = getAttrOrNull(elem, "ItemLayer");
             if (itemLayer != null && hiddenLayerIds.contains(itemLayer)) continue;
+
+            // 파싱 성공 여부와 무관하게 모든 자식 Self ID 기록 (z-order 맵용)
+            String childSelf = getAttrOrNull(elem, "Self");
+            if (childSelf != null) group.addChildSelfId(childSelf);
 
             if ("TextFrame".equals(elem.getTagName())) {
                 IDMLTextFrame frame = parseTextFrame(elem);

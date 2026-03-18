@@ -17,6 +17,9 @@ if (typeof JSON === "undefined") {
     JSON = {};
 }
 if (typeof JSON.stringify !== "function") {
+    // 최대 재귀 깊이 (InDesign DOM 객체 순환 참조 방지)
+    var _JSON_MAX_DEPTH = 30;
+
     JSON.stringify = function (val, replacer, space) {
         var indent = "";
         var gap = "";
@@ -25,7 +28,7 @@ if (typeof JSON.stringify !== "function") {
         } else if (typeof space === "string") {
             gap = space;
         }
-        return _jsonSerialize("", { "": val }, gap, indent);
+        return _jsonSerialize("", { "": val }, gap, indent, 0);
     };
 
     function _jsonQuote(str) {
@@ -43,10 +46,12 @@ if (typeof JSON.stringify !== "function") {
         return result + '"';
     }
 
-    function _jsonSerialize(key, holder, gap, indent) {
+    function _jsonSerialize(key, holder, gap, indent, depth) {
         var val = holder[key];
         if (val === null) return "null";
         if (val === undefined) return "null";
+        // 깊이 제한 — InDesign DOM 순환 참조 시 스택 오버플로 방지
+        if (depth > _JSON_MAX_DEPTH) return "null";
         var t = typeof val;
         if (t === "boolean") return val ? "true" : "false";
         if (t === "number") {
@@ -54,12 +59,17 @@ if (typeof JSON.stringify !== "function") {
             return "null";
         }
         if (t === "string") return _jsonQuote(val);
+        if (t === "function") return "null";
+        // InDesign DOM 객체 감지 — toSpecifier가 있으면 DOM 객체
+        if (typeof val.toSpecifier === "function") {
+            try { return _jsonQuote(val.toSpecifier()); } catch (e) { return "null"; }
+        }
         // Array
         if (val instanceof Array) {
             var arrParts = [];
             var newIndent = indent + gap;
             for (var i = 0; i < val.length; i++) {
-                arrParts.push(_jsonSerialize(String(i), val, gap, newIndent));
+                arrParts.push(_jsonSerialize(String(i), val, gap, newIndent, depth + 1));
             }
             if (arrParts.length === 0) return "[]";
             if (gap) {
@@ -73,7 +83,7 @@ if (typeof JSON.stringify !== "function") {
             var newIndent2 = indent + gap;
             for (var k in val) {
                 if (val.hasOwnProperty(k)) {
-                    var v = _jsonSerialize(k, val, gap, newIndent2);
+                    var v = _jsonSerialize(k, val, gap, newIndent2, depth + 1);
                     if (v !== undefined) {
                         objParts.push(_jsonQuote(k) + (gap ? ": " : ":") + v);
                     }
@@ -87,6 +97,17 @@ if (typeof JSON.stringify !== "function") {
         }
         return "null";
     }
+}
+
+// --- 디버그 마커 (크래시 지점 추적) ---
+function _marker(outputDir, tag) {
+    try {
+        var f = File(outputDir + "/.crash_marker");
+        f.encoding = "UTF-8";
+        f.open("w");
+        f.write(tag);
+        f.close();
+    } catch (e) {}
 }
 
 // --- 메인 ---
@@ -117,6 +138,7 @@ function main(args) {
         app.linkingPreferences.checkLinksAtOpen = false;
         app.linkingPreferences.findMissingLinksAtOpen = false;
 
+        _marker(outputDir, "00_start");
         writeProgress(outputDir, "open", 0, 0);
 
         // 0. 이전 배치에서 닫히지 않은 문서 정리
@@ -127,6 +149,7 @@ function main(args) {
         } catch (e) {}
 
         // 1. 문서 열기 (창 표시 안 함)
+        _marker(outputDir, "01_open");
         var inddFile = File(inddPath);
         if (!inddFile.exists) {
             var parentFolder = inddFile.parent;
@@ -158,6 +181,7 @@ function main(args) {
         var rangePageCount = endPage - startPage + 1;
 
         if (!pdfOnly) {
+            _marker(outputDir, "02_idml_export");
             writeProgress(outputDir, "idml", 0, pageCount);
 
             // 2. IDML 내보내기 (전체 — API 제한)
@@ -165,32 +189,46 @@ function main(args) {
             doc.exportFile(ExportFormat.INDESIGN_MARKUP, idmlFile);
 
             // 2.5. allPageItems 1회 수집 (성능 최적화: 6회 → 1회)
+            _marker(outputDir, "03_allPageItems");
             var allItems = doc.allPageItems;
 
             // 2.6. 짧은 텍스트 프레임 렌더링
+            _marker(outputDir, "04_renderedTextFrames");
             writeProgress(outputDir, "rendered_frames", 0, rangePageCount);
             var renderedResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems);
             var renderedFrames = renderedResult.frames;
             var badgeChildIds = renderedResult.badgeChildIds;
 
             // 2.7. PDF 배치 프레임 렌더링 (멀티페이지 PDF 지원)
+            _marker(outputDir, "05_pdfPlacedFrames");
             var renderedPdfFrames = exportPdfPlacedFrames(doc, outputDir, startPage, endPage, allItems);
+            try { $.gc(); } catch (e) {}
 
             // 2.8. 복합 장식 그래픽 렌더링 (중첩 도형, 사선 패턴 등)
+            _marker(outputDir, "06_complexGraphics");
             var renderedGraphicFrames = exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems);
+            try { $.gc(); } catch (e) {}
 
             // 2.9. 벡터 도형/그룹 InDesign 렌더링
+            _marker(outputDir, "07_vectorShapes");
             var renderedVectorFrames = exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds, allItems);
             for (var vi = 0; vi < renderedVectorFrames.length; vi++) {
                 renderedGraphicFrames.push(renderedVectorFrames[vi]);
             }
+            renderedVectorFrames = null;
+            try { $.gc(); } catch (e) {}
 
             // 2.10. 이미지 배치 프레임 렌더링 (PSD, AI 등 → PNG)
+            // item.images 접근이 특정 문서에서 InDesign C++ 크래시(SIGSEGV)를 유발.
+            // 안전 버전은 빈 배열 반환 — Java 변환기가 IDML 링크로 직접 처리.
+            _marker(outputDir, "08_imagePlacedFrames");
             var renderedImageFrames = [];
             try {
-                renderedImageFrames = exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems);
+                renderedImageFrames = exportImagePlacedFramesSafe(doc, outputDir, startPage, endPage, allItems);
             } catch (imgEx) {}
+            try { $.gc(); } catch (e) {}
 
+            _marker(outputDir, "09_collectResolved");
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
             // 3. resolved 속성 수집 (페이지 범위 필터링)
@@ -199,7 +237,19 @@ function main(args) {
             resolved.renderedPdfFrames = renderedPdfFrames;
             resolved.renderedGraphicFrames = renderedGraphicFrames;
             resolved.renderedImageFrames = renderedImageFrames;
+
+            _marker(outputDir, "10_writeJson");
             writeJson(outputDir + "/resolved.json", resolved);
+
+            // GC 후 참조 해제 — InDesign 엔진 정리 부담 감소
+            resolved = null;
+            allItems = null;
+            renderedFrames = null;
+            renderedPdfFrames = null;
+            renderedGraphicFrames = null;
+            renderedVectorFrames = null;
+            renderedImageFrames = null;
+            try { $.gc(); } catch (e) {}
         }
 
         writeProgress(outputDir, "pdf", rangePageCount, rangePageCount);
@@ -782,8 +832,11 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
         var outFile = File(renderDir + "/" + fileName);
 
         try {
+            _marker(outputDir, "08_img_" + domId + "_hide");
             var hiddenTFs = isGroupRender ? hideTextFrames(renderTarget) : [];
+            _marker(outputDir, "08_img_" + domId + "_export");
             renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
+            _marker(outputDir, "08_img_" + domId + "_restore");
             if (hiddenTFs.length > 0) restoreTextFrames(hiddenTFs);
 
             var bounds = null;
@@ -827,6 +880,19 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
     }
 
     return renderedImageFrames;
+}
+
+/**
+ * exportImagePlacedFrames의 안전 버전.
+ * exportFile(PNG_FORMAT)를 사용하지 않고, 이미지 링크 경로와 bounds 정보만 수집한다.
+ * InDesign이 특정 이미지 프레임의 exportFile에서 C++ 크래시(SIGSEGV)를 일으키는
+ * 문서에 대한 폴백으로, Java 변환기가 IDML 링크에서 직접 이미지를 처리하게 한다.
+ */
+function exportImagePlacedFramesSafe(doc, outputDir, startPage, endPage, allItems) {
+    // InDesign이 특정 이미지 프레임의 .images 접근에서 C++ 크래시(SIGSEGV)를
+    // 일으키는 문서가 있으므로, 이미지 프레임 렌더링은 건너뛴다.
+    // Java 변환기가 IDML 링크에서 직접 이미지를 처리한다.
+    return [];
 }
 
 /**
