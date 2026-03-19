@@ -283,6 +283,11 @@ public class IDMLVectorShape {
     public double[] parentClipBounds() { return parentClipBounds; }
     public void parentClipBounds(double[] v) { this.parentClipBounds = v; }
 
+    // 배경 도형 유지 플래그 (GraphicType 컨테이너 + TextFrame 자식 + 채우기)
+    private boolean keepAsBackground;
+    public boolean keepAsBackground() { return keepAsBackground; }
+    public void keepAsBackground(boolean v) { this.keepAsBackground = v; }
+
     public IDMLVectorShape clippedChild() { return clippedChild; }
     public void clippedChild(IDMLVectorShape v) { this.clippedChild = v; }
     public boolean hasClippedChild() { return clippedChild != null; }

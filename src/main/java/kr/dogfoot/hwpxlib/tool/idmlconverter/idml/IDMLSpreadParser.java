@@ -1472,6 +1472,9 @@ class IDMLSpreadParser {
                                 // (wrapper 전파만으로는 TextFrame보다 큰 배경 박스를 표현 불가)
                                 boolean keepAsBackground = vectorShape != null
                                         && vectorShape.hasFill();
+                                if (keepAsBackground) {
+                                    vectorShape.keepAsBackground(true);
+                                }
                                 if (vectorShape != null && !vectorShape.hasClippedChildren()
                                         && !keepAsBackground) {
                                     spread.vectorShapes().remove(vectorShape);

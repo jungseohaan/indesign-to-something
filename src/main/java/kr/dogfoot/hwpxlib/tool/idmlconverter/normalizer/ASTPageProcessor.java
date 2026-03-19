@@ -454,11 +454,20 @@ class ASTPageProcessor {
         vectorShapes.removeIf(s -> isDegenerateShape(s));
 
         // ExtendScript 렌더 대상 도형 제거 (배지, 복합 그래픽 등 모두 통합)
-        // 단, parentClipBounds가 설정된 도형은 유지 — 클리핑된 IDML 바운드로 렌더링해야 하므로
-        // orphan 경로(resolved bounds 사용)가 아닌 IDML 경로(클리핑 반영)로 처리
+        // parentClipBounds가 설정된 도형도 부모 그룹에 rendered PNG가 있으면 제거
+        // (그룹 PNG가 이미 클리핑 포함 → 개별 도형 유지 시 중복 발생)
+        // 부모 그룹에 rendered PNG가 없는 경우만 유지 (개별 solid fallback으로 렌더링)
         if (resolvedData != null) {
-            vectorShapes.removeIf(s -> s.parentClipBounds() == null
-                    && isRenderedByExtendScriptWithParent(s.selfId(), s.parentGroupId(), resolvedData));
+            vectorShapes.removeIf(s -> {
+                if (!isRenderedByExtendScriptWithParent(s.selfId(), s.parentGroupId(), resolvedData)) {
+                    return false;
+                }
+                if (s.parentClipBounds() != null && s.parentGroupId() != null) {
+                    // 부모 그룹에 rendered PNG가 없으면 유지 (개별 렌더링 필요)
+                    return resolvedData.isRenderedByExtendScript(s.parentGroupId());
+                }
+                return true;
+            });
         }
 
         IDMLPage finalPage = page;

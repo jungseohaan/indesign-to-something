@@ -450,8 +450,12 @@ class ASTFigureBuilder {
         }
 
         // pre-rendered PNG 없는 단순 채우기 도형은 단색 PNG 직접 생성
+        // fromGroup 도형은 그룹 합성이 필요하므로, 배경용으로 마킹된 것만 허용
         String fillHex = ASTInlineObjectBuilder.resolveColorHex(shape.fillColor(), colorResolver);
-        if (fillHex != null) {
+        boolean allowSolidFallback = !shape.fromGroup()
+                || shape.parentClipBounds() != null
+                || shape.keepAsBackground();
+        if (fillHex != null && allowSolidFallback) {
             double[] bbox = IDMLGeometry.getTransformedBoundingBox(
                     shape.geometricBounds(), shape.itemTransform());
             double[] pageAbs = IDMLGeometry.absoluteTopLeft(
