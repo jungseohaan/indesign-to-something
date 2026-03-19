@@ -209,26 +209,36 @@ function main(args) {
             var renderedGraphicFrames = exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems);
             try { $.gc(); } catch (e) {}
 
-            // 2.9. 벡터 도형/그룹 InDesign 렌더링
-            _marker(outputDir, "07_vectorShapes");
-            var renderedVectorFrames = exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds, allItems);
+            // 2.9. 장식 그룹 통째 렌더링 (클리핑 Oval, 도형 전용 Group)
+            _marker(outputDir, "07_decoGroups");
+            var decoResult = exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildIds, allItems);
+            var decoChildIds = decoResult.childIds;
+            for (var di = 0; di < decoResult.frames.length; di++) {
+                renderedGraphicFrames.push(decoResult.frames[di]);
+            }
+            decoResult = null;
+            try { $.gc(); } catch (e) {}
+
+            // 2.10. 벡터 도형 개별 렌더링 (장식 그룹 자식 제외)
+            _marker(outputDir, "08_vectorShapes");
+            var renderedVectorFrames = exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds, decoChildIds, allItems);
             for (var vi = 0; vi < renderedVectorFrames.length; vi++) {
                 renderedGraphicFrames.push(renderedVectorFrames[vi]);
             }
             renderedVectorFrames = null;
             try { $.gc(); } catch (e) {}
 
-            // 2.10. 이미지 배치 프레임 렌더링 (PSD, AI 등 → PNG)
+            // 2.11. 이미지 배치 프레임 렌더링 (PSD, AI 등 → PNG)
             // item.images 접근이 특정 문서에서 InDesign C++ 크래시(SIGSEGV)를 유발.
             // 안전 버전은 빈 배열 반환 — Java 변환기가 IDML 링크로 직접 처리.
-            _marker(outputDir, "08_imagePlacedFrames");
+            _marker(outputDir, "09_imagePlacedFrames");
             var renderedImageFrames = [];
             try {
                 renderedImageFrames = exportImagePlacedFramesSafe(doc, outputDir, startPage, endPage, allItems);
             } catch (imgEx) {}
             try { $.gc(); } catch (e) {}
 
-            _marker(outputDir, "09_collectResolved");
+            _marker(outputDir, "10_collectResolved");
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
             // 3. resolved 속성 수집 (페이지 범위 필터링)
@@ -238,7 +248,7 @@ function main(args) {
             resolved.renderedGraphicFrames = renderedGraphicFrames;
             resolved.renderedImageFrames = renderedImageFrames;
 
-            _marker(outputDir, "10_writeJson");
+            _marker(outputDir, "11_writeJson");
             writeJson(outputDir + "/resolved.json", resolved);
 
             // GC 후 참조 해제 — InDesign 엔진 정리 부담 감소
@@ -247,6 +257,7 @@ function main(args) {
             renderedFrames = null;
             renderedPdfFrames = null;
             renderedGraphicFrames = null;
+            decoChildIds = null;
             renderedVectorFrames = null;
             renderedImageFrames = null;
             try { $.gc(); } catch (e) {}
@@ -896,9 +907,201 @@ function exportImagePlacedFramesSafe(doc, outputDir, startPage, endPage, allItem
 }
 
 /**
+ * 도형만으로 구성된 장식 그룹(클리핑 Oval/Rect 포함)을 그룹 단위로 PNG 렌더링한다.
+ * 개별 도형 렌더링(exportVectorShapeFrames) 전에 호출하여 중복 방지.
+ *
+ * 대상:
+ * - Group의 allPageItems가 모두 도형(Rect/Polygon/Oval/GraphicLine/Group)
+ * - Oval/Rectangle 클리핑 컨테이너 내부에 도형 그룹이 있는 경우
+ *
+ * @return {{ frames: Array, childIds: Object }}
+ */
+function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildIds, allItems) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    var results = [];
+    var decoChildIds = {};   // 자식 DOM ID → true (개별 렌더링 제외용)
+    var renderedIds = {};
+
+    // Pass 1: Oval/Rectangle 클리핑 컨테이너 (nested items가 모두 도형/그룹)
+    for (var i = 0; i < allItems.length; i++) {
+        var item = allItems[i];
+        var cName = item.constructor.name;
+
+        if (cName !== "Oval" && cName !== "Rectangle") continue;
+        if (isOnHiddenLayer(item)) continue;
+
+        var hasNested = false;
+        try { hasNested = item.allPageItems && item.allPageItems.length > 0; } catch (e) {}
+        if (!hasNested) continue;
+
+        // contentType이 GRAPHIC_TYPE이 아니면 스킵 (텍스트 컨테이너 등)
+        try {
+            if (item.contentType !== ContentType.GRAPHIC_TYPE) continue;
+        } catch (e) { continue; }
+
+        // 이미지가 배치된 프레임은 스킵
+        var hasPlaced = false;
+        try { hasPlaced = item.images && item.images.length > 0; } catch (e) {}
+        if (!hasPlaced) try { hasPlaced = item.pdfs && item.pdfs.length > 0; } catch (e) {}
+        if (!hasPlaced) try { hasPlaced = item.epss && item.epss.length > 0; } catch (e) {}
+        if (hasPlaced) continue;
+
+        // 내부 아이템이 모두 도형/그룹인지 확인
+        if (!isAllShapeChildren(item)) continue;
+
+        var parentPage = null;
+        try { parentPage = item.parentPage; } catch (e) {}
+        if (!parentPage) continue;
+        var pgIdx = parentPage.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        var domId = item.id;
+        if (renderedIds[domId]) continue;
+        if (badgeChildIds && badgeChildIds[domId]) continue;
+
+        // 렌더링
+        try {
+            var fileName = "deco_" + domId + ".png";
+            var outFile = File(renderDir + "/" + fileName);
+            item.exportFile(ExportFormat.PNG_FORMAT, outFile);
+
+            var bounds = null;
+            try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
+            if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
+
+            if (bounds) {
+                var pageBounds = parentPage.bounds;
+                bounds[0] -= pageBounds[0];
+                bounds[1] -= pageBounds[1];
+                bounds[2] -= pageBounds[0];
+                bounds[3] -= pageBounds[1];
+            }
+
+            results.push({
+                id: domId,
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: parentPage.documentOffset
+            });
+            renderedIds[domId] = true;
+
+            // 자식 ID 모두 제외 대상에 등록
+            var nested = item.allPageItems;
+            for (var ni = 0; ni < nested.length; ni++) {
+                decoChildIds[nested[ni].id] = true;
+            }
+        } catch (e) {}
+    }
+
+    // Pass 2: 도형만으로 구성된 일반 Group (텍스트/이미지 없음, 배지 아님)
+    for (var gi = 0; gi < allItems.length; gi++) {
+        var grp = allItems[gi];
+        if (grp.constructor.name !== "Group") continue;
+        if (isOnHiddenLayer(grp)) continue;
+
+        var grpDomId = grp.id;
+        if (renderedIds[grpDomId]) continue;
+        if (decoChildIds[grpDomId]) continue;  // 이미 클리핑 컨테이너 자식
+        if (badgeChildIds && badgeChildIds[grpDomId]) continue;
+
+        // 부모가 이미 처리된 컨테이너면 스킵
+        try {
+            var pItem = grp.parent;
+            if (pItem && renderedIds[pItem.id]) continue;
+            if (pItem && decoChildIds[pItem.id]) continue;
+        } catch (e) {}
+
+        // 내부 아이템이 모두 도형/그룹인지 확인
+        if (!isAllShapeChildren(grp)) continue;
+
+        // 최소 자식 수 — 2개 이상이어야 그룹 렌더링 의미 있음
+        var childCount = 0;
+        try { childCount = grp.allPageItems.length; } catch (e) {}
+        if (childCount < 2) continue;
+
+        var grpPage = null;
+        try { grpPage = grp.parentPage; } catch (e) {}
+        if (!grpPage) {
+            try {
+                var _gb = grp.visibleBounds;
+                var _gcy = (_gb[0] + _gb[2]) / 2;
+                var _gcx = (_gb[1] + _gb[3]) / 2;
+                for (var pi = 0; pi < doc.pages.length; pi++) {
+                    var _pg = doc.pages[pi];
+                    var _pb = _pg.bounds;
+                    if (_gcy >= _pb[0] && _gcy <= _pb[2] && _gcx >= _pb[1] && _gcx <= _pb[3]) {
+                        grpPage = _pg;
+                        break;
+                    }
+                }
+            } catch (e) {}
+        }
+        if (!grpPage) continue;
+        var grpPgIdx = grpPage.documentOffset + 1;
+        if (grpPgIdx < startPage || grpPgIdx > endPage) continue;
+
+        try {
+            var grpFileName = "deco_" + grpDomId + ".png";
+            var grpOutFile = File(renderDir + "/" + grpFileName);
+            grp.exportFile(ExportFormat.PNG_FORMAT, grpOutFile);
+
+            var grpBounds = null;
+            try { grpBounds = arrCopy(grp.visibleBounds); } catch (e) {}
+            if (!grpBounds) try { grpBounds = arrCopy(grp.geometricBounds); } catch (e) {}
+
+            if (grpBounds) {
+                var grpPageBounds = grpPage.bounds;
+                grpBounds[0] -= grpPageBounds[0];
+                grpBounds[1] -= grpPageBounds[1];
+                grpBounds[2] -= grpPageBounds[0];
+                grpBounds[3] -= grpPageBounds[1];
+            }
+
+            results.push({
+                id: grpDomId,
+                file: "rendered_frames/" + grpFileName,
+                bounds: grpBounds,
+                pageIndex: grpPage.documentOffset
+            });
+            renderedIds[grpDomId] = true;
+
+            var grpNested = grp.allPageItems;
+            for (var gni = 0; gni < grpNested.length; gni++) {
+                decoChildIds[grpNested[gni].id] = true;
+            }
+        } catch (e) {}
+    }
+
+    return { frames: results, childIds: decoChildIds };
+}
+
+/**
+ * 아이템의 모든 자식이 도형(Rect/Polygon/Oval/GraphicLine) 또는 Group인지 확인.
+ * TextFrame, Image 등 비도형 자식이 하나라도 있으면 false.
+ */
+function isAllShapeChildren(item) {
+    try {
+        var nested = item.allPageItems;
+        for (var i = 0; i < nested.length; i++) {
+            var cn = nested[i].constructor.name;
+            if (cn !== "Rectangle" && cn !== "Polygon"
+                && cn !== "Oval" && cn !== "GraphicLine"
+                && cn !== "Group") {
+                return false;
+            }
+        }
+        return nested.length > 0;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
  * 벡터 도형을 PNG로 렌더링한다.
  */
-function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds, allItems) {
+function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds, decoChildIds, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -916,6 +1119,7 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
         if (renderedIds[domId]) continue;
         if (isOnHiddenLayer(item)) continue;
         if (badgeChildIds && badgeChildIds[domId]) continue;
+        if (decoChildIds && decoChildIds[domId]) continue;
 
         var hasPlaced = false;
         try { hasPlaced = item.images && item.images.length > 0; } catch (e) {}
