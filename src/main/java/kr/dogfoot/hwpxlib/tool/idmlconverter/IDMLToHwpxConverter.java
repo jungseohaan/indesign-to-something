@@ -996,7 +996,11 @@ public class IDMLToHwpxConverter {
                             long ebArea = (eb[2] - eb[0]) * (eb[3] - eb[1]);
                             double existingRatio = ebArea > 0 ? (double) overlapArea / ebArea : 0;
                             // 양쪽 모두 50% 이상 겹쳐야 중복 (같은 크기/위치의 객체)
-                            if (orphanRatio > 0.5 && existingRatio > 0.5) {
+                            // 단, 한쪽이 다른 쪽을 거의 완전히 포함(>90%)하면
+                            // 배경/컨테이너 관계이므로 중복 아님
+                            boolean isContainment = (existingRatio > 0.9 && orphanRatio < 0.9)
+                                    || (orphanRatio > 0.9 && existingRatio < 0.9);
+                            if (orphanRatio > 0.5 && existingRatio > 0.5 && !isContainment) {
                                 overlapsExisting = true;
                                 break;
                             }
