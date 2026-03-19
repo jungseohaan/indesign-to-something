@@ -921,8 +921,8 @@ public class IDMLToHwpxConverter {
                 continue;
             }
 
-            // 클리핑 도형의 자식 건너뜀 (부모 도형의 rendered PNG에 포함됨)
-            if (astDoc.clippedChildIds().contains(idmlHexId)) {
+            // vectorShapes 처리 대상 및 클리핑 자식 건너뜀 (중복 주입 방지)
+            if (astDoc.orphanExcludeIds().contains(idmlHexId)) {
                 continue;
             }
 

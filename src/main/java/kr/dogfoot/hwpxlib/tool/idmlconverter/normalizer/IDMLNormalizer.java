@@ -52,19 +52,10 @@ public class IDMLNormalizer {
         reporter.reportProgress(6, 100, "IDML 정규화 중... (4/4 AST 구축)");
         ASTDocument ast = Stage4_BuildAST.build(pool, idmlDoc, options, sourceFileName, resolvedData, reporter);
 
-        // 클리핑 도형의 자식 ID 수집 (orphan injection 중복 방지)
+        // orphan injection 제외 ID 수집 — 클리핑 도형의 자식 (재귀)
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread spread : idmlDoc.spreads()) {
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape vs : spread.vectorShapes()) {
-                if (vs.hasClippedChildren()) {
-                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape child : vs.clippedChildren()) {
-                        if (child.selfId() != null) {
-                            ast.addClippedChildId(child.selfId());
-                        }
-                    }
-                }
-                if (vs.hasClippedChild() && vs.clippedChild().selfId() != null) {
-                    ast.addClippedChildId(vs.clippedChild().selfId());
-                }
+                collectClippedChildIdsRecursive(vs, ast);
             }
         }
 
@@ -99,6 +90,29 @@ public class IDMLNormalizer {
         // 하위 그룹도 같은 루트 z-order로 재귀 처리
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLGroup child : grp.childGroups()) {
             addGroupChildrenToZMap(zMap, child, rootZ);
+        }
+    }
+
+    /**
+     * 벡터 도형의 clippedChildren ID를 재귀적으로 수집하여 orphanExcludeIds에 추가.
+     */
+    private static void collectClippedChildIdsRecursive(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape vs,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument ast) {
+        if (vs.hasClippedChildren()) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape child : vs.clippedChildren()) {
+                if (child.selfId() != null) {
+                    ast.addOrphanExcludeId(child.selfId());
+                }
+                collectClippedChildIdsRecursive(child, ast);
+            }
+        }
+        if (vs.hasClippedChild()) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape child = vs.clippedChild();
+            if (child.selfId() != null) {
+                ast.addOrphanExcludeId(child.selfId());
+            }
+            collectClippedChildIdsRecursive(child, ast);
         }
     }
 }

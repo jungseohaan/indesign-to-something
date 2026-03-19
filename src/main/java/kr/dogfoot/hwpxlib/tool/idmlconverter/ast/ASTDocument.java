@@ -20,8 +20,8 @@ public class ASTDocument {
     private List<ASTStyleDef> characterStyles;
     private Map<String, String> colors;
 
-    // 클리핑 도형의 자식 ID (orphan injection 제외용)
-    private java.util.Set<String> clippedChildIds;
+    // orphan injection 제외 ID (클리핑 자식 + vectorShapes 등록 도형)
+    private java.util.Set<String> orphanExcludeIds;
 
     public ASTDocument() {
         this.stories = new ArrayList<>();
@@ -31,11 +31,11 @@ public class ASTDocument {
         this.paragraphStyles = new ArrayList<>();
         this.characterStyles = new ArrayList<>();
         this.colors = new LinkedHashMap<>();
-        this.clippedChildIds = new java.util.HashSet<>();
+        this.orphanExcludeIds = new java.util.HashSet<>();
     }
 
-    public java.util.Set<String> clippedChildIds() { return clippedChildIds; }
-    public void addClippedChildId(String id) { clippedChildIds.add(id); }
+    public java.util.Set<String> orphanExcludeIds() { return orphanExcludeIds; }
+    public void addOrphanExcludeId(String id) { orphanExcludeIds.add(id); }
 
     public String sourceFile() { return sourceFile; }
     public void sourceFile(String v) { this.sourceFile = v; }
