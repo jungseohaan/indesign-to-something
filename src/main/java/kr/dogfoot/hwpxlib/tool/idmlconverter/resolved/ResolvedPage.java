@@ -61,4 +61,22 @@ public class ResolvedPage {
         double y = pageRelativeCoords ? gb[0] : (gb[0] - bounds[0]);
         return new double[]{x, y};
     }
+
+    /**
+     * rendered bounds(spread 좌표) → 페이지 상대 좌표 [x, y] 반환.
+     *
+     * renderedGraphicFrame/renderedTextFrame의 bounds는 항상 spread 좌표계를 사용:
+     * - 왼쪽 페이지: x = 0 ~ pageWidth
+     * - 오른쪽 페이지: x = -pageWidth ~ 0
+     *
+     * 오른쪽 페이지(bounds[1] > 0)에서 spread 좌표를 보정하여 페이지 상대 좌표로 변환.
+     */
+    public double[] spreadBoundsToPageRelative(double[] rb) {
+        if (bounds == null || rb == null) return null;
+        double pageWidth = bounds[3] - bounds[1];
+        boolean isRightPage = bounds[1] > 1.0;
+        double x = isRightPage ? (rb[1] + pageWidth) : rb[1];
+        double y = rb[0] - bounds[0];
+        return new double[]{x, y};
+    }
 }

@@ -516,11 +516,21 @@ public class IDMLToHwpxConverter {
                     long figX, figY, figW, figH;
                     double[] bounds = rendered.bounds();
                     if (isBadgeFallback && bounds != null && bounds.length == 4) {
-                        // 배지: 그룹 bounds(페이지 상대) → 위치/크기 직접 사용
-                        figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                .pointsToHwpunits(bounds[1]);
-                        figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                                .pointsToHwpunits(bounds[0]);
+                        // 배지: 그룹 bounds(spread 좌표) → 페이지 상대 좌표로 변환
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage badgePage =
+                                resolvedData.getPage(rendered.pageIndex());
+                        if (badgePage != null && badgePage.bounds() != null) {
+                            double[] rel = badgePage.spreadBoundsToPageRelative(bounds);
+                            figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                    .pointsToHwpunits(rel[0]);
+                            figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                    .pointsToHwpunits(rel[1]);
+                        } else {
+                            figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                    .pointsToHwpunits(bounds[1]);
+                            figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                                    .pointsToHwpunits(bounds[0]);
+                        }
                         figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
                                 .pointsToHwpunits(bounds[3] - bounds[1]);
                         figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
@@ -932,7 +942,7 @@ public class IDMLToHwpxConverter {
                 double[] bounds = rg.bounds();
                 long figX, figY, figW, figH;
                 if (resolvedPage != null && resolvedPage.bounds() != null) {
-                    double[] rel = resolvedPage.toPageRelative(bounds);
+                    double[] rel = resolvedPage.spreadBoundsToPageRelative(bounds);
                     figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
                             .pointsToHwpunits(rel[0]);
                     figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
@@ -1194,7 +1204,7 @@ public class IDMLToHwpxConverter {
                 double[] bounds = rg.bounds();
                 long figX, figY, figW, figH;
                 if (resolvedPage != null && resolvedPage.bounds() != null) {
-                    double[] rel = resolvedPage.toPageRelative(bounds);
+                    double[] rel = resolvedPage.spreadBoundsToPageRelative(bounds);
                     figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
                             .pointsToHwpunits(rel[0]);
                     figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter

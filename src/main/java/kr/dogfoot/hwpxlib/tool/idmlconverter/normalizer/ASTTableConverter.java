@@ -145,6 +145,7 @@ class ASTTableConverter {
         // 대각선
         cell.topLeftDiagonalLine(idmlCell.topLeftDiagonalLine());
         cell.topRightDiagonalLine(idmlCell.topRightDiagonalLine());
+        cell.diagonalBorder(convertCellBorder(idmlCell.diagonalBorder(), colorResolver));
 
         // 셀 내용 → 미니 문서 (재귀)
         FlattenedObjectPool emptyPool = new FlattenedObjectPool(); // 셀 내 인라인은 별도 처리

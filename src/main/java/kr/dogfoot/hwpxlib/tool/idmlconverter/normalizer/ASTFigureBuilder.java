@@ -151,7 +151,7 @@ class ASTFigureBuilder {
                     double rW = rb[3] - rb[1];
                     double rH = rb[2] - rb[0];
                     if (rW > 0 && rH > 0) {
-                        double[] rel = resolvedPage.toPageRelative(rb);
+                        double[] rel = resolvedPage.spreadBoundsToPageRelative(rb);
                         xHwp = CoordinateConverter.pointsToHwpunits(rel[0]);
                         yHwp = CoordinateConverter.pointsToHwpunits(rel[1]);
                         wHwp = CoordinateConverter.pointsToHwpunits(rW);
@@ -194,7 +194,7 @@ class ASTFigureBuilder {
                     double rW = rb[3] - rb[1];
                     double rH = rb[2] - rb[0];
                     if (rW > 0 && rH > 0) {
-                        double[] rel = resolvedPage.toPageRelative(rb);
+                        double[] rel = resolvedPage.spreadBoundsToPageRelative(rb);
                         xHwp = CoordinateConverter.pointsToHwpunits(rel[0]);
                         yHwp = CoordinateConverter.pointsToHwpunits(rel[1]);
                         wHwp = CoordinateConverter.pointsToHwpunits(rW);
@@ -678,9 +678,9 @@ class ASTFigureBuilder {
                         CoordinateConverter.pointsToHwpunits(rW),
                         CoordinateConverter.pointsToHwpunits(rH));
                 if (imgResult != null) {
-                    double[] pb = resolvedPage.bounds();
-                    long figX = CoordinateConverter.pointsToHwpunits(rb[1] - pb[1]);
-                    long figY = CoordinateConverter.pointsToHwpunits(rb[0] - pb[0]);
+                    double[] rel = resolvedPage.spreadBoundsToPageRelative(rb);
+                    long figX = CoordinateConverter.pointsToHwpunits(rel[0]);
+                    long figY = CoordinateConverter.pointsToHwpunits(rel[1]);
                     long figW = CoordinateConverter.pointsToHwpunits(rW);
                     long figH = CoordinateConverter.pointsToHwpunits(rH);
                     // PNG 비율로 높이 보정
