@@ -224,6 +224,14 @@ class ASTRunConverter {
             if (tryConvertGraphicLineToUnderlineTab(ig, inlineObj, para, colorResolver, idmlDoc)) {
                 return;
             }
+            // 자식 도형이 모두 renderedGraphicFrame으로 렌더링되는 그룹은 합성 이미지 생략
+            // (orphan 주입에서 개별 렌더 PNG가 플로팅 이미지로 배치되므로 중복 방지)
+            if (inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
+                    && !ig.hasVectorShape() && !ig.childGraphics().isEmpty()
+                    && resolvedData != null
+                    && allChildrenRenderedGraphic(ig, resolvedData)) {
+                return;
+            }
             // 크기 0인 RENDERED_GROUP 래퍼는 추가하지 않음 (배경 사각형+텍스트프레임 구조의 Group)
             boolean isEmptyWrapper = inlineObj.kind() == ASTInlineObject.ObjectKind.RENDERED_GROUP
                     && inlineObj.width() <= 0 && inlineObj.height() <= 0
@@ -333,6 +341,32 @@ class ASTRunConverter {
      * 인라인 그래픽의 자식 텍스트프레임 중 실제 텍스트 콘텐츠가 있는 것이 있는지 확인.
      * 장식용 도형(체크마크 PathGeometry 등)만 포함하는 빈 TextFrame은 false.
      */
+    /**
+     * 그룹의 벡터 도형 자식이 모두 renderedGraphicFrame으로 등록되어 있는지 확인.
+     * true이면 orphan 주입에서 개별 렌더 PNG가 배치되므로 합성 이미지는 중복.
+     */
+    private static boolean allChildrenRenderedGraphic(IDMLCharacterRun.InlineGraphic ig,
+                                                       kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolvedData) {
+        boolean hasAny = false;
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            if (child.hasVectorShape()) {
+                hasAny = true;
+                if (child.selfId() == null
+                        || resolvedData.getRenderedGraphicFrameByIdmlId(child.selfId()) == null) {
+                    return false;
+                }
+            }
+            // 재귀: 하위 그룹의 자식도 확인
+            if (!child.childGraphics().isEmpty()) {
+                if (!allChildrenRenderedGraphic(child, resolvedData)) {
+                    return false;
+                }
+                hasAny = true;
+            }
+        }
+        return hasAny;
+    }
+
     private static boolean hasChildTextFramesWithContent(IDMLCharacterRun.InlineGraphic ig,
                                                           IDMLDocument idmlDoc) {
         if (idmlDoc == null) return ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig);

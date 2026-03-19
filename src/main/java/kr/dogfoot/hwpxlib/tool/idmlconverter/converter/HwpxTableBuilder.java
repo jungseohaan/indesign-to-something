@@ -294,15 +294,17 @@ public class HwpxTableBuilder {
                 .breakCellSeparateLine(false);
 
         // 대각선
+        // IDML TopRightDiagonalLine(↙ /) → HWPX slash(/)
         bf.createSlash();
-        if (cell.topLeftDiagonalLine()) {
+        if (cell.topRightDiagonalLine()) {
             bf.slash().typeAnd(SlashType.CENTER).CrookedAnd(false).isCounter(false);
         } else {
             bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
         }
 
+        // IDML TopLeftDiagonalLine(↘ \) → HWPX backSlash(\)
         bf.createBackSlash();
-        if (cell.topRightDiagonalLine()) {
+        if (cell.topLeftDiagonalLine()) {
             bf.backSlash().typeAnd(SlashType.CENTER).CrookedAnd(false).isCounter(false);
         } else {
             bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
