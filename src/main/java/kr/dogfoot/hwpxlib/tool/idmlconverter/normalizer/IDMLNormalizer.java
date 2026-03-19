@@ -52,6 +52,22 @@ public class IDMLNormalizer {
         reporter.reportProgress(6, 100, "IDML 정규화 중... (4/4 AST 구축)");
         ASTDocument ast = Stage4_BuildAST.build(pool, idmlDoc, options, sourceFileName, resolvedData, reporter);
 
+        // 클리핑 도형의 자식 ID 수집 (orphan injection 중복 방지)
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread spread : idmlDoc.spreads()) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape vs : spread.vectorShapes()) {
+                if (vs.hasClippedChildren()) {
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape child : vs.clippedChildren()) {
+                        if (child.selfId() != null) {
+                            ast.addClippedChildId(child.selfId());
+                        }
+                    }
+                }
+                if (vs.hasClippedChild() && vs.clippedChild().selfId() != null) {
+                    ast.addClippedChildId(vs.clippedChild().selfId());
+                }
+            }
+        }
+
         // IDML selfId → z-order 맵 빌드 (orphan graphic z-order 복원용)
         // 풀의 모든 객체 + 그룹 자식 객체도 부모 그룹 z-order로 등록
         java.util.Map<String, Integer> zMap = new java.util.HashMap<>();

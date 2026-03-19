@@ -921,6 +921,11 @@ public class IDMLToHwpxConverter {
                 continue;
             }
 
+            // 클리핑 도형의 자식 건너뜀 (부모 도형의 rendered PNG에 포함됨)
+            if (astDoc.clippedChildIds().contains(idmlHexId)) {
+                continue;
+            }
+
             int pageIdx = rg.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
