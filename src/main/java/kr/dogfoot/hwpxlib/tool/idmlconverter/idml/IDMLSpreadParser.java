@@ -14,6 +14,11 @@ class IDMLSpreadParser {
     // ===== Spread XML 파싱 =====
 
     static IDMLSpread parseSpread(Document spreadDoc, Set<String> hiddenLayerIds) {
+        return parseSpread(spreadDoc, hiddenLayerIds, Collections.<String>emptyList());
+    }
+
+    static IDMLSpread parseSpread(Document spreadDoc, Set<String> hiddenLayerIds,
+                                   List<String> layerOrder) {
         IDMLSpread spread = new IDMLSpread();
 
         // Spread 또는 MasterSpread 루트 요소 찾기
@@ -28,15 +33,48 @@ class IDMLSpreadParser {
 
         // Page, TextFrame, Group 처리 (z-order 순서 추적)
         int[] zOrderCounter = {0};  // 배열로 래핑하여 람다/내부 메서드에서 수정 가능
+
+        // 레이어 순서를 고려하여 자식 요소를 정렬 (뒤 레이어→앞 레이어 순서로 z-order 부여)
+        // designmap.xml의 layerOrder는 front-to-back이므로 인덱스가 클수록 뒤 레이어
+        List<Element> childElements = new ArrayList<Element>();
         NodeList children = spreadElem.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node node = children.item(i);
             if (node.getNodeType() != Node.ELEMENT_NODE) continue;
-            Element elem = (Element) node;
+            childElements.add((Element) node);
+        }
+
+        if (!layerOrder.isEmpty()) {
+            // 레이어 인덱스 맵 생성 (front=0 → back=N-1)
+            final Map<String, Integer> layerIndexMap = new HashMap<String, Integer>();
+            for (int li = 0; li < layerOrder.size(); li++) {
+                layerIndexMap.put(layerOrder.get(li), li);
+            }
+            // 안정 정렬: 같은 레이어 내에서는 XML 순서 유지
+            // 뒤 레이어(인덱스 큰)를 앞에 배치하여 낮은 z-order 부여
+            final int defaultIdx = layerOrder.size(); // 레이어 없는 요소 = 맨 뒤
+            Collections.sort(childElements, new Comparator<Element>() {
+                public int compare(Element a, Element b) {
+                    String layerA = getAttrOrNull(a, "ItemLayer");
+                    String layerB = getAttrOrNull(b, "ItemLayer");
+                    int idxA = layerA != null && layerIndexMap.containsKey(layerA)
+                            ? layerIndexMap.get(layerA) : defaultIdx;
+                    int idxB = layerB != null && layerIndexMap.containsKey(layerB)
+                            ? layerIndexMap.get(layerB) : defaultIdx;
+                    // Page 요소는 ItemLayer 없음 → defaultIdx → 정렬 영향 없음
+                    // 내림차순: 뒤 레이어(큰 인덱스) 먼저 → 낮은 z-order
+                    return Integer.compare(idxB, idxA);
+                }
+            });
+        }
+
+        for (Element elem : childElements) {
 
             // 숨겨진 레이어에 속한 요소는 건너뛴다
             String itemLayer = getAttrOrNull(elem, "ItemLayer");
             if (itemLayer != null && hiddenLayerIds.contains(itemLayer)) continue;
+
+
 
             if ("Page".equals(elem.getTagName())) {
                 spread.addPage(parsePage(elem));
@@ -1034,6 +1072,9 @@ class IDMLSpreadParser {
         boolean hasWrapperStroke = wrapperStroke != null && !wrapperStroke.contains("None")
                 && wrapperStrokeWeight > 0;
 
+        // 부모 프레임의 로컬 바운드 (자식 벡터 도형 클리핑용)
+        double[] parentLocalBounds = computeBoundsFromPathGeometry(frameElem);
+
         NodeList children = frameElem.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node node = children.item(i);
@@ -1060,13 +1101,84 @@ class IDMLSpreadParser {
                 double[] combined = CoordinateConverter.combineTransforms(
                         frameTransform, groupTransform);
                 String groupSelfId = child.getAttribute("Self");
+
+                int vecCountBefore = spread.vectorShapes().size();
+
                 parseGroupForFrames(child, spread, combined, hiddenLayerIds,
                         zOrderCounter, groupSelfId,
                         hasWrapperFill ? wrapperFill : null, wrapperFillTint,
                         hasWrapperStroke ? wrapperStroke : null,
                         wrapperStrokeWeight, wrapperStrokeType,
                         wrapperCornerRadius);
+
+                // 부모 컨테이너 바운드를 초과하는 자식 벡터 도형 클리핑
+                clipChildVectorShapes(spread, vecCountBefore,
+                        parentLocalBounds, frameTransform);
             }
+        }
+    }
+
+    /**
+     * 부모 컨테이너의 바운드를 초과하는 자식 벡터 도형에 클리핑 바운드를 설정한다.
+     * InDesign은 자식을 부모 프레임에 클리핑하지만 HWPX는 그렇지 않으므로
+     * parentClipBounds를 설정하여 렌더링 시 crop을 적용한다.
+     * geometricBounds 자체는 수정하지 않는다 (pre-rendered PNG와 크기 불일치 방지).
+     */
+    private static void clipChildVectorShapes(IDMLSpread spread, int fromIndex,
+                                               double[] parentLocalBounds,
+                                               double[] parentTransform) {
+        if (parentLocalBounds == null
+                || (parentLocalBounds[0] == 0 && parentLocalBounds[1] == 0
+                    && parentLocalBounds[2] == 0 && parentLocalBounds[3] == 0)) {
+            return;
+        }
+        // 부모의 절대 AABB 계산 (회전 없는 경우)
+        double pa = parentTransform[0], pb = parentTransform[1];
+        double pc = parentTransform[2], pd = parentTransform[3];
+        double ptx = parentTransform[4], pty = parentTransform[5];
+        // 부모에 회전이 있으면 스킵
+        if (Math.abs(pb) > 0.001 || Math.abs(pc) > 0.001) return;
+
+        double pAbsLeft  = pa * parentLocalBounds[1] + ptx;
+        double pAbsTop   = pd * parentLocalBounds[0] + pty;
+        double pAbsRight = pa * parentLocalBounds[3] + ptx;
+        double pAbsBottom= pd * parentLocalBounds[2] + pty;
+        // 음수 스케일 대응
+        if (pAbsLeft > pAbsRight) { double t = pAbsLeft; pAbsLeft = pAbsRight; pAbsRight = t; }
+        if (pAbsTop > pAbsBottom) { double t = pAbsTop; pAbsTop = pAbsBottom; pAbsBottom = t; }
+
+        for (int v = fromIndex; v < spread.vectorShapes().size(); v++) {
+            IDMLVectorShape vs = spread.vectorShapes().get(v);
+            double[] cb = vs.geometricBounds();
+            double[] ct = vs.itemTransform();
+            if (cb == null || ct == null) continue;
+            // 자식에 회전이 있으면 스킵
+            if (Math.abs(ct[1]) > 0.001 || Math.abs(ct[2]) > 0.001) continue;
+
+            double cAbsLeft  = ct[0] * cb[1] + ct[4];
+            double cAbsTop   = ct[3] * cb[0] + ct[5];
+            double cAbsRight = ct[0] * cb[3] + ct[4];
+            double cAbsBottom= ct[3] * cb[2] + ct[5];
+            if (cAbsLeft > cAbsRight) { double t = cAbsLeft; cAbsLeft = cAbsRight; cAbsRight = t; }
+            if (cAbsTop > cAbsBottom) { double t = cAbsTop; cAbsTop = cAbsBottom; cAbsBottom = t; }
+
+            boolean needsClip = cAbsLeft < pAbsLeft - 0.5 || cAbsTop < pAbsTop - 0.5
+                    || cAbsRight > pAbsRight + 0.5 || cAbsBottom > pAbsBottom + 0.5;
+            if (!needsClip) continue;
+
+            double clippedAbsLeft   = Math.max(cAbsLeft, pAbsLeft);
+            double clippedAbsTop    = Math.max(cAbsTop, pAbsTop);
+            double clippedAbsRight  = Math.min(cAbsRight, pAbsRight);
+            double clippedAbsBottom = Math.min(cAbsBottom, pAbsBottom);
+
+            if (clippedAbsRight <= clippedAbsLeft || clippedAbsBottom <= clippedAbsTop) {
+                spread.vectorShapes().remove(v);
+                v--;
+                continue;
+            }
+
+            // 부모 클리핑 바운드를 절대 좌표로 저장 (렌더링 시 crop 적용용)
+            vs.parentClipBounds(new double[]{pAbsTop, pAbsLeft, pAbsBottom, pAbsRight});
         }
     }
 
@@ -1276,6 +1388,16 @@ class IDMLSpreadParser {
                     imageFrame.parentGroupId(groupSelfId);
                     imageFrame.zOrder(zOrderCounter[0]++);
                     spread.addImageFrame(imageFrame);
+                    // 이미지 프레임 내부에 Group/TextFrame이 있으면 추출
+                    // (GraphicType 컨테이너 안에 배너/텍스트가 함께 들어있는 경우)
+                    if ("Rectangle".equals(elem.getTagName())) {
+                        double[] frameTransform = IDMLGeometry.parseTransform(
+                                elem.getAttribute("ItemTransform"));
+                        double[] combined = CoordinateConverter.combineTransforms(
+                                accumulatedTransform, frameTransform);
+                        extractGroupsFromFrame(elem, spread, combined,
+                                hiddenLayerIds, zOrderCounter);
+                    }
                 } else {
                     // GraphicType 컨테이너의 자식 Group에 복수 이미지 → 개별 추출
                     boolean handledAsMultiImage = false;
@@ -1346,12 +1468,17 @@ class IDMLSpreadParser {
                                     hiddenLayerIds, zOrderCounter);
                             int tfCountAfter = spread.textFrames().size();
                             if (tfCountAfter > tfCountBefore) {
-                                // 래퍼 도형 제거 (TextFrame에 스타일 전파됨, 클리핑 자식 없을 때만)
-                                if (vectorShape != null && !vectorShape.hasClippedChildren()) {
+                                // 래퍼 도형 제거 — 단, 채우기가 있는 도형은 유지
+                                // (wrapper 전파만으로는 TextFrame보다 큰 배경 박스를 표현 불가)
+                                boolean keepAsBackground = vectorShape != null
+                                        && vectorShape.hasFill();
+                                if (vectorShape != null && !vectorShape.hasClippedChildren()
+                                        && !keepAsBackground) {
                                     spread.vectorShapes().remove(vectorShape);
                                 }
                                 // GraphicType 컨테이너의 배경 도형도 제거 (렌더링 PNG 중복 방지)
-                                if (isGraphicContainer2) {
+                                // 단, 채우기가 있는 배경은 유지 (배경 박스 역할)
+                                if (isGraphicContainer2 && !keepAsBackground) {
                                     String elemSelfId = elem.getAttribute("Self");
                                     java.util.Iterator<IDMLVectorShape> it = spread.vectorShapes().iterator();
                                     while (it.hasNext()) {

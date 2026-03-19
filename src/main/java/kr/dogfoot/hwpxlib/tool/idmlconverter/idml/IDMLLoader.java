@@ -109,7 +109,7 @@ public class IDMLLoader {
                 File masterFile = new File(dir, masterSrc);
                 if (masterFile.exists()) {
                     Document masterDoc = parseXML(masterFile);
-                    IDMLSpread masterSpread = IDMLSpreadParser.parseSpread(masterDoc, doc.hiddenLayerIds());
+                    IDMLSpread masterSpread = IDMLSpreadParser.parseSpread(masterDoc, doc.hiddenLayerIds(), doc.layerOrder());
                     if (masterSpread.selfId() != null) {
                         doc.addMasterSpread(masterSpread.selfId(), masterSpread);
                     }
@@ -121,7 +121,7 @@ public class IDMLLoader {
             for (String spreadSrc : spreadSources) {
                 File spreadFile = new File(dir, spreadSrc);
                 if (spreadFile.exists()) {
-                    IDMLSpread spread = IDMLSpreadParser.parseSpread(parseXML(spreadFile), doc.hiddenLayerIds());
+                    IDMLSpread spread = IDMLSpreadParser.parseSpread(parseXML(spreadFile), doc.hiddenLayerIds(), doc.layerOrder());
                     // 페이지 번호 할당 및 마스터 마진 상속
                     for (IDMLPage page : spread.pages()) {
                         pageIndex++;

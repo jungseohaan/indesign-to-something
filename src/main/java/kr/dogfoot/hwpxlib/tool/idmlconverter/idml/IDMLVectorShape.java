@@ -144,6 +144,10 @@ public class IDMLVectorShape {
     private String leftLineEnd;   // null = 장식 없음
     private String rightLineEnd;  // null = 장식 없음
 
+    // 부모 컨테이너 클리핑 바운드 (절대 좌표, [top, left, bottom, right])
+    // 부모 이미지 프레임 안에서 추출된 벡터 도형에 설정됨
+    private double[] parentClipBounds;
+
     // 클리핑 자식 도형 (외부 Rectangle이 클리핑 프레임 역할, 내부 자식이 실제 채우기)
     private IDMLVectorShape clippedChild;  // null이면 클리핑 없음
     // 복수 클리핑 자식 (Group 내부의 여러 도형을 클리핑 프레임으로 제한)
@@ -275,6 +279,9 @@ public class IDMLVectorShape {
 
     public String parentGroupId() { return parentGroupId; }
     public void parentGroupId(String v) { this.parentGroupId = v; }
+
+    public double[] parentClipBounds() { return parentClipBounds; }
+    public void parentClipBounds(double[] v) { this.parentClipBounds = v; }
 
     public IDMLVectorShape clippedChild() { return clippedChild; }
     public void clippedChild(IDMLVectorShape v) { this.clippedChild = v; }

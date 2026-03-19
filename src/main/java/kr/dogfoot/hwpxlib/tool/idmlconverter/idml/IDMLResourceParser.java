@@ -65,10 +65,11 @@ class IDMLResourceParser {
                     }
                 }
             } else if ("Layer".equals(tagName)) {
-                String layerVisible = elem.getAttribute("Visible");
-                if ("false".equals(layerVisible)) {
-                    String layerSelf = elem.getAttribute("Self");
-                    if (layerSelf != null && !layerSelf.isEmpty()) {
+                String layerSelf = elem.getAttribute("Self");
+                if (layerSelf != null && !layerSelf.isEmpty()) {
+                    doc.addLayerId(layerSelf);  // front-to-back 순서 보존
+                    String layerVisible = elem.getAttribute("Visible");
+                    if ("false".equals(layerVisible)) {
                         doc.addHiddenLayerId(layerSelf);
                     }
                 }

@@ -10,6 +10,10 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
+import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -362,6 +366,35 @@ class ASTFigureBuilder {
                                 shape.geometricBounds(), shape.itemTransform());
                         double[] pageAbs = IDMLGeometry.absoluteTopLeft(
                                 page.geometricBounds(), page.itemTransform());
+
+                        // 부모 컨테이너 클리핑
+                        double[] pcb = shape.parentClipBounds();
+                        if (pcb != null) {
+                            double origW = bbox[2] - bbox[0];
+                            double origH = bbox[3] - bbox[1];
+                            double clLeft  = Math.max(bbox[0], pcb[1]);
+                            double clTop   = Math.max(bbox[1], pcb[0]);
+                            double clRight = Math.min(bbox[2], pcb[3]);
+                            double clBot   = Math.min(bbox[3], pcb[2]);
+                            if (clRight > clLeft && clBot > clTop && origW > 0 && origH > 0) {
+                                // pre-rendered PNG에 bleed가 있으므로,
+                                // 단순 채우기 도형은 단색 PNG를 직접 생성
+                                String fillHex = ASTInlineObjectBuilder.resolveColorHex(
+                                        shape.fillColor(), colorResolver);
+                                if (fillHex != null && !shape.hasStroke()
+                                        && !shape.hasClippedChildren()) {
+                                    byte[] solidPng = createSolidColorPng(fillHex,
+                                            shape.fillTint(), clRight - clLeft, clBot - clTop,
+                                            shape.cornerRadius(), shape.cornerRadii());
+                                    if (solidPng != null) {
+                                        imgResult.imageData = solidPng;
+                                        imgResult.format = "png";
+                                    }
+                                }
+                                bbox = new double[]{clLeft, clTop, clRight, clBot};
+                            }
+                        }
+
                         figX = CoordinateConverter.pointsToHwpunits(bbox[0] - pageAbs[0]);
                         figY = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
                         figW = CoordinateConverter.pointsToHwpunits(bbox[2] - bbox[0]);
@@ -377,7 +410,9 @@ class ASTFigureBuilder {
                         }
                     }
                     // PNG 비율로 높이 보정 (한 축이 0인 선 도형은 건너뜀)
-                    if (imgResult.pixelWidth > 0 && figW > 0 && figH > 0) {
+                    // 부모 클리핑된 도형은 이미 crop되었으므로 비율 보정 생략
+                    if (shape.parentClipBounds() == null
+                            && imgResult.pixelWidth > 0 && figW > 0 && figH > 0) {
                         long geoBottom = figY + figH;
                         long pngH = Math.round(figW * ((double) imgResult.pixelHeight / imgResult.pixelWidth));
                         // 선 도형(한 축이 매우 작은 경우)은 비율 보정 적용하지 않음
@@ -414,8 +449,41 @@ class ASTFigureBuilder {
                     resolvedData, resolvedPage);
         }
 
-        // pre-rendered PNG 없으면 표시하지 않음 (Java 래스터라이즈 제거됨)
-        System.out.println("[VectorShape] " + shape.selfId() + " — no pre-rendered PNG, skipping");
+        // pre-rendered PNG 없는 단순 채우기 도형은 단색 PNG 직접 생성
+        String fillHex = ASTInlineObjectBuilder.resolveColorHex(shape.fillColor(), colorResolver);
+        if (fillHex != null) {
+            double[] bbox = IDMLGeometry.getTransformedBoundingBox(
+                    shape.geometricBounds(), shape.itemTransform());
+            double[] pageAbs = IDMLGeometry.absoluteTopLeft(
+                    page.geometricBounds(), page.itemTransform());
+            long figX = CoordinateConverter.pointsToHwpunits(bbox[0] - pageAbs[0]);
+            long figY = CoordinateConverter.pointsToHwpunits(bbox[1] - pageAbs[1]);
+            long figW = CoordinateConverter.pointsToHwpunits(bbox[2] - bbox[0]);
+            long figH = CoordinateConverter.pointsToHwpunits(bbox[3] - bbox[1]);
+            if (figW > 0 && figH > 0) {
+                double[] cornerRadii = shape.cornerRadii();
+                double cornerR = shape.cornerRadius();
+                byte[] solidPng = createSolidColorPng(fillHex, shape.fillTint(),
+                        bbox[2] - bbox[0], bbox[3] - bbox[1],
+                        cornerR, cornerRadii);
+                if (solidPng != null) {
+                    ASTFigure fig = new ASTFigure();
+                    fig.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
+                    fig.x(figX);
+                    fig.y(figY);
+                    fig.width(figW);
+                    fig.height(figH);
+                    fig.zOrder(shape.zOrder());
+                    fig.imageData(solidPng);
+                    fig.imageFormat("png");
+                    fig.fromGroup(shape.fromGroup());
+                    fig.parentGroupId(shape.parentGroupId());
+                    fig.sourceId(shape.selfId());
+                    return fig;
+                }
+            }
+        }
+
         return null;
     }
 
@@ -740,6 +808,86 @@ class ASTFigureBuilder {
         long h = Math.round((b[2] - b[0]) * 10);
 
         return uri + "|" + tx + "," + ty + "|" + w + "x" + h;
+    }
+
+    /**
+     * 단색 채우기 PNG 생성. parentClipBounds로 클리핑된 도형에 사용.
+     * pre-rendered PNG의 bleed 문제를 회피하기 위해 직접 생성.
+     */
+    private static byte[] createSolidColorPng(String fillHex, double tint,
+                                                double widthPt, double heightPt,
+                                                double cornerRadius, double[] cornerRadii) {
+        try {
+            if (fillHex == null || fillHex.length() < 7) return null;
+            int r = Integer.parseInt(fillHex.substring(1, 3), 16);
+            int g = Integer.parseInt(fillHex.substring(3, 5), 16);
+            int b = Integer.parseInt(fillHex.substring(5, 7), 16);
+            if (tint >= 0 && tint < 100) {
+                double t = tint / 100.0;
+                r = (int) (255 + (r - 255) * t);
+                g = (int) (255 + (g - 255) * t);
+                b = (int) (255 + (b - 255) * t);
+            }
+            // 적절한 해상도 (2x for retina-like quality)
+            int pw = Math.max(4, (int) Math.round(widthPt * 2));
+            int ph = Math.max(4, (int) Math.round(heightPt * 2));
+            if (pw > 2000) pw = 2000;
+            if (ph > 2000) ph = 2000;
+
+            double scaleX = pw / widthPt;
+            double scaleY = ph / heightPt;
+
+            BufferedImage img = new BufferedImage(pw, ph, BufferedImage.TYPE_INT_ARGB);
+            java.awt.Color color = new java.awt.Color(r, g, b, 255);
+            Graphics2D gfx = img.createGraphics();
+            gfx.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            gfx.setColor(color);
+
+            // per-corner radii 지원 (TL, TR, BL, BR)
+            double rTL = 0, rTR = 0, rBL = 0, rBR = 0;
+            if (cornerRadii != null && cornerRadii.length >= 4) {
+                rTL = cornerRadii[0]; rTR = cornerRadii[1];
+                rBL = cornerRadii[2]; rBR = cornerRadii[3];
+            } else if (cornerRadius > 0) {
+                rTL = rTR = rBL = rBR = cornerRadius;
+            }
+
+            boolean hasRoundCorners = rTL > 0 || rTR > 0 || rBL > 0 || rBR > 0;
+            if (!hasRoundCorners) {
+                gfx.fillRect(0, 0, pw, ph);
+            } else {
+                // GeneralPath로 per-corner rounded rect 생성
+                java.awt.geom.GeneralPath path = new java.awt.geom.GeneralPath();
+                double sTL = rTL * Math.min(scaleX, scaleY);
+                double sTR = rTR * Math.min(scaleX, scaleY);
+                double sBL = rBL * Math.min(scaleX, scaleY);
+                double sBR = rBR * Math.min(scaleX, scaleY);
+
+                path.moveTo(sTL, 0);
+                path.lineTo(pw - sTR, 0);
+                if (sTR > 0) path.quadTo(pw, 0, pw, sTR);
+                else path.lineTo(pw, 0);
+                path.lineTo(pw, ph - sBR);
+                if (sBR > 0) path.quadTo(pw, ph, pw - sBR, ph);
+                else path.lineTo(pw, ph);
+                path.lineTo(sBL, ph);
+                if (sBL > 0) path.quadTo(0, ph, 0, ph - sBL);
+                else path.lineTo(0, ph);
+                path.lineTo(0, sTL);
+                if (sTL > 0) path.quadTo(0, 0, sTL, 0);
+                else path.lineTo(0, 0);
+                path.closePath();
+                gfx.fill(path);
+            }
+            gfx.dispose();
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(img, "png", baos);
+            return baos.toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
 }

@@ -17,6 +17,7 @@ public class IDMLDocument {
     private Map<String, Double> objectStyleCornerRadii; // selfRef → cornerRadius (pt)
     private Map<String, double[]> dashedStrokeStyles; // selfRef → dashArray (e.g., [3, 2])
     private Set<String> hiddenLayerIds;
+    private List<String> layerOrder;  // 레이어 ID 목록 (front-to-back, designmap.xml 순서)
     private Map<String, IDMLSpread> masterSpreads;
     private String basePath;
     private File tempDir;  // ZIP에서 추출한 임시 디렉토리 (cleanup 대상)
@@ -35,6 +36,7 @@ public class IDMLDocument {
         this.objectStyleCornerRadii = new LinkedHashMap<String, Double>();
         this.dashedStrokeStyles = new LinkedHashMap<String, double[]>();
         this.hiddenLayerIds = new HashSet<String>();
+        this.layerOrder = new ArrayList<String>();
         this.masterSpreads = new LinkedHashMap<String, IDMLSpread>();
         this.textVariableValues = new LinkedHashMap<String, String>();
         this.textVariableStyleRefs = new LinkedHashMap<String, String>();
@@ -91,6 +93,10 @@ public class IDMLDocument {
 
     public Set<String> hiddenLayerIds() { return hiddenLayerIds; }
     public void addHiddenLayerId(String id) { hiddenLayerIds.add(id); }
+
+    /** 레이어 순서 (front-to-back, designmap.xml 순서) */
+    public List<String> layerOrder() { return layerOrder; }
+    public void addLayerId(String id) { layerOrder.add(id); }
     public boolean isHiddenLayer(String layerId) {
         return layerId != null && hiddenLayerIds.contains(layerId);
     }
