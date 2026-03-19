@@ -1163,6 +1163,52 @@ class IDMLSpreadParser {
         // → InDesign에서 도형 안의 텍스트는 항상 형제 도형 위에 렌더링됨
         List<IDMLTextFrame> deferredTextFrames = new ArrayList<>();
 
+        // ── 배경 TextFrame 감지: 그룹 내 fill 있는 TextFrame이 형제 TextFrame의 배경으로 쓰이는 패턴 ──
+        // 예: Group { TextFrame(fill=Paper, cornerRadius, 빈 텍스트), TextFrame("이름", no fill) }
+        // → fill/cornerRadius를 형제 TextFrame의 wrapper 속성으로 전파하고 배경 TextFrame은 건너뜀
+        String siblingBgFill = wrapperFill;
+        double siblingBgFillTint = wrapperFillTint;
+        double siblingBgCornerRadius = wrapperCornerRadius;
+        Set<String> bgTextFrameSelfIds = new java.util.HashSet<>();
+        if (wrapperFill == null) {
+            // 그룹 직접 자식 TextFrame 목록 수집
+            List<Element> directTextFrames = new ArrayList<>();
+            NodeList preChildren = groupElem.getChildNodes();
+            for (int pi = 0; pi < preChildren.getLength(); pi++) {
+                Node pn = preChildren.item(pi);
+                if (pn.getNodeType() != Node.ELEMENT_NODE) continue;
+                Element pe = (Element) pn;
+                if ("TextFrame".equals(pe.getTagName())
+                        && !"GraphicType".equals(pe.getAttribute("ContentType"))) {
+                    directTextFrames.add(pe);
+                }
+            }
+            // 2개 이상 TextFrame이 있을 때, fill 있는 TextFrame을 배경 후보로 감지
+            if (directTextFrames.size() >= 2) {
+                List<Element> filledFrames = new ArrayList<>();
+                List<Element> unfilledFrames = new ArrayList<>();
+                for (Element tf : directTextFrames) {
+                    String fc = getAttrOrNull(tf, "FillColor");
+                    if (fc != null && !fc.contains("None")) {
+                        filledFrames.add(tf);
+                    } else {
+                        unfilledFrames.add(tf);
+                    }
+                }
+                // fill 있는 TextFrame 1개 + fill 없는 TextFrame 1개 이상 → 배경 패턴
+                if (filledFrames.size() == 1 && !unfilledFrames.isEmpty()) {
+                    Element bgFrame = filledFrames.get(0);
+                    siblingBgFill = getAttrOrNull(bgFrame, "FillColor");
+                    siblingBgFillTint = parseDoubleAttrDef(bgFrame, "FillTint", 100);
+                    String bgCornerOpt = getAttrOrNull(bgFrame, "CornerOption");
+                    if ("RoundedCorner".equals(bgCornerOpt)) {
+                        siblingBgCornerRadius = parseDoubleAttrDef(bgFrame, "CornerRadius", 0);
+                    }
+                    bgTextFrameSelfIds.add(bgFrame.getAttribute("Self"));
+                }
+            }
+        }
+
         NodeList children = groupElem.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
             Node node = children.item(i);
@@ -1174,6 +1220,12 @@ class IDMLSpreadParser {
             if (itemLayer != null && hiddenLayerIds.contains(itemLayer)) continue;
 
             if ("TextFrame".equals(elem.getTagName())) {
+                // 배경 TextFrame은 건너뜀 (fill/cornerRadius가 형제에게 전파됨)
+                String elemSelf = elem.getAttribute("Self");
+                if (bgTextFrameSelfIds.contains(elemSelf)) {
+                    zOrderCounter[0]++; // z-order 슬롯 유지
+                    continue;
+                }
                 // 그룹의 직접 자식 TextFrame — 즉시 등록 (도형 안이 아니므로 지연 불필요)
                 IDMLTextFrame frame = parseTextFrame(elem);
                 if (frame != null) {
@@ -1181,10 +1233,14 @@ class IDMLSpreadParser {
                             accumulatedTransform, frame.itemTransform()));
                     frame.zOrder(zOrderCounter[0]++);
                     frame.parentGroupId(groupSelfId);
-                    if (wrapperFill != null || wrapperStroke != null) {
-                        applyWrapperStyle(frame, wrapperFill, wrapperFillTint,
+                    // 부모 래퍼 또는 형제 배경 TextFrame의 스타일 전파
+                    String effWrapperFill = wrapperFill != null ? wrapperFill : siblingBgFill;
+                    double effWrapperFillTint = wrapperFill != null ? wrapperFillTint : siblingBgFillTint;
+                    double effWrapperCornerR = wrapperCornerRadius > 0 ? wrapperCornerRadius : siblingBgCornerRadius;
+                    if (effWrapperFill != null || wrapperStroke != null) {
+                        applyWrapperStyle(frame, effWrapperFill, effWrapperFillTint,
                                 wrapperStroke, wrapperStrokeWeight, wrapperStrokeType,
-                                wrapperCornerRadius);
+                                effWrapperCornerR);
                     }
                     spread.addTextFrame(frame);
                 }

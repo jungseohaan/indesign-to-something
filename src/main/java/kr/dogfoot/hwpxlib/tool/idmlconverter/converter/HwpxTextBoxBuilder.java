@@ -269,11 +269,17 @@ public class HwpxTextBoxBuilder {
             boolean hasOwnVisibleFill = block.fillColor() != null
                     && block.fillColor().startsWith("#") && !block.fillColor().equals("#FFFFFF");
             boolean hasWrapper = block.hasWrapperFill() || hasOwnVisibleFill;
-            if (hasWrapper) {
-                addWrapperRoundedRect(framePara, block, w, h);
+            // 둥근 모서리 래퍼: Table 대신 Rectangle+DrawText 단일 객체 사용
+            // (Table은 사각형이라 래퍼 Rectangle의 둥근 모서리를 덮어버림)
+            if (hasWrapper && block.cornerRadius() > 0) {
+                convertRoundedWrapperDrawText(framePara, block, w, h);
+            } else {
+                if (hasWrapper) {
+                    addWrapperRoundedRect(framePara, block, w, h);
+                }
+                convertSingleColumnTable(framePara, block, block.x(), block.y(), w, h,
+                        block.paragraphs(), hasWrapper);
             }
-            convertSingleColumnTable(framePara, block, block.x(), block.y(), w, h,
-                    block.paragraphs(), hasWrapper);
         } else {
             // 다단 — N개 독립 글상자(1×1 테이블)를 수평 배치
             long[] colWidths = computeColumnWidths(block, colCount);
@@ -487,6 +493,122 @@ public class HwpxTextBoxBuilder {
     }
 
     /**
+     * 둥근 모서리 래퍼가 있는 텍스트 프레임 → Rectangle(DrawTextBox)로 변환.
+     * Table은 사각형이라 래퍼 Rectangle의 둥근 모서리를 덮어버리므로,
+     * 단일 Rectangle에 fill + 둥근 모서리 + DrawText를 합쳐서 출력한다.
+     */
+    private void convertRoundedWrapperDrawText(Para framePara, ASTTextFrameBlock block,
+                                                long w, long h) {
+        Run anchorRun = framePara.addNewRun();
+        anchorRun.charPrIDRef("0");
+
+        Rectangle rect = anchorRun.addNewRectangle();
+        String shapeId = HwpxUtil.nextShapeId();
+
+        TextWrapMethod wrapMethod = block.isBackgroundOnly()
+                ? TextWrapMethod.BEHIND_TEXT
+                : TextWrapMethod.IN_FRONT_OF_TEXT;
+        int zOrder = block.isBackgroundOnly() ? 0 : block.zOrder();
+
+        rect.idAnd(shapeId)
+                .zOrderAnd(zOrder)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(wrapMethod)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(resolveDropCapStyle(block.paragraphs()));
+
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(HwpxUtil.nextShapeId());
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+        rect.createCurSz();
+        rect.curSz().set(w, 0L);
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        // LineShape (테두리)
+        setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
+                block.strokeType(), block.strokeTint());
+
+        // FillBrush — 래퍼 fill 사용
+        String bgColor = block.wrapperFillColor();
+        double bgTint = block.wrapperFillTint();
+        if (bgTint < 0) bgTint = 100;
+        String tinted = blendColorWithWhite(bgColor, bgTint / 100.0);
+        setupTextBoxFillBrush(rect, tinted, 100);
+
+        // DrawText (글상자 내용)
+        rect.createDrawText();
+        DrawText dt = rect.drawText();
+        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
+
+        dt.createTextMargin();
+        dt.textMargin().leftAnd(block.insetLeft())
+                .rightAnd(block.insetRight())
+                .topAnd(block.insetTop())
+                .bottomAnd(block.insetBottom());
+
+        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
+        VerticalAlign2 cellVAlign = mapVerticalJustification(block.verticalJustification());
+        dt.createSubList();
+        SubList subList = dt.subList();
+        subList.idAnd("").textDirectionAnd(textDir)
+                .lineWrapAnd(LineWrapMethod.BREAK)
+                .vertAlignAnd(cellVAlign);
+        subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+
+        for (ASTParagraph para : block.paragraphs()) {
+            paragraphBuilder.addParagraphToSubList(subList, para);
+        }
+        if (subList.countOfPara() == 0) {
+            paragraphBuilder.addEmptySubListPara(subList);
+        }
+
+        // 둥근 모서리
+        rect.ratioAnd(computeCornerRatio(block.cornerRadius(), w, h));
+        rect.createPt0();
+        rect.pt0().set(0L, 0L);
+        rect.createPt1();
+        rect.pt1().set(w, 0L);
+        rect.createPt2();
+        rect.pt2().set(w, h);
+        rect.createPt3();
+        rect.pt3().set(0L, h);
+
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(block.y())
+                .horzOffset(block.x());
+
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+    }
+
+    /**
      * 회전이 있는 플로팅 텍스트 프레임 → Rectangle(DrawTextBox)로 변환.
      * HWPX Table은 회전을 지원하지 않으므로, 회전이 필요한 블록은 DrawTextBox를 사용한다.
      */
@@ -651,10 +773,13 @@ public class HwpxTextBoxBuilder {
         setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
                 block.strokeType(), block.strokeTint());
 
-        // FillBrush (배경색) — 프레임 자체 fill이 없으면 래퍼 배경(흰색) 사용
+        // FillBrush (배경색) — 래퍼에 둥근 모서리가 있으면 셀 배경 투명 (래퍼 사각형이 배경 역할)
         String fillColor = block.fillColor();
         double fillTint = block.fillTint();
-        if ((fillColor == null || !fillColor.startsWith("#")) && block.hasWrapperFill()) {
+        if (block.hasWrapperFill() && block.cornerRadius() > 0) {
+            // 둥근 모서리 래퍼: 셀 fill 생략 → 래퍼 Rectangle의 둥근 배경이 보임
+            fillColor = null;
+        } else if ((fillColor == null || !fillColor.startsWith("#")) && block.hasWrapperFill()) {
             fillColor = "#FFFFFF";
             fillTint = 100;
         }
@@ -774,6 +899,30 @@ public class HwpxTextBoxBuilder {
                 .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
+        // BaselineShift → 컨테이너 Y 오프셋 보정.
+        // HWPX charPr offset으로는 baseline 위치 보정이 불완전하므로,
+        // 프레임 전체의 Y 위치를 직접 조정하고 charPr offset은 제거한다.
+        long adjustedY = y;
+        if (paragraphs != null && !paragraphs.isEmpty()) {
+            ASTParagraph firstPara = paragraphs.get(0);
+            if (firstPara.items() != null && !firstPara.items().isEmpty()) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem firstItem = firstPara.items().get(0);
+                if (firstItem instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun firstRun =
+                            (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) firstItem;
+                    if (firstRun.baselineShift() != null && firstRun.baselineShift() != 0
+                            && firstRun.fontSizeHwpunits() != null) {
+                        // baselineShift: %단위 (양수=위). Y를 위로 이동.
+                        long shiftHwp = (long) firstRun.baselineShift()
+                                * firstRun.fontSizeHwpunits() / 100;
+                        adjustedY = y - shiftHwp;
+                        // charPr offset에서 이중 적용 방지: baselineShift 제거
+                        firstRun.baselineShift(null);
+                    }
+                }
+            }
+        }
+
         // ShapePosition — PAPER 기준 절대 좌표
         table.createPos();
         table.pos().treatAsCharAnd(false)
@@ -785,7 +934,7 @@ public class HwpxTextBoxBuilder {
                 .horzRelToAnd(HorzRelTo.PAPER)
                 .vertAlignAnd(VertAlign.TOP)
                 .horzAlignAnd(HorzAlign.LEFT)
-                .vertOffsetAnd(y)
+                .vertOffsetAnd(adjustedY)
                 .horzOffset(x);
 
         // OutMargin
@@ -859,6 +1008,17 @@ public class HwpxTextBoxBuilder {
         // 인라인 텍스트 프레임 균등 분배: 연속 단락에 각각 1개씩 인라인 TextFrame이 있으면
         // 부모 컨테이너 폭 기준으로 균등 분배
         redistributeInlineTextFrameWidths(paragraphs, ctx.currentContainerWidth);
+
+        // lineSpacing이 셀 높이를 초과하면 셀 높이로 제한.
+        // InDesign에서는 FirstBaselineOffset이 첫 줄 위치를 제어하고 Leading은 줄간 간격만 담당하지만,
+        // HWPX에서는 FIXED lineSpacing이 첫 줄의 baseline 위치에도 영향을 주므로,
+        // 셀 높이를 넘는 lineSpacing은 baseline을 불필요하게 아래로 밀어냄.
+        int cellH = (int) h;
+        for (ASTParagraph para : paragraphs) {
+            if (para.lineSpacing() != null && para.lineSpacing() > cellH) {
+                para.lineSpacing(cellH);
+            }
+        }
 
         // 단락 추가 (인라인 테이블 포함)
         for (ASTParagraph para : paragraphs) {

@@ -561,7 +561,7 @@ class ASTPageProcessor {
                     String text = resolveFooterText(story, page, idmlDoc);
                     if (text != null && !text.trim().isEmpty()) {
                         ASTTextFrameBlock block = createFooterBlock(
-                                mtf, masterPage, page, text, colorResolver);
+                                mtf, masterPage, page, text, colorResolver, story);
                         if (block != null) {
                             section.addBlock(block);
                             String pos = isHeader ? "header" : "footer";
@@ -1367,7 +1367,7 @@ class ASTPageProcessor {
      */
     private static ASTTextFrameBlock createFooterBlock(IDMLTextFrame tf, IDMLPage masterPage,
                                                         IDMLPage docPage, String footerText,
-                                                        ColorResolver colorResolver) {
+                                                        ColorResolver colorResolver, IDMLStory story) {
         double[] relPos = IDMLGeometry.pageRelativePosition(
                 tf.geometricBounds(), tf.itemTransform(),
                 masterPage.geometricBounds(), masterPage.itemTransform());
@@ -1402,9 +1402,40 @@ class ASTPageProcessor {
         } else {
             para.alignment("left");
         }
-        ASTTextRun textRun = new ASTTextRun();
-        textRun.text(footerText.trim());
-        para.addItem(textRun);
+
+        // Story에서 단락/문자 스타일 추출
+        if (story != null && !story.paragraphs().isEmpty()) {
+            IDMLParagraph srcPara = story.paragraphs().get(0);
+            if (srcPara.appliedParagraphStyle() != null) {
+                para.paragraphStyleRef(srcPara.appliedParagraphStyle());
+            }
+            if (!srcPara.characterRuns().isEmpty()) {
+                IDMLCharacterRun srcRun = srcPara.characterRuns().get(0);
+                ASTTextRun textRun = new ASTTextRun();
+                textRun.text(footerText.trim());
+                if (srcRun.fontFamily() != null) textRun.fontFamily(srcRun.fontFamily());
+                if (srcRun.fontStyle() != null) textRun.fontStyle(srcRun.fontStyle());
+                if (srcRun.fontSize() != null) textRun.fontSizeHwpunits(
+                        (int) CoordinateConverter.pointsToHwpunits(srcRun.fontSize()));
+                if (srcRun.fillColor() != null) {
+                    textRun.textColor(colorResolver.resolve(srcRun.fillColor()));
+                }
+                if (srcRun.tracking() != null) textRun.letterSpacing((short) srcRun.tracking().intValue());
+                if (srcRun.horizontalScale() != null) textRun.horizontalScale((short) srcRun.horizontalScale().intValue());
+                if (srcRun.appliedCharacterStyle() != null) {
+                    textRun.characterStyleRef(srcRun.appliedCharacterStyle());
+                }
+                para.addItem(textRun);
+            } else {
+                ASTTextRun textRun = new ASTTextRun();
+                textRun.text(footerText.trim());
+                para.addItem(textRun);
+            }
+        } else {
+            ASTTextRun textRun = new ASTTextRun();
+            textRun.text(footerText.trim());
+            para.addItem(textRun);
+        }
         block.addParagraph(para);
 
         return block;
