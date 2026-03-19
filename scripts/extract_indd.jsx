@@ -1136,6 +1136,14 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
 
         var parentPage = null;
         try { parentPage = item.parentPage; } catch (e) {}
+        // 부모가 Group이면 Group의 parentPage를 우선 사용
+        // (스프레드 경계에서 도형 중심 기준 판정이 부정확할 수 있음)
+        if (!parentPage || (item.parent && item.parent.constructor.name === "Group")) {
+            try {
+                var grpPage = item.parent.parentPage;
+                if (grpPage) parentPage = grpPage;
+            } catch (e) {}
+        }
         if (!parentPage) continue;
         var pgIdx = parentPage.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;

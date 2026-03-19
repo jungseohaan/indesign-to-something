@@ -207,6 +207,10 @@ public class ResolvedData {
         }
     }
 
+    public java.util.Collection<RenderedGroup> allRenderedPdfFrames() {
+        return renderedPdfFrameMap.values();
+    }
+
     // --- RenderedGraphicFrame (복합 장식 그래픽) ---
 
     public void addRenderedGraphicFrame(RenderedGroup frame) {

@@ -900,6 +900,8 @@ public class IDMLToHwpxConverter {
         // TextFrame 자식이 없는 배지 그룹(TextPath 전용)을 OrphanGraphic 대상에 추가
         java.util.List<RenderedGroup> orphanTargets = new java.util.ArrayList<>(
                 resolvedData.allRenderedGraphicFrames());
+        // PDF 배치 프레임도 orphan 대상에 추가 (IDML에서 PDF 링크를 직접 변환하지 못하므로)
+        orphanTargets.addAll(resolvedData.allRenderedPdfFrames());
         for (RenderedGroup rg : resolvedData.allRenderedTextFrames()) {
             if (rg.isBadgeGroup() && (rg.childTextFrameIds() == null || rg.childTextFrameIds().length == 0)) {
                 orphanTargets.add(rg);
