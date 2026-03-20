@@ -1038,10 +1038,38 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
                 }
             } catch (e) {}
         }
+        // 인라인 앵커 그룹: 자식 pageItem의 parentPage를 폴백으로 사용
+        if (!grpPage) {
+            try {
+                var _pi = grp.pageItems;
+                for (var _k = 0; _k < _pi.length; _k++) {
+                    try { grpPage = _pi[_k].parentPage; } catch (e2) {}
+                    if (grpPage) break;
+                }
+            } catch (e) {}
+        }
         if (!grpPage) continue;
         var grpPgIdx = grpPage.documentOffset + 1;
         if (grpPgIdx < startPage || grpPgIdx > endPage) continue;
 
+        // 부모 Group도 도형 전용이면 부모로 승격 (인라인 그룹 전체를 하나의 deco로)
+        var _renderSiblings = false;
+        try {
+            var _par = grp.parent;
+            if (_par && _par.constructor.name === "Group"
+                && !renderedIds[_par.id] && !(badgeChildIds && badgeChildIds[_par.id])) {
+                if (isAllShapeChildren(_par)) {
+                    grp = _par;
+                    grpDomId = _par.id;
+                } else {
+                    // 부모가 TextFrame 등 비도형 포함 → 형제 도형을 개별 렌더
+                    _renderSiblings = true;
+                }
+            }
+        } catch (e) {}
+        if (renderedIds[grpDomId]) continue;
+
+        // 현재 그룹 렌더
         try {
             var grpFileName = "deco_" + grpDomId + ".png";
             var grpOutFile = File(renderDir + "/" + grpFileName);
@@ -1072,6 +1100,63 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
                 decoChildIds[grpNested[gni].id] = true;
             }
         } catch (e) {}
+
+        // 부모 그룹의 형제 도형(GraphicLine 등)을 개별 렌더
+        if (_renderSiblings) {
+            try {
+                var _origGrp = allItems[gi];
+                var _parRef = _origGrp.parent;
+                // allPageItems로 구체 타입 취득 후 직접 자식만 필터
+                var _allKids = _parRef.allPageItems;
+                var _parItems = [];
+                for (var _fi = 0; _fi < _allKids.length; _fi++) {
+                    try { if (_allKids[_fi].parent.id === _parRef.id) _parItems.push(_allKids[_fi]); } catch(e3) {}
+                }
+                var _parPageBounds = grpPage.bounds;
+                for (var _si = 0; _si < _parItems.length; _si++) {
+                    var sib = _parItems[_si];
+                    var sibId = sib.id;
+                    if (sibId === grpDomId) continue;
+                    if (renderedIds[sibId] || decoChildIds[sibId]) continue;
+                    var sibCn = sib.constructor.name;
+                    if (sibCn !== "GraphicLine" && sibCn !== "Rectangle"
+                        && sibCn !== "Polygon" && sibCn !== "Oval" && sibCn !== "Group") continue;
+                    if (sibCn === "Group" && !isAllShapeChildren(sib)) continue;
+
+                    try {
+                        var sibFileName = "deco_" + sibId + ".png";
+                        var sibOutFile = File(renderDir + "/" + sibFileName);
+                        sib.exportFile(ExportFormat.PNG_FORMAT, sibOutFile);
+
+                        var sibBounds = null;
+                        try { sibBounds = arrCopy(sib.visibleBounds); } catch (e2) {}
+                        if (!sibBounds) try { sibBounds = arrCopy(sib.geometricBounds); } catch (e2) {}
+
+                        if (sibBounds) {
+                            sibBounds[0] -= _parPageBounds[0];
+                            sibBounds[1] -= _parPageBounds[1];
+                            sibBounds[2] -= _parPageBounds[0];
+                            sibBounds[3] -= _parPageBounds[1];
+                        }
+
+                        results.push({
+                            id: sibId,
+                            file: "rendered_frames/" + sibFileName,
+                            bounds: sibBounds,
+                            pageIndex: grpPage.documentOffset
+                        });
+                        renderedIds[sibId] = true;
+
+                        try {
+                            var sibNested = sib.allPageItems;
+                            for (var sni = 0; sni < sibNested.length; sni++) {
+                                decoChildIds[sibNested[sni].id] = true;
+                            }
+                        } catch (e2) {}
+                    } catch (e2) {}
+                }
+            } catch (e) {}
+        }
     }
 
     return { frames: results, childIds: decoChildIds };
@@ -1127,12 +1212,21 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
         if (!hasPlaced) try { hasPlaced = item.epss && item.epss.length > 0; } catch (e) {}
         if (hasPlaced) continue;
 
+        // 부모 체인을 거슬러 올라가며 인라인 앵커 여부 확인
+        // (Group 내부 도형이 TextFrame/Cell/Story에 앵커된 경우 스킵)
+        var isInline = false;
         try {
-            var pName = item.parent.constructor.name;
-            if (pName === "TextFrame" || pName === "Character"
-                || pName === "InsertionPoint" || pName === "Cell"
-                || pName === "Story") continue;
+            var cur = item.parent;
+            while (cur) {
+                var pn = cur.constructor.name;
+                if (pn === "TextFrame" || pn === "Character"
+                    || pn === "InsertionPoint" || pn === "Cell"
+                    || pn === "Story") { isInline = true; break; }
+                if (pn === "Spread" || pn === "Page" || pn === "Document") break;
+                cur = cur.parent;
+            }
         } catch (e) {}
+        if (isInline) continue;
 
         var parentPage = null;
         try { parentPage = item.parentPage; } catch (e) {}

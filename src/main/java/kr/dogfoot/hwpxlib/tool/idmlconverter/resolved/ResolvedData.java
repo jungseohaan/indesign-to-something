@@ -31,6 +31,7 @@ public class ResolvedData {
     private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TextFrame DOM id → 배지 그룹 RenderedGroup
     private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
     private final Map<String, FontMetricEntry> fontMetricMap = new HashMap<>();  // family → metric
+    private final Set<String> consumedRenderedGraphicIds = new HashSet<>();  // 인라인 처리로 소비된 deco DOM id
     private String basePath;  // resolved.json 부모 디렉토리 경로
 
     public String basePath() { return basePath; }
@@ -244,6 +245,17 @@ public class ResolvedData {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /**
+     * 인라인 그래픽 처리 시 자손 deco를 소비 마킹 (orphan 주입에서 제외).
+     */
+    public void markConsumedRenderedGraphic(String domId) {
+        consumedRenderedGraphicIds.add(domId);
+    }
+
+    public boolean isConsumedRenderedGraphic(String domId) {
+        return consumedRenderedGraphicIds.contains(domId);
     }
 
     // --- RenderedImageFrame (이미지 배치 프레임) ---

@@ -216,6 +216,12 @@ class ASTRunConverter {
                 }
             }
         }
+        // 그룹 자체 또는 자손이 renderedGraphicFrame(deco 등)으로 렌더링된 경우
+        // orphan 주입에서 올바른 위치로 배치되므로 인라인 이미지 생성 생략
+        if (resolvedData != null && hasRenderedGraphicDescendant(ig, resolvedData)) {
+            return;
+        }
+
         // ObjectStyle에서 stroke/fill 속성 상속 (인라인 도형에 직접 속성이 없는 경우)
         applyObjectStyleDefaults(ig, idmlDoc);
         ASTInlineObject inlineObj = ASTInlineObjectBuilder.createInlineObjectFromGraphic(ig, imageLoader, colorResolver, idmlDoc);
@@ -335,6 +341,24 @@ class ASTRunConverter {
                 if (tint >= 0) vs.strokeTint(tint); // -1은 IDML 기본값 (100%)
             } catch (NumberFormatException ignored) {}
         }
+    }
+
+    /**
+     * 인라인 그래픽 자체 또는 자손 중 renderedGraphicFrame(deco 등)으로 등록된 것이 있는지 확인.
+     * true이면 orphan 주입에서 올바른 위치로 배치되므로 인라인 이미지 생성을 생략해야 함.
+     */
+    private static boolean hasRenderedGraphicDescendant(IDMLCharacterRun.InlineGraphic ig,
+                                                         kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolvedData) {
+        if (ig.selfId() != null
+                && resolvedData.getRenderedGraphicFrameByIdmlId(ig.selfId()) != null) {
+            return true;
+        }
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            if (hasRenderedGraphicDescendant(child, resolvedData)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

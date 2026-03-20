@@ -928,6 +928,11 @@ public class IDMLToHwpxConverter {
                 continue;
             }
 
+            // 인라인 그래픽으로 이미 처리된 deco 건너뜀 (중복 주입 방지)
+            if (resolvedData.isConsumedRenderedGraphic(String.valueOf(rg.id()))) {
+                continue;
+            }
+
             int pageIdx = rg.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
