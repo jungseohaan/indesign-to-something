@@ -903,9 +903,18 @@ public class IDMLToHwpxConverter {
                 resolvedData.allRenderedGraphicFrames());
         // PDF 배치 프레임도 orphan 대상에 추가 (IDML에서 PDF 링크를 직접 변환하지 못하므로)
         orphanTargets.addAll(resolvedData.allRenderedPdfFrames());
-        for (RenderedGroup rg : resolvedData.allRenderedTextFrames()) {
-            if (rg.isBadgeGroup()) {
-                orphanTargets.add(rg);
+        // renderedTextFrame: 배지 그룹 + 시각 효과(그림자, 투명도 등)로 렌더된 텍스트프레임
+        // AST 파이프라인에서 isRenderedByExtendScript로 건너뛰므로 orphan으로 주입
+        orphanTargets.addAll(resolvedData.allRenderedTextFrames());
+
+        // 부모-자식 관계: childIds에 포함된 ID는 부모 렌더링에 이미 포함되므로 건너뜀
+        // 단, 부모 자체가 렌더 가능한 파일을 가진 경우에만 (부모가 필터되면 자식 허용)
+        java.util.Set<Integer> orphanChildIdSet = new java.util.HashSet<>();
+        for (RenderedGroup rg : orphanTargets) {
+            if (rg.childIds() != null && rg.file() != null) {
+                for (int cid : rg.childIds()) {
+                    orphanChildIdSet.add(cid);
+                }
             }
         }
 
@@ -916,6 +925,9 @@ public class IDMLToHwpxConverter {
         java.util.Set<Integer> placedOrphanChildIds = new java.util.HashSet<>();
         for (RenderedGroup rg : orphanTargets) {
             if (rg.file() == null || rg.bounds() == null) continue;
+
+            // 부모 그룹의 childIds에 포함된 자식은 건너뜀 (부모가 전체 렌더링)
+            if (orphanChildIdSet.contains(rg.id())) continue;
 
             // DOM ID → IDML hex ID 변환하여 이미 사용된 것인지 확인
             String idmlHexId = "u" + Integer.toHexString(rg.id());

@@ -1103,7 +1103,6 @@ class IDMLSpreadParser {
                 String groupSelfId = child.getAttribute("Self");
 
                 int vecCountBefore = spread.vectorShapes().size();
-
                 parseGroupForFrames(child, spread, combined, hiddenLayerIds,
                         zOrderCounter, groupSelfId,
                         hasWrapperFill ? wrapperFill : null, wrapperFillTint,

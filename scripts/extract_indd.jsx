@@ -1376,6 +1376,16 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
 
         if (nonRectCount < 3) continue;
 
+        // 텍스트 프레임을 포함한 그룹은 제외 (텍스트가 이미지로 변환되는 것 방지)
+        var p4HasTF = false;
+        for (var p4t = 0; p4t < p4Nested.length; p4t++) {
+            if (p4Nested[p4t].constructor.name === "TextFrame") {
+                p4HasTF = true;
+                break;
+            }
+        }
+        if (p4HasTF) continue;
+
         // 페이지 확인
         var p4Page = null;
         try { p4Page = p4Grp.parentPage; } catch (e) {}

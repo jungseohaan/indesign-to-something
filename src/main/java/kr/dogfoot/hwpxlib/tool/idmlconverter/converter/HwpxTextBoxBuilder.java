@@ -126,6 +126,13 @@ public class HwpxTextBoxBuilder {
                 .hasTextRefAnd(false)
                 .hasNumRefAnd(false);
 
+        // JustifyAlign 시뮬레이션: 문단 간 간격을 균등 분배
+        // HWPX에는 수직 균등 배분이 없으므로, 문단 사이 spaceAfter로 대체
+        if ("JustifyAlign".equalsIgnoreCase(block.verticalJustification())
+                && block.paragraphs().size() >= 2) {
+            distributeVerticalSpace(block);
+        }
+
         // 내용 단락
         for (ASTParagraph para : block.paragraphs()) {
             paragraphBuilder.addParagraphToSubList(subList, para);
@@ -229,6 +236,72 @@ public class HwpxTextBoxBuilder {
      */
     VerticalAlign2 mapVerticalJustification(String vj) {
         return HwpxEnumMapper.mapVerticalJustification(vj);
+    }
+
+    /**
+     * JustifyAlign 시뮬레이션: 프레임 높이에 맞게 문단 간 간격을 균등 분배.
+     * HWPX에는 수직 균등 배분(vertAlign=JUSTIFY)이 없으므로,
+     * 남는 수직 공간을 문단 사이의 spaceAfter로 삽입한다.
+     */
+    private void distributeVerticalSpace(kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock block) {
+        java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph> paras = block.paragraphs();
+        int paraCount = paras.size();
+        if (paraCount < 2) return;
+
+        // 프레임 내부 가용 높이 (hwpunits)
+        long availableHeight = block.height() - block.insetTop() - block.insetBottom();
+        if (availableHeight <= 0) return;
+
+        // 각 문단의 텍스트 높이 추정 (lineSpacing 기반)
+        long totalTextHeight = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para : paras) {
+            long paraHeight = estimateParagraphHeight(para);
+            totalTextHeight += paraHeight;
+            // spaceBefore/After도 기존 간격으로 포함
+            if (para.spaceBefore() != null) totalTextHeight += para.spaceBefore();
+            if (para.spaceAfter() != null) totalTextHeight += para.spaceAfter();
+        }
+
+        long extraSpace = availableHeight - totalTextHeight;
+        if (extraSpace <= 0) return;
+
+        // 문단 사이 간격에 균등 분배 (마지막 문단 제외)
+        int gaps = paraCount - 1;
+        long spacePerGap = extraSpace / gaps;
+
+        for (int i = 0; i < paraCount - 1; i++) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para = paras.get(i);
+            long existing = para.spaceAfter() != null ? para.spaceAfter() : 0;
+            para.spaceAfter(existing + spacePerGap);
+        }
+    }
+
+    /**
+     * 문단의 텍스트 높이를 추정한다 (hwpunits).
+     * fixed lineSpacing이면 그 값, percent이면 폰트크기 × 비율.
+     */
+    private long estimateParagraphHeight(kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph para) {
+        // 한 줄 기준 높이 추정
+        if ("fixed".equals(para.lineSpacingType()) && para.lineSpacing() > 0) {
+            return para.lineSpacing();
+        }
+        // 폰트 크기 기반 추정
+        int fontSize = 1100; // 기본 11pt
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem item : para.items()) {
+            if (item.itemType() == kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem.ItemType.TEXT_RUN) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun run =
+                        (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) item;
+                if (run.fontSizeHwpunits() != null) {
+                    fontSize = run.fontSizeHwpunits();
+                    break;
+                }
+            }
+        }
+        if ("percent".equals(para.lineSpacingType()) && para.lineSpacing() > 0) {
+            return (long) (fontSize * para.lineSpacing() / 100.0);
+        }
+        // 기본: 160%
+        return (long) (fontSize * 1.6);
     }
 
     // ── 플로팅 텍스트 프레임 블록 변환 (1x1 테이블) ──
