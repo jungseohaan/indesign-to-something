@@ -78,7 +78,9 @@ public class IDMLNormalizer {
     }
 
     /**
-     * 그룹 내부 자식 객체의 selfId를 부모 그룹의 z-order로 등록 (재귀).
+     * 그룹 내부 자식 객체의 selfId를 z-order 맵에 등록 (재귀).
+     * 자식 그룹의 z-order는 첫 번째 파싱된 자식의 z-order로 대체하여
+     * 같은 부모 내 형제 간 상대적 스태킹 순서를 보존한다.
      */
     private static void addGroupChildrenToZMap(java.util.Map<String, Integer> zMap,
                                                 kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLGroup grp,
@@ -87,8 +89,20 @@ public class IDMLNormalizer {
         for (String childId : grp.allChildSelfIds()) {
             zMap.putIfAbsent(childId, rootZ);
         }
-        // 하위 그룹도 같은 루트 z-order로 재귀 처리
+        // 하위 그룹: 그룹의 z-order를 첫 번째 파싱된 자식의 z-order로 대체
+        // (IDML 순서: 먼저 나오는 자식 = back, 뒤 자식 = front → 높은 z-order)
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLGroup child : grp.childGroups()) {
+            int childGroupZ = rootZ;
+            for (String grandChildId : child.allChildSelfIds()) {
+                Integer gcZ = zMap.get(grandChildId);
+                if (gcZ != null && gcZ > rootZ) {
+                    childGroupZ = gcZ;
+                    break; // 첫 번째 파싱된 자식의 z-order 사용
+                }
+            }
+            if (childGroupZ > rootZ) {
+                zMap.put(child.selfId(), childGroupZ);
+            }
             addGroupChildrenToZMap(zMap, child, rootZ);
         }
     }
