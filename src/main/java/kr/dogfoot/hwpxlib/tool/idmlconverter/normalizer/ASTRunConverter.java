@@ -344,17 +344,29 @@ class ASTRunConverter {
     }
 
     /**
-     * 인라인 그래픽 자체 또는 자손 중 renderedGraphicFrame(deco 등)으로 등록된 것이 있는지 확인.
-     * true이면 orphan 주입에서 올바른 위치로 배치되므로 인라인 이미지 생성을 생략해야 함.
+     * 인라인 그래픽의 자손(자기 자신 제외) 중 renderedGraphicFrame(deco 등)으로 등록된 것이 있는지 확인.
+     * true이면 자손 deco가 orphan 주입에서 배치되므로 인라인 이미지 생성을 생략해야 함.
+     * 자기 자신이 deco인 경우는 텍스트 흐름에 인라인으로 남아야 하므로 차단하지 않음.
      */
     private static boolean hasRenderedGraphicDescendant(IDMLCharacterRun.InlineGraphic ig,
+                                                         kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolvedData) {
+        // 자기 자신은 체크하지 않음 — 자손만 확인
+        for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+            if (hasRenderedGraphicDescendantIncludingSelf(child, resolvedData)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasRenderedGraphicDescendantIncludingSelf(IDMLCharacterRun.InlineGraphic ig,
                                                          kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolvedData) {
         if (ig.selfId() != null
                 && resolvedData.getRenderedGraphicFrameByIdmlId(ig.selfId()) != null) {
             return true;
         }
         for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
-            if (hasRenderedGraphicDescendant(child, resolvedData)) {
+            if (hasRenderedGraphicDescendantIncludingSelf(child, resolvedData)) {
                 return true;
             }
         }
