@@ -277,7 +277,7 @@ public class HwpxTextBoxBuilder {
                 if (hasWrapper) {
                     addWrapperRoundedRect(framePara, block, w, h);
                 }
-                convertSingleColumnTable(framePara, block, block.x(), block.y(), w, h,
+                convertSingleColumnTable(framePara, block, block.effectiveX(), block.y(), w, h,
                         block.paragraphs(), hasWrapper);
             }
         } else {
@@ -295,7 +295,7 @@ public class HwpxTextBoxBuilder {
                 addMultiColumnFrameBorder(framePara, block, w, h);
             }
 
-            long xCursor = block.x();
+            long xCursor = block.effectiveX();
             long gutter = block.columnGutter();
             for (int c = 0; c < colCount; c++) {
                 convertSingleColumnTable(framePara, block, xCursor, block.y(),

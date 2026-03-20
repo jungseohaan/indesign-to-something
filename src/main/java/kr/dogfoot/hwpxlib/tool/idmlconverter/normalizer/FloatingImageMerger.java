@@ -43,6 +43,7 @@ public class FloatingImageMerger {
 
         // ── Pass 1: side-by-side 감지 → 텍스트 프레임 폭 축소 ──
         Map<ASTTextFrameBlock, Long> frameNarrowedRight = new HashMap<>();
+        Map<ASTTextFrameBlock, Long> frameNarrowedLeft = new HashMap<>();
         List<ASTFigure> remainingFigures = new ArrayList<>();
         int sideBySideCount = 0;
 
@@ -54,14 +55,23 @@ public class FloatingImageMerger {
             }
 
             if (isSideBySide(fig, target)) {
-                // 이미지 왼쪽 경계에서 gap을 뺀 값으로 프레임 폭 축소
                 long gap = 283; // ~1mm
-                long narrowRight = fig.x() - gap;
+                long midX = target.x() + target.width() / 2;
 
-                // 같은 프레임에 여러 side-by-side 이미지 → 가장 왼쪽 기준
-                Long prev = frameNarrowedRight.get(target);
-                if (prev == null || narrowRight < prev) {
-                    frameNarrowedRight.put(target, narrowRight);
+                if (fig.x() >= midX) {
+                    // 오른쪽 병렬: 이미지 왼쪽 경계에서 gap을 뺀 값으로 프레임 폭 축소
+                    long narrowRight = fig.x() - gap;
+                    Long prev = frameNarrowedRight.get(target);
+                    if (prev == null || narrowRight < prev) {
+                        frameNarrowedRight.put(target, narrowRight);
+                    }
+                } else {
+                    // 왼쪽 병렬: 이미지 오른쪽 끝 + gap에서 프레임 시작
+                    long newLeft = fig.x() + fig.width() + gap;
+                    Long prev = frameNarrowedLeft.get(target);
+                    if (prev == null || newLeft > prev) {
+                        frameNarrowedLeft.put(target, newLeft);
+                    }
                 }
                 fig.textWrapMode(null); // BEHIND_TEXT 플로팅
                 sideBySideCount++;
@@ -70,11 +80,29 @@ public class FloatingImageMerger {
             }
         }
 
-        // narrowedWidth 적용
+        // 오른쪽 narrowedWidth 적용
         for (Map.Entry<ASTTextFrameBlock, Long> e : frameNarrowedRight.entrySet()) {
             long nw = e.getValue() - e.getKey().x();
             if (nw > 0 && nw < e.getKey().width()) {
                 e.getKey().narrowedWidth(nw);
+            }
+        }
+
+        // 왼쪽 narrowedXOffset + narrowedWidth 적용
+        for (Map.Entry<ASTTextFrameBlock, Long> e : frameNarrowedLeft.entrySet()) {
+            ASTTextFrameBlock tf = e.getKey();
+            long newLeft = e.getValue();
+            long xOffset = newLeft - tf.x();
+            if (xOffset > 0 && xOffset < tf.width()) {
+                tf.narrowedXOffset(xOffset);
+                // 오른쪽 축소도 같이 적용된 경우
+                long rightEdge = tf.narrowedWidth() > 0
+                        ? tf.x() + tf.narrowedWidth()
+                        : tf.x() + tf.width();
+                long nw = rightEdge - newLeft;
+                if (nw > 0) {
+                    tf.narrowedWidth(nw);
+                }
             }
         }
 
@@ -102,12 +130,18 @@ public class FloatingImageMerger {
     }
 
     /**
-     * 이미지가 텍스트 프레임 오른쪽에 나란히(side-by-side) 배치된 경우 true.
-     * 이미지의 X가 프레임 중간점 이상이면 수평 병렬로 판단.
+     * 이미지가 텍스트 프레임과 수평 병렬(side-by-side)로 배치된 경우 true.
+     * 오른쪽: 이미지 X가 프레임 중간점 이상
+     * 왼쪽: 이미지 오른쪽 끝이 프레임 중간점 이하
      */
     private static boolean isSideBySide(ASTFigure fig, ASTTextFrameBlock frame) {
-        long threshold = frame.x() + frame.width() / 2;
-        return fig.x() >= threshold;
+        long midX = frame.x() + frame.width() / 2;
+        // 오른쪽 병렬
+        if (fig.x() >= midX) return true;
+        // 왼쪽 병렬: 이미지가 프레임 왼쪽 절반 안에 있고, 프레임보다 좁은 경우
+        long figRight = fig.x() + fig.width();
+        if (figRight <= midX && fig.width() < frame.width() / 2) return true;
+        return false;
     }
 
     /**

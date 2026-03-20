@@ -63,6 +63,7 @@ public class FlatLayoutNode {
     private boolean distributed;
     private double rotationAngle;
     private long narrowedWidth;
+    private long narrowedXOffset;
     private String wrapperFillColor;
     private double wrapperFillTint = -1;
     private boolean dropShadow;
@@ -275,6 +276,9 @@ public class FlatLayoutNode {
 
     public long narrowedWidth() { return narrowedWidth; }
     public void narrowedWidth(long v) { this.narrowedWidth = v; }
+
+    public long narrowedXOffset() { return narrowedXOffset; }
+    public void narrowedXOffset(long v) { this.narrowedXOffset = v; }
 
     public String wrapperFillColor() { return wrapperFillColor; }
     public void wrapperFillColor(String v) { this.wrapperFillColor = v; }

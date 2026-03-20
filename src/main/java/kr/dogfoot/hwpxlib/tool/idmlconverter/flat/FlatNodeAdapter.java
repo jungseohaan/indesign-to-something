@@ -60,6 +60,7 @@ public class FlatNodeAdapter {
         tfb.distributed(node.distributed());
         tfb.rotationAngle(node.rotationAngle());
         tfb.narrowedWidth(node.narrowedWidth());
+        tfb.narrowedXOffset(node.narrowedXOffset());
 
         // Wrapper fill
         tfb.wrapperFillColor(node.wrapperFillColor());

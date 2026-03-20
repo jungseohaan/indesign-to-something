@@ -402,13 +402,14 @@ class IDMLStoryParser {
                     }
                 } else if ("Rectangle".equals(tag) || "Polygon".equals(tag)
                         || "Oval".equals(tag) || "GraphicLine".equals(tag)) {
+                    IDMLCharacterRun.InlineGraphic graphic = parseInlineGraphicElement(elem);
+
                     if (pendingAce8 > 0) {
                         pendingAce8--;
                     } else {
                         contentBuilder.append('\uFFFC');
                     }
                     int graphicIdx = currentRun.inlineGraphics().size();
-                    IDMLCharacterRun.InlineGraphic graphic = parseInlineGraphicElement(elem);
                     currentRun.addInlineGraphic(graphic);
                     currentRun.addInlineAnchor(IDMLCharacterRun.InlineAnchorType.GRAPHIC, graphicIdx);
                 }

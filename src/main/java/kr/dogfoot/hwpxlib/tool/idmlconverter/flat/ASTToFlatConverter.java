@@ -152,6 +152,7 @@ public class ASTToFlatConverter {
         node.distributed(tfb.distributed());
         node.rotationAngle(tfb.rotationAngle());
         node.narrowedWidth(tfb.narrowedWidth());
+        node.narrowedXOffset(tfb.narrowedXOffset());
 
         // Wrapper fill
         node.wrapperFillColor(tfb.wrapperFillColor());

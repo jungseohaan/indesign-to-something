@@ -909,6 +909,8 @@ public class IDMLToHwpxConverter {
         }
 
         Map<Integer, Integer> pageOrphanZCounter = new java.util.HashMap<>();
+        // 페이지별 주입된 orphan bounds 추적 (자식 포함 관계 중복 방지)
+        Map<Integer, java.util.List<long[]>> pageOrphanBounds = new java.util.HashMap<>();
         for (RenderedGroup rg : orphanTargets) {
             if (rg.file() == null || rg.bounds() == null) continue;
 
@@ -1014,6 +1016,28 @@ public class IDMLToHwpxConverter {
                 }
                 if (overlapsExisting) continue;
 
+                // 같은 페이지에 이미 주입된 orphan에 포함되는 자식 건너뜀
+                // (부모 그룹의 렌더 이미지가 자식을 포함하므로 자식은 중복)
+                boolean containedByOrphan = false;
+                java.util.List<long[]> existingOrphans = pageOrphanBounds.get(pageIdx);
+                if (existingOrphans != null && figArea > 0) {
+                    for (long[] ob : existingOrphans) {
+                        // ob가 현재 orphan을 80% 이상 포함하면 건너뜀
+                        long oLeft = Math.max(figX, ob[0]);
+                        long oTop = Math.max(figY, ob[1]);
+                        long oRight = Math.min(figX + figW, ob[2]);
+                        long oBottom = Math.min(figY + figH, ob[3]);
+                        if (oLeft < oRight && oTop < oBottom) {
+                            long oArea = (oRight - oLeft) * (oBottom - oTop);
+                            if ((double) oArea / figArea > 0.8) {
+                                containedByOrphan = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (containedByOrphan) continue;
+
                 // 페이지 밖 음수 좌표 → crop fraction 설정
                 // HwpxImageBuilder가 hasCrop일 때 x<0, y<0을 자동 클램핑하므로
                 // 원래 크기를 유지하고 fraction만 설정
@@ -1057,6 +1081,15 @@ public class IDMLToHwpxConverter {
                 fig.fromGroup(true);  // inFrontBlocks로 분류되도록
 
                 section.addBlock(fig);
+
+                // 주입된 orphan bounds 추적
+                java.util.List<long[]> orphanList = pageOrphanBounds.get(pageIdx);
+                if (orphanList == null) {
+                    orphanList = new java.util.ArrayList<>();
+                    pageOrphanBounds.put(pageIdx, orphanList);
+                }
+                orphanList.add(new long[]{figX, figY, figX + figW, figY + figH});
+
                 // === 스프레드 걸침 감지: 그래픽이 인접 페이지까지 확장되면 추가 배치 ===
                 if (resolvedPage != null && resolvedPage.bounds() != null) {
                     double pageRight = resolvedPage.bounds()[3];  // 현재 페이지 오른쪽 끝 (spread coords, pt)

@@ -39,6 +39,7 @@ public class ASTTextFrameBlock extends ASTBlock {
     private boolean distributed; // resolved 기반 문단 재배치 완료 → 연결 글상자 링크 해제
     private double rotationAngle; // 프레임 회전 각도 (도 단위)
     private long narrowedWidth;   // side-by-side 이미지로 축소된 폭 (0 = 미적용)
+    private long narrowedXOffset; // 왼쪽 side-by-side 이미지로 X 이동량 (0 = 미적용)
 
     // 래퍼 사각형 배경 (부모 Rectangle에서 전파된 fill — 테두리 효과용)
     private String wrapperFillColor;
@@ -137,12 +138,20 @@ public class ASTTextFrameBlock extends ASTBlock {
     public long narrowedWidth() { return narrowedWidth; }
     public void narrowedWidth(long v) { this.narrowedWidth = v; }
 
+    public long narrowedXOffset() { return narrowedXOffset; }
+    public void narrowedXOffset(long v) { this.narrowedXOffset = v; }
+
     public boolean dropShadow() { return dropShadow; }
     public void dropShadow(boolean v) { this.dropShadow = v; }
 
     /** 실제 렌더링에 사용할 폭. narrowedWidth가 설정되면 그 값, 아니면 원래 width. */
     public long effectiveWidth() {
         return narrowedWidth > 0 ? narrowedWidth : width;
+    }
+
+    /** 실제 렌더링에 사용할 X 좌표. narrowedXOffset이 있으면 오른쪽으로 이동. */
+    public long effectiveX() {
+        return x + narrowedXOffset;
     }
 
     public String wrapperFillColor() { return wrapperFillColor; }
