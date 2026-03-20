@@ -897,13 +897,14 @@ public class IDMLToHwpxConverter {
             pageFigureBounds.put(si, bounds);
         }
 
-        // TextFrame 자식이 없는 배지 그룹(TextPath 전용)을 OrphanGraphic 대상에 추가
+        // 배지 그룹을 OrphanGraphic 대상에 추가
+        // (인라인 처리된 배지는 isConsumedRenderedGraphic으로 건너뜀)
         java.util.List<RenderedGroup> orphanTargets = new java.util.ArrayList<>(
                 resolvedData.allRenderedGraphicFrames());
         // PDF 배치 프레임도 orphan 대상에 추가 (IDML에서 PDF 링크를 직접 변환하지 못하므로)
         orphanTargets.addAll(resolvedData.allRenderedPdfFrames());
         for (RenderedGroup rg : resolvedData.allRenderedTextFrames()) {
-            if (rg.isBadgeGroup() && (rg.childTextFrameIds() == null || rg.childTextFrameIds().length == 0)) {
+            if (rg.isBadgeGroup()) {
                 orphanTargets.add(rg);
             }
         }
@@ -911,29 +912,23 @@ public class IDMLToHwpxConverter {
         Map<Integer, Integer> pageOrphanZCounter = new java.util.HashMap<>();
         // 페이지별 주입된 orphan bounds 추적 (자식 포함 관계 중복 방지)
         Map<Integer, java.util.List<long[]>> pageOrphanBounds = new java.util.HashMap<>();
+        // 주입된 orphan의 childIds 집합 (배지 중복 방지)
+        java.util.Set<Integer> placedOrphanChildIds = new java.util.HashSet<>();
         for (RenderedGroup rg : orphanTargets) {
             if (rg.file() == null || rg.bounds() == null) continue;
 
             // DOM ID → IDML hex ID 변환하여 이미 사용된 것인지 확인
             String idmlHexId = "u" + Integer.toHexString(rg.id());
-            if (usedSourceIds.contains(idmlHexId)) {
-                continue;
-            }
+            if (usedSourceIds.contains(idmlHexId)) continue;
 
             // 배지 그룹 자식 도형 건너뜀 (배지 통째 렌더링에서 처리)
-            if (resolvedData.isShapeInBadgeGroup(idmlHexId)) {
-                continue;
-            }
+            if (resolvedData.isShapeInBadgeGroup(idmlHexId)) continue;
 
             // vectorShapes 처리 대상 및 클리핑 자식 건너뜀 (중복 주입 방지)
-            if (astDoc.orphanExcludeIds().contains(idmlHexId)) {
-                continue;
-            }
+            if (astDoc.orphanExcludeIds().contains(idmlHexId)) continue;
 
             // 인라인 그래픽으로 이미 처리된 deco 건너뜀 (중복 주입 방지)
-            if (resolvedData.isConsumedRenderedGraphic(String.valueOf(rg.id()))) {
-                continue;
-            }
+            if (resolvedData.isConsumedRenderedGraphic(String.valueOf(rg.id()))) continue;
 
             int pageIdx = rg.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
@@ -1007,7 +1002,7 @@ public class IDMLToHwpxConverter {
                             // 배경/컨테이너 관계이므로 중복 아님
                             boolean isContainment = (existingRatio > 0.9 && orphanRatio < 0.9)
                                     || (orphanRatio > 0.9 && existingRatio < 0.9);
-                            if (orphanRatio > 0.5 && existingRatio > 0.5 && !isContainment) {
+                            if (orphanRatio > 0.7 && existingRatio > 0.7 && !isContainment) {
                                 overlapsExisting = true;
                                 break;
                             }
@@ -1018,10 +1013,20 @@ public class IDMLToHwpxConverter {
 
                 // 같은 페이지에 이미 주입된 orphan에 포함되는 자식 건너뜀
                 // (부모 그룹의 렌더 이미지가 자식을 포함하므로 자식은 중복)
+                // 단, 배지 그룹이 이미 배치된 orphan의 자식이 아니면 독립 배치 허용
+                // (배경 사각형 위에 배지가 있는 경우: 배경은 배지를 포함하지 않음)
                 boolean containedByOrphan = false;
+                boolean isBadge = rg.isBadgeGroup();
+                if (isBadge && placedOrphanChildIds.contains(rg.id())) {
+                    // 이미 배치된 orphan이 이 배지를 자식으로 포함 → 중복이므로 건너뜀
+                    containedByOrphan = true;
+                }
                 java.util.List<long[]> existingOrphans = pageOrphanBounds.get(pageIdx);
-                if (existingOrphans != null && figArea > 0) {
+                if (!isBadge && existingOrphans != null && figArea > 0) {
                     for (long[] ob : existingOrphans) {
+                        long obW = ob[2] - ob[0];
+                        long obH = ob[3] - ob[1];
+                        long obArea = obW * obH;
                         // ob가 현재 orphan을 80% 이상 포함하면 건너뜀
                         long oLeft = Math.max(figX, ob[0]);
                         long oTop = Math.max(figY, ob[1]);
@@ -1029,9 +1034,19 @@ public class IDMLToHwpxConverter {
                         long oBottom = Math.min(figY + figH, ob[3]);
                         if (oLeft < oRight && oTop < oBottom) {
                             long oArea = (oRight - oLeft) * (oBottom - oTop);
-                            if ((double) oArea / figArea > 0.8) {
-                                containedByOrphan = true;
-                                break;
+                            double containRatio = (double) oArea / figArea;
+                            if (containRatio > 0.8) {
+                                // 크기가 비슷하면 동일 객체 중복 → 건너뜀
+                                // 크기가 크게 다르면 배경-컨텐츠 레이어 관계 → 유지
+                                long minArea = Math.min(figArea, obArea);
+                                long maxArea = Math.max(figArea, obArea);
+                                double sizeRatio = maxArea > 0 ? (double) minArea / maxArea : 0;
+                                if (sizeRatio > 0.9) {
+                                    // 면적 비 90% 이상 → 거의 같은 크기 → 중복
+                                    containedByOrphan = true;
+                                    break;
+                                }
+                                // 면적 비 90% 미만 → 배경 위 컨텐츠 레이어 → 유지
                             }
                         }
                     }
@@ -1089,6 +1104,12 @@ public class IDMLToHwpxConverter {
                     pageOrphanBounds.put(pageIdx, orphanList);
                 }
                 orphanList.add(new long[]{figX, figY, figX + figW, figY + figH});
+                // 주입된 orphan의 자식 ID 기록 (자식 배지 중복 방지)
+                if (rg.childIds() != null) {
+                    for (int cid : rg.childIds()) {
+                        placedOrphanChildIds.add(cid);
+                    }
+                }
 
                 // === 스프레드 걸침 감지: 그래픽이 인접 페이지까지 확장되면 추가 배치 ===
                 if (resolvedPage != null && resolvedPage.bounds() != null) {

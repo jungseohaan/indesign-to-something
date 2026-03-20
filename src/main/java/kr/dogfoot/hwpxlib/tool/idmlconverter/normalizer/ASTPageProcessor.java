@@ -207,6 +207,17 @@ class ASTPageProcessor {
             IDMLTextFrame tf = (IDMLTextFrame) fo.sourceObject();
             if (tf.isEditorialNote()) continue;
 
+            // ExtendScript가 통째 렌더링한 그룹의 자식 TextFrame은 건너뛴다
+            if (resolvedData != null && tf.selfId() != null) {
+                if (resolvedData.isRenderedByExtendScript(tf.selfId())) {
+                    continue;
+                }
+                if (tf.parentGroupId() != null
+                        && resolvedData.isRenderedByExtendScript(tf.parentGroupId())) {
+                    continue;
+                }
+            }
+
             String storyId = tf.parentStoryId();
             if (storyId == null) continue;
 
@@ -1519,8 +1530,15 @@ class ASTPageProcessor {
      */
     static boolean hasContent(ASTTextFrameBlock block) {
         if (block.fillColor() != null) return true;
-        // visible stroke가 있으면 테두리 사각형으로 출력 (table-only 래퍼 등)
-        if (block.strokeColor() != null && block.strokeWeight() > 0) return true;
+        // visible stroke가 있으면 테두리 사각형으로 출력
+        // 단, 내용이 비어있으면 (테이블만 포함된 래퍼 등) stroke만으로 출력하지 않음
+        if (block.strokeColor() != null && block.strokeWeight() > 0) {
+            if (!block.paragraphs().isEmpty()) {
+                for (ASTParagraph para : block.paragraphs()) {
+                    if (!para.items().isEmpty()) return true;
+                }
+            }
+        }
         if (block.paragraphs().isEmpty()) return false;
         for (ASTParagraph para : block.paragraphs()) {
             if (!para.items().isEmpty()) return true;

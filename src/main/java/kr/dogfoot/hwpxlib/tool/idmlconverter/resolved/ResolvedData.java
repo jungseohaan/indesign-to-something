@@ -459,6 +459,7 @@ public class ResolvedData {
 
         // 1. renderedImageFrame: 그룹 자체 + 자식 이미지
         for (RenderedGroup rg : renderedImageFrameMap.values()) {
+            if (rg.file() == null) continue;  // 렌더 실패한 항목은 건너뜀
             renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
             if (rg.childImageIds() != null) {
                 for (int childId : rg.childImageIds()) {
@@ -469,6 +470,7 @@ public class ResolvedData {
 
         // 2. renderedGraphicFrame: 도형/그룹 자체 + childIds (벡터 그룹)
         for (RenderedGroup rg : renderedGraphicFrameMap.values()) {
+            if (rg.file() == null) continue;  // 렌더 실패한 항목은 건너뜀
             renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
             if (rg.childIds() != null) {
                 for (int childId : rg.childIds()) {
@@ -479,6 +481,7 @@ public class ResolvedData {
 
         // 3. renderedTextFrame: 프레임 자체 + badge childIds + badge childTextFrameIds
         for (RenderedGroup rg : renderedTextFrameMap.values()) {
+            if (rg.file() == null) continue;  // 렌더 실패한 항목은 건너뜀
             renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
             if (rg.childIds() != null) {
                 for (int childId : rg.childIds()) {
@@ -497,7 +500,7 @@ public class ResolvedData {
         // isRenderedByExtendScript에서 제외하여 정상 파이프라인을 우선 적용.
         // IDML이 처리하지 못한 경우에만 orphan으로 폴백된다.
 
-        System.out.println("[ResolvedData] ExtendScript 렌더 ID " + renderedExtIdmlIds.size() + "개 인덱싱");
+        System.err.println("[ResolvedData] ExtendScript 렌더 ID " + renderedExtIdmlIds.size() + "개 인덱싱");
     }
 
     /**

@@ -1341,6 +1341,98 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
         } catch (e) {}
     }
 
+    // Pass 4: 비사각형 폴리곤 다수 포함 그룹 (벌집 그리드 등)
+    // 조건: 중첩 자식 중 비사각형 Polygon(꼭짓점 5개 이상)이 3개 이상
+    for (var p4i = 0; p4i < allItems.length; p4i++) {
+        var p4Grp = allItems[p4i];
+        if (p4Grp.constructor.name !== "Group") continue;
+        if (isOnHiddenLayer(p4Grp)) continue;
+
+        var p4Id = p4Grp.id;
+        if (renderedIds[p4Id]) continue;
+        if (decoChildIds[p4Id]) continue;
+        if (badgeChildIds && badgeChildIds[p4Id]) continue;
+
+        // 부모가 이미 처리됨
+        try {
+            var p4Par = p4Grp.parent;
+            if (p4Par && (renderedIds[p4Par.id] || decoChildIds[p4Par.id])) continue;
+        } catch (e) {}
+
+        // 비사각형 도형 카운트 (Rectangle/Polygon 모두 path points > 4이면 비사각형)
+        var nonRectCount = 0;
+        var p4Nested;
+        try {
+            p4Nested = p4Grp.allPageItems;
+            for (var p4n = 0; p4n < p4Nested.length; p4n++) {
+                var p4cn = p4Nested[p4n].constructor.name;
+                if (p4cn !== "Polygon" && p4cn !== "Rectangle") continue;
+                try {
+                    var p4pts = p4Nested[p4n].paths[0].pathPoints.length;
+                    if (p4pts > 4) nonRectCount++;
+                } catch (e2) {}
+            }
+        } catch (e) { continue; }
+
+        if (nonRectCount < 3) continue;
+
+        // 페이지 확인
+        var p4Page = null;
+        try { p4Page = p4Grp.parentPage; } catch (e) {}
+        if (!p4Page) continue;
+        var p4PgIdx = p4Page.documentOffset + 1;
+        if (p4PgIdx < startPage || p4PgIdx > endPage) continue;
+
+        $.writeln("[Pass4 MATCH] id=" + p4Id + " nonRectPolygons=" + nonRectCount
+            + " children=" + p4Nested.length);
+
+        // 렌더링
+        try {
+            var p4FileName = "deco_" + p4Id + ".png";
+            var p4OutFile = File(renderDir + "/" + p4FileName);
+            p4Grp.exportFile(ExportFormat.PNG_FORMAT, p4OutFile);
+
+            var p4Bounds = null;
+            try { p4Bounds = arrCopy(p4Grp.visibleBounds); } catch (e) {}
+            if (!p4Bounds) try { p4Bounds = arrCopy(p4Grp.geometricBounds); } catch (e) {}
+
+            if (p4Bounds) {
+                var p4PageBounds = p4Page.bounds;
+                p4Bounds[0] -= p4PageBounds[0];
+                p4Bounds[1] -= p4PageBounds[1];
+                p4Bounds[2] -= p4PageBounds[0];
+                p4Bounds[3] -= p4PageBounds[1];
+            }
+
+            var p4ChildIds = [];
+            var p4ChildIdMap = {};
+            for (var p4ci = 0; p4ci < p4Nested.length; p4ci++) {
+                var p4ChildId = p4Nested[p4ci].id;
+                p4ChildIds.push(p4ChildId);
+                p4ChildIdMap[p4ChildId] = true;
+                decoChildIds[p4ChildId] = true;
+            }
+
+            // 이전 Pass에서 이미 렌더링된 자식 엔트리를 results에서 제거
+            var p4Cleaned = [];
+            for (var p4ri = 0; p4ri < results.length; p4ri++) {
+                if (!p4ChildIdMap[results[p4ri].id]) {
+                    p4Cleaned.push(results[p4ri]);
+                }
+            }
+            results = p4Cleaned;
+
+            results.push({
+                id: p4Id,
+                file: "rendered_frames/" + p4FileName,
+                bounds: p4Bounds,
+                pageIndex: p4Page.documentOffset,
+                childIds: p4ChildIds
+            });
+            renderedIds[p4Id] = true;
+        } catch (e) {}
+    }
+
     return { frames: results, childIds: decoChildIds };
 }
 
