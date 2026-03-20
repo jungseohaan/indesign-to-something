@@ -492,10 +492,10 @@ public class ResolvedData {
             }
         }
 
-        // 4. renderedPdfFrame: 도형 자체
-        for (RenderedGroup rg : renderedPdfFrameMap.values()) {
-            renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
-        }
+        // 4. renderedPdfFrame: orphan 주입 대상이므로 여기서 등록하지 않음
+        // IDML 이미지 프레임 파이프라인이 Links 폴더의 .ai/.pdf 파일을 처리할 수 있으므로
+        // isRenderedByExtendScript에서 제외하여 정상 파이프라인을 우선 적용.
+        // IDML이 처리하지 못한 경우에만 orphan으로 폴백된다.
 
         System.out.println("[ResolvedData] ExtendScript 렌더 ID " + renderedExtIdmlIds.size() + "개 인덱싱");
     }
