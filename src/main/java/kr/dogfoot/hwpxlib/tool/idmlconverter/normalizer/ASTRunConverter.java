@@ -216,6 +216,18 @@ class ASTRunConverter {
                 }
             }
         }
+        // 그룹 자체가 renderedGraphicFrame으로 통째 렌더링된 경우 → 인라인 이미지로 직접 사용
+        if (resolvedData != null && ig.selfId() != null && imageLoader != null) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup groupRg =
+                    resolvedData.getRenderedGraphicFrameByIdmlId(ig.selfId());
+            if (groupRg != null && groupRg.file() != null) {
+                ASTInlineObject groupImg = loadRenderedGroupAsInlineImage(ig, groupRg, imageLoader, resolvedData);
+                if (groupImg != null) {
+                    para.addItem(groupImg);
+                    return;
+                }
+            }
+        }
         // 그룹 자체 또는 자손이 renderedGraphicFrame(deco 등)으로 렌더링된 경우
         // orphan 주입에서 올바른 위치로 배치되므로 인라인 이미지 생성 생략
         if (resolvedData != null && hasRenderedGraphicDescendant(ig, resolvedData)) {
@@ -818,6 +830,67 @@ class ASTRunConverter {
             obj.textWrapMode(ig.textWrapMode());
 
             System.out.println("[InlineBadge] " + ig.selfId() + " → " + badgeRg.file());
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * 그룹 자체가 renderedGraphicFrame으로 통째 렌더링된 경우,
+     * 해당 PNG를 인라인 이미지로 로드하여 반환.
+     */
+    private static ASTInlineObject loadRenderedGroupAsInlineImage(
+            IDMLCharacterRun.InlineGraphic ig,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg,
+            ASTImageLoader imageLoader,
+            ResolvedData resolvedData) {
+        String basePath = resolvedData.basePath();
+        if (basePath == null) return null;
+
+        java.io.File pngFile = new java.io.File(basePath, rg.file());
+        if (!pngFile.exists()) return null;
+
+        try {
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+            if (img == null) return null;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.sourceId(ig.selfId());
+            obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+            obj.imageData(imageData);
+            obj.imageFormat("png");
+            obj.pixelWidth(img.getWidth());
+            obj.pixelHeight(img.getHeight());
+
+            // resolved bounds [top, left, bottom, right] 에서 실제 크기 계산
+            double widthPt = ig.widthPoints();
+            double heightPt = ig.heightPoints();
+            if (rg.bounds() != null && rg.bounds().length >= 4) {
+                double bw = rg.bounds()[3] - rg.bounds()[1];
+                double bh = rg.bounds()[2] - rg.bounds()[0];
+                if (bw > 0 && bh > 0) {
+                    widthPt = bw;
+                    heightPt = bh;
+                }
+            }
+            obj.width(CoordinateConverter.pointsToHwpunits(widthPt));
+            obj.height(CoordinateConverter.pointsToHwpunits(heightPt));
+
+            obj.anchoredPosition(ig.anchoredPosition());
+            obj.textWrapMode(ig.textWrapMode());
+
+            // 그룹 자체 + 자식 ID를 consumed로 마킹 → orphan 주입에서 제외
+            resolvedData.markConsumedRenderedGraphic(String.valueOf(rg.id()));
+            if (rg.childIds() != null) {
+                for (int childId : rg.childIds()) {
+                    resolvedData.markConsumedRenderedGraphic(String.valueOf(childId));
+                }
+            }
+
+            System.err.println("[InlineRenderedGroup] " + ig.selfId() + " → " + rg.file()
+                    + " (children consumed: " + (rg.childIds() != null ? rg.childIds().length : 0) + ")");
             return obj;
         } catch (Exception e) {
             return null;

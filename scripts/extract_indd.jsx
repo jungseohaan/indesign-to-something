@@ -1159,6 +1159,188 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
         }
     }
 
+    // Pass 3: 컨테이너 도형+특수효과 텍스트 복합 그룹 (표지판, 장식 카드 등)
+    // 조건:
+    //   (1) convex 도형(Rectangle/Oval)이 컨테이너 역할 (가장 큰 바운딩 박스)
+    //       TextFrame, 테이블셀은 컨테이너가 아님
+    //   (2) 나머지 모든 객체가 컨테이너 bounds 내부에 존재
+    //   (3) 모든 텍스트에 특수효과 있음 (outline, shadow, skew, rotation 등)
+    for (var ci = 0; ci < allItems.length; ci++) {
+        var cGrp = allItems[ci];
+        if (cGrp.constructor.name !== "Group") continue;
+        if (isOnHiddenLayer(cGrp)) continue;
+
+        var cDomId = cGrp.id;
+        if (renderedIds[cDomId]) continue;
+        if (decoChildIds[cDomId]) continue;
+        if (badgeChildIds && badgeChildIds[cDomId]) continue;
+
+        // 부모가 이미 처리된 그룹이면 스킵
+        try {
+            var cPar = cGrp.parent;
+            if (cPar && (renderedIds[cPar.id] || decoChildIds[cPar.id])) continue;
+        } catch (e) {}
+
+        // --- 조건 1: convex 컨테이너 도형 찾기 ---
+        var containerShape = null;
+        var containerBounds = null;
+        var containerArea = 0;
+        var hasText = false;
+        var cNested;
+        try {
+            cNested = cGrp.allPageItems;
+            if (cNested.length < 2) continue;
+            for (var cn2 = 0; cn2 < cNested.length; cn2++) {
+                var cnItem = cNested[cn2];
+                var cnName = cnItem.constructor.name;
+                if (cnName === "TextFrame") {
+                    hasText = true;
+                } else if (cnName === "Rectangle" || cnName === "Oval") {
+                    try {
+                        var sb = cnItem.geometricBounds;
+                        var sArea = (sb[2] - sb[0]) * (sb[3] - sb[1]);
+                        if (sArea > containerArea) {
+                            containerArea = sArea;
+                            containerShape = cnItem;
+                            containerBounds = sb;
+                        }
+                    } catch (e2) {}
+                }
+            }
+        } catch (e) { continue; }
+        if (!hasText || !containerShape || !containerBounds) continue;
+
+        // --- 조건 2: 나머지 모든 객체가 컨테이너 내부에 존재 ---
+        var allInside = true;
+        var TOLERANCE = 1.0;  // 1pt 허용 오차
+        try {
+            for (var cn4 = 0; cn4 < cNested.length; cn4++) {
+                if (cNested[cn4] === containerShape) continue;
+                try {
+                    var childBb = cNested[cn4].geometricBounds;
+                    if (childBb[0] < containerBounds[0] - TOLERANCE ||
+                        childBb[1] < containerBounds[1] - TOLERANCE ||
+                        childBb[2] > containerBounds[2] + TOLERANCE ||
+                        childBb[3] > containerBounds[3] + TOLERANCE) {
+                        allInside = false;
+                        break;
+                    }
+                } catch (e3) {}
+            }
+        } catch (e) { allInside = false; }
+        if (!allInside) continue;
+
+        // --- 조건 3: 모든 텍스트에 특수효과 있어야 함 ---
+        // 특수효과: outline(strokeColor), shadow, skew, rotation
+        // 노말 텍스트가 하나라도 있으면 스킵
+        var allTextSpecial = true;
+        try {
+            for (var cn5 = 0; cn5 < cNested.length; cn5++) {
+                if (cNested[cn5].constructor.name !== "TextFrame") continue;
+                var ctf = cNested[cn5];
+                // 빈 텍스트 프레임은 무시
+                try {
+                    var ctfContent = ctf.contents;
+                    if (!ctfContent || ctfContent.replace(/[\s\r\n]/g, "").length === 0) continue;
+                } catch (e3) { continue; }
+
+                var tfSpecial = false;
+                // 프레임 회전
+                try { if (Math.abs(ctf.rotationAngle) > 0.1) tfSpecial = true; } catch (e3) {}
+                // 문자 단위 특수효과 확인
+                if (!tfSpecial) {
+                    try {
+                        var ctChars = ctf.characters;
+                        var charAllSpecial = true;
+                        for (var cc = 0; cc < ctChars.length && cc < 30; cc++) {
+                            var ch = ctChars[cc];
+                            var chContent = ch.contents;
+                            // 공백/줄바꿈은 건너뜀
+                            if (chContent === " " || chContent === "\r" || chContent === "\n") continue;
+                            var chSpecial = false;
+                            // 텍스트 외곽선(stroke)
+                            try {
+                                var chSc = ch.strokeColor;
+                                if (chSc && chSc.name !== "None") chSpecial = true;
+                            } catch (e4) {}
+                            // 기울임(skew)
+                            if (!chSpecial) {
+                                try { if (Math.abs(ch.skewAngle) > 0.1) chSpecial = true; } catch (e4) {}
+                            }
+                            // 그림자(shadow) — dropShadowSettings
+                            if (!chSpecial) {
+                                try {
+                                    var ds = ch.dropShadowSettings;
+                                    if (ds && ds.mode && ds.mode.toString() !== "ShadowMode.NONE"
+                                        && ds.mode.toString() !== "ShadowMode.NONE") chSpecial = true;
+                                } catch (e4) {}
+                            }
+                            if (!chSpecial) { charAllSpecial = false; break; }
+                        }
+                        if (charAllSpecial) tfSpecial = true;
+                    } catch (e3) {}
+                }
+                // 프레임 레벨 그림자
+                if (!tfSpecial) {
+                    try {
+                        var tfDs = ctf.transparencySettings.dropShadowSettings;
+                        if (tfDs && tfDs.mode && tfDs.mode.toString() !== "ShadowMode.NONE") tfSpecial = true;
+                    } catch (e3) {}
+                }
+                if (!tfSpecial) { allTextSpecial = false; break; }
+            }
+        } catch (e) { allTextSpecial = false; }
+        if (!allTextSpecial) continue;
+
+        $.writeln("[Pass3 MATCH] id=" + cDomId
+            + " container=" + containerShape.constructor.name + " area=" + containerArea.toFixed(0)
+            + " children=" + cNested.length);
+
+        // 페이지 범위 확인
+        var cPage = null;
+        try { cPage = cGrp.parentPage; } catch (e) {}
+        if (!cPage) continue;
+        var cPgIdx = cPage.documentOffset + 1;
+        if (cPgIdx < startPage || cPgIdx > endPage) continue;
+
+        // 렌더링
+        try {
+            var cFileName = "deco_" + cDomId + ".png";
+            var cOutFile = File(renderDir + "/" + cFileName);
+            cGrp.exportFile(ExportFormat.PNG_FORMAT, cOutFile);
+
+            var cBounds = null;
+            try { cBounds = arrCopy(cGrp.visibleBounds); } catch (e) {}
+            if (!cBounds) try { cBounds = arrCopy(cGrp.geometricBounds); } catch (e) {}
+
+            if (cBounds) {
+                var cPageBounds = cPage.bounds;
+                cBounds[0] -= cPageBounds[0];
+                cBounds[1] -= cPageBounds[1];
+                cBounds[2] -= cPageBounds[0];
+                cBounds[3] -= cPageBounds[1];
+            }
+
+            // 자식 ID 수집
+            var cAllNested = cGrp.allPageItems;
+            var cChildIdArr = [];
+            for (var cni = 0; cni < cAllNested.length; cni++) {
+                var cChildId = cAllNested[cni].id;
+                cChildIdArr.push(cChildId);
+                decoChildIds[cChildId] = true;
+            }
+
+            results.push({
+                id: cDomId,
+                file: "rendered_frames/" + cFileName,
+                bounds: cBounds,
+                pageIndex: cPage.documentOffset,
+                childIds: cChildIdArr
+            });
+            renderedIds[cDomId] = true;
+        } catch (e) {}
+    }
+
     return { frames: results, childIds: decoChildIds };
 }
 
