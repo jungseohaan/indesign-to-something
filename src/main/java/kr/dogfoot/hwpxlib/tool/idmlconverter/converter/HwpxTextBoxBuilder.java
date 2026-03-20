@@ -239,6 +239,37 @@ public class HwpxTextBoxBuilder {
     }
 
     /**
+     * 폰트 메트릭 기반 글상자 높이 보정.
+     * 문단의 텍스트 런을 순회하여 각 폰트의 heightScale(HWPX/IDML ascent+descent 비율)을 구하고,
+     * 최대값이 1.0보다 크면 높이를 확장한다.
+     */
+    private long adjustHeightByFontMetrics(long h, java.util.List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return h;
+        if (ctx.fontRegistry.fontMapper() == null) return h;
+
+        double maxScale = 1.0;
+        for (ASTParagraph para : paragraphs) {
+            if (para.items() == null) continue;
+            for (ASTInlineItem item : para.items()) {
+                if (!(item instanceof ASTTextRun)) continue;
+                ASTTextRun run = (ASTTextRun) item;
+                if (run.fontFamily() == null) continue;
+                // resolveFontIdPair를 호출하면 캐시된 MappingResult에서 heightScale을 가져올 수 있음
+                ctx.fontRegistry.resolveFontIdPair(run.fontFamily(), run.fontStyle());
+                double scale = ctx.fontRegistry.lastHeightScale();
+                if (scale > maxScale) {
+                    maxScale = scale;
+                }
+            }
+        }
+
+        if (maxScale > 1.0) {
+            h = (long) Math.ceil(h * maxScale);
+        }
+        return h;
+    }
+
+    /**
      * JustifyAlign 시뮬레이션: 프레임 높이에 맞게 문단 간 간격을 균등 분배.
      * HWPX에는 수직 균등 배분(vertAlign=JUSTIFY)이 없으므로,
      * 남는 수직 공간을 문단 사이의 spaceAfter로 삽입한다.
@@ -938,6 +969,9 @@ public class HwpxTextBoxBuilder {
                                            long x, long y, long w, long h,
                                            java.util.List<ASTParagraph> paragraphs,
                                            boolean suppressBorder) {
+        // 폰트 메트릭 기반 높이 보정: 매핑 폰트가 원본보다 세로로 크면 글상자 확장
+        h = adjustHeightByFontMetrics(h, paragraphs);
+
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
 

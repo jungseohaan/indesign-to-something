@@ -102,9 +102,18 @@ public class FontMapper {
      * 3계층 매핑: IDML 폰트 → HWPX [ko, en, spacingAdjust%]
      */
     public MappingResult mapFont(String idmlFontFamily) {
+        return mapFont(idmlFontFamily, null);
+    }
+
+    /**
+     * 3계층 매핑: IDML 폰트 → HWPX [ko, en, spacingAdjust%]
+     * @param fontStyle 가변폰트의 실제 웨이트 힌트 (예: "20", "Bold")
+     */
+    public MappingResult mapFont(String idmlFontFamily, String fontStyle) {
         if (idmlFontFamily == null) return new MappingResult(DEFAULT_HWPX_FONT, DEFAULT_HWPX_FONT, 0);
 
-        MappingResult cached = cache.get(idmlFontFamily);
+        String cacheKey = fontStyle != null ? idmlFontFamily + "/" + fontStyle : idmlFontFamily;
+        MappingResult cached = cache.get(cacheKey);
         if (cached != null) return cached;
 
         MappingResult result;
@@ -122,16 +131,36 @@ public class FontMapper {
                 result = findBestMatchByMetrics(idmlFontFamily, idmlMetric);
             } else {
                 // InDesign 메트릭 없으면 카테고리 폴백
-                result = categoryFallback(idmlFontFamily);
+                result = categoryFallback(idmlFontFamily, fontStyle);
             }
         }
         // [3] 카테고리 폴백
         else {
-            result = categoryFallback(idmlFontFamily);
+            result = categoryFallback(idmlFontFamily, fontStyle);
         }
 
-        cache.put(idmlFontFamily, result);
+        // heightScale 미설정 시 HWPX 메트릭에서 계산
+        if (result.heightScale == 1.0 && !hwpxMetrics.isEmpty()) {
+            double hs = computeHwpxHeightScale(result.koFont);
+            if (hs > 1.0) {
+                result = new MappingResult(result.koFont, result.enFont,
+                        result.spacingAdjustPercent, result.scaleAdjust, hs);
+            }
+        }
+
+        cache.put(cacheKey, result);
         return result;
+    }
+
+    /** HWPX 폰트 메트릭만으로 heightScale 계산: (ascent+descent) / testSize(10pt) */
+    private static final double METRIC_TEST_SIZE = 10.0;
+
+    private double computeHwpxHeightScale(String hwpxFontName) {
+        HwpxMetric hm = hwpxMetrics.get(hwpxFontName);
+        if (hm == null || hm.ascent <= 0 || hm.descent <= 0) return 1.0;
+        double total = hm.ascent + hm.descent;
+        double scale = total / METRIC_TEST_SIZE;
+        return Math.max(1.0, scale);
     }
 
     /**
@@ -180,10 +209,22 @@ public class FontMapper {
             spacing = (int) Math.round((ratio - 1.0) * 100);
         }
 
-        System.out.printf("[FontMap] \"%s\" → ko=\"%s\"(%.3f) en=\"%s\"(%.3f) 자간=%+d%%\n",
-                idmlFont, bestKoFont, bestKoScore, bestEnFont, bestEnScore, spacing);
+        // 높이 보정: HWPX 폰트의 (ascent+descent) / IDML 폰트의 (ascent+descent)
+        double heightScale = 1.0;
+        if (hwpxInfo != null && hwpxInfo.ascent > 0 && hwpxInfo.descent > 0
+                && idmlInfo.ascent() > 0 && idmlInfo.descent() > 0) {
+            double hwpxTotal = hwpxInfo.ascent + hwpxInfo.descent;
+            double idmlTotal = idmlInfo.ascent() + idmlInfo.descent();
+            double scale = hwpxTotal / idmlTotal;
+            if (scale > 1.0) {
+                heightScale = scale;
+            }
+        }
 
-        return new MappingResult(bestKoFont, bestEnFont, spacing);
+        System.out.printf("[FontMap] \"%s\" → ko=\"%s\"(%.3f) en=\"%s\"(%.3f) 자간=%+d%% 높이=%.3f\n",
+                idmlFont, bestKoFont, bestKoScore, bestEnFont, bestEnScore, spacing, heightScale);
+
+        return new MappingResult(bestKoFont, bestEnFont, spacing, 0, heightScale);
     }
 
     /** 심볼/딩뱃 폰트 제외 (영문 매칭 후보에서 제외) */
@@ -249,15 +290,15 @@ public class FontMapper {
      * 1차: 폰트명 키워드로 한/글 번들 폰트에 직접 매핑
      * 2차: 대분류(세리프/산세리프)로 기본 폰트 매핑
      */
-    private MappingResult categoryFallback(String idmlFontFamily) {
+    private MappingResult categoryFallback(String idmlFontFamily, String fontStyle) {
         String lower = idmlFontFamily.toLowerCase();
         boolean isWestern = isWesternFont(idmlFontFamily);
 
         // --- 1차: 키워드 기반 정밀 매핑 (한/글 번들 폰트명과 직접 연결) ---
-        String keywordMatch = keywordMapping(lower);
+        String keywordMatch = keywordMapping(lower, fontStyle);
         if (keywordMatch != null) {
             String en = isWestern ? DEFAULT_LATIN_SANS : keywordMatch;
-            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + keywordMatch + "\" en=\"" + en + "\" (키워드매핑)");
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" (style=" + fontStyle + ") → ko=\"" + keywordMatch + "\" en=\"" + en + "\" (키워드매핑)");
             return new MappingResult(keywordMatch, en, 0);
         }
 
@@ -301,14 +342,27 @@ public class FontMapper {
      * 가변 폰트, 외부 폰트 등 이름만으로 한/글 번들에 매핑 가능한 경우.
      * @return 매핑된 한/글 번들 폰트명, 없으면 null
      */
-    private static String keywordMapping(String lowerName) {
-        // 윤고딕 계열 → 한컴 윤고딕 (번호 기반 웨이트 매핑)
+    private static String keywordMapping(String lowerName, String fontStyle) {
+        // 윤고딕 계열 → 한컴 윤고딕 (웨이트 기반 매핑)
         if (lowerName.contains("윤고딕")) {
-            // 윤고딕100~300 → 한컴 윤고딕 230 (가는)
-            // 윤고딕400~500 → 한컴 윤고딕 240 (중간)
-            // 윤고딕600~700 → 한컴 윤고딕 250 (굵은)
-            // 윤고딕700~900 → 한컴 윤고딕 760 (진한)
-            int weight = extractWeightNumber(lowerName);
+            // 가변폰트("[Yoon가변] 윤고딕100_OTF" 등)는 fontStyle이 실제 웨이트
+            // (예: fontStyle="20" → weight 20 = Ultra-Thin)
+            // 비가변폰트는 폰트명의 숫자가 웨이트 (예: "윤고딕700" → weight 700)
+            int weight;
+            boolean isVariable = lowerName.contains("가변");
+            int styleWeight = parseFontStyleWeight(fontStyle);
+            if (isVariable && styleWeight > 0) {
+                weight = styleWeight;
+            } else {
+                weight = extractWeightNumber(lowerName);
+            }
+            // 한컴 윤고딕 매핑 (한컴한글 2014 호환: 230, 240, 250, 760만 사용):
+            // ~99 → 함초롬돋움 (극세: 한컴 윤고딕 230보다 얇은 느낌)
+            // 100~300 → 한컴 윤고딕 230 (가는)
+            // 301~500 → 한컴 윤고딕 240 (중간)
+            // 501~700 → 한컴 윤고딕 250 (굵은)
+            // 701~ → 한컴 윤고딕 760 (진한)
+            if (weight < 100) return "함초롬돋움";
             if (weight <= 300) return "한컴 윤고딕 230";
             if (weight <= 500) return "한컴 윤고딕 240";
             if (weight <= 700) return "한컴 윤고딕 250";
@@ -320,10 +374,10 @@ public class FontMapper {
         if (lowerName.contains("나눔고딕") || lowerName.contains("nanum gothic")) return DEFAULT_SANS;
         // 나눔명조 → 한컴바탕
         if (lowerName.contains("나눔명조") || lowerName.contains("nanum myeongjo")) return DEFAULT_SERIF;
-        // 나눔스퀘어 → 한컴 윤고딕 740
-        if (lowerName.contains("나눔스퀘어") || lowerName.contains("nanumsquare")) return "한컴 윤고딕 740";
-        // 본고딕/Noto Sans → 한컴 윤고딕 720
-        if (lowerName.contains("본고딕") || lowerName.contains("noto sans")) return "한컴 윤고딕 720";
+        // 나눔스퀘어 → 한컴 윤고딕 250 (2014 호환, 원래 740)
+        if (lowerName.contains("나눔스퀘어") || lowerName.contains("nanumsquare")) return "한컴 윤고딕 250";
+        // 본고딕/Noto Sans → 한컴 윤고딕 240 (2014 호환, 원래 720)
+        if (lowerName.contains("본고딕") || lowerName.contains("noto sans")) return "한컴 윤고딕 240";
         // 본명조/Noto Serif → 한컴바탕
         if (lowerName.contains("본명조") || lowerName.contains("noto serif")) return DEFAULT_SERIF;
         // 맑은 고딕 → 맑은 고딕 (한/글 번들에 포함)
@@ -355,6 +409,29 @@ public class FontMapper {
             }
         }
         return 400; // 기본 웨이트
+    }
+
+    /** fontStyle 문자열에서 웨이트 숫자를 추출 (예: "20" → 20, "Bold" → 700, null → 0) */
+    private static int parseFontStyleWeight(String fontStyle) {
+        if (fontStyle == null || fontStyle.isEmpty()) return 0;
+        // 순수 숫자인 경우 (가변폰트 인스턴스)
+        try {
+            return Integer.parseInt(fontStyle.trim());
+        } catch (NumberFormatException e) {
+            // 무시
+        }
+        // 키워드 기반
+        String lower = fontStyle.toLowerCase();
+        if (lower.contains("thin") || lower.contains("hairline")) return 100;
+        if (lower.contains("extralight") || lower.contains("ultralight")) return 200;
+        if (lower.contains("light")) return 300;
+        if (lower.contains("regular") || lower.contains("normal")) return 400;
+        if (lower.contains("medium")) return 500;
+        if (lower.contains("semibold") || lower.contains("demibold")) return 600;
+        if (lower.contains("extrabold") || lower.contains("ultrabold")) return 800;
+        if (lower.contains("bold")) return 700;
+        if (lower.contains("black") || lower.contains("heavy")) return 900;
+        return 0;
     }
 
     /**
@@ -457,7 +534,7 @@ public class FontMapper {
         String lower = fontFamily.toLowerCase();
 
         // 키워드 기반 정밀 매핑 우선
-        String keyword = keywordMapping(lower);
+        String keyword = keywordMapping(lower, null);
         if (keyword != null) return keyword;
 
         if (lower.contains("명조") || lower.contains("부리") || lower.contains("바탕")
@@ -494,16 +571,23 @@ public class FontMapper {
         public final int spacingAdjustPercent;
         /** horizontalScale 보정값 (예: 5 → IDML 95% → HWPX 100%) */
         public final int scaleAdjust;
+        /** 세로 높이 비율: HWPX 폰트 (ascent+descent) / IDML 폰트 (ascent+descent). 1.0 이상이면 글상자 확장 필요 */
+        public final double heightScale;
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent) {
-            this(koFont, enFont, spacingAdjustPercent, 0);
+            this(koFont, enFont, spacingAdjustPercent, 0, 1.0);
         }
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust) {
+            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, 1.0);
+        }
+
+        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double heightScale) {
             this.koFont = koFont;
             this.enFont = enFont;
             this.spacingAdjustPercent = spacingAdjustPercent;
             this.scaleAdjust = scaleAdjust;
+            this.heightScale = heightScale;
         }
     }
 

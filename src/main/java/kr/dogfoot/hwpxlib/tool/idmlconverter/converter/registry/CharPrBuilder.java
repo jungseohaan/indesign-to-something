@@ -45,6 +45,26 @@ public final class CharPrBuilder {
                               boolean strikethrough,
                               Short verticalScale,
                               Short baselineShift) {
+        build(charPr, id, height, textColor, fontFamily, null, fontRegistry,
+                letterSpacing, bold, italic, superscript, subscript,
+                underlineType, underlineColor, underlineShape,
+                horizontalScale, strikethrough, verticalScale, baselineShift);
+    }
+
+    /**
+     * @param fontStyle 가변폰트의 실제 웨이트 힌트 (예: "20", "Bold")
+     */
+    public static void build(CharPr charPr, String id, int height, String textColor,
+                              String fontFamily, String fontStyle, FontRegistry fontRegistry,
+                              Short letterSpacing,
+                              boolean bold, boolean italic,
+                              boolean superscript, boolean subscript,
+                              UnderlineType underlineType, String underlineColor,
+                              LineType3 underlineShape,
+                              Short horizontalScale,
+                              boolean strikethrough,
+                              Short verticalScale,
+                              Short baselineShift) {
         // 기본 속성
         charPr.idAnd(id)
                 .heightAnd(height)
@@ -72,7 +92,7 @@ public final class CharPrBuilder {
         }
 
         // 폰트 참조 (hangul/latin 슬롯 분리)
-        String[] fontIds = fontRegistry.resolveFontIdPair(fontFamily);
+        String[] fontIds = fontRegistry.resolveFontIdPair(fontFamily, fontStyle);
         String hangulFontId = fontIds[0];
         String latinFontId = fontIds[1];
         charPr.createFontRef();

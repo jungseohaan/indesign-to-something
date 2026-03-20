@@ -101,6 +101,13 @@ public class FontRegistry {
      * 한글 폰트: 양쪽 동일
      */
     public String[] resolveFontIdPair(String fontFamily) {
+        return resolveFontIdPair(fontFamily, null);
+    }
+
+    /**
+     * @param fontStyle 가변폰트의 실제 웨이트 힌트 (예: "20", "Bold")
+     */
+    public String[] resolveFontIdPair(String fontFamily, String fontStyle) {
         if (fontFamily == null) return new String[]{"1", "1"};
 
         // 수식 등 특수 폰트 → 양쪽 동일 (FontMapper를 거치면 안 됨)
@@ -110,10 +117,11 @@ public class FontRegistry {
             return new String[]{id, id};
         }
 
-        // 매핑 결과 캐시 조회
-        String[] cached = fontPairCache.get(fontFamily);
+        // 매핑 결과 캐시 조회 (fontStyle 포함 키)
+        String cacheKey = fontStyle != null ? fontFamily + "/" + fontStyle : fontFamily;
+        String[] cached = fontPairCache.get(cacheKey);
         if (cached != null) {
-            lastMappingResult = fontPairMappingCache.get(fontFamily);
+            lastMappingResult = fontPairMappingCache.get(cacheKey);
             return cached;
         }
 
@@ -121,12 +129,12 @@ public class FontRegistry {
 
         // 3계층 FontMapper 인스턴스가 있으면 사용
         if (fontMapperInstance != null) {
-            FontMapper.MappingResult mr = fontMapperInstance.mapFont(fontFamily);
+            FontMapper.MappingResult mr = fontMapperInstance.mapFont(fontFamily, fontStyle);
             lastMappingResult = mr;
             String hangulId = ensureRegistered(mr.koFont);
             String latinId = ensureRegistered(mr.enFont);
             result = new String[]{hangulId, latinId};
-            fontPairMappingCache.put(fontFamily, mr);
+            fontPairMappingCache.put(cacheKey, mr);
         } else {
             // 폴백: 정적 매핑
             String[] pair = FontMapper.mapToHwpxFontPair(fontFamily, customFontMap);
@@ -136,7 +144,7 @@ public class FontRegistry {
             result = new String[]{hangulId, latinId};
         }
 
-        fontPairCache.put(fontFamily, result);
+        fontPairCache.put(cacheKey, result);
         return result;
     }
 
@@ -155,6 +163,14 @@ public class FontRegistry {
      */
     public int lastScaleAdjust() {
         return lastMappingResult != null ? lastMappingResult.scaleAdjust : 0;
+    }
+
+    /**
+     * 마지막 resolveFontIdPair() 호출 결과의 높이 스케일을 반환한다.
+     * 1.0 이상이면 HWPX 폰트가 IDML 폰트보다 세로로 큰 것.
+     */
+    public double lastHeightScale() {
+        return lastMappingResult != null ? lastMappingResult.heightScale : 1.0;
     }
 
     /**
