@@ -1106,10 +1106,7 @@ public class ASTToFlatConverter {
             if (!node.fromGroup()) {
                 return FlatLayoutNode.SemanticLayer.BACKGROUND;
             }
-            // 그룹 내부: 200pt(20000 hwpunit) 이상 → 배경, 미만 → 콘텐츠
-            if (node.width() >= 20000) {
-                return FlatLayoutNode.SemanticLayer.BACKGROUND;
-            }
+            // 그룹 내부 FIGURE → 콘텐츠 (z-order로 스태킹 제어)
             return FlatLayoutNode.SemanticLayer.CONTENT;
         }
 

@@ -39,10 +39,10 @@ public class HwpxTableBuilder {
 
         // ShapeObject
         String tableId = HwpxUtil.nextShapeId();
-        // 테이블 z-order를 원래 값보다 높게 설정하여
-        // 동일 영역의 배경 이미지 위에 렌더링되도록 함
+        // 테이블 z-order: semantic layer가 배경/콘텐츠를 분리하므로
+        // 원래 z-order 값을 그대로 사용 (동일 레이어 내 올바른 스태킹)
         table.idAnd(tableId)
-                .zOrderAnd(astTable.zOrder() + 100)
+                .zOrderAnd(astTable.zOrder())
                 .numberingTypeAnd(NumberingType.TABLE)
                 .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
