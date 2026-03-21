@@ -409,21 +409,9 @@ class ASTFigureBuilder {
                                     shape.strokeWeight()), 100);
                         }
                     }
-                    // PNG 비율로 높이 보정 (한 축이 0인 선 도형은 건너뜀)
-                    // 부모 클리핑된 도형은 이미 crop되었으므로 비율 보정 생략
-                    if (shape.parentClipBounds() == null
-                            && imgResult.pixelWidth > 0 && figW > 0 && figH > 0) {
-                        long geoBottom = figY + figH;
-                        long pngH = Math.round(figW * ((double) imgResult.pixelHeight / imgResult.pixelWidth));
-                        // 선 도형(한 축이 매우 작은 경우)은 비율 보정 적용하지 않음
-                        if (pngH > 0) {
-                            figH = pngH;
-                        }
-                        // 음수 Y (페이지 위 확장) 시 바닥 가장자리 기하학적 위치 유지
-                        if (figY < 0) {
-                            figY = geoBottom - figH;
-                        }
-                    }
+                    // ExtendScript 렌더 PNG는 visibleBounds(stroke 포함) 기준이므로
+                    // IDML geometricBounds와 비율이 다름 → PNG 비율 보정 생략
+                    // (IDML geometricBounds 크기를 그대로 사용)
                     ASTFigure fig = new ASTFigure();
                     fig.kind(ASTFigure.FigureKind.RENDERED_SHAPE);
                     fig.x(figX);

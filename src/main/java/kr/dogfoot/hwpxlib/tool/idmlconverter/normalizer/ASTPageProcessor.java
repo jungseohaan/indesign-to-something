@@ -465,18 +465,19 @@ class ASTPageProcessor {
         vectorShapes.removeIf(s -> isDegenerateShape(s));
 
         // ExtendScript 렌더 대상 도형 제거:
-        // 부모 그룹이 렌더된 경우만 제거 (그룹 PNG가 자식을 포함)
-        // 도형 자체가 개별 렌더된 경우는 유지 → createFigureFromVectorShape에서 PNG 사용
+        // renderedGraphicFrame으로 렌더된 도형은 IDML 벡터 파이프라인에서 제거하고
+        // orphan 주입에서 ExtendScript PNG(정확한 bounds)로 처리
         if (resolvedData != null) {
             vectorShapes.removeIf(s -> {
-                if (!isRenderedByExtendScriptWithParent(s.selfId(), s.parentGroupId(), resolvedData)) {
-                    return false;
+                if (s.selfId() == null) return false;
+                // 도형 자체가 renderedGraphicFrame으로 렌더된 경우 → 제거 (orphan 주입 경로)
+                if (resolvedData.getRenderedGraphicFrameByIdmlId(s.selfId()) != null) {
+                    return true;
                 }
                 // 부모 그룹이 렌더된 경우 → 그룹 PNG가 자식 커버 → 제거
                 if (s.parentGroupId() != null && resolvedData.isRenderedByExtendScript(s.parentGroupId())) {
                     return true;
                 }
-                // 도형 자체만 렌더된 경우 → 유지 (createFigureFromVectorShape에서 PNG 사용)
                 return false;
             });
         }

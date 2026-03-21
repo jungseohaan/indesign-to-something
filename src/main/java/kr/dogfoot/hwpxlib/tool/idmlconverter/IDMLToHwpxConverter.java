@@ -959,29 +959,17 @@ public class IDMLToHwpxConverter {
                 java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
                 if (img == null) continue;
 
-                // 위치/크기 계산 (resolved bounds, 페이지 상대 좌표)
+                // 위치/크기 계산 (ExtendScript에서 이미 pageBounds를 뺀 페이지 상대 좌표)
                 double[] bounds = rg.bounds();
                 long figX, figY, figW, figH;
-                if (resolvedPage != null && resolvedPage.bounds() != null) {
-                    double[] rel = resolvedPage.spreadBoundsToPageRelative(bounds);
-                    figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(rel[0]);
-                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(rel[1]);
-                    figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[3] - bounds[1]);
-                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[2] - bounds[0]);
-                } else {
-                    figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[1]);
-                    figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[0]);
-                    figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[3] - bounds[1]);
-                    figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
-                            .pointsToHwpunits(bounds[2] - bounds[0]);
-                }
+                figX = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                        .pointsToHwpunits(bounds[1]);
+                figY = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                        .pointsToHwpunits(bounds[0]);
+                figW = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                        .pointsToHwpunits(bounds[3] - bounds[1]);
+                figH = kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter
+                        .pointsToHwpunits(bounds[2] - bounds[0]);
                 // PNG 비율로 높이 보정
                 if (img.getWidth() > 0) {
                     long geoBottom = figY + figH;
@@ -1105,6 +1093,11 @@ public class IDMLToHwpxConverter {
                     pageOrphanZCounter.put(pageIdx, orphanZ + 1);
                 }
                 fig.zOrder(idmlZ);
+                // renderedGraphicFrame(벡터 도형)은 텍스트/배지보다 앞에 표시
+                // IDML z-order 없으면 높은 값으로 설정하여 배경 위에 배치
+                if (idmlZ <= 0 && resolvedData.getRenderedGraphicFrameByIdmlId(idmlHexId) != null) {
+                    fig.zOrder(9000 + pageOrphanZCounter.getOrDefault(pageIdx, 0));
+                }
                 fig.fromGroup(true);  // inFrontBlocks로 분류되도록
 
                 section.addBlock(fig);
