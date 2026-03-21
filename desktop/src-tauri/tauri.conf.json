@@ -35,7 +35,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../../scripts/extract_indd.jsx"
+      "../../scripts/extract_indd.jsx",
+      "../../conversion-config.json"
     ]
   },
   "plugins": {}

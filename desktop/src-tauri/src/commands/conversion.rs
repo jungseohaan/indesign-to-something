@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
@@ -64,6 +64,15 @@ pub async fn convert_idml(
             args.push("--font-map".to_string());
             args.push(path.to_string_lossy().to_string());
             font_map_file = Some(path);
+        }
+    }
+
+    // conversion-config.json 경로 추가 (리소스 디렉토리에서 찾기)
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let config_path = resource_dir.join("conversion-config.json");
+        if config_path.exists() {
+            args.push("--config".to_string());
+            args.push(config_path.to_string_lossy().to_string());
         }
     }
 

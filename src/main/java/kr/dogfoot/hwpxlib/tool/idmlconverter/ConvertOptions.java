@@ -22,6 +22,8 @@ public class ConvertOptions {
     private String fontMapPath;
     private String linksDirectory;
     private boolean drawMarginGuide;
+    private String configPath;
+    private ConversionConfig config;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -259,6 +261,30 @@ public class ConvertOptions {
 
     public ConvertOptions linksDirectory(String linksDirectory) {
         this.linksDirectory = linksDirectory;
+        return this;
+    }
+
+    public String configPath() {
+        return configPath;
+    }
+
+    public ConvertOptions configPath(String configPath) {
+        this.configPath = configPath;
+        return this;
+    }
+
+    /**
+     * ConversionConfig를 반환한다. 로드되지 않았으면 configPath에서 로드한다.
+     */
+    public ConversionConfig config() {
+        if (config == null) {
+            config = ConversionConfig.load(configPath);
+        }
+        return config;
+    }
+
+    public ConvertOptions config(ConversionConfig config) {
+        this.config = config;
         return this;
     }
 

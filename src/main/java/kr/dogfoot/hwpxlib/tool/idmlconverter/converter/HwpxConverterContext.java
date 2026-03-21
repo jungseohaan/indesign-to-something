@@ -82,6 +82,9 @@ public class HwpxConverterContext {
 
     public List<String> warnings() { return warnings; }
 
+    /** 변환 설정 (spacing, orphan 등) */
+    public kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config;
+
     public HwpxConverterContext(HWPXFile hwpxFile, StyleRegistry styleRegistry,
                                 FontRegistry fontRegistry, List<ASTStyleDef> paragraphStyles) {
         this.hwpxFile = hwpxFile;

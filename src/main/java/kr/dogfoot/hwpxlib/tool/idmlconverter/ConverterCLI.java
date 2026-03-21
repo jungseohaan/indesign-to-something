@@ -158,6 +158,11 @@ public class ConverterCLI {
                         options = options.fontMapPath(args[++i]);
                     }
                     break;
+                case "--config":
+                    if (i + 1 < args.length) {
+                        options = options.configPath(args[++i]);
+                    }
+                    break;
                 case "--links-directory":
                     if (i + 1 < args.length) {
                         options = options.linksDirectory(args[++i]);

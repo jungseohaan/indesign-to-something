@@ -110,6 +110,110 @@ function _marker(outputDir, tag) {
     } catch (e) {}
 }
 
+// --- 전역 설정 ---
+var CONFIG = null;
+
+// --- conversion-config.json 로더 ---
+
+function loadConversionConfig(configPath) {
+    var defaults = {
+        rendering: {
+            textFrame: { maxTextLength: 30, decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 } },
+            badge: { maxTextLength: 15, maxTotalTextLength: 40, maxFontSize: 12 },
+            transparency: { opacityThreshold: 100, tintThreshold: 30 },
+            rotation: { minAngle: 0.1 },
+            pngExportResolution: 300
+        }
+    };
+    if (!configPath) return defaults;
+    try {
+        var f = File(configPath);
+        if (!f.exists) return defaults;
+        f.encoding = "UTF-8";
+        f.open("r");
+        var raw = f.read();
+        f.close();
+        var parsed = JSON.parse(raw);
+        // 얕은 병합: rendering 섹션만 사용
+        if (parsed.rendering) {
+            if (parsed.rendering.textFrame) {
+                if (parsed.rendering.textFrame.maxTextLength !== undefined)
+                    defaults.rendering.textFrame.maxTextLength = parsed.rendering.textFrame.maxTextLength;
+                if (parsed.rendering.textFrame.decorativeLargeText) {
+                    var dlt = parsed.rendering.textFrame.decorativeLargeText;
+                    if (dlt.enabled !== undefined) defaults.rendering.textFrame.decorativeLargeText.enabled = dlt.enabled;
+                    if (dlt.minFontSize !== undefined) defaults.rendering.textFrame.decorativeLargeText.minFontSize = dlt.minFontSize;
+                    if (dlt.excludeBlack !== undefined) defaults.rendering.textFrame.decorativeLargeText.excludeBlack = dlt.excludeBlack;
+                    if (dlt.blackThreshold !== undefined) defaults.rendering.textFrame.decorativeLargeText.blackThreshold = dlt.blackThreshold;
+                }
+            }
+            if (parsed.rendering.badge) {
+                var b = parsed.rendering.badge;
+                if (b.maxTextLength !== undefined) defaults.rendering.badge.maxTextLength = b.maxTextLength;
+                if (b.maxTotalTextLength !== undefined) defaults.rendering.badge.maxTotalTextLength = b.maxTotalTextLength;
+                if (b.maxFontSize !== undefined) defaults.rendering.badge.maxFontSize = b.maxFontSize;
+            }
+            if (parsed.rendering.transparency) {
+                var t = parsed.rendering.transparency;
+                if (t.opacityThreshold !== undefined) defaults.rendering.transparency.opacityThreshold = t.opacityThreshold;
+                if (t.tintThreshold !== undefined) defaults.rendering.transparency.tintThreshold = t.tintThreshold;
+            }
+            if (parsed.rendering.rotation) {
+                if (parsed.rendering.rotation.minAngle !== undefined)
+                    defaults.rendering.rotation.minAngle = parsed.rendering.rotation.minAngle;
+            }
+            if (parsed.rendering.pngExportResolution !== undefined)
+                defaults.rendering.pngExportResolution = parsed.rendering.pngExportResolution;
+        }
+        $.writeln("[Config] conversion-config.json loaded: " + configPath);
+        return defaults;
+    } catch (e) {
+        $.writeln("[Config] load failed: " + e + " → defaults");
+        return defaults;
+    }
+}
+
+/**
+ * 문자의 채움 색상이 검정(또는 검정 근사)인지 판별한다.
+ * @param character InDesign Character 객체
+ * @param blackThreshold 검정 판정 임계값 (0.90 = 90% 이상이면 검정)
+ * @return true이면 검정색
+ */
+function isBlackColor(character, blackThreshold) {
+    if (!blackThreshold) blackThreshold = 0.90;
+    try {
+        var color = character.fillColor;
+        if (!color) return true; // 색상 없으면 검정 취급
+
+        // 스와치 이름 검사
+        var name = color.name;
+        if (name === "Black" || name === "[Black]") return true;
+        if (name === "Registration") return true;
+
+        // 색상값 검사
+        var space = color.space;
+        if (space === ColorSpace.CMYK) {
+            var cv = color.colorValue;
+            // K >= blackThreshold*100% AND C+M+Y < 10%
+            if (cv[3] >= blackThreshold * 100 && (cv[0] + cv[1] + cv[2]) < 10) return true;
+        } else if (space === ColorSpace.RGB) {
+            var cv = color.colorValue;
+            // R, G, B 모두 25 이하이면 검정
+            var darkThreshold = (1.0 - blackThreshold) * 255;
+            if (cv[0] <= darkThreshold && cv[1] <= darkThreshold && cv[2] <= darkThreshold) return true;
+        }
+
+        // 틴트 검사: 검정 스와치에 높은 틴트
+        var tint = 100;
+        try { tint = character.fillTint; } catch (e2) {}
+        if ((name === "Black" || name === "[Black]") && tint >= blackThreshold * 100) return true;
+
+        return false;
+    } catch (e) {
+        return true; // 오류 시 검정 취급 (렌더링 안 함)
+    }
+}
+
 // --- 메인 ---
 
 function main(args) {
@@ -122,6 +226,9 @@ function main(args) {
     var spreadMode = (args[4] === "1");
     // PDF 전용 모드 ("1"이면 IDML/resolved 생략, PDF만 내보냄)
     var pdfOnly = (args[5] === "1");
+    // conversion-config.json 경로 (선택적)
+    var configPath = args[6] || null;
+    CONFIG = loadConversionConfig(configPath);
 
     // --- 기존 환경설정 저장 ---
     var savedInteractionLevel = app.scriptPreferences.userInteractionLevel;
@@ -1814,6 +1921,19 @@ function isRenderableTextFrame(tf) {
         try {
             var charOpacity = firstChar.transparencySettings.blendingSettings.opacity;
             if (charOpacity < 100) return true;
+        } catch (e) {}
+
+        // 장식 대형 컬러 텍스트: fontSize >= minFontSize AND 색상이 검정이 아님
+        try {
+            var dltCfg = CONFIG.rendering.textFrame.decorativeLargeText;
+            if (dltCfg.enabled) {
+                var fontSize = firstChar.pointSize;
+                if (fontSize >= dltCfg.minFontSize) {
+                    if (!dltCfg.excludeBlack || !isBlackColor(firstChar, dltCfg.blackThreshold)) {
+                        return true;
+                    }
+                }
+            }
         } catch (e) {}
     } catch (e) {}
 

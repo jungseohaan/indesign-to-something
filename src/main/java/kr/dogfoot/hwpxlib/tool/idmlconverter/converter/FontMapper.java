@@ -22,6 +22,12 @@ public class FontMapper {
     private static final String DEFAULT_SERIF = "한컴바탕";
     private static final String DEFAULT_SANS = "한컴돋움";
 
+    /** config에서 오버라이드된 기본 폰트 (인스턴스용) */
+    private String configSerifKo = DEFAULT_SERIF;
+    private String configSansKo = DEFAULT_SANS;
+    private String configSerifEn = DEFAULT_LATIN_SERIF;
+    private String configSansEn = DEFAULT_LATIN_SANS;
+
     // --- [1] 외부 JSON 매핑 ---
     private Map<String, MappingEntry> externalMappings = new HashMap<String, MappingEntry>();
 
@@ -83,6 +89,49 @@ public class FontMapper {
         } catch (Exception e) {
             System.err.println("[FontMapper] font-mapping.json 로드 실패: " + e.getMessage());
         }
+    }
+
+    /**
+     * ConversionConfig에서 폰트 매핑 및 메트릭을 로드한다.
+     */
+    public void loadFromConfig(kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config) {
+        if (config == null) return;
+
+        configSerifKo = config.defaultSerifKo();
+        configSansKo = config.defaultSansKo();
+        configSerifEn = config.defaultSerifEn();
+        configSansEn = config.defaultSansEn();
+
+        // mappings
+        for (Map.Entry<String, kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMappingEntry> entry
+                : config.fontMappings().entrySet()) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMappingEntry src = entry.getValue();
+            MappingEntry me = new MappingEntry();
+            me.ko = src.ko;
+            me.en = src.en;
+            me.spacing = src.spacing;
+            me.scaleAdjust = src.scaleAdjust;
+            externalMappings.put(entry.getKey(), me);
+        }
+
+        // hwpxFontMetrics
+        for (Map.Entry<String, kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMetricEntry> entry
+                : config.hwpxFontMetrics().entrySet()) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMetricEntry src = entry.getValue();
+            HwpxMetric hm = new HwpxMetric();
+            hm.korWidth = src.korWidth;
+            hm.latWidth = src.latWidth;
+            hm.weight = src.weight;
+            hm.xHeight = src.xHeight;
+            hm.ascent = src.ascent;
+            hm.descent = src.descent;
+            hm.category = src.category;
+            hwpxMetrics.put(entry.getKey(), hm);
+        }
+
+        System.out.println("[FontMapper] config 로드: mappings=" + config.fontMappings().size()
+                + ", hwpxFontMetrics=" + config.hwpxFontMetrics().size()
+                + ", defaultKo=" + configSerifKo + "/" + configSansKo);
     }
 
     /**
@@ -302,15 +351,15 @@ public class FontMapper {
             return new MappingResult(keywordMatch, en, 0);
         }
 
-        // --- 2차: 대분류 폴백 ---
+        // --- 2차: 대분류 폴백 (config 기본 폰트 사용) ---
 
         // 세리프 계열
         if (lower.contains("명조") || lower.contains("부리") || lower.contains("바탕")
                 || lower.contains("serif") || lower.contains("roman") || lower.contains("garamond")
                 || lower.contains("minion") || lower.contains("times") || lower.contains("palatino")
                 || lower.contains("궁서")) {
-            String ko = DEFAULT_SERIF;
-            String en = isWestern ? DEFAULT_LATIN_SERIF : ko;
+            String ko = configSerifKo;
+            String en = isWestern ? configSerifEn : ko;
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + ko + "\" en=\"" + en + "\" (카테고리폴백: serif)");
             return new MappingResult(ko, en, 0);
         }
@@ -320,21 +369,21 @@ public class FontMapper {
                 || lower.contains("sans") || lower.contains("gothic") || lower.contains("grotesque")
                 || lower.contains("arial") || lower.contains("helvetica") || lower.contains("myriad")
                 || lower.contains("rounded") || lower.contains("futura") || lower.contains("din")) {
-            String ko = DEFAULT_SANS;
-            String en = isWestern ? DEFAULT_LATIN_SANS : ko;
+            String ko = configSansKo;
+            String en = isWestern ? configSansEn : ko;
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + ko + "\" en=\"" + en + "\" (카테고리폴백: sans)");
             return new MappingResult(ko, en, 0);
         }
 
         // 서양 폰트 기본 → 산세리프
         if (isWestern) {
-            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + DEFAULT_SANS + "\" en=\"" + DEFAULT_LATIN_SANS + "\" (카테고리폴백: western-default)");
-            return new MappingResult(DEFAULT_SANS, DEFAULT_LATIN_SANS, 0);
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + configSansKo + "\" en=\"" + configSansEn + "\" (카테고리폴백: western-default)");
+            return new MappingResult(configSansKo, configSansEn, 0);
         }
 
         // 기본
-        System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + DEFAULT_SANS + "\" en=\"" + DEFAULT_SANS + "\" (카테고리폴백: default)");
-        return new MappingResult(DEFAULT_SANS, DEFAULT_SANS, 0);
+        System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + configSansKo + "\" en=\"" + configSansKo + "\" (카테고리폴백: default)");
+        return new MappingResult(configSansKo, configSansKo, 0);
     }
 
     /**

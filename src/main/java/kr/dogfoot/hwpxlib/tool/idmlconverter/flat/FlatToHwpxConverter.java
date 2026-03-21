@@ -43,8 +43,17 @@ public class FlatToHwpxConverter {
     public static ConvertResult convert(FlatDocument flatDoc, ProgressReporter reporter,
                                          Map<String, String> customFontMap,
                                          kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper fontMapper) throws ConvertException {
+        return convert(flatDoc, reporter, customFontMap, fontMapper, null);
+    }
+
+    public static ConvertResult convert(FlatDocument flatDoc, ProgressReporter reporter,
+                                         Map<String, String> customFontMap,
+                                         kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper fontMapper,
+                                         kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config) throws ConvertException {
         try {
-            return new FlatToHwpxConverter(flatDoc, reporter, customFontMap, fontMapper).doConvert();
+            FlatToHwpxConverter converter = new FlatToHwpxConverter(flatDoc, reporter, customFontMap, fontMapper);
+            converter.config = config;
+            return converter.doConvert();
         } catch (ConvertException ce) {
             throw ce;
         } catch (Exception e) {
@@ -61,6 +70,7 @@ public class FlatToHwpxConverter {
     private final ProgressReporter reporter;
     private final Map<String, String> customFontMap;
     private final kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper fontMapper;
+    private kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config;
 
     private int pagesConverted;
 
@@ -102,6 +112,7 @@ public class FlatToHwpxConverter {
         // 3. 컨텍스트 + 빌더 생성
         ctx = new HwpxConverterContext(hwpxFile, styleRegistry, fontRegistry,
                 gateway.paragraphStyles());
+        ctx.config = config;
 
         paragraphBuilder = new HwpxParagraphBuilder(ctx);
         textBoxBuilder = new HwpxTextBoxBuilder(ctx, paragraphBuilder);

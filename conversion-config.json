@@ -1,0 +1,57 @@
+{
+  "_comment": "IDML→HWPX 변환 통합 설정. ExtendScript + Java CLI 공용.",
+
+  "rendering": {
+    "_comment": "ExtendScript PNG 렌더링 조건",
+    "textFrame": {
+      "maxTextLength": 30,
+      "decorativeLargeText": {
+        "enabled": true,
+        "minFontSize": 16,
+        "excludeBlack": true,
+        "blackThreshold": 0.90
+      }
+    },
+    "badge": {
+      "maxTextLength": 15,
+      "maxTotalTextLength": 40,
+      "maxFontSize": 12
+    },
+    "transparency": {
+      "opacityThreshold": 100,
+      "tintThreshold": 30
+    },
+    "rotation": {
+      "minAngle": 0.1
+    },
+    "pngExportResolution": 300
+  },
+
+  "fontMapping": {
+    "defaultSerifKo": "한컴바탕",
+    "defaultSansKo": "한컴돋움",
+    "defaultSerifEn": "Times New Roman",
+    "defaultSansEn": "Arial",
+    "mappings": {},
+    "hwpxFontMetrics": {}
+  },
+
+  "spacing": {
+    "spaceCondenseRatio": 50
+  },
+
+  "orphanInjection": {
+    "overlapThreshold": 0.70,
+    "containmentThreshold": 0.80,
+    "duplicateSizeRatio": 0.90
+  },
+
+  "vectorRendering": {
+    "dpi": 300
+  },
+
+  "image": {
+    "defaultDpi": 72,
+    "maxPixelDimension": 2000
+  }
+}

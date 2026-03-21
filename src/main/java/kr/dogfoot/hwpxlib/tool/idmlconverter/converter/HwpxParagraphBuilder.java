@@ -572,7 +572,7 @@ public class HwpxParagraphBuilder {
         // 공백 문자를 별도 런으로 분리하여 장평(ratio) 축소 적용
         // 탭/줄바꿈이 포함된 경우는 기존 로직 유지 (복잡도 방지)
         boolean hasSpecial = text.indexOf('\t') >= 0 || text.indexOf('\n') >= 0 || text.indexOf('\u2028') >= 0;
-        if (!hasSpecial && SPACE_RATIO < 100 && text.indexOf(' ') >= 0) {
+        if (!hasSpecial && spaceRatio() < 100 && text.indexOf(' ') >= 0) {
             addTextRunWithSpaceSplit(para, text, charPrId, textRun);
         } else {
             Run run = para.addNewRun();
@@ -585,8 +585,11 @@ public class HwpxParagraphBuilder {
         }
     }
 
-    /** 공백 장평 축소 비율 (100 = 변경 없음, 80 = 80%로 축소) */
-    private static final short SPACE_RATIO = 50;
+    /** 공백 장평 축소 비율 (100 = 변경 없음, 50 = 50%로 축소) */
+    private short spaceRatio() {
+        if (ctx.config != null) return (short) ctx.config.spaceCondenseRatio();
+        return 50;
+    }
 
     /**
      * 텍스트를 "비공백/공백" 세그먼트로 분할하여 출력.
@@ -610,7 +613,7 @@ public class HwpxParagraphBuilder {
 
     /**
      * 공백용 CharPr을 생성 또는 캐시에서 가져온다.
-     * 기존 CharPr과 동일하되 ratio만 SPACE_RATIO로 축소.
+     * 기존 CharPr과 동일하되 ratio만 spaceRatio()로 축소.
      */
     private String getOrCreateSpaceCharPr(String baseCharPrId, ASTTextRun textRun) {
         String cacheKey = "SP|" + baseCharPrId;
@@ -630,7 +633,7 @@ public class HwpxParagraphBuilder {
             ulShape = LineType3.fromString(textRun.underlineShape());
         }
 
-        // horizontalScale를 SPACE_RATIO로 강제 오버라이드
+        // horizontalScale를 spaceRatio()로 강제 오버라이드
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
                 textRun.letterSpacing(),
@@ -642,7 +645,7 @@ public class HwpxParagraphBuilder {
                         ? (textRun.underlineColor() != null ? textRun.underlineColor() : textColor)
                         : "#000000",
                 ulShape,
-                SPACE_RATIO,  // 공백 장평 축소
+                spaceRatio(),  // 공백 장평 축소
                 textRun.strikeThrough(),
                 textRun.verticalScale(),
                 textRun.baselineShift());

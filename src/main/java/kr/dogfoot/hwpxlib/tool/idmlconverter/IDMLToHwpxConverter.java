@@ -181,9 +181,15 @@ public class IDMLToHwpxConverter {
 
             // Phase 2.8: 3계층 폰트 매퍼 초기화 (선택적)
             FontMapper fontMapper = null;
-            if (options.fontMapPath() != null) {
+            ConversionConfig config = options.config();
+            if (options.fontMapPath() != null || !config.fontMappings().isEmpty()) {
                 fontMapper = new FontMapper();
-                fontMapper.loadFontMapping(options.fontMapPath());
+                // config 기반 초기화 (기본 폰트, 매핑, 메트릭)
+                fontMapper.loadFromConfig(config);
+                // font-mapping.json이 별도로 있으면 추가 로드 (오버라이드)
+                if (options.fontMapPath() != null) {
+                    fontMapper.loadFontMapping(options.fontMapPath());
+                }
                 if (resolvedData != null) {
                     fontMapper.setIdmlMetrics(resolvedData.fontMetrics());
                 }
@@ -191,7 +197,7 @@ public class IDMLToHwpxConverter {
 
             // Phase 3: AST -> Flat -> HWPX (페이지별 진행률: 10~90)
             FlatDocument flatDoc = ASTToFlatConverter.convert(astDoc);
-            ConvertResult result = FlatToHwpxConverter.convert(flatDoc, reporter, null, fontMapper);
+            ConvertResult result = FlatToHwpxConverter.convert(flatDoc, reporter, null, fontMapper, config);
 
             // 초기 단계 경고 + AST 정규화 경고를 결과에 병합
             for (String w : earlyWarnings) { result.addWarning(w); }

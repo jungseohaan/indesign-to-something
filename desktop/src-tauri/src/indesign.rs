@@ -5,6 +5,25 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
 use tokio::time::sleep;
 
+/// 번들 리소스에서 conversion-config.json 경로를 찾는다.
+fn find_bundled_config(app: &AppHandle) -> String {
+    // 리소스 디렉토리에서 찾기
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let config = resource_dir.join("conversion-config.json");
+        if config.exists() {
+            return config.to_string_lossy().to_string();
+        }
+    }
+    // 앱 데이터 디렉토리에서 찾기
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        let config = data_dir.join("conversion-config.json");
+        if config.exists() {
+            return config.to_string_lossy().to_string();
+        }
+    }
+    String::new()
+}
+
 /// InDesign 추출 결과
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InddExtractResult {
@@ -104,12 +123,16 @@ pub async fn run_extraction(
     // - `with arguments`: ExtendScript의 arguments 변수로 전달
     // - arguments[2] = startPage (0=전체), arguments[3] = endPage (0=전체)
     // - arguments[4] = spreadMode ("1"=스프레드 PDF, "0"=페이지별 PDF)
+    // - arguments[5] = pdfOnly ("0"=기본)
+    // - arguments[6] = configPath (conversion-config.json 경로, 빈 문자열이면 기본값)
     let spread_flag = if spread_mode { "1" } else { "0" };
+    // config 파일: 번들 리소스에서 찾거나 빈 문자열
+    let config_path = find_bundled_config(&app);
     let applescript = format!(
         r#"tell application "{app_name}"
     activate
     with timeout of 600 seconds
-        do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}"}}
+        do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}"}}
     end timeout
 end tell"#,
         app_name = app_name,
@@ -119,6 +142,7 @@ end tell"#,
         start_page = start_page,
         end_page = end_page,
         spread_flag = spread_flag,
+        config_path = config_path,
     );
 
     // 진행률: 추출 실행 중
