@@ -71,6 +71,7 @@ public class HwpxParagraphBuilder {
             astPara.addTabStop(new ASTTabStop(astPara.indentToHerePosition(), "left", null));
         }
 
+
         // 단락 속성 오버라이드가 있으면 새 ParaPr 생성
         if (hasParagraphOverrides(astPara)) {
             paraPrId = createOverrideParaPr(astPara, paraPrId);
@@ -380,15 +381,7 @@ public class HwpxParagraphBuilder {
         int next = resolveParaLong(astPara.spaceAfter(),
                 baseStyle != null ? baseStyle.spaceAfter() : null);
 
-        // HWPX 탭 위치는 leftMargin 기준(상대), InDesign 탭은 프레임 기준(절대)
-        // 행잉 인덴트 시 탭 위치를 leftMargin만큼 감산
-        if (indent < 0 && left > 0 && astPara.hasTabStops()) {
-            for (ASTTabStop ts : astPara.tabStops()) {
-                long adjPos = ts.position() - left;
-                if (adjPos < 0) adjPos = 0;
-                ts.position(adjPos);
-            }
-        }
+        // InDesign 탭 위치는 프레임 기준(절대) — HWPX에서도 동일하게 사용
 
         // 인라인 탭 정지점 → TabPr 생성 (마진 조정 후에 실행해야 암시적 탭 포함)
         String tabPrId;

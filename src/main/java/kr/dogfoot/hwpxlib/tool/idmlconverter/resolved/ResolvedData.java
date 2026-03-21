@@ -372,6 +372,24 @@ public class ResolvedData {
         for (RenderedGroup rt : renderedImageFrameMap.values()) {
             scaleDoubleArray(rt.bounds(), s);
         }
+        // stories: paragraph indent + tabStops
+        for (ResolvedStory story : storyMap.values()) {
+            for (ResolvedParagraph para : story.paragraphs()) {
+                if (para.leftIndent() != null) para.leftIndent(para.leftIndent() * s);
+                if (para.firstLineIndent() != null) para.firstLineIndent(para.firstLineIndent() * s);
+                if (para.rightIndent() != null) para.rightIndent(para.rightIndent() * s);
+                if (para.spaceBefore() != null) para.spaceBefore(para.spaceBefore() * s);
+                if (para.spaceAfter() != null) para.spaceAfter(para.spaceAfter() * s);
+                // tabStops position도 스케일
+                if (para.hasTabStops()) {
+                    for (ResolvedTabStop rts : para.tabStops()) {
+                        if (rts.position() != null) {
+                            rts.position(rts.position() * s);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private static void scaleDoubleArray(double[] arr, double s) {
