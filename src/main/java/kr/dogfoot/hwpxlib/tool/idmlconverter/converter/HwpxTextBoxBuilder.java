@@ -1160,7 +1160,8 @@ public class HwpxTextBoxBuilder {
                 if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                     ASTInlineObject obj = (ASTInlineObject) item;
                     if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
-                            && obj.width() < halfWidth) {
+                            && obj.width() < halfWidth
+                            && obj.height() >= ConverterConstants.MIN_TEXT_BOX_HEIGHT) {
                         narrowFrames.add(obj);
                     }
                 }
@@ -1379,7 +1380,6 @@ public class HwpxTextBoxBuilder {
         boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
         boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
         if (!hasParagraphs && !hasInlineTables) return;
-
 
         // 테이블 셀 내부 오버레이 → 페이지 레벨로 승격
         // 한글(HWPX 렌더러)이 테이블 셀 SubList 내부의 플로팅 객체를 지원하지 않으므로

@@ -227,29 +227,18 @@ public class StyleRegistry {
         int prev = styleDef.spaceBefore() != null ? styleDef.spaceBefore().intValue() : 0;
         int next = styleDef.spaceAfter() != null ? styleDef.spaceAfter().intValue() : 0;
 
-        // HWPX 탭 위치는 leftMargin 기준이므로,
-        // 행잉 인덴트(indent < 0)일 때 leftMargin=0으로 설정
+        // HWPX 탭 위치는 leftMargin 기준(상대), InDesign 탭은 프레임 기준(절대)
+        // 행잉 인덴트 시 탭 위치를 leftMargin만큼 감산하여 절대→상대 변환
         boolean hangingIndent = indent < 0 && left > 0;
         if (hangingIndent && styleDef.hasTabStops()) {
-            int origLeft = left;
-            int origFirstLine = left + indent;
-            indent = origFirstLine;
-            left = 0;
-
-            // InDesign 행잉 인덴트 + 탭 패턴: 탭이 LeftIndent 위치로 이동
-            boolean hasTabAtLeft = false;
+            java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop> adjusted
+                    = new java.util.ArrayList<>();
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop ts : styleDef.tabStops()) {
-                if (Math.abs(ts.position() - origLeft) < 50) {
-                    hasTabAtLeft = true;
-                    break;
-                }
+                long adjPos = ts.position() - left;
+                if (adjPos < 0) adjPos = 0;
+                adjusted.add(new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop(adjPos, ts.alignment(), ts.leader()));
             }
-            if (!hasTabAtLeft) {
-                java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop> tabs
-                        = new java.util.ArrayList<>(styleDef.tabStops());
-                tabs.add(new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop(origLeft, "left", null));
-                styleDef.tabStops(tabs);
-            }
+            styleDef.tabStops(adjusted);
         }
 
         // 스타일 내 탭 정지점 → TabPr 생성
