@@ -2489,11 +2489,20 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
 
 function collectTextFrames(doc, startPage, endPage) {
     var frames = [];
+    var collectedStoryIds = {};  // 범위 내 프레임의 storyId 수집
+    var collectedTfIds = {};     // 수집된 프레임 ID 추적
     try {
-        var tfs = doc.textFrames.everyItem().getElements();
+        // doc.textFrames는 페이지 소속 프레임만 포함할 수 있으므로
+        // allPageItems에서 TextFrame을 수집하여 Spread 직속 프레임도 포함
+        var allItems = doc.allPageItems;
+        var tfs = [];
+        for (var ai = 0; ai < allItems.length; ai++) {
+            if (allItems[ai].constructor.name === "TextFrame") tfs.push(allItems[ai]);
+        }
+
+        // Pass 1: 페이지 범위 내 프레임 수집
         for (var i = 0; i < tfs.length; i++) {
             var tf = tfs[i];
-            // 페이지 범위 필터
             try {
                 var pp = tf.parentPage;
                 if (pp) {
@@ -2501,6 +2510,8 @@ function collectTextFrames(doc, startPage, endPage) {
                     if (pgIdx < startPage || pgIdx > endPage) continue;
                 }
             } catch (e) {}
+            try { collectedStoryIds[tf.parentStory.id] = true; } catch (e) {}
+            collectedTfIds[tf.id] = true;
             var fData = {
                 id: tf.id.toString(),
                 storyId: null,
@@ -2556,6 +2567,59 @@ function collectTextFrames(doc, startPage, endPage) {
             try { fData.rotationAngle = tf.absoluteRotationAngle; } catch (e) {}
 
             frames.push(fData);
+        }
+
+        // Pass 2: 범위 내 Story와 같은 storyId를 가진 범위 밖 프레임 추가 수집
+        // (스레드 체인의 일부가 다른 페이지에 있을 때 조판 엔진 단락 분배 정보 유지)
+        for (var j = 0; j < tfs.length; j++) {
+            var tf2 = tfs[j];
+            if (collectedTfIds[tf2.id]) continue;  // 이미 수집됨
+            var sid2 = null;
+            try { sid2 = tf2.parentStory.id; } catch (e) {}
+            if (sid2 && collectedStoryIds[sid2]) {
+                var fData2 = {
+                    id: tf2.id.toString(),
+                    storyId: sid2.toString(),
+                    overflows: false,
+                    lineCount: 0,
+                    paragraphStart: -1,
+                    paragraphEnd: -1
+                };
+                try { fData2.overflows = tf2.overflows; } catch (e) {}
+                try { fData2.lineCount = tf2.lines.length; } catch (e) {}
+                try {
+                    var fp2 = tf2.paragraphs.everyItem().getElements();
+                    if (fp2.length > 0) {
+                        var sp2 = tf2.parentStory.paragraphs.everyItem().getElements();
+                        var fi2 = fp2[0].index;
+                        var li2 = fp2[fp2.length - 1].index;
+                        for (var sk = 0; sk < sp2.length; sk++) {
+                            if (sp2[sk].index === fi2) fData2.paragraphStart = sk;
+                            if (sp2[sk].index === li2) fData2.paragraphEnd = sk;
+                        }
+                        var fb2 = tf2.geometricBounds;
+                        var ft2 = fb2[0];
+                        var py2 = [];
+                        for (var fk = 0; fk < fp2.length; fk++) {
+                            try {
+                                var ln2 = fp2[fk].lines.everyItem().getElements();
+                                if (ln2.length > 0) {
+                                    py2.push(Math.round((ln2[0].geometricBounds[0] - ft2) * 100) / 100);
+                                } else { py2.push(-1); }
+                            } catch (e3) { py2.push(-1); }
+                        }
+                        fData2.paragraphYOffsets = py2;
+                    }
+                } catch (e) {}
+                try { fData2.geometricBounds = [tf2.geometricBounds[0], tf2.geometricBounds[1], tf2.geometricBounds[2], tf2.geometricBounds[3]]; } catch (e) {}
+                try { fData2.columnCount = tf2.textFramePreferences.textColumnCount; } catch (e) {}
+                try { fData2.columnGutter = tf2.textFramePreferences.textColumnGutter; } catch (e) {}
+                try { var is2 = tf2.textFramePreferences.insetSpacing; fData2.insetSpacing = [is2[0], is2[1], is2[2], is2[3]]; } catch (e) {}
+                try { fData2.verticalJustification = tf2.textFramePreferences.verticalJustification.toString(); } catch (e) {}
+                try { fData2.rotationAngle = tf2.absoluteRotationAngle; } catch (e) {}
+                frames.push(fData2);
+                $.writeln("[collectTextFrames] Pass2: added thread frame id=" + tf2.id + " storyId=" + sid2);
+            }
         }
     } catch (e) {
         // 텍스트 프레임 접근 실패 시 무시

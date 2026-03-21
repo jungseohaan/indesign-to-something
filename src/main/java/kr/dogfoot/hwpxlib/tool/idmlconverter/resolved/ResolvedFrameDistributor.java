@@ -518,7 +518,7 @@ public class ResolvedFrameDistributor {
             for (ASTBlock block : section.blocks()) {
                 if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
                     ASTTextFrameBlock tfb = (ASTTextFrameBlock) block;
-                    if (tfb.distributed() && tfb.storyId() != null && !tfb.isBackgroundOnly()) {
+                    if (tfb.storyId() != null && !tfb.isBackgroundOnly()) {
                         storyBlocks.computeIfAbsent(tfb.storyId(), k -> new ArrayList<>()).add(tfb);
                     }
                 }
