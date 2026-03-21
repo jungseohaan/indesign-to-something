@@ -710,11 +710,21 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
                 bounds[3] -= pageBounds[1];
             }
 
+            // 자식 ID 수집 (IDML 파이프라인에서 중복 배치 방지)
+            var childIds = [];
+            try {
+                var allNested = item.allPageItems;
+                for (var ci = 0; ci < allNested.length; ci++) {
+                    childIds.push(allNested[ci].id);
+                }
+            } catch (e2) {}
+
             renderedGraphicFrames.push({
                 id: domId,
                 file: "rendered_frames/" + fileName,
                 bounds: bounds,
-                pageIndex: parentPage.documentOffset
+                pageIndex: parentPage.documentOffset,
+                childIds: childIds.length > 0 ? childIds : undefined
             });
         } catch (e) {}
     }
