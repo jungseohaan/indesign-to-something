@@ -74,7 +74,8 @@ class IDMLSpreadParser {
             String itemLayer = getAttrOrNull(elem, "ItemLayer");
             if (itemLayer != null && hiddenLayerIds.contains(itemLayer)) continue;
 
-
+            // 비인쇄(Nonprinting) 요소는 건너뛴다
+            if ("true".equals(elem.getAttribute("Nonprinting"))) continue;
 
             if ("Page".equals(elem.getTagName())) {
                 spread.addPage(parsePage(elem));

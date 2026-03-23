@@ -486,11 +486,14 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems) 
     app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
 
     // Pass 1: 배지 그룹 감지 및 렌더링
+    // 부모 그룹이 이미 렌더된 경우, 자식 그룹은 건너뜀 (중복 방지)
     for (var gi = 0; gi < allItems.length; gi++) {
         var grp = allItems[gi];
         if (grp.constructor.name !== "Group") continue;
         if (isOnHiddenLayer(grp)) continue;
         if (!isBadgeGroup(grp)) continue;
+        // 이미 부모 배지의 childId로 등록된 그룹은 건너뜀
+        if (badgeGroupChildIds[grp.id]) continue;
 
         var grpPage = null;
         try { grpPage = grp.parentPage; } catch (e) {}
