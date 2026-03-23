@@ -4,7 +4,8 @@
     "Sandoll 곧은부리": { "ko": "한컴돋움", "en": "Arial", "spacing": 0 },
     "Sandoll 고고RoundCond": { "ko": "한컴돋움", "en": "Calibri", "spacing": -5 },
     "Helvetica Neue": { "ko": "한컴돋움", "en": "Arial", "spacing": 0, "scaleAdjust": 5 },
-    "Times New Roman": { "ko": "한컴바탕", "en": "Times New Roman", "spacing": 0 }
+    "Times New Roman": { "ko": "한컴바탕", "en": "Times New Roman", "spacing": 0 },
+    "210 한반도OTF": { "ko": "한컴 윤고딕 250", "en": "한컴 윤고딕 250", "spacing": 0, "ratio": 0.82 }
   },
   "hwpxFontMetrics": {
     "_comment": "한/글 폰트 메트릭 (10pt 기준, FontMetricsAnalyzer로 측정)",

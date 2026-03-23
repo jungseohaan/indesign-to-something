@@ -59,6 +59,7 @@ public class FontMapper {
                         me.en = val.has("en") ? val.get("en").getAsString() : me.ko;
                         me.spacing = val.has("spacing") ? val.get("spacing").getAsInt() : 0;
                         me.scaleAdjust = val.has("scaleAdjust") ? val.get("scaleAdjust").getAsInt() : 0;
+                        me.ratio = val.has("ratio") ? val.get("ratio").getAsDouble() : 1.0;
                         externalMappings.put(entry.getKey(), me);
                     }
                 }
@@ -111,6 +112,7 @@ public class FontMapper {
             me.en = src.en;
             me.spacing = src.spacing;
             me.scaleAdjust = src.scaleAdjust;
+            me.ratio = src.ratio;
             externalMappings.put(entry.getKey(), me);
         }
 
@@ -170,8 +172,8 @@ public class FontMapper {
         // [1] 외부 JSON 명시적 매핑
         MappingEntry ext = externalMappings.get(idmlFontFamily);
         if (ext != null) {
-            result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust);
-            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)");
+            result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, 1.0, ext.ratio);
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
         }
         // [2] 메트릭 기반 자동 매핑
         else if (!hwpxMetrics.isEmpty()) {
@@ -270,10 +272,17 @@ public class FontMapper {
             }
         }
 
-        System.out.printf("[FontMap] \"%s\" → ko=\"%s\"(%.3f) en=\"%s\"(%.3f) 자간=%+d%% 높이=%.3f\n",
-                idmlFont, bestKoFont, bestKoScore, bestEnFont, bestEnScore, spacing, heightScale);
+        // 장평 비율: InDesign 한글폭 / HWPX 한글폭
+        double fontRatio = 1.0;
+        if (hwpxInfo != null && hwpxInfo.korWidth > 0 && idmlInfo.korWidth() > 0) {
+            fontRatio = idmlInfo.korWidth() / hwpxInfo.korWidth;
+            if (fontRatio > 0.95 && fontRatio < 1.05) fontRatio = 1.0; // 5% 이내면 무시
+        }
 
-        return new MappingResult(bestKoFont, bestEnFont, spacing, 0, heightScale);
+        System.out.printf("[FontMap] \"%s\" → ko=\"%s\"(%.3f) en=\"%s\"(%.3f) 자간=%+d%% 높이=%.3f 장평=%.3f\n",
+                idmlFont, bestKoFont, bestKoScore, bestEnFont, bestEnScore, spacing, heightScale, fontRatio);
+
+        return new MappingResult(bestKoFont, bestEnFont, spacing, 0, heightScale, fontRatio);
     }
 
     /** 심볼/딩뱃 폰트 제외 (영문 매칭 후보에서 제외) */
@@ -622,21 +631,28 @@ public class FontMapper {
         public final int scaleAdjust;
         /** 세로 높이 비율: HWPX 폰트 (ascent+descent) / IDML 폰트 (ascent+descent). 1.0 이상이면 글상자 확장 필요 */
         public final double heightScale;
+        /** 장평 비율: 원본 폰트 대비 HWPX 폰트의 폭 비율. 1.0 미만이면 글자 폭 축소 필요 (예: 0.82 → 82%) */
+        public final double ratio;
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent) {
-            this(koFont, enFont, spacingAdjustPercent, 0, 1.0);
+            this(koFont, enFont, spacingAdjustPercent, 0, 1.0, 1.0);
         }
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust) {
-            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, 1.0);
+            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, 1.0, 1.0);
         }
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double heightScale) {
+            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, heightScale, 1.0);
+        }
+
+        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double heightScale, double ratio) {
             this.koFont = koFont;
             this.enFont = enFont;
             this.spacingAdjustPercent = spacingAdjustPercent;
             this.scaleAdjust = scaleAdjust;
             this.heightScale = heightScale;
+            this.ratio = ratio;
         }
     }
 
@@ -645,6 +661,7 @@ public class FontMapper {
         String en;
         int spacing;
         int scaleAdjust;
+        double ratio;
     }
 
     static class HwpxMetric {

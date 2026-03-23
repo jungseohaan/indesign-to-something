@@ -2049,25 +2049,24 @@ function measureFontMetrics(doc) {
     var latSample = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     var testSize = 10; // 10pt 기준
 
-    // 문서에서 사용된 폰트 패밀리 수집
+    // 문서에서 사용된 폰트 수집 (doc.fonts = 실제 설치+사용 가능한 폰트)
     var usedFonts = {};
-    var stories = doc.stories;
-    for (var i = 0; i < stories.length; i++) {
-        var chars = stories[i].characters;
-        var step = Math.max(1, Math.floor(chars.length / 20)); // 최대 20개 샘플링
-        for (var j = 0; j < chars.length; j += step) {
+    try {
+        var docFonts = doc.fonts;
+        for (var i = 0; i < docFonts.length; i++) {
             try {
-                var af = chars[j].appliedFont;
-                var ff = af.fontFamily;
+                var f = docFonts[i];
+                var ff = f.fontFamily;
+                if (f.status !== FontStatus.INSTALLED) continue; // 설치된 폰트만
                 if (!usedFonts[ff]) {
                     usedFonts[ff] = {
-                        font: af,
-                        style: af.fontStyleName
+                        fontObj: f, // 폰트 객체 직접 사용
+                        style: f.fontStyleName
                     };
                 }
             } catch(e) {}
         }
-    }
+    } catch(e) {}
 
     var results = [];
 
@@ -2084,7 +2083,7 @@ function measureFontMetrics(doc) {
     for (var family in usedFonts) {
         try {
             var fontInfo = usedFonts[family];
-            var fontRef = fontInfo.font;
+            var fontObj = fontInfo.fontObj; // 폰트 객체 직접 사용
 
             // weight 추론 (fontStyleName에서)
             var styleLower = fontInfo.style.toLowerCase();
@@ -2098,15 +2097,17 @@ function measureFontMetrics(doc) {
             else if (styleLower.indexOf("semibold") >= 0 || styleLower.indexOf("demibold") >= 0) weight = 600;
             else if (styleLower.indexOf("medium") >= 0) weight = 500;
 
-            // 한글 폭 측정
+            // 한글 폭 측정 — 적용 후 실제 폰트 확인
             var avgKorWidth = 0;
             try {
                 tf.contents = korSample;
-                tf.characters.everyItem().appliedFont = fontRef;
+                tf.characters.everyItem().appliedFont = fontObj;
                 tf.characters.everyItem().pointSize = testSize;
                 tf.characters.everyItem().tracking = 0;
                 tf.characters.everyItem().desiredLetterSpacing = 0;
-                if (tf.lines.length > 0) {
+                // 실제 적용된 폰트가 요청한 폰트와 같은지 확인
+                var actualFont = tf.characters[0].appliedFont.fontFamily;
+                if (actualFont === family && tf.lines.length > 0) {
                     var korTotalWidth = tf.lines[0].endHorizontalOffset - tf.lines[0].horizontalOffset;
                     avgKorWidth = korTotalWidth / korSample.length;
                 }
@@ -2116,52 +2117,24 @@ function measureFontMetrics(doc) {
             var avgLatWidth = 0;
             try {
                 tf.contents = latSample;
-                tf.characters.everyItem().appliedFont = fontRef;
+                tf.characters.everyItem().appliedFont = fontObj;
                 tf.characters.everyItem().pointSize = testSize;
                 tf.characters.everyItem().tracking = 0;
                 tf.characters.everyItem().desiredLetterSpacing = 0;
-                if (tf.lines.length > 0) {
+                var actualFontEn = tf.characters[0].appliedFont.fontFamily;
+                if (actualFontEn === family && tf.lines.length > 0) {
                     var latTotalWidth = tf.lines[0].endHorizontalOffset - tf.lines[0].horizontalOffset;
                     avgLatWidth = latTotalWidth / latSample.length;
                 }
             } catch(e3) {}
 
-            // x-height 측정 (소문자 x)
-            var xHeight = 0;
-            try {
-                tf.contents = "x";
-                tf.characters.everyItem().appliedFont = fontRef;
-                tf.characters.everyItem().pointSize = testSize;
-                if (tf.lines.length > 0 && tf.characters.length > 0) {
-                    var charBounds = tf.characters[0].geometricBounds; // [top, left, bottom, right]
-                    xHeight = charBounds[2] - charBounds[0]; // 근사치
-                }
-            } catch(e4) {}
-
-            // ascent/descent — 대문자 기준
-            var ascent = 0, descent = 0;
-            try {
-                tf.contents = "Hg";
-                tf.characters.everyItem().appliedFont = fontRef;
-                tf.characters.everyItem().pointSize = testSize;
-                if (tf.characters.length >= 2) {
-                    var baseline = tf.characters[0].baseline;
-                    var topBound = tf.characters[0].geometricBounds[0];
-                    var bottomBound = tf.characters[1].geometricBounds[2]; // 'g' descender
-                    ascent = baseline - topBound;
-                    descent = bottomBound - baseline;
-                }
-            } catch(e5) {}
-
+            // x-height, ascent/descent 생략 — korWidth/latWidth만 수집
             results.push({
                 family: family,
                 style: fontInfo.style,
                 korWidth: Math.round(avgKorWidth * 100) / 100,
                 latWidth: Math.round(avgLatWidth * 100) / 100,
-                weight: weight,
-                xHeight: Math.round(xHeight * 100) / 100,
-                ascent: Math.round(ascent * 100) / 100,
-                descent: Math.round(descent * 100) / 100
+                weight: weight
             });
         } catch(e6) {
             // 폰트 측정 실패 — 스킵

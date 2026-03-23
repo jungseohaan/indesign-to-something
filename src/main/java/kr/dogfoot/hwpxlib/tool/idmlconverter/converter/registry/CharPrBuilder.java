@@ -103,6 +103,11 @@ public final class CharPrBuilder {
         if (fontScaleAdjust != 0) {
             ratio = (short) (ratio + fontScaleAdjust);
         }
+        // 장평 비율 적용 (폰트 매핑에서 원본보다 넓은 폰트로 매핑 시 축소)
+        double fontRatio = fontRegistry.lastFontRatio();
+        if (fontRatio > 0 && fontRatio != 1.0) {
+            ratio = (short) Math.round(ratio * fontRatio);
+        }
         charPr.createRatio();
         charPr.ratio().set(ratio, ratio, ratio, ratio, ratio, ratio, ratio);
 

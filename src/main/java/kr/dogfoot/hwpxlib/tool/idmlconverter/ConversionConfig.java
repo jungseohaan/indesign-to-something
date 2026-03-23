@@ -219,6 +219,7 @@ public class ConversionConfig {
         public String en;
         public int spacing;
         public int scaleAdjust;
+        public double ratio = 1.0;
     }
 
     public static class FontMetricEntry {
