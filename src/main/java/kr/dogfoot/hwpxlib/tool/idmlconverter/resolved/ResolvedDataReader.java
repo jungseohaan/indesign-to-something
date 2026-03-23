@@ -361,18 +361,18 @@ public class ResolvedDataReader {
         group.id(getInt(o, "id", 0));
         group.file(getString(o, "file"));
         group.pageIndex(getInt(o, "pageIndex", 0));
-        if (o.has("bounds")) {
+        if (o.has("bounds") && !o.get("bounds").isJsonNull()) {
             group.bounds(parseDoubleArray(o.getAsJsonArray("bounds")));
         }
-        if (o.has("visibleExpansion")) {
+        if (o.has("visibleExpansion") && !o.get("visibleExpansion").isJsonNull()) {
             group.visibleExpansion(parseDoubleArray(o.getAsJsonArray("visibleExpansion")));
         }
         // 배지 그룹 필드
         group.type(getString(o, "type"));
-        if (o.has("childIds")) {
+        if (o.has("childIds") && !o.get("childIds").isJsonNull()) {
             group.childIds(parseIntArray(o.getAsJsonArray("childIds")));
         }
-        if (o.has("childTextFrameIds")) {
+        if (o.has("childTextFrameIds") && !o.get("childTextFrameIds").isJsonNull()) {
             group.childTextFrameIds(parseIntArray(o.getAsJsonArray("childTextFrameIds")));
         }
         group.badgeGroupId(getInt(o, "badgeGroupId", 0));

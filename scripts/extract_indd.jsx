@@ -346,8 +346,16 @@ function main(args) {
             try { $.gc(); } catch (e) {}
 
             // 2.12. 통합 플로팅 그래픽 렌더링 (실험적)
+            // 기존 렌더 함수에서 이미 처리된 ID 수집 → 중복 렌더 방지
             _marker(outputDir, "09b_floatingItems");
-            var renderedFloatingItems = exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems);
+            var alreadyRenderedIds = {};
+            var allRendered = [].concat(renderedFrames, renderedPdfFrames, renderedGraphicFrames, renderedImageFrames);
+            for (var ri = 0; ri < allRendered.length; ri++) {
+                if (allRendered[ri] && allRendered[ri].id) {
+                    alreadyRenderedIds[allRendered[ri].id] = true;
+                }
+            }
+            var renderedFloatingItems = exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems, alreadyRenderedIds);
             try { $.gc(); } catch (e) {}
 
             _marker(outputDir, "10_collectResolved");
@@ -2073,7 +2081,8 @@ function isInlineItem(item) {
  *
  * @return {Array} renderedFloatingItems 배열
  */
-function exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems) {
+function exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems, alreadyRenderedIds) {
+    if (!alreadyRenderedIds) alreadyRenderedIds = {};
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -2093,6 +2102,47 @@ function exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems) {
         "GraphicLine": true, "Group": true, "TextFrame": true
     };
 
+    // 레이어 순서 맵: doc.layers는 위→아래 순서 (index 0 = top)
+    var layerIndexMap = {};  // layer name → index
+    try {
+        var docLayers = doc.layers;
+        for (var li = 0; li < docLayers.length; li++) {
+            layerIndexMap[docLayers[li].name] = li;
+        }
+    } catch (e) {}
+
+    // 페이지별 "커버 레이어": 페이지의 80% 이상을 덮는 불투명 객체의 레이어 인덱스
+    // 이 레이어보다 아래(인덱스 큰) 레이어의 객체는 가려져서 렌더 불필요
+    var pageCoverLayerIdx = {};  // pageDocOffset → layerIndex
+
+    // 1차 패스: 커버 레이어 탐지
+    for (var ci = 0; ci < allItems.length; ci++) {
+        var cItem = allItems[ci];
+        var cName2 = cItem.constructor.name;
+        if (cName2 !== "Rectangle" && cName2 !== "Polygon" && cName2 !== "Group") continue;
+        try {
+            var cPage = cItem.parentPage;
+            if (!cPage) continue;
+            var cBounds = cItem.geometricBounds;
+            var cPageBounds = cPage.bounds;
+            var cItemW = cBounds[3] - cBounds[1];
+            var cItemH = cBounds[2] - cBounds[0];
+            var cPageW = cPageBounds[3] - cPageBounds[1];
+            var cPageH = cPageBounds[2] - cPageBounds[0];
+            var coverage = (cItemW * cItemH) / (cPageW * cPageH);
+            if (coverage > 0.8) {
+                var cLayerName = cItem.itemLayer.name;
+                var cLayerIdx = layerIndexMap[cLayerName];
+                if (cLayerIdx !== undefined) {
+                    var pgOff = cPage.documentOffset;
+                    if (pageCoverLayerIdx[pgOff] === undefined || cLayerIdx < pageCoverLayerIdx[pgOff]) {
+                        pageCoverLayerIdx[pgOff] = cLayerIdx;
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+
     for (var i = 0; i < allItems.length; i++) {
         var item = allItems[i];
         var cName = item.constructor.name;
@@ -2102,6 +2152,8 @@ function exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems) {
 
         // 이미 처리된 항목 건너뜀
         if (processedIds[domId]) continue;
+        // 기존 렌더 함수에서 이미 렌더된 항목 건너뜀
+        if (alreadyRenderedIds[domId]) continue;
         // 부모 Group에 의해 이미 커버된 자식 건너뜀
         if (childCoveredIds[domId]) continue;
 
@@ -2139,6 +2191,15 @@ function exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems) {
         if (!parentPage) continue;
         var pgIdx = parentPage.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        // 레이어 필터: 커버 레이어보다 아래 레이어의 객체는 가려져서 렌더 불필요
+        try {
+            var itemLayerIdx = layerIndexMap[item.itemLayer.name];
+            var coverIdx = pageCoverLayerIdx[parentPage.documentOffset];
+            if (itemLayerIdx !== undefined && coverIdx !== undefined && itemLayerIdx > coverIdx) {
+                continue;  // 배경에 가려진 하위 레이어 객체
+            }
+        } catch (e) {}
 
         // Group: 그룹 전체를 렌더하고 자식을 커버 처리
         if (cName === "Group") {

@@ -173,6 +173,16 @@ public class ResolvedData {
 
     public List<RenderedGroup> allRenderedFloatingItems() { return renderedFloatingItems; }
 
+    public boolean hasRenderedFloatingItem(String idmlHexId) {
+        if (idmlHexId == null || idmlHexId.length() < 2 || idmlHexId.charAt(0) != 'u') return false;
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(idmlHexId.substring(1), 16));
+            return renderedFloatingItemMap.containsKey(decimalId);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     public List<RenderedGroup> getRenderedFloatingItemsByPage(int pageIndex) {
         List<RenderedGroup> result = new ArrayList<>();
         for (RenderedGroup rg : renderedFloatingItems) {
@@ -546,7 +556,17 @@ public class ResolvedData {
             }
         }
 
-        // 4. renderedPdfFrame: orphan 주입 대상이므로 여기서 등록하지 않음
+        // 4. renderedFloatingItems: 통합 플로팅 그래픽
+        for (RenderedGroup rg : renderedFloatingItems) {
+            renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
+            if (rg.childIds() != null) {
+                for (int childId : rg.childIds()) {
+                    renderedExtIdmlIds.add("u" + Integer.toHexString(childId));
+                }
+            }
+        }
+
+        // 5. renderedPdfFrame: orphan 주입 대상이므로 여기서 등록하지 않음
         // IDML 이미지 프레임 파이프라인이 Links 폴더의 .ai/.pdf 파일을 처리할 수 있으므로
         // isRenderedByExtendScript에서 제외하여 정상 파이프라인을 우선 적용.
         // IDML이 처리하지 못한 경우에만 orphan으로 폴백된다.

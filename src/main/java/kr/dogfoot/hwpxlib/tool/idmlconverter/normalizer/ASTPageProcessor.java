@@ -405,6 +405,10 @@ class ASTPageProcessor {
             // 1) 이미지 자체가 렌더 ID 셋에 등록 (renderedImageFrame의 childImageId 등)
             // 2) 조상 그룹이 renderedImageFrame으로 등록
             if (resolvedData != null) {
+                // renderedFloatingItems에 있는 이미지 → ExtendScript PNG로 대체
+                if (resolvedData.hasRenderedFloatingItem(imgFrame.selfId())) {
+                    continue;
+                }
                 if (resolvedData.isRenderedByExtendScript(imgFrame.selfId())) {
                     continue;
                 }
@@ -473,6 +477,10 @@ class ASTPageProcessor {
         if (resolvedData != null) {
             vectorShapes.removeIf(s -> {
                 if (s.selfId() == null) return false;
+                // renderedFloatingItems에 있는 도형 → ExtendScript PNG로 대체
+                if (resolvedData.hasRenderedFloatingItem(s.selfId())) {
+                    return true;
+                }
                 // 도형 자체가 renderedGraphicFrame으로 렌더된 경우 → 제거 (orphan 주입 경로)
                 if (resolvedData.getRenderedGraphicFrameByIdmlId(s.selfId()) != null) {
                     return true;
