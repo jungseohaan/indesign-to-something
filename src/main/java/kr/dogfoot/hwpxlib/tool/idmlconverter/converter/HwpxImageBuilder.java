@@ -467,10 +467,14 @@ public class HwpxImageBuilder {
         String picId = HwpxUtil.nextShapeId();
 
         // 콘텐츠 이미지/그룹 요소 모두 IN_FRONT_OF_TEXT — z-order로 순서 결정.
-        // 단, 페이지 대부분을 덮는 큰 배경 이미지는 BEHIND_TEXT로
+        // 단, fromGroup=false(배경 표시) 또는 z-order가 낮고 면적이 큰 이미지는 BEHIND_TEXT
         // (테이블 등 본문 텍스트 선택/편집이 가능하도록).
         TextWrapMethod figWrap = TextWrapMethod.IN_FRONT_OF_TEXT;
-        if (figure.width() > 45000 && figure.height() > 60000) {
+        long figAreaHwp = (long) figure.width() * figure.height();
+        // A4 기준 페이지 면적 약 59000 * 84000 = ~5e9 hwpunit²
+        // 20% 이상(~1e9)이고 z-order가 낮으면(≤5) 배경으로 판단
+        boolean isLargeBackground = figAreaHwp > 500_000_000L && figure.zOrder() <= 5;
+        if (!figure.fromGroup() || isLargeBackground) {
             figWrap = TextWrapMethod.BEHIND_TEXT;
         }
 

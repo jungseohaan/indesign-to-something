@@ -1104,7 +1104,23 @@ public class IDMLToHwpxConverter {
                 if (idmlZ <= 0 && resolvedData.getRenderedGraphicFrameByIdmlId(idmlHexId) != null) {
                     fig.zOrder(9000 + pageOrphanZCounter.getOrDefault(pageIdx, 0));
                 }
-                fig.fromGroup(true);  // inFrontBlocks로 분류되도록
+
+                // 배경 vs 전경 판단: 이미지 면적이 페이지의 50% 이상이면 배경(BEHIND_TEXT)
+                boolean isBackground = false;
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage bgPage =
+                        (resolvedData != null) ? resolvedData.getPage(pageIdx) : null;
+                if (bgPage != null && bgPage.bounds() != null) {
+                    double[] pb = bgPage.bounds();
+                    double pageArea = (pb[2] - pb[0]) * (pb[3] - pb[1]);
+                    double orphanArea = (double) figW * figH / (100.0 * 100.0); // hwpunit → pt
+                    if (pageArea > 0 && orphanArea / pageArea > 0.5) {
+                        isBackground = true;
+                    }
+                }
+                if (isBackground) {
+                    fig.zOrder(0);  // 배경은 최하위 z-order
+                }
+                fig.fromGroup(!isBackground);  // 배경이면 BEHIND_TEXT, 아니면 IN_FRONT_OF_TEXT
 
                 section.addBlock(fig);
 
