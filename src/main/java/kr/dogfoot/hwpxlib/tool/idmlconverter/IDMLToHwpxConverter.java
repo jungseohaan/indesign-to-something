@@ -191,7 +191,7 @@ public class IDMLToHwpxConverter {
                     fontMapper.loadFontMapping(options.fontMapPath());
                 }
                 if (resolvedData != null) {
-                    fontMapper.setIdmlMetrics(resolvedData.fontMetrics());
+                    fontMapper.setIdmlMetrics(resolvedData.fontMetrics(), resolvedData.scaleFactor());
                 }
             }
 

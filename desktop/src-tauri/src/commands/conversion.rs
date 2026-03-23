@@ -67,12 +67,20 @@ pub async fn convert_idml(
         }
     }
 
-    // conversion-config.json 경로 추가 (리소스 디렉토리에서 찾기)
+    // 리소스 디렉토리에서 config 및 font-map 경로 추가
     if let Ok(resource_dir) = app.path().resource_dir() {
         let config_path = resource_dir.join("conversion-config.json");
         if config_path.exists() {
             args.push("--config".to_string());
             args.push(config_path.to_string_lossy().to_string());
+        }
+        // 사용자 지정 font_map이 없을 때만 번들된 font-mapping.json 사용
+        if font_map_file.is_none() {
+            let font_map_path = resource_dir.join("font-mapping.json");
+            if font_map_path.exists() {
+                args.push("--font-map".to_string());
+                args.push(font_map_path.to_string_lossy().to_string());
+            }
         }
     }
 

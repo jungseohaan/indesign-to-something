@@ -34,6 +34,7 @@ public class ConversionConfig {
     private String defaultSansEn = "Arial";
     private Map<String, FontMappingEntry> fontMappings = new HashMap<String, FontMappingEntry>();
     private Map<String, FontMetricEntry> hwpxFontMetrics = new HashMap<String, FontMetricEntry>();
+    private Map<String, FontMetricEntry> indesignFontMetrics = new HashMap<String, FontMetricEntry>();
 
     // --- spacing ---
     private int spaceCondenseRatio = 50;
@@ -123,6 +124,7 @@ public class ConversionConfig {
                     me.en = val.has("en") ? val.get("en").getAsString() : me.ko;
                     me.spacing = val.has("spacing") ? val.get("spacing").getAsInt() : 0;
                     me.scaleAdjust = val.has("scaleAdjust") ? val.get("scaleAdjust").getAsInt() : 0;
+                    me.ratio = val.has("ratio") ? val.get("ratio").getAsDouble() : 1.0;
                     fontMappings.put(entry.getKey(), me);
                 }
             }
@@ -141,6 +143,21 @@ public class ConversionConfig {
                     hm.descent = val.has("descent") ? val.get("descent").getAsDouble() : 0;
                     hm.category = val.has("category") ? val.get("category").getAsString() : "sans";
                     hwpxFontMetrics.put(entry.getKey(), hm);
+                }
+            }
+
+            if (fm.has("indesignFontMetrics")) {
+                JsonObject metrics = fm.getAsJsonObject("indesignFontMetrics");
+                for (Map.Entry<String, JsonElement> entry : metrics.entrySet()) {
+                    if (entry.getKey().startsWith("_")) continue;
+                    JsonObject val = entry.getValue().getAsJsonObject();
+                    FontMetricEntry hm = new FontMetricEntry();
+                    hm.korWidth = val.has("korWidth") ? val.get("korWidth").getAsDouble() : 0;
+                    hm.latWidth = val.has("latWidth") ? val.get("latWidth").getAsDouble() : 0;
+                    hm.weight = val.has("weight") ? val.get("weight").getAsInt() : 400;
+                    hm.ascent = val.has("ascent") ? val.get("ascent").getAsDouble() : 0;
+                    hm.descent = val.has("descent") ? val.get("descent").getAsDouble() : 0;
+                    indesignFontMetrics.put(entry.getKey(), hm);
                 }
             }
         }
@@ -196,6 +213,7 @@ public class ConversionConfig {
     public String defaultSansEn() { return defaultSansEn; }
     public Map<String, FontMappingEntry> fontMappings() { return fontMappings; }
     public Map<String, FontMetricEntry> hwpxFontMetrics() { return hwpxFontMetrics; }
+    public Map<String, FontMetricEntry> indesignFontMetrics() { return indesignFontMetrics; }
 
     // spacing
     public int spaceCondenseRatio() { return spaceCondenseRatio; }

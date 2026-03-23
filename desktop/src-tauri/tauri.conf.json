@@ -36,7 +36,8 @@
     ],
     "resources": [
       "../../scripts/extract_indd.jsx",
-      "../../conversion-config.json"
+      "../../conversion-config.json",
+      "../../font-mapping.json"
     ]
   },
   "plugins": {}

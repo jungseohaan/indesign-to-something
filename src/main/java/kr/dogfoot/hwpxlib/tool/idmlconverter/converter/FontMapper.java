@@ -36,6 +36,8 @@ public class FontMapper {
 
     // --- InDesign 폰트 메트릭 (resolved.json에서 런타임 로드) ---
     private Map<String, FontMetricEntry> idmlMetrics = new HashMap<String, FontMetricEntry>();
+    /** InDesign 좌표 → pt 변환 스케일 팩터 (mm→pt = 2.8346) */
+    private double scaleFactor = 2.8346;
 
     // --- 매핑 캐시 ---
     private Map<String, MappingResult> cache = new HashMap<String, MappingResult>();
@@ -131,8 +133,27 @@ public class FontMapper {
             hwpxMetrics.put(entry.getKey(), hm);
         }
 
+        // indesignFontMetrics (fonttools 측정값, scaleFactor 불필요 — 이미 pt 단위)
+        for (Map.Entry<String, kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMetricEntry> entry
+                : config.indesignFontMetrics().entrySet()) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMetricEntry src = entry.getValue();
+            FontMetricEntry fm = new FontMetricEntry();
+            fm.family(entry.getKey());
+            // fonttools 측정값은 이미 pt 단위 → scaleFactor로 나눠서 저장
+            // findBestMatchByMetrics에서 scaleFactor를 곱하면 원래 pt 값 복원
+            fm.korWidth(src.korWidth / scaleFactor);
+            fm.latWidth(src.latWidth / scaleFactor);
+            fm.ascent(src.ascent);
+            fm.descent(src.descent);
+            // idmlMetrics에 없는 경우만 추가 (resolved.json 런타임 값 우선)
+            if (!idmlMetrics.containsKey(entry.getKey())) {
+                idmlMetrics.put(entry.getKey(), fm);
+            }
+        }
+
         System.out.println("[FontMapper] config 로드: mappings=" + config.fontMappings().size()
                 + ", hwpxFontMetrics=" + config.hwpxFontMetrics().size()
+                + ", indesignFontMetrics=" + config.indesignFontMetrics().size()
                 + ", defaultKo=" + configSerifKo + "/" + configSansKo);
     }
 
@@ -140,13 +161,18 @@ public class FontMapper {
      * resolved.json에서 로드한 InDesign 폰트 메트릭을 설정한다.
      */
     public void setIdmlMetrics(List<FontMetricEntry> metrics) {
+        setIdmlMetrics(metrics, 2.8346);
+    }
+
+    public void setIdmlMetrics(List<FontMetricEntry> metrics, double scale) {
         if (metrics == null) return;
+        this.scaleFactor = scale;
         for (FontMetricEntry m : metrics) {
             if (m.family() != null) {
                 idmlMetrics.put(m.family(), m);
             }
         }
-        System.out.println("[FontMapper] InDesign 폰트 메트릭 로드: " + idmlMetrics.size() + "개");
+        System.out.println("[FontMapper] InDesign 폰트 메트릭 로드: " + idmlMetrics.size() + "개 (scale=" + scale + ")");
     }
 
     /**
@@ -175,17 +201,7 @@ public class FontMapper {
             result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, 1.0, ext.ratio);
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
         }
-        // [2] 메트릭 기반 자동 매핑
-        else if (!hwpxMetrics.isEmpty()) {
-            FontMetricEntry idmlMetric = idmlMetrics.get(idmlFontFamily);
-            if (idmlMetric != null && (idmlMetric.korWidth() > 0 || idmlMetric.latWidth() > 0)) {
-                result = findBestMatchByMetrics(idmlFontFamily, idmlMetric);
-            } else {
-                // InDesign 메트릭 없으면 카테고리 폴백
-                result = categoryFallback(idmlFontFamily, fontStyle);
-            }
-        }
-        // [3] 카테고리 폴백
+        // [2] 카테고리/키워드 폴백
         else {
             result = categoryFallback(idmlFontFamily, fontStyle);
         }
@@ -252,11 +268,14 @@ public class FontMapper {
             }
         }
 
-        // 자간 보정: (InDesign 한글폭 / HWPX 한글폭 - 1) * 100
+        // 자간/장평 보정: InDesign korWidth(mm) → pt 변환
+        // 대체 폰트 값(3.53mm) 감지: 대부분 폰트가 동일 값이면 대체 폰트로 간주하여 무시
         HwpxMetric hwpxInfo = hwpxMetrics.get(bestKoFont);
         int spacing = 0;
-        if (hwpxInfo != null && hwpxInfo.korWidth > 0 && idmlInfo.korWidth() > 0) {
-            double ratio = idmlInfo.korWidth() / hwpxInfo.korWidth;
+        double idmlKorWidthPt = idmlInfo.korWidth() * scaleFactor;
+        boolean isReliableMetric = isReliableIdmlMetric(idmlInfo.korWidth());
+        if (isReliableMetric && hwpxInfo != null && hwpxInfo.korWidth > 0 && idmlKorWidthPt > 0) {
+            double ratio = idmlKorWidthPt / hwpxInfo.korWidth;
             spacing = (int) Math.round((ratio - 1.0) * 100);
         }
 
@@ -272,10 +291,10 @@ public class FontMapper {
             }
         }
 
-        // 장평 비율: InDesign 한글폭 / HWPX 한글폭
+        // 장평 비율: InDesign 한글폭(mm→pt) / HWPX 한글폭(pt)
         double fontRatio = 1.0;
-        if (hwpxInfo != null && hwpxInfo.korWidth > 0 && idmlInfo.korWidth() > 0) {
-            fontRatio = idmlInfo.korWidth() / hwpxInfo.korWidth;
+        if (isReliableMetric && hwpxInfo != null && hwpxInfo.korWidth > 0 && idmlKorWidthPt > 0) {
+            fontRatio = idmlKorWidthPt / hwpxInfo.korWidth;
             if (fontRatio > 0.95 && fontRatio < 1.05) fontRatio = 1.0; // 5% 이내면 무시
         }
 
@@ -283,6 +302,24 @@ public class FontMapper {
                 idmlFont, bestKoFont, bestKoScore, bestEnFont, bestEnScore, spacing, heightScale, fontRatio);
 
         return new MappingResult(bestKoFont, bestEnFont, spacing, 0, heightScale, fontRatio);
+    }
+
+    /**
+     * InDesign fontMetric의 korWidth가 신뢰할 수 있는 값인지 판별한다.
+     * 대부분 폰트가 동일 korWidth를 보고하면 대체 폰트(fallback)로 측정된 것이므로 신뢰 불가.
+     */
+    private boolean isReliableIdmlMetric(double korWidth) {
+        if (korWidth <= 0) return false;
+        // 같은 korWidth를 가진 폰트가 전체의 50% 이상이면 대체 폰트 값으로 간주
+        int sameCount = 0;
+        int total = 0;
+        for (FontMetricEntry m : idmlMetrics.values()) {
+            if (m.korWidth() > 0) {
+                total++;
+                if (Math.abs(m.korWidth() - korWidth) < 0.01) sameCount++;
+            }
+        }
+        return total < 3 || sameCount < total / 2;
     }
 
     /** 심볼/딩뱃 폰트 제외 (영문 매칭 후보에서 제외) */

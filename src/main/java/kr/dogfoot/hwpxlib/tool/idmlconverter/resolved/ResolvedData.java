@@ -30,6 +30,7 @@ public class ResolvedData {
     private Set<String> badgeGroupShapeIdmlIds;  // 배지 그룹 소속 도형 IDML hex ID ("u1735")
     private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TextFrame DOM id → 배지 그룹 RenderedGroup
     private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
+    private double scaleFactor = 2.8346;  // resolved 좌표 → pt 변환 스케일
     private final Map<String, FontMetricEntry> fontMetricMap = new HashMap<>();  // family → metric
     private final Set<String> consumedRenderedGraphicIds = new HashSet<>();  // 인라인 처리로 소비된 deco DOM id
     private String basePath;  // resolved.json 부모 디렉토리 경로
@@ -154,6 +155,7 @@ public class ResolvedData {
     }
 
     public List<FontMetricEntry> fontMetrics() { return fontMetrics; }
+    public double scaleFactor() { return scaleFactor; }
 
     public FontMetricEntry getFontMetric(String family) {
         return fontMetricMap.get(family);
@@ -322,6 +324,7 @@ public class ResolvedData {
         if (resolvedPageWidth <= 0) return;
 
         double scale = idmlPageWidthPts / resolvedPageWidth;
+        this.scaleFactor = scale;
         if (Math.abs(scale - 1.0) < 0.01) return;  // 이미 points
 
         System.out.println("[ResolvedData] 좌표 단위 정규화: scale=" + String.format("%.4f", scale)
