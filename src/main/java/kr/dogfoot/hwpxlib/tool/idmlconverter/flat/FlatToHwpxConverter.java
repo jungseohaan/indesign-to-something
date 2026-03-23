@@ -245,6 +245,9 @@ public class FlatToHwpxConverter {
         switch (node.nodeType()) {
             case TEXT_FRAME:
                 ASTTextFrameBlock tfb = adapter.toTextFrameBlock(node);
+                if ("u3547f".equals(tfb.sourceId())) {
+                    System.out.println("[FLAT-DBG] u3547f: x=" + tfb.x() + " y=" + tfb.y() + " w=" + tfb.width() + " h=" + tfb.height() + " paras=" + tfb.paragraphs().size());
+                }
                 if (node.hasNonRectPath() && gateway.isBackgroundOnly(node)) {
                     imageBuilder.convertNonRectBackground(para, tfb);
                 } else {

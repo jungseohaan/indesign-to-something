@@ -10,6 +10,7 @@ public class ResolvedTable {
     private int columnCount;
     private double[] columnWidths;  // pts
     private double[] rowHeights;    // pts
+    private double[] bounds;        // [top, left, bottom, right] page-relative
 
     public String id() { return id; }
     public void id(String v) { this.id = v; }
@@ -25,4 +26,7 @@ public class ResolvedTable {
 
     public double[] rowHeights() { return rowHeights; }
     public void rowHeights(double[] v) { this.rowHeights = v; }
+
+    public double[] bounds() { return bounds; }
+    public void bounds(double[] v) { this.bounds = v; }
 }

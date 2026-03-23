@@ -110,12 +110,20 @@ public class IDMLToHwpxConverter {
                 replaceRenderedTextFrames(idmlDoc, resolvedData, options);
             }
 
-            // Phase 2: IDML -> ASTDocument (4단계 정규화, resolved 좌표 활용)
-            reporter.reportProgress(5, 100, "IDML 정규화 중...");
-            ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
+            // Phase 2: AST 빌드
+            reporter.reportProgress(5, 100, "AST 빌드 중...");
+            ASTDocument astDoc;
+            // IDML-Free 파이프라인: resolved.json에 renderedFloatingItems가 있으면 새 빌더 사용
+            if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) {
+                astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(resolvedData, idmlDoc.tempDir()).build();
+            } else {
+                // 레거시: IDML 기반 4단계 정규화
+                astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
+            }
 
-            // Phase 2.5: Resolved 텍스트/스타일 보강 (선택적)
-            if (resolvedData != null) {
+            // Phase 2.5: Resolved 텍스트/스타일 보강 (레거시 파이프라인만)
+            boolean isNewPipeline = resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty();
+            if (resolvedData != null && !isNewPipeline) {
                 try {
                     reporter.reportProgress(8, 100, "resolved 데이터 병합 중...");
                     kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedMerger.enrich(
@@ -128,8 +136,8 @@ public class IDMLToHwpxConverter {
                 }
             }
 
-            // Phase 2.6: Resolved 오버레이 좌표 보강 (선택적)
-            if (resolvedData != null) {
+            // Phase 2.6: Resolved 오버레이 좌표 보강 (레거시만)
+            if (resolvedData != null && !isNewPipeline) {
                 try {
                     kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedOverlayEnricher.enrich(
                             astDoc, resolvedData);
@@ -139,29 +147,33 @@ public class IDMLToHwpxConverter {
                 }
             }
 
-            // Phase 2.7: 플로팅 이미지 → 인라인 머지 (textWrap 자리차지)
-            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FloatingImageMerger.merge(astDoc);
-
-            // Phase 2.8: 인라인 앵커 텍스트 프레임 → 렌더 이미지 교체
+            // Phase 2.7~2.8: 레거시 후처리 (새 파이프라인에서는 건너뜀)
             java.util.Set<String> inlineReplacedTexts = java.util.Collections.emptySet();
-            if (resolvedData != null && resolvedData.renderedTextFrameCount() > 0) {
-                inlineReplacedTexts = replaceInlineRenderedTextFrames(astDoc, resolvedData, options);
+            if (!isNewPipeline) {
+                // Phase 2.7: 플로팅 이미지 → 인라인 머지 (textWrap 자리차지)
+                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FloatingImageMerger.merge(astDoc);
+
+                // Phase 2.8: 인라인 앵커 텍스트 프레임 → 렌더 이미지 교체
+                if (resolvedData != null && resolvedData.renderedTextFrameCount() > 0) {
+                    inlineReplacedTexts = replaceInlineRenderedTextFrames(astDoc, resolvedData, options);
+                }
+
+                // 테이블 셀 인라인 텍스트와 동일한 플로팅 텍스트 프레임 블록 제거
+                if (!inlineReplacedTexts.isEmpty()) {
+                    removeFloatingDuplicates(astDoc, inlineReplacedTexts, resolvedData);
+                }
             }
 
-            // 테이블 셀 인라인 텍스트와 동일한 플로팅 텍스트 프레임 블록 제거
-            // (플로팅 교체 전에 실행해야 ASTFigure로 변환되기 전에 매칭 가능)
-            if (!inlineReplacedTexts.isEmpty()) {
-                removeFloatingDuplicates(astDoc, inlineReplacedTexts, resolvedData);
-            }
-
-            // Phase 2.9: 플로팅 렌더 텍스트 프레임 → 이미지 교체 (AST 좌표 기반)
-            if (resolvedData != null && resolvedData.renderedTextFrameCount() > 0) {
-                replaceFloatingRenderedTextFrames(astDoc, resolvedData, options);
-            }
-
-            // Phase 2.10: VectorShape로 등록되지 않은 렌더 그래픽 프레임 주입
-            if (resolvedData != null) {
-                injectOrphanRenderedGraphics(astDoc, resolvedData, options);
+            // Phase 2.9~2.10: 레거시 후처리 (새 파이프라인에서는 건너뜀)
+            if (!isNewPipeline) {
+                // Phase 2.9: 플로팅 렌더 텍스트 프레임 → 이미지 교체
+                if (resolvedData != null && resolvedData.renderedTextFrameCount() > 0) {
+                    replaceFloatingRenderedTextFrames(astDoc, resolvedData, options);
+                }
+                // Phase 2.10: orphan 렌더 그래픽 주입
+                if (resolvedData != null) {
+                    injectOrphanRenderedGraphics(astDoc, resolvedData, options);
+                }
             }
 
             // 정규화 완료 summary

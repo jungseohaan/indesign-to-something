@@ -24,6 +24,20 @@ public class ResolvedTextFrame {
     private String verticalJustification;
     private double rotationAngle;
 
+    // IDML-Free 파이프라인 보강 필드
+    private String previousFrameId;     // 스레드 체인 이전 프레임 DOM ID
+    private String nextFrameId;         // 스레드 체인 다음 프레임 DOM ID
+    private boolean isInline;           // 인라인(앵커) 여부
+    private int pageIndex = -1;         // 페이지 인덱스 (0-based)
+    private int zOrder;                 // 페이지 내 스태킹 순서
+    private double[] pageRelativeBounds; // [top, left, bottom, right] page-relative
+    private String fillColor;
+    private double fillTint;
+    private String strokeColor;
+    private double strokeWeight;
+    private double opacity = 100;
+    private double cornerRadius;
+
     public String id() { return id; }
     public void id(String v) { this.id = v; }
 
@@ -62,4 +76,41 @@ public class ResolvedTextFrame {
 
     public double rotationAngle() { return rotationAngle; }
     public void rotationAngle(double v) { this.rotationAngle = v; }
+
+    // IDML-Free 파이프라인 보강 접근자
+    public String previousFrameId() { return previousFrameId; }
+    public void previousFrameId(String v) { this.previousFrameId = v; }
+
+    public String nextFrameId() { return nextFrameId; }
+    public void nextFrameId(String v) { this.nextFrameId = v; }
+
+    public boolean isInline() { return isInline; }
+    public void isInline(boolean v) { this.isInline = v; }
+
+    public int pageIndex() { return pageIndex; }
+    public void pageIndex(int v) { this.pageIndex = v; }
+
+    public int zOrder() { return zOrder; }
+    public void zOrder(int v) { this.zOrder = v; }
+
+    public double[] pageRelativeBounds() { return pageRelativeBounds; }
+    public void pageRelativeBounds(double[] v) { this.pageRelativeBounds = v; }
+
+    public String fillColor() { return fillColor; }
+    public void fillColor(String v) { this.fillColor = v; }
+
+    public double fillTint() { return fillTint; }
+    public void fillTint(double v) { this.fillTint = v; }
+
+    public String strokeColor() { return strokeColor; }
+    public void strokeColor(String v) { this.strokeColor = v; }
+
+    public double strokeWeight() { return strokeWeight; }
+    public void strokeWeight(double v) { this.strokeWeight = v; }
+
+    public double opacity() { return opacity; }
+    public void opacity(double v) { this.opacity = v; }
+
+    public double cornerRadius() { return cornerRadius; }
+    public void cornerRadius(double v) { this.cornerRadius = v; }
 }

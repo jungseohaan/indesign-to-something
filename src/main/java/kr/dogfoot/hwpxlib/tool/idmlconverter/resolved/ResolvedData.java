@@ -35,10 +35,17 @@ public class ResolvedData {
     private final Set<String> consumedRenderedGraphicIds = new HashSet<>();  // 인라인 처리로 소비된 deco DOM id
     private final List<RenderedGroup> renderedFloatingItems = new ArrayList<>();  // 통합 플로팅 그래픽
     private final Map<String, RenderedGroup> renderedFloatingItemMap = new LinkedHashMap<>();
+    private Set<String> editableTextFrameIds;  // 배경에서 숨겨진 TextFrame DOM ID
     private String basePath;  // resolved.json 부모 디렉토리 경로
 
     public String basePath() { return basePath; }
     public void basePath(String path) { this.basePath = path; }
+
+    public Set<String> editableTextFrameIds() { return editableTextFrameIds; }
+    public void editableTextFrameIds(Set<String> v) { this.editableTextFrameIds = v; }
+    public boolean isEditableTextFrame(String domId) {
+        return editableTextFrameIds != null && editableTextFrameIds.contains(domId);
+    }
 
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
@@ -95,6 +102,28 @@ public class ResolvedData {
 
     public ResolvedTable getTable(String tableId) {
         return tableMap.get(tableId);
+    }
+
+    /**
+     * IDML 테이블 ID로 resolved 테이블의 bounds를 조회한다.
+     * @param idmlTableId IDML Table Self ID (예: "u9cbi8146")
+     * @return [top, left, bottom, right] page-relative (mm 단위), 없으면 null
+     */
+    public double[] getTableBounds(String idmlTableId) {
+        if (idmlTableId == null) return null;
+        // IDML table ID → resolved table ID (DOM decimal)
+        // IDML: "u9cbi8146" → "i" 뒤의 hex 부분이 DOM ID
+        int iIdx = idmlTableId.indexOf('i');
+        if (iIdx < 0) return null;
+        String hexPart = idmlTableId.substring(iIdx + 1);
+        try {
+            String decimalId = String.valueOf(Integer.parseInt(hexPart, 16));
+            ResolvedTable rt = tableMap.get(decimalId);
+            if (rt != null && rt.bounds() != null) {
+                return rt.bounds();
+            }
+        } catch (NumberFormatException e) {}
+        return null;
     }
 
     // --- PageItem ---
@@ -597,6 +626,19 @@ public class ResolvedData {
 
     public int storyCount() { return storyMap.size(); }
     public int colorCount() { return colorHexMap.size(); }
+    public List<ResolvedTextFrame> textFrames() { return textFrames; }
+
+    /** DOM decimal ID로 textFrame 조회 */
+    public ResolvedTextFrame getTextFrame(String domId) {
+        for (ResolvedTextFrame tf : textFrames) {
+            if (domId != null && domId.equals(tf.id())) return tf;
+        }
+        return null;
+    }
+
+    /** 모든 Story를 컬렉션으로 반환 */
+    public java.util.Collection<ResolvedStory> stories() { return storyMap.values(); }
+
     public int textFrameCount() { return textFrames.size(); }
     public int tableCount() { return tableMap.size(); }
     public int pageItemCount() { return pageItems.size(); }

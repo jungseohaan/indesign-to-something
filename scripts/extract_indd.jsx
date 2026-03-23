@@ -299,63 +299,19 @@ function main(args) {
             _marker(outputDir, "03_allPageItems");
             var allItems = doc.allPageItems;
 
-            // 2.6. 짧은 텍스트 프레임 렌더링
-            _marker(outputDir, "04_renderedTextFrames");
-            writeProgress(outputDir, "rendered_frames", 0, rangePageCount);
-            var renderedResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems);
-            var renderedFrames = renderedResult.frames;
-            var badgeChildIds = renderedResult.badgeChildIds;
-
-            // 2.7. PDF 배치 프레임 렌더링 (멀티페이지 PDF 지원)
-            _marker(outputDir, "05_pdfPlacedFrames");
-            var renderedPdfFrames = exportPdfPlacedFrames(doc, outputDir, startPage, endPage, allItems);
-            try { $.gc(); } catch (e) {}
-
-            // 2.8. 복합 장식 그래픽 렌더링 (중첩 도형, 사선 패턴 등)
-            _marker(outputDir, "06_complexGraphics");
-            var renderedGraphicFrames = exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems);
-            try { $.gc(); } catch (e) {}
-
-            // 2.9. 장식 그룹 통째 렌더링 (클리핑 Oval, 도형 전용 Group)
-            _marker(outputDir, "07_decoGroups");
-            var decoResult = exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildIds, allItems);
-            var decoChildIds = decoResult.childIds;
-            for (var di = 0; di < decoResult.frames.length; di++) {
-                renderedGraphicFrames.push(decoResult.frames[di]);
-            }
-            decoResult = null;
-            try { $.gc(); } catch (e) {}
-
-            // 2.10. 벡터 도형 개별 렌더링 (장식 그룹 자식 제외)
-            _marker(outputDir, "08_vectorShapes");
-            var renderedVectorFrames = exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds, decoChildIds, allItems);
-            for (var vi = 0; vi < renderedVectorFrames.length; vi++) {
-                renderedGraphicFrames.push(renderedVectorFrames[vi]);
-            }
-            renderedVectorFrames = null;
-            try { $.gc(); } catch (e) {}
-
-            // 2.11. 이미지 배치 프레임 렌더링 (PSD, AI 등 → PNG)
-            // item.images 접근이 특정 문서에서 InDesign C++ 크래시(SIGSEGV)를 유발.
-            // 안전 버전은 빈 배열 반환 — Java 변환기가 IDML 링크로 직접 처리.
-            _marker(outputDir, "09_imagePlacedFrames");
+            // 2.6~2.11. 기존 개별 렌더 함수 비활성화 → 페이지 단위 렌더링으로 통합
+            var renderedFrames = [];
+            var renderedPdfFrames = [];
+            var renderedGraphicFrames = [];
             var renderedImageFrames = [];
-            try {
-                renderedImageFrames = exportImagePlacedFramesSafe(doc, outputDir, startPage, endPage, allItems);
-            } catch (imgEx) {}
-            try { $.gc(); } catch (e) {}
 
-            // 2.12. 통합 플로팅 그래픽 렌더링 (실험적)
-            // 기존 렌더 함수에서 이미 처리된 ID 수집 → 중복 렌더 방지
-            _marker(outputDir, "09b_floatingItems");
-            var alreadyRenderedIds = {};
-            var allRendered = [].concat(renderedFrames, renderedPdfFrames, renderedGraphicFrames, renderedImageFrames);
-            for (var ri = 0; ri < allRendered.length; ri++) {
-                if (allRendered[ri] && allRendered[ri].id) {
-                    alreadyRenderedIds[allRendered[ri].id] = true;
-                }
-            }
-            var renderedFloatingItems = exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems, alreadyRenderedIds);
+            // 2.12. 페이지 단위 배경 렌더링
+            // 편집 가능한 텍스트 프레임만 숨기고 페이지를 통째로 PNG 렌더
+            _marker(outputDir, "04_pageRendering");
+            writeProgress(outputDir, "rendered_frames", 0, rangePageCount);
+            var bgResult = exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems);
+            var renderedFloatingItems = bgResult.items;
+            var editableFrameIds = bgResult.editableFrameIds;
             try { $.gc(); } catch (e) {}
 
             _marker(outputDir, "10_collectResolved");
@@ -368,6 +324,13 @@ function main(args) {
             resolved.renderedGraphicFrames = renderedGraphicFrames;
             resolved.renderedImageFrames = renderedImageFrames;
             resolved.renderedFloatingItems = renderedFloatingItems;
+
+            // 편집 가능 TextFrame ID 목록 (배경에서 숨겨진 프레임 = 글상자로 배치할 대상)
+            var editableIdList = [];
+            for (var eid in editableFrameIds) {
+                editableIdList.push(parseInt(eid, 10));
+            }
+            resolved.editableTextFrameIds = editableIdList;
 
             _marker(outputDir, "11_writeJson");
             writeJson(outputDir + "/resolved.json", resolved);
@@ -2076,6 +2039,187 @@ function isInlineItem(item) {
 }
 
 /**
+ * 페이지 단위 배경 렌더링: 편집 가능 텍스트 프레임만 숨기고 페이지를 통째로 PNG 렌더.
+ * 모든 그래픽/벡터/이미지/장식 텍스트가 한 장에 캡처되어 z-order/레이어 문제 해결.
+ *
+ * @return {Array} renderedFloatingItems 호환 배열 (페이지당 1개 엔트리)
+ */
+function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 300;
+    app.pngExportPreferences.antiAlias = true;
+    app.pngExportPreferences.transparentBackground = true;
+    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
+
+    // 고품질 이미지 표시로 전환 (배치 이미지를 원본 해상도로 렌더)
+    var savedDisplayPerf = null;
+    try {
+        savedDisplayPerf = doc.viewPreferences.displayPerformance;
+        doc.viewPreferences.displayPerformance = ViewDisplaySettings.HIGH_QUALITY;
+    } catch (e) {}
+
+    var results = [];
+
+    // 편집 가능 텍스트 프레임 수집 (숨길 대상)
+    // 조건: 본문 텍스트 (긴 텍스트, 비장식)
+    var editableFrames = [];
+    var editableFrameIds = {};  // id → true (Java에서 글상자 배치 시 사용)
+    for (var i = 0; i < allItems.length; i++) {
+        var item = allItems[i];
+        if (item.constructor.name !== "TextFrame") continue;
+        if (isOnHiddenLayer(item)) continue;
+        try { if (item.nonprinting) continue; } catch (e) {}
+
+        // 인라인 객체는 부모가 관리하므로 건너뜀
+        if (isInlineItem(item)) continue;
+
+        // 렌더 대상 텍스트 프레임(배지, 장식)은 배경에 포함 → 숨기지 않음
+        if (isRenderableTextFrame(item)) continue;
+
+        // 테이블이 포함된 TextFrame은 배경에 포함 → 숨기지 않음
+        try {
+            if (item.parentStory && item.parentStory.tables.length > 0) continue;
+        } catch (e) {}
+
+        // 나머지 = 편집 가능 본문 텍스트 → 숨겨서 배경에서 제외
+        editableFrames.push(item);
+        // ID 기록 (Java에서 글상자 배치 시 사용)
+        editableFrameIds[item.id] = true;
+    }
+
+    // 인라인 객체 추출: 편집 TextFrame 안의 앵커된 그래픽을 개별 PNG로 렌더
+    var inlineObjects = [];  // { id, file, parentStoryId, bounds, pageIndex }
+    for (var ei = 0; ei < editableFrames.length; ei++) {
+        var eTf = editableFrames[ei];
+        try {
+            var eStory = eTf.parentStory;
+            var eAllItems = eTf.allPageItems;
+            for (var eai = 0; eai < eAllItems.length; eai++) {
+                var inItem = eAllItems[eai];
+                // TextFrame 자체는 건너뜀 (자식 객체만)
+                if (inItem === eTf) continue;
+                var inName = inItem.constructor.name;
+                // 인라인 앵커 객체만 (부모가 Character/InsertionPoint/Story)
+                if (!isInlineItem(inItem)) continue;
+
+                var inId = inItem.id;
+                var inFileName = "inline_" + inId + ".png";
+                var inOutFile = File(renderDir + "/" + inFileName);
+                try {
+                    inItem.exportFile(ExportFormat.PNG_FORMAT, inOutFile);
+                    if (inOutFile.exists) {
+                        var inBounds = null;
+                        try {
+                            inBounds = arrCopy(inItem.visibleBounds);
+                            if (!inBounds) inBounds = arrCopy(inItem.geometricBounds);
+                        } catch (eb) {}
+
+                        var inPageIdx = -1;
+                        try {
+                            var inPage = eTf.parentPage;
+                            if (inPage) inPageIdx = inPage.documentOffset;
+                        } catch (ep) {}
+
+                        inlineObjects.push({
+                            id: inId,
+                            file: "rendered_frames/" + inFileName,
+                            parentStoryId: eStory.id.toString(),
+                            bounds: inBounds,
+                            pageIndex: inPageIdx,
+                            type: "inline_object"
+                        });
+                    }
+                } catch (eRender) {}
+            }
+        } catch (eInline) {}
+    }
+
+    // 페이지별 렌더링
+    for (var pi = 0; pi < doc.pages.length; pi++) {
+        var page = doc.pages[pi];
+        var pgIdx = page.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        // 1. 편집 가능 텍스트 프레임 숨기기
+        var hiddenItems = [];
+        for (var hi = 0; hi < editableFrames.length; hi++) {
+            var tf = editableFrames[hi];
+            try {
+                if (tf.parentPage === page && tf.visible) {
+                    tf.visible = false;
+                    hiddenItems.push(tf);
+                }
+            } catch (e) {
+                // parentPage 없는 프레임은 bounds로 페이지 매칭
+                try {
+                    var tfb = tf.visibleBounds;
+                    var pb = page.bounds;
+                    var cy = (tfb[0] + tfb[2]) / 2;
+                    var cx = (tfb[1] + tfb[3]) / 2;
+                    if (cy >= pb[0] && cy <= pb[2] && cx >= pb[1] && cx <= pb[3]) {
+                        if (tf.visible) {
+                            tf.visible = false;
+                            hiddenItems.push(tf);
+                        }
+                    }
+                } catch (e2) {}
+            }
+        }
+
+        // 2. 페이지 PNG 렌더링
+        var fileName = "page_bg_" + pi + ".png";
+        var outFile = File(renderDir + "/" + fileName);
+        var renderSuccess = false;
+
+        try {
+            app.pngExportPreferences.pageString = page.name;
+            app.pngExportPreferences.pngExportRange = PNGExportRangeEnum.EXPORT_RANGE;
+            doc.exportFile(ExportFormat.PNG_FORMAT, outFile);
+            renderSuccess = outFile.exists;
+        } catch (e) {
+            renderSuccess = false;
+        }
+
+        // 3. 숨긴 텍스트 프레임 복원
+        for (var ri = 0; ri < hiddenItems.length; ri++) {
+            try { hiddenItems[ri].visible = true; } catch (e) {}
+        }
+
+        // 4. 결과 추가
+        var pageBounds = page.bounds; // [top, left, bottom, right]
+        var entry = {
+            id: pi,  // 페이지 인덱스를 ID로 사용
+            file: renderSuccess ? ("rendered_frames/" + fileName) : null,
+            bounds: [0, 0, pageBounds[2] - pageBounds[0], pageBounds[3] - pageBounds[1]],
+            pageIndex: page.documentOffset,
+            zOrder: 0,  // 배경이므로 최하위
+            type: "page_background",
+            childIds: null
+        };
+        results.push(entry);
+
+        writeProgress(outputDir, "rendered_frames", pi + 1, doc.pages.length);
+    }
+
+    // Display Performance 복원
+    if (savedDisplayPerf !== null) {
+        try { doc.viewPreferences.displayPerformance = savedDisplayPerf; } catch (e) {}
+    }
+
+    // 인라인 객체를 결과에 추가
+    for (var ioi = 0; ioi < inlineObjects.length; ioi++) {
+        results.push(inlineObjects[ioi]);
+    }
+    if (inlineObjects.length > 0) {
+        $.writeln("[exportPageBackgrounds] " + inlineObjects.length + " inline objects rendered");
+    }
+
+    return { items: results, editableFrameIds: editableFrameIds };
+}
+
+/**
  * 모든 플로팅(비인라인) 그래픽을 PNG로 렌더링한다.
  * 인라인 객체, 본문 TextFrame, 숨겨진 레이어, Nonprinting 요소는 제외.
  *
@@ -2585,9 +2729,20 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
             tables: []
         };
 
-        // 문단 수집
+        // 문단 수집 — 실제 단락 수를 \r로 확인하여 중복 방지
         var paras = story.paragraphs.everyItem().getElements();
-        for (var p = 0; p < paras.length; p++) {
+        var realParaCount = paras.length;
+        try {
+            var storyText = story.contents;
+            if (typeof storyText === "string") {
+                // \r로 분리된 실제 단락 수 (마지막 \r 이후 빈 문자열 제외)
+                var splits = storyText.split("\r");
+                while (splits.length > 0 && splits[splits.length - 1] === "") splits.pop();
+                realParaCount = splits.length;
+            }
+        } catch (e) {}
+        var paraLimit = Math.min(paras.length, realParaCount);
+        for (var p = 0; p < paraLimit; p++) {
             var para = paras[p];
             var paraData = {
                 styleName: "[Unknown]",
@@ -2665,7 +2820,49 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     try { runData.underline = rng.underline; } catch (e) {}
                     try { runData.strikeThru = rng.strikeThru; } catch (e) {}
 
-                    paraData.runs.push(runData);
+                    // U+FFFC(인라인 객체 마커) 분리
+                    var runText = runData.text || "";
+                    if (runText.indexOf("\uFFFC") >= 0) {
+                        // U+FFFC를 기준으로 텍스트 분할, 마커 위치에 inline_anchor 삽입
+                        var parts = runText.split("\uFFFC");
+                        // 인라인 객체 찾기: 이 range 내의 anchored objects
+                        var anchoredIds = [];
+                        try {
+                            var rngChars = rng.characters.everyItem().getElements();
+                            for (var rc = 0; rc < rngChars.length; rc++) {
+                                if (rngChars[rc].contents === "\uFFFC") {
+                                    try {
+                                        var anchItems = rngChars[rc].allPageItems;
+                                        if (anchItems.length > 0) {
+                                            anchoredIds.push(anchItems[0].id);
+                                        } else {
+                                            anchoredIds.push(null);
+                                        }
+                                    } catch (ea) { anchoredIds.push(null); }
+                                }
+                            }
+                        } catch (ea2) {}
+
+                        var anchorIdx = 0;
+                        for (var pi2 = 0; pi2 < parts.length; pi2++) {
+                            if (parts[pi2].length > 0) {
+                                var partRun = {};
+                                for (var rk in runData) { partRun[rk] = runData[rk]; }
+                                partRun.text = parts[pi2];
+                                paraData.runs.push(partRun);
+                            }
+                            // U+FFFC 마커 (마지막 part 뒤에는 없음)
+                            if (pi2 < parts.length - 1) {
+                                paraData.runs.push({
+                                    type: "inline_anchor",
+                                    anchoredObjectId: anchorIdx < anchoredIds.length ? anchoredIds[anchorIdx] : null
+                                });
+                                anchorIdx++;
+                            }
+                        }
+                    } else {
+                        paraData.runs.push(runData);
+                    }
                 }
             } catch (e) {
                 // textStyleRanges 접근 실패 시 무시
@@ -2684,8 +2881,36 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     rowCount: tbl.rows.length,
                     columnCount: tbl.columns.length,
                     columnWidths: [],
-                    rowHeights: []
+                    rowHeights: [],
+                    bounds: null  // [top, left, bottom, right] page-relative
                 };
+                // 테이블 절대 위치: 첫 셀의 baseline + 행/열 크기로 bounds 계산
+                try {
+                    var firstCell = tbl.cells[0];
+                    var firstIP = firstCell.insertionPoints[0];
+                    var baseline = firstIP.baseline;
+                    var horzOffset = firstIP.horizontalOffset;
+
+                    var tblCols = tbl.columns.everyItem().getElements();
+                    var tblTotalW = 0;
+                    for (var twi = 0; twi < tblCols.length; twi++) tblTotalW += tblCols[twi].width;
+                    var tblRows = tbl.rows.everyItem().getElements();
+                    var tblTotalH = 0;
+                    for (var thi = 0; thi < tblRows.length; thi++) tblTotalH += tblRows[thi].height;
+
+                    var tblTop = baseline - tblRows[0].height;
+                    var tblParentPage = null;
+                    try { tblParentPage = firstCell.texts[0].parentTextFrames[0].parentPage; } catch (ep) {}
+                    if (tblParentPage) {
+                        var tblPageBounds = tblParentPage.bounds;
+                        tblData.bounds = [
+                            tblTop - tblPageBounds[0],
+                            horzOffset - tblPageBounds[1],
+                            tblTop + tblTotalH - tblPageBounds[0],
+                            horzOffset + tblTotalW - tblPageBounds[1]
+                        ];
+                    }
+                } catch (e) {}
                 try {
                     var cols = tbl.columns.everyItem().getElements();
                     for (var ci = 0; ci < cols.length; ci++) {
@@ -2698,6 +2923,56 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                         tblData.rowHeights.push(rows[ri].height);
                     }
                 } catch (e) {}
+                // NEW: 셀 내용 수집
+                try {
+                    tblData.cells = [];
+                    var cells = tbl.cells.everyItem().getElements();
+                    for (var ci2 = 0; ci2 < cells.length; ci2++) {
+                        var cell = cells[ci2];
+                        var cellData = {
+                            row: cell.rowSpan > 0 ? Math.floor(ci2 / tbl.columns.length) : 0,
+                            col: ci2 % tbl.columns.length,
+                            rowSpan: cell.rowSpan,
+                            colSpan: cell.columnSpan,
+                            paragraphs: []
+                        };
+                        try { cellData.fillColor = cell.fillColor.name; } catch (ec) {}
+                        try {
+                            cellData.insetSpacing = [
+                                cell.topInset, cell.leftInset,
+                                cell.bottomInset, cell.rightInset
+                            ];
+                        } catch (ec) {}
+                        // 셀 내 단락 수집
+                        try {
+                            var cellParas = cell.paragraphs.everyItem().getElements();
+                            for (var cp = 0; cp < cellParas.length; cp++) {
+                                var cellPara = cellParas[cp];
+                                var cpData = { runs: [] };
+                                try {
+                                    var cellTSRs = cellPara.textStyleRanges.everyItem().getElements();
+                                    for (var cr = 0; cr < cellTSRs.length; cr++) {
+                                        var cellRng = cellTSRs[cr];
+                                        var runData = { text: "" };
+                                        try { runData.text = cellRng.contents; } catch (er) {}
+                                        try { runData.fontFamily = cellRng.appliedFont.fontFamily; } catch (er) {}
+                                        try { runData.pointSize = cellRng.pointSize; } catch (er) {}
+                                        try { runData.fontStyle = cellRng.fontStyle; } catch (er) {}
+                                        try {
+                                            if (cellRng.fillColor && cellRng.fillColor.name !== "None") {
+                                                runData.fillColor = cellRng.fillColor.name;
+                                            }
+                                        } catch (er) {}
+                                        cpData.runs.push(runData);
+                                    }
+                                } catch (ec2) {}
+                                cellData.paragraphs.push(cpData);
+                            }
+                        } catch (ec3) {}
+                        tblData.cells.push(cellData);
+                    }
+                } catch (e) {}
+
                 storyData.tables.push(tblData);
             }
         } catch (e) {
@@ -2789,6 +3064,46 @@ function collectTextFrames(doc, startPage, endPage) {
             try { var is = tf.textFramePreferences.insetSpacing; fData.insetSpacing = [is[0], is[1], is[2], is[3]]; } catch (e) {}
             try { fData.verticalJustification = tf.textFramePreferences.verticalJustification.toString(); } catch (e) {}
             try { fData.rotationAngle = tf.absoluteRotationAngle; } catch (e) {}
+
+            // NEW: 스레드 체인 (previous/next TextFrame)
+            try {
+                var prevTF = tf.previousTextFrame;
+                fData.previousFrameId = (prevTF && prevTF.id) ? prevTF.id.toString() : null;
+            } catch (e) { fData.previousFrameId = null; }
+            try {
+                var nextTF = tf.nextTextFrame;
+                fData.nextFrameId = (nextTF && nextTF.id) ? nextTF.id.toString() : null;
+            } catch (e) { fData.nextFrameId = null; }
+
+            // NEW: 인라인 여부
+            fData.isInline = isInlineItem(tf);
+
+            // NEW: z-order (페이지 내 stacking 순서)
+            // allPageItems 순서를 사용 — 나중에 페이지별로 재계산
+            fData.zOrder = i;  // 임시값, 아래에서 페이지별로 재계산
+
+            // NEW: 시각 속성 (pageItems에서 중복되지만 TextFrame에 직접 포함)
+            try { fData.fillColor = tf.fillColor.name; } catch (e) { fData.fillColor = null; }
+            try { fData.fillTint = tf.fillTint; } catch (e) {}
+            try { fData.strokeColor = tf.strokeColor.name; } catch (e) { fData.strokeColor = null; }
+            try { fData.strokeWeight = tf.strokeWeight; } catch (e) {}
+            try { fData.opacity = tf.transparencySettings.blendingSettings.opacity; } catch (e) {}
+            try { fData.cornerRadius = tf.topLeftCornerRadius; } catch (e) {}
+
+            // NEW: page-relative bounds (페이지 bounds 차감)
+            try {
+                var tfPage = tf.parentPage;
+                if (tfPage) {
+                    var pageBounds = tfPage.bounds;
+                    fData.pageIndex = tfPage.documentOffset;
+                    fData.pageRelativeBounds = [
+                        fData.geometricBounds[0] - pageBounds[0],
+                        fData.geometricBounds[1] - pageBounds[1],
+                        fData.geometricBounds[2] - pageBounds[0],
+                        fData.geometricBounds[3] - pageBounds[1]
+                    ];
+                }
+            } catch (e) {}
 
             frames.push(fData);
         }
@@ -2985,6 +3300,41 @@ function collectPageItems(doc, startPage, endPage) {
                 data.cornerRadius = pi.cornerRadius;
             }
         } catch (e) {}
+
+        // NEW: z-order (allPageItems 순서 = 시각적 스태킹)
+        data.zOrder = i;
+
+        // NEW: 인라인 여부
+        data.isInline = isInlineItem(pi);
+
+        // NEW: Group 자식 ID
+        if (pi.constructor.name === "Group") {
+            try {
+                var grpChildren = pi.allPageItems;
+                var childIds = [];
+                for (var gc = 0; gc < grpChildren.length; gc++) {
+                    childIds.push(grpChildren[gc].id);
+                }
+                data.childIds = childIds;
+            } catch (e) {}
+            try { data.clipContent = pi.clipContent; } catch (e) {}
+        }
+
+        // NEW: page-relative bounds
+        if (piPageIdx >= 0) {
+            try {
+                var piPage = pi.parentPage;
+                if (piPage && data.geometricBounds) {
+                    var piPB = piPage.bounds;
+                    data.pageRelativeBounds = [
+                        data.geometricBounds[0] - piPB[0],
+                        data.geometricBounds[1] - piPB[1],
+                        data.geometricBounds[2] - piPB[0],
+                        data.geometricBounds[3] - piPB[1]
+                    ];
+                }
+            } catch (e) {}
+        }
 
         items.push(data);
     }

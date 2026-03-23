@@ -232,11 +232,16 @@ public class ASTToHwpxConverter {
         ctx.currentColumnWidth = Math.max(100, layout.pageWidth() - mLeft - mRight);
 
         // TEXT_FRAME_BLOCK 수집
+        System.out.println("[CVT-SEC] page=" + section.pageNumber() + " blocks=" + section.blocks().size());
         List<ASTTextFrameBlock> textFrameBlocks = new ArrayList<>();
         List<ASTBlock> otherBlocks = new ArrayList<>();
         for (ASTBlock block : section.blocks()) {
             if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
                 textFrameBlocks.add((ASTTextFrameBlock) block);
+                if ("u3547f".equals(block.sourceId())) {
+                    ASTTextFrameBlock tfb = (ASTTextFrameBlock) block;
+                    System.out.println("[CVT-DBG] u3547f in blocks: x=" + tfb.effectiveX() + " y=" + tfb.y() + " paras=" + tfb.paragraphs().size() + " bgOnly=" + tfb.isBackgroundOnly());
+                }
             } else {
                 otherBlocks.add(block);
             }
@@ -310,6 +315,10 @@ public class ASTToHwpxConverter {
         });
         for (ASTBlock block : inFrontBlocks) {
             if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
+                ASTTextFrameBlock _dbgTfb = (ASTTextFrameBlock) block;
+                if ("u3547f".equals(_dbgTfb.sourceId())) {
+                    System.out.println("[CVT-DBG] u3547f: x=" + _dbgTfb.effectiveX() + " y=" + _dbgTfb.y() + " w=" + _dbgTfb.effectiveWidth() + " h=" + _dbgTfb.height() + " paras=" + _dbgTfb.paragraphs().size() + " bgOnly=" + _dbgTfb.isBackgroundOnly());
+                }
                 textBoxBuilder.convertTextFrameBlock(secPrPara, (ASTTextFrameBlock) block);
             } else if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 imageBuilder.convertFigure(secPrPara, (ASTFigure) block);

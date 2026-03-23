@@ -30,12 +30,24 @@ class ASTTableConverter {
         table.sourceId(idmlTable.selfId());
         table.zOrder(zOrder);
 
-        // 테이블 위치 (텍스트 프레임 기준)
-        double[] relPos = IDMLGeometry.pageRelativePosition(
-                tf.geometricBounds(), tf.itemTransform(),
-                page.geometricBounds(), page.itemTransform());
-        table.x(CoordinateConverter.pointsToHwpunits(relPos[0]));
-        table.y(CoordinateConverter.pointsToHwpunits(relPos[1]));
+        // 테이블 위치: resolved.json의 테이블 bounds 우선, 없으면 TextFrame 좌표 폴백
+        double[] resolvedTableBounds = null;
+        if (resolvedData != null) {
+            resolvedTableBounds = resolvedData.getTableBounds(idmlTable.selfId());
+        }
+        if (resolvedTableBounds != null) {
+            // resolved bounds는 page-relative (mm 단위 → scale 적용 필요)
+            double scale = resolvedData != null ? resolvedData.scaleFactor() : 2.8346;
+            table.x(CoordinateConverter.pointsToHwpunits(resolvedTableBounds[1] * scale));
+            table.y(CoordinateConverter.pointsToHwpunits(resolvedTableBounds[0] * scale));
+        } else {
+            // 폴백: TextFrame 좌표
+            double[] relPos = IDMLGeometry.pageRelativePosition(
+                    tf.geometricBounds(), tf.itemTransform(),
+                    page.geometricBounds(), page.itemTransform());
+            table.x(CoordinateConverter.pointsToHwpunits(relPos[0]));
+            table.y(CoordinateConverter.pointsToHwpunits(relPos[1]));
+        }
 
         // 컬럼 너비
         for (double cw : idmlTable.columnWidths()) {

@@ -291,7 +291,7 @@ class ASTPageProcessor {
 
             // 스토리 → 단락 변환
             convertStoryToParagraphs(story, block, pool, tf, page, fo.zOrder(),
-                    idmlDoc, colorResolver, imageLoader, resolvedData);
+                    idmlDoc, colorResolver, imageLoader, resolvedData, section);
 
             // 인라인 처리되지 않은 테이블
             convertStoryTables(story, section, tf, page, fo.zOrder(), idmlDoc, colorResolver, imageLoader, resolvedData);
@@ -426,21 +426,27 @@ class ASTPageProcessor {
 
         IDMLPage finalPage = page;
         int totalImgFrames = uniqueFrames.size();
-        List<ASTFigure> imageFigures = uniqueFrames.parallelStream()
-                .map(imgFrame -> {
-                    ASTFigure fig = ASTFigureBuilder.createFigureFromImageFrame(
-                            imgFrame, finalPage, imageLoader, colorResolver,
-                            resolvedData, resolvedPage);
-                    if (fig == null) {
-                        System.err.println("[IMG-FAIL] Page " + finalPage.pageNumber()
-                                + " imageFrame URI=" + imgFrame.linkResourceURI()
-                                + " bounds=" + java.util.Arrays.toString(imgFrame.geometricBounds())
-                                + " transform=" + java.util.Arrays.toString(imgFrame.itemTransform()));
-                    }
-                    return fig;
-                })
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        // Java 이미지 프레임 처리 비활성화 — ExtendScript floatingItems로 대체
+        List<ASTFigure> imageFigures;
+        if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) {
+            imageFigures = Collections.emptyList();
+        } else {
+            imageFigures = uniqueFrames.parallelStream()
+                    .map(imgFrame -> {
+                        ASTFigure fig = ASTFigureBuilder.createFigureFromImageFrame(
+                                imgFrame, finalPage, imageLoader, colorResolver,
+                                resolvedData, resolvedPage);
+                        if (fig == null) {
+                            System.err.println("[IMG-FAIL] Page " + finalPage.pageNumber()
+                                    + " imageFrame URI=" + imgFrame.linkResourceURI()
+                                    + " bounds=" + java.util.Arrays.toString(imgFrame.geometricBounds())
+                                    + " transform=" + java.util.Arrays.toString(imgFrame.itemTransform()));
+                        }
+                        return fig;
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+        }
 
         if (imageFigures.size() < totalImgFrames) {
             System.err.println("[IMG-WARN] Page " + page.pageNumber()
@@ -499,12 +505,19 @@ class ASTPageProcessor {
 
         IDMLPage finalPage = page;
 
-        List<ASTFigure> vectorFigures = vectorShapes.parallelStream()
-                .map(shape -> ASTFigureBuilder.createFigureFromVectorShape(
-                        shape, finalPage, imageLoader, colorResolver,
-                        resolvedData, resolvedPage))
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        // Java 벡터 래스터화 비활성화 — ExtendScript floatingItems로 대체
+        // renderedFloatingItems가 있으면 Java 래스터화를 완전히 건너뜀
+        List<ASTFigure> vectorFigures;
+        if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) {
+            vectorFigures = Collections.emptyList();
+        } else {
+            vectorFigures = vectorShapes.parallelStream()
+                    .map(shape -> ASTFigureBuilder.createFigureFromVectorShape(
+                            shape, finalPage, imageLoader, colorResolver,
+                            resolvedData, resolvedPage))
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+        }
 
         // 페이지 경계 클리핑
         long fullPageW = CoordinateConverter.pointsToHwpunits(
@@ -627,6 +640,19 @@ class ASTPageProcessor {
                                             ColorResolver colorResolver,
                                             ASTImageLoader imageLoader,
                                             ResolvedData resolvedData) {
+        convertStoryToParagraphs(story, block, pool, tf, page, zOrder, idmlDoc,
+                colorResolver, imageLoader, resolvedData, null);
+    }
+
+    static void convertStoryToParagraphs(IDMLStory story, ASTTextFrameBlock block,
+                                            FlattenedObjectPool pool,
+                                            IDMLTextFrame tf, IDMLPage page,
+                                            int zOrder,
+                                            IDMLDocument idmlDoc,
+                                            ColorResolver colorResolver,
+                                            ASTImageLoader imageLoader,
+                                            ResolvedData resolvedData,
+                                            ASTSection section) {
         // 스토리 전체에 BT 수식 폰트 런이 있는지 미리 확인
         boolean storyHasBTRuns = false;
         for (IDMLParagraph p : story.paragraphs()) {
@@ -664,7 +690,14 @@ class ASTPageProcessor {
                     ASTTable astTable = ASTTableConverter.convertTable(
                             idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader, resolvedData);
                     if (astTable != null) {
-                        addInlineTableOrFlatten(astTable, block);
+                        // resolved bounds가 있으면 독립 블록으로 섹션에 추가 (정확한 좌표)
+                        double[] tblBounds = resolvedData != null
+                                ? resolvedData.getTableBounds(idmlTable.selfId()) : null;
+                        if (tblBounds != null && section != null) {
+                            section.addBlock(astTable);
+                        } else {
+                            addInlineTableOrFlatten(astTable, block);
+                        }
                     }
                 }
             }
@@ -692,7 +725,13 @@ class ASTPageProcessor {
                 ASTTable astTable = ASTTableConverter.convertTable(
                         idmlTable, tf, page, zOrder, idmlDoc, colorResolver, imageLoader, resolvedData);
                 if (astTable != null) {
-                    addInlineTableOrFlatten(astTable, block);
+                    double[] tblBounds = resolvedData != null
+                            ? resolvedData.getTableBounds(idmlTable.selfId()) : null;
+                    if (tblBounds != null && section != null) {
+                        section.addBlock(astTable);
+                    } else {
+                        addInlineTableOrFlatten(astTable, block);
+                    }
                 }
             }
         }
@@ -1061,6 +1100,10 @@ class ASTPageProcessor {
                     if (xHwp + wHwp > pageW) { wHwp = pageW - xHwp; }
                     if (yHwp + hHwp > pageH) { hHwp = pageH - yHwp; }
                     if (wHwp > 0 && hHwp > 0) {
+                        if ("u9dd".equals(tf.selfId())) {
+                            System.out.println("[TF-DBG] u9dd resolved: x=" + xHwp + " y=" + yHwp + " w=" + wHwp + " h=" + hHwp
+                                + " gb=" + java.util.Arrays.toString(gb) + " rel=" + java.util.Arrays.toString(rel));
+                        }
                         block.x(xHwp);
                         block.y(yHwp);
                         block.width(wHwp);
@@ -1684,9 +1727,10 @@ class ASTPageProcessor {
         int added = 0;
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : items) {
             String idmlHexId = "u" + Integer.toHexString(rg.id());
+            boolean isPageBg = "page_background".equals(rg.itemType());
 
-            // 이미 IDML 파이프라인에서 처리된 항목 건너뜀
-            if (existingSourceIds.contains(idmlHexId)) continue;
+            // 이미 IDML 파이프라인에서 처리된 항목 건너뜀 (페이지 배경은 항상 배치)
+            if (!isPageBg && existingSourceIds.contains(idmlHexId)) continue;
 
             // PNG 로드
             if (rg.file() == null) continue;
@@ -1728,7 +1772,8 @@ class ASTPageProcessor {
             fig.pixelHeight(pixelH);
             fig.sourceId(idmlHexId);
             fig.zOrder(rg.zOrder());
-            fig.fromGroup(true);  // IN_FRONT_OF_TEXT 기본
+            // page_background: BEHIND_TEXT, 나머지: IN_FRONT_OF_TEXT
+            fig.fromGroup(!isPageBg);
 
             section.addBlock(fig);
             existingSourceIds.add(idmlHexId);

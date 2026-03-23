@@ -345,6 +345,13 @@ public class HwpxTextBoxBuilder {
     public void convertTextFrameBlock(Para framePara, ASTTextFrameBlock block) {
         long w = block.effectiveWidth();
         long h = block.height();
+        if ("u3547f".equals(block.sourceId())) {
+            System.out.println("[TFB-DBG] u3547f: x=" + block.effectiveX() + " y=" + block.y() + " w=" + w + " h=" + h + " paras=" + block.paragraphs().size());
+        }
+        if ("u9dd".equals(block.sourceId())) {
+            System.out.println("[TFB-DBG] u9dd: effectiveX=" + block.effectiveX() + " y=" + block.y() + " w=" + w + " h=" + h
+                + " rot=" + block.rotationAngle() + " colCount=" + block.columnCount() + " cornerR=" + block.cornerRadius());
+        }
 
         // 음수 또는 0 크기 블록 건너뜀 (페이지 밖 객체)
         if (w <= 0 || h <= 0) return;
@@ -1042,7 +1049,11 @@ public class HwpxTextBoxBuilder {
                 .vertAlignAnd(VertAlign.TOP)
                 .horzAlignAnd(HorzAlign.LEFT)
                 .vertOffsetAnd(adjustedY)
-                .horzOffset(x);
+                .horzOffsetAnd(x);
+
+        if (x > 18000 && x < 20000) {
+            System.out.println("[TBL-POS] horzOffset=" + x + " vertOffset=" + adjustedY + " w=" + w + " h=" + h + " src=" + block.sourceId());
+        }
 
         // OutMargin
         table.createOutMargin();

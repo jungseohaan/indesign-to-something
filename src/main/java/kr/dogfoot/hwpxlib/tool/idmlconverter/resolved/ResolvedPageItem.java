@@ -57,6 +57,13 @@ public class ResolvedPageItem {
     // 코너
     private double cornerRadius;
 
+    // IDML-Free 파이프라인 보강
+    private int zOrder;
+    private boolean isInline;
+    private int[] childIds;          // Group 자식 ID
+    private boolean clipContent;     // Group 클리핑
+    private double[] pageRelativeBounds; // [top, left, bottom, right] page-relative
+
     // --- 접근자 ---
 
     public String id() { return id; }
@@ -157,4 +164,19 @@ public class ResolvedPageItem {
 
     public double cornerRadius() { return cornerRadius; }
     public void cornerRadius(double v) { this.cornerRadius = v; }
+
+    public int zOrder() { return zOrder; }
+    public void zOrder(int v) { this.zOrder = v; }
+
+    public boolean isInline() { return isInline; }
+    public void isInline(boolean v) { this.isInline = v; }
+
+    public int[] childIds() { return childIds; }
+    public void childIds(int[] v) { this.childIds = v; }
+
+    public boolean clipContent() { return clipContent; }
+    public void clipContent(boolean v) { this.clipContent = v; }
+
+    public double[] pageRelativeBounds() { return pageRelativeBounds; }
+    public void pageRelativeBounds(double[] v) { this.pageRelativeBounds = v; }
 }

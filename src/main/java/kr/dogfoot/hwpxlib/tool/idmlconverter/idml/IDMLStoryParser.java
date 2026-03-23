@@ -10,15 +10,15 @@ import static kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLXmlUtils.*;
 /**
  * IDML Story 파싱: 텍스트, 테이블, 단락, 문자 런, 인라인 그래픽, GREP 스타일 해석.
  */
-class IDMLStoryParser {
+public class IDMLStoryParser {
 
     // ===== Story XML 파싱 =====
 
-    static IDMLStory parseStory(Document storyDoc, String storyId) {
+    public static IDMLStory parseStory(Document storyDoc, String storyId) {
         return parseStory(storyDoc, storyId, null);
     }
 
-    static IDMLStory parseStory(Document storyDoc, String storyId, IDMLDocument doc) {
+    public static IDMLStory parseStory(Document storyDoc, String storyId, IDMLDocument doc) {
         IDMLStory story = new IDMLStory();
         story.selfId(storyId);
 

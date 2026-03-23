@@ -19,6 +19,18 @@ public class ResolvedRun {
     private Boolean underline;
     private Boolean strikeThru;
 
+    // IDML-Free 파이프라인: inline_anchor 지원
+    private String type;             // null(일반 텍스트) | "inline_anchor"
+    private Integer anchoredObjectId; // inline_anchor일 때 앵커된 객체의 DOM ID
+
+    public String type() { return type; }
+    public void type(String v) { this.type = v; }
+
+    public Integer anchoredObjectId() { return anchoredObjectId; }
+    public void anchoredObjectId(Integer v) { this.anchoredObjectId = v; }
+
+    public boolean isInlineAnchor() { return "inline_anchor".equals(type); }
+
     public String text() { return text; }
     public void text(String v) { this.text = v; }
 

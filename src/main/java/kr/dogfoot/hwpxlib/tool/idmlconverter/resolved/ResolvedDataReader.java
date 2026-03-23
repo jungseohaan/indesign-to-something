@@ -8,6 +8,8 @@ import com.google.gson.stream.JsonReader;
 
 import java.io.IOException;
 import java.io.StringReader;
+import java.util.HashSet;
+import java.util.Set;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 
@@ -125,6 +127,16 @@ public class ResolvedDataReader {
             }
         }
 
+        // editableTextFrameIds (배경에서 숨겨진 = 글상자 배치 대상)
+        if (root.has("editableTextFrameIds") && !root.get("editableTextFrameIds").isJsonNull()) {
+            JsonArray arr = root.getAsJsonArray("editableTextFrameIds");
+            Set<String> ids = new java.util.HashSet<>();
+            for (int i = 0; i < arr.size(); i++) {
+                ids.add(String.valueOf(arr.get(i).getAsInt()));
+            }
+            data.editableTextFrameIds(ids);
+        }
+
         // fontMetrics (InDesign에서 측정한 폰트 메트릭)
         if (root.has("fontMetrics")) {
             for (JsonElement e : root.getAsJsonArray("fontMetrics")) {
@@ -171,6 +183,22 @@ public class ResolvedDataReader {
         tf.verticalJustification(getString(o, "verticalJustification"));
         tf.rotationAngle(getDouble(o, "rotationAngle", 0));
 
+        // IDML-Free 파이프라인 보강 필드
+        tf.previousFrameId(getString(o, "previousFrameId"));
+        tf.nextFrameId(getString(o, "nextFrameId"));
+        tf.isInline(getBool(o, "isInline", false));
+        tf.pageIndex(getInt(o, "pageIndex", -1));
+        tf.zOrder(getInt(o, "zOrder", 0));
+        if (o.has("pageRelativeBounds") && !o.get("pageRelativeBounds").isJsonNull()) {
+            tf.pageRelativeBounds(parseDoubleArray(o.getAsJsonArray("pageRelativeBounds")));
+        }
+        tf.fillColor(getString(o, "fillColor"));
+        tf.fillTint(getDouble(o, "fillTint", 100));
+        tf.strokeColor(getString(o, "strokeColor"));
+        tf.strokeWeight(getDouble(o, "strokeWeight", 0));
+        tf.opacity(getDouble(o, "opacity", 100));
+        tf.cornerRadius(getDouble(o, "cornerRadius", 0));
+
         return tf;
     }
 
@@ -184,6 +212,9 @@ public class ResolvedDataReader {
         }
         if (o.has("rowHeights")) {
             table.rowHeights(parseDoubleArray(o.getAsJsonArray("rowHeights")));
+        }
+        if (o.has("bounds") && !o.get("bounds").isJsonNull()) {
+            table.bounds(parseDoubleArray(o.getAsJsonArray("bounds")));
         }
         return table;
     }
@@ -260,6 +291,11 @@ public class ResolvedDataReader {
         run.position(getString(o, "position"));
         run.underline(getBoxedBool(o, "underline"));
         run.strikeThru(getBoxedBool(o, "strikeThru"));
+        // IDML-Free: inline_anchor
+        run.type(getString(o, "type"));
+        if (o.has("anchoredObjectId") && !o.get("anchoredObjectId").isJsonNull()) {
+            run.anchoredObjectId(o.get("anchoredObjectId").getAsInt());
+        }
         return run;
     }
 
@@ -352,6 +388,17 @@ public class ResolvedDataReader {
 
         // 플립
         item.absoluteFlip(getString(o, "absoluteFlip"));
+
+        // IDML-Free 파이프라인 보강 필드
+        item.zOrder(getInt(o, "zOrder", 0));
+        item.isInline(getBool(o, "isInline", false));
+        item.clipContent(getBool(o, "clipContent", false));
+        if (o.has("childIds") && !o.get("childIds").isJsonNull()) {
+            item.childIds(parseIntArray(o.getAsJsonArray("childIds")));
+        }
+        if (o.has("pageRelativeBounds") && !o.get("pageRelativeBounds").isJsonNull()) {
+            item.pageRelativeBounds(parseDoubleArray(o.getAsJsonArray("pageRelativeBounds")));
+        }
 
         return item;
     }
