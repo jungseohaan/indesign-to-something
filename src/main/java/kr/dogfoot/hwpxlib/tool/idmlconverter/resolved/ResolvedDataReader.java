@@ -114,6 +114,17 @@ public class ResolvedDataReader {
             }
         }
 
+        // renderedFloatingItems (통합 플로팅 그래픽 렌더링)
+        if (root.has("renderedFloatingItems")) {
+            for (JsonElement e : root.getAsJsonArray("renderedFloatingItems")) {
+                RenderedGroup rg = parseRenderedGroup(e.getAsJsonObject());
+                JsonObject obj = e.getAsJsonObject();
+                if (obj.has("zOrder")) rg.zOrder(obj.get("zOrder").getAsInt());
+                if (obj.has("type")) rg.itemType(obj.get("type").getAsString());
+                data.addRenderedFloatingItem(rg);
+            }
+        }
+
         // fontMetrics (InDesign에서 측정한 폰트 메트릭)
         if (root.has("fontMetrics")) {
             for (JsonElement e : root.getAsJsonArray("fontMetrics")) {

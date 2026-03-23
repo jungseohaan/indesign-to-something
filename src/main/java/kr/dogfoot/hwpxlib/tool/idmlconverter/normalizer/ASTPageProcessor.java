@@ -68,6 +68,9 @@ class ASTPageProcessor {
         processVectorShapes(spread, page, imageLoader,
                 colorResolver, resolvedData, resolvedPage, section);
 
+        // ExtendScript 통합 플로팅 그래픽 처리
+        processRenderedFloatingItems(page, imageLoader, resolvedData, resolvedPage, section);
+
         // 여백 가이드라인 (옵션)
         if (imageLoader != null && imageLoader.drawMarginGuide()) {
             ASTFigure marginGuide = ASTTextWrapSimulator.createMarginGuideFigure(page);
@@ -1630,5 +1633,103 @@ class ASTPageProcessor {
             return true;
         }
         return false;
+    }
+
+    /**
+     * ExtendScript에서 렌더링한 플로팅 그래픽을 ASTFigure로 변환하여 섹션에 추가.
+     * renderedFloatingItems에서 현재 페이지의 항목을 로드하고, 기존 AST에 이미 배치된 항목은 건너뜀.
+     */
+    private static void processRenderedFloatingItems(IDMLPage page,
+            ASTImageLoader imageLoader, ResolvedData resolvedData,
+            ResolvedPage resolvedPage, ASTSection section) {
+        if (resolvedData == null) return;
+
+        // pageIndex = ExtendScript의 documentOffset (0-based)
+        // resolvedData.pages()의 인덱스와 동일
+        int pageIdx = -1;
+        if (resolvedPage != null) {
+            List<ResolvedPage> allPages = resolvedData.pages();
+            for (int pi = 0; pi < allPages.size(); pi++) {
+                if (allPages.get(pi) == resolvedPage) {
+                    pageIdx = pi;
+                    break;
+                }
+            }
+        }
+        if (pageIdx < 0) return;
+
+        List<kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup> items =
+                resolvedData.getRenderedFloatingItemsByPage(pageIdx);
+        if (items.isEmpty()) return;
+
+        String basePath = resolvedData.basePath();
+        if (basePath == null) return;
+
+        // 이미 AST에 배치된 sourceId 수집 (중복 방지)
+        Set<String> existingSourceIds = new HashSet<>();
+        for (ASTBlock blk : section.blocks()) {
+            if (blk.sourceId() != null) existingSourceIds.add(blk.sourceId());
+        }
+
+        double scale = resolvedData.scaleFactor();
+
+        int added = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : items) {
+            String idmlHexId = "u" + Integer.toHexString(rg.id());
+
+            // 이미 IDML 파이프라인에서 처리된 항목 건너뜀
+            if (existingSourceIds.contains(idmlHexId)) continue;
+
+            // PNG 로드
+            if (rg.file() == null) continue;
+            java.io.File pngFile = new java.io.File(basePath, rg.file());
+            if (!pngFile.exists()) continue;
+
+            byte[] imageData;
+            int pixelW, pixelH;
+            try {
+                imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                BufferedImage img = ImageIO.read(pngFile);
+                if (img == null) continue;
+                pixelW = img.getWidth();
+                pixelH = img.getHeight();
+            } catch (Exception e) {
+                continue;
+            }
+
+            // bounds → HWPUNIT (bounds는 resolved 좌표 → pt 변환 후)
+            double[] bounds = rg.bounds();
+            if (bounds == null || bounds.length < 4) continue;
+
+            // bounds는 page-relative (mm 또는 pt 단위, scale 적용 필요)
+            long figX = CoordinateConverter.pointsToHwpunits(bounds[1] * scale);
+            long figY = CoordinateConverter.pointsToHwpunits(bounds[0] * scale);
+            long figW = CoordinateConverter.pointsToHwpunits((bounds[3] - bounds[1]) * scale);
+            long figH = CoordinateConverter.pointsToHwpunits((bounds[2] - bounds[0]) * scale);
+
+            if (figW <= 0 || figH <= 0) continue;
+
+            ASTFigure fig = new ASTFigure();
+            fig.x(figX);
+            fig.y(figY);
+            fig.width(figW);
+            fig.height(figH);
+            fig.imageData(imageData);
+            fig.imageFormat("png");
+            fig.pixelWidth(pixelW);
+            fig.pixelHeight(pixelH);
+            fig.sourceId(idmlHexId);
+            fig.zOrder(rg.zOrder());
+            fig.fromGroup(true);  // IN_FRONT_OF_TEXT 기본
+
+            section.addBlock(fig);
+            existingSourceIds.add(idmlHexId);
+            added++;
+        }
+
+        if (added > 0) {
+            System.out.println("[Stage4] Page " + page.pageNumber()
+                    + " floatingItems: " + added + " (ExtendScript)");
+        }
     }
 }

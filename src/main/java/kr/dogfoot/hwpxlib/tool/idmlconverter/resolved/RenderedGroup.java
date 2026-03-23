@@ -16,6 +16,8 @@ public class RenderedGroup {
     private int[] childTextFrameIds;  // 배지 그룹 자식 TextFrame DOM ID (type=badge_group일 때)
     private int badgeGroupId;    // 배지 그룹 부모 DOM ID (type=badge_group_child일 때)
     private int[] childImageIds; // 그룹 렌더링 시 자식 이미지 프레임 DOM ID 목록
+    private int zOrder;          // ExtendScript 할당 z-order (renderedFloatingItems)
+    private String itemType;     // "vector" | "group" | "text_decoration" | "image" | "other"
 
     public int id() { return id; }
     public void id(int v) { this.id = v; }
@@ -46,6 +48,12 @@ public class RenderedGroup {
 
     public int[] childImageIds() { return childImageIds; }
     public void childImageIds(int[] v) { this.childImageIds = v; }
+
+    public int zOrder() { return zOrder; }
+    public void zOrder(int v) { this.zOrder = v; }
+
+    public String itemType() { return itemType; }
+    public void itemType(String v) { this.itemType = v; }
 
     public boolean isBadgeGroup() { return "badge_group".equals(type); }
     public boolean isBadgeGroupChild() { return "badge_group_child".equals(type); }

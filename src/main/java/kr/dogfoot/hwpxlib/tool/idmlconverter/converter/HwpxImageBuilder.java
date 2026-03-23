@@ -410,6 +410,11 @@ public class HwpxImageBuilder {
         if (imageData == null || imageData.length == 0) return;
         if (figure.width() <= 0 || figure.height() <= 0) return;
 
+        // Java 폴백 렌더링 시 주황 외곽선 추가
+        if (figure.fallbackRendered()) {
+            imageData = addFallbackBorder(imageData);
+        }
+
         String format = figure.imageFormat() != null ? figure.imageFormat() : "png";
 
         long x = figure.x();
@@ -866,6 +871,29 @@ public class HwpxImageBuilder {
      * PNG: pixel * 75 (96 DPI 기준, 1px = 0.75pt = 75 HWPUNIT)
      * SVG: pt * 100 (pixelWidth가 pt 단위, 1pt = 100 HWPUNIT)
      */
+    /**
+     * Java 폴백 렌더링 이미지에 주황 외곽선(2px, #FF8C00)을 추가한다.
+     */
+    private static byte[] addFallbackBorder(byte[] imageData) {
+        try {
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(
+                    new java.io.ByteArrayInputStream(imageData));
+            if (img == null) return imageData;
+
+            java.awt.Graphics2D g = img.createGraphics();
+            g.setColor(new java.awt.Color(255, 140, 0, 200)); // #FF8C00, 약간 반투명
+            g.setStroke(new java.awt.BasicStroke(2));
+            g.drawRect(1, 1, img.getWidth() - 2, img.getHeight() - 2);
+            g.dispose();
+
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(img, "png", out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            return imageData;
+        }
+    }
+
     private static long clipDimension(int pixelOrPt, String format) {
         if ("svg".equalsIgnoreCase(format)) {
             return (long) pixelOrPt * 100;

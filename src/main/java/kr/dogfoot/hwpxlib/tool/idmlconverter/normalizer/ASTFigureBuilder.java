@@ -426,6 +426,7 @@ class ASTFigureBuilder {
                     fig.fromGroup(shape.fromGroup());
                     fig.parentGroupId(shape.parentGroupId());
                     fig.sourceId(shape.selfId());
+                    fig.fallbackRendered(true);  // Java 폴백 렌더링 표시
                     return fig;
                 }
             }
@@ -471,6 +472,7 @@ class ASTFigureBuilder {
                     fig.fromGroup(shape.fromGroup());
                     fig.parentGroupId(shape.parentGroupId());
                     fig.sourceId(shape.selfId());
+                    fig.fallbackRendered(true);  // Java 폴백 렌더링 표시
                     return fig;
                 }
             }

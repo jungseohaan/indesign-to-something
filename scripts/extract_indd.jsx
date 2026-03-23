@@ -345,6 +345,11 @@ function main(args) {
             } catch (imgEx) {}
             try { $.gc(); } catch (e) {}
 
+            // 2.12. 통합 플로팅 그래픽 렌더링 (실험적)
+            _marker(outputDir, "09b_floatingItems");
+            var renderedFloatingItems = exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems);
+            try { $.gc(); } catch (e) {}
+
             _marker(outputDir, "10_collectResolved");
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
@@ -354,6 +359,7 @@ function main(args) {
             resolved.renderedPdfFrames = renderedPdfFrames;
             resolved.renderedGraphicFrames = renderedGraphicFrames;
             resolved.renderedImageFrames = renderedImageFrames;
+            resolved.renderedFloatingItems = renderedFloatingItems;
 
             _marker(outputDir, "11_writeJson");
             writeJson(outputDir + "/resolved.json", resolved);
@@ -2041,6 +2047,187 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
         pageItems: pageItems,
         fontMetrics: fontMetrics
     };
+}
+
+/**
+ * 아이템이 텍스트 흐름 안의 인라인(앵커) 객체인지 판별한다.
+ */
+function isInlineItem(item) {
+    try {
+        var cur = item.parent;
+        while (cur) {
+            var pn = cur.constructor.name;
+            if (pn === "TextFrame" || pn === "Character"
+                || pn === "InsertionPoint" || pn === "Cell"
+                || pn === "Story") return true;
+            if (pn === "Spread" || pn === "Page" || pn === "Document") return false;
+            try { cur = cur.parent; } catch (e) { break; }
+        }
+    } catch (e) {}
+    return false;
+}
+
+/**
+ * 모든 플로팅(비인라인) 그래픽을 PNG로 렌더링한다.
+ * 인라인 객체, 본문 TextFrame, 숨겨진 레이어, Nonprinting 요소는 제외.
+ *
+ * @return {Array} renderedFloatingItems 배열
+ */
+function exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 300;
+    app.pngExportPreferences.antiAlias = true;
+    app.pngExportPreferences.transparentBackground = true;
+    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
+
+    var results = [];
+    var processedIds = {};  // DOM id → true (중복 방지)
+    var childCoveredIds = {};  // Group childIds → true (자식 개별 렌더 방지)
+    var zCounter = {};  // pageIndex → counter
+
+    // 렌더 대상 타입
+    var RENDER_TYPES = {
+        "Rectangle": true, "Polygon": true, "Oval": true,
+        "GraphicLine": true, "Group": true, "TextFrame": true
+    };
+
+    for (var i = 0; i < allItems.length; i++) {
+        var item = allItems[i];
+        var cName = item.constructor.name;
+        if (!RENDER_TYPES[cName]) continue;
+
+        var domId = item.id;
+
+        // 이미 처리된 항목 건너뜀
+        if (processedIds[domId]) continue;
+        // 부모 Group에 의해 이미 커버된 자식 건너뜀
+        if (childCoveredIds[domId]) continue;
+
+        // 숨겨진 레이어
+        if (isOnHiddenLayer(item)) continue;
+        // Nonprinting
+        try { if (item.nonprinting) continue; } catch (e) {}
+        // 인라인(앵커) 객체 제외
+        if (isInlineItem(item)) continue;
+
+        // TextFrame: 본문 텍스트는 제외, 장식/배지만 렌더
+        if (cName === "TextFrame") {
+            if (!isRenderableTextFrame(item)) continue;
+        }
+
+        // 페이지 판별
+        var parentPage = null;
+        try { parentPage = item.parentPage; } catch (e) {}
+        if (!parentPage) {
+            // parentPage 없으면 visibleBounds로 페이지 매칭
+            try {
+                var vb = item.visibleBounds;
+                var cy = (vb[0] + vb[2]) / 2;
+                var cx = (vb[1] + vb[3]) / 2;
+                for (var pi = 0; pi < doc.pages.length; pi++) {
+                    var pg = doc.pages[pi];
+                    var pb = pg.bounds;
+                    if (cy >= pb[0] && cy <= pb[2] && cx >= pb[1] && cx <= pb[3]) {
+                        parentPage = pg;
+                        break;
+                    }
+                }
+            } catch (e) {}
+        }
+        if (!parentPage) continue;
+        var pgIdx = parentPage.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        // Group: 그룹 전체를 렌더하고 자식을 커버 처리
+        if (cName === "Group") {
+            try {
+                var grpItems = item.allPageItems;
+                for (var gi = 0; gi < grpItems.length; gi++) {
+                    childCoveredIds[grpItems[gi].id] = true;
+                }
+            } catch (e) {}
+        }
+
+        // 렌더 대상 결정: TextFrame의 부모가 도형이면 도형째로 렌더
+        var renderTarget = item;
+        if (cName === "TextFrame") {
+            try {
+                var p = item.parent;
+                var pn = p ? p.constructor.name : "";
+                if (p && p.id && (pn === "Rectangle" || pn === "Polygon"
+                    || pn === "GraphicLine" || pn === "Oval")) {
+                    renderTarget = p;
+                }
+            } catch (e) {}
+        }
+
+        var targetId = renderTarget.id;
+        if (processedIds[targetId]) continue;
+
+        // PNG 렌더링
+        var fileName = "float_" + targetId + ".png";
+        var outFile = File(renderDir + "/" + fileName);
+        var renderSuccess = false;
+
+        try {
+            renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
+            renderSuccess = outFile.exists;
+        } catch (e) {
+            renderSuccess = false;
+        }
+
+        // bounds 계산 (page-relative)
+        var bounds = null;
+        try {
+            bounds = arrCopy(renderTarget.visibleBounds);
+            if (!bounds) bounds = arrCopy(renderTarget.geometricBounds);
+            if (bounds) {
+                var pageBounds = parentPage.bounds;
+                bounds[0] -= pageBounds[0];
+                bounds[1] -= pageBounds[1];
+                bounds[2] -= pageBounds[0];
+                bounds[3] -= pageBounds[1];
+            }
+        } catch (e) {}
+
+        // childIds 수집 (Group인 경우)
+        var childIds = null;
+        if (cName === "Group") {
+            childIds = [];
+            try {
+                var gItems = item.allPageItems;
+                for (var ci = 0; ci < gItems.length; ci++) {
+                    childIds.push(gItems[ci].id);
+                }
+            } catch (e) {}
+        }
+
+        // z-order (페이지 내 순서)
+        var pageIdx = parentPage.documentOffset;
+        if (!zCounter[pageIdx]) zCounter[pageIdx] = 0;
+        var zOrder = zCounter[pageIdx]++;
+
+        // 결과 추가
+        var entry = {
+            id: targetId,
+            file: renderSuccess ? ("rendered_frames/" + fileName) : null,
+            bounds: bounds,
+            pageIndex: pageIdx,
+            zOrder: zOrder,
+            type: cName === "TextFrame" ? "text_decoration"
+                : cName === "Group" ? "group"
+                : (cName === "Rectangle" || cName === "Polygon" || cName === "Oval" || cName === "GraphicLine") ? "vector"
+                : "other",
+            childIds: childIds
+        };
+        results.push(entry);
+        processedIds[targetId] = true;
+        processedIds[domId] = true;
+    }
+
+    return results;
 }
 
 /**

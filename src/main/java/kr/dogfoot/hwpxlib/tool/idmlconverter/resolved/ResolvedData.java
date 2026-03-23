@@ -33,6 +33,8 @@ public class ResolvedData {
     private double scaleFactor = 2.8346;  // resolved 좌표 → pt 변환 스케일
     private final Map<String, FontMetricEntry> fontMetricMap = new HashMap<>();  // family → metric
     private final Set<String> consumedRenderedGraphicIds = new HashSet<>();  // 인라인 처리로 소비된 deco DOM id
+    private final List<RenderedGroup> renderedFloatingItems = new ArrayList<>();  // 통합 플로팅 그래픽
+    private final Map<String, RenderedGroup> renderedFloatingItemMap = new LinkedHashMap<>();
     private String basePath;  // resolved.json 부모 디렉토리 경로
 
     public String basePath() { return basePath; }
@@ -156,6 +158,28 @@ public class ResolvedData {
 
     public List<FontMetricEntry> fontMetrics() { return fontMetrics; }
     public double scaleFactor() { return scaleFactor; }
+
+    // --- RenderedFloatingItem (통합 플로팅 그래픽) ---
+
+    public void addRenderedFloatingItem(RenderedGroup item) {
+        String key = String.valueOf(item.id());
+        RenderedGroup existing = renderedFloatingItemMap.get(key);
+        if (existing != null && existing.childIds() != null && item.childIds() == null) {
+            item.childIds(existing.childIds());
+        }
+        renderedFloatingItemMap.put(key, item);
+        renderedFloatingItems.add(item);
+    }
+
+    public List<RenderedGroup> allRenderedFloatingItems() { return renderedFloatingItems; }
+
+    public List<RenderedGroup> getRenderedFloatingItemsByPage(int pageIndex) {
+        List<RenderedGroup> result = new ArrayList<>();
+        for (RenderedGroup rg : renderedFloatingItems) {
+            if (rg.pageIndex() == pageIndex) result.add(rg);
+        }
+        return result;
+    }
 
     public FontMetricEntry getFontMetric(String family) {
         return fontMetricMap.get(family);

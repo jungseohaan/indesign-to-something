@@ -48,6 +48,9 @@ public class ASTFigure extends ASTBlock {
     // 소속 그룹 ID (compositing용)
     private String parentGroupId;
 
+    // Java 폴백 렌더링 여부 (ExtendScript 실패 시 true → 주황 외곽선 표시)
+    private boolean fallbackRendered;
+
     public BlockType blockType() { return BlockType.FIGURE; }
 
     public FigureKind kind() { return kind; }
@@ -130,6 +133,9 @@ public class ASTFigure extends ASTBlock {
 
     public String parentGroupId() { return parentGroupId; }
     public void parentGroupId(String v) { this.parentGroupId = v; }
+
+    public boolean fallbackRendered() { return fallbackRendered; }
+    public void fallbackRendered(boolean v) { this.fallbackRendered = v; }
 
     public boolean hasCrop() {
         return cropLeftFraction > 0 || cropTopFraction > 0
