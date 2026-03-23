@@ -217,7 +217,13 @@ public class ResolvedData {
     // --- RenderedGraphicFrame (복합 장식 그래픽) ---
 
     public void addRenderedGraphicFrame(RenderedGroup frame) {
-        renderedGraphicFrameMap.put(String.valueOf(frame.id()), frame);
+        String key = String.valueOf(frame.id());
+        RenderedGroup existing = renderedGraphicFrameMap.get(key);
+        if (existing != null && existing.childIds() != null && frame.childIds() == null) {
+            // 기존 엔트리에 childIds가 있고 새 엔트리에 없으면 childIds 보존
+            frame.childIds(existing.childIds());
+        }
+        renderedGraphicFrameMap.put(key, frame);
     }
 
     /**

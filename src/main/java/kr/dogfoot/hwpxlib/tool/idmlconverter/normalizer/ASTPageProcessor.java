@@ -474,6 +474,10 @@ class ASTPageProcessor {
                 if (resolvedData.getRenderedGraphicFrameByIdmlId(s.selfId()) != null) {
                     return true;
                 }
+                // 도형 자체가 isRenderedByExtendScript에 등록된 경우 → 제거
+                if (resolvedData.isRenderedByExtendScript(s.selfId())) {
+                    return true;
+                }
                 // 부모 그룹이 렌더된 경우 → 그룹 PNG가 자식 커버 → 제거
                 if (s.parentGroupId() != null && resolvedData.isRenderedByExtendScript(s.parentGroupId())) {
                     return true;
