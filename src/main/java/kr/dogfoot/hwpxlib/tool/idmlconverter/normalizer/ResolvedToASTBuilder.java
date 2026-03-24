@@ -481,7 +481,13 @@ public class ResolvedToASTBuilder {
         }
 
         // 다중 프레임: paragraphStart/End로 분배
-        for (ASTTextFrameBlock block : blocks) {
+        // 프레임 체인 순서대로 정렬 (previousFrameId=null이 첫 번째)
+        // 겹치는 단락(이전 프레임의 paraEnd == 다음 프레임의 paraStart)은 다음 프레임에만 할당
+        java.util.Set<Integer> assignedParas = new java.util.HashSet<Integer>();
+        // 체인 순서로 정렬: previousFrameId=null → next → next → ...
+        List<ASTTextFrameBlock> ordered = orderByThreadChain(blocks);
+
+        for (ASTTextFrameBlock block : ordered) {
             String domId = block.sourceId().startsWith("u")
                     ? String.valueOf(Integer.parseInt(block.sourceId().substring(1), 16))
                     : block.sourceId();
@@ -494,9 +500,59 @@ public class ResolvedToASTBuilder {
             if (end < 0) end = paragraphs.size() - 1;
 
             for (int i = start; i <= end && i < paragraphs.size(); i++) {
-                block.addParagraph(paragraphs.get(i));
+                if (!assignedParas.contains(i)) {
+                    block.addParagraph(paragraphs.get(i));
+                    assignedParas.add(i);
+                }
             }
         }
+    }
+
+    /**
+     * 스레드 체인 순서로 블록 정렬: previousFrameId=null인 첫 번째 프레임부터 순서대로.
+     */
+    private List<ASTTextFrameBlock> orderByThreadChain(List<ASTTextFrameBlock> blocks) {
+        if (blocks.size() <= 1) return blocks;
+
+        // domId → block 매핑
+        Map<String, ASTTextFrameBlock> byDomId = new java.util.LinkedHashMap<String, ASTTextFrameBlock>();
+        for (ASTTextFrameBlock b : blocks) {
+            String domId = b.sourceId().startsWith("u")
+                    ? String.valueOf(Integer.parseInt(b.sourceId().substring(1), 16))
+                    : b.sourceId();
+            byDomId.put(domId, b);
+        }
+
+        // 첫 번째 프레임 찾기 (previousFrameId=null)
+        String firstId = null;
+        for (String domId : byDomId.keySet()) {
+            ResolvedTextFrame rtf = resolvedData.getTextFrame(domId);
+            if (rtf != null && rtf.previousFrameId() == null) {
+                firstId = domId;
+                break;
+            }
+        }
+
+        if (firstId == null) return blocks; // 체인 시작을 못 찾으면 원래 순서
+
+        // 체인 순서로 정렬
+        List<ASTTextFrameBlock> ordered = new ArrayList<ASTTextFrameBlock>();
+        String currentId = firstId;
+        java.util.Set<String> visited = new java.util.HashSet<String>();
+        while (currentId != null && !visited.contains(currentId)) {
+            visited.add(currentId);
+            ASTTextFrameBlock b = byDomId.get(currentId);
+            if (b != null) ordered.add(b);
+            ResolvedTextFrame rtf = resolvedData.getTextFrame(currentId);
+            currentId = (rtf != null) ? rtf.nextFrameId() : null;
+        }
+
+        // 체인에 포함되지 않은 블록 추가
+        for (ASTTextFrameBlock b : blocks) {
+            if (!ordered.contains(b)) ordered.add(b);
+        }
+
+        return ordered;
     }
 
     // ═══════════════════════════════════════════════════
