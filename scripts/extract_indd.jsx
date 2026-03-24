@@ -3079,6 +3079,33 @@ function collectTextFrames(doc, startPage, endPage) {
                         }
                     }
                     fData.paragraphYOffsets = paraYOffsets;
+
+                    // 프레임에 보이는 각 단락의 실제 텍스트 (단락 분할점 계산용)
+                    var frameParaTexts = [];
+                    for (var fpt = 0; fpt < frameParas.length; fpt++) {
+                        try {
+                            var paraContent = frameParas[fpt].contents;
+                            // \r 제거 (단락 끝 구분자)
+                            if (typeof paraContent === "string") {
+                                paraContent = paraContent.replace(/\r$/g, "");
+                            }
+                            frameParaTexts.push(paraContent || "");
+                        } catch (e3) {
+                            frameParaTexts.push("");
+                        }
+                    }
+                    fData.frameParaTexts = frameParaTexts;
+
+                    // 프레임에 실제 보이는 전체 텍스트 (오버플로우 제외)
+                    try {
+                        var visibleText = tf.contents;
+                        if (typeof visibleText === "string") {
+                            visibleText = visibleText.replace(/\r/g, "\n");
+                        }
+                        fData.frameVisibleText = visibleText || "";
+                    } catch (e4) {
+                        fData.frameVisibleText = "";
+                    }
                 }
             } catch (e) {}
 

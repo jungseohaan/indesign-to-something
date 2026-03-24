@@ -37,6 +37,8 @@ public class ResolvedTextFrame {
     private double strokeWeight;
     private double opacity = 100;
     private double cornerRadius;
+    private java.util.List<String> frameParaTexts;  // 프레임에 보이는 각 단락의 실제 텍스트
+    private String frameVisibleText;  // 프레임에 실제 보이는 전체 텍스트 (오버플로우 제외)
 
     public String id() { return id; }
     public void id(String v) { this.id = v; }
@@ -113,4 +115,9 @@ public class ResolvedTextFrame {
 
     public double cornerRadius() { return cornerRadius; }
     public void cornerRadius(double v) { this.cornerRadius = v; }
+
+    public java.util.List<String> frameParaTexts() { return frameParaTexts; }
+    public void frameParaTexts(java.util.List<String> v) { this.frameParaTexts = v; }
+    public String frameVisibleText() { return frameVisibleText; }
+    public void frameVisibleText(String v) { this.frameVisibleText = v; }
 }

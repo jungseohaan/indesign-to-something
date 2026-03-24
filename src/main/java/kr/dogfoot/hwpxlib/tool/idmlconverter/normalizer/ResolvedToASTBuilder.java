@@ -128,16 +128,19 @@ public class ResolvedToASTBuilder {
 
             ASTSection section = sections.get(pageIdx);
 
-            // 좌표 계산: geometricBounds는 이미 페이지 상대 좌표 (page-relative)
-            // pageLeft/pageTop을 빼지 않고 직접 사용
+            // 좌표 계산: geometricBounds는 spread 좌표 (applyScale 후 pt)
+            // → page bounds를 빼서 page-relative로 변환
             double[] gb = tf.geometricBounds();
             if (gb == null || gb.length < 4) continue;
 
-            double x = gb[1];
-            double y = gb[0];
+            ResolvedPage rPage = (pageIdx < resolvedData.pages().size())
+                    ? resolvedData.pages().get(pageIdx) : null;
+            double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
+            double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
+            double x = gb[1] - pageLeft;
+            double y = gb[0] - pageTop;
             double w = gb[3] - gb[1];
             double h = gb[2] - gb[0];
-
             // 음수 좌표 클램핑
             if (x < 0) { w += x; x = 0; }
             if (y < 0) { h += y; y = 0; }
@@ -470,42 +473,253 @@ public class ResolvedToASTBuilder {
         return paragraphs;
     }
 
+    /**
+     * 텍스트 기반 단락 분배: frameParaTexts로 IDML 단락을 각 프레임에 할당.
+     * paragraphStart/End 인덱스 대신, 텍스트 내용을 순차 매칭하여 프레임 간 단락 분할을 정확히 처리.
+     */
     private void distributeParagraphs(List<ASTParagraph> paragraphs,
                                        List<ASTTextFrameBlock> blocks, String storyId) {
         if (blocks.size() == 1) {
-            // 단일 프레임: 모든 단락 할당
             for (ASTParagraph p : paragraphs) {
                 blocks.get(0).addParagraph(p);
             }
             return;
         }
 
-        // 다중 프레임: paragraphStart/End로 분배
-        // 프레임 체인 순서대로 정렬 (previousFrameId=null이 첫 번째)
-        // 겹치는 단락(이전 프레임의 paraEnd == 다음 프레임의 paraStart)은 다음 프레임에만 할당
-        java.util.Set<Integer> assignedParas = new java.util.HashSet<Integer>();
-        // 체인 순서로 정렬: previousFrameId=null → next → next → ...
         List<ASTTextFrameBlock> ordered = orderByThreadChain(blocks);
 
-        for (ASTTextFrameBlock block : ordered) {
+        // 전체 IDML 단락 텍스트를 하나의 연속 문자열로 합침
+        StringBuilder storyTextBuilder = new StringBuilder();
+        List<int[]> paraRanges = new ArrayList<>(); // [startCharIdx, endCharIdx]
+        for (ASTParagraph p : paragraphs) {
+            int s = storyTextBuilder.length();
+            String pt = getParaPlainText(p);
+            storyTextBuilder.append(pt != null ? pt : "");
+            paraRanges.add(new int[]{s, storyTextBuilder.length()});
+        }
+        String storyText = storyTextBuilder.toString();
+
+        // 각 프레임의 첫 frameParaText를 storyText에서 검색하여 정확한 범위 결정
+        // 프레임별 (startOffset, endOffset) 계산
+        int[][] frameRanges = new int[ordered.size()][2];
+        int searchFrom = 0;
+        for (int fi = 0; fi < ordered.size(); fi++) {
+            ASTTextFrameBlock block = ordered.get(fi);
             String domId = block.sourceId().startsWith("u")
                     ? String.valueOf(Integer.parseInt(block.sourceId().substring(1), 16))
                     : block.sourceId();
             ResolvedTextFrame rtf = resolvedData.getTextFrame(domId);
-            if (rtf == null) continue;
+            // frameVisibleText 사용 (정확한 프레임 보이는 텍스트)
+            String visibleText = (rtf != null) ? rtf.frameVisibleText() : null;
+            if (visibleText != null) {
+                visibleText = visibleText.replace("\uFFFC", "").replace("\n", "");
+            }
 
-            int start = rtf.paragraphStart();
-            int end = rtf.paragraphEnd();
-            if (start < 0) start = 0;
-            if (end < 0) end = paragraphs.size() - 1;
+            if (visibleText == null || visibleText.isEmpty()) {
+                // frameVisibleText가 없으면 frameParaTexts 폴백
+                java.util.List<String> frameTexts = (rtf != null) ? rtf.frameParaTexts() : null;
+                if (frameTexts != null && !frameTexts.isEmpty()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (String ft : frameTexts) {
+                        if (ft != null) sb.append(ft.replace("\uFFFC", ""));
+                    }
+                    visibleText = sb.toString();
+                }
+            }
 
-            for (int i = start; i <= end && i < paragraphs.size(); i++) {
-                if (!assignedParas.contains(i)) {
+            if (visibleText == null || visibleText.isEmpty()) {
+                frameRanges[fi][0] = searchFrom;
+                frameRanges[fi][1] = (fi == ordered.size() - 1) ? storyText.length() : searchFrom;
+                continue;
+            }
+
+            // visibleText의 앞부분을 storyText에서 검색하여 시작 위치 결정
+            String startKey = visibleText.length() > 20 ? visibleText.substring(0, 20) : visibleText;
+            int foundStart = storyText.indexOf(startKey, searchFrom);
+            if (foundStart < 0) foundStart = searchFrom;
+
+            // visibleText의 끝부분을 storyText에서 검색하여 종료 위치 결정
+            String endKey = visibleText.length() > 20 ? visibleText.substring(visibleText.length() - 20) : visibleText;
+            int foundEnd = storyText.indexOf(endKey, foundStart);
+            if (foundEnd >= 0) {
+                foundEnd += endKey.length();
+            } else {
+                foundEnd = foundStart + visibleText.length();
+            }
+
+            frameRanges[fi][0] = foundStart;
+            frameRanges[fi][1] = Math.min(foundEnd, storyText.length());
+            searchFrom = frameRanges[fi][1];
+            if (ordered.size() > 1) {
+                System.out.println("[FRANGE] " + storyId + " TF=" + domId + " range=[" + foundStart + "," + frameRanges[fi][1] + "] visLen=" + (visibleText != null ? visibleText.length() : 0));
+            }
+        }
+
+        // 프레임별 단락 할당
+        for (int fi = 0; fi < ordered.size(); fi++) {
+            ASTTextFrameBlock block = ordered.get(fi);
+            int frameStart = frameRanges[fi][0];
+            int frameEnd = frameRanges[fi][1];
+            String domId = block.sourceId().startsWith("u")
+                    ? String.valueOf(Integer.parseInt(block.sourceId().substring(1), 16))
+                    : block.sourceId();
+            ResolvedTextFrame rtf = resolvedData.getTextFrame(domId);
+            java.util.List<String> frameTexts = (rtf != null) ? rtf.frameParaTexts() : null;
+
+            if (frameTexts == null || frameTexts.isEmpty()) {
+                int start = (rtf != null) ? Math.max(0, rtf.paragraphStart()) : 0;
+                int end = (rtf != null && rtf.paragraphEnd() >= 0) ? rtf.paragraphEnd() : paragraphs.size() - 1;
+                for (int i = start; i <= end && i < paragraphs.size(); i++) {
                     block.addParagraph(paragraphs.get(i));
-                    assignedParas.add(i);
+                }
+                continue;
+            }
+
+            for (int i = 0; i < paragraphs.size(); i++) {
+                int paraStart = paraRanges.get(i)[0];
+                int paraEnd = paraRanges.get(i)[1];
+
+                if (paraEnd <= frameStart) continue;
+                if (paraStart >= frameEnd) break;
+
+                if (paraStart >= frameStart && paraEnd <= frameEnd) {
+                    // 단락이 프레임 안에 완전히 포함
+                    block.addParagraph(paragraphs.get(i));
+                } else if (paraStart < frameEnd && paraEnd > frameEnd) {
+                    // 단락이 프레임 경계에 걸침 → 앞부분만 (cutLen 글자)
+                    int cutLen = frameEnd - paraStart;
+                    String fullText = getParaPlainText(paragraphs.get(i));
+                    String cutText = (fullText != null && cutLen < fullText.length()) ? fullText.substring(0, cutLen) : fullText;
+                    ASTParagraph trimmed = createSplitParagraph(paragraphs.get(i), cutText);
+                    if (trimmed != null) {
+                        block.addParagraph(trimmed);
+                    }
+                } else if (paraStart < frameStart && paraEnd > frameStart) {
+                    // 이전 프레임에서 시작된 단락의 나머지
+                    int skipLen = frameStart - paraStart;
+                    String fullText = getParaPlainText(paragraphs.get(i));
+                    String contText = (fullText != null && skipLen < fullText.length()) ? fullText.substring(skipLen) : "";
+                    ASTParagraph continuation = createContinuationParagraph(paragraphs.get(i), skipLen, contText);
+                    if (continuation != null) {
+                        block.addParagraph(continuation);
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * 원본 단락에서 skipLen 이후의 텍스트만 포함하는 이어지기 단락 생성.
+     */
+    private ASTParagraph createContinuationParagraph(ASTParagraph original, int skipLen, String expectedText) {
+        ASTParagraph cont = new ASTParagraph();
+        cont.paragraphStyleRef(original.paragraphStyleRef());
+        cont.alignment(original.alignment());
+        if (original.lineSpacing() != null) {
+            cont.lineSpacing(original.lineSpacing());
+            cont.lineSpacingType(original.lineSpacingType());
+        }
+        if (original.spaceBefore() != null) cont.spaceBefore(original.spaceBefore());
+        if (original.spaceAfter() != null) cont.spaceAfter(original.spaceAfter());
+        if (original.leftMargin() != null) cont.leftMargin(original.leftMargin());
+
+        int skipped = 0;
+        for (ASTInlineItem item : original.items()) {
+            if (item instanceof ASTTextRun) {
+                ASTTextRun origRun = (ASTTextRun) item;
+                String text = origRun.text();
+                if (text == null) continue;
+                if (skipped + text.length() <= skipLen) {
+                    skipped += text.length();
+                    continue;
+                }
+                if (skipped < skipLen) {
+                    // 런 중간에서 시작
+                    int offset = skipLen - skipped;
+                    ASTTextRun partialRun = new ASTTextRun();
+                    partialRun.text(text.substring(offset));
+                    partialRun.fontFamily(origRun.fontFamily());
+                    partialRun.fontStyle(origRun.fontStyle());
+                    partialRun.fontSizeHwpunits(origRun.fontSizeHwpunits());
+                    partialRun.textColor(origRun.textColor());
+                    cont.addItem(partialRun);
+                    skipped = skipLen;
+                } else {
+                    cont.addItem(origRun);
+                }
+            } else {
+                if (skipped >= skipLen) {
+                    cont.addItem(item);
+                } else {
+                    skipped++;
+                }
+            }
+        }
+
+        return cont.items().isEmpty() ? null : cont;
+    }
+
+    /** ASTParagraph의 전체 plain text를 반환 */
+    private String getParaPlainText(ASTParagraph para) {
+        StringBuilder sb = new StringBuilder();
+        for (ASTInlineItem item : para.items()) {
+            if (item instanceof ASTTextRun) {
+                String t = ((ASTTextRun) item).text();
+                if (t != null) sb.append(t);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 원본 단락에서 frameText에 해당하는 부분만 포함하는 분할 단락 생성.
+     * 원본 단락의 스타일을 복제하고, 텍스트 런을 frameText 길이에 맞게 잘라냄.
+     */
+    private ASTParagraph createSplitParagraph(ASTParagraph original, String frameText) {
+        if (frameText == null || frameText.trim().isEmpty()) return null;
+
+        ASTParagraph split = new ASTParagraph();
+        // 단락 스타일 복제
+        split.paragraphStyleRef(original.paragraphStyleRef());
+        split.alignment(original.alignment());
+        if (original.lineSpacing() != null) {
+            split.lineSpacing(original.lineSpacing());
+            split.lineSpacingType(original.lineSpacingType());
+        }
+        if (original.spaceBefore() != null) split.spaceBefore(original.spaceBefore());
+        if (original.spaceAfter() != null) split.spaceAfter(original.spaceAfter());
+        if (original.leftMargin() != null) split.leftMargin(original.leftMargin());
+        if (original.firstLineIndent() != null) split.firstLineIndent(original.firstLineIndent());
+
+        // 텍스트 런을 frameText 길이에 맞게 복제
+        int remaining = frameText.length();
+        for (ASTInlineItem item : original.items()) {
+            if (remaining <= 0) break;
+            if (item instanceof ASTTextRun) {
+                ASTTextRun origRun = (ASTTextRun) item;
+                String text = origRun.text();
+                if (text == null) continue;
+                if (text.length() <= remaining) {
+                    split.addItem(origRun); // 전체 런 복제
+                    remaining -= text.length();
+                } else {
+                    // 런 잘라내기
+                    ASTTextRun trimmedRun = new ASTTextRun();
+                    trimmedRun.text(text.substring(0, remaining));
+                    trimmedRun.fontFamily(origRun.fontFamily());
+                    trimmedRun.fontStyle(origRun.fontStyle());
+                    trimmedRun.fontSizeHwpunits(origRun.fontSizeHwpunits());
+                    trimmedRun.textColor(origRun.textColor());
+                    split.addItem(trimmedRun);
+                    remaining = 0;
+                }
+            } else {
+                split.addItem(item); // 인라인 객체는 그대로
+                remaining--; // U+FFFC 자리
+            }
+        }
+
+        return split.items().isEmpty() ? null : split;
     }
 
     /**

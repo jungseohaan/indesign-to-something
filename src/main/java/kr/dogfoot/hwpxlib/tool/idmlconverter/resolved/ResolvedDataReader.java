@@ -199,6 +199,21 @@ public class ResolvedDataReader {
         tf.opacity(getDouble(o, "opacity", 100));
         tf.cornerRadius(getDouble(o, "cornerRadius", 0));
 
+        // frameParaTexts: 프레임에 보이는 각 단락의 실제 텍스트
+        if (o.has("frameParaTexts") && !o.get("frameParaTexts").isJsonNull()) {
+            JsonArray fptArr = o.getAsJsonArray("frameParaTexts");
+            java.util.List<String> texts = new java.util.ArrayList<>();
+            for (int i = 0; i < fptArr.size(); i++) {
+                texts.add(fptArr.get(i).isJsonNull() ? "" : fptArr.get(i).getAsString());
+            }
+            tf.frameParaTexts(texts);
+        }
+
+        // frameVisibleText: 프레임에 실제 보이는 전체 텍스트 (오버플로우 제외)
+        if (o.has("frameVisibleText") && !o.get("frameVisibleText").isJsonNull()) {
+            tf.frameVisibleText(o.get("frameVisibleText").getAsString());
+        }
+
         return tf;
     }
 
