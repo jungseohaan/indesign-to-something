@@ -1,36 +1,49 @@
 {
   "_comment": "IDML→HWPX 변환 통합 설정. ExtendScript + Java CLI 공용.",
   "rendering": {
-    "_comment": "ExtendScript PNG 렌더링 조건",
+    "_comment": "ExtendScript 렌더링 설정 — 텍스트 프레임/배지를 PNG로 렌더링할 조건",
     "textFrame": {
+      "_comment": "편집 가능 텍스트 프레임 vs 장식 텍스트 판별 기준",
       "maxTextLength": 30,
+      "_comment_maxTextLength": "이 글자 수 이하인 TextFrame은 장식으로 판별하여 배경 PNG에 포함",
       "decorativeLargeText": {
+        "_comment": "큰 폰트의 장식 텍스트를 PNG로 렌더링할 조건",
         "enabled": true,
         "minFontSize": 16,
+        "_comment_minFontSize": "이 크기 이상인 텍스트를 장식으로 판별",
         "excludeBlack": true,
+        "_comment_excludeBlack": "검정색 텍스트는 장식이 아닌 본문으로 판별",
         "blackThreshold": 0.9
       }
     },
     "badge": {
+      "_comment": "배지 그룹 (아이콘+짧은 텍스트) 감지 기준",
       "maxTextLength": 15,
       "maxTotalTextLength": 40,
       "maxFontSize": 12
     },
     "transparency": {
+      "_comment": "투명도 기반 렌더링 대상 판별 (미사용 — 향후 구현 예정)",
       "opacityThreshold": 100,
       "tintThreshold": 30
     },
     "rotation": {
+      "_comment": "회전된 객체 렌더링 최소 각도 (미사용 — 향후 구현 예정)",
       "minAngle": 0.1
     },
-    "pngExportResolution": 300
+    "pngExportResolution": 300,
+    "_comment_pngExportResolution": "ExtendScript PNG 내보내기 해상도 (DPI). 페이지 배경은 PDF 파이프라인 사용"
   },
   "fontMapping": {
+    "_comment": "폰트 매핑 설정 — Java FontMapper에서 사용. InDesign 폰트를 HWPX 호환 폰트로 변환",
     "defaultSerifKo": "한컴바탕",
+    "_comment_defaultSerifKo": "명조(세리프) 계열 한글 기본 폰트",
     "defaultSansKo": "한컴돋움",
+    "_comment_defaultSansKo": "고딕(산세리프) 계열 한글 기본 폰트",
     "defaultSerifEn": "Times New Roman",
     "defaultSansEn": "Arial",
     "mappings": {
+      "_comment": "InDesign 폰트명 → HWPX 폰트 매핑. ko: 한글, en: 영문, spacing: 자간 보정(%), ratio: 장평 보정, scaleAdjust: 크기 보정(%)",
       "Sandoll 곧은부리": {
         "ko": "한컴돋움",
         "en": "Arial",
@@ -1819,6 +1832,7 @@
       }
     },
     "indesignFontMetrics": {
+      "_comment": "InDesign 폰트 메트릭 (10pt 기준, measure_indesign_fonts.py로 측정). 폰트 너비 비율 계산에 사용",
       "NPS font": {
         "korWidth": 9.2,
         "latWidth": 6.3,
@@ -3054,18 +3068,8 @@
     }
   },
   "spacing": {
-    "spaceCondenseRatio": 50
-  },
-  "orphanInjection": {
-    "overlapThreshold": 0.7,
-    "containmentThreshold": 0.8,
-    "duplicateSizeRatio": 0.9
-  },
-  "vectorRendering": {
-    "dpi": 300
-  },
-  "image": {
-    "defaultDpi": 72,
-    "maxPixelDimension": 2000
+    "_comment": "텍스트 간격 보정 설정 — Java HwpxParagraphBuilder에서 사용",
+    "spaceCondenseRatio": 50,
+    "_comment_spaceCondenseRatio": "공백 문자 장평 축소 비율 (%). 50이면 공백 폭을 50%로 축소"
   }
 }
