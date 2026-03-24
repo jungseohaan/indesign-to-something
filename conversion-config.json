@@ -14,13 +14,32 @@
         "excludeBlack": true,
         "_comment_excludeBlack": "검정색 텍스트는 장식이 아닌 본문으로 판별",
         "blackThreshold": 0.9
+      },
+      "decorativeStyledText": {
+        "_comment": "배경색/테두리가 있는 짧은 텍스트를 장식으로 판별 (Object Style + 텍스트 조건 동시 만족)",
+        "enabled": true,
+        "maxTextLength": 10,
+        "_comment_maxTextLength": "이 글자 수 이하인 TextFrame만 대상",
+        "excludeBlack": true,
+        "_comment_excludeBlack": "검정색 텍스트는 제외",
+        "blackThreshold": 0.9,
+        "requireObjectStyle": true,
+        "_comment_requireObjectStyle": "배경색, 테두리, 둥근 모서리 중 하나 이상 필요"
       }
     },
     "badge": {
-      "_comment": "배지 그룹 (아이콘+짧은 텍스트) 감지 기준",
-      "maxTextLength": 15,
-      "maxTotalTextLength": 40,
-      "maxFontSize": 12
+      "_comment": "배지 그룹 (도형+짧은 텍스트 조합) 감지 기준. 인라인 배지는 고해상도(badgeDpi)로 렌더",
+      "enabled": true,
+      "maxSize": 50,
+      "_comment_maxSize": "짧은 변 기준 최대 크기 (pt). 이보다 크면 배지 아님",
+      "maxTextLength": 20,
+      "_comment_maxTextLength": "그룹 내 전체 텍스트 최대 글자 수. 이보다 길면 배지 아님",
+      "requireShape": true,
+      "_comment_requireShape": "도형(Rectangle/Polygon/Oval) 1개 이상 필수",
+      "allowImage": false,
+      "_comment_allowImage": "이미지 포함 시 배지로 인정할지",
+      "badgeDpi": 600,
+      "_comment_badgeDpi": "배지 렌더 해상도. 텍스트 선명도 확보용"
     },
     "transparency": {
       "_comment": "투명도 기반 렌더링 대상 판별 (미사용 — 향후 구현 예정)",

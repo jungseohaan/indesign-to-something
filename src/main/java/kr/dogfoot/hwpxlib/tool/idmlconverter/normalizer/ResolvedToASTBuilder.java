@@ -117,6 +117,9 @@ public class ResolvedToASTBuilder {
             // 인라인 프레임은 Phase 3에서 처리
             if (tf.isInline()) continue;
 
+            // 다른 TextFrame 안에 중첩된 프레임은 건너뜀 (부모가 배경에 포함)
+            if (isNestedInTextFrame(tf)) continue;
+
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             // 단, 스레드 체인(연결 텍스트 프레임)은 무조건 배치 — 본문 텍스트일 가능성 높음
             boolean isThreaded = tf.previousFrameId() != null || tf.nextFrameId() != null;
@@ -819,6 +822,36 @@ public class ResolvedToASTBuilder {
             }
         }
         return null;
+    }
+
+    /**
+     * TextFrame이 다른 TextFrame 안에 중첩되어 있는지 확인.
+     * resolved.json의 pageItems에서 parentId 체인을 추적하여 부모 중 TextFrame이 있으면 true.
+     */
+    private boolean isNestedInTextFrame(ResolvedTextFrame tf) {
+        List<ResolvedPageItem> pageItems = resolvedData.pageItems();
+        if (pageItems == null) return false;
+
+        // 이 TextFrame의 parentId 찾기
+        String parentId = null;
+        for (ResolvedPageItem pi : pageItems) {
+            if (tf.id().equals(String.valueOf(pi.id()))) {
+                parentId = pi.parentId() != null ? String.valueOf(pi.parentId()) : null;
+                break;
+            }
+        }
+
+        // parentId 체인을 추적하여 TextFrame 부모 확인
+        for (int depth = 0; depth < 5 && parentId != null; depth++) {
+            for (ResolvedPageItem pi : pageItems) {
+                if (parentId.equals(String.valueOf(pi.id()))) {
+                    if ("TextFrame".equals(pi.type())) return true;
+                    parentId = pi.parentId() != null ? String.valueOf(pi.parentId()) : null;
+                    break;
+                }
+            }
+        }
+        return false;
     }
 
     // ═══════════════════════════════════════════════════

@@ -118,8 +118,8 @@ var CONFIG = null;
 function loadConversionConfig(configPath) {
     var defaults = {
         rendering: {
-            textFrame: { maxTextLength: 30, decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 } },
-            badge: { maxTextLength: 15, maxTotalTextLength: 40, maxFontSize: 12 },
+            textFrame: { maxTextLength: 30, decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 }, decorativeStyledText: { enabled: true, maxTextLength: 10, excludeBlack: true, blackThreshold: 0.90, requireObjectStyle: true } },
+            badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
             rotation: { minAngle: 0.1 },
             pngExportResolution: 600
@@ -146,12 +146,23 @@ function loadConversionConfig(configPath) {
                     if (dlt.excludeBlack !== undefined) defaults.rendering.textFrame.decorativeLargeText.excludeBlack = dlt.excludeBlack;
                     if (dlt.blackThreshold !== undefined) defaults.rendering.textFrame.decorativeLargeText.blackThreshold = dlt.blackThreshold;
                 }
+                if (parsed.rendering.textFrame.decorativeStyledText) {
+                    var dst = parsed.rendering.textFrame.decorativeStyledText;
+                    if (dst.enabled !== undefined) defaults.rendering.textFrame.decorativeStyledText.enabled = dst.enabled;
+                    if (dst.maxTextLength !== undefined) defaults.rendering.textFrame.decorativeStyledText.maxTextLength = dst.maxTextLength;
+                    if (dst.excludeBlack !== undefined) defaults.rendering.textFrame.decorativeStyledText.excludeBlack = dst.excludeBlack;
+                    if (dst.blackThreshold !== undefined) defaults.rendering.textFrame.decorativeStyledText.blackThreshold = dst.blackThreshold;
+                    if (dst.requireObjectStyle !== undefined) defaults.rendering.textFrame.decorativeStyledText.requireObjectStyle = dst.requireObjectStyle;
+                }
             }
             if (parsed.rendering.badge) {
                 var b = parsed.rendering.badge;
+                if (b.enabled !== undefined) defaults.rendering.badge.enabled = b.enabled;
+                if (b.maxSize !== undefined) defaults.rendering.badge.maxSize = b.maxSize;
                 if (b.maxTextLength !== undefined) defaults.rendering.badge.maxTextLength = b.maxTextLength;
-                if (b.maxTotalTextLength !== undefined) defaults.rendering.badge.maxTotalTextLength = b.maxTotalTextLength;
-                if (b.maxFontSize !== undefined) defaults.rendering.badge.maxFontSize = b.maxFontSize;
+                if (b.requireShape !== undefined) defaults.rendering.badge.requireShape = b.requireShape;
+                if (b.allowImage !== undefined) defaults.rendering.badge.allowImage = b.allowImage;
+                if (b.badgeDpi !== undefined) defaults.rendering.badge.badgeDpi = b.badgeDpi;
             }
             if (parsed.rendering.transparency) {
                 var t = parsed.rendering.transparency;
@@ -1685,14 +1696,12 @@ function isOnHiddenLayer(item) {
 }
 
 function isBadgeGroup(group) {
+    var cfg = CONFIG.rendering.badge;
+    if (!cfg.enabled) return false;
+
     var hasShape = false;
-    var hasShortText = false;
-    var hasLongText = false;
     var hasImage = false;
-    var hasSubGroup = false;
     var totalTextLen = 0;
-    var subGroupCount = 0;
-    var singleSubGroup = null;
 
     try {
         var items = group.allPageItems;
@@ -1701,53 +1710,22 @@ function isBadgeGroup(group) {
             var cName = item.constructor.name;
             if (cName === "Rectangle" || cName === "Polygon"
                 || cName === "Oval" || cName === "GraphicLine") {
-                // 이미지가 포함된 Rectangle은 도형이 아닌 이미지 컨테이너
                 try {
                     if (item.images && item.images.length > 0) { hasImage = true; continue; }
                     if (item.epss && item.epss.length > 0) { hasImage = true; continue; }
                     if (item.pdfs && item.pdfs.length > 0) { hasImage = true; continue; }
                 } catch (e) {}
                 hasShape = true;
-                // TextPath가 있는 도형: 곡선 텍스트도 배지 텍스트로 인식
+                // TextPath 텍스트도 카운트
                 try {
                     if (item.textPaths && item.textPaths.length > 0) {
                         for (var tp = 0; tp < item.textPaths.length; tp++) {
-                            var tpTxt = "";
-                            try { tpTxt = item.textPaths[tp].texts[0].contents; } catch (e2) {}
-                            var tpTrimmed = tpTxt.replace(/[\s\uFEFF]/g, "");
-                            totalTextLen += tpTrimmed.length;
-                            if (tpTrimmed.length > 0 && tpTrimmed.length <= 15) {
-                                hasShortText = true;
-                            }
-                            if (tpTrimmed.length > 30) {
-                                hasLongText = true;
-                            }
+                            try { totalTextLen += item.textPaths[tp].texts[0].contents.replace(/[\s\uFEFF]/g, "").length; } catch (e2) {}
                         }
                     }
                 } catch (e) {}
             } else if (cName === "TextFrame") {
-                var txt = "";
-                try { txt = item.contents; } catch (e) {}
-                var trimmed = txt.replace(/[\s\uFEFF]/g, "");
-                totalTextLen += trimmed.length;
-                // 폰트 크기 12pt 초과 → 배지 아님 (제목/장식 텍스트)
-                try {
-                    if (item.parentStory.characters[0].pointSize > 12) return false;
-                } catch (e) {}
-                if (trimmed.length > 0 && trimmed.length <= 15) {
-                    hasShortText = true;
-                }
-                if (trimmed.length > 30) {
-                    hasLongText = true;
-                }
-            } else if (cName === "Group") {
-                // 직속 자식 Group만 카운트 (allPageItems는 재귀적이므로 parent로 확인)
-                try {
-                    if (item.parent && item.parent.id === group.id) {
-                        subGroupCount++;
-                        singleSubGroup = item;
-                    }
-                } catch (e) {}
+                try { totalTextLen += item.contents.replace(/[\s\uFEFF]/g, "").length; } catch (e) {}
             } else if (cName === "Image" || cName === "EPS" || cName === "PDF") {
                 hasImage = true;
             }
@@ -1756,49 +1734,23 @@ function isBadgeGroup(group) {
         return false;
     }
 
-    // 배지: 도형+짧은텍스트, 이미지/서브그룹 없음, 긴 텍스트 없음
-    if (hasImage) return false;
-    if (hasSubGroup) return false;
-    if (hasLongText) return false;
-
-    // 직속 하위 Group이 없으면 기존 로직
-    if (subGroupCount === 0) {
-        if (!(hasShape && hasShortText)) return false;
-    } else if (subGroupCount === 1 && singleSubGroup) {
-        // 직속 하위 Group이 1개이고, 그 안에 배지 조건이 충족되면 허용
-        // (외부 래퍼 Group → 내부 배지 Group 패턴)
-        if (!(hasShape && hasShortText)) return false;
-    } else {
-        return false; // 직속 하위 Group이 2개 이상이면 배지 아님
-    }
-
-    // 전체 텍스트가 너무 많으면 배지가 아님 (콘텐츠 박스)
-    if (totalTextLen > 40) return false;
-
-    // 크기 제한: geometricBounds는 문서 측정 단위로 반환되므로
-    // points로 변환하여 비교
-    // TextPath 포함 그룹은 곡선 경로로 인해 바운딩 박스가 크므로 제한 완화 (350pt)
-    var hasTextPathInGroup = false;
+    // 조건 1: 이미지 허용 여부
+    if (hasImage && !cfg.allowImage) return false;
+    // 조건 2: 도형 필수 여부
+    if (cfg.requireShape && !hasShape) return false;
+    // 조건 3: 텍스트 길이
+    if (totalTextLen === 0 || totalTextLen > cfg.maxTextLength) return false;
+    // 조건 4: 크기 제한 (짧은 변 기준, pt 변환)
     try {
-        for (var ti = 0; ti < items.length; ti++) {
-            try {
-                if (items[ti].textPaths && items[ti].textPaths.length > 0) {
-                    hasTextPathInGroup = true; break;
-                }
-            } catch (e) {}
-        }
-    } catch (e) {}
-    var maxSize = hasTextPathInGroup ? 350 : 150;
-    try {
-        var gb = group.geometricBounds; // [top, left, bottom, right]
+        var gb = group.geometricBounds;
         var gw = gb[3] - gb[1];
         var gh = gb[2] - gb[0];
-        // 문서 단위 → points 변환 (페이지 폭 비교)
         var pageW = group.parentPage.bounds[3] - group.parentPage.bounds[1];
         var scale = 1;
-        if (pageW > 0 && pageW < 300) scale = 72 / 25.4; // mm → pt
-        else if (pageW > 0 && pageW < 30) scale = 72; // inch → pt
-        if (gw * scale > maxSize || gh * scale > maxSize) return false;
+        if (pageW > 0 && pageW < 300) scale = 72 / 25.4;
+        else if (pageW > 0 && pageW < 30) scale = 72;
+        var minDim = Math.min(gw, gh) * scale;
+        if (minDim > cfg.maxSize) return false;
     } catch (e) {
         return false;
     }
@@ -1911,6 +1863,45 @@ function isRenderableTextFrame(tf) {
                 }
             }
         } catch (e) {}
+
+        // 장식 스타일 텍스트: 짧은 텍스트(≤10자) + 비검정 + Object Style(배경색/테두리/둥근모서리)
+        try {
+            var dstCfg = CONFIG.rendering.textFrame.decorativeStyledText;
+            if (dstCfg.enabled && trimmed.length <= dstCfg.maxTextLength) {
+                var hasObjStyle = false;
+                if (dstCfg.requireObjectStyle) {
+                    // 배경색 체크
+                    try {
+                        var fillName = tf.fillColor ? tf.fillColor.name : "None";
+                        if (fillName !== "None" && fillName !== "[None]") hasObjStyle = true;
+                    } catch (e) {}
+                    // 테두리 체크
+                    if (!hasObjStyle) {
+                        try {
+                            if (tf.strokeWeight > 0) {
+                                var sName = tf.strokeColor ? tf.strokeColor.name : "None";
+                                if (sName !== "None" && sName !== "[None]") hasObjStyle = true;
+                            }
+                        } catch (e) {}
+                    }
+                    // 둥근 모서리 체크
+                    if (!hasObjStyle) {
+                        try {
+                            if (tf.topLeftCornerOption !== CornerOptions.NONE
+                                || tf.topRightCornerOption !== CornerOptions.NONE) hasObjStyle = true;
+                        } catch (e) {}
+                    }
+                } else {
+                    hasObjStyle = true; // requireObjectStyle=false이면 무조건 통과
+                }
+
+                if (hasObjStyle) {
+                    if (!dstCfg.excludeBlack || !isBlackColor(firstChar, dstCfg.blackThreshold)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (e) {}
     } catch (e) {}
 
     return false;
@@ -1920,6 +1911,55 @@ function isRenderableTextFrame(tf) {
  * 텍스트가 흰색 또는 희미한 색상인지 판별.
  * 배경이 없으면 보이지 않는 텍스트 → 렌더링 대상.
  */
+/**
+ * TextFrame이 장식 스타일 텍스트 배지인지 판별.
+ * 조건: 짧은 텍스트(≤maxTextLength) + 비검정 + Object Style(배경색/테두리/둥근모서리).
+ */
+function isDecorativeStyledTextFrame(tf) {
+    var cfg = CONFIG.rendering.textFrame.decorativeStyledText;
+    if (!cfg || !cfg.enabled) return false;
+
+    try {
+        var text = tf.parentStory.contents;
+        var trimmed = text.replace(/[\s\uFEFF\r\n]/g, "");
+        if (trimmed.length === 0 || trimmed.length > cfg.maxTextLength) return false;
+
+        // 검정색 체크
+        if (cfg.excludeBlack) {
+            var firstChar = tf.parentStory.characters[0];
+            if (isBlackColor(firstChar, cfg.blackThreshold)) return false;
+        }
+
+        // Object Style 체크
+        if (cfg.requireObjectStyle) {
+            var hasStyle = false;
+            try {
+                var fillName = tf.fillColor ? tf.fillColor.name : "None";
+                if (fillName !== "None" && fillName !== "[None]") hasStyle = true;
+            } catch (e) {}
+            if (!hasStyle) {
+                try {
+                    if (tf.strokeWeight > 0) {
+                        var sName = tf.strokeColor ? tf.strokeColor.name : "None";
+                        if (sName !== "None" && sName !== "[None]") hasStyle = true;
+                    }
+                } catch (e) {}
+            }
+            if (!hasStyle) {
+                try {
+                    if (tf.topLeftCornerOption !== CornerOptions.NONE
+                        || tf.topRightCornerOption !== CornerOptions.NONE) hasStyle = true;
+                } catch (e) {}
+            }
+            if (!hasStyle) return false;
+        }
+
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
 function isLightColoredText(tf) {
     try {
         var firstChar = tf.parentStory.characters[0];
@@ -2019,6 +2059,25 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
 /**
  * 아이템이 텍스트 흐름 안의 인라인(앵커) 객체인지 판별한다.
  */
+/**
+ * TextFrame이 다른 TextFrame 안에 중첩되어 있는지 확인.
+ * allPageItems로 순회 시 중첩 TextFrame이 독립 항목으로 나타나지만,
+ * 부모 TextFrame/Group이 배경에 포함되므로 별도 처리 불필요.
+ */
+function isNestedInTextFrame(item) {
+    try {
+        var cur = item.parent;
+        // 부모 체인을 2단계까지 확인 (Group > TextFrame 패턴)
+        for (var depth = 0; depth < 5 && cur; depth++) {
+            var pn = cur.constructor.name;
+            if (pn === "TextFrame") return true;
+            if (pn === "Spread" || pn === "Page" || pn === "Document") return false;
+            try { cur = cur.parent; } catch (e) { break; }
+        }
+    } catch (e) {}
+    return false;
+}
+
 function isInlineItem(item) {
     try {
         var cur = item.parent;
@@ -2087,12 +2146,27 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         // 인라인 객체는 부모가 관리하므로 건너뜀
         if (isInlineItem(item)) continue;
 
+        // Group 안의 짧은 TextFrame은 장식 요소 → 배경에 포함 (editable 아님)
+        try {
+            var parentType = item.parent.constructor.name;
+            if (parentType === "Group") {
+                var groupText = item.contents.replace(/[\s\uFEFF\r\n]/g, "");
+                if (groupText.length <= CONFIG.rendering.textFrame.maxTextLength) continue;
+            }
+        } catch (e) {}
+
         // 렌더 대상 텍스트 프레임(배지, 장식)은 배경에 포함 → 숨기지 않음
         if (isRenderableTextFrame(item)) continue;
 
         // 테이블이 포함된 TextFrame은 배경에 포함 → 숨기지 않음
         try {
             if (item.parentStory && item.parentStory.tables.length > 0) continue;
+        } catch (e) {}
+
+        // 빈 TextFrame(텍스트 없음)은 그래픽 속성(테두리, 배경색, 회전 등)이 있으므로 배경에 포함
+        try {
+            var trimmedContents = item.contents.replace(/[\r\n\s\uFFFC]/g, "");
+            if (trimmedContents.length === 0) continue;
         } catch (e) {}
 
         // 나머지 = 편집 가능 본문 텍스트 → 숨겨서 배경에서 제외
