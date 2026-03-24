@@ -122,7 +122,7 @@ function loadConversionConfig(configPath) {
             badge: { maxTextLength: 15, maxTotalTextLength: 40, maxFontSize: 12 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
             rotation: { minAngle: 0.1 },
-            pngExportResolution: 300
+            pngExportResolution: 600
         }
     };
     if (!configPath) return defaults;

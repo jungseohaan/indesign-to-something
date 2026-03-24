@@ -31,7 +31,7 @@
       "_comment": "회전된 객체 렌더링 최소 각도 (미사용 — 향후 구현 예정)",
       "minAngle": 0.1
     },
-    "pngExportResolution": 300,
+    "pngExportResolution": 600,
     "_comment_pngExportResolution": "ExtendScript PNG 내보내기 해상도 (DPI). 페이지 배경은 PDF 파이프라인 사용"
   },
   "fontMapping": {

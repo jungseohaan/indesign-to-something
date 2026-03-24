@@ -657,8 +657,8 @@ public class ResolvedToASTBuilder {
             byte[] imageData = null;
             int pixelW = 0, pixelH = 0;
 
-            // PDF 배경 래스터화 우선 시도
-            if (rg.pdfFile() != null && rg.pdfPageIndex() >= 0) {
+            // PDF 배경 래스터화 비활성화 — PNG 600dpi가 더 고품질
+            if (false && rg.pdfFile() != null && rg.pdfPageIndex() >= 0) {
                 try {
                     File pdfFile = new File(basePath, rg.pdfFile());
                     if (pdfFile.exists()) {

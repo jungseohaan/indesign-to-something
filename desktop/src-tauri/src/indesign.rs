@@ -13,6 +13,11 @@ fn find_bundled_config(app: &AppHandle) -> String {
         if config.exists() {
             return config.to_string_lossy().to_string();
         }
+        // Tauri 번들: _up_/_up_/ 구조
+        let config2 = resource_dir.join("_up_/_up_/conversion-config.json");
+        if config2.exists() {
+            return config2.to_string_lossy().to_string();
+        }
     }
     // 앱 데이터 디렉토리에서 찾기
     if let Ok(data_dir) = app.path().app_data_dir() {
