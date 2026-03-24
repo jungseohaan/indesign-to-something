@@ -164,6 +164,20 @@ public class ResolvedToASTBuilder {
             block.columnCount(tf.columnCount() > 0 ? tf.columnCount() : 1);
             block.columnGutter(CoordinateConverter.pointsToHwpunits(tf.columnGutter() * scaleFactor));
 
+            // 내부 여백 (insetSpacing — 이미 pt로 스케일됨)
+            if (tf.insetSpacing() != null) {
+                double[] inset = tf.insetSpacing();
+                block.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
+                block.insetLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
+                block.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
+                block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
+            }
+
+            // 수직 정렬
+            if (tf.verticalJustification() != null) {
+                block.verticalJustification(tf.verticalJustification());
+            }
+
             if (tf.rotationAngle() != 0) {
                 block.rotationAngle(tf.rotationAngle());
             }

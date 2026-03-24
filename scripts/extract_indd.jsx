@@ -391,13 +391,11 @@ function main(args) {
             // 링크 업데이트 실패는 무시
         }
 
-        // 5. PDF 프리뷰
+        // 5. PDF 프리뷰 (HWPX와 함께 출력용)
         try {
             var pdfFile = File(outputDir + "/preview.pdf");
 
             app.pdfExportPreferences.exportReaderSpreads = spreadMode;
-
-            // 이미지: 300 DPI 다운샘플링 + JPEG HIGH 압축
             app.pdfExportPreferences.colorBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
             app.pdfExportPreferences.colorBitmapSamplingDPI = 300;
             app.pdfExportPreferences.colorBitmapCompression = BitmapCompression.JPEG;
@@ -408,12 +406,8 @@ function main(args) {
             app.pdfExportPreferences.grayscaleBitmapQuality = CompressionQuality.HIGH;
             app.pdfExportPreferences.monochromeBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
             app.pdfExportPreferences.monochromeBitmapSamplingDPI = 1200;
-
-            // 프레임 밖 이미지 제외, 텍스트/벡터 압축
             app.pdfExportPreferences.cropImagesToFrames = true;
             app.pdfExportPreferences.compressTextAndLineArt = true;
-
-            // PDF 버전, 폰트 서브셋
             app.pdfExportPreferences.acrobatCompatibility = AcrobatCompatibility.ACROBAT_7;
             app.pdfExportPreferences.subsetFontsBelow = 100;
             app.pdfExportPreferences.optimizePDF = true;
