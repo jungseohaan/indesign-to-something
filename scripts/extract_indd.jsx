@@ -396,6 +396,7 @@ function main(args) {
             var pdfFile = File(outputDir + "/preview.pdf");
 
             app.pdfExportPreferences.exportReaderSpreads = spreadMode;
+            app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
             app.pdfExportPreferences.colorBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
             app.pdfExportPreferences.colorBitmapSamplingDPI = 300;
             app.pdfExportPreferences.colorBitmapCompression = BitmapCompression.JPEG;

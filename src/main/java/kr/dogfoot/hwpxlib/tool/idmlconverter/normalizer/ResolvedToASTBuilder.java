@@ -118,7 +118,9 @@ public class ResolvedToASTBuilder {
             if (tf.isInline()) continue;
 
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
-            if (!resolvedData.isEditableTextFrame(tf.id())) continue;
+            // 단, 스레드 체인(연결 텍스트 프레임)은 무조건 배치 — 본문 텍스트일 가능성 높음
+            boolean isThreaded = tf.previousFrameId() != null || tf.nextFrameId() != null;
+            if (!isThreaded && !resolvedData.isEditableTextFrame(tf.id())) continue;
 
             // 페이지 인덱스 결정
             int pageIdx = tf.pageIndex();
@@ -126,28 +128,15 @@ public class ResolvedToASTBuilder {
 
             ASTSection section = sections.get(pageIdx);
 
-            // 좌표 계산: geometricBounds는 applyScale() 후 pt 단위
-            // → resolvedPage bounds도 applyScale() 후 pt 단위
-            // → page-relative 좌표 = gb - page bounds (pt - pt = pt)
+            // 좌표 계산: geometricBounds는 이미 페이지 상대 좌표 (page-relative)
+            // pageLeft/pageTop을 빼지 않고 직접 사용
             double[] gb = tf.geometricBounds();
             if (gb == null || gb.length < 4) continue;
 
-            ResolvedPage rPage = (pageIdx < resolvedData.pages().size())
-                    ? resolvedData.pages().get(pageIdx) : null;
-            double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
-            double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
-            double x = gb[1] - pageLeft;
-            double y = gb[0] - pageTop;
+            double x = gb[1];
+            double y = gb[0];
             double w = gb[3] - gb[1];
             double h = gb[2] - gb[0];
-
-            if ("218239".equals(tf.id())) {
-                long xH = CoordinateConverter.pointsToHwpunits(x);
-                long yH = CoordinateConverter.pointsToHwpunits(y);
-                long wH = CoordinateConverter.pointsToHwpunits(w);
-                long hH = CoordinateConverter.pointsToHwpunits(h);
-                System.out.println("[DEBUG] TF 218239 PLACED: x=" + xH + " y=" + yH + " w=" + wH + " h=" + hH + " pageIdx=" + pageIdx + " sec.blocks=" + section.blocks().size());
-            }
 
             // 음수 좌표 클램핑
             if (x < 0) { w += x; x = 0; }
