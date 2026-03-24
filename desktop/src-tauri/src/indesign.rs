@@ -276,6 +276,79 @@ end tell"#,
     let resolved_json_path = output_dir.join("resolved.json");
     let preview_pdf_path = output_dir.join("preview.pdf");
 
+    // ── 고해상도 PDF 배경 내보내기 (별도 스크립트) ──
+    // `with arguments`로 실행하면 InDesign이 PDF export 설정을 무시하므로,
+    // 인수를 하드코딩한 임시 JSX 래퍼를 생성하여 `do script "경로"`로 실행한다.
+    emit_progress(app, "pdf_bg", "고해상도 배경 PDF 내보내기 중...");
+
+    let pdf_bg_jsx = find_pdf_bg_script(app);
+    // 디버그 로그를 파일로 출력
+    let log_path = output_dir.join("_pdf_bg_debug.log");
+    let _ = std::fs::write(&log_path, format!("pdf_bg_jsx={:?}\noutput_dir={}\nindd_path={}\n",
+        &pdf_bg_jsx, output_dir_str, indd_path));
+    if let Ok(pdf_bg_jsx_path) = pdf_bg_jsx {
+        // 임시 래퍼 JSX 생성 (인수 하드코딩, 한글은 \uXXXX 이스케이프)
+        let wrapper_jsx = output_dir.join("_run_pdf_bg.jsx");
+        let indd_escaped = escape_to_js_unicode(indd_path);
+        let outdir_escaped = escape_to_js_unicode(&output_dir_str);
+        let script_escaped = escape_to_js_unicode(&pdf_bg_jsx_path);
+        let wrapper_content = format!(
+            "var arguments = [\"{indd}\", \"{outdir}\", \"{sp}\", \"{ep}\"];\n\
+             $.evalFile(\"{script}\");\n",
+            indd = indd_escaped,
+            outdir = outdir_escaped,
+            sp = start_page,
+            ep = end_page,
+            script = script_escaped,
+        );
+
+        // 래퍼 내용을 디버그 로그에 추가
+        let _ = std::fs::write(
+            output_dir.join("_pdf_bg_wrapper.log"),
+            format!("wrapper_path={}\n---\n{}", wrapper_jsx.display(), &wrapper_content),
+        );
+
+        if let Err(e) = std::fs::write(&wrapper_jsx, &wrapper_content) {
+            eprintln!("[PDF-BG] 래퍼 JSX 쓰기 실패: {}", e);
+        } else {
+            let wrapper_path = wrapper_jsx.to_string_lossy().to_string();
+            let pdf_bg_applescript = format!(
+                r#"tell application "{app_name}"
+    with timeout of 600 seconds
+        do script "{jsx_path}" language javascript
+    end timeout
+end tell"#,
+                app_name = app_name,
+                jsx_path = wrapper_path,
+            );
+
+            let pdf_bg_result = Command::new("osascript")
+                .args(["-e", &pdf_bg_applescript])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await;
+
+            match pdf_bg_result {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let _ = std::fs::write(
+                        output_dir.join("_pdf_bg_result.log"),
+                        format!("status={}\n---stdout---\n{}\n---stderr---\n{}", output.status, stdout, stderr),
+                    );
+                }
+                Err(e) => {
+                    let _ = std::fs::write(
+                        output_dir.join("_pdf_bg_result.log"),
+                        format!("error={}", e),
+                    );
+                }
+            }
+            let _ = std::fs::remove_file(&wrapper_jsx);
+        }
+    }
+
     emit_progress(app, "done", "추출 완료");
 
     // 추출 완료 후 데스크탑 앱으로 포커스 복귀
@@ -313,6 +386,87 @@ fn emit_progress(app: &AppHandle, phase: &str, message: &str) {
             message: message.to_string(),
         },
     );
+}
+
+/// 문자열을 JavaScript 유니코드 이스케이프로 변환한다.
+/// ASCII는 그대로, 비ASCII(한글 등)는 \uXXXX 형태로 변환.
+/// macOS NFD 정규화(자모 분해)를 NFC(완성형)로 변환 후 이스케이프.
+fn escape_to_js_unicode(s: &str) -> String {
+    // NFC 정규화: macOS 파일 경로의 NFD 한글을 완성형으로 변환
+    let normalized = unicode_normalization_nfc(s);
+    let mut result = String::new();
+    for c in normalized.chars() {
+        if c.is_ascii() {
+            match c {
+                '\\' => result.push_str("\\\\"),
+                '"' => result.push_str("\\\""),
+                _ => result.push(c),
+            }
+        } else {
+            let mut buf = [0u16; 2];
+            for u in c.encode_utf16(&mut buf) {
+                result.push_str(&format!("\\u{:04x}", u));
+            }
+        }
+    }
+    result
+}
+
+/// 간단한 NFC 정규화 (한글 자모 조합).
+/// macOS는 파일 경로를 NFD(분해형)로 저장하므로, NFC(완성형)로 변환해야
+/// JavaScript에서 올바른 유니코드 이스케이프(\uAC00 등)가 생성된다.
+fn unicode_normalization_nfc(s: &str) -> String {
+    // 한글 자모 범위: 초성 0x1100-0x1112, 중성 0x1161-0x1175, 종성 0x11A8-0x11C2
+    let chars: Vec<char> = s.chars().collect();
+    let mut result = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        // 한글 초성 체크
+        if ('\u{1100}'..='\u{1112}').contains(&c) && i + 1 < chars.len() {
+            let v = chars[i + 1];
+            if ('\u{1161}'..='\u{1175}').contains(&v) {
+                let cho = c as u32 - 0x1100;
+                let jung = v as u32 - 0x1161;
+                // 종성 체크
+                if i + 2 < chars.len() && ('\u{11A8}'..='\u{11C2}').contains(&chars[i + 2]) {
+                    let jong = chars[i + 2] as u32 - 0x11A7;
+                    let syllable = 0xAC00 + (cho * 21 + jung) * 28 + jong;
+                    result.push(char::from_u32(syllable).unwrap_or(c));
+                    i += 3;
+                } else {
+                    let syllable = 0xAC00 + (cho * 21 + jung) * 28;
+                    result.push(char::from_u32(syllable).unwrap_or(c));
+                    i += 2;
+                }
+                continue;
+            }
+        }
+        result.push(c);
+        i += 1;
+    }
+    result
+}
+
+/// PDF 배경 내보내기 스크립트 경로를 찾는다.
+fn find_pdf_bg_script(app: &AppHandle) -> Result<String, String> {
+    let dev_paths = [
+        "../../scripts/export_pdf_bg.jsx",
+        "../../../scripts/export_pdf_bg.jsx",
+        "scripts/export_pdf_bg.jsx",
+    ];
+    for rel_path in dev_paths {
+        let path = Path::new(rel_path);
+        if path.exists() {
+            return Ok(
+                path.canonicalize()
+                    .map_err(|e| format!("경로 해석 실패: {}", e))?
+                    .to_string_lossy()
+                    .to_string(),
+            );
+        }
+    }
+    Err("export_pdf_bg.jsx를 찾을 수 없습니다".into())
 }
 
 /// ExtendScript 파일 경로를 찾는다.

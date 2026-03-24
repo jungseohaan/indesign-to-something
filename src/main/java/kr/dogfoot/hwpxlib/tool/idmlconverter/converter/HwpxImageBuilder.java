@@ -22,7 +22,6 @@ public class HwpxImageBuilder {
     private static final long INLINE_IMAGE_HEIGHT_THRESHOLD = ConverterConstants.INLINE_IMAGE_HEIGHT_THRESHOLD;
 
     /** 96 DPI 기준 1px = 0.75pt = 75 HWPUNIT */
-    private static final int PIXEL_TO_HWPUNIT_96DPI = 75;
 
     /** 이미지 크기가 0 이하일 때 사용하는 기본 크기 (HWPUNIT) */
     private static final long DEFAULT_IMAGE_DIMENSION = 1000;
@@ -82,11 +81,6 @@ public class HwpxImageBuilder {
         if (obj.width() <= 0 || obj.height() <= 0) {
             System.err.println("[HwpxImageBuilder] 이미지 크기 0 → 기본값 사용: w=" + obj.width() + " h=" + obj.height());
         }
-        long clipW = clipDimension(obj.pixelWidth(), format);
-        long clipH = clipDimension(obj.pixelHeight(), format);
-        if (clipW <= 0) clipW = displayW;
-        if (clipH <= 0) clipH = displayH;
-
         // IDML 속성 기반 래핑 모드 결정
         boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
         String wrapMode = obj.textWrapMode();
@@ -201,15 +195,15 @@ public class HwpxImageBuilder {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, displayH);
 
-        // ImageClip/Dim — pixel * 75 (96 DPI 기준 HWPUNIT)
+        // ImageClip/Dim — displayW 기준 (이미지 DPI와 무관하게 표시 크기에 맞춤)
         pic.createImgClip();
-        pic.imgClip().leftAnd(0L).rightAnd(clipW).topAnd(0L).bottomAnd(clipH);
+        pic.imgClip().leftAnd(0L).rightAnd(displayW).topAnd(0L).bottomAnd(displayH);
 
         pic.createInMargin();
         pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         pic.createImgDim();
-        pic.imgDim().dimwidthAnd(clipW).dimheightAnd(clipH);
+        pic.imgDim().dimwidthAnd(displayW).dimheightAnd(displayH);
 
         // Image 참조
         pic.createImg();
@@ -244,17 +238,12 @@ public class HwpxImageBuilder {
 
         long imgW = obj.width() > 0 ? obj.width() : DEFAULT_IMAGE_DIMENSION;
         long imgH = obj.height() > 0 ? obj.height() : DEFAULT_IMAGE_DIMENSION;
-        long clipW = clipDimension(obj.pixelWidth(), format);
-        long clipH = clipDimension(obj.pixelHeight(), format);
-        if (clipW <= 0) clipW = imgW;
-        if (clipH <= 0) clipH = imgH;
-
         boolean useResolved = hasResolvedOverlays(obj);
 
         if (useResolved) {
             // ── resolved 경로: 이미지 자체 크기, 오버레이는 절대 좌표 + 센터링 델타 ──
             addInlinePicture(para, itemId, imgW, imgH,
-                    imgW, imgH, 0, 0, clipW, clipH);
+                    imgW, imgH, 0, 0, imgW, imgH);
 
             for (ASTInlineObject overlay : obj.overlayFrames()) {
                 if (overlay.resolvedPageX() < 0 || overlay.resolvedPageY() < 0) continue;
@@ -283,7 +272,7 @@ public class HwpxImageBuilder {
             }
 
             addInlinePicture(para, itemId, frameW, frameH,
-                    imgW, imgH, imgOffX, imgOffY, clipW, clipH);
+                    imgW, imgH, imgOffX, imgOffY, frameW, frameH);
 
             for (ASTInlineObject overlay : obj.overlayFrames()) {
                 HwpxConverterContext.DeferredOverlay d = new HwpxConverterContext.DeferredOverlay();
@@ -374,13 +363,13 @@ public class HwpxImageBuilder {
         pic.imgRect().pt3().set(imgOffX, imgOffY + imgH);
 
         pic.createImgClip();
-        pic.imgClip().leftAnd(0L).rightAnd(clipW).topAnd(0L).bottomAnd(clipH);
+        pic.imgClip().leftAnd(0L).rightAnd(frameW).topAnd(0L).bottomAnd(frameH);
 
         pic.createInMargin();
         pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         pic.createImgDim();
-        pic.imgDim().dimwidthAnd(clipW).dimheightAnd(clipH);
+        pic.imgDim().dimwidthAnd(frameW).dimheightAnd(frameH);
 
         pic.createImg();
         pic.img().binaryItemIDRefAnd(itemId)
@@ -457,11 +446,6 @@ public class HwpxImageBuilder {
                 useImgClipCrop = true;
             }
         }
-
-        long clipW = clipDimension(pixelW, format);
-        long clipH = clipDimension(pixelH, format);
-        if (clipW <= 0) clipW = displayW;
-        if (clipH <= 0) clipH = displayH;
 
         String itemId = ImageInserter.registerImage(ctx.hwpxFile, imageData, format);
 
@@ -541,23 +525,23 @@ public class HwpxImageBuilder {
             double cropB = Math.max(0, Math.min(1, figure.cropBottomFraction()));
             if (cropL + cropR >= 1.0) { cropL = 0; cropR = 0; }
             if (cropT + cropB >= 1.0) { cropT = 0; cropB = 0; }
-            long imgClipL = Math.round(clipW * cropL);
-            long imgClipT = Math.round(clipH * cropT);
-            long imgClipR = Math.round(clipW * (1.0 - cropR));
-            long imgClipB = Math.round(clipH * (1.0 - cropB));
+            long imgClipL = Math.round(displayW * cropL);
+            long imgClipT = Math.round(displayH * cropT);
+            long imgClipR = Math.round(displayW * (1.0 - cropR));
+            long imgClipB = Math.round(displayH * (1.0 - cropB));
             pic.imgClip().leftAnd(imgClipL).rightAnd(imgClipR)
                     .topAnd(imgClipT).bottomAnd(imgClipB);
         } else {
-            pic.imgClip().leftAnd(0L).rightAnd(clipW)
-                    .topAnd(0L).bottomAnd(clipH);
+            pic.imgClip().leftAnd(0L).rightAnd(displayW)
+                    .topAnd(0L).bottomAnd(displayH);
         }
 
         pic.createInMargin();
         pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
-        // ImgDim — 원본 이미지 전체 크기 (pixel * 75)
+        // ImgDim — 표시 크기 기준 (이미지 DPI와 무관하게 최대 해상도로 렌더링)
         pic.createImgDim();
-        pic.imgDim().dimwidthAnd(clipW).dimheightAnd(clipH);
+        pic.imgDim().dimwidthAnd(displayW).dimheightAnd(displayH);
 
         // Image 참조
         pic.createImg();
@@ -578,15 +562,6 @@ public class HwpxImageBuilder {
 
         long w = bg.pageWidth();
         long h = bg.pageHeight();
-        long bgClipW, bgClipH;
-        try {
-            int[] sz = ImageInserter.detectPixelSize(pngData);
-            bgClipW = (long) sz[0] * PIXEL_TO_HWPUNIT_96DPI;
-            bgClipH = (long) sz[1] * PIXEL_TO_HWPUNIT_96DPI;
-        } catch (Exception e) {
-            bgClipW = w;
-            bgClipH = h;
-        }
 
         Para framePara = HwpxUtil.createFloatingObjectPara(sectionFile);
         Run anchorRun = framePara.runs().iterator().next();
@@ -637,15 +612,15 @@ public class HwpxImageBuilder {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, h);
 
-        // ImageClip/Dim — pixel * 75 (96 DPI 기준 HWPUNIT)
+        // ImageClip/Dim — 표시 크기 기준
         pic.createImgClip();
-        pic.imgClip().leftAnd(0L).rightAnd(bgClipW).topAnd(0L).bottomAnd(bgClipH);
+        pic.imgClip().leftAnd(0L).rightAnd(w).topAnd(0L).bottomAnd(h);
 
         pic.createInMargin();
         pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         pic.createImgDim();
-        pic.imgDim().dimwidthAnd(bgClipW).dimheightAnd(bgClipH);
+        pic.imgDim().dimwidthAnd(w).dimheightAnd(h);
 
         pic.createImg();
         pic.img().binaryItemIDRefAnd(itemId)
@@ -725,8 +700,6 @@ public class HwpxImageBuilder {
         long y = block.y();
         long displayW = block.width();
         long displayH = block.height();
-        long clipW = (long) pixW * PIXEL_TO_HWPUNIT_96DPI;
-        long clipH = (long) pixH * PIXEL_TO_HWPUNIT_96DPI;
 
         Run anchorRun = anchorPara.addNewRun();
         anchorRun.charPrIDRef("0");
@@ -800,14 +773,14 @@ public class HwpxImageBuilder {
         pic.imgRect().pt3().set(0L, displayH);
 
         pic.createImgClip();
-        pic.imgClip().leftAnd(0L).rightAnd(clipW)
-                .topAnd(0L).bottomAnd(clipH);
+        pic.imgClip().leftAnd(0L).rightAnd(displayW)
+                .topAnd(0L).bottomAnd(displayH);
 
         pic.createInMargin();
         pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         pic.createImgDim();
-        pic.imgDim().dimwidthAnd(clipW).dimheightAnd(clipH);
+        pic.imgDim().dimwidthAnd(displayW).dimheightAnd(displayH);
 
         pic.createImg();
         pic.img().binaryItemIDRefAnd(itemId)
@@ -894,10 +867,4 @@ public class HwpxImageBuilder {
         }
     }
 
-    private static long clipDimension(int pixelOrPt, String format) {
-        if ("svg".equalsIgnoreCase(format)) {
-            return (long) pixelOrPt * 100;
-        }
-        return (long) pixelOrPt * PIXEL_TO_HWPUNIT_96DPI;
-    }
 }

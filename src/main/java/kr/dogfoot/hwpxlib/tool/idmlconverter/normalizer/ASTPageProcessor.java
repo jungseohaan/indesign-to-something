@@ -1732,21 +1732,45 @@ class ASTPageProcessor {
             // 이미 IDML 파이프라인에서 처리된 항목 건너뜀 (페이지 배경은 항상 배치)
             if (!isPageBg && existingSourceIds.contains(idmlHexId)) continue;
 
-            // PNG 로드
-            if (rg.file() == null) continue;
-            java.io.File pngFile = new java.io.File(basePath, rg.file());
-            if (!pngFile.exists()) continue;
+            // 이미지 로드 (PDF 우선, PNG 폴백)
+            byte[] imageData = null;
+            int pixelW = 0, pixelH = 0;
 
-            byte[] imageData;
-            int pixelW, pixelH;
-            try {
-                imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                BufferedImage img = ImageIO.read(pngFile);
-                if (img == null) continue;
-                pixelW = img.getWidth();
-                pixelH = img.getHeight();
-            } catch (Exception e) {
-                continue;
+            // PDF 배경 래스터화 시도
+            if (isPageBg && rg.pdfFile() != null && rg.pdfPageIndex() >= 0) {
+                try {
+                    java.io.File pdfFile = new java.io.File(basePath, rg.pdfFile());
+                    if (pdfFile.exists()) {
+                        imageData = kr.dogfoot.hwpxlib.tool.idmlconverter.converter
+                                .PdfPageRenderer.renderPage(pdfFile, rg.pdfPageIndex(), 600);
+                        BufferedImage pdfImg = ImageIO.read(
+                                new java.io.ByteArrayInputStream(imageData));
+                        if (pdfImg != null) {
+                            pixelW = pdfImg.getWidth();
+                            pixelH = pdfImg.getHeight();
+                            pdfImg.flush();
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("[Stage4] PDF 배경 래스터화 실패: " + e.getMessage());
+                    imageData = null;
+                }
+            }
+
+            // PNG 폴백
+            if (imageData == null) {
+                if (rg.file() == null) continue;
+                java.io.File pngFile = new java.io.File(basePath, rg.file());
+                if (!pngFile.exists()) continue;
+                try {
+                    imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                    BufferedImage img = ImageIO.read(pngFile);
+                    if (img == null) continue;
+                    pixelW = img.getWidth();
+                    pixelH = img.getHeight();
+                } catch (Exception e) {
+                    continue;
+                }
             }
 
             // bounds → HWPUNIT (bounds는 resolved 좌표 → pt 변환 후)

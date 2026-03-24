@@ -306,9 +306,10 @@ function main(args) {
             var renderedImageFrames = [];
 
             // 2.12. 페이지 단위 배경 렌더링
-            // 편집 가능한 텍스트 프레임만 숨기고 페이지를 통째로 PNG 렌더
+            // 편집 가능한 텍스트 프레임만 숨기고 페이지를 통째로 PDF/PNG 렌더
             _marker(outputDir, "04_pageRendering");
             writeProgress(outputDir, "rendered_frames", 0, rangePageCount);
+
             var bgResult = exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems);
             var renderedFloatingItems = bgResult.items;
             var editableFrameIds = bgResult.editableFrameIds;
@@ -2060,6 +2061,22 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         doc.viewPreferences.displayPerformance = ViewDisplaySettings.HIGH_QUALITY;
     } catch (e) {}
 
+    // 개별 페이지 아이템의 localDisplaySetting도 HIGH_QUALITY로 강제
+    // (문서 레벨 설정을 개별 아이템이 Typical/Fast로 오버라이드하면 저품질 렌더링됨)
+    var savedLocalSettings = [];
+    try {
+        for (var li = 0; li < allItems.length; li++) {
+            try {
+                var localSetting = allItems[li].localDisplaySetting;
+                if (localSetting !== ViewDisplaySettings.DEFAULT_VALUE
+                    && localSetting !== ViewDisplaySettings.HIGH_QUALITY) {
+                    savedLocalSettings.push({ item: allItems[li], setting: localSetting });
+                    allItems[li].localDisplaySetting = ViewDisplaySettings.HIGH_QUALITY;
+                }
+            } catch (e2) {}
+        }
+    } catch (e) {}
+
     var results = [];
 
     // 편집 가능 텍스트 프레임 수집 (숨길 대상)
@@ -2136,71 +2153,84 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         } catch (eInline) {}
     }
 
-    // 페이지별 렌더링
+    // ── 페이지별 배경 렌더링 ──
+    // PDF 배경은 별도 스크립트(export_pdf_bg.jsx)에서 생성.
+    // 여기서는 PNG 폴백 + 결과 항목 생성.
+
     for (var pi = 0; pi < doc.pages.length; pi++) {
         var page = doc.pages[pi];
         var pgIdx = page.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
 
-        // 1. 편집 가능 텍스트 프레임 숨기기
-        var hiddenItems = [];
-        for (var hi = 0; hi < editableFrames.length; hi++) {
-            var tf = editableFrames[hi];
-            try {
-                if (tf.parentPage === page && tf.visible) {
-                    tf.visible = false;
-                    hiddenItems.push(tf);
-                }
-            } catch (e) {
-                // parentPage 없는 프레임은 bounds로 페이지 매칭
+        // PDF 파일 존재 여부 확인 (export_pdf_bg.jsx가 먼저 실행된 경우)
+        var pdfFileName = "page_bg_" + pi + ".pdf";
+        var bgPdfFile = File(renderDir + "/" + pdfFileName);
+        var hasPdf = bgPdfFile.exists;
+
+        var pngFileName = null;
+        if (!hasPdf) {
+            // PDF 없음 → PNG 렌더링
+            // 1. 해당 페이지의 편집 가능 텍스트 프레임 숨기기
+            var hiddenItems = [];
+            for (var hi = 0; hi < editableFrames.length; hi++) {
+                var tf = editableFrames[hi];
                 try {
-                    var tfb = tf.visibleBounds;
-                    var pb = page.bounds;
-                    var cy = (tfb[0] + tfb[2]) / 2;
-                    var cx = (tfb[1] + tfb[3]) / 2;
-                    if (cy >= pb[0] && cy <= pb[2] && cx >= pb[1] && cx <= pb[3]) {
-                        if (tf.visible) {
-                            tf.visible = false;
-                            hiddenItems.push(tf);
-                        }
+                    if (tf.parentPage === page && tf.visible) {
+                        tf.visible = false;
+                        hiddenItems.push(tf);
                     }
-                } catch (e2) {}
+                } catch (e) {
+                    try {
+                        var tfb = tf.visibleBounds;
+                        var pb = page.bounds;
+                        var cy = (tfb[0] + tfb[2]) / 2;
+                        var cx = (tfb[1] + tfb[3]) / 2;
+                        if (cy >= pb[0] && cy <= pb[2] && cx >= pb[1] && cx <= pb[3]) {
+                            if (tf.visible) {
+                                tf.visible = false;
+                                hiddenItems.push(tf);
+                            }
+                        }
+                    } catch (e2) {}
+                }
+            }
+
+            // 2. 페이지 PNG 렌더링
+            pngFileName = "page_bg_" + pi + ".png";
+            var outFile = File(renderDir + "/" + pngFileName);
+            try {
+                app.pngExportPreferences.pageString = page.name;
+                app.pngExportPreferences.pngExportRange = PNGExportRangeEnum.EXPORT_RANGE;
+                doc.exportFile(ExportFormat.PNG_FORMAT, outFile);
+            } catch (e) {}
+
+            // 3. 숨긴 텍스트 프레임 복원
+            for (var ri = 0; ri < hiddenItems.length; ri++) {
+                try { hiddenItems[ri].visible = true; } catch (e) {}
             }
         }
 
-        // 2. 페이지 PNG 렌더링
-        var fileName = "page_bg_" + pi + ".png";
-        var outFile = File(renderDir + "/" + fileName);
-        var renderSuccess = false;
-
-        try {
-            app.pngExportPreferences.pageString = page.name;
-            app.pngExportPreferences.pngExportRange = PNGExportRangeEnum.EXPORT_RANGE;
-            doc.exportFile(ExportFormat.PNG_FORMAT, outFile);
-            renderSuccess = outFile.exists;
-        } catch (e) {
-            renderSuccess = false;
-        }
-
-        // 3. 숨긴 텍스트 프레임 복원
-        for (var ri = 0; ri < hiddenItems.length; ri++) {
-            try { hiddenItems[ri].visible = true; } catch (e) {}
-        }
-
         // 4. 결과 추가
-        var pageBounds = page.bounds; // [top, left, bottom, right]
+        var pageBounds = page.bounds;
         var entry = {
-            id: pi,  // 페이지 인덱스를 ID로 사용
-            file: renderSuccess ? ("rendered_frames/" + fileName) : null,
+            id: pi,
+            file: hasPdf ? null : (pngFileName ? ("rendered_frames/" + pngFileName) : null),
+            pdfFile: "rendered_frames/" + pdfFileName,
+            pdfPageIndex: 0,
             bounds: [0, 0, pageBounds[2] - pageBounds[0], pageBounds[3] - pageBounds[1]],
             pageIndex: page.documentOffset,
-            zOrder: 0,  // 배경이므로 최하위
+            zOrder: 0,
             type: "page_background",
             childIds: null
         };
         results.push(entry);
 
         writeProgress(outputDir, "rendered_frames", pi + 1, doc.pages.length);
+    }
+
+    // localDisplaySetting 복원
+    for (var ri = 0; ri < savedLocalSettings.length; ri++) {
+        try { savedLocalSettings[ri].item.localDisplaySetting = savedLocalSettings[ri].setting; } catch (e) {}
     }
 
     // Display Performance 복원

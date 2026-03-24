@@ -582,44 +582,89 @@ public class ResolvedToASTBuilder {
         List<RenderedGroup> floatingItems = resolvedData.allRenderedFloatingItems();
         if (floatingItems == null || floatingItems.isEmpty()) return;
 
+        // PDF 래스터화 캐시 (한 번만 로드)
+        java.util.List<byte[]> pdfPages = null;
+        String loadedPdfPath = null;
+
         for (RenderedGroup rg : floatingItems) {
             if (!"page_background".equals(rg.itemType())) continue;
-            if (rg.file() == null) continue;
 
             int pageIdx = rg.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
-            File pngFile = new File(basePath, rg.file());
-            if (!pngFile.exists()) continue;
+            double[] bounds = rg.bounds();
+            if (bounds == null || bounds.length < 4) continue;
 
-            try {
-                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                BufferedImage img = ImageIO.read(pngFile);
-                if (img == null) continue;
+            byte[] imageData = null;
+            int pixelW = 0, pixelH = 0;
 
-                double[] bounds = rg.bounds();
-                if (bounds == null || bounds.length < 4) continue;
-
-                long figW = CoordinateConverter.pointsToHwpunits((bounds[3] - bounds[1]) * scaleFactor);
-                long figH = CoordinateConverter.pointsToHwpunits((bounds[2] - bounds[0]) * scaleFactor);
-
-                ASTFigure fig = new ASTFigure();
-                fig.x(0);
-                fig.y(0);
-                fig.width(figW);
-                fig.height(figH);
-                fig.imageData(imageData);
-                fig.imageFormat("png");
-                fig.pixelWidth(img.getWidth());
-                fig.pixelHeight(img.getHeight());
-                fig.zOrder(0);
-                fig.fromGroup(false);  // BEHIND_TEXT
-                fig.sourceId("page_bg_" + pageIdx);
-
-                sections.get(pageIdx).addBlock(fig);
-            } catch (Exception e) {
-                System.err.println("[ResolvedToASTBuilder] 페이지 배경 로드 실패: " + pngFile + " → " + e.getMessage());
+            // PDF 배경 래스터화 우선 시도
+            if (rg.pdfFile() != null && rg.pdfPageIndex() >= 0) {
+                try {
+                    File pdfFile = new File(basePath, rg.pdfFile());
+                    if (pdfFile.exists()) {
+                        String pdfPath = pdfFile.getAbsolutePath();
+                        if (pdfPages == null || !pdfPath.equals(loadedPdfPath)) {
+                            pdfPages = kr.dogfoot.hwpxlib.tool.idmlconverter.converter
+                                    .PdfPageRenderer.renderAllPages(pdfFile, 600);
+                            loadedPdfPath = pdfPath;
+                        }
+                        int pdfIdx = rg.pdfPageIndex();
+                        if (pdfIdx >= 0 && pdfIdx < pdfPages.size()) {
+                            imageData = pdfPages.get(pdfIdx);
+                            BufferedImage pdfImg = ImageIO.read(
+                                    new java.io.ByteArrayInputStream(imageData));
+                            if (pdfImg != null) {
+                                pixelW = pdfImg.getWidth();
+                                pixelH = pdfImg.getHeight();
+                                pdfImg.flush();
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("[ResolvedToASTBuilder] PDF 배경 래스터화 실패: " + e.getMessage());
+                    imageData = null;
+                }
             }
+
+            // PNG 폴백
+            if (imageData == null && rg.file() != null) {
+                try {
+                    File pngFile = new File(basePath, rg.file());
+                    if (pngFile.exists()) {
+                        imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                        BufferedImage img = ImageIO.read(pngFile);
+                        if (img != null) {
+                            pixelW = img.getWidth();
+                            pixelH = img.getHeight();
+                            img.flush();
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("[ResolvedToASTBuilder] PNG 배경 로드 실패: " + e.getMessage());
+                    continue;
+                }
+            }
+
+            if (imageData == null) continue;
+
+            long figW = CoordinateConverter.pointsToHwpunits((bounds[3] - bounds[1]) * scaleFactor);
+            long figH = CoordinateConverter.pointsToHwpunits((bounds[2] - bounds[0]) * scaleFactor);
+
+            ASTFigure fig = new ASTFigure();
+            fig.x(0);
+            fig.y(0);
+            fig.width(figW);
+            fig.height(figH);
+            fig.imageData(imageData);
+            fig.imageFormat("png");
+            fig.pixelWidth(pixelW);
+            fig.pixelHeight(pixelH);
+            fig.zOrder(0);
+            fig.fromGroup(false);  // BEHIND_TEXT
+            fig.sourceId("page_bg_" + pageIdx);
+
+            sections.get(pageIdx).addBlock(fig);
         }
     }
 }

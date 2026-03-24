@@ -24,6 +24,7 @@ public class ConvertOptions {
     private boolean drawMarginGuide;
     private String configPath;
     private ConversionConfig config;
+    private int pdfBgDpi;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -40,6 +41,7 @@ public class ConvertOptions {
         this.drawPageBoundary = false;
         this.drawMarginGuide = false;
         this.layoutMode = "preserve";
+        this.pdfBgDpi = 300;
     }
 
     public static ConvertOptions defaults() {
@@ -285,6 +287,15 @@ public class ConvertOptions {
 
     public ConvertOptions config(ConversionConfig config) {
         this.config = config;
+        return this;
+    }
+
+    public int pdfBgDpi() {
+        return pdfBgDpi;
+    }
+
+    public ConvertOptions pdfBgDpi(int pdfBgDpi) {
+        this.pdfBgDpi = pdfBgDpi;
         return this;
     }
 

@@ -426,6 +426,9 @@ public class ResolvedDataReader {
         if (o.has("childImageIds") && !o.get("childImageIds").isJsonNull()) {
             group.childImageIds(parseIntArray(o.getAsJsonArray("childImageIds")));
         }
+        // PDF 배경 필드
+        group.pdfFile(getString(o, "pdfFile"));
+        group.pdfPageIndex(getInt(o, "pdfPageIndex", -1));
         return group;
     }
 

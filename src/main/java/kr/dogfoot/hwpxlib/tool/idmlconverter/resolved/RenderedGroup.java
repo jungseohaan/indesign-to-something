@@ -55,6 +55,16 @@ public class RenderedGroup {
     public String itemType() { return itemType; }
     public void itemType(String v) { this.itemType = v; }
 
+    private String pdfFile;      // PDF 배경 파일 상대 경로 (page_background 타입)
+    private int pdfPageIndex;    // PDF 파일 내 페이지 인덱스 (0-based)
+
+    public String pdfFile() { return pdfFile; }
+    public void pdfFile(String v) { this.pdfFile = v; }
+
+    public int pdfPageIndex() { return pdfPageIndex; }
+    public void pdfPageIndex(int v) { this.pdfPageIndex = v; }
+
     public boolean isBadgeGroup() { return "badge_group".equals(type); }
     public boolean isBadgeGroupChild() { return "badge_group_child".equals(type); }
+    public boolean isPageBackground() { return "page_background".equals(type); }
 }
