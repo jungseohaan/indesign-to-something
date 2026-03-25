@@ -399,7 +399,7 @@ public class ResolvedToASTBuilder {
                         if (rts.position() != null && rts.position() > 0) {
                             // resolved tabStop position은 mm(절대) → leftMargin 빼서 상대 → pt → hwpunit
                             double posPt = rts.position() * scaleFactor - leftPt;
-                            if (posPt < 1) posPt = 1; // 0이면 HWPX가 기본 탭 사용하므로 최소 1
+                            if (posPt < 0) posPt = 0; // 음수는 0으로
                             String align = "left";
                             if (rts.alignment() != null) {
                                 String a = rts.alignment().toLowerCase();
@@ -470,6 +470,16 @@ public class ResolvedToASTBuilder {
                 }
             }
 
+            // 패턴 감지: 행잉 인덴트 + 인라인 아이콘 + 탭
+            // InDesign에서 인라인 아이콘이 마진 밖(-indent 영역)에 배치되지만
+            // HWPX에서는 마진 안에 배치되므로, 행잉 인덴트를 리셋하여 자연 들여쓰기 사용
+            if (para.firstLineIndent() != null && para.firstLineIndent() < 0
+                    && !para.items().isEmpty()
+                    && para.items().get(0) instanceof ASTInlineObject) {
+                para.leftMargin(null);
+                para.firstLineIndent(null);
+            }
+
             paragraphs.add(para);
         }
 
@@ -478,6 +488,13 @@ public class ResolvedToASTBuilder {
 
     private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr) {
         ASTTextRun tr = new ASTTextRun();
+        // Indent to Here (\u0008) 제거
+        // \t + Indent to Here 패턴: \t\u0008 → 둘 다 제거 (인라인 아이콘이 뒤따르는 패턴)
+        // 단독 \t는 유지 (정상 탭)
+        if (text != null) {
+            text = text.replace("\t\u0008", ""); // \t + IndentToHere 조합 제거
+            text = text.replace("\u0008", "");   // 단독 IndentToHere 제거
+        }
         tr.text(text);
         // IDML CharacterRun 속성 우선
         if (cr.fontFamily() != null) tr.fontFamily(cr.fontFamily());

@@ -154,14 +154,28 @@ public class StyleRegistry {
             if ("right".equals(ts.alignment())) { hasRightTab = true; break; }
         }
 
+        // pos=0인 탭만 있으면 → autoTabLeft로 기본 탭 간격 설정 (pos=0은 HWPX에서 무시됨)
+        boolean allZero = true;
+        long maxPos = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop ts : tabStops) {
+            if (ts.position() > 0) { allZero = false; }
+            if (ts.position() > maxPos) maxPos = ts.position();
+        }
+
         tabPr.idAnd(tabPrId)
-                .autoTabLeftAnd(hasRightTab)  // RIGHT 탭 제거 시 auto tab으로 기본 간격 보장
+                .autoTabLeftAnd(hasRightTab || allZero)  // pos=0만 있으면 auto tab 활성화
                 .autoTabRightAnd(false);
 
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop ts : tabStops) {
             // HWPX에서 RIGHT 탭은 LEFT처럼 동작하여 텍스트가 탭 위치에서 시작됨
             // → RIGHT 탭은 건너뛰고, 해당 TAB 문자는 auto tab 간격으로 처리
             if ("right".equals(ts.alignment())) continue;
+            // pos=0은 최소값 100(1pt)으로 보정하여 tabItem 생성 (빈 tabPr 방지)
+            if (ts.position() <= 0) {
+                TabItem item = tabPr.addNewTabItem();
+                item.posAnd(100).typeAnd(TabItemType.LEFT).leaderAnd(LineType2.NONE).unitAnd(ValueUnit2.HWPUNIT);
+                continue;
+            }
             TabItem item = tabPr.addNewTabItem();
             item.posAnd((int) ts.position())
                     .typeAnd(mapTabItemType(ts.alignment()))
