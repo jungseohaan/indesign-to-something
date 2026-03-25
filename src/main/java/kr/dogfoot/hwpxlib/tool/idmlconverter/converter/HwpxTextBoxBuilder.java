@@ -979,6 +979,29 @@ public class HwpxTextBoxBuilder {
         // 폰트 메트릭 기반 높이 보정: 매핑 폰트가 원본보다 세로로 크면 글상자 확장
         h = adjustHeightByFontMetrics(h, paragraphs);
 
+        // overflow 방지: 텍스트 단락 수 기반으로 높이 자동 조정
+        // 단락 수가 적은데 높이가 크면 → 실제 콘텐츠에 맞게 축소
+        if (paragraphs != null && !paragraphs.isEmpty() && h > 0) {
+            // 단락당 평균 높이를 추정하여 최대 높이 계산
+            int paraCount = paragraphs.size();
+            int avgFontSize = 1000; // 기본 10pt
+            for (ASTParagraph p : paragraphs) {
+                for (Object item : p.items()) {
+                    if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) {
+                        Integer fs = ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) item).fontSizeHwpunits();
+                        if (fs != null && fs > 0) { avgFontSize = fs; break; }
+                    }
+                }
+                break;
+            }
+            // 예상 콘텐츠 높이: 단락수 × (폰트크기 × 1.6) + 여백
+            long estimatedH = (long) (paraCount * avgFontSize * 1.6) + 500;
+            if (estimatedH < h * 0.8) {
+                // 콘텐츠가 높이의 80% 미만이면 축소
+                h = estimatedH;
+            }
+        }
+
         // 글상자 너비 확장: 매핑 폰트의 폭 차이로 텍스트 넘침 방지
         if (ctx.config != null && ctx.config.textBoxWidthExpandPercent() > 0) {
             w = w + w * ctx.config.textBoxWidthExpandPercent() / 100;

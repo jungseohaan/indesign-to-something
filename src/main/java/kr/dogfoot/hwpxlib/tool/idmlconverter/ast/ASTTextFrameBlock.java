@@ -173,6 +173,14 @@ public class ASTTextFrameBlock extends ASTBlock {
     public List<ASTParagraph> paragraphs() { return paragraphs; }
     public void addParagraph(ASTParagraph p) { paragraphs.add(p); }
 
+    // overflow 감지용: Story 전체 텍스트 길이 vs 프레임에 보이는 텍스트 길이
+    private int storyTotalTextLength;
+    private int frameVisibleTextLength;
+    public int storyTotalTextLength() { return storyTotalTextLength; }
+    public void storyTotalTextLength(int v) { this.storyTotalTextLength = v; }
+    public int frameVisibleTextLength() { return frameVisibleTextLength; }
+    public void frameVisibleTextLength(int v) { this.frameVisibleTextLength = v; }
+
     /**
      * 배경 전용 블록인지 판별.
      * fillColor가 있으면서 실질 텍스트가 없는 블록 (장식용 배경 사각형).

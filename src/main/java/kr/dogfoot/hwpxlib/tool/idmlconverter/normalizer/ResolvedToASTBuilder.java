@@ -272,6 +272,13 @@ public class ResolvedToASTBuilder {
                 // TODO: 스트로크
             }
 
+            // overflow 감지용 텍스트 길이 저장
+            String visText = tf.frameVisibleText();
+            if (visText != null) {
+                block.frameVisibleTextLength(visText.replace("\uFFFC", "").replace("\n", "").replace("\r", "").length());
+            }
+            // storyTotalTextLength는 convertStories()에서 설정
+
             section.addBlock(block);
         }
     }
@@ -352,6 +359,17 @@ public class ResolvedToASTBuilder {
                 resolvedCount++;
             }
             totalParas += paragraphs.size();
+
+            // Story 전체 텍스트 길이 저장 (overflow 감지용)
+            int storyTextLen = 0;
+            for (ASTParagraph p : paragraphs) {
+                String pt = getParaPlainText(p);
+                if (pt != null) storyTextLen += pt.length();
+            }
+            for (ASTTextFrameBlock b : blocks) {
+                b.storyTotalTextLength(storyTextLen);
+            }
+
             if ("321251".equals(storyId)) {
                 System.out.println("[DEBUG] Story 321251: " + paragraphs.size() + " paragraphs, useIdml=" + useIdml);
                 for (ASTTextFrameBlock b : blocks) {
