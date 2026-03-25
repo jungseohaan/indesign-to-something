@@ -278,6 +278,45 @@ function main(args) {
             }
         }
         doc = app.open(inddFile, false);
+
+        // 1.5. 링크 업데이트 (페이지 렌더링 전에 원본 이미지 연결)
+        try {
+            var inddParent = File(inddPath).parent;
+            var linksFolders = [
+                Folder(inddParent + "/Links"),
+                Folder(inddParent)
+            ];
+            var fixedCount = 0;
+            var missingCount = 0;
+            for (var li = 0; li < doc.links.length; li++) {
+                var link = doc.links[li];
+                try {
+                    if (link.status === LinkStatus.NORMAL) continue;
+                    if (link.status === LinkStatus.LINK_OUT_OF_DATE) {
+                        link.update();
+                        fixedCount++;
+                    } else if (link.status === LinkStatus.LINK_MISSING) {
+                        var found = false;
+                        for (var fi = 0; fi < linksFolders.length; fi++) {
+                            if (!linksFolders[fi].exists) continue;
+                            var linkFile = File(linksFolders[fi] + "/" + link.name);
+                            if (linkFile.exists) {
+                                link.relink(linkFile);
+                                link.update();
+                                fixedCount++;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) missingCount++;
+                    }
+                } catch (le) {}
+            }
+            if (fixedCount > 0 || missingCount > 0) {
+                $.writeln("[Links] early fix: fixed=" + fixedCount + " missing=" + missingCount);
+            }
+        } catch (e) {}
+
         var pageCount = doc.pages.length;
 
         // 문서 페이지 번호 → 물리 인덱스 변환
