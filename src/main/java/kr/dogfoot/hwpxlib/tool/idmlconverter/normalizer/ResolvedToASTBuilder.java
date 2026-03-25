@@ -454,8 +454,9 @@ public class ResolvedToASTBuilder {
                 resolvedRuns = resolvedStory.paragraphs().get(i).runs();
             }
 
-            // ParagraphStyle에서 FillColor 미리 구해둠 (런에서 color 없을 때 사용)
+            // ParagraphStyle에서 FillColor/Tracking 미리 구해둠 (런에서 없을 때 사용)
             String styleFillColor = getStyleFillColor(ip.appliedParagraphStyle());
+            Double styleTracking = getStyleTracking(ip.appliedParagraphStyle());
 
             // 런 변환: IDML CharacterRun → ASTTextRun
             // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
@@ -484,7 +485,7 @@ public class ResolvedToASTBuilder {
                     for (int pi = 0; pi < parts.length; pi++) {
                         if (!parts[pi].isEmpty()) {
                             ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, parts[pi]);
-                            ASTTextRun tr = createRunFromIDML(cr, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor);
+                            ASTTextRun tr = createRunFromIDML(cr, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking);
                             para.addItem(tr);
                         }
                         // U+FFFC 위치에 인라인 객체 삽입
@@ -502,7 +503,7 @@ public class ResolvedToASTBuilder {
                     }
                 } else {
                     ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
-                    ASTTextRun tr = createRunFromIDML(cr, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor);
+                    ASTTextRun tr = createRunFromIDML(cr, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor, styleTracking);
                     para.addItem(tr);
                 }
             }
@@ -523,7 +524,7 @@ public class ResolvedToASTBuilder {
         return paragraphs;
     }
 
-    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, String styleFillColor) {
+    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, String styleFillColor, Double styleTracking) {
         ASTTextRun tr = new ASTTextRun();
         // 특수 제어 문자 제거
         // \u0008 = Indent to Here (ACE 7) — HWPX에 대응 없음
@@ -544,6 +545,11 @@ public class ResolvedToASTBuilder {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
         }
         if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
+        if (cr.tracking() != null && cr.tracking() != 0) {
+            tr.letterSpacing((short) cr.tracking().doubleValue());
+        } else if (styleTracking != null && styleTracking != 0) {
+            tr.letterSpacing((short) styleTracking.doubleValue());
+        }
         // IDML에 없는 속성은 ParagraphStyle → resolved 런 순으로 보강
         if (rr != null) {
             if (tr.fontFamily() == null && rr.fontFamily() != null) tr.fontFamily(rr.fontFamily());
@@ -567,6 +573,15 @@ public class ResolvedToASTBuilder {
         if (styleResolver == null) return null;
         IDMLStyleDef resolved = styleResolver.getResolvedParagraphStyle(styleRef);
         return resolved != null ? resolved.leading() : null;
+    }
+
+    /**
+     * ParagraphStyle의 Tracking(자간) 값을 가져옴. StylePropertyResolver에 위임.
+     */
+    private Double getStyleTracking(String styleRef) {
+        if (styleResolver == null) return null;
+        IDMLStyleDef resolved = styleResolver.getResolvedParagraphStyle(styleRef);
+        return resolved != null ? resolved.tracking() : null;
     }
 
     /**
