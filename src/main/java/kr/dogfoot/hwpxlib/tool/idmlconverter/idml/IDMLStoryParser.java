@@ -446,7 +446,11 @@ public class IDMLStoryParser {
                 String target = node.getNodeName();
                 String data = node.getNodeValue() != null ? node.getNodeValue().trim() : "";
                 if ("ACE".equals(target)) {
-                    if ("7".equals(data)) {
+                    if ("3".equals(data)) {
+                        builder.append('\n'); // Frame Break → 줄바꿈
+                    } else if ("4".equals(data)) {
+                        builder.append('\n'); // Column Break → 줄바꿈
+                    } else if ("7".equals(data)) {
                         builder.append('\u0008'); // Indent to Here
                     } else if ("8".equals(data)) {
                         builder.append('\uFFFC'); // Object Replacement Character (인라인 오브젝트 앵커)
