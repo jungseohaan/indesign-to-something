@@ -464,7 +464,7 @@ public class ResolvedToASTBuilder {
         if (cr.fontSize() != null && cr.fontSize() > 0) {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
         }
-        if (cr.fillColor() != null) tr.textColor(cr.fillColor());
+        if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
         // IDML에 없는 속성은 resolved 런에서 보강 (ParagraphStyle 상속 값)
         if (rr != null) {
             if (tr.fontFamily() == null && rr.fontFamily() != null) tr.fontFamily(rr.fontFamily());
@@ -472,9 +472,43 @@ public class ResolvedToASTBuilder {
             if (tr.fontSizeHwpunits() == null && rr.fontSize() != null && rr.fontSize() > 0) {
                 tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
             }
-            if (tr.textColor() == null && rr.fillColor() != null) tr.textColor(rr.fillColor());
+            if (tr.textColor() == null && rr.fillColor() != null) tr.textColor(resolveColorToHex(rr.fillColor()));
         }
         return tr;
+    }
+
+    /**
+     * 색상 이름/CMYK 문자열을 hex RGB로 변환.
+     * IDML 스와치 이름("Color/홀수_1단원_MD") 또는 CMYK 문자열("C=0 M=0 Y=0 K=70") 지원.
+     */
+    private String resolveColorToHex(String color) {
+        if (color == null) return null;
+        // 이미 hex
+        if (color.startsWith("#")) return color;
+        // IDML 스와치: "Color/Paper" → "Paper"
+        String name = color.startsWith("Color/") ? color.substring(6) : color;
+        // resolvedData에서 조회
+        String hex = resolvedData.resolveColorHex(name);
+        if (hex != null) return hex;
+        // CMYK 문자열 파싱: "C=0 M=15 Y=80 K=0"
+        if (name.contains("C=") && name.contains("M=")) {
+            try {
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("C=(\\d+\\.?\\d*)\\s+M=(\\d+\\.?\\d*)\\s+Y=(\\d+\\.?\\d*)\\s+K=(\\d+\\.?\\d*)")
+                        .matcher(name);
+                if (m.find()) {
+                    double c = Double.parseDouble(m.group(1)) / 100.0;
+                    double mm = Double.parseDouble(m.group(2)) / 100.0;
+                    double y = Double.parseDouble(m.group(3)) / 100.0;
+                    double k = Double.parseDouble(m.group(4)) / 100.0;
+                    int r = (int) (255 * (1 - c) * (1 - k));
+                    int g = (int) (255 * (1 - mm) * (1 - k));
+                    int b = (int) (255 * (1 - y) * (1 - k));
+                    return String.format("#%02X%02X%02X", r, g, b);
+                }
+            } catch (Exception e) {}
+        }
+        return null;
     }
 
     /**
