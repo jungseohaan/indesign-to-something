@@ -545,10 +545,12 @@ public class ResolvedToASTBuilder {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
         }
         if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
+        // InDesign Tracking (1/1000 em) → HWPX 자간 (%)
+        // 변환: tracking / 10 (e.g., InDesign -30 → HWPX -3%)
         if (cr.tracking() != null && cr.tracking() != 0) {
-            tr.letterSpacing((short) cr.tracking().doubleValue());
+            tr.letterSpacing((short) Math.round(cr.tracking() / 10.0));
         } else if (styleTracking != null && styleTracking != 0) {
-            tr.letterSpacing((short) styleTracking.doubleValue());
+            tr.letterSpacing((short) Math.round(styleTracking / 10.0));
         }
         // IDML에 없는 속성은 ParagraphStyle → resolved 런 순으로 보강
         if (rr != null) {
@@ -757,7 +759,7 @@ public class ResolvedToASTBuilder {
                     textRun.fontStyle(run.fontStyle());
                     textRun.textColor(resolveColorToHex(run.fillColor()));
                     if (run.tracking() != null && run.tracking() != 0) {
-                        textRun.letterSpacing((short) run.tracking().doubleValue());
+                        textRun.letterSpacing((short) Math.round(run.tracking() / 10.0));
                     }
                     if (run.horizontalScale() != null && run.horizontalScale() != 0 && run.horizontalScale() != 100) {
                         textRun.horizontalScale((short) run.horizontalScale().doubleValue());
@@ -781,12 +783,8 @@ public class ResolvedToASTBuilder {
      */
     private void distributeParagraphs(List<ASTParagraph> paragraphs,
                                        List<ASTTextFrameBlock> blocks, String storyId) {
-        if (blocks.size() == 1) {
-            for (ASTParagraph p : paragraphs) {
-                blocks.get(0).addParagraph(p);
-            }
-            return;
-        }
+        // 단일 프레임도 frameVisibleText 기반 overflow 트리밍 적용
+        // (스레드 프레임 분할과 동일한 로직)
 
         List<ASTTextFrameBlock> ordered = orderByThreadChain(blocks);
 
