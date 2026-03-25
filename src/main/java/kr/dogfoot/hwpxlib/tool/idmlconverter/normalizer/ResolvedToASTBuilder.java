@@ -30,6 +30,7 @@ public class ResolvedToASTBuilder {
     private final double scaleFactor;    // mm → pt 변환 (resolved 좌표 → points)
     private final File idmlDir;          // IDML 압축 해제 디렉토리 (Story XML 로드용)
     private final Map<String, IDMLStory> idmlStoryCache = new HashMap<>();
+    private ASTDocument astDoc; // Phase 0에서 스타일 정의 접근용
 
     public ResolvedToASTBuilder(ResolvedData resolvedData) {
         this(resolvedData, null);
@@ -47,6 +48,7 @@ public class ResolvedToASTBuilder {
      */
     public ASTDocument build() {
         ASTDocument doc = new ASTDocument();
+        this.astDoc = doc;
         doc.sourceFormat("Resolved");
 
         // Phase 0: IDML 폰트/스타일/색상 정의 복사
@@ -371,10 +373,21 @@ public class ResolvedToASTBuilder {
             }
 
             // 단락 속성: resolved에서 가져옴 (정확한 pt 값)
+            // 디버그: lineSpacing 설정 확인
+            if ("5752".equals(storyId)) {
+                System.out.println("[DBG-LS] Story 5752 para[" + i + "]: lineSpacing=" + para.lineSpacing() + " lineSpacingType=" + para.lineSpacingType());
+            }
             if (resolvedStory != null && i < resolvedStory.paragraphs().size()) {
                 ResolvedParagraph rp = resolvedStory.paragraphs().get(i);
                 if (rp.justification() != null) para.alignment(rp.justification());
-                Double fixedLeading = rp.fixedLeading();
+                // leading: IDML ParagraphStyle 우선, CharacterRun, resolved 순
+                Double fixedLeading = getStyleLeading(ip.appliedParagraphStyle());
+                if (fixedLeading == null || fixedLeading <= 0) {
+                    fixedLeading = ip.leading(); // IDML CharacterRun leading
+                }
+                if (fixedLeading == null || fixedLeading <= 0) {
+                    fixedLeading = rp.fixedLeading(); // resolved fallback
+                }
                 if (fixedLeading != null && fixedLeading > 0) {
                     para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
                     para.lineSpacingType("fixed");
@@ -513,6 +526,52 @@ public class ResolvedToASTBuilder {
             if (tr.textColor() == null && rr.fillColor() != null) tr.textColor(resolveColorToHex(rr.fillColor()));
         }
         return tr;
+    }
+
+    /**
+     * ParagraphStyle의 Leading 값을 가져옴 (pt).
+     * Phase 0에서 수집한 ASTStyleDef에서 lineSpacing을 hwpunit → pt로 역변환.
+     */
+    private Double getStyleLeading(String styleRef) {
+        if (styleRef == null || astDoc == null) return null;
+        for (ASTStyleDef sd : astDoc.paragraphStyles()) {
+            if (styleRef.equals(sd.styleId())) {
+                Integer lsHwp = sd.fontSizeHwpunits(); // Phase 0에서 PointSize를 저장했지만...
+                // Phase 0에서 Leading을 별도로 저장해야 함 — 현재 없으므로 직접 IDML에서 읽기
+                break;
+            }
+        }
+        // IDML Styles.xml에서 직접 읽기
+        if (idmlDir == null) return null;
+        try {
+            File stylesFile = new File(new File(idmlDir, "Resources"), "Styles.xml");
+            if (!stylesFile.exists()) return null;
+            DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+            try { dbf.setAttribute("http://www.oracle.com/xml/jaxp/properties/elementAttributeLimit", "0"); } catch (Exception e) {}
+            DocumentBuilder db = dbf.newDocumentBuilder();
+            org.w3c.dom.Document xmlDoc = db.parse(stylesFile);
+            // styleRef = "ParagraphStyle/#강조 디자인 바야흐로_130(10pt)"
+            String styleName = styleRef.contains("/") ? styleRef.substring(styleRef.lastIndexOf('/') + 1) : styleRef;
+            // URL decode
+            styleName = styleName.replace("%3a", ":").replace("%25", "%");
+            org.w3c.dom.NodeList paraStyles = xmlDoc.getElementsByTagName("ParagraphStyle");
+            for (int si = 0; si < paraStyles.getLength(); si++) {
+                org.w3c.dom.Element ps = (org.w3c.dom.Element) paraStyles.item(si);
+                String name = ps.getAttribute("Name");
+                if (name != null && name.equals(styleName)) {
+                    // Leading 요소
+                    org.w3c.dom.NodeList leadings = ps.getElementsByTagName("Leading");
+                    if (leadings.getLength() > 0) {
+                        String val = leadings.item(0).getTextContent().trim();
+                        if (!"Auto".equalsIgnoreCase(val)) {
+                            return Double.parseDouble(val);
+                        }
+                    }
+                    break;
+                }
+            }
+        } catch (Exception e) {}
+        return null;
     }
 
     /**
