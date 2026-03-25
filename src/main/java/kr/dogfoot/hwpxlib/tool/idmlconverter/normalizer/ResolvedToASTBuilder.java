@@ -2,7 +2,8 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper;
+// FontMapper import removed (unused in new pipeline)
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
@@ -30,9 +31,7 @@ public class ResolvedToASTBuilder {
     private final double scaleFactor;    // mm → pt 변환 (resolved 좌표 → points)
     private final File idmlDir;          // IDML 압축 해제 디렉토리 (Story XML 로드용)
     private final Map<String, IDMLStory> idmlStoryCache = new HashMap<>();
-    private final Map<String, Double> styleLeadingCache = new HashMap<>(); // styleRef → leading(pt)
-    private final Map<String, String> styleFillColorCache = new HashMap<>(); // styleName → FillColor
-    private boolean styleLeadingCacheBuilt = false;
+    private StylePropertyResolver styleResolver;
     private ASTDocument astDoc; // Phase 0에서 스타일 정의 접근용
 
     public ResolvedToASTBuilder(ResolvedData resolvedData) {
@@ -54,7 +53,8 @@ public class ResolvedToASTBuilder {
         this.astDoc = doc;
         doc.sourceFormat("Resolved");
 
-        // Phase 0: IDML 폰트/스타일/색상 정의 복사
+        // Phase 0: IDML 폰트/스타일/색상 정의 복사 + 스타일 resolver 초기화
+        this.styleResolver = StylePropertyResolver.fromIdmlDir(idmlDir);
         copyIDMLDefinitions(doc);
 
         // Phase 1: 페이지/섹션 빌드
@@ -535,98 +535,22 @@ public class ResolvedToASTBuilder {
     }
 
     /**
-     * ParagraphStyle의 Leading 값을 가져옴 (pt).
-     * 첫 호출 시 Styles.xml에서 모든 스타일의 Leading을 캐시에 로드.
+     * ParagraphStyle의 Leading 값을 가져옴 (pt). StylePropertyResolver에 위임.
      */
     private Double getStyleLeading(String styleRef) {
-        if (styleRef == null) return null;
-
-        // 캐시 빌드 (첫 호출 시 1회)
-        if (!styleLeadingCacheBuilt) {
-            buildStyleLeadingCache();
-            styleLeadingCacheBuilt = true;
-        }
-
-        // 1차: 전체 styleRef로 검색
-        Double result = styleLeadingCache.get(styleRef);
-        if (result != null) return result;
-
-        // 2차: 경로에서 이름 추출하여 검색
-        String styleName = styleRef.contains("/") ? styleRef.substring(styleRef.lastIndexOf('/') + 1) : styleRef;
-        styleName = styleName.replace("%3a", ":").replace("%25", "%");
-        result = styleLeadingCache.get(styleName);
-        if (result != null) return result;
-
-        // 3차: 그룹 경로 제거
-        if (styleName.contains(":")) {
-            String shortName = styleName.substring(styleName.lastIndexOf(':') + 1);
-            result = styleLeadingCache.get(shortName);
-            if (result != null) return result;
-        }
-
-        return null;
-    }
-
-    private void buildStyleLeadingCache() {
-        if (idmlDir == null) return;
-        try {
-            File stylesFile = new File(new File(idmlDir, "Resources"), "Styles.xml");
-            if (!stylesFile.exists()) return;
-            DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-            try { dbf.setAttribute("http://www.oracle.com/xml/jaxp/properties/elementAttributeLimit", "0"); } catch (Exception e) {}
-            DocumentBuilder db = dbf.newDocumentBuilder();
-            org.w3c.dom.Document xmlDoc = db.parse(stylesFile);
-            org.w3c.dom.NodeList paraStyles = xmlDoc.getElementsByTagName("ParagraphStyle");
-            for (int si = 0; si < paraStyles.getLength(); si++) {
-                org.w3c.dom.Element ps = (org.w3c.dom.Element) paraStyles.item(si);
-                String self = ps.getAttribute("Self");
-                String name = ps.getAttribute("Name");
-                org.w3c.dom.NodeList leadings = ps.getElementsByTagName("Leading");
-                if (leadings.getLength() > 0) {
-                    String val = leadings.item(0).getTextContent().trim();
-                    if (!"Auto".equalsIgnoreCase(val)) {
-                        try {
-                            Double leading = Double.parseDouble(val);
-                            if (self != null) styleLeadingCache.put(self, leading);
-                            if (name != null) styleLeadingCache.put(name, leading);
-                        } catch (NumberFormatException e) {}
-                    }
-                }
-                // FillColor 캐시
-                String fillColor = ps.getAttribute("FillColor");
-                if (fillColor != null && !fillColor.isEmpty()) {
-                    if (self != null) styleFillColorCache.put(self, fillColor);
-                    if (name != null) styleFillColorCache.put(name, fillColor);
-                }
-            }
-            System.out.println("[ResolvedToASTBuilder] Style leading cache: " + styleLeadingCache.size() + " entries");
-        } catch (Exception e) {
-            System.err.println("[ResolvedToASTBuilder] Style leading cache build failed: " + e.getMessage());
-        }
+        if (styleResolver == null) return null;
+        IDMLStyleDef resolved = styleResolver.getResolvedParagraphStyle(styleRef);
+        return resolved != null ? resolved.leading() : null;
     }
 
     /**
-     * ParagraphStyle의 FillColor를 hex로 변환하여 반환.
+     * ParagraphStyle의 FillColor를 hex로 변환하여 반환. StylePropertyResolver에 위임.
      */
     private String getStyleFillColor(String styleRef) {
-        if (styleRef == null) return null;
-        if (!styleLeadingCacheBuilt) {
-            buildStyleLeadingCache();
-            styleLeadingCacheBuilt = true;
-        }
-        // 1차: 전체 styleRef
-        String color = styleFillColorCache.get(styleRef);
-        if (color != null) return resolveColorToHex(color);
-        // 2차: 경로에서 이름 추출
-        String styleName = styleRef.contains("/") ? styleRef.substring(styleRef.lastIndexOf('/') + 1) : styleRef;
-        styleName = styleName.replace("%3a", ":").replace("%25", "%");
-        color = styleFillColorCache.get(styleName);
-        if (color != null) return resolveColorToHex(color);
-        // 3차: 그룹 경로 제거
-        if (styleName.contains(":")) {
-            String shortName = styleName.substring(styleName.lastIndexOf(':') + 1);
-            color = styleFillColorCache.get(shortName);
-            if (color != null) return resolveColorToHex(color);
+        if (styleResolver == null) return null;
+        IDMLStyleDef resolved = styleResolver.getResolvedParagraphStyle(styleRef);
+        if (resolved != null && resolved.fillColor() != null) {
+            return resolveColorToHex(resolved.fillColor());
         }
         return null;
     }

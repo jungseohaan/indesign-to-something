@@ -7,7 +7,7 @@ import static kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLXmlUtils.*;
 /**
  * IDML 리소스 파싱: designmap, fonts, styles, colors, 마스터 스프레드 마진.
  */
-class IDMLResourceParser {
+public class IDMLResourceParser {
 
     // ===== designmap.xml 파싱 =====
 
@@ -142,7 +142,7 @@ class IDMLResourceParser {
         }
     }
 
-    static IDMLStyleDef parseStyleDef(Element styleElem) {
+    public static IDMLStyleDef parseStyleDef(Element styleElem) {
         IDMLStyleDef def = new IDMLStyleDef();
         def.selfRef(styleElem.getAttribute("Self"));
         def.name(styleElem.getAttribute("Name"));
