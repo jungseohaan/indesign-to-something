@@ -375,18 +375,11 @@ public class ResolvedToASTBuilder {
             }
 
             // 단락 속성: resolved에서 가져옴 (정확한 pt 값)
-            // 디버그: lineSpacing 설정 확인
-            if ("5752".equals(storyId)) {
-                System.out.println("[DBG-LS] Story 5752 para[" + i + "]: lineSpacing=" + para.lineSpacing() + " lineSpacingType=" + para.lineSpacingType());
-            }
             if (resolvedStory != null && i < resolvedStory.paragraphs().size()) {
                 ResolvedParagraph rp = resolvedStory.paragraphs().get(i);
                 if (rp.justification() != null) para.alignment(rp.justification());
                 // leading: IDML ParagraphStyle 우선, CharacterRun, resolved 순
                 Double fixedLeading = getStyleLeading(ip.appliedParagraphStyle());
-                if ("5286".equals(storyId)) {
-                    System.out.println("[DBG] Story 5286: styleRef=" + ip.appliedParagraphStyle() + " styleLeading=" + fixedLeading + " ipLeading=" + ip.leading());
-                }
                 if (fixedLeading == null || fixedLeading <= 0) {
                     fixedLeading = ip.leading(); // IDML CharacterRun leading
                 }

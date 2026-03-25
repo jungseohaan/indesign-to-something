@@ -84,8 +84,9 @@ public class HwpxParagraphBuilder {
         }
 
         // 인라인 텍스트 프레임이 줄 간격보다 크면 줄 간격 확장
+        // 단, ASTParagraph에 명시적 lineSpacing이 있으면 그 값 우선 (인라인보다 작아도 유지)
         long maxInlineH = maxInlineObjectHeight(astPara);
-        if (maxInlineH > 2000) {
+        if (maxInlineH > 2000 && astPara.lineSpacing() == null) {
             paraPrId = ensureLineSpacingForInline(paraPrId, maxInlineH);
         }
 
