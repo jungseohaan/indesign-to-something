@@ -69,17 +69,28 @@ pub async fn convert_idml(
 
     // 리소스 디렉토리에서 config 및 font-map 경로 추가
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let config_path = resource_dir.join("conversion-config.json");
-        if config_path.exists() {
-            args.push("--config".to_string());
-            args.push(config_path.to_string_lossy().to_string());
+        // Tauri 번들에서 리소스는 _up_/_up_/ 하위에 위치할 수 있음
+        let candidates = vec![
+            resource_dir.clone(),
+            resource_dir.join("_up_").join("_up_"),
+        ];
+        for dir in &candidates {
+            let config_path = dir.join("conversion-config.json");
+            if config_path.exists() {
+                args.push("--config".to_string());
+                args.push(config_path.to_string_lossy().to_string());
+                break;
+            }
         }
         // 사용자 지정 font_map이 없을 때만 번들된 font-mapping.json 사용
         if font_map_file.is_none() {
-            let font_map_path = resource_dir.join("font-mapping.json");
-            if font_map_path.exists() {
-                args.push("--font-map".to_string());
-                args.push(font_map_path.to_string_lossy().to_string());
+            for dir in &candidates {
+                let font_map_path = dir.join("font-mapping.json");
+                if font_map_path.exists() {
+                    args.push("--font-map".to_string());
+                    args.push(font_map_path.to_string_lossy().to_string());
+                    break;
+                }
             }
         }
     }

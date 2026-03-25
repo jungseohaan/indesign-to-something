@@ -31,6 +31,7 @@ public class ResolvedToASTBuilder {
     private final File idmlDir;          // IDML 압축 해제 디렉토리 (Story XML 로드용)
     private final Map<String, IDMLStory> idmlStoryCache = new HashMap<>();
     private final Map<String, Double> styleLeadingCache = new HashMap<>(); // styleRef → leading(pt)
+    private final Map<String, String> styleFillColorCache = new HashMap<>(); // styleName → FillColor
     private boolean styleLeadingCacheBuilt = false;
     private ASTDocument astDoc; // Phase 0에서 스타일 정의 접근용
 
@@ -431,6 +432,9 @@ public class ResolvedToASTBuilder {
                 resolvedRuns = resolvedStory.paragraphs().get(i).runs();
             }
 
+            // ParagraphStyle에서 FillColor 미리 구해둠 (런에서 color 없을 때 사용)
+            String styleFillColor = getStyleFillColor(ip.appliedParagraphStyle());
+
             // 런 변환: IDML CharacterRun → ASTTextRun
             // resolved 런의 첫 번째에서 기본 폰트 가져오기 (ParagraphStyle 상속 보강)
             ResolvedRun defaultRR = (resolvedRuns != null && !resolvedRuns.isEmpty()) ? resolvedRuns.get(0) : null;
@@ -458,7 +462,7 @@ public class ResolvedToASTBuilder {
                     for (int pi = 0; pi < parts.length; pi++) {
                         if (!parts[pi].isEmpty()) {
                             ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, parts[pi]);
-                            ASTTextRun tr = createRunFromIDML(cr, parts[pi], matchedRR != null ? matchedRR : defaultRR);
+                            ASTTextRun tr = createRunFromIDML(cr, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor);
                             para.addItem(tr);
                         }
                         // U+FFFC 위치에 인라인 객체 삽입
@@ -476,7 +480,7 @@ public class ResolvedToASTBuilder {
                     }
                 } else {
                     ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
-                    ASTTextRun tr = createRunFromIDML(cr, text, matchedRR2 != null ? matchedRR2 : defaultRR);
+                    ASTTextRun tr = createRunFromIDML(cr, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor);
                     para.addItem(tr);
                 }
             }
@@ -497,7 +501,7 @@ public class ResolvedToASTBuilder {
         return paragraphs;
     }
 
-    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr) {
+    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, String styleFillColor) {
         ASTTextRun tr = new ASTTextRun();
         // Indent to Here (\u0008) 제거
         // \t + Indent to Here 패턴: \t\u0008 → 둘 다 제거 (인라인 아이콘이 뒤따르는 패턴)
@@ -514,12 +518,16 @@ public class ResolvedToASTBuilder {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
         }
         if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
-        // IDML에 없는 속성은 resolved 런에서 보강 (ParagraphStyle 상속 값)
+        // IDML에 없는 속성은 ParagraphStyle → resolved 런 순으로 보강
         if (rr != null) {
             if (tr.fontFamily() == null && rr.fontFamily() != null) tr.fontFamily(rr.fontFamily());
             if (tr.fontStyle() == null && rr.fontStyle() != null) tr.fontStyle(rr.fontStyle());
             if (tr.fontSizeHwpunits() == null && rr.fontSize() != null && rr.fontSize() > 0) {
                 tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+            }
+            // FillColor: ParagraphStyle 우선, resolved fallback
+            if (tr.textColor() == null && styleFillColor != null) {
+                tr.textColor(styleFillColor);
             }
             if (tr.textColor() == null && rr.fillColor() != null) tr.textColor(resolveColorToHex(rr.fillColor()));
         }
@@ -579,17 +587,48 @@ public class ResolvedToASTBuilder {
                     if (!"Auto".equalsIgnoreCase(val)) {
                         try {
                             Double leading = Double.parseDouble(val);
-                            // Self, Name 둘 다 캐시
                             if (self != null) styleLeadingCache.put(self, leading);
                             if (name != null) styleLeadingCache.put(name, leading);
                         } catch (NumberFormatException e) {}
                     }
+                }
+                // FillColor 캐시
+                String fillColor = ps.getAttribute("FillColor");
+                if (fillColor != null && !fillColor.isEmpty()) {
+                    if (self != null) styleFillColorCache.put(self, fillColor);
+                    if (name != null) styleFillColorCache.put(name, fillColor);
                 }
             }
             System.out.println("[ResolvedToASTBuilder] Style leading cache: " + styleLeadingCache.size() + " entries");
         } catch (Exception e) {
             System.err.println("[ResolvedToASTBuilder] Style leading cache build failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * ParagraphStyle의 FillColor를 hex로 변환하여 반환.
+     */
+    private String getStyleFillColor(String styleRef) {
+        if (styleRef == null) return null;
+        if (!styleLeadingCacheBuilt) {
+            buildStyleLeadingCache();
+            styleLeadingCacheBuilt = true;
+        }
+        // 1차: 전체 styleRef
+        String color = styleFillColorCache.get(styleRef);
+        if (color != null) return resolveColorToHex(color);
+        // 2차: 경로에서 이름 추출
+        String styleName = styleRef.contains("/") ? styleRef.substring(styleRef.lastIndexOf('/') + 1) : styleRef;
+        styleName = styleName.replace("%3a", ":").replace("%25", "%");
+        color = styleFillColorCache.get(styleName);
+        if (color != null) return resolveColorToHex(color);
+        // 3차: 그룹 경로 제거
+        if (styleName.contains(":")) {
+            String shortName = styleName.substring(styleName.lastIndexOf(':') + 1);
+            color = styleFillColorCache.get(shortName);
+            if (color != null) return resolveColorToHex(color);
+        }
+        return null;
     }
 
     /**
