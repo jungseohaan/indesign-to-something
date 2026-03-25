@@ -436,8 +436,8 @@ public class ResolvedToASTBuilder {
             String styleFillColor = getStyleFillColor(ip.appliedParagraphStyle());
 
             // 런 변환: IDML CharacterRun → ASTTextRun
-            // resolved 런의 첫 번째에서 기본 폰트 가져오기 (ParagraphStyle 상속 보강)
-            ResolvedRun defaultRR = (resolvedRuns != null && !resolvedRuns.isEmpty()) ? resolvedRuns.get(0) : null;
+            // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
+            ResolvedRun defaultRR = findDefaultResolvedRun(resolvedRuns);
             int resolvedRunIdx = 0;
             for (IDMLCharacterRun cr : ip.characterRuns()) {
                 String text = cr.content();
@@ -587,6 +587,26 @@ public class ResolvedToASTBuilder {
             } catch (Exception e) {}
         }
         return null;
+    }
+
+    /**
+     * resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 선택.
+     * 불릿(●, ▪ 등 1~2자)이나 특수문자 런이 아닌 본문 런을 우선 선택.
+     */
+    private ResolvedRun findDefaultResolvedRun(List<ResolvedRun> runs) {
+        if (runs == null || runs.isEmpty()) return null;
+        ResolvedRun longest = null;
+        int maxLen = 0;
+        for (ResolvedRun r : runs) {
+            String text = r.text();
+            if (text == null) continue;
+            String trimmed = text.replace("\uFFFC", "").trim();
+            if (trimmed.length() > maxLen) {
+                maxLen = trimmed.length();
+                longest = r;
+            }
+        }
+        return longest != null ? longest : runs.get(0);
     }
 
     /**

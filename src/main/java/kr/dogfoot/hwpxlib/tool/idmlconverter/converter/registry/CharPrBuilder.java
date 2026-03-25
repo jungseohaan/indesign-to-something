@@ -65,7 +65,8 @@ public final class CharPrBuilder {
                               boolean strikethrough,
                               Short verticalScale,
                               Short baselineShift) {
-        // 기본 속성
+        // 기본 속성 (빈 textColor는 검정으로 기본값)
+        if (textColor == null || textColor.isEmpty()) textColor = "#000000";
         charPr.idAnd(id)
                 .heightAnd(height)
                 .textColorAnd(textColor)

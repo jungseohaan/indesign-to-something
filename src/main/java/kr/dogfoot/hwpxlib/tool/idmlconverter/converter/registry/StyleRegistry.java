@@ -209,7 +209,7 @@ public class StyleRegistry {
 
     private void buildCharPr(CharPr charPr, String id, ASTStyleDef styleDef) {
         int height = styleDef.fontSizeHwpunits() != null ? styleDef.fontSizeHwpunits() : 1000;
-        String textColor = styleDef.textColor() != null ? styleDef.textColor() : "#000000";
+        String textColor = (styleDef.textColor() != null && !styleDef.textColor().isEmpty()) ? styleDef.textColor() : "#000000";
         // bold/italic: 명시적 플래그 우선, 없으면 fontStyle 파싱
         boolean bold = Boolean.TRUE.equals(styleDef.bold());
         boolean italic = Boolean.TRUE.equals(styleDef.italic());
