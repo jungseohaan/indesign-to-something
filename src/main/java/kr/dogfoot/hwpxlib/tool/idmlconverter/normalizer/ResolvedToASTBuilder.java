@@ -410,8 +410,29 @@ public class ResolvedToASTBuilder {
                     fixedLeading = rp.fixedLeading(); // resolved fallback
                 }
                 if (fixedLeading != null && fixedLeading > 0) {
-                    para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
-                    para.lineSpacingType("fixed");
+                    // InDesign Leading(pt) → HWPX 줄간격(%)
+                    // 공식: (leading / fontSize) × 100
+                    Double fontSize = getStyleFontSize(ip.appliedParagraphStyle());
+                    if (fontSize == null || fontSize <= 0) {
+                        // resolved 런에서 fontSize fallback
+                        if (rp.runs() != null && !rp.runs().isEmpty()) {
+                            for (ResolvedRun rr : rp.runs()) {
+                                if (rr.fontSize() != null && rr.fontSize() > 0) {
+                                    fontSize = rr.fontSize();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (fontSize != null && fontSize > 0) {
+                        int percent = (int) Math.round((fixedLeading / fontSize) * 100);
+                        para.lineSpacing(percent);
+                        para.lineSpacingType("percent");
+                    } else {
+                        // fontSize 없으면 FIXED 폴백
+                        para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
+                        para.lineSpacingType("fixed");
+                    }
                 }
                 if (rp.spaceBefore() != null && rp.spaceBefore() > 0) {
                     para.spaceBefore(CoordinateConverter.pointsToHwpunits(rp.spaceBefore()));
@@ -578,6 +599,15 @@ public class ResolvedToASTBuilder {
     }
 
     /**
+     * ParagraphStyle의 PointSize(글자 크기) 값을 가져옴 (pt). StylePropertyResolver에 위임.
+     */
+    private Double getStyleFontSize(String styleRef) {
+        if (styleResolver == null) return null;
+        IDMLStyleDef resolved = styleResolver.getResolvedParagraphStyle(styleRef);
+        return resolved != null ? resolved.fontSize() : null;
+    }
+
+    /**
      * ParagraphStyle의 Tracking(자간) 값을 가져옴. StylePropertyResolver에 위임.
      */
     private Double getStyleTracking(String styleRef) {
@@ -710,8 +740,24 @@ public class ResolvedToASTBuilder {
             if (rp.justification() != null) para.alignment(rp.justification());
             Double fixedLeading = rp.fixedLeading();
             if (fixedLeading != null && fixedLeading > 0) {
-                para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
-                para.lineSpacingType("fixed");
+                // InDesign Leading(pt) → HWPX 줄간격(%)
+                Double fontSize = null;
+                if (rp.runs() != null) {
+                    for (ResolvedRun rr : rp.runs()) {
+                        if (rr.fontSize() != null && rr.fontSize() > 0) {
+                            fontSize = rr.fontSize();
+                            break;
+                        }
+                    }
+                }
+                if (fontSize != null && fontSize > 0) {
+                    int percent = (int) Math.round((fixedLeading / fontSize) * 100);
+                    para.lineSpacing(percent);
+                    para.lineSpacingType("percent");
+                } else {
+                    para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
+                    para.lineSpacingType("fixed");
+                }
             }
             if (rp.spaceBefore() != null && rp.spaceBefore() > 0) {
                 para.spaceBefore(CoordinateConverter.pointsToHwpunits(rp.spaceBefore()));
