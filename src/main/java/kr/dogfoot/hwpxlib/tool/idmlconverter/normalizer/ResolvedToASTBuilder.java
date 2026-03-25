@@ -207,6 +207,11 @@ public class ResolvedToASTBuilder {
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             if (!resolvedData.isEditableTextFrame(tf.id())) continue;
 
+            // DEBUG: TF 321248 추적
+            if ("321248".equals(tf.id())) {
+                System.out.println("[DEBUG-TF] 321248: inline=" + tf.isInline() + " nested=" + isNestedInTextFrame(tf) + " editable=" + resolvedData.isEditableTextFrame(tf.id()) + " pageIdx=" + tf.pageIndex());
+            }
+
             // 페이지 인덱스 결정
             int pageIdx = tf.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
@@ -298,6 +303,11 @@ public class ResolvedToASTBuilder {
         }
 
         System.out.println("[ResolvedToASTBuilder] Phase 3: " + storyToBlocks.size() + " stories matched to TextFrameBlocks");
+        if (storyToBlocks.containsKey("321251")) {
+            System.out.println("[DEBUG] Story 321251 matched, blocks=" + storyToBlocks.get("321251").size());
+        } else {
+            System.out.println("[DEBUG] Story 321251 NOT in storyToBlocks!");
+        }
 
         // 각 Story → 단락 변환 후 TextFrameBlock에 분배
         // IDML Story XML 우선, 없으면 resolved fallback
@@ -342,9 +352,20 @@ public class ResolvedToASTBuilder {
                 resolvedCount++;
             }
             totalParas += paragraphs.size();
+            if ("321251".equals(storyId)) {
+                System.out.println("[DEBUG] Story 321251: " + paragraphs.size() + " paragraphs, useIdml=" + useIdml);
+                for (ASTTextFrameBlock b : blocks) {
+                    System.out.println("[DEBUG] Story 321251 block before dist: " + b.paragraphs().size() + " paras, sourceId=" + b.sourceId());
+                }
+            }
 
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
             distributeParagraphs(paragraphs, blocks, storyId);
+            if ("321251".equals(storyId)) {
+                for (ASTTextFrameBlock b : blocks) {
+                    System.out.println("[DEBUG] Story 321251 block after dist: " + b.paragraphs().size() + " paras, x=" + b.x() + " y=" + b.y() + " w=" + b.width() + " h=" + b.height());
+                }
+            }
         }
         System.out.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
     }
