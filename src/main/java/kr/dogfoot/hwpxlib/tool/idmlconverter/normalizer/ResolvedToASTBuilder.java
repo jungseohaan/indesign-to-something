@@ -30,6 +30,8 @@ public class ResolvedToASTBuilder {
     private final double scaleFactor;    // mm → pt 변환 (resolved 좌표 → points)
     private final File idmlDir;          // IDML 압축 해제 디렉토리 (Story XML 로드용)
     private final Map<String, IDMLStory> idmlStoryCache = new HashMap<>();
+    private final Map<String, Double> styleLeadingCache = new HashMap<>(); // styleRef → leading(pt)
+    private boolean styleLeadingCacheBuilt = false;
     private ASTDocument astDoc; // Phase 0에서 스타일 정의 접근용
 
     public ResolvedToASTBuilder(ResolvedData resolvedData) {
@@ -382,6 +384,9 @@ public class ResolvedToASTBuilder {
                 if (rp.justification() != null) para.alignment(rp.justification());
                 // leading: IDML ParagraphStyle 우선, CharacterRun, resolved 순
                 Double fixedLeading = getStyleLeading(ip.appliedParagraphStyle());
+                if ("5286".equals(storyId)) {
+                    System.out.println("[DBG] Story 5286: styleRef=" + ip.appliedParagraphStyle() + " styleLeading=" + fixedLeading + " ipLeading=" + ip.leading());
+                }
                 if (fixedLeading == null || fixedLeading <= 0) {
                     fixedLeading = ip.leading(); // IDML CharacterRun leading
                 }
@@ -530,48 +535,68 @@ public class ResolvedToASTBuilder {
 
     /**
      * ParagraphStyle의 Leading 값을 가져옴 (pt).
-     * Phase 0에서 수집한 ASTStyleDef에서 lineSpacing을 hwpunit → pt로 역변환.
+     * 첫 호출 시 Styles.xml에서 모든 스타일의 Leading을 캐시에 로드.
      */
     private Double getStyleLeading(String styleRef) {
-        if (styleRef == null || astDoc == null) return null;
-        for (ASTStyleDef sd : astDoc.paragraphStyles()) {
-            if (styleRef.equals(sd.styleId())) {
-                Integer lsHwp = sd.fontSizeHwpunits(); // Phase 0에서 PointSize를 저장했지만...
-                // Phase 0에서 Leading을 별도로 저장해야 함 — 현재 없으므로 직접 IDML에서 읽기
-                break;
-            }
+        if (styleRef == null) return null;
+
+        // 캐시 빌드 (첫 호출 시 1회)
+        if (!styleLeadingCacheBuilt) {
+            buildStyleLeadingCache();
+            styleLeadingCacheBuilt = true;
         }
-        // IDML Styles.xml에서 직접 읽기
-        if (idmlDir == null) return null;
+
+        // 1차: 전체 styleRef로 검색
+        Double result = styleLeadingCache.get(styleRef);
+        if (result != null) return result;
+
+        // 2차: 경로에서 이름 추출하여 검색
+        String styleName = styleRef.contains("/") ? styleRef.substring(styleRef.lastIndexOf('/') + 1) : styleRef;
+        styleName = styleName.replace("%3a", ":").replace("%25", "%");
+        result = styleLeadingCache.get(styleName);
+        if (result != null) return result;
+
+        // 3차: 그룹 경로 제거
+        if (styleName.contains(":")) {
+            String shortName = styleName.substring(styleName.lastIndexOf(':') + 1);
+            result = styleLeadingCache.get(shortName);
+            if (result != null) return result;
+        }
+
+        return null;
+    }
+
+    private void buildStyleLeadingCache() {
+        if (idmlDir == null) return;
         try {
             File stylesFile = new File(new File(idmlDir, "Resources"), "Styles.xml");
-            if (!stylesFile.exists()) return null;
+            if (!stylesFile.exists()) return;
             DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
             try { dbf.setAttribute("http://www.oracle.com/xml/jaxp/properties/elementAttributeLimit", "0"); } catch (Exception e) {}
             DocumentBuilder db = dbf.newDocumentBuilder();
             org.w3c.dom.Document xmlDoc = db.parse(stylesFile);
-            // styleRef = "ParagraphStyle/#강조 디자인 바야흐로_130(10pt)"
-            String styleName = styleRef.contains("/") ? styleRef.substring(styleRef.lastIndexOf('/') + 1) : styleRef;
-            // URL decode
-            styleName = styleName.replace("%3a", ":").replace("%25", "%");
             org.w3c.dom.NodeList paraStyles = xmlDoc.getElementsByTagName("ParagraphStyle");
             for (int si = 0; si < paraStyles.getLength(); si++) {
                 org.w3c.dom.Element ps = (org.w3c.dom.Element) paraStyles.item(si);
+                String self = ps.getAttribute("Self");
                 String name = ps.getAttribute("Name");
-                if (name != null && name.equals(styleName)) {
-                    // Leading 요소
-                    org.w3c.dom.NodeList leadings = ps.getElementsByTagName("Leading");
-                    if (leadings.getLength() > 0) {
-                        String val = leadings.item(0).getTextContent().trim();
-                        if (!"Auto".equalsIgnoreCase(val)) {
-                            return Double.parseDouble(val);
-                        }
+                org.w3c.dom.NodeList leadings = ps.getElementsByTagName("Leading");
+                if (leadings.getLength() > 0) {
+                    String val = leadings.item(0).getTextContent().trim();
+                    if (!"Auto".equalsIgnoreCase(val)) {
+                        try {
+                            Double leading = Double.parseDouble(val);
+                            // Self, Name 둘 다 캐시
+                            if (self != null) styleLeadingCache.put(self, leading);
+                            if (name != null) styleLeadingCache.put(name, leading);
+                        } catch (NumberFormatException e) {}
                     }
-                    break;
                 }
             }
-        } catch (Exception e) {}
-        return null;
+            System.out.println("[ResolvedToASTBuilder] Style leading cache: " + styleLeadingCache.size() + " entries");
+        } catch (Exception e) {
+            System.err.println("[ResolvedToASTBuilder] Style leading cache build failed: " + e.getMessage());
+        }
     }
 
     /**
