@@ -49,6 +49,9 @@ public class ResolvedToASTBuilder {
         ASTDocument doc = new ASTDocument();
         doc.sourceFormat("Resolved");
 
+        // Phase 0: IDML 폰트/스타일/색상 정의 복사
+        copyIDMLDefinitions(doc);
+
         // Phase 1: 페이지/섹션 빌드
         List<ASTSection> sections = buildSections();
         for (ASTSection sec : sections) {
@@ -69,6 +72,80 @@ public class ResolvedToASTBuilder {
 
         System.out.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
         return doc;
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Phase 0: IDML 정의 복사
+    // ═══════════════════════════════════════════════════
+
+    private void copyIDMLDefinitions(ASTDocument doc) {
+        if (idmlDir == null) {
+            System.out.println("[ResolvedToASTBuilder] Phase 0: idmlDir is null — skipping");
+            return;
+        }
+
+        try {
+            // Styles.xml에서 폰트, 단락스타일, 색상 파싱
+            File stylesFile = new File(new File(idmlDir, "Resources"), "Styles.xml");
+            if (!stylesFile.exists()) return;
+            DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+            // IDML의 ParagraphStyle은 200+ 속성을 가질 수 있으므로 제한 해제
+            try { dbf.setAttribute("http://www.oracle.com/xml/jaxp/properties/elementAttributeLimit", "0"); } catch (Exception e) {}
+            try { dbf.setAttribute("http://www.oracle.com/xml/jaxp/properties/totalEntitySizeLimit", "0"); } catch (Exception e) {}
+            DocumentBuilder db = dbf.newDocumentBuilder();
+            org.w3c.dom.Document xmlDoc = db.parse(stylesFile);
+
+            // 폰트 정의 수집 (Fonts.xml에서)
+            File fontsFile = new File(new File(idmlDir, "Resources"), "Fonts.xml");
+            if (fontsFile.exists()) {
+                try {
+                    org.w3c.dom.Document fontsDoc = db.parse(fontsFile);
+                    org.w3c.dom.NodeList fontFamilies = fontsDoc.getElementsByTagName("FontFamily");
+                    for (int i = 0; i < fontFamilies.getLength(); i++) {
+                        org.w3c.dom.Element ff = (org.w3c.dom.Element) fontFamilies.item(i);
+                        String name = ff.getAttribute("Name");
+                        if (name != null && !name.isEmpty()) {
+                            ASTFontDef fd = new ASTFontDef();
+                            fd.fontFamily(name);
+                            doc.addFont(fd);
+                        }
+                    }
+                } catch (Exception e) {
+                    System.err.println("[ResolvedToASTBuilder] Fonts.xml 파싱 실패: " + e.getMessage());
+                }
+            }
+
+            // 단락 스타일 수집
+            org.w3c.dom.NodeList paraStyles = xmlDoc.getElementsByTagName("ParagraphStyle");
+            for (int i = 0; i < paraStyles.getLength(); i++) {
+                org.w3c.dom.Element ps = (org.w3c.dom.Element) paraStyles.item(i);
+                String self = ps.getAttribute("Self");
+                String name = ps.getAttribute("Name");
+                if (self != null && name != null) {
+                    // 폰트 정보 추출
+                    org.w3c.dom.NodeList appliedFonts = ps.getElementsByTagName("AppliedFont");
+                    String font = null;
+                    if (appliedFonts.getLength() > 0) {
+                        font = appliedFonts.item(0).getTextContent();
+                    }
+                    ASTStyleDef sd = new ASTStyleDef();
+                    sd.styleId(self);
+                    sd.styleName(name);
+                    if (font != null) sd.fontFamily(font);
+                    String fontSize = ps.getAttribute("PointSize");
+                    if (fontSize != null && !fontSize.isEmpty()) {
+                        try { sd.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(Double.parseDouble(fontSize))); } catch (NumberFormatException e) {}
+                    }
+                    sd.textColor(ps.getAttribute("FillColor"));
+                    sd.fontStyle(ps.getAttribute("FontStyle"));
+                    doc.addParagraphStyle(sd);
+                }
+            }
+            System.out.println("[ResolvedToASTBuilder] Phase 0: fonts=" + doc.fonts().size()
+                    + " styles=" + doc.paragraphStyles().size());
+        } catch (Exception e) {
+            System.err.println("[ResolvedToASTBuilder] IDML 정의 복사 실패: " + e.getMessage());
+        }
     }
 
     // ═══════════════════════════════════════════════════
@@ -316,7 +393,16 @@ public class ResolvedToASTBuilder {
                 }
             }
 
+            // resolved 런 (스타일 상속 보강용)
+            List<ResolvedRun> resolvedRuns = null;
+            if (resolvedStory != null && i < resolvedStory.paragraphs().size()) {
+                resolvedRuns = resolvedStory.paragraphs().get(i).runs();
+            }
+
             // 런 변환: IDML CharacterRun → ASTTextRun
+            // resolved 런의 첫 번째에서 기본 폰트 가져오기 (ParagraphStyle 상속 보강)
+            ResolvedRun defaultRR = (resolvedRuns != null && !resolvedRuns.isEmpty()) ? resolvedRuns.get(0) : null;
+            int resolvedRunIdx = 0;
             for (IDMLCharacterRun cr : ip.characterRuns()) {
                 String text = cr.content();
                 if (text == null || text.isEmpty()) continue;
@@ -339,7 +425,8 @@ public class ResolvedToASTBuilder {
                     int anchorIdx = 0;
                     for (int pi = 0; pi < parts.length; pi++) {
                         if (!parts[pi].isEmpty()) {
-                            ASTTextRun tr = createRunFromIDML(cr, parts[pi]);
+                            ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, parts[pi]);
+                            ASTTextRun tr = createRunFromIDML(cr, parts[pi], matchedRR != null ? matchedRR : defaultRR);
                             para.addItem(tr);
                         }
                         // U+FFFC 위치에 인라인 객체 삽입
@@ -356,7 +443,8 @@ public class ResolvedToASTBuilder {
                         }
                     }
                 } else {
-                    ASTTextRun tr = createRunFromIDML(cr, text);
+                    ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
+                    ASTTextRun tr = createRunFromIDML(cr, text, matchedRR2 != null ? matchedRR2 : defaultRR);
                     para.addItem(tr);
                 }
             }
@@ -367,17 +455,47 @@ public class ResolvedToASTBuilder {
         return paragraphs;
     }
 
-    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text) {
+    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr) {
         ASTTextRun tr = new ASTTextRun();
         tr.text(text);
+        // IDML CharacterRun 속성 우선
         if (cr.fontFamily() != null) tr.fontFamily(cr.fontFamily());
         if (cr.fontStyle() != null) tr.fontStyle(cr.fontStyle());
         if (cr.fontSize() != null && cr.fontSize() > 0) {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
         }
         if (cr.fillColor() != null) tr.textColor(cr.fillColor());
-        // tracking은 ASTParagraph 수준 또는 CharPr에서 처리
+        // IDML에 없는 속성은 resolved 런에서 보강 (ParagraphStyle 상속 값)
+        if (rr != null) {
+            if (tr.fontFamily() == null && rr.fontFamily() != null) tr.fontFamily(rr.fontFamily());
+            if (tr.fontStyle() == null && rr.fontStyle() != null) tr.fontStyle(rr.fontStyle());
+            if (tr.fontSizeHwpunits() == null && rr.fontSize() != null && rr.fontSize() > 0) {
+                tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+            }
+            if (tr.textColor() == null && rr.fillColor() != null) tr.textColor(rr.fillColor());
+        }
         return tr;
+    }
+
+    /**
+     * resolved 런 목록에서 텍스트가 매칭되는 런을 찾음.
+     * IDML 런과 resolved 런의 텍스트 경계가 다를 수 있으므로, 텍스트 포함 여부로 매칭.
+     */
+    private ResolvedRun findResolvedRun(List<ResolvedRun> runs, int startIdx, String text) {
+        if (runs == null || runs.isEmpty() || text == null || text.isEmpty()) return null;
+        String key = text.length() > 5 ? text.substring(0, 5) : text;
+        // startIdx부터 순차 검색
+        for (int i = startIdx; i < runs.size(); i++) {
+            String rt = runs.get(i).text();
+            if (rt != null && rt.contains(key)) return runs.get(i);
+        }
+        // 못 찾으면 처음부터
+        for (int i = 0; i < Math.min(startIdx, runs.size()); i++) {
+            String rt = runs.get(i).text();
+            if (rt != null && rt.contains(key)) return runs.get(i);
+        }
+        // 그래도 못 찾으면 첫 번째 런 반환 (스타일 상속용)
+        return runs.isEmpty() ? null : runs.get(0);
     }
 
     private List<ASTParagraph> convertStoryParagraphs(ResolvedStory story) {

@@ -118,6 +118,7 @@ public class ConversionConfig {
             if (fm.has("mappings")) {
                 JsonObject mappings = fm.getAsJsonObject("mappings");
                 for (Map.Entry<String, JsonElement> entry : mappings.entrySet()) {
+                    if (entry.getKey().startsWith("_") || !entry.getValue().isJsonObject()) continue;
                     JsonObject val = entry.getValue().getAsJsonObject();
                     FontMappingEntry me = new FontMappingEntry();
                     me.ko = val.has("ko") ? val.get("ko").getAsString() : defaultSansKo;
