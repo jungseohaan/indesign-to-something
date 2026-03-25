@@ -391,6 +391,27 @@ public class ResolvedToASTBuilder {
                 if (rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
                     para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
                 }
+                // 탭 스톱
+                if (rp.hasTabStops()) {
+                    // HWPX 탭은 leftMargin 기준 상대 위치
+                    double leftPt = (rp.leftIndent() != null ? rp.leftIndent() : 0) * scaleFactor;
+                    for (ResolvedTabStop rts : rp.tabStops()) {
+                        if (rts.position() != null && rts.position() > 0) {
+                            // resolved tabStop position은 mm(절대) → leftMargin 빼서 상대 → pt → hwpunit
+                            double posPt = rts.position() * scaleFactor - leftPt;
+                            if (posPt < 1) posPt = 1; // 0이면 HWPX가 기본 탭 사용하므로 최소 1
+                            String align = "left";
+                            if (rts.alignment() != null) {
+                                String a = rts.alignment().toLowerCase();
+                                if (a.contains("center")) align = "center";
+                                else if (a.contains("right")) align = "right";
+                                else if (a.contains("decimal")) align = "decimal";
+                            }
+                            para.addTabStop(new ASTTabStop(
+                                    CoordinateConverter.pointsToHwpunits(posPt), align, null));
+                        }
+                    }
+                }
             }
 
             // resolved 런 (스타일 상속 보강용)

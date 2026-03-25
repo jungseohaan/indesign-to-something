@@ -979,6 +979,11 @@ public class HwpxTextBoxBuilder {
         // 폰트 메트릭 기반 높이 보정: 매핑 폰트가 원본보다 세로로 크면 글상자 확장
         h = adjustHeightByFontMetrics(h, paragraphs);
 
+        // 글상자 너비 확장: 매핑 폰트의 폭 차이로 텍스트 넘침 방지
+        if (ctx.config != null && ctx.config.textBoxWidthExpandPercent() > 0) {
+            w = w + w * ctx.config.textBoxWidthExpandPercent() / 100;
+        }
+
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
 

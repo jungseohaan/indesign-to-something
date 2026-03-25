@@ -3089,6 +3089,8 @@
   "spacing": {
     "_comment": "텍스트 간격 보정 설정 — Java HwpxParagraphBuilder에서 사용",
     "spaceCondenseRatio": 50,
-    "_comment_spaceCondenseRatio": "공백 문자 장평 축소 비율 (%). 50이면 공백 폭을 50%로 축소"
+    "_comment_spaceCondenseRatio": "공백 문자 장평 축소 비율 (%). 50이면 공백 폭을 50%로 축소",
+    "textBoxWidthExpandPercent": 5,
+    "_comment_textBoxWidthExpandPercent": "글상자 너비 확장 비율 (%). 3이면 원래 너비의 103%로 확장"
   }
 }
