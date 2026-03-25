@@ -503,12 +503,16 @@ public class ResolvedToASTBuilder {
 
     private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, String styleFillColor) {
         ASTTextRun tr = new ASTTextRun();
-        // Indent to Here (\u0008) 제거
-        // \t + Indent to Here 패턴: \t\u0008 → 둘 다 제거 (인라인 아이콘이 뒤따르는 패턴)
-        // 단독 \t는 유지 (정상 탭)
+        // 특수 제어 문자 제거
+        // \u0008 = Indent to Here (ACE 7) — HWPX에 대응 없음
+        // \n = Frame Break (ACE 3) — 같은 글상자 안에서 의미 없음
+        // \t + \u0008 패턴: 인라인 아이콘 앞 탭+IndentToHere → 둘 다 제거
+        // 단독 \t: resolved에서 온 탭이지만 탭스톱 없으면 불필요한 간격 생성 → 공백으로 치환
         if (text != null) {
             text = text.replace("\t\u0008", ""); // \t + IndentToHere 조합 제거
             text = text.replace("\u0008", "");   // 단독 IndentToHere 제거
+            text = text.replace("\n", "");       // Frame Break 제거
+            text = text.replace("\t", " ");      // 탭 → 공백 (탭스톱 없는 경우 간격 방지)
         }
         tr.text(text);
         // IDML CharacterRun 속성 우선
