@@ -310,7 +310,29 @@ public class ResolvedToASTBuilder {
 
             // 1차: IDML Story XML에서 단락 파싱 (정확한 단락 구조)
             List<ASTParagraph> paragraphs = convertStoryFromIDML(storyId);
-            if (paragraphs != null && !paragraphs.isEmpty()) {
+            boolean useIdml = paragraphs != null && !paragraphs.isEmpty();
+
+            // IDML-SHORT 감지: IDML 텍스트가 resolved의 30% 미만이면 불릿 전용 Story 등
+            // IDML에 본문이 누락되므로 resolved fallback 전환
+            if (useIdml) {
+                ResolvedStory rs = resolvedData.getStory(storyId);
+                if (rs != null) {
+                    int idmlLen = 0;
+                    for (ASTParagraph p : paragraphs)
+                        for (Object item : p.items())
+                            if (item instanceof ASTTextRun) idmlLen += ((ASTTextRun) item).text() != null ? ((ASTTextRun) item).text().length() : 0;
+                    int resolvedLen = 0;
+                    for (ResolvedParagraph rp : rs.paragraphs())
+                        if (rp.runs() != null)
+                            for (ResolvedRun r : rp.runs())
+                                resolvedLen += r.text() != null ? r.text().length() : 0;
+                    if (resolvedLen > 10 && idmlLen < resolvedLen * 0.3) {
+                        useIdml = false; // resolved fallback 전환
+                    }
+                }
+            }
+
+            if (useIdml) {
                 idmlCount++;
             } else {
                 // 2차: resolved.json fallback
@@ -704,13 +726,21 @@ public class ResolvedToASTBuilder {
                     }
 
                     ASTTextRun textRun = new ASTTextRun();
-                    textRun.text(run.text());
+                    String runText = run.text();
+                    // 특수 제어 문자 제거 (IDML 경로와 동일)
+                    if (runText != null) {
+                        runText = runText.replace("\t\u0008", "");
+                        runText = runText.replace("\u0008", "");
+                        runText = runText.replace("\n", "");
+                        runText = runText.replace("\t", " ");
+                    }
+                    textRun.text(runText);
                     textRun.fontFamily(run.fontFamily());
                     if (run.fontSize() != null && run.fontSize() > 0) {
                         textRun.fontSizeHwpunits((int) Math.round(run.fontSize() * 100));
                     }
                     textRun.fontStyle(run.fontStyle());
-                    textRun.textColor(run.fillColor());
+                    textRun.textColor(resolveColorToHex(run.fillColor()));
                     if (run.tracking() != null && run.tracking() != 0) {
                         textRun.letterSpacing((short) run.tracking().doubleValue());
                     }
