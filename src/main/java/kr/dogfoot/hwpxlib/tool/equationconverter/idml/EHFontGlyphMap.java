@@ -156,13 +156,11 @@ public class EHFontGlyphMap {
         for (int i = 0; i < inner.length(); i++) {
             char c = inner.charAt(i);
 
-            // 확장 범위 (0x80+): 상부자 매핑 사용
+            // 확장 범위 (0x80+): 상부자 매핑 사용 → 분자 숫자 인코딩
             if (c >= 0x80) {
                 char decoded = decodeSubSupGlyph(c);
                 if (decoded != c) {
-                    // 확장범위의 숫자/소문자 → 분모, 대문자 → 분자
-                    // (상부자 테이블의 분수용 확장 매핑)
-                    denom.append(decoded);
+                    numer.append(decoded);
                 }
                 continue;
             }
