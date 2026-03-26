@@ -157,11 +157,10 @@ public class EHIRBuilder {
                     out.add(new EHNode.Text(text.substring(splitPos)));
                     return i + 1;
                 } else {
-                    // 전체가 radicand 안
+                    // 전체가 radicand 안 → 계속 수집
                     sqrt.radicand().add(new EHNode.Text(text));
                     i++;
-                    // radicand 완료 (다음 토큰이 같은 타입이 아니면)
-                    break;
+                    continue;
                 }
             }
 
