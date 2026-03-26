@@ -31,15 +31,6 @@ public class EHFontEquationConverter {
     public static String convert(List<IDMLCharacterRun> runs) {
         if (runs == null || runs.isEmpty()) return null;
 
-        // 전방 탐색: EH분수소문자가 존재하는지 확인 (분수 vs 루트 구분)
-        boolean hasDenominator = false;
-        for (IDMLCharacterRun r : runs) {
-            if (EHFontGlyphMap.isFractionDenominatorFont(r.fontFamily())) {
-                hasDenominator = true;
-                break;
-            }
-        }
-
         StringBuilder sb = new StringBuilder();
         boolean sqrtOpen = false; // 루트 sqrt{ 가 열려있는지
 
@@ -62,19 +53,15 @@ public class EHFontEquationConverter {
                     // 루트 내부: 한국어/thin space 이전까지 루트 안, 나머지 루트 밖
                     int splitPos = findSqrtEndPos(text);
                     if (splitPos > 0 && splitPos < text.length()) {
-                        // 루트 안 부분
                         convertSubSupRun(text.substring(0, splitPos), fontFamily, sb);
                         sb.append("}");
                         sqrtOpen = false;
-                        // 루트 밖 부분
                         convertSubSupRun(text.substring(splitPos), fontFamily, sb);
                     } else if (splitPos == 0) {
-                        // 전체가 루트 밖 (한국어로 시작)
                         sb.append("}");
                         sqrtOpen = false;
                         convertSubSupRun(text, fontFamily, sb);
                     } else {
-                        // 전체가 루트 안
                         convertSubSupRun(text, fontFamily, sb);
                         sb.append("}");
                         sqrtOpen = false;
@@ -83,8 +70,20 @@ public class EHFontEquationConverter {
                     convertSubSupRun(text, fontFamily, sb);
                 }
             } else if (EHFontGlyphMap.isFractionNumeratorFont(fontFamily)) {
-                if (hasDenominator) {
-                    // 진짜 분수: 분모가 뒤에 있음
+                // 개별 판단: 이 분수대문자 뒤에 분수소문자가 오는지 확인
+                boolean followedByDenom = false;
+                for (int fj = ri + 1; fj < runs.size(); fj++) {
+                    String fjFont = runs.get(fj).fontFamily();
+                    if (EHFontGlyphMap.isFractionDenominatorFont(fjFont)) {
+                        followedByDenom = true;
+                        break;
+                    }
+                    // 분수대문자 연속은 건너뜀, 다른 폰트가 오면 중단
+                    if (!EHFontGlyphMap.isFractionNumeratorFont(fjFont)) break;
+                }
+                if (followedByDenom) {
+                    // 진짜 분수: 바로 뒤에 분모가 있음
+                    if (sqrtOpen) { sb.append("}"); sqrtOpen = false; }
                     String decoded = EHFontGlyphMap.decodeText(text, fontFamily);
                     if (decoded != null && !decoded.isEmpty()) {
                         sb.append("{").append(convertToHwpScript(decoded)).append("}");
@@ -105,11 +104,17 @@ public class EHFontEquationConverter {
                     sb.append("{").append(convertToHwpScript(decoded)).append("}");
                 }
             } else if (run.isEHFont()) {
-                // EH수식/EH약물 등: 글리프 디코딩 후 일반 수식 텍스트
+                // EH수식/EH약물 등: 글리프 디코딩 후 수식 텍스트
                 if (sqrtOpen) { sb.append("}"); sqrtOpen = false; }
-                String decoded = EHFontGlyphMap.decodeText(text, fontFamily);
-                if (decoded != null && !decoded.isEmpty()) {
-                    sb.append(convertToHwpScript(decoded));
+                if (text.contains("`")) {
+                    // 백틱(`) = 앞 문자를 위첨자로 만드는 마커
+                    // "2`" → "^{2}", 백틱 없는 부분은 decodeText로 처리
+                    convertEHBaseWithBacktick(text, fontFamily, sb);
+                } else {
+                    String decoded = EHFontGlyphMap.decodeText(text, fontFamily);
+                    if (decoded != null && !decoded.isEmpty()) {
+                        sb.append(convertToHwpScript(decoded));
+                    }
                 }
             } else if (EHFontGlyphMap.containsEHEncodedChars(text)) {
                 // 폰트 미지정이지만 EH 인코딩 패턴 포함 → 상부자로 처리
@@ -173,6 +178,33 @@ public class EHFontEquationConverter {
     }
 
     /**
+     * EH수식/EH약물 텍스트에서 백틱(`) 패턴을 위첨자로 변환.
+     * "2`" → 디코딩 후 "^{2}", 백틱 없는 부분은 일반 처리.
+     */
+    private static void convertEHBaseWithBacktick(String text, String fontFamily, StringBuilder sb) {
+        int i = 0;
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            if (c == '`') {
+                // 백틱: 앞 문자를 위첨자로 변환
+                if (sb.length() > 0) {
+                    char last = sb.charAt(sb.length() - 1);
+                    sb.deleteCharAt(sb.length() - 1);
+                    sb.append("^{").append(last).append("}");
+                }
+                i++;
+            } else {
+                // 일반 문자: decodeText 단일 문자 처리
+                String decoded = EHFontGlyphMap.decodeText(String.valueOf(c), fontFamily);
+                if (decoded != null && !decoded.isEmpty()) {
+                    sb.append(convertToHwpScript(decoded));
+                }
+                i++;
+            }
+        }
+    }
+
+    /**
      * EH상부자/하부자 런을 문자별로 처리.
      * 확장 범위(0x80-0xFF) 연속 문자 → 위첨자/아래첨자 그룹.
      * 기본 범위(0x20-0x7F) → 일반 수식 텍스트.
@@ -191,6 +223,10 @@ public class EHFontEquationConverter {
 
             // 백틱(0x60) = EH 불가시 여백 글리프 → 스킵
             if (c == 0x60) continue;
+
+            // EH 인코딩에서 { = (, } = ) (hwpScript 그룹 구분자와 충돌 방지)
+            if (c == '{') c = '(';
+            else if (c == '}') c = ')';
 
             if (c >= 0x80) {
                 // 확장 범위 → 먼저 기본 범위 버퍼 플러시

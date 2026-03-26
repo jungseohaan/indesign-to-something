@@ -38,7 +38,8 @@ public class EHFontGlyphMap {
         // 비상교육 교과서 EH 문자 스타일명 패턴
         return styleRef.contains("상부자") || styleRef.contains("하부자")
                 || styleRef.contains("분수대문자") || styleRef.contains("분수소문자")
-                || styleRef.contains("선모음") || styleRef.contains("약물");
+                || styleRef.contains("선모음") || styleRef.contains("약물")
+                || styleRef.contains("수식") || styleRef.contains("루트");
     }
 
     /**
