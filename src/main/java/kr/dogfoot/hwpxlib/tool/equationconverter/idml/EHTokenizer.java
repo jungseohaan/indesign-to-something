@@ -55,7 +55,12 @@ public class EHTokenizer {
                 }
                 if (followedByDenom) {
                     String decoded = EHFontGlyphMap.decodeText(text, fontFamily);
-                    tokens.add(new EHToken(EHToken.Type.FRACTION_NUMERATOR, decoded));
+                    // 분수선 장식 글리프(®, Â, É 등)는 스킵 — 실제 분자 정보가 없음
+                    if (decoded == null || decoded.isEmpty() || isFractionBarDecoration(text)) {
+                        tokens.add(new EHToken(EHToken.Type.SKIP, text));
+                    } else {
+                        tokens.add(new EHToken(EHToken.Type.FRACTION_NUMERATOR, decoded));
+                    }
                 } else {
                     tokens.add(new EHToken(EHToken.Type.SQRT_MARKER, text));
                 }
@@ -260,5 +265,22 @@ public class EHTokenizer {
                 tokens.add(new EHToken(type, text));
             }
         }
+    }
+
+    /**
+     * EH분수대문자 텍스트가 분수선 장식 글리프만 포함하는지 판별.
+     * ®(0xAE), Â(0xC2), É(0xC9), ¿(0xBF), ¹(0xB9), ¾(0xBE), ¨(0xA8) 등
+     * 확장 범위(0x80+) 글리프만 있고 기본 범위 숫자/문자가 없으면 장식.
+     */
+    private static boolean isFractionBarDecoration(String text) {
+        if (text == null || text.isEmpty()) return true;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            // 기본 범위 숫자/문자가 있으면 장식이 아님 (실제 분자 내용)
+            if (c >= '0' && c <= '9') return false;
+            if (c >= 'A' && c <= 'Z') return false;
+            if (c >= 'a' && c <= 'z') return false;
+        }
+        return true; // 확장 범위/특수 글리프만 → 장식
     }
 }
