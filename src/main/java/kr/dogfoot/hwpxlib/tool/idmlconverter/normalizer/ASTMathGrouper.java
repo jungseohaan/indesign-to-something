@@ -44,7 +44,7 @@ class ASTMathGrouper {
                 if (Character.isLetterOrDigit(c) && !(c >= 0xAC00 && c <= 0xD7AF) && !(c >= 0x3131 && c <= 0x318E))
                     hasLatinMath = true;
                 if (c == '_' || c == '^' || c == '&' || c == '\\' || c == '`'
-                        || "+-*/=<>()[]{}|!.".indexOf(c) >= 0) hasLatinMath = true;
+                        || "+-*/=<>()[]{}|!.;".indexOf(c) >= 0) hasLatinMath = true;
             }
             if (!hasKorean || !hasLatinMath) {
                 result.add(run);
@@ -59,7 +59,7 @@ class ASTMathGrouper {
                 if (c >= 0xAC00 && c <= 0xD7AF || c >= 0x3131 && c <= 0x318E) {
                     types[i] = 1; // KOREAN
                 } else if (Character.isLetterOrDigit(c) || c == '_' || c == '^' || c == '&'
-                        || c == '\\' || c == '`' || "+-*/=<>()[]{}|!.".indexOf(c) >= 0) {
+                        || c == '\\' || c == '`' || "+-*/=<>()[]{}|!.;".indexOf(c) >= 0) {
                     types[i] = 2; // LATIN/MATH
                 } else {
                     types[i] = 0; // NEUTRAL (공백, 기타)
