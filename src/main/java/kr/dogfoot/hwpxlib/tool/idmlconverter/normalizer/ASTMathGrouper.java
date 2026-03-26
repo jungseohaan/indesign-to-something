@@ -588,9 +588,9 @@ class ASTMathGrouper {
                         }
                     }
                 }
-                // 원문자 자체를 텍스트로
+                // 원문자 앞 여백 + 원문자 자체를 텍스트로
                 ASTTextRun numRun = new ASTTextRun();
-                numRun.text(String.valueOf(c) + " ");
+                numRun.text("  " + String.valueOf(c) + " ");
                 para.addItem(numRun);
                 lastSplit = i + 1;
                 // 원문자 뒤 공백 스킵

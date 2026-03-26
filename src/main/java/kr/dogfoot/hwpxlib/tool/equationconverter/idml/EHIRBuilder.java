@@ -256,9 +256,11 @@ public class EHIRBuilder {
     private static int findRadicandEnd(String text) {
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
-            if (ch >= 0xAC00 && ch <= 0xD7A3) return i;
-            if (ch == '\u2009') return i;
-            if (ch == '\r' || ch == '\n') return i;
+            if (ch >= 0xAC00 && ch <= 0xD7A3) return i; // 한국어
+            if (ch == '\u2009') return i; // thin space
+            if (ch == '\r' || ch == '\n') return i; // 줄바꿈
+            // 연산자/구두점에서 종료 (radicand는 피연산자만)
+            if (ch == '=' || ch == ',' || ch == '<' || ch == '>') return i;
         }
         return -1;
     }
