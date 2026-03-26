@@ -2185,12 +2185,26 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         // 인라인 객체는 부모가 관리하므로 건너뜀
         if (isInlineItem(item)) continue;
 
-        // Group 안의 짧은 TextFrame은 장식 요소 → 배경에 포함 (editable 아님)
+        // Group 안의 짧은 장식 TextFrame은 배경에 포함 (editable 아님)
+        // 조건: 10자 이하 + 글자 효과(색상, 특수 폰트)가 있는 경우만
         try {
             var parentType = item.parent.constructor.name;
             if (parentType === "Group") {
                 var groupText = item.contents.replace(/[\s\uFEFF\r\n]/g, "");
-                if (groupText.length <= CONFIG.rendering.textFrame.maxTextLength) continue;
+                if (groupText.length <= 10) {
+                    // 일반 폰트(검정, 기본체)인지 확인 — 일반이면 editable 유지
+                    var isDecorative = false;
+                    try {
+                        var chars = item.parentStory.characters;
+                        if (chars.length > 0) {
+                            var fc = chars[0].fillColor;
+                            if (fc && fc.name && fc.name !== "Black" && fc.name !== "[Black]") {
+                                isDecorative = true;
+                            }
+                        }
+                    } catch (e2) { isDecorative = true; }
+                    if (isDecorative) continue;
+                }
             }
         } catch (e) {}
 

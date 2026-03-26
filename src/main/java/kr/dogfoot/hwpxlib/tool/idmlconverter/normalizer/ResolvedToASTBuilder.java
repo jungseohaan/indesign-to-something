@@ -525,13 +525,13 @@ public class ResolvedToASTBuilder {
             boolean paraHasMathSymbols = false;
             // IDML 원본 CharacterRun에서 수식 기호 유무 확인 (GREP 분리 전 기준)
             for (IDMLCharacterRun r : ip.characterRuns()) {
-                if (r.isBTFont() || r.isNPFont()) { paraHasMathSymbols = true; break; }
+                if (r.isBTFont() || r.isNPFont() || r.isEHFont()) { paraHasMathSymbols = true; break; }
                 String rt = r.content();
                 if (rt != null) {
                     for (int ci = 0; ci < rt.length(); ci++) {
                         char cc = rt.charAt(ci);
                         if ("+=<>≤≥±×÷√²³^_π∑∫∞".indexOf(cc) >= 0
-                                || (cc >= 0xDA && cc <= 0xE2)) { // EH encoded chars
+                                || (cc >= 0xC0 && cc <= 0xFF)) { // EH encoded chars (확장 라틴 전체)
                             paraHasMathSymbols = true;
                             break;
                         }
