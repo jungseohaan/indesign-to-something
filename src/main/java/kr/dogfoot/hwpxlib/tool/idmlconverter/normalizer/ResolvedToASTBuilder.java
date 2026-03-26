@@ -600,9 +600,22 @@ public class ResolvedToASTBuilder {
                 }
 
                 // EH 수식 그룹 진입
+                // 한국어+EH 혼합 런은 분리하여 EH 부분만 수식 처리
+                String runContent = run.content();
+                boolean hasEHChars = EHFontGlyphMap.containsEHEncodedChars(runContent);
+                boolean hasKoreanInRun = false;
+                if (runContent != null) {
+                    for (int ci = 0; ci < runContent.length(); ci++) {
+                        char cc = runContent.charAt(ci);
+                        if ((cc >= 0xAC00 && cc <= 0xD7AF) || (cc >= 0x3131 && cc <= 0x318E)) {
+                            hasKoreanInRun = true; break;
+                        }
+                    }
+                }
+                // 한국어+EH 혼합이면 enterEH=false → 일반 텍스트 경로에서 splitLatinVarsInMixedText로 처리
                 boolean enterEH = run.isEHFont()
-                        || EHFontGlyphMap.containsEHEncodedChars(run.content())
-                        || EHFontGlyphMap.containsEHFractionPattern(run.content())
+                        || (hasEHChars && !hasKoreanInRun)
+                        || EHFontGlyphMap.containsEHFractionPattern(runContent)
                         || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx))
                         || (!ehMathGroup.isEmpty() && isEHSqrtContent(run, ehMathGroup));
 
