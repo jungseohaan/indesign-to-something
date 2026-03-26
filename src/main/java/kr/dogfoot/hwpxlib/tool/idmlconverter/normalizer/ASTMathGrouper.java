@@ -184,14 +184,14 @@ class ASTMathGrouper {
         if (run.isBTFont()) return false;
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
+        // 수식 기호가 하나라도 있으면 수식 가능 → plain이 아님
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (Character.isLetterOrDigit(c) || c == ' ' || c == ',') continue;
-            // 수식 마커나 연산자가 있으면 순수 알파벳/숫자가 아님
-            return false;
+            if ("+=<>≤≥±×÷√²³^_π∑∫∞".indexOf(c) >= 0) return false;
         }
         // 그리스 문자 키워드(alpha, beta 등)가 포함되면 수식으로 간주
         if (BTFontEquationConverter.containsGreekKeyword(text)) return false;
+        // 수식 기호가 없으면 plain (수식 아님)
         return true;
     }
 
@@ -245,11 +245,13 @@ class ASTMathGrouper {
         }
         // 수식 폰트가 적용되지 않은 순수 알파벳/숫자는 브릿지하지 않음
         // 예: "1" (번호), "n" (일반 변수명) 등이 수식으로 잘못 검출되는 것을 방지
-        if (onlyAlphanumeric && !run.isBTFont() && !run.grepMathFont()) return false;
+        if (onlyAlphanumeric && !run.isBTFont()) return false;
+        // GREP 수식 폰트여도 순수 알파벳/숫자/구두점이면 수식 아님 (예: "Pythagoras, B.C. 569?")
+        if (run.grepMathFont() && isPlainAlphanumericRun(run)) return false;
         // 뒤에 BT 수식 런이 있는지 확인 (비한국어 런은 건너뜀)
         for (int j = idx + 1; j < runs.size(); j++) {
             IDMLCharacterRun next = runs.get(j);
-            if (next.isBTFont() || next.grepMathFont()) return true;
+            if (next.isBTFont() || (next.grepMathFont() && !isPlainAlphanumericRun(next))) return true;
             String nextText = next.content();
             if (nextText == null || nextText.isEmpty()) continue;
             boolean hasKorean = false;
@@ -477,7 +479,7 @@ class ASTMathGrouper {
                     if (cleaned.isEmpty()) continue;
                     textRun.text(cleaned);
                     String ff = run.fontFamily();
-                    if (run.isBTFont() || run.grepMathFont()) {
+                    if (run.isBTFont() || (run.grepMathFont() && !isPlainAlphanumericRun(run))) {
                         if (ff == null || !ff.contains("BT수식")) ff = "BT수식M";
                     }
                     textRun.fontFamily(ff);

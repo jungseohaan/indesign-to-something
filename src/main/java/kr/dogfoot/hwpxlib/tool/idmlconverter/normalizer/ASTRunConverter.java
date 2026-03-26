@@ -722,7 +722,8 @@ class ASTRunConverter {
         }
 
         // GREP 수식 폰트가 적용된 런: 스타일 상속 대신 BT수식M Italic 적용
-        if (run.grepMathFont() && (fontFamily == null || !fontFamily.contains("BT수식"))) {
+        if (run.grepMathFont() && !ASTMathGrouper.isPlainAlphanumericRun(run)
+                && (fontFamily == null || !fontFamily.contains("BT수식"))) {
             fontFamily = "BT수식M";
             fontStyle = "Italic";
         }
