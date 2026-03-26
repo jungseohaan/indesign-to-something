@@ -249,22 +249,32 @@ public class EHIRBuilder {
 
     /**
      * radicand 종료 위치 탐색.
-     * 한국어 문자, thin space(\u2009), 줄바꿈에서 종료.
+     * radicand = 하나의 수학 "항(factor)": 숫자/문자 시퀀스 또는 괄호 그룹.
+     *
+     * 종료 조건:
+     * - 한국어, thin space, 줄바꿈 → 무조건 종료
+     * - =, <, >, , → 무조건 종료
+     * - +, - → i > 0일 때만 종료 (단항 연산자는 radicand에 포함)
+     * - 매칭 안 되는 닫는 괄호 → 종료
+     *
      * @return 종료 인덱스 (해당 위치 이전까지가 radicand), -1이면 전체가 radicand
      */
     private static int findRadicandEnd(String text) {
         int parenDepth = 0;
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
-            if (ch >= 0xAC00 && ch <= 0xD7A3) return i; // 한국어
-            if (ch == '\u2009') return i; // thin space
-            if (ch == '\r' || ch == '\n') return i; // 줄바꿈
-            // 연산자/구두점에서 종료 (radicand는 피연산자만)
+            // 한국어
+            if (ch >= 0xAC00 && ch <= 0xD7A3) return i;
+            // thin space / 줄바꿈
+            if (ch == '\u2009' || ch == '\r' || ch == '\n') return i;
+            // 무조건 종료 연산자
             if (ch == '=' || ch == ',' || ch == '<' || ch == '>') return i;
-            // 괄호 균형: 열린 괄호 없이 닫는 괄호 → 종료
+            // 이항 연산자: 첫 문자가 아닐 때만 종료 (단항 -, + 허용)
+            if ((ch == '+' || ch == '-') && i > 0 && parenDepth == 0) return i;
+            // 괄호 균형
             if (ch == '(') parenDepth++;
             else if (ch == ')') {
-                if (parenDepth <= 0) return i; // 매칭되지 않는 ) → radicand 밖
+                if (parenDepth <= 0) return i;
                 parenDepth--;
             }
         }
