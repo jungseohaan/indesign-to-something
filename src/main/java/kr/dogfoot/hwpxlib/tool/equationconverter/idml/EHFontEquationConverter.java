@@ -31,8 +31,20 @@ public class EHFontEquationConverter {
     public static String convert(List<IDMLCharacterRun> runs) {
         if (runs == null || runs.isEmpty()) return null;
 
+        // 전방 탐색: EH분수소문자가 존재하는지 확인 (분수 vs 루트 구분)
+        boolean hasDenominator = false;
+        for (IDMLCharacterRun r : runs) {
+            if (EHFontGlyphMap.isFractionDenominatorFont(r.fontFamily())) {
+                hasDenominator = true;
+                break;
+            }
+        }
+
         StringBuilder sb = new StringBuilder();
-        for (IDMLCharacterRun run : runs) {
+        boolean sqrtOpen = false; // 루트 sqrt{ 가 열려있는지
+
+        for (int ri = 0; ri < runs.size(); ri++) {
+            IDMLCharacterRun run = runs.get(ri);
             String text = run.content();
             if (text == null || text.isEmpty()) continue;
 
@@ -46,39 +58,86 @@ public class EHFontEquationConverter {
 
             if (EHFontGlyphMap.isSuperscriptFont(fontFamily)
                     || EHFontGlyphMap.isSubscriptFont(fontFamily)) {
-                // 상부자/하부자: 문자별로 기본/확장 범위 분리 처리
-                convertSubSupRun(text, fontFamily, sb);
+                if (sqrtOpen) {
+                    // 루트 내부: 한국어/thin space 이전까지 루트 안, 나머지 루트 밖
+                    int splitPos = findSqrtEndPos(text);
+                    if (splitPos > 0 && splitPos < text.length()) {
+                        // 루트 안 부분
+                        convertSubSupRun(text.substring(0, splitPos), fontFamily, sb);
+                        sb.append("}");
+                        sqrtOpen = false;
+                        // 루트 밖 부분
+                        convertSubSupRun(text.substring(splitPos), fontFamily, sb);
+                    } else if (splitPos == 0) {
+                        // 전체가 루트 밖 (한국어로 시작)
+                        sb.append("}");
+                        sqrtOpen = false;
+                        convertSubSupRun(text, fontFamily, sb);
+                    } else {
+                        // 전체가 루트 안
+                        convertSubSupRun(text, fontFamily, sb);
+                        sb.append("}");
+                        sqrtOpen = false;
+                    }
+                } else {
+                    convertSubSupRun(text, fontFamily, sb);
+                }
             } else if (EHFontGlyphMap.isFractionNumeratorFont(fontFamily)) {
-                String decoded = EHFontGlyphMap.decodeText(text, fontFamily);
-                if (decoded != null && !decoded.isEmpty()) {
-                    sb.append("{").append(convertToHwpScript(decoded)).append("}");
-                    sb.append(" over ");
+                if (hasDenominator) {
+                    // 진짜 분수: 분모가 뒤에 있음
+                    String decoded = EHFontGlyphMap.decodeText(text, fontFamily);
+                    if (decoded != null && !decoded.isEmpty()) {
+                        sb.append("{").append(convertToHwpScript(decoded)).append("}");
+                        sb.append(" over ");
+                    }
+                } else {
+                    // 루트 패턴: EH분수대문자이지만 분모 없음 → sqrt
+                    if (!sqrtOpen) {
+                        sb.append("sqrt{");
+                        sqrtOpen = true;
+                    }
+                    // 연속 EH분수대문자 런(', Ä, Å 등)은 루트 장식이므로 스킵
                 }
             } else if (EHFontGlyphMap.isFractionDenominatorFont(fontFamily)) {
+                if (sqrtOpen) { sb.append("}"); sqrtOpen = false; }
                 String decoded = EHFontGlyphMap.decodeText(text, fontFamily);
                 if (decoded != null && !decoded.isEmpty()) {
                     sb.append("{").append(convertToHwpScript(decoded)).append("}");
                 }
             } else if (run.isEHFont()) {
                 // EH수식/EH약물 등: 글리프 디코딩 후 일반 수식 텍스트
+                if (sqrtOpen) { sb.append("}"); sqrtOpen = false; }
                 String decoded = EHFontGlyphMap.decodeText(text, fontFamily);
                 if (decoded != null && !decoded.isEmpty()) {
                     sb.append(convertToHwpScript(decoded));
                 }
             } else if (EHFontGlyphMap.containsEHEncodedChars(text)) {
                 // 폰트 미지정이지만 EH 인코딩 패턴 포함 → 상부자로 처리
+                if (sqrtOpen) { sb.append("}"); sqrtOpen = false; }
                 convertSubSupRun(text, "EH상부자", sb);
             } else if (EHFontGlyphMap.containsEHFractionPattern(text)) {
                 // 폰트 미지정이지만 ;...; 분수 GREP 패턴 포함 → 분수 변환
+                if (sqrtOpen) { sb.append("}"); sqrtOpen = false; }
                 convertFractionPatternRun(text, sb);
             } else {
                 // 비EH 브릿지 런: 패스스루
+                if (sqrtOpen) { sb.append("}"); sqrtOpen = false; }
                 sb.append(convertToHwpScript(text));
             }
         }
+        // 루프 끝에서 열린 루트 닫기
+        if (sqrtOpen) { sb.append("}"); }
 
         String result = sb.toString().trim();
         if (result.isEmpty()) return null;
+
+        // 짝 안 맞는 중괄호 보정
+        int open = 0;
+        for (int ci = 0; ci < result.length(); ci++) {
+            if (result.charAt(ci) == '{') open++;
+            else if (result.charAt(ci) == '}') open--;
+        }
+        while (open > 0) { result = result + "}"; open--; }
 
         // 순수 한국어만이면 수식 아님
         if (isOnlyKorean(result)) return null;
@@ -93,6 +152,24 @@ public class EHFontEquationConverter {
         if (!hasLetterOrDigit) return null;
 
         return result;
+    }
+
+    /**
+     * 루트(sqrt) 종료 위치 탐색: 한국어 문자, thin space(\u2009),
+     * 또는 일반 구두점이 나오면 루트 종료.
+     * @return 루트 종료 인덱스 (해당 위치 이전까지가 루트 내용), -1이면 전체가 루트 안
+     */
+    private static int findSqrtEndPos(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            // 한국어 문자
+            if (ch >= 0xAC00 && ch <= 0xD7A3) return i;
+            // thin space → 루트 종료 (thin space 자체는 루트 밖)
+            if (ch == '\u2009') return i;
+            // \r, \n → 줄 끝은 루트 종료
+            if (ch == '\r' || ch == '\n') return i;
+        }
+        return -1; // 전체가 루트 안
     }
 
     /**
