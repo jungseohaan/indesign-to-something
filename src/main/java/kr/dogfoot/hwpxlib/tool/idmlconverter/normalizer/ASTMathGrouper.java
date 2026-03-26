@@ -424,9 +424,10 @@ class ASTMathGrouper {
     static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
         if (hwpScript != null) {
-            // 선행 번호 "(숫자) " 분리: 수식 앞의 번호를 별도 텍스트로
+            // 선행 번호 "(숫자) " 분리
             hwpScript = splitLeadingNumber(hwpScript, para);
-            para.addItem(new ASTEquation(hwpScript, "EH_FONT"));
+            // 원문자 번호(⑴⑵⑶... ①②③...)로 수식 분할
+            splitByCircledNumbers(hwpScript, para);
         } else {
             // 수식이 아닌 EH 폰트 텍스트 → 일반 텍스트 런으로 폴백
             for (IDMLCharacterRun run : ehRuns) {
@@ -562,6 +563,58 @@ class ASTMathGrouper {
             }
         }
         return hwpScript;
+    }
+
+    /**
+     * 원문자 번호(⑴⑵...⑼, ①②...⑨)로 수식을 분할.
+     * 예: "sqrt{9 ⑵ -}sqrt{121}" → "sqrt{9}" + "⑵" + "-sqrt{121}"
+     */
+    private static void splitByCircledNumbers(String hwpScript, ASTParagraph para) {
+        // 원문자 범위: ⑴-⑼ (U+2474-U+247C), ①-⑨ (U+2460-U+2468)
+        int i = 0;
+        int lastSplit = 0;
+        while (i < hwpScript.length()) {
+            char c = hwpScript.charAt(i);
+            boolean isCircled = (c >= 0x2460 && c <= 0x2473)  // ①-⑳
+                    || (c >= 0x2474 && c <= 0x2487); // ⑴-⒇
+            if (isCircled) {
+                // 원문자 앞 수식
+                if (i > lastSplit) {
+                    String before = hwpScript.substring(lastSplit, i).trim();
+                    if (!before.isEmpty()) {
+                        before = splitLeadingNumber(before, para);
+                        if (!before.isEmpty()) {
+                            para.addItem(new ASTEquation(before, "EH_FONT"));
+                        }
+                    }
+                }
+                // 원문자 자체를 텍스트로
+                ASTTextRun numRun = new ASTTextRun();
+                numRun.text(String.valueOf(c) + " ");
+                para.addItem(numRun);
+                lastSplit = i + 1;
+                // 원문자 뒤 공백 스킵
+                while (lastSplit < hwpScript.length() && hwpScript.charAt(lastSplit) == ' ') {
+                    lastSplit++;
+                }
+                i = lastSplit;
+            } else {
+                i++;
+            }
+        }
+        // 남은 수식
+        if (lastSplit < hwpScript.length()) {
+            String rest = hwpScript.substring(lastSplit).trim();
+            if (!rest.isEmpty()) {
+                rest = splitLeadingNumber(rest, para);
+                if (!rest.isEmpty()) {
+                    para.addItem(new ASTEquation(rest, "EH_FONT"));
+                }
+            }
+        } else if (lastSplit == 0) {
+            // 원문자 없음 → 전체 수식
+            para.addItem(new ASTEquation(hwpScript, "EH_FONT"));
+        }
     }
 
     /** 텍스트가 한국어/구두점/공백만 포함하는지 (라틴 알파벳/숫자 없음) */
