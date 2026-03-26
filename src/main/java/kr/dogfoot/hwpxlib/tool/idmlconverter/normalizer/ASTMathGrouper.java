@@ -594,7 +594,10 @@ class ASTMathGrouper {
                     }
                 }
                 if (isTab) {
-                    // 탭 → 탭 문자 유지 (선택지 간격)
+                    // 연속 탭 → 하나의 탭으로 병합
+                    while (lastSplit < hwpScript.length() && hwpScript.charAt(lastSplit) == '\t') {
+                        lastSplit++;
+                    }
                     ASTTextRun tabRun = new ASTTextRun();
                     tabRun.text("\t");
                     para.addItem(tabRun);

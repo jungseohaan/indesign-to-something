@@ -15,10 +15,12 @@ public class EHTextClassifier {
         if (text == null || text.isEmpty()) return false;
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            // 라틴 알파벳/숫자 포함 → false
+            // 라틴 알파벳/숫자 포함 → false (원문자 ①-⒇는 예외)
             if (Character.isLetterOrDigit(c)
                     && !(c >= 0xAC00 && c <= 0xD7A3)
-                    && !(c >= 0x3131 && c <= 0x318E)) {
+                    && !(c >= 0x3131 && c <= 0x318E)
+                    && !(c >= 0x2460 && c <= 0x2473)
+                    && !(c >= 0x2474 && c <= 0x2487)) {
                 return false;
             }
             // 수학 연산자/기호 포함 → false
