@@ -575,7 +575,8 @@ public class ResolvedToASTBuilder {
                 boolean enterEH = run.isEHFont()
                         || EHFontGlyphMap.containsEHEncodedChars(run.content())
                         || EHFontGlyphMap.containsEHFractionPattern(run.content())
-                        || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx));
+                        || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx))
+                        || (!ehMathGroup.isEmpty() && isEHSqrtContent(run, ehMathGroup));
 
                 // NP 수식 그룹 진입
                 boolean enterNP = false;
@@ -1006,6 +1007,23 @@ public class ResolvedToASTBuilder {
                     mathGroup.add(cr);
                 }
             } else {
+                // EH 그룹이 열려있고 마지막이 EH분수대문자(√)이면,
+                // 비EH 런이라도 라틴/숫자로 시작하면 루트 내용으로 포함
+                if ("EH".equals(mathType) && !mathGroup.isEmpty()) {
+                    IDMLCharacterRun lastEH = mathGroup.get(mathGroup.size() - 1);
+                    String text = tr.text();
+                    if (EHFontGlyphMap.isFractionNumeratorFont(lastEH.fontFamily())
+                            && text != null && !text.isEmpty()
+                            && Character.isLetterOrDigit(text.charAt(0))
+                            && !(text.charAt(0) >= 0xAC00 && text.charAt(0) <= 0xD7AF)) {
+                        // 루트 내용으로 EH상부자처럼 포함
+                        IDMLCharacterRun cr = new IDMLCharacterRun();
+                        cr.content(text);
+                        cr.fontFamily("EH상부자"); // 상부자로 간주
+                        mathGroup.add(cr);
+                        continue;
+                    }
+                }
                 flushResolvedMathGroup(mathGroup, mathType, newItems, para);
                 mathGroup.clear();
                 mathType = null;
@@ -1079,6 +1097,27 @@ public class ResolvedToASTBuilder {
             return sp > 0 ? rest.substring(0, sp) : rest;
         }
         return "EH수식"; // 기본 폴백
+    }
+
+    /**
+     * EH 그룹이 열려있고 마지막이 EH분수대문자(√)일 때,
+     * 바로 뒤의 짧은 비EH 런이 루트 내용(radicand)인지 판단.
+     * GREP 스타일이 IDML에 반영되지 않아 fontFamily=null인 런도 포함.
+     */
+    private static boolean isEHSqrtContent(IDMLCharacterRun run,
+                                            List<IDMLCharacterRun> ehGroup) {
+        if (ehGroup.isEmpty()) return false;
+        // 마지막 EH 런이 분수대문자(√)인지
+        IDMLCharacterRun last = ehGroup.get(ehGroup.size() - 1);
+        if (!EHFontGlyphMap.isFractionNumeratorFont(last.fontFamily())) return false;
+        // 현재 런이 짧은 라틴/수학 텍스트인지 (한국어만으로 시작하면 제외)
+        String text = run.content();
+        if (text == null || text.isEmpty()) return false;
+        char first = text.charAt(0);
+        // 첫 문자가 라틴 알파벳, 숫자, 수학 기호이면 루트 내용
+        return Character.isLetterOrDigit(first)
+                && !(first >= 0xAC00 && first <= 0xD7AF)
+                && !(first >= 0x3131 && first <= 0x318E);
     }
 
     /**
