@@ -10,8 +10,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
-import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHGrepFractionConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 
@@ -1109,63 +1109,18 @@ public class ResolvedToASTBuilder {
      * 예: "이므로 ;4!;의 제곱근은" → "이므로 " + ASTEquation({1} over {4}) + "의 제곱근은"
      */
     private void splitFractionPatternInText(String text, ASTTextRun templateRun, ASTParagraph para) {
-        // { → (, } → ) 치환 (hwpScript 충돌 방지)
-        String processed = text.replace('{', '(').replace('}', ')');
-        int i = 0;
-        while (i < processed.length()) {
-            int semiStart = processed.indexOf(';', i);
-            if (semiStart < 0) {
-                String rest = processed.substring(i);
-                if (!rest.isEmpty()) {
-                    ASTTextRun tr = new ASTTextRun();
-                    tr.text(rest);
-                    tr.fontFamily(templateRun.fontFamily());
-                    tr.fontStyle(templateRun.fontStyle());
-                    tr.fontSizeHwpunits(templateRun.fontSizeHwpunits());
-                    tr.textColor(templateRun.textColor());
-                    para.addItem(tr);
-                }
-                break;
-            }
-            // ; 이전 텍스트
-            if (semiStart > i) {
+        for (EHGrepFractionConverter.Segment seg : EHGrepFractionConverter.splitAndConvert(text)) {
+            if (seg.type() == EHGrepFractionConverter.Segment.Type.EQUATION) {
+                para.addItem(new ASTEquation(seg.content(), "EH_FONT"));
+            } else {
                 ASTTextRun tr = new ASTTextRun();
-                tr.text(processed.substring(i, semiStart));
+                tr.text(seg.content());
                 tr.fontFamily(templateRun.fontFamily());
                 tr.fontStyle(templateRun.fontStyle());
                 tr.fontSizeHwpunits(templateRun.fontSizeHwpunits());
                 tr.textColor(templateRun.textColor());
                 para.addItem(tr);
             }
-            int semiEnd = processed.indexOf(';', semiStart + 1);
-            if (semiEnd < 0) {
-                ASTTextRun tr = new ASTTextRun();
-                tr.text(processed.substring(semiStart));
-                tr.fontFamily(templateRun.fontFamily());
-                para.addItem(tr);
-                break;
-            }
-            String inner = processed.substring(semiStart + 1, semiEnd);
-            String[] fracParts = EHFontGlyphMap.decodeFractionInner(inner);
-            if (fracParts != null && (fracParts[0].length() > 0 || fracParts[1].length() > 0)) {
-                String hwpScript;
-                if (fracParts[0].length() > 0 && fracParts[1].length() > 0) {
-                    hwpScript = "{" + EHFontEquationConverter.convertToHwpScript(fracParts[0])
-                            + "} over {"
-                            + EHFontEquationConverter.convertToHwpScript(fracParts[1]) + "}";
-                } else if (fracParts[0].length() > 0) {
-                    hwpScript = "{" + EHFontEquationConverter.convertToHwpScript(fracParts[0]) + "} over { }";
-                } else {
-                    hwpScript = "{ } over {" + EHFontEquationConverter.convertToHwpScript(fracParts[1]) + "}";
-                }
-                para.addItem(new ASTEquation(hwpScript, "EH_FONT"));
-            } else {
-                ASTTextRun tr = new ASTTextRun();
-                tr.text(";" + inner + ";");
-                tr.fontFamily(templateRun.fontFamily());
-                para.addItem(tr);
-            }
-            i = semiEnd + 1;
         }
     }
 
