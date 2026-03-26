@@ -424,6 +424,8 @@ class ASTMathGrouper {
     static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
         if (hwpScript != null) {
+            // 선행 번호 "(숫자) " 분리: 수식 앞의 번호를 별도 텍스트로
+            hwpScript = splitLeadingNumber(hwpScript, para);
             para.addItem(new ASTEquation(hwpScript, "EH_FONT"));
         } else {
             // 수식이 아닌 EH 폰트 텍스트 → 일반 텍스트 런으로 폴백
@@ -528,6 +530,38 @@ class ASTMathGrouper {
                 }
             }
         }
+    }
+
+    /**
+     * 수식 시작의 "(숫자) " 번호 패턴을 분리하여 일반 텍스트로 출력.
+     * 예: "(1) 3^{2}=9" → para에 "(1) " 텍스트 추가, "3^{2}=9" 반환
+     */
+    private static String splitLeadingNumber(String hwpScript, ASTParagraph para) {
+        if (hwpScript.length() > 3 && hwpScript.charAt(0) == '(') {
+            int closeIdx = hwpScript.indexOf(')');
+            if (closeIdx > 0 && closeIdx <= 3) {
+                String inner = hwpScript.substring(1, closeIdx);
+                boolean isNumber = true;
+                for (int ci = 0; ci < inner.length(); ci++) {
+                    if (!Character.isDigit(inner.charAt(ci))) { isNumber = false; break; }
+                }
+                if (isNumber) {
+                    int afterClose = closeIdx + 1;
+                    while (afterClose < hwpScript.length()
+                            && (hwpScript.charAt(afterClose) == ' '
+                                || hwpScript.charAt(afterClose) == '\t')) {
+                        afterClose++;
+                    }
+                    if (afterClose < hwpScript.length()) {
+                        ASTTextRun numRun = new ASTTextRun();
+                        numRun.text(hwpScript.substring(0, afterClose));
+                        para.addItem(numRun);
+                        return hwpScript.substring(afterClose);
+                    }
+                }
+            }
+        }
+        return hwpScript;
     }
 
     /** 텍스트가 한국어/구두점/공백만 포함하는지 (라틴 알파벳/숫자 없음) */
