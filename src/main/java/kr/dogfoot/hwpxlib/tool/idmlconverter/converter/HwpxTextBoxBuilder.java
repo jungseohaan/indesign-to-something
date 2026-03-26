@@ -1118,12 +1118,12 @@ public class HwpxTextBoxBuilder {
         tc.createCellSz();
         tc.cellSz().widthAnd(w).heightAnd(h);
 
-        // 셀 여백 — 텍스트 프레임의 inset 값 사용
+        // 셀 여백 — 최소화 (다음 페이지로 밀림 방지)
         tc.createCellMargin();
-        tc.cellMargin().leftAnd(block.insetLeft())
-                .rightAnd(block.insetRight())
-                .topAnd(block.insetTop())
-                .bottomAnd(block.insetBottom());
+        tc.cellMargin().leftAnd(0L)
+                .rightAnd(0L)
+                .topAnd(0L)
+                .bottomAnd(0L);
 
         // 셀 내부 SubList
         tc.createSubList();

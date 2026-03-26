@@ -559,20 +559,30 @@ public class ResolvedToASTBuilder {
             for (int idx = 0; idx < runs.size(); idx++) {
                 IDMLCharacterRun run = runs.get(idx);
 
-                // GREP 수식 플래그 완전 제거 + fontStyle 리셋
+                // GREP 수식 리셋: 단일 라틴 문자(수식 변수 x, a, n)는 유지, 나머지 제거
                 if (run.grepMathFont()) {
-                    run.grepMathFont(false);
-                    String ff = run.fontFamily();
-                    if (ff != null && ff.contains("BT수식")) {
-                        run.fontFamily(null);
+                    String ct = run.content();
+                    boolean isSingleLatinVar = ct != null && ct.trim().length() == 1
+                            && Character.isLetter(ct.trim().charAt(0));
+                    if (!isSingleLatinVar) {
+                        run.grepMathFont(false);
+                        String ff = run.fontFamily();
+                        if (ff != null && ff.contains("BT수식")) {
+                            run.fontFamily(null);
+                        }
+                        run.fontStyle(null);
                     }
-                    run.fontStyle(null); // GREP Italic 무조건 제거
                 }
-                // EH 수식 폰트 리셋: 단락에 수식 기호가 없으면 일반 텍스트
+                // EH 수식 폰트 리셋: 단락에 수식 기호 없고, 단일 라틴 변수가 아니면 리셋
                 if (!paraHasMathSymbols && run.isEHFont()) {
-                    run.fontFamily(null);
-                    run.fontStyle(null);
-                    run.appliedCharacterStyle(null); // isEHFont() 판별 차단
+                    String ct = run.content();
+                    boolean isSingleLatinVar = ct != null && ct.trim().length() == 1
+                            && Character.isLetter(ct.trim().charAt(0));
+                    if (!isSingleLatinVar) {
+                        run.fontFamily(null);
+                        run.fontStyle(null);
+                        run.appliedCharacterStyle(null);
+                    }
                 }
 
                 // EH 수식: fontFamily가 null이면 CharacterStyle 이름에서 추출
@@ -643,7 +653,7 @@ public class ResolvedToASTBuilder {
                             if (!parts[pi].isEmpty()) {
                                 ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, parts[pi]);
                                 ASTTextRun tr = createRunFromIDML(run, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking);
-                                para.addItem(tr);
+                                splitLatinVarsInMixedText(tr, para);
                             }
                             if (pi < parts.length - 1 && anchorIdx < inlineIds.size()) {
                                 String inlineHexId = inlineIds.get(anchorIdx);
@@ -664,7 +674,8 @@ public class ResolvedToASTBuilder {
                         if (EHFontGlyphMap.containsEHFractionPattern(text)) {
                             splitFractionPatternInText(text, tr, para);
                         } else {
-                            para.addItem(tr);
+                            // 한국어 사이 단일 라틴 문자를 수식 변수로 분리
+                            splitLatinVarsInMixedText(tr, para);
                         }
                     }
                 }
@@ -729,14 +740,18 @@ public class ResolvedToASTBuilder {
                 // EH/BT 수식 폰트는 수식 기호가 있는 텍스트에만 적용
                 boolean isEHorBT = EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
                         || (rr.fontFamily() != null && rr.fontFamily().contains("BT수식"));
-                if (!isEHorBT) {
+                boolean isSingleLatin = text != null && text.trim().length() == 1
+                        && Character.isLetter(text.trim().charAt(0));
+                if (!isEHorBT || isSingleLatin) {
                     tr.fontFamily(rr.fontFamily());
                 }
             }
             if (tr.fontStyle() == null && rr.fontStyle() != null) {
                 boolean isEHorBT = rr.fontFamily() != null
                         && (EHFontGlyphMap.isEHFontFamily(rr.fontFamily()) || rr.fontFamily().contains("BT수식"));
-                if (!isEHorBT) {
+                boolean isSingleLatin = text != null && text.trim().length() == 1
+                        && Character.isLetter(text.trim().charAt(0));
+                if (!isEHorBT || isSingleLatin) {
                     tr.fontStyle(rr.fontStyle());
                 }
             }
@@ -790,6 +805,66 @@ public class ResolvedToASTBuilder {
             return resolveColorToHex(resolved.fillColor());
         }
         return null;
+    }
+
+    /**
+     * 한국어 사이 단일 라틴 문자를 수식 변수(이탤릭)로 분리.
+     * "길이를 x라고 할 때" → "길이를 " + [수식 x] + "라고 할 때"
+     */
+    private void splitLatinVarsInMixedText(ASTTextRun originalRun, ASTParagraph para) {
+        String text = originalRun.text();
+        if (text == null || text.isEmpty()) { para.addItem(originalRun); return; }
+
+        // 한국어가 포함된 텍스트에서만 분리 (순수 라틴 텍스트는 그대로)
+        boolean hasKorean = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c >= 0xAC00 && c <= 0xD7AF) || (c >= 0x3131 && c <= 0x318E)) { hasKorean = true; break; }
+        }
+        if (!hasKorean) { para.addItem(originalRun); return; }
+
+        // 단일 라틴 문자(공백으로 둘러싸인)를 찾아 분리
+        StringBuilder buf = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            boolean isLatinLetter = Character.isLetter(c) && c < 0x100 && !Character.isDigit(c);
+            // 단일 라틴 문자: 앞뒤가 공백/한국어/숫자이고, 다음 문자가 라틴이 아님
+            boolean isSingleVar = isLatinLetter
+                    && (i == 0 || !Character.isLetter(text.charAt(i - 1)) || text.charAt(i - 1) >= 0x100)
+                    && (i == text.length() - 1 || !Character.isLetter(text.charAt(i + 1)) || text.charAt(i + 1) >= 0x100);
+            if (isSingleVar) {
+                // 앞 텍스트 flush
+                if (buf.length() > 0) {
+                    ASTTextRun before = cloneRunWithText(originalRun, buf.toString());
+                    para.addItem(before);
+                    buf.setLength(0);
+                }
+                // 수식 변수
+                ASTEquation eq = new ASTEquation();
+                eq.hwpScript(String.valueOf(c));
+                eq.sourceType("LATIN_VAR");
+                if (originalRun.textColor() != null) eq.textColor(originalRun.textColor());
+                para.addItem(eq);
+            } else {
+                buf.append(c);
+            }
+        }
+        if (buf.length() > 0) {
+            ASTTextRun after = cloneRunWithText(originalRun, buf.toString());
+            para.addItem(after);
+        }
+    }
+
+    private ASTTextRun cloneRunWithText(ASTTextRun src, String text) {
+        ASTTextRun tr = new ASTTextRun();
+        tr.text(text);
+        tr.fontFamily(src.fontFamily());
+        tr.fontStyle(src.fontStyle());
+        tr.fontSizeHwpunits(src.fontSizeHwpunits());
+        tr.textColor(src.textColor());
+        tr.letterSpacing(src.letterSpacing());
+        tr.grepMathFont(src.grepMathFont());
+        return tr;
     }
 
     /**

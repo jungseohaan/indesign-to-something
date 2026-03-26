@@ -23,9 +23,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.CharPrBuilder;
 public class HwpxParagraphBuilder {
 
     /** 분수 수식 높이 배율: 분자(1) + 분수선(0.2) + 분모(1) + 여유(0.6) */
-    private static final double FRACTION_HEIGHT_MULTIPLIER = 2.8;
+    private static final double FRACTION_HEIGHT_MULTIPLIER = 2.2;
     /** 일반 수식 높이 배율 */
-    private static final double NORMAL_EQUATION_HEIGHT_MULTIPLIER = 1.4;
+    private static final double NORMAL_EQUATION_HEIGHT_MULTIPLIER = 1.0;
 
     final HwpxConverterContext ctx;
 
@@ -90,9 +90,9 @@ public class HwpxParagraphBuilder {
             paraPrId = ensureLineSpacingForInline(paraPrId, maxInlineH);
         }
 
-        // 분수 수식이 줄 간격보다 크면 줄 간격 확장
+        // 분수 수식이 줄 간격보다 크면 줄 간격 확장 (명시적 lineSpacing 없을 때만)
         long maxEqH = maxFractionEquationHeight(astPara);
-        if (maxEqH > maxInlineH && maxEqH > 2000) {
+        if (maxEqH > maxInlineH && maxEqH > 2000 && astPara.lineSpacing() == null) {
             paraPrId = ensureLineSpacingForInline(paraPrId, maxEqH);
         }
 
