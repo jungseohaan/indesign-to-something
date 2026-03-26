@@ -2294,27 +2294,28 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
             // PDF 없음 → PNG 렌더링
             // 1. 해당 페이지의 편집 가능 텍스트 프레임 숨기기
             var hiddenItems = [];
+            var pb = page.bounds;
             for (var hi = 0; hi < editableFrames.length; hi++) {
                 var tf = editableFrames[hi];
                 try {
-                    if (tf.parentPage === page && tf.visible) {
+                    // parentPage 비교 또는 visibleBounds로 페이지 소속 판단
+                    var onThisPage = false;
+                    try {
+                        onThisPage = (tf.parentPage === page);
+                    } catch (e) {}
+                    if (!onThisPage) {
+                        try {
+                            var tfb = tf.visibleBounds;
+                            var cy = (tfb[0] + tfb[2]) / 2;
+                            var cx = (tfb[1] + tfb[3]) / 2;
+                            onThisPage = (cy >= pb[0] && cy <= pb[2] && cx >= pb[1] && cx <= pb[3]);
+                        } catch (e) {}
+                    }
+                    if (onThisPage && tf.visible) {
                         tf.visible = false;
                         hiddenItems.push(tf);
                     }
-                } catch (e) {
-                    try {
-                        var tfb = tf.visibleBounds;
-                        var pb = page.bounds;
-                        var cy = (tfb[0] + tfb[2]) / 2;
-                        var cx = (tfb[1] + tfb[3]) / 2;
-                        if (cy >= pb[0] && cy <= pb[2] && cx >= pb[1] && cx <= pb[3]) {
-                            if (tf.visible) {
-                                tf.visible = false;
-                                hiddenItems.push(tf);
-                            }
-                        }
-                    } catch (e2) {}
-                }
+                } catch (e) {}
             }
 
             // 2. 페이지 PNG 렌더링
