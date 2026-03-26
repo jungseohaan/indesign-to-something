@@ -573,12 +573,20 @@ public class ResolvedToASTBuilder {
                         run.fontStyle(null);
                     }
                 }
-                // EH 수식 폰트 리셋: 단락에 수식 기호 없고, 단일 라틴 변수가 아니면 리셋
-                if (!paraHasMathSymbols && run.isEHFont()) {
+                // EH 수식 폰트 리셋
+                if (run.isEHFont()) {
                     String ct = run.content();
                     boolean isSingleLatinVar = ct != null && ct.trim().length() == 1
                             && Character.isLetter(ct.trim().charAt(0));
-                    if (!isSingleLatinVar) {
+                    // 이 런 또는 근처 런(±5)에 3자+ 영단어가 있으면 이름/약어 그룹 → 리셋
+                    boolean nearLongWord = containsLongLatinWord(ct, 3);
+                    if (!nearLongWord) {
+                        for (int d = 1; d <= 5 && !nearLongWord; d++) {
+                            if (idx - d >= 0) nearLongWord = containsLongLatinWord(runs.get(idx - d).content(), 3);
+                            if (idx + d < runs.size()) nearLongWord = nearLongWord || containsLongLatinWord(runs.get(idx + d).content(), 3);
+                        }
+                    }
+                    if ((!paraHasMathSymbols && !isSingleLatinVar) || nearLongWord) {
                         run.fontFamily(null);
                         run.fontStyle(null);
                         run.appliedCharacterStyle(null);
@@ -870,6 +878,22 @@ public class ResolvedToASTBuilder {
     /**
      * 텍스트에 수식 기호 또는 EH 인코딩 문자가 포함되어 있는지 확인.
      */
+    /** 텍스트에 minLen자 이상 연속 라틴 문자(영단어)가 포함되어 있는지 확인. */
+    private static boolean containsLongLatinWord(String text, int minLen) {
+        if (text == null) return false;
+        int streak = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isLetter(c) && c < 0x100) {
+                streak++;
+                if (streak >= minLen) return true;
+            } else {
+                streak = 0;
+            }
+        }
+        return false;
+    }
+
     private static boolean hasMathOrEHChars(String text) {
         if (text == null || text.isEmpty()) return false;
         for (int i = 0; i < text.length(); i++) {
