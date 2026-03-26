@@ -221,22 +221,6 @@ public class EHFontEquationConverter {
         }
     }
 
-    /**
-     * 한국어만 포함된 텍스트인지 확인.
-     */
-    static boolean isOnlyKorean(String text) {
-        boolean hasKorean = false;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c >= 0xAC00 && c <= 0xD7AF || c >= 0x3131 && c <= 0x318E) {
-                hasKorean = true;
-            } else if (Character.isLetterOrDigit(c)) {
-                return false;
-            } else if ("+-*/=<>()[]{}|!".indexOf(c) >= 0) {
-                return false;
-            }
-        }
-        return hasKorean;
-    }
+    // isOnlyKorean → EHTextClassifier.isKoreanOnly로 이동
 
 }

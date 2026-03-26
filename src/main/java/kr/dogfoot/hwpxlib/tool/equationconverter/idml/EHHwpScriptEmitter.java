@@ -85,7 +85,7 @@ public class EHHwpScriptEmitter {
         while (open > 0) { result = result + "}"; open--; }
 
         // 순수 한국어만이면 수식 아님
-        if (EHFontEquationConverter.isOnlyKorean(result)) return null;
+        if (EHTextClassifier.isKoreanOnly(result)) return null;
 
         // 글자나 숫자가 없으면 수식 아님
         boolean hasLetterOrDigit = false;

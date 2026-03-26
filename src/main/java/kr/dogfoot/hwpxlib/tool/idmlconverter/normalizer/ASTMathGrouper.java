@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.PatternEquationConverter;
@@ -437,7 +438,7 @@ class ASTMathGrouper {
                     textRun.text(ASTPageProcessor.stripACEPlaceholders(text));
                     // 한국어만 텍스트에 EH 폰트/스타일 적용 방지
                     String ff = run.fontFamily();
-                    if (ff != null && EHFontGlyphMap.isEHFontFamily(ff) && isKoreanOnly(text)) {
+                    if (ff != null && EHFontGlyphMap.isEHFontFamily(ff) && EHTextClassifier.isKoreanOnly(text)) {
                         // EH 폰트/스타일 제거 → 기본 폰트 사용
                     } else {
                         textRun.fontFamily(ff);
@@ -617,16 +618,5 @@ class ASTMathGrouper {
         }
     }
 
-    /** 텍스트가 한국어/구두점/공백만 포함하는지 (라틴 알파벳/숫자 없음) */
-    private static boolean isKoreanOnly(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (Character.isLetterOrDigit(c)
-                    && !(c >= 0xAC00 && c <= 0xD7A3)
-                    && !(c >= 0x3131 && c <= 0x318E)) {
-                return false;
-            }
-        }
-        return true;
-    }
+    // isKoreanOnly → EHTextClassifier.isKoreanOnly로 이동
 }

@@ -43,6 +43,45 @@ public class EHFontGlyphMap {
     }
 
     /**
+     * CharacterStyle 이름에서 EH 폰트 변형명 추출.
+     * 예: "태광10%3a분수대문자 10" → "EH분수대문자"
+     *     "CharacterStyle/분수대문자" → "EH분수대문자"
+     */
+    public static String extractFontFromStyle(String styleRef) {
+        if (styleRef == null) return null;
+        if (styleRef.contains("상부자")) return "EH상부자";
+        if (styleRef.contains("하부자")) return "EH하부자";
+        if (styleRef.contains("분수대문자")) return "EH분수대문자";
+        if (styleRef.contains("분수소문자")) return "EH분수소문자";
+        if (styleRef.contains("선모음")) return "EH선모음";
+        if (styleRef.contains("약물")) return "EH약물";
+        if (styleRef.contains("수식")) return "EH수식";
+        if (styleRef.contains("루트")) return "EH루트";
+        if (styleRef.contains("/EH")) {
+            int idx = styleRef.indexOf("/EH");
+            String rest = styleRef.substring(idx + 1);
+            int sp = rest.indexOf(' ');
+            return sp > 0 ? rest.substring(0, sp) : rest;
+        }
+        return "EH수식"; // 기본 폴백
+    }
+
+    /**
+     * EH분수대문자 텍스트가 분수선 장식 글리프만 포함하는지 판별.
+     * 확장 범위(0x80+) 글리프만 있고 기본 범위 숫자/문자가 없으면 장식.
+     */
+    public static boolean isFractionBarDecoration(String text) {
+        if (text == null || text.isEmpty()) return true;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= '0' && c <= '9') return false;
+            if (c >= 'A' && c <= 'Z') return false;
+            if (c >= 'a' && c <= 'z') return false;
+        }
+        return true;
+    }
+
+    /**
      * 텍스트가 EH 인코딩 패턴을 포함하는지 확인.
      * EH 상부자/하부자 확장 범위 숫자 문자(0xDA-0xE2)를 감지.
      * 대부분 뒤에 백틱(0x60)이 따라오지만 런 경계에서 생략될 수 있다.

@@ -12,6 +12,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 
 import javax.imageio.ImageIO;
@@ -568,7 +569,7 @@ public class ResolvedToASTBuilder {
 
                 // EH 수식: fontFamily가 null이면 CharacterStyle 이름에서 추출
                 if (run.isEHFont() && run.fontFamily() == null) {
-                    String ehFont = extractEHFontFromStyle(run.appliedCharacterStyle());
+                    String ehFont = EHFontGlyphMap.extractFontFromStyle(run.appliedCharacterStyle());
                     if (ehFont != null) run.fontFamily(ehFont);
                 }
 
@@ -698,7 +699,7 @@ public class ResolvedToASTBuilder {
         // EH 수식 폰트가 한국어 텍스트에 잘못 적용되면 제거
         String fontFamily = cr.fontFamily();
         if (fontFamily != null && EHFontGlyphMap.isEHFontFamily(fontFamily)
-                && text != null && isOnlyKoreanOrPunctuation(text)) {
+                && text != null && EHTextClassifier.isKoreanOnly(text)) {
             fontFamily = null; // 한국어 텍스트에 EH 폰트 적용 방지
             tr.grepMathFont(false); // 수식 폰트 CharPr 적용도 방지
             tr.fontStyle(null); // EH 폰트의 Italic fontStyle 제거
@@ -721,14 +722,14 @@ public class ResolvedToASTBuilder {
             if (tr.fontFamily() == null && rr.fontFamily() != null) {
                 // EH 수식 폰트가 한국어 텍스트에 잘못 적용되는 것 방지
                 if (!(EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
-                        && text != null && isOnlyKoreanOrPunctuation(text))) {
+                        && text != null && EHTextClassifier.isKoreanOnly(text))) {
                     tr.fontFamily(rr.fontFamily());
                 }
             }
             if (tr.fontStyle() == null && rr.fontStyle() != null) {
                 // EH 수식 폰트의 Italic이 한국어 텍스트에 적용되는 것 방지
                 if (!(rr.fontFamily() != null && EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
-                        && text != null && isOnlyKoreanOrPunctuation(text))) {
+                        && text != null && EHTextClassifier.isKoreanOnly(text))) {
                     tr.fontStyle(rr.fontStyle());
                 }
             }
@@ -1100,44 +1101,8 @@ public class ResolvedToASTBuilder {
         }
     }
 
-    /**
-     * CharacterStyle 이름에서 EH 폰트 변형명 추출.
-     * 예: "태광10%3a분수대문자 10" → "EH분수대문자"
-     *     "CharacterStyle/분수대문자" → "EH분수대문자"
-     */
-    private static String extractEHFontFromStyle(String styleRef) {
-        if (styleRef == null) return null;
-        if (styleRef.contains("상부자")) return "EH상부자";
-        if (styleRef.contains("하부자")) return "EH하부자";
-        if (styleRef.contains("분수대문자")) return "EH분수대문자";
-        if (styleRef.contains("분수소문자")) return "EH분수소문자";
-        if (styleRef.contains("선모음")) return "EH선모음";
-        if (styleRef.contains("약물")) return "EH약물";
-        if (styleRef.contains("수식")) return "EH수식";
-        if (styleRef.contains("루트")) return "EH루트";
-        if (styleRef.contains("/EH")) {
-            // "CharacterStyle/EH상부자" 형태
-            int idx = styleRef.indexOf("/EH");
-            String rest = styleRef.substring(idx + 1);
-            int sp = rest.indexOf(' ');
-            return sp > 0 ? rest.substring(0, sp) : rest;
-        }
-        return "EH수식"; // 기본 폴백
-    }
-
-    /** 텍스트가 한국어/구두점/공백만 포함하는지 확인 (라틴 알파벳/숫자 없음) */
-    private static boolean isOnlyKoreanOrPunctuation(String text) {
-        if (text == null || text.isEmpty()) return false;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (Character.isLetterOrDigit(c)
-                    && !(c >= 0xAC00 && c <= 0xD7A3)
-                    && !(c >= 0x3131 && c <= 0x318E)) {
-                return false; // 라틴/숫자 포함
-            }
-        }
-        return true;
-    }
+    // extractEHFontFromStyle → EHFontGlyphMap.extractFontFromStyle로 이동
+    // isOnlyKoreanOrPunctuation → EHTextClassifier.isKoreanOnly로 이동
 
     /**
      * 텍스트 내 ;...; 분수 GREP 패턴을 인라인 수식(ASTEquation)으로 분리.
