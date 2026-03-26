@@ -140,8 +140,36 @@ public class EHTokenizer {
     /**
      * EH수식/EH약물 텍스트를 토큰화.
      * 백틱(`) = 앞 문자를 위첨자로 만드는 마커.
+     * EH약물의 특수 글리프(Ñ→±)는 직접 변환.
      */
     private static void tokenizeBaseEH(String text, String fontFamily, List<EHToken> tokens) {
+        // EH약물 전용 글리프 전처리: decodeText가 잘못 매핑하는 글리프를 직접 처리
+        if (EHFontGlyphMap.isChemicalFont(fontFamily) && text.indexOf('\u00D1') >= 0) {
+            // Ñ(0xD1) = ± 기호. decodeText는 이를 'e'/'+'로 잘못 매핑하므로 직접 분리
+            StringBuilder buf = new StringBuilder();
+            for (int ci = 0; ci < text.length(); ci++) {
+                char ch = text.charAt(ci);
+                if (ch == '\u00D1') {
+                    if (buf.length() > 0) {
+                        String decoded = EHFontGlyphMap.decodeText(buf.toString(), fontFamily);
+                        if (decoded != null && !decoded.isEmpty()) {
+                            tokens.add(new EHToken(EHToken.Type.BASE_TEXT, decoded));
+                        }
+                        buf.setLength(0);
+                    }
+                    tokens.add(new EHToken(EHToken.Type.BASE_TEXT, "\u00B1")); // ±
+                } else {
+                    buf.append(ch);
+                }
+            }
+            if (buf.length() > 0) {
+                String decoded = EHFontGlyphMap.decodeText(buf.toString(), fontFamily);
+                if (decoded != null && !decoded.isEmpty()) {
+                    tokens.add(new EHToken(EHToken.Type.BASE_TEXT, decoded));
+                }
+            }
+            return;
+        }
         if (text.contains("`")) {
             StringBuilder buf = new StringBuilder();
             for (int i = 0; i < text.length(); i++) {
