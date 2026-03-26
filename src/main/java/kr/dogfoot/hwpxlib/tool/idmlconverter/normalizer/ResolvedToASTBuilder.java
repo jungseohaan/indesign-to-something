@@ -695,7 +695,13 @@ public class ResolvedToASTBuilder {
         }
         tr.text(text);
         // IDML CharacterRun 속성 우선
-        if (cr.fontFamily() != null) tr.fontFamily(cr.fontFamily());
+        // EH 수식 폰트가 한국어 텍스트에 잘못 적용되면 제거
+        String fontFamily = cr.fontFamily();
+        if (fontFamily != null && EHFontGlyphMap.isEHFontFamily(fontFamily)
+                && text != null && isOnlyKoreanOrPunctuation(text)) {
+            fontFamily = null; // 한국어 텍스트에 EH 폰트 적용 방지
+        }
+        if (fontFamily != null) tr.fontFamily(fontFamily);
         if (cr.fontStyle() != null) tr.fontStyle(cr.fontStyle());
         if (cr.fontSize() != null && cr.fontSize() > 0) {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
@@ -710,7 +716,13 @@ public class ResolvedToASTBuilder {
         }
         // IDML에 없는 속성은 ParagraphStyle → resolved 런 순으로 보강
         if (rr != null) {
-            if (tr.fontFamily() == null && rr.fontFamily() != null) tr.fontFamily(rr.fontFamily());
+            if (tr.fontFamily() == null && rr.fontFamily() != null) {
+                // EH 수식 폰트가 한국어 텍스트에 잘못 적용되는 것 방지
+                if (!(EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
+                        && text != null && isOnlyKoreanOrPunctuation(text))) {
+                    tr.fontFamily(rr.fontFamily());
+                }
+            }
             if (tr.fontStyle() == null && rr.fontStyle() != null) tr.fontStyle(rr.fontStyle());
             if (tr.fontSizeHwpunits() == null && rr.fontSize() != null && rr.fontSize() > 0) {
                 tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
@@ -1103,6 +1115,20 @@ public class ResolvedToASTBuilder {
             return sp > 0 ? rest.substring(0, sp) : rest;
         }
         return "EH수식"; // 기본 폴백
+    }
+
+    /** 텍스트가 한국어/구두점/공백만 포함하는지 확인 (라틴 알파벳/숫자 없음) */
+    private static boolean isOnlyKoreanOrPunctuation(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isLetterOrDigit(c)
+                    && !(c >= 0xAC00 && c <= 0xD7A3)
+                    && !(c >= 0x3131 && c <= 0x318E)) {
+                return false; // 라틴/숫자 포함
+            }
+        }
+        return true;
     }
 
     /**
