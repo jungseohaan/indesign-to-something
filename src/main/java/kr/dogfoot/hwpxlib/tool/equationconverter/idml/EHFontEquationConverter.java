@@ -43,9 +43,9 @@ public class EHFontEquationConverter {
 
             if (EHFontGlyphMap.isRootFont(fontFamily)
                     || EHFontGlyphMap.isLineFont(fontFamily)) {
-                // 루트/선모음 → 시각적 장식이므로 스킵
                 continue;
             }
+
 
             if (EHFontGlyphMap.isSuperscriptFont(fontFamily)
                     || EHFontGlyphMap.isSubscriptFont(fontFamily)) {
@@ -135,6 +135,18 @@ public class EHFontEquationConverter {
 
         String result = sb.toString().trim();
         if (result.isEmpty()) return null;
+
+        // 빈 sqrt{} → 단독 제곱근 기호 sqrt{ } (내용 없는 루트)
+        // 수식 내 다른 내용이 있으면 빈 sqrt 제거, 단독이면 기호로 유지
+        if (result.equals("sqrt{}")) {
+            result = "sqrt{ }"; // 단독 √ 기호
+        } else {
+            while (result.contains("sqrt{}")) {
+                result = result.replace("sqrt{}", "");
+            }
+            result = result.trim();
+            if (result.isEmpty()) return null;
+        }
 
         // 짝 안 맞는 중괄호 보정
         int open = 0;
@@ -231,8 +243,7 @@ public class EHFontEquationConverter {
             if (c >= 0x80) {
                 // 확장 범위 → 먼저 기본 범위 버퍼 플러시
                 if (baseBuf.length() > 0) {
-                    sb.append(convertToHwpScript(baseBuf.toString()));
-                    baseBuf.setLength(0);
+                    flushBaseBuf(baseBuf, sb);
                 }
                 // 디코딩하여 확장 버퍼에 추가
                 char decoded = EHFontGlyphMap.decodeSubSupGlyph(c);
@@ -259,7 +270,18 @@ public class EHFontEquationConverter {
               .append("}");
         }
         if (baseBuf.length() > 0) {
-            sb.append(convertToHwpScript(baseBuf.toString()));
+            flushBaseBuf(baseBuf, sb);
+        }
+    }
+
+    /** 기본 범위 버퍼 플러시: ;...; 분수 패턴이 있으면 분수 변환, 없으면 일반 처리 */
+    private static void flushBaseBuf(StringBuilder baseBuf, StringBuilder sb) {
+        String text = baseBuf.toString();
+        baseBuf.setLength(0);
+        if (EHFontGlyphMap.containsEHFractionPattern(text)) {
+            convertFractionPatternRun(text, sb);
+        } else {
+            sb.append(convertToHwpScript(text));
         }
     }
 
@@ -276,6 +298,8 @@ public class EHFontEquationConverter {
      * - 구조: ; = 분수선, [] {} = 괄호(스킵)
      */
     private static void convertFractionPatternRun(String text, StringBuilder sb) {
+        // EH 인코딩에서 { = (, } = ) (hwpScript 그룹 구분자 충돌 방지)
+        text = text.replace('{', '(').replace('}', ')');
         int i = 0;
         while (i < text.length()) {
             // ;...; 패턴 탐색
