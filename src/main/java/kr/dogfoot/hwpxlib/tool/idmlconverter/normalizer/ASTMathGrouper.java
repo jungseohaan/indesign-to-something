@@ -58,8 +58,9 @@ class ASTMathGrouper {
             int[] types = new int[len];
             for (int i = 0; i < len; i++) {
                 char c = text.charAt(i);
-                if (c >= 0xAC00 && c <= 0xD7AF || c >= 0x3131 && c <= 0x318E) {
-                    types[i] = 1; // KOREAN
+                if (c >= 0xAC00 && c <= 0xD7AF || c >= 0x3131 && c <= 0x318E
+                        || (c >= 0x2460 && c <= 0x2473) || (c >= 0x2474 && c <= 0x2487)) {
+                    types[i] = 1; // KOREAN + 원문자 (선택지 번호 분리)
                 } else if (Character.isLetterOrDigit(c) || c == '_' || c == '^' || c == '&'
                         || c == '\\' || c == '`' || "+-*/=<>()[]{}|!.;".indexOf(c) >= 0) {
                     types[i] = 2; // LATIN/MATH
@@ -391,16 +392,18 @@ class ASTMathGrouper {
 
     /**
      * EH 수식 런 사이의 비EH 런이 수식 그룹에 포함될 수 있는지 확인.
-     * 한국어/탭 포함 → 브릿지 아님. 뒤에 EH 런이 이어지면 → 브릿지.
+     * 한국어/탭/원문자 포함 → 브릿지 아님. 뒤에 EH 런이 이어지면 → 브릿지.
      */
     static boolean isEHMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (c >= 0xAC00 && c <= 0xD7AF) return false;
-            if (c >= 0x3131 && c <= 0x318E) return false;
-            if (c == '\t') return false;
+            if (c >= 0xAC00 && c <= 0xD7AF) return false; // 한국어
+            if (c >= 0x3131 && c <= 0x318E) return false; // 한국어 자모
+            if (c == '\t') return false; // 탭 (선택지 구분)
+            // 원문자 ①-⑳, ⑴-⒇ → 선택지 번호, 브릿지 아님
+            if ((c >= 0x2460 && c <= 0x2473) || (c >= 0x2474 && c <= 0x2487)) return false;
         }
         // 뒤에 EH 수식 런이 있는지 확인
         for (int j = idx + 1; j < runs.size(); j++) {
