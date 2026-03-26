@@ -21,7 +21,13 @@ public class EHHwpScriptEmitter {
 
     private static void emitNode(EHNode node, StringBuilder sb) {
         if (node instanceof EHNode.Text) {
-            sb.append(EHFontEquationConverter.convertToHwpScript(((EHNode.Text) node).text()));
+            String text = ((EHNode.Text) node).text();
+            // 탭은 선택지 구분자 → 보존 (convertToHwpScript가 공백으로 변환하므로)
+            if ("\t".equals(text)) {
+                sb.append('\t');
+            } else {
+                sb.append(EHFontEquationConverter.convertToHwpScript(text));
+            }
 
         } else if (node instanceof EHNode.Superscript) {
             sb.append("^{");

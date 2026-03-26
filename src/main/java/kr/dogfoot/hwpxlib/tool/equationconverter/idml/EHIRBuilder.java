@@ -265,8 +265,8 @@ public class EHIRBuilder {
             char ch = text.charAt(i);
             // 한국어
             if (ch >= 0xAC00 && ch <= 0xD7A3) return i;
-            // thin space / 줄바꿈
-            if (ch == '\u2009' || ch == '\r' || ch == '\n') return i;
+            // thin space / 줄바꿈 / 탭 (선택지 구분자)
+            if (ch == '\u2009' || ch == '\r' || ch == '\n' || ch == '\t') return i;
             // 무조건 종료 연산자
             if (ch == '=' || ch == ',' || ch == '<' || ch == '>') return i;
             // 이항 연산자: 첫 문자가 아닐 때만 종료 (단항 -, + 허용)

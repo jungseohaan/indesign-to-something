@@ -578,7 +578,8 @@ class ASTMathGrouper {
             char c = hwpScript.charAt(i);
             boolean isCircled = (c >= 0x2460 && c <= 0x2473)  // ①-⑳
                     || (c >= 0x2474 && c <= 0x2487); // ⑴-⒇
-            if (isCircled) {
+            boolean isTab = (c == '\t');
+            if (isCircled || isTab) {
                 // 원문자 앞 수식
                 if (i > lastSplit) {
                     String before = hwpScript.substring(lastSplit, i).trim();
@@ -589,10 +590,17 @@ class ASTMathGrouper {
                         }
                     }
                 }
-                // 원문자 앞 여백 + 원문자 자체를 텍스트로
-                ASTTextRun numRun = new ASTTextRun();
-                numRun.text("  " + String.valueOf(c) + " ");
-                para.addItem(numRun);
+                if (isTab) {
+                    // 탭 → 탭 문자 유지 (선택지 간격)
+                    ASTTextRun tabRun = new ASTTextRun();
+                    tabRun.text("\t");
+                    para.addItem(tabRun);
+                } else {
+                    // 원문자 앞 여백 + 원문자 자체를 텍스트로
+                    ASTTextRun numRun = new ASTTextRun();
+                    numRun.text("  " + String.valueOf(c) + " ");
+                    para.addItem(numRun);
+                }
                 lastSplit = i + 1;
                 // 원문자 뒤 공백 스킵
                 while (lastSplit < hwpScript.length() && hwpScript.charAt(lastSplit) == ' ') {

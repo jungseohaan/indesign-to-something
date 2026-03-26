@@ -119,6 +119,14 @@ public class EHTokenizer {
             // 백틱(0x60) = 불가시 여백 → 스킵
             if (c == 0x60) continue;
 
+            // 탭(\t) = 선택지 구분자 → 버퍼 플러시 후 별도 토큰
+            if (c == '\t') {
+                flushExtBuf(extBuf, glyphType, tokens);
+                flushBaseBuf(baseBuf, baseType, tokens);
+                tokens.add(new EHToken(EHToken.Type.BASE_TEXT, "\t"));
+                continue;
+            }
+
             // { → (, } → )
             if (c == '{') c = '(';
             else if (c == '}') c = ')';
