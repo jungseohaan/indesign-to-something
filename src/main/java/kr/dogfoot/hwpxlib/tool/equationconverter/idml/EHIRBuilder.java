@@ -253,6 +253,7 @@ public class EHIRBuilder {
      * @return 종료 인덱스 (해당 위치 이전까지가 radicand), -1이면 전체가 radicand
      */
     private static int findRadicandEnd(String text) {
+        int parenDepth = 0;
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             if (ch >= 0xAC00 && ch <= 0xD7A3) return i; // 한국어
@@ -260,6 +261,12 @@ public class EHIRBuilder {
             if (ch == '\r' || ch == '\n') return i; // 줄바꿈
             // 연산자/구두점에서 종료 (radicand는 피연산자만)
             if (ch == '=' || ch == ',' || ch == '<' || ch == '>') return i;
+            // 괄호 균형: 열린 괄호 없이 닫는 괄호 → 종료
+            if (ch == '(') parenDepth++;
+            else if (ch == ')') {
+                if (parenDepth <= 0) return i; // 매칭되지 않는 ) → radicand 밖
+                parenDepth--;
+            }
         }
         return -1;
     }
