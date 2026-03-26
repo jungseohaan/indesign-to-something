@@ -93,8 +93,12 @@ public class EHTokenizer {
                 continue;
             }
 
-            // 순수 비EH 브릿지 런
-            tokens.add(new EHToken(EHToken.Type.BASE_TEXT, text));
+            // 순수 비EH 브릿지 런 — 탭으로 분리
+            if (text.contains("\t")) {
+                splitByTab(text, tokens);
+            } else {
+                tokens.add(new EHToken(EHToken.Type.BASE_TEXT, text));
+            }
         }
 
         return tokens;
@@ -275,4 +279,18 @@ public class EHTokenizer {
         }
     }
 
+    /** 텍스트를 탭(\t) 기준으로 분리하여 각각 BASE_TEXT 토큰으로 추가 */
+    private static void splitByTab(String text, List<EHToken> tokens) {
+        int i = 0;
+        while (i < text.length()) {
+            if (text.charAt(i) == '\t') {
+                tokens.add(new EHToken(EHToken.Type.BASE_TEXT, "\t"));
+                i++;
+            } else {
+                int start = i;
+                while (i < text.length() && text.charAt(i) != '\t') i++;
+                tokens.add(new EHToken(EHToken.Type.BASE_TEXT, text.substring(start, i)));
+            }
+        }
+    }
 }
