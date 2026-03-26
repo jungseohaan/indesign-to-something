@@ -191,7 +191,10 @@ class ASTMathGrouper {
         }
         // 그리스 문자 키워드(alpha, beta 등)가 포함되면 수식으로 간주
         if (BTFontEquationConverter.containsGreekKeyword(text)) return false;
-        // 수식 기호가 없으면 plain (수식 아님)
+        // 단일 문자/숫자(1~2자)는 수식 변수일 수 있음 → plain 아님
+        String trimmed = text.trim();
+        if (trimmed.length() <= 2) return false;
+        // 3자 이상 단어가 있으면 plain (수식 아님)
         return true;
     }
 

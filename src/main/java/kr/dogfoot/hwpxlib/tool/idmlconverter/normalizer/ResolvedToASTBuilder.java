@@ -545,10 +545,11 @@ public class ResolvedToASTBuilder {
                 // GREP 수식 플래그 보정
                 if (run.grepMathFont() && ASTMathGrouper.isPlainAlphanumericRun(run)) {
                     run.grepMathFont(false);
-                    // BT수식M이 GREP으로 적용된 경우 폰트를 null로 리셋 (스타일 상속으로 복원)
+                    // BT수식M/Italic이 GREP으로 적용된 경우 폰트를 null로 리셋 (스타일 상속으로 복원)
                     String ff = run.fontFamily();
                     if (ff != null && ff.contains("BT수식")) {
                         run.fontFamily(null);
+                        run.fontStyle(null);
                     }
                 }
 
