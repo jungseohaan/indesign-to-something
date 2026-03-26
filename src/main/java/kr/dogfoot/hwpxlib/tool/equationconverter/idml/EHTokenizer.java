@@ -62,7 +62,12 @@ public class EHTokenizer {
                         tokens.add(new EHToken(EHToken.Type.FRACTION_NUMERATOR, decoded));
                     }
                 } else {
-                    tokens.add(new EHToken(EHToken.Type.SQRT_MARKER, text));
+                    // √ 바 연장 글리프(0x8C, 0x8D 등)는 SKIP — 새 √가 아닌 이전 √의 연장
+                    if (EHFontGlyphMap.isFractionBarDecoration(text)) {
+                        tokens.add(new EHToken(EHToken.Type.SKIP, text));
+                    } else {
+                        tokens.add(new EHToken(EHToken.Type.SQRT_MARKER, text));
+                    }
                 }
                 continue;
             }
