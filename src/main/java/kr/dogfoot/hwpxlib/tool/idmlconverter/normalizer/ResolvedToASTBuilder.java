@@ -315,11 +315,6 @@ public class ResolvedToASTBuilder {
         }
 
         System.out.println("[ResolvedToASTBuilder] Phase 3: " + storyToBlocks.size() + " stories matched to TextFrameBlocks");
-        if (storyToBlocks.containsKey("321251")) {
-            System.out.println("[DEBUG] Story 321251 matched, blocks=" + storyToBlocks.get("321251").size());
-        } else {
-            System.out.println("[DEBUG] Story 321251 NOT in storyToBlocks!");
-        }
 
         // 각 Story → 단락 변환 후 TextFrameBlock에 분배
         // IDML Story XML 우선, 없으면 resolved fallback
@@ -375,20 +370,8 @@ public class ResolvedToASTBuilder {
                 b.storyTotalTextLength(storyTextLen);
             }
 
-            if ("321251".equals(storyId)) {
-                System.out.println("[DEBUG] Story 321251: " + paragraphs.size() + " paragraphs, useIdml=" + useIdml);
-                for (ASTTextFrameBlock b : blocks) {
-                    System.out.println("[DEBUG] Story 321251 block before dist: " + b.paragraphs().size() + " paras, sourceId=" + b.sourceId());
-                }
-            }
-
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
             distributeParagraphs(paragraphs, blocks, storyId);
-            if ("321251".equals(storyId)) {
-                for (ASTTextFrameBlock b : blocks) {
-                    System.out.println("[DEBUG] Story 321251 block after dist: " + b.paragraphs().size() + " paras, x=" + b.x() + " y=" + b.y() + " w=" + b.width() + " h=" + b.height());
-                }
-            }
         }
         System.out.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
     }
@@ -1101,8 +1084,6 @@ public class ResolvedToASTBuilder {
         }
     }
 
-    // extractEHFontFromStyle → EHFontGlyphMap.extractFontFromStyle로 이동
-    // isOnlyKoreanOrPunctuation → EHTextClassifier.isKoreanOnly로 이동
 
     /**
      * 텍스트 내 ;...; 분수 GREP 패턴을 인라인 수식(ASTEquation)으로 분리.

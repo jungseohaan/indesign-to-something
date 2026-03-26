@@ -267,5 +267,4 @@ public class EHTokenizer {
         }
     }
 
-    // isFractionBarDecoration은 EHFontGlyphMap으로 이동됨
 }

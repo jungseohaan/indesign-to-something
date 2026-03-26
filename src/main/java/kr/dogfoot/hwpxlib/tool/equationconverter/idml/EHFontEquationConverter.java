@@ -41,10 +41,6 @@ public class EHFontEquationConverter {
         return EHHwpScriptEmitter.emit(tree);
     }
 
-    // 이하 레거시 메서드는 제거됨 (EHTokenizer/EHIRBuilder/EHHwpScriptEmitter로 이전)
-    // convertSubSupRun, convertEHBaseWithBacktick, findSqrtEndPos,
-    // flushBaseBuf, convertFractionPatternRun
-
     /**
      * 유니코드 텍스트를 HWP 수식 스크립트로 변환.
      * 유니코드 수학 기호를 HWP 키워드로 매핑한다.
@@ -220,7 +216,5 @@ public class EHFontEquationConverter {
             default: return null;
         }
     }
-
-    // isOnlyKorean → EHTextClassifier.isKoreanOnly로 이동
 
 }

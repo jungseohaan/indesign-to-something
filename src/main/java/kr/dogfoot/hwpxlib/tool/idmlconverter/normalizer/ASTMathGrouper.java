@@ -618,5 +618,4 @@ class ASTMathGrouper {
         }
     }
 
-    // isKoreanOnly → EHTextClassifier.isKoreanOnly로 이동
 }
