@@ -522,8 +522,25 @@ public class ResolvedToASTBuilder {
 
             boolean paraHasBTRuns = false;
             boolean paraHasNPStructuralRuns = false;
+            boolean paraHasMathSymbols = false;
+            // IDML 원본 CharacterRun에서 수식 기호 유무 확인 (GREP 분리 전 기준)
+            for (IDMLCharacterRun r : ip.characterRuns()) {
+                if (r.isBTFont() || r.isNPFont()) { paraHasMathSymbols = true; break; }
+                String rt = r.content();
+                if (rt != null) {
+                    for (int ci = 0; ci < rt.length(); ci++) {
+                        char cc = rt.charAt(ci);
+                        if ("+=<>≤≥±×÷√²³^_π∑∫∞".indexOf(cc) >= 0
+                                || (cc >= 0xDA && cc <= 0xE2)) { // EH encoded chars
+                            paraHasMathSymbols = true;
+                            break;
+                        }
+                    }
+                }
+                if (paraHasMathSymbols) break;
+            }
             for (IDMLCharacterRun r : runs) {
-                if (r.isBTFont() || r.grepMathFont()) paraHasBTRuns = true;
+                if (r.isBTFont()) paraHasBTRuns = true;
                 if (r.isNPFont()) {
                     NPFontGlyphMap.FontCategory cat = NPFontGlyphMap.getCategory(r.npFontName());
                     if (cat == NPFontGlyphMap.FontCategory.SUBSCRIPT_INDEX
@@ -542,15 +559,20 @@ public class ResolvedToASTBuilder {
             for (int idx = 0; idx < runs.size(); idx++) {
                 IDMLCharacterRun run = runs.get(idx);
 
-                // GREP 수식 플래그 보정
-                if (run.grepMathFont() && ASTMathGrouper.isPlainAlphanumericRun(run)) {
+                // GREP 수식 플래그 완전 제거 + fontStyle 리셋
+                if (run.grepMathFont()) {
                     run.grepMathFont(false);
-                    // BT수식M/Italic이 GREP으로 적용된 경우 폰트를 null로 리셋 (스타일 상속으로 복원)
                     String ff = run.fontFamily();
                     if (ff != null && ff.contains("BT수식")) {
                         run.fontFamily(null);
-                        run.fontStyle(null);
                     }
+                    run.fontStyle(null); // GREP Italic 무조건 제거
+                }
+                // EH 수식 폰트 리셋: 단락에 수식 기호가 없으면 일반 텍스트
+                if (!paraHasMathSymbols && run.isEHFont()) {
+                    run.fontFamily(null);
+                    run.fontStyle(null);
+                    run.appliedCharacterStyle(null); // isEHFont() 판별 차단
                 }
 
                 // EH 수식: fontFamily가 null이면 CharacterStyle 이름에서 추출
@@ -560,7 +582,7 @@ public class ResolvedToASTBuilder {
                 }
 
                 // EH 수식 그룹 진입
-                boolean enterEH = (run.isEHFont() && !ASTMathGrouper.isPlainAlphanumericRun(run))
+                boolean enterEH = run.isEHFont()
                         || EHFontGlyphMap.containsEHEncodedChars(run.content())
                         || EHFontGlyphMap.containsEHFractionPattern(run.content())
                         || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx))
@@ -573,20 +595,17 @@ public class ResolvedToASTBuilder {
                             || (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx))
                             || (npMathGroup.isEmpty() && ASTMathGrouper.isPreNPMathRun(run, runs, idx))
                             || (paraHasNPStructuralRuns && !run.isNPFont() && !run.isBTFont()
-                                && !run.grepMathFont() && !run.isEHFont()
+                                && !run.isEHFont()
                                 && ASTMathGrouper.isStandaloneMathRun(run));
                 }
 
                 // BT 수식 그룹 진입
                 boolean enterBT = false;
                 if (!enterEH && !enterNP) {
-                    enterBT = ((run.isBTFont() || run.grepMathFont())
-                                && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())
-                                && !ASTMathGrouper.isPlainAlphanumericRun(run))
-                            || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx)
-                                && !ASTMathGrouper.isPlainAlphanumericRun(run))
-                            || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content())
-                                && !ASTMathGrouper.isPlainAlphanumericRun(run));
+                    enterBT = (run.isBTFont()
+                                && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content()))
+                            || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))
+                            || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()));
                 }
 
                 if (enterEH) {
@@ -689,7 +708,6 @@ public class ResolvedToASTBuilder {
         if (fontFamily != null && EHFontGlyphMap.isEHFontFamily(fontFamily)
                 && text != null && EHTextClassifier.isKoreanOnly(text)) {
             fontFamily = null; // 한국어 텍스트에 EH 폰트 적용 방지
-            tr.grepMathFont(false); // 수식 폰트 CharPr 적용도 방지
             tr.fontStyle(null); // EH 폰트의 Italic fontStyle 제거
         }
         if (fontFamily != null) tr.fontFamily(fontFamily);
@@ -708,16 +726,17 @@ public class ResolvedToASTBuilder {
         // IDML에 없는 속성은 ParagraphStyle → resolved 런 순으로 보강
         if (rr != null) {
             if (tr.fontFamily() == null && rr.fontFamily() != null) {
-                // EH 수식 폰트가 한국어 텍스트에 잘못 적용되는 것 방지
-                if (!(EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
-                        && text != null && EHTextClassifier.isKoreanOnly(text))) {
+                // EH/BT 수식 폰트는 수식 기호가 있는 텍스트에만 적용
+                boolean isEHorBT = EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
+                        || (rr.fontFamily() != null && rr.fontFamily().contains("BT수식"));
+                if (!isEHorBT) {
                     tr.fontFamily(rr.fontFamily());
                 }
             }
             if (tr.fontStyle() == null && rr.fontStyle() != null) {
-                // EH 수식 폰트의 Italic이 한국어 텍스트에 적용되는 것 방지
-                if (!(rr.fontFamily() != null && EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
-                        && text != null && EHTextClassifier.isKoreanOnly(text))) {
+                boolean isEHorBT = rr.fontFamily() != null
+                        && (EHFontGlyphMap.isEHFontFamily(rr.fontFamily()) || rr.fontFamily().contains("BT수식"));
+                if (!isEHorBT) {
                     tr.fontStyle(rr.fontStyle());
                 }
             }
@@ -771,6 +790,19 @@ public class ResolvedToASTBuilder {
             return resolveColorToHex(resolved.fillColor());
         }
         return null;
+    }
+
+    /**
+     * 텍스트에 수식 기호 또는 EH 인코딩 문자가 포함되어 있는지 확인.
+     */
+    private static boolean hasMathOrEHChars(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ("+=<>≤≥±×÷√²³^_π∑∫∞".indexOf(c) >= 0) return true;
+            if (c >= 0xDA && c <= 0xE2) return true; // EH encoded chars
+        }
+        return false;
     }
 
     /**
