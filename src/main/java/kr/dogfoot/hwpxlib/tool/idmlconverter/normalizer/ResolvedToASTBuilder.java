@@ -700,6 +700,8 @@ public class ResolvedToASTBuilder {
         if (fontFamily != null && EHFontGlyphMap.isEHFontFamily(fontFamily)
                 && text != null && isOnlyKoreanOrPunctuation(text)) {
             fontFamily = null; // 한국어 텍스트에 EH 폰트 적용 방지
+            tr.grepMathFont(false); // 수식 폰트 CharPr 적용도 방지
+            tr.fontStyle(null); // EH 폰트의 Italic fontStyle 제거
         }
         if (fontFamily != null) tr.fontFamily(fontFamily);
         if (cr.fontStyle() != null) tr.fontStyle(cr.fontStyle());
@@ -723,7 +725,13 @@ public class ResolvedToASTBuilder {
                     tr.fontFamily(rr.fontFamily());
                 }
             }
-            if (tr.fontStyle() == null && rr.fontStyle() != null) tr.fontStyle(rr.fontStyle());
+            if (tr.fontStyle() == null && rr.fontStyle() != null) {
+                // EH 수식 폰트의 Italic이 한국어 텍스트에 적용되는 것 방지
+                if (!(rr.fontFamily() != null && EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
+                        && text != null && isOnlyKoreanOrPunctuation(text))) {
+                    tr.fontStyle(rr.fontStyle());
+                }
+            }
             if (tr.fontSizeHwpunits() == null && rr.fontSize() != null && rr.fontSize() > 0) {
                 tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
             }
