@@ -1447,17 +1447,21 @@ public class ResolvedToASTBuilder {
                     obj.pixelWidth(img.getWidth());
                     obj.pixelHeight(img.getHeight());
 
-                    // 크기: bounds에서 계산 (mm → pt → HWPUNIT)
+                    // 크기: bounds 기반, 가로가 긴 방향을 width로 (인라인 객체는 가로 텍스트 흐름)
                     double[] bounds = rg.bounds();
                     if (bounds != null && bounds.length >= 4) {
-                        double w = (bounds[3] - bounds[1]) * scaleFactor;
-                        double h = (bounds[2] - bounds[0]) * scaleFactor;
-                        obj.width(CoordinateConverter.pointsToHwpunits(w));
-                        obj.height(CoordinateConverter.pointsToHwpunits(h));
+                        double span1 = Math.abs(bounds[3] - bounds[1]) * scaleFactor;
+                        double span2 = Math.abs(bounds[2] - bounds[0]) * scaleFactor;
+                        // 인라인 객체: 항상 가로가 긴 방향을 width로
+                        double bw = Math.max(span1, span2);
+                        double bh = Math.min(span1, span2);
+                        obj.width(CoordinateConverter.pointsToHwpunits(bw));
+                        obj.height(CoordinateConverter.pointsToHwpunits(bh));
                     } else {
-                        // 폴백: 300dpi 기준 pt 계산
-                        obj.width(CoordinateConverter.pointsToHwpunits(img.getWidth() * 72.0 / 300));
-                        obj.height(CoordinateConverter.pointsToHwpunits(img.getHeight() * 72.0 / 300));
+                        // 폴백: PNG 픽셀에서 계산
+                        double pw = img.getWidth(), ph = img.getHeight();
+                        obj.width(CoordinateConverter.pointsToHwpunits(Math.max(pw, ph) * 72.0 / 300));
+                        obj.height(CoordinateConverter.pointsToHwpunits(Math.min(pw, ph) * 72.0 / 300));
                     }
 
                     obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
