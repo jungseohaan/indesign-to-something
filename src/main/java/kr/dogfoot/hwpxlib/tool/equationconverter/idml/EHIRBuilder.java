@@ -97,8 +97,27 @@ public class EHIRBuilder {
         while (i < tokens.size()) {
             EHToken t = tokens.get(i);
 
-            // SQRT_MARKER가 다시 오면 → 새로운 √ (현재 √ 종료)
-            if (t.type() == EHToken.Type.SQRT_MARKER) break;
+            // SQRT_MARKER가 다시 오면:
+            // - radicand가 비어있으면 → √ 바 연장 (스킵)
+            // - radicand가 있고 다음이 비SQRT 토큰이면 → √ 바 연장 (스킵, radicand 계속)
+            // - radicand가 있고 다음이 SQRT_MARKER이면 → 연속 √ (스킵)
+            // - radicand가 있고 다음이 없거나 한국어이면 → 새로운 √ (종료)
+            if (t.type() == EHToken.Type.SQRT_MARKER) {
+                // 연속 SQRT_MARKER 스킵
+                while (i < tokens.size() && tokens.get(i).type() == EHToken.Type.SQRT_MARKER) {
+                    i++;
+                }
+                // 다음 토큰 확인: radicand 계속 수집 가능하면 √ 바 연장
+                if (i < tokens.size() && !sqrt.radicand().isEmpty()) {
+                    EHToken next = tokens.get(i);
+                    // 다음이 SKIP/BASE_TEXT/SUP_BASE_TEXT 등 radicand 후보이면 계속
+                    if (next.type() != EHToken.Type.SQRT_MARKER
+                            && next.type() != EHToken.Type.FRACTION_DENOMINATOR) {
+                        continue; // √ 바 연장 → radicand 계속 수집
+                    }
+                }
+                break; // 새로운 √ 또는 종료
+            }
 
             // SKIP 토큰은 건너뜀
             if (t.type() == EHToken.Type.SKIP) { i++; continue; }
