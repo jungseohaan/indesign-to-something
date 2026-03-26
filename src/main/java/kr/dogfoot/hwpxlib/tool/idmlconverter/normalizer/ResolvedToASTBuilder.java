@@ -9,6 +9,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 
 import javax.imageio.ImageIO;
 import javax.xml.parsers.DocumentBuilder;
@@ -518,55 +521,135 @@ public class ResolvedToASTBuilder {
             String styleFillColor = getStyleFillColor(ip.appliedParagraphStyle());
             Double styleTracking = getStyleTracking(ip.appliedParagraphStyle());
 
-            // 런 변환: IDML CharacterRun → ASTTextRun
+            // 런 변환: IDML CharacterRun → ASTTextRun + 수식 그룹화
             // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
             ResolvedRun defaultRR = findDefaultResolvedRun(resolvedRuns);
             int resolvedRunIdx = 0;
-            for (IDMLCharacterRun cr : ip.characterRuns()) {
-                String text = cr.content();
-                if (text == null || text.isEmpty()) continue;
 
-                // U+FFFC (인라인 객체 마커) 처리
-                if (text.contains("\uFFFC")) {
-                    String[] parts = text.split("\uFFFC", -1);
-                    // IDML에서 인라인 프레임/그래픽 ID 수집
-                    List<String> inlineIds = new ArrayList<>();
-                    if (cr.inlineFrames() != null) {
-                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame itf : cr.inlineFrames()) {
-                            inlineIds.add(itf.selfId());
-                        }
+            // 전처리: 한국어+수식마커 혼합 런 분리 + 원문자 변환
+            List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(ip.characterRuns());
+            ASTRunConverter.convertCircledNumberRuns(runs);
+
+            // 수식 그룹화 상태
+            List<IDMLCharacterRun> mathGroup = new ArrayList<>();
+            List<IDMLCharacterRun> npMathGroup = new ArrayList<>();
+            List<IDMLCharacterRun> ehMathGroup = new ArrayList<>();
+
+            boolean paraHasBTRuns = false;
+            boolean paraHasNPStructuralRuns = false;
+            for (IDMLCharacterRun r : runs) {
+                if (r.isBTFont() || r.grepMathFont()) paraHasBTRuns = true;
+                if (r.isNPFont()) {
+                    NPFontGlyphMap.FontCategory cat = NPFontGlyphMap.getCategory(r.npFontName());
+                    if (cat == NPFontGlyphMap.FontCategory.SUBSCRIPT_INDEX
+                            || cat == NPFontGlyphMap.FontCategory.SUPERSCRIPT_INDEX
+                            || cat == NPFontGlyphMap.FontCategory.ROOT
+                            || cat == NPFontGlyphMap.FontCategory.FRACTION_BAR
+                            || cat == NPFontGlyphMap.FontCategory.INTEGRAL
+                            || cat == NPFontGlyphMap.FontCategory.SUMMATION
+                            || cat == NPFontGlyphMap.FontCategory.LIMIT
+                            || cat == NPFontGlyphMap.FontCategory.SPECIAL_SYMBOL) {
+                        paraHasNPStructuralRuns = true;
                     }
-                    if (cr.inlineGraphics() != null) {
-                        for (IDMLCharacterRun.InlineGraphic ig : cr.inlineGraphics()) {
-                            inlineIds.add(ig.selfId());
-                        }
-                    }
-                    int anchorIdx = 0;
-                    for (int pi = 0; pi < parts.length; pi++) {
-                        if (!parts[pi].isEmpty()) {
-                            ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, parts[pi]);
-                            ASTTextRun tr = createRunFromIDML(cr, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking);
-                            para.addItem(tr);
-                        }
-                        // U+FFFC 위치에 인라인 객체 삽입
-                        if (pi < parts.length - 1 && anchorIdx < inlineIds.size()) {
-                            String inlineHexId = inlineIds.get(anchorIdx);
-                            try {
-                                int domId = Integer.parseInt(inlineHexId.substring(1), 16);
-                                ASTInlineObject inlineObj = loadInlineObject(domId);
-                                if (inlineObj != null) {
-                                    para.addItem(inlineObj);
-                                }
-                            } catch (Exception e) { /* skip */ }
-                            anchorIdx++;
-                        }
-                    }
-                } else {
-                    ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
-                    ASTTextRun tr = createRunFromIDML(cr, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor, styleTracking);
-                    para.addItem(tr);
                 }
             }
+
+            for (int idx = 0; idx < runs.size(); idx++) {
+                IDMLCharacterRun run = runs.get(idx);
+
+                // GREP 수식 플래그 보정
+                if (run.grepMathFont() && ASTMathGrouper.isPlainAlphanumericRun(run)) {
+                    String ff = run.fontFamily();
+                    if (ff != null && !ff.contains("BT수식")) {
+                        run.grepMathFont(false);
+                    }
+                }
+
+                // EH 수식 그룹 진입
+                boolean enterEH = run.isEHFont()
+                        || EHFontGlyphMap.containsEHEncodedChars(run.content())
+                        || EHFontGlyphMap.containsEHFractionPattern(run.content())
+                        || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx));
+
+                // NP 수식 그룹 진입
+                boolean enterNP = false;
+                if (!enterEH) {
+                    enterNP = run.isNPFont()
+                            || (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx))
+                            || (npMathGroup.isEmpty() && ASTMathGrouper.isPreNPMathRun(run, runs, idx))
+                            || (paraHasNPStructuralRuns && !run.isNPFont() && !run.isBTFont()
+                                && !run.grepMathFont() && !run.isEHFont()
+                                && ASTMathGrouper.isStandaloneMathRun(run));
+                }
+
+                // BT 수식 그룹 진입
+                boolean enterBT = false;
+                if (!enterEH && !enterNP) {
+                    enterBT = ((run.isBTFont() || run.grepMathFont())
+                                && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content())
+                                && !ASTMathGrouper.isPlainAlphanumericRun(run))
+                            || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))
+                            || (paraHasBTRuns && ASTMathGrouper.looksLikeMathRun(run.content()));
+                }
+
+                if (enterEH) {
+                    flushMathGroups(mathGroup, npMathGroup, null, para);
+                    ehMathGroup.add(run);
+                } else if (enterNP) {
+                    flushMathGroups(mathGroup, null, ehMathGroup, para);
+                    npMathGroup.add(run);
+                } else if (enterBT) {
+                    flushMathGroups(null, npMathGroup, ehMathGroup, para);
+                    mathGroup.add(run);
+                } else {
+                    // 비수식 런: 열린 그룹 모두 flush
+                    flushMathGroups(mathGroup, npMathGroup, ehMathGroup, para);
+
+                    // 일반 런 변환 (U+FFFC 인라인 객체 포함)
+                    String text = run.content();
+                    if (text == null || text.isEmpty()) continue;
+
+                    if (text.contains("\uFFFC")) {
+                        String[] parts = text.split("\uFFFC", -1);
+                        List<String> inlineIds = new ArrayList<>();
+                        if (run.inlineFrames() != null) {
+                            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame itf : run.inlineFrames()) {
+                                inlineIds.add(itf.selfId());
+                            }
+                        }
+                        if (run.inlineGraphics() != null) {
+                            for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
+                                inlineIds.add(ig.selfId());
+                            }
+                        }
+                        int anchorIdx = 0;
+                        for (int pi = 0; pi < parts.length; pi++) {
+                            if (!parts[pi].isEmpty()) {
+                                ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, parts[pi]);
+                                ASTTextRun tr = createRunFromIDML(run, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking);
+                                para.addItem(tr);
+                            }
+                            if (pi < parts.length - 1 && anchorIdx < inlineIds.size()) {
+                                String inlineHexId = inlineIds.get(anchorIdx);
+                                try {
+                                    int domId = Integer.parseInt(inlineHexId.substring(1), 16);
+                                    ASTInlineObject inlineObj = loadInlineObject(domId);
+                                    if (inlineObj != null) {
+                                        para.addItem(inlineObj);
+                                    }
+                                } catch (Exception e) { /* skip */ }
+                                anchorIdx++;
+                            }
+                        }
+                    } else {
+                        ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
+                        ASTTextRun tr = createRunFromIDML(run, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor, styleTracking);
+                        para.addItem(tr);
+                    }
+                }
+            }
+            // 단락 끝 잔여 수식 그룹 flush
+            flushMathGroups(mathGroup, npMathGroup, ehMathGroup, para);
 
             // 패턴 감지: 행잉 인덴트 + 인라인 아이콘 + 탭
             // InDesign에서 인라인 아이콘이 마진 밖(-indent 영역)에 배치되지만
@@ -625,6 +708,7 @@ public class ResolvedToASTBuilder {
             }
             if (tr.textColor() == null && rr.fillColor() != null) tr.textColor(resolveColorToHex(rr.fillColor()));
         }
+        // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
         return tr;
     }
 
@@ -859,7 +943,111 @@ public class ResolvedToASTBuilder {
             paragraphs.add(para);
         }
 
+        // 수식 폰트 런 → ASTEquation 변환 (단락별 후처리)
+        for (ASTParagraph para : paragraphs) {
+            convertMathRunsInParagraph(para);
+        }
+
         return paragraphs;
+    }
+
+    /**
+     * resolved-only 단락 내 수식 폰트 런(EH/BT/NP)을 ASTEquation으로 변환.
+     * ASTTextRun의 fontFamily를 기반으로 IDMLCharacterRun 어댑터를 생성하여
+     * ASTMathGrouper.flush* 메서드로 위임.
+     */
+    private void convertMathRunsInParagraph(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.isEmpty()) return;
+
+        List<ASTInlineItem> newItems = new ArrayList<>();
+        List<IDMLCharacterRun> mathGroup = new ArrayList<>();
+        String mathType = null; // "EH", "BT", "NP"
+
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) {
+                flushResolvedMathGroup(mathGroup, mathType, newItems, para);
+                mathGroup.clear();
+                mathType = null;
+                newItems.add(item);
+                continue;
+            }
+
+            ASTTextRun tr = (ASTTextRun) item;
+            String ff = tr.fontFamily();
+            String currentType = null;
+            if (ff != null) {
+                if (EHFontGlyphMap.isEHFontFamily(ff)) currentType = "EH";
+                else if (BTFontGlyphMap.isBTFontFamily(ff)) currentType = "BT";
+                else if (NPFontGlyphMap.isNPFont(ff)) currentType = "NP";
+            }
+
+            if (currentType != null) {
+                if (mathType == null || mathType.equals(currentType)) {
+                    mathType = currentType;
+                    IDMLCharacterRun cr = new IDMLCharacterRun();
+                    cr.content(tr.text());
+                    cr.fontFamily(ff);
+                    mathGroup.add(cr);
+                } else {
+                    flushResolvedMathGroup(mathGroup, mathType, newItems, para);
+                    mathGroup.clear();
+                    mathType = currentType;
+                    IDMLCharacterRun cr = new IDMLCharacterRun();
+                    cr.content(tr.text());
+                    cr.fontFamily(ff);
+                    mathGroup.add(cr);
+                }
+            } else {
+                flushResolvedMathGroup(mathGroup, mathType, newItems, para);
+                mathGroup.clear();
+                mathType = null;
+                newItems.add(item);
+            }
+        }
+        flushResolvedMathGroup(mathGroup, mathType, newItems, para);
+
+        if (newItems.size() != items.size() || !newItems.equals(items)) {
+            items.clear();
+            items.addAll(newItems);
+        }
+    }
+
+    private void flushResolvedMathGroup(List<IDMLCharacterRun> group, String type,
+                                         List<ASTInlineItem> out, ASTParagraph ignoredPara) {
+        if (group == null || group.isEmpty()) return;
+        // flush 메서드는 para에 직접 추가하므로, 임시 para를 사용하여 결과를 꺼냄
+        ASTParagraph tempPara = new ASTParagraph();
+        if ("EH".equals(type)) {
+            ASTMathGrouper.flushEHMathGroup(group, tempPara);
+        } else if ("BT".equals(type)) {
+            ASTMathGrouper.flushMathGroup(group, tempPara);
+        } else if ("NP".equals(type)) {
+            ASTMathGrouper.flushNPMathGroup(group, tempPara);
+        }
+        out.addAll(tempPara.items());
+    }
+
+    /**
+     * 수식 그룹 flush 헬퍼: null이 아닌 그룹만 flush하고 clear.
+     */
+    private void flushMathGroups(List<IDMLCharacterRun> btGroup,
+                                  List<IDMLCharacterRun> npGroup,
+                                  List<IDMLCharacterRun> ehGroup,
+                                  ASTParagraph para) {
+        if (btGroup != null && !btGroup.isEmpty()) {
+            ASTMathGrouper.flushMathGroup(btGroup, para);
+            btGroup.clear();
+        }
+        if (npGroup != null && !npGroup.isEmpty()) {
+            ASTMathGrouper.flushNPMathGroup(npGroup, para);
+            npGroup.clear();
+        }
+        if (ehGroup != null && !ehGroup.isEmpty()) {
+            ASTMathGrouper.flushEHMathGroup(ehGroup, para);
+            ehGroup.clear();
+        }
     }
 
     /**
