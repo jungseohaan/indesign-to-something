@@ -2328,11 +2328,13 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                         onThisPage = (tf.parentPage === page);
                     } catch (e) {}
                     if (!onThisPage) {
+                        // visibleBounds 폴백: spread 좌표에서 페이지 bounds와 겹침 확인
                         try {
                             var tfb = tf.visibleBounds;
-                            var cy = (tfb[0] + tfb[2]) / 2;
-                            var cx = (tfb[1] + tfb[3]) / 2;
-                            onThisPage = (cy >= pb[0] && cy <= pb[2] && cx >= pb[1] && cx <= pb[3]);
+                            // 겹침 확인 (중심점이 아닌 영역 겹침)
+                            var overlapH = tfb[3] > pb[1] && tfb[1] < pb[3];
+                            var overlapV = tfb[2] > pb[0] && tfb[0] < pb[2];
+                            onThisPage = overlapH && overlapV;
                         } catch (e) {}
                     }
                     if (onThisPage && tf.visible) {
