@@ -2182,6 +2182,30 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         if (isOnHiddenLayer(item)) continue;
         try { if (item.nonprinting) continue; } catch (e) {}
 
+        // 페이징 정보(footer/하시라/header): 페이지 상하단 10% 영역의 짧은 텍스트 → 배경에 포함
+        try {
+            var sc = item.parentStory.contents;
+            if (sc.indexOf("\u0018") >= 0) continue; // 자동 페이지 번호 마커
+        } catch (e) {}
+        try {
+            if (item.masterPageItem) continue; // 마스터 페이지 override
+        } catch (e) {}
+        try {
+            var ppg = item.parentPage;
+            if (ppg) {
+                var pgB = ppg.bounds; // [top, left, bottom, right]
+                var pgH = pgB[2] - pgB[0];
+                var tfB = item.geometricBounds;
+                var tfTop = tfB[0] - pgB[0];
+                var tfBot = tfB[2] - pgB[0];
+                var trimmed = item.contents.replace(/[\s\uFEFF\r\n\u0018]/g, "");
+                // 상단 10% 또는 하단 10%에 위치하고 짧은 텍스트(≤15자) → 배경 포함
+                if (trimmed.length <= 15 && (tfTop < pgH * 0.10 || tfBot > pgH * 0.90)) {
+                    continue;
+                }
+            }
+        } catch (e) {}
+
         // 인라인 객체는 부모가 관리하므로 건너뜀
         if (isInlineItem(item)) continue;
 
