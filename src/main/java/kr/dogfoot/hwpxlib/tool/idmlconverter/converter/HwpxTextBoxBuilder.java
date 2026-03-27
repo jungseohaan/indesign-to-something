@@ -1014,10 +1014,10 @@ public class HwpxTextBoxBuilder {
                 .borderFillIDRefAnd("1")
                 .noAdjustAnd(false);
 
-        // ShapeSize
+        // ShapeSize — 높이 0: 콘텐츠에 맞게 자동 확장 (하단 빈 공간 방지)
         table.createSZ();
         table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .heightAnd(0L).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
         // BaselineShift → 컨테이너 Y 오프셋 보정.
@@ -1093,9 +1093,9 @@ public class HwpxTextBoxBuilder {
         tc.createCellSpan();
         tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
 
-        // 셀 크기
+        // 셀 크기 — 높이 0: 콘텐츠에 맞게 자동 확장
         tc.createCellSz();
-        tc.cellSz().widthAnd(w).heightAnd(h);
+        tc.cellSz().widthAnd(w).heightAnd(0L);
 
         // 셀 여백 — 블록 인셋 적용 (InDesign insetSpacing)
         tc.createCellMargin();
@@ -1663,7 +1663,7 @@ public class HwpxTextBoxBuilder {
 
         table.createSZ();
         table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .heightAnd(0L).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
         table.createPos();
@@ -1703,7 +1703,7 @@ public class HwpxTextBoxBuilder {
         tc.createCellSpan();
         tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
         tc.createCellSz();
-        tc.cellSz().widthAnd(w).heightAnd(h);
+        tc.cellSz().widthAnd(w).heightAnd(0L);
         // 셀 여백: 페이지 레벨 승격된 오버레이는 위치가 절대 좌표로 이미 처리되므로
         // applyImplicitTextMargin()이 설정한 위치 기반 여백은 사용하지 않는다.
         tc.createCellMargin();
