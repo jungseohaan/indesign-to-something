@@ -118,7 +118,7 @@ var CONFIG = null;
 function loadConversionConfig(configPath) {
     var defaults = {
         rendering: {
-            textFrame: { maxTextLength: 30, decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 }, decorativeStyledText: { enabled: true, maxTextLength: 10, excludeBlack: true, blackThreshold: 0.90, requireObjectStyle: true } },
+            textFrame: { maxTextLength: 30, groupShapeMaxTextLength: 20, decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 }, decorativeStyledText: { enabled: true, maxTextLength: 10, excludeBlack: true, blackThreshold: 0.90, requireObjectStyle: true } },
             badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
             rotation: { minAngle: 0.1 },
@@ -139,6 +139,8 @@ function loadConversionConfig(configPath) {
             if (parsed.rendering.textFrame) {
                 if (parsed.rendering.textFrame.maxTextLength !== undefined)
                     defaults.rendering.textFrame.maxTextLength = parsed.rendering.textFrame.maxTextLength;
+                if (parsed.rendering.textFrame.groupShapeMaxTextLength !== undefined)
+                    defaults.rendering.textFrame.groupShapeMaxTextLength = parsed.rendering.textFrame.groupShapeMaxTextLength;
                 if (parsed.rendering.textFrame.decorativeLargeText) {
                     var dlt = parsed.rendering.textFrame.decorativeLargeText;
                     if (dlt.enabled !== undefined) defaults.rendering.textFrame.decorativeLargeText.enabled = dlt.enabled;
@@ -2209,14 +2211,13 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         // 인라인 객체는 부모가 관리하므로 건너뜀
         if (isInlineItem(item)) continue;
 
-        // Group 안의 짧은 장식 TextFrame은 배경에 포함 (editable 아님)
-        // 조건: 10자 이하 + 글자 효과(색상, 특수 폰트)가 있는 경우만
+        // Group 안 짧은 장식 TextFrame → 배경에 포함
         try {
             var parentType = item.parent.constructor.name;
             if (parentType === "Group") {
                 var groupText = item.contents.replace(/[\s\uFEFF\r\n]/g, "");
+                // 10자 이하 + 비검정 색상 → 장식 텍스트 → 배경 포함
                 if (groupText.length <= 10) {
-                    // 일반 폰트(검정, 기본체)인지 확인 — 일반이면 editable 유지
                     var isDecorative = false;
                     try {
                         var chars = item.parentStory.characters;
@@ -2229,6 +2230,7 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                     } catch (e2) { isDecorative = true; }
                     if (isDecorative) continue;
                 }
+                // 나머지 Group 안 TextFrame → 기존 렌더링 조건으로 판별 (아래 계속)
             }
         } catch (e) {}
 

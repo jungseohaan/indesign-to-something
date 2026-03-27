@@ -6,6 +6,8 @@
       "_comment": "편집 가능 텍스트 프레임 vs 장식 텍스트 판별 기준",
       "maxTextLength": 30,
       "_comment_maxTextLength": "이 글자 수 이하인 TextFrame은 장식으로 판별하여 배경 PNG에 포함",
+      "groupShapeMaxTextLength": 20,
+      "_comment_groupShapeMaxTextLength": "Group 안 도형+텍스트 조합에서 이 글자 수 이하면 배경 포함 (도형 위 제목/라벨)",
       "decorativeLargeText": {
         "_comment": "큰 폰트의 장식 텍스트를 PNG로 렌더링할 조건",
         "enabled": true,
@@ -50,7 +52,7 @@
       "_comment": "회전된 객체 렌더링 최소 각도 (미사용 — 향후 구현 예정)",
       "minAngle": 0.1
     },
-    "pngExportResolution": 300,
+    "pngExportResolution": 220,
     "_comment_pngExportResolution": "ExtendScript PNG 내보내기 해상도 (DPI). 페이지 배경은 PDF 파이프라인 사용"
   },
   "fontMapping": {
