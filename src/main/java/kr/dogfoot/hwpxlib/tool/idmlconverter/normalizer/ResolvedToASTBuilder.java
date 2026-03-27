@@ -427,7 +427,11 @@ public class ResolvedToASTBuilder {
             // 단락 속성: resolved에서 가져옴 (정확한 pt 값)
             if (resolvedStory != null && i < resolvedStory.paragraphs().size()) {
                 ResolvedParagraph rp = resolvedStory.paragraphs().get(i);
-                if (rp.justification() != null) para.alignment(rp.justification());
+                if (rp.justification() != null) {
+                    para.alignment(rp.justification());
+                } else {
+                    para.alignment("LEFT_JUSTIFIED"); // 기본 왼쪽 정렬 (한컴한글 기본=양쪽정렬 방지)
+                }
                 // leading: IDML ParagraphStyle 우선, CharacterRun, resolved 순
                 Double fixedLeading = getStyleLeading(ip.appliedParagraphStyle());
                 if (fixedLeading == null || fixedLeading <= 0) {

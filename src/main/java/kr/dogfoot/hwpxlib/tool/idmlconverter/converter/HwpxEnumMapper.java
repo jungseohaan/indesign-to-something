@@ -19,11 +19,11 @@ public final class HwpxEnumMapper {
     public static HorizontalAlign2 mapAlignment(String alignment) {
         if (alignment == null) return HorizontalAlign2.JUSTIFY;
         switch (alignment.toLowerCase()) {
-            case "left": case "leftjustify": case "leftalign":
+            case "left": case "leftjustify": case "leftalign": case "left_align": case "left_justified":
                 return HorizontalAlign2.LEFT;
-            case "center": case "centerjustify": case "centeralign":
+            case "center": case "centerjustify": case "centeralign": case "center_align": case "center_justified":
                 return HorizontalAlign2.CENTER;
-            case "right": case "rightjustify": case "rightalign":
+            case "right": case "rightjustify": case "rightalign": case "right_align": case "right_justified":
                 return HorizontalAlign2.RIGHT;
             case "leftjustified":
                 return HorizontalAlign2.LEFT;
