@@ -35,19 +35,25 @@ public class ResolvedToASTBuilder {
     private final String basePath;       // resolved.json 부모 디렉토리
     private final double scaleFactor;    // mm → pt 변환 (resolved 좌표 → points)
     private final File idmlDir;          // IDML 압축 해제 디렉토리 (Story XML 로드용)
+    private final int pngExportDpi;      // ExtendScript PNG 내보내기 해상도
     private final Map<String, IDMLStory> idmlStoryCache = new HashMap<>();
     private StylePropertyResolver styleResolver;
     private ASTDocument astDoc; // Phase 0에서 스타일 정의 접근용
 
     public ResolvedToASTBuilder(ResolvedData resolvedData) {
-        this(resolvedData, null);
+        this(resolvedData, null, 300);
     }
 
     public ResolvedToASTBuilder(ResolvedData resolvedData, File idmlDir) {
+        this(resolvedData, idmlDir, 300);
+    }
+
+    public ResolvedToASTBuilder(ResolvedData resolvedData, File idmlDir, int pngExportDpi) {
         this.resolvedData = resolvedData;
         this.basePath = resolvedData.basePath();
         this.scaleFactor = resolvedData.scaleFactor();
         this.idmlDir = idmlDir;
+        this.pngExportDpi = pngExportDpi;
     }
 
     /**
@@ -436,6 +442,11 @@ public class ResolvedToASTBuilder {
             IDMLParagraph ip = idmlParas.get(i);
             ASTParagraph para = new ASTParagraph();
 
+            // 칼럼 브레이크 (ACE 8)
+            if (ip.columnBreakAfter()) {
+                para.columnBreakAfter(true);
+            }
+
             // 단락 스타일 (IDML)
             if (ip.appliedParagraphStyle() != null) {
                 para.paragraphStyleRef(ip.appliedParagraphStyle());
@@ -769,12 +780,24 @@ public class ResolvedToASTBuilder {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
         }
         if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
-        // InDesign Tracking (1/1000 em) → HWPX 자간 (%)
-        // 변환: tracking / 10 (e.g., InDesign -30 → HWPX -3%)
-        if (cr.tracking() != null && cr.tracking() != 0) {
-            tr.letterSpacing((short) Math.round(cr.tracking() / 10.0));
-        } else if (styleTracking != null && styleTracking != 0) {
-            tr.letterSpacing((short) Math.round(styleTracking / 10.0));
+        // InDesign Tracking → HWPX 자간
+        // 한컴돋움/한컴바탕 fallback 폰트 매핑 시: tracking 값 그대로 (e.g., -15 → -15%)
+        // 명시적 매핑 폰트: tracking / 10 (e.g., -30 → -3%)
+        // 한국어 폰트(한글 포함 이름)는 대부분 한컴돋움 fallback → 그대로 사용
+        {
+            Double trackingVal = (cr.tracking() != null && cr.tracking() != 0)
+                    ? cr.tracking() : styleTracking;
+            if (trackingVal != null && trackingVal != 0) {
+                String fn = (fontFamily != null) ? fontFamily : (rr != null ? rr.fontFamily() : null);
+                boolean isDefaultFallback = isKoreanFontName(fn);
+                if (isDefaultFallback) {
+                    // 한컴돋움 fallback: tracking 값의 50%
+                    tr.letterSpacing((short) Math.round(trackingVal * 0.5));
+                } else {
+                    // 명시적 매핑: tracking / 10
+                    tr.letterSpacing((short) Math.round(trackingVal / 10.0));
+                }
+            }
         }
         // baselineShift: InDesign pt → HWPX % (fontSize 기준)
         if (rr != null && rr.baselineShift() != null && rr.baselineShift() != 0) {
@@ -818,6 +841,16 @@ public class ResolvedToASTBuilder {
     }
 
     private static final String BULLET_CHARS = "●•◆◇▶▷■□";
+
+    /** 한국어 폰트 이름 판별: 한글 문자가 포함되어 있으면 한국어 폰트 */
+    private static boolean isKoreanFontName(String fontName) {
+        if (fontName == null) return false;
+        for (int i = 0; i < fontName.length(); i++) {
+            char c = fontName.charAt(i);
+            if ((c >= 0xAC00 && c <= 0xD7AF) || (c >= 0x3131 && c <= 0x318E)) return true;
+        }
+        return false;
+    }
 
     /**
      * 불릿 문자(●, •)로 시작하는 런을 불릿 런 + 본문 런으로 분리하여 단락에 추가.
@@ -1786,8 +1819,8 @@ public class ResolvedToASTBuilder {
                         obj.height(CoordinateConverter.pointsToHwpunits(bh));
                     } else {
                         double pw = img.getWidth(), ph = img.getHeight();
-                        obj.width(CoordinateConverter.pointsToHwpunits(Math.max(pw, ph) * 72.0 / 300));
-                        obj.height(CoordinateConverter.pointsToHwpunits(Math.min(pw, ph) * 72.0 / 300));
+                        obj.width(CoordinateConverter.pointsToHwpunits(Math.max(pw, ph) * 72.0 / pngExportDpi));
+                        obj.height(CoordinateConverter.pointsToHwpunits(Math.min(pw, ph) * 72.0 / pngExportDpi));
                     }
 
                     obj.sourceId("u" + Integer.toHexString(anchoredObjectId));

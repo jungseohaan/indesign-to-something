@@ -195,7 +195,6 @@ public class HwpxImageBuilder {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, displayH);
 
-        // ImageClip/Dim — displayW 기준 (이미지 DPI와 무관하게 표시 크기에 맞춤)
         pic.createImgClip();
         pic.imgClip().leftAnd(0L).rightAnd(displayW).topAnd(0L).bottomAnd(displayH);
 
@@ -539,7 +538,7 @@ public class HwpxImageBuilder {
         pic.createInMargin();
         pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
-        // ImgDim — 표시 크기 기준 (이미지 DPI와 무관하게 최대 해상도로 렌더링)
+        // ImgDim — 표시 크기 기준
         pic.createImgDim();
         pic.imgDim().dimwidthAnd(displayW).dimheightAnd(displayH);
 
@@ -612,7 +611,6 @@ public class HwpxImageBuilder {
         pic.imgRect().createPt3();
         pic.imgRect().pt3().set(0L, h);
 
-        // ImageClip/Dim — 표시 크기 기준
         pic.createImgClip();
         pic.imgClip().leftAnd(0L).rightAnd(w).topAnd(0L).bottomAnd(h);
 

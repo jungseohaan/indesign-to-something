@@ -122,12 +122,13 @@ function loadConversionConfig(configPath) {
             badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
             rotation: { minAngle: 0.1 },
-            pngExportResolution: 600
+            pngExportResolution: 220
         }
     };
-    if (!configPath) return defaults;
+    if (!configPath) { $.writeln("[Config] no configPath"); return defaults; }
     try {
         var f = File(configPath);
+        $.writeln("[Config] path: " + f.fsName + " exists=" + f.exists);
         if (!f.exists) return defaults;
         f.encoding = "UTF-8";
         f.open("r");
@@ -240,6 +241,15 @@ function main(args) {
     // conversion-config.json 경로 (선택적)
     var configPath = args[6] || null;
     CONFIG = loadConversionConfig(configPath);
+    // config 디버그 기록
+    try {
+        var cfgLog = File(outputDir + "/_config_jsx_debug.log");
+        cfgLog.encoding = "UTF-8";
+        cfgLog.open("w");
+        cfgLog.writeln("configPath=" + configPath);
+        cfgLog.writeln("pngExportResolution=" + CONFIG.rendering.pngExportResolution);
+        cfgLog.close();
+    } catch(e) {}
 
     // --- 기존 환경설정 저장 ---
     var savedInteractionLevel = app.scriptPreferences.userInteractionLevel;
@@ -503,7 +513,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems) 
     var renderedIds = {};
     var badgeGroupChildIds = {};
 
-    app.pngExportPreferences.exportResolution = 300;
+    app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 220;
     app.pngExportPreferences.antiAlias = true;
     app.pngExportPreferences.transparentBackground = true;
     app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
@@ -2142,7 +2152,7 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
-    app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 300;
+    app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 220;
     app.pngExportPreferences.antiAlias = true;
     app.pngExportPreferences.transparentBackground = true;
     app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
@@ -2409,7 +2419,7 @@ function exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems, al
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
-    app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 300;
+    app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 220;
     app.pngExportPreferences.antiAlias = true;
     app.pngExportPreferences.transparentBackground = true;
     app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;

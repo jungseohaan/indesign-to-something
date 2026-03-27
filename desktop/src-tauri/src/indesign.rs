@@ -9,13 +9,16 @@ use tokio::time::sleep;
 fn find_bundled_config(app: &AppHandle) -> String {
     // 리소스 디렉토리에서 찾기
     if let Ok(resource_dir) = app.path().resource_dir() {
+        eprintln!("[config] resource_dir: {:?}", resource_dir);
         let config = resource_dir.join("conversion-config.json");
         if config.exists() {
+            eprintln!("[config] found: {:?}", config);
             return config.to_string_lossy().to_string();
         }
         // Tauri 번들: _up_/_up_/ 구조
         let config2 = resource_dir.join("_up_/_up_/conversion-config.json");
         if config2.exists() {
+            eprintln!("[config] found (bundle): {:?}", config2);
             return config2.to_string_lossy().to_string();
         }
     }
@@ -23,9 +26,18 @@ fn find_bundled_config(app: &AppHandle) -> String {
     if let Ok(data_dir) = app.path().app_data_dir() {
         let config = data_dir.join("conversion-config.json");
         if config.exists() {
+            eprintln!("[config] found (app_data): {:?}", config);
             return config.to_string_lossy().to_string();
         }
     }
+    // 개발 모드: 프로젝트 루트에서 찾기
+    let dev_config = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conversion-config.json");
+    if dev_config.exists() {
+        let resolved = dev_config.canonicalize().unwrap_or(dev_config);
+        eprintln!("[config] found (dev): {:?}", resolved);
+        return resolved.to_string_lossy().to_string();
+    }
+    eprintln!("[config] NOT FOUND — using defaults");
     String::new()
 }
 
@@ -133,6 +145,11 @@ pub async fn run_extraction(
     let spread_flag = if spread_mode { "1" } else { "0" };
     // config 파일: 번들 리소스에서 찾거나 빈 문자열
     let config_path = find_bundled_config(&app);
+    // 디버그 로그: config 경로를 추출 디렉토리에 기록
+    let _ = std::fs::write(
+        output_dir.join("_config_debug.log"),
+        format!("config_path={}\n", config_path),
+    );
     let applescript = format!(
         r#"tell application "{app_name}"
     activate

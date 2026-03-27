@@ -206,7 +206,10 @@ public class FlatToHwpxConverter {
         // 현재 섹션의 컬럼 너비 계산
         long mLeft = page.marginLeft() > 0 ? page.marginLeft() : 1417;
         long mRight = page.marginRight() > 0 ? page.marginRight() : 1417;
+        long mTop = page.marginTop() > 0 ? page.marginTop() : 1417;
         ctx.currentColumnWidth = page.pageWidth() - mLeft - mRight;
+        ctx.pageMarginTop = mTop;
+        ctx.pageMarginLeft = mLeft;
 
         // SecPr 단락 생성
         Para secPrPara = createSectionPara(sectionFile, pagesConverted > 0);
@@ -329,12 +332,14 @@ public class FlatToHwpxConverter {
             hwpxHeight = (int) page.pageHeight();
         }
 
-        // 마진
-        int mTop = page.marginTop() > 0 ? (int) page.marginTop() : 1417;
-        int mBottom = page.marginBottom() > 0 ? (int) page.marginBottom() : 1417;
-        int mLeft = page.marginLeft() > 0 ? (int) page.marginLeft() : 1417;
-        int mRight = page.marginRight() > 0 ? (int) page.marginRight() : 1417;
-        int headerFooter = 1417;
+        // 마진: 모든 콘텐츠가 절대 좌표(PAPER 기준)로 배치되므로 0으로 설정.
+        // 한글 뷰어가 BEHIND_TEXT 이미지를 본문 영역으로 클리핑하기 때문에
+        // 마진이 있으면 페이지 배경 PNG가 잘림.
+        int mTop = 0;
+        int mBottom = 0;
+        int mLeft = 0;
+        int mRight = 0;
+        int headerFooter = 0;
 
         secPr.createPagePr();
         secPr.pagePr()

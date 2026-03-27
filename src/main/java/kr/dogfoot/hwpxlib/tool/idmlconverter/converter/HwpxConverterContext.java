@@ -39,6 +39,10 @@ public class HwpxConverterContext {
     // 현재 섹션의 컬럼 너비 (HWPUNIT) — 오버레이 위치 계산에 사용
     public long currentColumnWidth;
 
+    // 현재 페이지 마진 (HWPUNIT) — 배경 이미지 PAGE 기준 위치 보정용
+    public long pageMarginTop;
+    public long pageMarginLeft;
+
     // 연결 글상자 링크 추적
     // storyId → 사전 할당된 linkListIDRef 배열 (블록 순서대로)
     public final Map<String, java.util.List<String>> storyLinkIds = new LinkedHashMap<>();
