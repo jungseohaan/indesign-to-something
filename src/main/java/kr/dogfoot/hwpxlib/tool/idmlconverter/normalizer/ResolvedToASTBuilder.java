@@ -221,8 +221,6 @@ public class ResolvedToASTBuilder {
             int pageIdx = tf.pageIndex();
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
-            ASTSection section = sections.get(pageIdx);
-
             // 좌표 계산: geometricBounds는 spread 좌표 (applyScale 후 pt)
             // → page bounds를 빼서 page-relative로 변환
             double[] gb = tf.geometricBounds();
@@ -232,10 +230,17 @@ public class ResolvedToASTBuilder {
                     ? resolvedData.pages().get(pageIdx) : null;
             double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
             double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
-            double x = gb[1] - pageLeft;
+
+            // facing pages: InDesign geometricBounds가 이미 page-relative인 경우 감지
+            // gb.left < pageBounds.left이면 spread 좌표가 아닌 page-relative 좌표
+            boolean gbAlreadyPageRelative = (pageLeft > 0 && gb[1] < pageLeft);
+            double x = gbAlreadyPageRelative ? gb[1] : (gb[1] - pageLeft);
             double y = gb[0] - pageTop;
             double w = gb[3] - gb[1];
             double h = gb[2] - gb[0];
+
+            ASTSection section = sections.get(pageIdx);
+
             // 음수 좌표 클램핑
             if (x < 0) { w += x; x = 0; }
             if (y < 0) { h += y; y = 0; }

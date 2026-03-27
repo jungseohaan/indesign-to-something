@@ -1,167 +1,157 @@
 # InDesign to Something
 
-Adobe InDesign(IDML)을 HWPX(한글) 및 기타 형식으로 변환하는 Java 라이브러리입니다.
+Adobe InDesign(.indd/.idml)을 HWPX(한글) 형식으로 변환하는 Java 라이브러리 + Tauri 데스크탑 앱입니다.
 
 ## 개요
 
 ```
-┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
-│   IDML      │ ──> │   Intermediate   │ ──> │    HWPX      │
-│  (InDesign) │     │     (JSON)       │     │   (한글)     │
-└─────────────┘     └──────────────────┘     └──────────────┘
+.indd → [ExtendScript] → .idml + resolved.json + 페이지 PNG
+                               ↓
+                     ResolvedToASTBuilder (하이브리드)
+                      ├─ 텍스트: IDML Story XML (정확한 단락 구조)
+                      ├─ 좌표/스타일: resolved.json (ExtendScript bounds)
+                      ├─ 그래픽: 페이지 배경 PNG + 인라인 객체 PNG
+                      └─ 수식: BT/NP/EH 폰트 → HWP 수식 스크립트
+                               ↓
+                         ASTDocument (중간 표현)
+                               ↓
+                     ASTToHwpxConverter → .hwpx 출력
 ```
-
-InDesign IDML 파일을 중간 표현(Intermediate JSON)으로 파싱한 후, HWPX 형식으로 변환합니다.
 
 ## 주요 기능
 
-### IDML → HWPX 변환
-- **텍스트 프레임**: 텍스트, 문단, 문자 스타일 변환
-- **이미지 프레임**: 이미지 추출 및 삽입
-- **수식 변환**: NP 폰트 기반 수식 → HWP 수식 스크립트
-- **페이지 필터링**: 특정 페이지 범위만 변환
-- **레이어 필터링**: 숨겨진 레이어, 편집 지시(조판지시서) 프레임 자동 제외
+- **하이브리드 변환 파이프라인**: IDML Story XML(텍스트) + resolved.json(좌표/스타일) + ExtendScript PNG(그래픽)
+- **페이지 배경 PNG**: 비편집 영역을 InDesign이 직접 렌더링 → 원본 충실도 보장
+- **수식 변환**: BT/NP/EH 수식 폰트 → HWP 수식 스크립트, GREP 수식 감지
+- **배지 추출**: 도형+짧은 텍스트 조합을 단일 PNG로 렌더링
+- **장식 텍스트 렌더링**: 회전/TextPath/비블랙 장식 텍스트 → PNG
+- **폰트 매핑**: fontStyle 기반 가변 폰트 매핑, 비율 기반 장평 보정
+- **변환 속도**: Java 래스터화 비활성화로 84초 → 4.5초
 
-### 수식 변환
-- LaTeX → HWP 수식 스크립트
-- MathML → HWP 수식 스크립트
-- NP 폰트 글리프 → HWP 수식 스크립트
+## 빌드
 
-### 유틸리티
-- 이미지 삽입 (ImageInserter)
-- 텍스트 추출 (TextExtractor)
-- 빈 HWPX 파일 생성 (BlankFileMaker)
-- 객체 검색 (ObjectFinder)
+```bash
+# Java (Maven) — CLI JAR 빌드
+mvn clean package -q -DskipTests
+# 결과: target/idml-to-something-1.0.9-cli.jar
 
-## 설치
+# Desktop 앱 빌드
+cd desktop && npm run tauri build
 
-### Maven
-
-```xml
-<dependency>
-    <groupId>kr.dogfoot</groupId>
-    <artifactId>hwpxlib</artifactId>
-    <version>1.0.8</version>
-</dependency>
-```
-
-### Gradle
-
-```groovy
-implementation 'kr.dogfoot:hwpxlib:1.0.8'
+# Desktop 개발 모드
+cd desktop && npm run tauri dev
 ```
 
 ## 사용법
 
-### IDML → HWPX 변환
+### CLI
 
-```java
-import kr.dogfoot.hwpxlib.tool.idmlconverter.IDMLToHwpxConverter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertResult;
+```bash
+# IDML + resolved.json → HWPX (권장)
+java -jar target/idml-to-something-1.0.9-cli.jar \
+  --convert input.idml output.hwpx \
+  --resolved resolved.json \
+  --links-directory /path/to/Links
 
-// 기본 변환
-ConvertResult result = IDMLToHwpxConverter.convert("input.idml", "output.hwpx");
-
-// 옵션 설정
-ConvertOptions options = new ConvertOptions()
-    .startPage(1)
-    .endPage(10)
-    .includeImages(true)
-    .convertEquations(true);
-
-ConvertResult result = IDMLToHwpxConverter.convert("input.idml", "output.hwpx", options);
+# IDML만으로 변환 (레거시)
+java -jar target/idml-to-something-1.0.9-cli.jar \
+  --convert input.idml output.hwpx
 ```
 
-### 중간 표현(Intermediate) JSON 활용
+### Desktop 앱 (Tauri)
 
-```java
-import kr.dogfoot.hwpxlib.tool.idmlconverter.intermediate.*;
+1. `.indd` 파일을 앱에 드래그 & 드롭
+2. InDesign ExtendScript가 자동으로 `.idml` + `resolved.json` + 페이지 PNG 추출
+3. Java CLI가 자동으로 HWPX 변환 실행
 
-// IDML → Intermediate JSON
-IntermediateDocument doc = IDMLToHwpxConverter.toIntermediate("input.idml");
-String json = JsonSerializer.toJson(doc);
+## 변환 파이프라인
 
-// Intermediate JSON → HWPX
-IntermediateDocument doc = JsonDeserializer.fromJson(json);
-IDMLToHwpxConverter.fromIntermediate(doc, "output.hwpx");
+### 새 파이프라인 (ResolvedToASTBuilder) — 현재 기본
+
+```
+ExtendScript 추출
+ ├─ output.idml (IDML — Story XML만 사용)
+ ├─ resolved.json (좌표, 스타일, 색상, 프레임 정보)
+ ├─ page_bg_*.png (페이지 배경 — 편집 TextFrame 숨김 후 렌더링)
+ ├─ rendered_frames/*.png (인라인 객체, 배지, 장식 텍스트)
+ └─ Links/ (원본 이미지)
+
+ResolvedToASTBuilder (Phase 0~6)
+ ├─ Phase 0: IDML Fonts.xml/Styles.xml 파싱, StylePropertyResolver
+ ├─ Phase 1: 페이지/섹션 빌드 (resolved pages → ASTSection)
+ ├─ Phase 2: TextFrame 배치 (편집 가능한 것만, facing pages 좌표 보정)
+ ├─ Phase 3: Story 텍스트 변환 (IDML Story XML + resolved 스타일 하이브리드)
+ ├─ Phase 4: 테이블 변환
+ ├─ Phase 5: Figure/Image 배치
+ └─ Phase 6: 페이지 배경 PNG 주입
+
+ASTToHwpxConverter → .hwpx
 ```
 
-### 수식 변환
+### 레거시 파이프라인 (resolved.json 없을 때)
 
-```java
-import kr.dogfoot.hwpxlib.tool.equationconverter.*;
-
-// LaTeX → HWP Script
-String hwpScript = LatexToHwpConverter.convert("\\frac{a}{b} + \\sqrt{c}");
-// 결과: "{a} over {b} + sqrt {c}"
-
-// MathML → HWP Script
-String hwpScript = MathMLToHwpConverter.convert(mathmlString);
+```
+IDML → IDMLNormalizer (Stage1~4) → ResolvedMerger → ASTToHwpxConverter → .hwpx
 ```
 
-### 이미지 삽입
+### 편집 TextFrame 분류 (배경 PNG에서 제외)
 
-```java
-import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
+| 조건 | 결과 | 이유 |
+|------|------|------|
+| masterPageItem | 배경 | 마스터 페이지 요소 (머리글/바닥글) |
+| 내용에 `\u0018` 포함 | 배경 | 자동 페이지 번호 |
+| 상단/하단 10% 영역 + 짧은 텍스트 | 배경 | 페이징/머리말 |
+| Group 내 + 10자 이하 + 비블랙 텍스트 | 배경 | 장식 텍스트 |
+| 그 외 | 편집 가능 | 본문 텍스트 (배경에서 숨김 → 텍스트로 변환) |
 
-HWPXFile hwpx = HWPXReader.read("document.hwpx");
-ImageInserter inserter = new ImageInserter(hwpx);
+### 단위 변환
 
-// 이미지 등록 및 삽입
-inserter.insertImage("image.png", x, y, width, height);
+| 변환 | 공식 |
+|------|------|
+| 행간 (Leading pt → HWPX %) | `(leading / fontSize) × 100` |
+| 자간 (Tracking 1/1000em → HWPX %) | `tracking / 10` |
+| baselineShift (pt → HWPX %) | `(shift / fontSize) × 100` |
+| 좌표 (points → HWPUNIT) | `pt × 100` |
 
-HWPXWriter.write(hwpx, "output.hwpx");
-```
-
-## 중간 표현(Intermediate) 스키마
-
-IDML 문서를 JSON으로 표현한 중간 포맷입니다. 자세한 내용은 [docs/intermediate-schema.md](docs/intermediate-schema.md)를 참조하세요.
+## 설정 (conversion-config.json)
 
 ```json
 {
-  "version": "1.0",
-  "sourceFormat": "IDML",
-  "layout": { "defaultPageWidth": 1512000, "defaultPageHeight": 2139120 },
-  "fonts": [...],
-  "paragraphStyles": [...],
-  "characterStyles": [...],
-  "pages": [
-    {
-      "pageNumber": 1,
-      "frames": [
-        {
-          "frameType": "text",
-          "x": 216000, "y": 252000,
-          "paragraphs": [...]
-        }
-      ]
-    }
-  ]
+  "pngExportResolution": 220,
+  "textBoxWidthExpandPercent": 5,
+  "groupShapeMaxTextLength": 20,
+  "spaceCondenseRatio": 50,
+  "fontMappings": { ... },
+  "badgeConditions": { ... }
 }
 ```
-
-## 단위
-
-- **HWPUNIT**: 1/7200 inch (HWP/HWPX 내부 단위)
-  - 1pt = 100 HWPUNIT
-  - 1mm ≈ 283.46 HWPUNIT
-  - 1inch = 7200 HWPUNIT
 
 ## 프로젝트 구조
 
 ```
-src/main/java/kr/dogfoot/hwpxlib/
-├── reader/          # HWPX 파일 읽기
-├── writer/          # HWPX 파일 쓰기
-├── object/          # HWPX 객체 모델
-└── tool/
-    ├── idmlconverter/       # IDML → HWPX 변환
-    │   ├── idml/            # IDML 문서 모델
-    │   ├── intermediate/    # 중간 표현 모델
-    │   └── converter/       # 변환기
-    ├── equationconverter/   # 수식 변환
-    └── imageinserter/       # 이미지 삽입
+src/main/java/kr/dogfoot/hwpxlib/tool/idmlconverter/
+├── ConverterCLI.java              # CLI 엔트리포인트
+├── IDMLToHwpxConverter.java       # 변환 파사드
+├── ast/                           # 중간 표현 (ASTDocument, ASTParagraph, ...)
+├── normalizer/
+│   ├── ResolvedToASTBuilder.java  # 새 파이프라인 (메인)
+│   ├── IDMLNormalizer.java        # 레거시 파이프라인
+│   └── Stage1~4                   # 레거시 정규화 단계
+├── converter/
+│   ├── ASTToHwpxConverter.java    # AST → HWPX 변환
+│   ├── HwpxParagraphBuilder.java  # 문단 빌더
+│   ├── HwpxTextBoxBuilder.java    # 글상자 빌더
+│   ├── HwpxTableBuilder.java      # 표 빌더
+│   ├── HwpxImageBuilder.java      # 이미지 빌더
+│   └── HwpxEnumMapper.java        # IDML→HWPX enum 매핑
+├── resolved/                      # resolved.json 데이터 처리
+└── idml/                          # IDML 파서
+
+scripts/extract_indd.jsx           # InDesign ExtendScript 추출
+
+desktop/
+├── src/                           # React 18 + Zustand + Tailwind 프론트엔드
+└── src-tauri/src/                 # Tauri 2.0 (Rust) 브릿지
 ```
 
 ## 관련 프로젝트
@@ -170,8 +160,6 @@ src/main/java/kr/dogfoot/hwpxlib/
 
 - [hwplib](https://github.com/neolord0/hwplib) - HWP 파일 라이브러리
 - [hwpxlib](https://github.com/neolord0/hwpxlib) - HWPX 파일 라이브러리 (원본)
-- [hwp2hwpx](https://github.com/neolord0/hwp2hwpx) - HWP → HWPX 변환
-- [hwpxlib_ext](https://github.com/neolord0/hwpxlib_ext) - hwpxlib 확장 (암호화 등)
 
 ## 참고 문서
 
