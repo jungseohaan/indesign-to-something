@@ -746,6 +746,13 @@ public class ResolvedToASTBuilder {
         } else if (styleTracking != null && styleTracking != 0) {
             tr.letterSpacing((short) Math.round(styleTracking / 10.0));
         }
+        // baselineShift: InDesign pt → HWPX % (fontSize 기준)
+        if (rr != null && rr.baselineShift() != null && rr.baselineShift() != 0) {
+            double bsPt = rr.baselineShift();
+            double fs = (rr.fontSize() != null && rr.fontSize() > 0) ? rr.fontSize() : 10.0;
+            short bsPct = (short) Math.round((bsPt / fs) * 100);
+            tr.baselineShift(bsPct);
+        }
         // IDML에 없는 속성은 ParagraphStyle → resolved 런 순으로 보강
         if (rr != null) {
             if (tr.fontFamily() == null && rr.fontFamily() != null) {
