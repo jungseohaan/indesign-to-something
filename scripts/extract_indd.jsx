@@ -2204,13 +2204,18 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
             var ppg = item.parentPage;
             if (ppg) {
                 var pgB = ppg.bounds; // [top, left, bottom, right]
+                var pgW = pgB[3] - pgB[1];
                 var pgH = pgB[2] - pgB[0];
                 var tfB = item.geometricBounds;
                 var tfTop = tfB[0] - pgB[0];
                 var tfBot = tfB[2] - pgB[0];
+                var tfLeft = tfB[1] - pgB[1];
+                var tfRight = tfB[3] - pgB[1];
                 var trimmed = item.contents.replace(/[\s\uFEFF\r\n\u0018]/g, "");
-                // 상단 10% 또는 하단 10%에 위치하고 짧은 텍스트(≤15자) → 배경 포함
-                if (trimmed.length <= 15 && (tfTop < pgH * 0.10 || tfBot > pgH * 0.90)) {
+                // 상하단 10% 또는 좌우 마진 영역의 짧은 텍스트(≤15자) → 배경 포함
+                var inMarginArea = (tfTop < pgH * 0.10 || tfBot > pgH * 0.90
+                    || tfRight <= pgW * 0.15 || tfLeft >= pgW * 0.85);
+                if (trimmed.length <= 15 && inMarginArea) {
                     continue;
                 }
             }
