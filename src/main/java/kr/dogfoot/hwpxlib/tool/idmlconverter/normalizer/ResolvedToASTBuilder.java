@@ -682,15 +682,23 @@ public class ResolvedToASTBuilder {
                             if (!parts[pi].isEmpty()) {
                                 ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, parts[pi]);
                                 ASTTextRun tr = createRunFromIDML(run, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking);
-                                splitLatinVarsInMixedText(tr, para);
+                                if (!splitBulletRun(tr, para)) {
+                                    splitLatinVarsInMixedText(tr, para);
+                                }
                             }
                             if (pi < parts.length - 1 && anchorIdx < inlineIds.size()) {
                                 String inlineHexId = inlineIds.get(anchorIdx);
                                 try {
                                     int domId = Integer.parseInt(inlineHexId.substring(1), 16);
-                                    ASTInlineObject inlineObj = loadInlineObject(domId);
-                                    if (inlineObj != null) {
-                                        para.addItem(inlineObj);
+                                    // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
+                                    ASTTextRun textRun = tryInlineTextFrameAsRun(domId);
+                                    if (textRun != null) {
+                                        para.addItem(textRun);
+                                    } else {
+                                        ASTInlineObject inlineObj = loadInlineObject(domId);
+                                        if (inlineObj != null) {
+                                            para.addItem(inlineObj);
+                                        }
                                     }
                                 } catch (Exception e) { /* skip */ }
                                 anchorIdx++;
@@ -700,11 +708,13 @@ public class ResolvedToASTBuilder {
                         ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
                         ASTTextRun tr = createRunFromIDML(run, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor, styleTracking);
                         // ;...; 분수 GREP 패턴이 포함된 텍스트 → 분수 수식으로 분리
-                        if (EHFontGlyphMap.containsEHFractionPattern(text)) {
-                            splitFractionPatternInText(text, tr, para);
-                        } else {
-                            // 한국어 사이 단일 라틴 문자를 수식 변수로 분리
-                            splitLatinVarsInMixedText(tr, para);
+                        if (!splitBulletRun(tr, para)) {
+                            if (EHFontGlyphMap.containsEHFractionPattern(text)) {
+                                splitFractionPatternInText(text, tr, para);
+                            } else {
+                                // 한국어 사이 단일 라틴 문자를 수식 변수로 분리
+                                splitLatinVarsInMixedText(tr, para);
+                            }
                         }
                     }
                 }
@@ -721,6 +731,9 @@ public class ResolvedToASTBuilder {
                 para.leftMargin(null);
                 para.firstLineIndent(null);
             }
+
+            // 불릿 단락이면 불릿 이후 런 색상을 검정으로 리셋
+            resetBulletParagraphColors(para);
 
             paragraphs.add(para);
         }
@@ -802,6 +815,93 @@ public class ResolvedToASTBuilder {
         }
         // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
         return tr;
+    }
+
+    private static final String BULLET_CHARS = "●•◆◇▶▷■□";
+
+    /**
+     * 불릿 문자(●, •)로 시작하는 런을 불릿 런 + 본문 런으로 분리하여 단락에 추가.
+     * InDesign에서 불릿과 본문이 같은 런에 포함되면 불릿 색상이 본문에도 적용되는 문제 해결.
+     * 분리 시 불릿 런은 원래 색상 유지, 본문 런은 검정(#000000)으로 리셋.
+     * @return true: 분리되어 단락에 추가됨, false: 분리 불필요 (호출자가 직접 추가)
+     */
+    private boolean splitBulletRun(ASTTextRun tr, ASTParagraph para) {
+        String text = tr.text();
+        if (text == null || text.length() < 2) return false;
+
+        char first = text.charAt(0);
+        if (BULLET_CHARS.indexOf(first) < 0) return false;
+
+        // 불릿 뒤에 공백/탭이 있어야 분리 (단독 불릿 문자는 무시)
+        int splitIdx = 1;
+        if (splitIdx < text.length() && (text.charAt(splitIdx) == ' ' || text.charAt(splitIdx) == '\t')) {
+            splitIdx++; // 공백/탭 포함
+        }
+        if (splitIdx >= text.length()) return false; // 불릿만 있으면 분리 불필요
+
+        // 단락에 불릿 플래그 설정 (이후 런의 색상 리셋용)
+        para.bulletParagraph(true);
+
+        // 불릿 런: 원래 색상, 약간 작은 크기
+        ASTTextRun bulletRun = new ASTTextRun();
+        bulletRun.text(String.valueOf(first));
+        bulletRun.textColor(tr.textColor());
+        bulletRun.fontFamily(tr.fontFamily());
+        bulletRun.fontStyle(tr.fontStyle());
+        if (tr.fontSizeHwpunits() != null) {
+            // 불릿 크기: 본문의 70%
+            bulletRun.fontSizeHwpunits((int) (tr.fontSizeHwpunits() * 0.7));
+        }
+        bulletRun.letterSpacing(tr.letterSpacing());
+        para.addItem(bulletRun);
+
+        // 구분자(탭/공백) 런
+        if (splitIdx > 1) {
+            ASTTextRun sepRun = new ASTTextRun();
+            sepRun.text(text.substring(1, splitIdx));
+            sepRun.fontFamily(tr.fontFamily());
+            sepRun.fontStyle(tr.fontStyle());
+            sepRun.fontSizeHwpunits(tr.fontSizeHwpunits());
+            sepRun.textColor("#000000");
+            para.addItem(sepRun);
+        }
+
+        // 본문 런: 검정색
+        ASTTextRun bodyRun = new ASTTextRun();
+        bodyRun.text(text.substring(splitIdx));
+        bodyRun.fontFamily(tr.fontFamily());
+        bodyRun.fontStyle(tr.fontStyle());
+        bodyRun.fontSizeHwpunits(tr.fontSizeHwpunits());
+        bodyRun.letterSpacing(tr.letterSpacing());
+        bodyRun.textColor("#000000");
+        bodyRun.baselineShift(tr.baselineShift());
+        para.addItem(bodyRun);
+
+        return true;
+    }
+
+    /**
+     * 불릿 단락의 런 색상을 검정으로 리셋 (불릿 런 자체는 제외).
+     * splitBulletRun이 단락 첫 런만 처리하므로, 이후 런의 색상도 리셋 필요.
+     */
+    private void resetBulletParagraphColors(ASTParagraph para) {
+        if (!para.bulletParagraph()) return;
+        boolean firstItem = true;
+        for (Object item : para.items()) {
+            if (item instanceof ASTTextRun) {
+                if (firstItem) {
+                    firstItem = false;
+                    continue; // 불릿 런 자체는 건너뜀
+                }
+                ASTTextRun run = (ASTTextRun) item;
+                // 불릿 색상(비검정)이면 검정으로 리셋
+                if (run.textColor() != null && !run.textColor().equals("#000000")) {
+                    run.textColor("#000000");
+                }
+            } else {
+                firstItem = false;
+            }
+        }
     }
 
     /**
@@ -938,8 +1038,18 @@ public class ResolvedToASTBuilder {
      */
     private String resolveColorToHex(String color) {
         if (color == null) return null;
-        // 이미 hex
-        if (color.startsWith("#")) return color;
+        // 이미 hex (#RRGGBB 또는 #RGB 형식: # 뒤가 모두 hex 문자)
+        if (color.startsWith("#") && color.length() >= 4 && color.substring(1).matches("[0-9a-fA-F]+")) {
+            return color;
+        }
+        // # 접두사가 있지만 hex가 아닌 스와치 이름 (예: "#활동 번호 색") → 이름으로 조회
+        if (color.startsWith("#")) {
+            String hex = resolvedData.resolveColorHex(color);
+            if (hex != null) return hex;
+            // # 제거 후 재조회
+            hex = resolvedData.resolveColorHex(color.substring(1));
+            if (hex != null) return hex;
+        }
         // IDML 스와치: "Color/Paper" → "Paper"
         String name = color.startsWith("Color/") ? color.substring(6) : color;
         // resolvedData에서 조회
@@ -1083,6 +1193,12 @@ public class ResolvedToASTBuilder {
                     if (run.isInlineAnchor()) {
                         Integer anchoredId = run.anchoredObjectId();
                         if (anchoredId != null) {
+                            // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
+                            ASTTextRun textRun = tryInlineTextFrameAsRun(anchoredId);
+                            if (textRun != null) {
+                                para.addItem(textRun);
+                                continue;
+                            }
                             ASTInlineObject inlineObj = loadInlineObject(anchoredId);
                             if (inlineObj != null) {
                                 para.addItem(inlineObj);
@@ -1592,6 +1708,42 @@ public class ResolvedToASTBuilder {
     // ═══════════════════════════════════════════════════
     // 인라인 객체 로드
     // ═══════════════════════════════════════════════════
+
+    /**
+     * 인라인 앵커 객체가 짧은 텍스트(1~5자)를 가진 TextFrame이면
+     * PNG 이미지 대신 ASTTextRun으로 변환 (줄간격 영향 없음, 폰트 매핑 가능).
+     * @return ASTTextRun (텍스트로 변환됨) 또는 null (PNG 변환 필요)
+     */
+    private ASTTextRun tryInlineTextFrameAsRun(int anchoredObjectId) {
+        String domId = String.valueOf(anchoredObjectId);
+        ResolvedTextFrame tf = resolvedData.getTextFrame(domId);
+        if (tf == null || !tf.isInline()) return null;
+
+        String visText = tf.frameVisibleText();
+        if (visText == null) return null;
+        visText = visText.replace("\uFFFC", "").replace("\n", "").replace("\r", "").trim();
+        if (visText.isEmpty() || visText.length() > 5) return null;
+
+        // resolved story에서 런 스타일 가져오기
+        ResolvedStory story = (tf.storyId() != null) ? resolvedData.getStory(tf.storyId()) : null;
+        ASTTextRun run = new ASTTextRun();
+        run.text(visText + " "); // 뒤에 공백 추가 (텍스트와의 간격)
+
+        if (story != null && !story.paragraphs().isEmpty()) {
+            ResolvedParagraph rp = story.paragraphs().get(0);
+            if (rp.runs() != null && !rp.runs().isEmpty()) {
+                ResolvedRun rr = rp.runs().get(0);
+                if (rr.fontFamily() != null) run.fontFamily(rr.fontFamily());
+                if (rr.fontStyle() != null) run.fontStyle(rr.fontStyle());
+                if (rr.fontSize() != null && rr.fontSize() > 0) {
+                    run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+                }
+                if (rr.fillColor() != null) run.textColor(resolveColorToHex(rr.fillColor()));
+            }
+        }
+
+        return run;
+    }
 
     /**
      * renderedFloatingItems에서 인라인 객체 PNG를 로드하여 ASTInlineObject로 변환.

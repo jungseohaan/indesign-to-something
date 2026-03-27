@@ -54,6 +54,9 @@ public class ASTParagraph {
     // 장식 선(GraphicLine)의 stroke 색상 → 후속 텍스트 런에 underline으로 전파
     private String pendingUnderlineColor;
 
+    // 불릿 단락 플래그 (●, • 등으로 시작 — 불릿 이후 런 색상 리셋용)
+    private boolean bulletParagraph;
+
     // 인라인 항목 (읽기 순서)
     private List<ASTInlineItem> items;
 
@@ -144,6 +147,9 @@ public class ASTParagraph {
 
     public String pendingUnderlineColor() { return pendingUnderlineColor; }
     public void pendingUnderlineColor(String v) { this.pendingUnderlineColor = v; }
+
+    public boolean bulletParagraph() { return bulletParagraph; }
+    public void bulletParagraph(boolean v) { this.bulletParagraph = v; }
 
     public List<ASTInlineItem> items() { return items; }
     public void addItem(ASTInlineItem item) { items.add(item); }

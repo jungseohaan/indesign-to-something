@@ -161,9 +161,9 @@ public class HwpxImageBuilder {
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
         } else {
-            // 기존 인라인 (글자처럼 취급)
+            // 기존 인라인 (글자처럼 취급, 줄간격에 영향 없음)
             pic.pos().treatAsCharAnd(true)
-                    .affectLSpacingAnd(true)
+                    .affectLSpacingAnd(false)
                     .flowWithTextAnd(true)
                     .allowOverlapAnd(false)
                     .holdAnchorAndSOAnd(false)

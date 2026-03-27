@@ -90,6 +90,13 @@ public class HwpxParagraphBuilder {
             paraPrId = ensureLineSpacingForInline(paraPrId, maxInlineH);
         }
 
+        // 큰 폰트 인라인 텍스트가 줄간격을 벌리는 것 방지:
+        // 단락 내 가장 큰 폰트와 본문 대표 폰트 크기가 1.5배 이상 차이나면
+        // 본문 폰트 기준 고정 줄간격 설정
+        if (astPara.lineSpacing() == null) {
+            paraPrId = clampLineSpacingForMixedFontSizes(paraPrId, astPara);
+        }
+
         // 분수 수식이 줄 간격보다 크면 줄 간격 확장 (명시적 lineSpacing 없을 때만)
         long maxEqH = maxFractionEquationHeight(astPara);
         if (maxEqH > maxInlineH && maxEqH > 2000 && astPara.lineSpacing() == null) {
@@ -260,13 +267,46 @@ public class HwpxParagraphBuilder {
 
     // ── 인라인 객체 높이 기반 줄 간격 확장 ──
 
+    /**
+     * 단락 내 폰트 크기가 혼재(큰 인라인 텍스트 + 본문)될 때 줄간격을 본문 기준으로 고정.
+     * 예: "2 「가시리」를 감상하고" — "2"=20pt, 본문=10pt → 본문 기준 줄간격
+     */
+    private String clampLineSpacingForMixedFontSizes(String paraPrId, ASTParagraph astPara) {
+        int maxFs = 0, minFs = Integer.MAX_VALUE;
+        int bodyFs = 0; // 가장 긴 텍스트의 폰트 크기 (본문 대표)
+        int bodyMaxLen = 0;
+        for (ASTInlineItem item : astPara.items()) {
+            if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun tr =
+                        (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) item;
+                Integer fs = tr.fontSizeHwpunits();
+                if (fs == null || fs <= 0) continue;
+                if (fs > maxFs) maxFs = fs;
+                if (fs < minFs) minFs = fs;
+                String text = tr.text();
+                int len = (text != null) ? text.trim().length() : 0;
+                if (len > bodyMaxLen) {
+                    bodyMaxLen = len;
+                    bodyFs = fs;
+                }
+            }
+        }
+        // 가장 큰 폰트가 본문의 1.5배 이상이면 본문 기준 고정 줄간격
+        if (bodyFs > 0 && maxFs > bodyFs * 1.5) {
+            long fixedH = (long) (bodyFs * 1.6); // 본문 폰트 × 160%
+            return ensureLineSpacingForInline(paraPrId, fixedH);
+        }
+        return paraPrId;
+    }
+
     private long maxInlineObjectHeight(ASTParagraph astPara) {
         long max = 0;
         for (ASTInlineItem item : astPara.items()) {
             if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                 ASTInlineObject obj = (ASTInlineObject) item;
-                // HWPX에서는 모든 인라인 객체가 줄 간격에 영향을 주므로
-                // textWrapMode와 무관하게 높이를 반영한다
+                // IMAGE 타입 인라인 객체는 줄간격 확장에서 제외
+                // (affectLSpacing=false로 처리되므로 줄간격에 영향 없음)
+                if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE) continue;
                 if (obj.height() > max) {
                     max = obj.height();
                 }
