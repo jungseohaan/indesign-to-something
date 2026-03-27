@@ -77,20 +77,14 @@ public class HwpxTextBoxBuilder {
         rect.createFlip();
         rect.flip().horizontalAnd(false).verticalAnd(false);
         rect.createRotationInfo();
-        short rotAngle = (short) Math.round(block.rotationAngle());
-        rect.rotationInfo().angleAnd(rotAngle)
+        // 텍스트 글상자는 회전 미적용 (HWPX 회전이 위치 오프셋 유발, 텍스트는 항상 정방향)
+        rect.rotationInfo().angleAnd((short) 0)
                 .centerXAnd(w / 2).centerYAnd(textBoxMinH / 2).rotateimageAnd(true);
         rect.createRenderingInfo();
         rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        if (rotAngle != 0) {
-            double radians = Math.toRadians(rotAngle);
-            float cos = (float) Math.cos(radians);
-            float sin = (float) Math.sin(radians);
-            rect.renderingInfo().addNewRotMatrix().set(cos, -sin, 0f, sin, cos, 0f);
-        } else {
-            rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        }
+        // rotationInfo가 회전 처리 → rotMatrix는 항등 행렬
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
         // LineShape (테두리)
         setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
@@ -353,6 +347,13 @@ public class HwpxTextBoxBuilder {
                 + " rot=" + block.rotationAngle() + " colCount=" + block.columnCount() + " cornerR=" + block.cornerRadius());
         }
 
+        if ("u3a525".equals(block.sourceId()) || "u243fd".equals(block.sourceId())) {
+            int colCount2 = Math.max(block.columnCount(), 1);
+            boolean hasOwnFill = block.fillColor() != null && block.fillColor().startsWith("#") && !block.fillColor().equals("#FFFFFF");
+            boolean hasWrap = block.hasWrapperFill() || hasOwnFill;
+            boolean hasStroke = block.strokeColor() != null && block.strokeColor().startsWith("#") && block.strokeWeight() > 0;
+            System.out.println("[TFB-DEBUG] " + block.sourceId() + ": w=" + w + " h=" + h + " rot=" + Math.round(block.rotationAngle()) + " colCount=" + colCount2 + " hasWrapper=" + hasWrap + " hasStroke=" + hasStroke + " cornerR=" + block.cornerRadius() + " fillColor=" + block.fillColor());
+        }
         // 음수 또는 0 크기 블록 건너뜀 (페이지 밖 객체)
         if (w <= 0 || h <= 0) return;
 
@@ -757,15 +758,13 @@ public class HwpxTextBoxBuilder {
         rect.createFlip();
         rect.flip().horizontalAnd(false).verticalAnd(false);
         rect.createRotationInfo();
-        rect.rotationInfo().angleAnd(rotAngle)
+        // 텍스트 글상자는 회전 미적용 (HWPX 회전이 위치 오프셋 유발, 텍스트는 항상 정방향)
+        rect.rotationInfo().angleAnd((short) 0)
                 .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
         rect.createRenderingInfo();
         rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        double radians = Math.toRadians(rotAngle);
-        float cos = (float) Math.cos(radians);
-        float sin = (float) Math.sin(radians);
-        rect.renderingInfo().addNewRotMatrix().set(cos, -sin, 0f, sin, cos, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
         // LineShape (테두리)
         setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
@@ -979,28 +978,8 @@ public class HwpxTextBoxBuilder {
         // 폰트 메트릭 기반 높이 보정: 매핑 폰트가 원본보다 세로로 크면 글상자 확장
         h = adjustHeightByFontMetrics(h, paragraphs);
 
-        // overflow 방지: 텍스트 단락 수 기반으로 높이 자동 조정
-        // 단락 수가 적은데 높이가 크면 → 실제 콘텐츠에 맞게 축소
-        if (paragraphs != null && !paragraphs.isEmpty() && h > 0) {
-            // 단락당 평균 높이를 추정하여 최대 높이 계산
-            int paraCount = paragraphs.size();
-            int avgFontSize = 1000; // 기본 10pt
-            for (ASTParagraph p : paragraphs) {
-                for (Object item : p.items()) {
-                    if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) {
-                        Integer fs = ((kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) item).fontSizeHwpunits();
-                        if (fs != null && fs > 0) { avgFontSize = fs; break; }
-                    }
-                }
-                break;
-            }
-            // 예상 콘텐츠 높이: 단락수 × (폰트크기 × 1.6) + 여백
-            long estimatedH = (long) (paraCount * avgFontSize * 1.6) + 500;
-            if (estimatedH < h * 0.8) {
-                // 콘텐츠가 높이의 80% 미만이면 축소
-                h = estimatedH;
-            }
-        }
+        // overflow 방지 높이 축소: resolved 기반 파이프라인에서는 geometricBounds가 정확하므로 비활성화
+        // (레거시 파이프라인용 코드, 새 파이프라인에서는 필요 없음)
 
         // 글상자 너비 확장: 매핑 폰트의 폭 차이로 텍스트 넘침 방지
         if (ctx.config != null && ctx.config.textBoxWidthExpandPercent() > 0) {
@@ -1118,12 +1097,12 @@ public class HwpxTextBoxBuilder {
         tc.createCellSz();
         tc.cellSz().widthAnd(w).heightAnd(h);
 
-        // 셀 여백 — 최소화 (다음 페이지로 밀림 방지)
+        // 셀 여백 — 블록 인셋 적용 (InDesign insetSpacing)
         tc.createCellMargin();
-        tc.cellMargin().leftAnd(0L)
-                .rightAnd(0L)
-                .topAnd(0L)
-                .bottomAnd(0L);
+        tc.cellMargin().leftAnd(block.insetLeft())
+                .rightAnd(block.insetRight())
+                .topAnd(block.insetTop())
+                .bottomAnd(block.insetBottom());
 
         // 셀 내부 SubList
         tc.createSubList();

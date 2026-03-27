@@ -212,9 +212,9 @@ public class ResolvedToASTBuilder {
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             if (!resolvedData.isEditableTextFrame(tf.id())) continue;
 
-            // DEBUG: TF 321248 추적
-            if ("321248".equals(tf.id())) {
-                System.out.println("[DEBUG-TF] 321248: inline=" + tf.isInline() + " nested=" + isNestedInTextFrame(tf) + " editable=" + resolvedData.isEditableTextFrame(tf.id()) + " pageIdx=" + tf.pageIndex());
+            // DEBUG: TF 추적
+            if ("238885".equals(tf.id()) || "148477".equals(tf.id())) {
+                System.out.println("[DEBUG-TF] " + tf.id() + ": inline=" + tf.isInline() + " nested=" + isNestedInTextFrame(tf) + " editable=" + resolvedData.isEditableTextFrame(tf.id()) + " pageIdx=" + tf.pageIndex() + " gb=" + java.util.Arrays.toString(tf.geometricBounds()));
             }
 
             // 페이지 인덱스 결정
@@ -334,8 +334,9 @@ public class ResolvedToASTBuilder {
             List<ASTParagraph> paragraphs = convertStoryFromIDML(storyId);
             boolean useIdml = paragraphs != null && !paragraphs.isEmpty();
 
-            // IDML-SHORT 감지: IDML 텍스트가 resolved의 30% 미만이면 불릿 전용 Story 등
-            // IDML에 본문이 누락되므로 resolved fallback 전환
+            // IDML-SHORT/PARA-MISMATCH 감지: resolved fallback 전환 조건
+            // 1) IDML 텍스트가 resolved의 30% 미만 (불릿 전용 Story 등)
+            // 2) IDML 단락 수가 resolved의 50% 미만 (강제 줄바꿈이 단락으로 처리되지 않는 경우)
             if (useIdml) {
                 ResolvedStory rs = resolvedData.getStory(storyId);
                 if (rs != null) {
@@ -349,7 +350,12 @@ public class ResolvedToASTBuilder {
                             for (ResolvedRun r : rp.runs())
                                 resolvedLen += r.text() != null ? r.text().length() : 0;
                     if (resolvedLen > 10 && idmlLen < resolvedLen * 0.3) {
-                        useIdml = false; // resolved fallback 전환
+                        useIdml = false; // 텍스트 길이 부족 → resolved fallback
+                    }
+                    // 단락 수 불일치: IDML 1~2개 단락인데 resolved 5개 이상이면 강제 줄바꿈 누락
+                    int resolvedParaCount = rs.paragraphs().size();
+                    if (paragraphs.size() <= 2 && resolvedParaCount >= 5) {
+                        useIdml = false; // 단락 구조 불일치 → resolved fallback
                     }
                 }
             }
@@ -376,6 +382,12 @@ public class ResolvedToASTBuilder {
             }
 
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
+            if ("238888".equals(storyId) || "148480".equals(storyId)) {
+                System.out.println("[DEBUG-STORY] " + storyId + ": paragraphs=" + paragraphs.size() + " blocks=" + blocks.size() + " useIdml=" + useIdml);
+                for (ASTTextFrameBlock b : blocks) {
+                    System.out.println("[DEBUG-STORY]   block=" + b.sourceId() + " x=" + b.x() + " y=" + b.y());
+                }
+            }
             distributeParagraphs(paragraphs, blocks, storyId);
         }
         System.out.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
@@ -1284,9 +1296,16 @@ public class ResolvedToASTBuilder {
      */
     private void distributeParagraphs(List<ASTParagraph> paragraphs,
                                        List<ASTTextFrameBlock> blocks, String storyId) {
-        // 단일 프레임도 frameVisibleText 기반 overflow 트리밍 적용
-        // (스레드 프레임 분할과 동일한 로직)
+        // 단일 프레임: 모든 단락을 그대로 할당 (분배/트리밍 불필요)
+        if (blocks.size() == 1) {
+            ASTTextFrameBlock block = blocks.get(0);
+            for (ASTParagraph p : paragraphs) {
+                block.addParagraph(p);
+            }
+            return;
+        }
 
+        // 다중 프레임: frameVisibleText 기반 분배
         List<ASTTextFrameBlock> ordered = orderByThreadChain(blocks);
 
         // 전체 IDML 단락 텍스트를 하나의 연속 문자열로 합침
@@ -1599,20 +1618,17 @@ public class ResolvedToASTBuilder {
                     obj.pixelWidth(img.getWidth());
                     obj.pixelHeight(img.getHeight());
 
-                    // 크기: bounds width + PNG 비율로 height 계산
+                    // 크기: bounds [top, left, bottom, right]
                     double[] bounds = rg.bounds();
                     if (bounds != null && bounds.length >= 4) {
-                        double span1 = Math.abs(bounds[3] - bounds[1]) * scaleFactor;
-                        double span2 = Math.abs(bounds[2] - bounds[0]) * scaleFactor;
-                        double bw = Math.max(span1, span2);
-                        // PNG 비율로 height 보정 (bounds height가 과소한 경우)
-                        double pngRatio = (double) img.getWidth() / img.getHeight(); // >1 = 가로, <1 = 세로
-                        double bh;
-                        if (pngRatio > 0.5) {
-                            // PNG 기반 height = width / pngRatio
+                        double bw = Math.abs(bounds[3] - bounds[1]) * scaleFactor; // right - left
+                        double bh = Math.abs(bounds[2] - bounds[0]) * scaleFactor; // bottom - top
+                        // PNG 비율로 보정 (bounds가 부정확한 경우)
+                        double pngRatio = (double) img.getWidth() / img.getHeight();
+                        double boundsRatio = bw / bh;
+                        // bounds 비율과 PNG 비율이 크게 다르면 PNG 비율 기준으로 보정
+                        if (Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.3) {
                             bh = bw / pngRatio;
-                        } else {
-                            bh = Math.min(span1, span2);
                         }
                         obj.width(CoordinateConverter.pointsToHwpunits(bw));
                         obj.height(CoordinateConverter.pointsToHwpunits(bh));
