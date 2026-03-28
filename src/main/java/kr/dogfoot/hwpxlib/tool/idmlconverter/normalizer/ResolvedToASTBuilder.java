@@ -255,10 +255,11 @@ public class ResolvedToASTBuilder {
             if (y < 0) { h += y; y = 0; }
             if (w <= 0 || h <= 0) continue;
 
-            // composedLines 기반 배치 (비활성 — 성능/정확도 개선 필요)
-            // if (tf.composedLines() != null && !tf.composedLines().isEmpty()) {
-            //     placeComposedLines(tf, section, pageLeft, pageTop);
-            //     continue;
+            // composedLines: Y 점프 기반 글상자 분할 (비활성 — 앱에서 composedLines 수집 미동작)
+            // if (tf.composedLines() != null && tf.composedLines().size() > 1) {
+            //     if (placeByYGapSplit(tf, section, pageLeft, pageTop)) {
+            //         continue;
+            //     }
             // }
 
             ASTTextFrameBlock block = new ASTTextFrameBlock();
@@ -311,6 +312,109 @@ public class ResolvedToASTBuilder {
     // ═══════════════════════════════════════════════════
     // Phase 2a: composedLines 기반 글상자 배치
     // ═══════════════════════════════════════════════════
+
+    /**
+     * composedLines에서 Y 간격이 비정상적으로 큰 지점을 감지하여 글상자를 분할한다.
+     * 정상 행간의 3배 이상 Y 점프가 있으면 분할 지점으로 판단.
+     * 분할이 없으면 false 반환 → 기존 경로 사용.
+     */
+    private boolean placeByYGapSplit(ResolvedTextFrame tf, ASTSection section,
+                                      double pageLeft, double pageTop) {
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+
+        // 정상 행간 계산: 처음 몇 줄의 Y 간격 중앙값
+        List<Double> gaps = new ArrayList<>();
+        for (int i = 1; i < lines.size(); i++) {
+            double[] prev = lines.get(i - 1).bounds();
+            double[] curr = lines.get(i).bounds();
+            if (prev == null || curr == null) continue;
+            double gap = curr[0] - prev[0]; // top 차이
+            if (gap > 0) gaps.add(gap);
+        }
+        if (gaps.isEmpty()) return false;
+
+        java.util.Collections.sort(gaps);
+        double medianGap = gaps.get(gaps.size() / 2);
+
+        // Y 점프 분할 지점 감지 (중앙값의 3배 이상)
+        List<Integer> splitPoints = new ArrayList<>(); // 분할 후 새 그룹 시작 라인 인덱스
+        for (int i = 1; i < lines.size(); i++) {
+            double[] prev = lines.get(i - 1).bounds();
+            double[] curr = lines.get(i).bounds();
+            if (prev == null || curr == null) continue;
+            double gap = curr[0] - prev[0];
+            if (gap > medianGap * 3) {
+                splitPoints.add(i);
+            }
+        }
+
+        if (splitPoints.isEmpty()) return false; // 분할 불필요
+
+        // 분할 지점으로 라인 그룹 생성
+        List<List<ResolvedTextFrame.ComposedLine>> groups = new ArrayList<>();
+        int from = 0;
+        for (int sp : splitPoints) {
+            groups.add(lines.subList(from, sp));
+            from = sp;
+        }
+        groups.add(lines.subList(from, lines.size()));
+
+        String sourceIdBase = "u" + Integer.toHexString(Integer.parseInt(tf.id()));
+        int charOffset = 0;
+
+        for (int gi = 0; gi < groups.size(); gi++) {
+            List<ResolvedTextFrame.ComposedLine> group = groups.get(gi);
+
+            // 그룹 bounds
+            double minLeft = Double.MAX_VALUE, minTop = Double.MAX_VALUE;
+            double maxRight = -Double.MAX_VALUE, maxBottom = -Double.MAX_VALUE;
+            int groupCharCount = 0;
+            for (ResolvedTextFrame.ComposedLine line : group) {
+                double[] b = line.bounds();
+                if (b[0] < minTop) minTop = b[0];
+                if (b[1] < minLeft) minLeft = b[1];
+                if (b[2] > maxBottom) maxBottom = b[2];
+                if (b[3] > maxRight) maxRight = b[3];
+                if (line.text() != null) groupCharCount += line.text().length();
+            }
+
+            double gx = (minLeft - pageLeft) * scaleFactor;
+            double gy = (minTop - pageTop) * scaleFactor;
+            double gw = (maxRight - minLeft) * scaleFactor;
+            double gh = (maxBottom - minTop) * scaleFactor;
+
+            if (gx < 0) { gw += gx; gx = 0; }
+            if (gy < 0) { gh += gy; gy = 0; }
+            if (gw <= 0 || gh <= 0) continue;
+
+            ASTTextFrameBlock block = new ASTTextFrameBlock();
+            block.sourceId(sourceIdBase + (groups.size() > 1 ? "_g" + gi : ""));
+            block.x(CoordinateConverter.pointsToHwpunits(gx));
+            block.y(CoordinateConverter.pointsToHwpunits(gy));
+            block.width(CoordinateConverter.pointsToHwpunits(gw));
+            block.height(CoordinateConverter.pointsToHwpunits(gh));
+            block.zOrder(tf.zOrder());
+            block.storyId(tf.storyId());
+            block.composedCharStart(charOffset);
+            block.composedCharEnd(charOffset + groupCharCount);
+
+            // 프레임 속성 복사
+            if (tf.insetSpacing() != null) {
+                double[] inset = tf.insetSpacing();
+                block.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
+                block.insetLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
+                block.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
+                block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
+            }
+
+            charOffset += groupCharCount;
+            section.addBlock(block);
+        }
+
+        System.out.println("[YGapSplit] " + sourceIdBase + " → " + groups.size()
+                + " groups (splits at: " + splitPoints + "), " + lines.size() + " lines");
+        return true;
+    }
 
     /**
      * InDesign 조판 결과(composedLines)를 기반으로 글상자를 배치한다.
