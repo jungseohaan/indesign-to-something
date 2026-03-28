@@ -2250,7 +2250,7 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         // 렌더 대상 텍스트 프레임(배지, 장식)은 배경에 포함 → 숨기지 않음
         if (isRenderableTextFrame(item)) continue;
 
-        // 테이블이 포함된 TextFrame은 배경에 포함 → 숨기지 않음
+        // 테이블이 포함된 TextFrame은 배경에 포함 (Java IDML 테이블 파싱 미지원)
         try {
             if (item.parentStory && item.parentStory.tables.length > 0) continue;
         } catch (e) {}
