@@ -214,6 +214,41 @@ public class ResolvedDataReader {
             tf.frameVisibleText(o.get("frameVisibleText").getAsString());
         }
 
+        // composedLines: 조판 결과 (Phase 4)
+        if (o.has("composedLines") && !o.get("composedLines").isJsonNull()) {
+            JsonArray clArr = o.getAsJsonArray("composedLines");
+            java.util.List<ResolvedTextFrame.ComposedLine> lines = new java.util.ArrayList<>();
+            for (int i = 0; i < clArr.size(); i++) {
+                JsonObject clObj = clArr.get(i).getAsJsonObject();
+                ResolvedTextFrame.ComposedLine cl = new ResolvedTextFrame.ComposedLine();
+                if (clObj.has("bounds") && !clObj.get("bounds").isJsonNull()) {
+                    JsonArray ba = clObj.getAsJsonArray("bounds");
+                    cl.bounds(new double[]{ba.get(0).getAsDouble(), ba.get(1).getAsDouble(),
+                            ba.get(2).getAsDouble(), ba.get(3).getAsDouble()});
+                }
+                cl.text(getString(clObj, "text"));
+                cl.paraIndex(getInt(clObj, "paraIndex", 0));
+                if (clObj.has("runs") && !clObj.get("runs").isJsonNull()) {
+                    JsonArray runsArr = clObj.getAsJsonArray("runs");
+                    java.util.List<ResolvedTextFrame.ComposedRun> runs = new java.util.ArrayList<>();
+                    for (int j = 0; j < runsArr.size(); j++) {
+                        JsonObject rObj = runsArr.get(j).getAsJsonObject();
+                        ResolvedTextFrame.ComposedRun cr = new ResolvedTextFrame.ComposedRun();
+                        cr.text(getString(rObj, "text"));
+                        cr.fillColor(getString(rObj, "fillColor"));
+                        cr.fontSize(rObj.has("fontSize") && !rObj.get("fontSize").isJsonNull()
+                                ? rObj.get("fontSize").getAsDouble() : null);
+                        cr.fontFamily(getString(rObj, "fontFamily"));
+                        cr.fontStyle(getString(rObj, "fontStyle"));
+                        runs.add(cr);
+                    }
+                    cl.runs(runs);
+                }
+                lines.add(cl);
+            }
+            tf.composedLines(lines);
+        }
+
         return tf;
     }
 

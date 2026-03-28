@@ -120,4 +120,48 @@ public class ResolvedTextFrame {
     public void frameParaTexts(java.util.List<String> v) { this.frameParaTexts = v; }
     public String frameVisibleText() { return frameVisibleText; }
     public void frameVisibleText(String v) { this.frameVisibleText = v; }
+
+    // Phase 4: 조판 결과 (composed lines)
+    private java.util.List<ComposedLine> composedLines;
+
+    public java.util.List<ComposedLine> composedLines() { return composedLines; }
+    public void composedLines(java.util.List<ComposedLine> v) { this.composedLines = v; }
+
+    /**
+     * InDesign 조판 엔진이 배치한 실제 라인 정보.
+     */
+    public static class ComposedLine {
+        private double[] bounds;  // [top, left, bottom, right] (document units)
+        private String text;
+        private int paraIndex;
+        private java.util.List<ComposedRun> runs;
+
+        public double[] bounds() { return bounds; }
+        public void bounds(double[] v) { this.bounds = v; }
+        public String text() { return text; }
+        public void text(String v) { this.text = v; }
+        public int paraIndex() { return paraIndex; }
+        public void paraIndex(int v) { this.paraIndex = v; }
+        public java.util.List<ComposedRun> runs() { return runs; }
+        public void runs(java.util.List<ComposedRun> v) { this.runs = v; }
+    }
+
+    public static class ComposedRun {
+        private String text;
+        private String fillColor;
+        private Double fontSize;
+        private String fontFamily;
+        private String fontStyle;
+
+        public String text() { return text; }
+        public void text(String v) { this.text = v; }
+        public String fillColor() { return fillColor; }
+        public void fillColor(String v) { this.fillColor = v; }
+        public Double fontSize() { return fontSize; }
+        public void fontSize(Double v) { this.fontSize = v; }
+        public String fontFamily() { return fontFamily; }
+        public void fontFamily(String v) { this.fontFamily = v; }
+        public String fontStyle() { return fontStyle; }
+        public void fontStyle(String v) { this.fontStyle = v; }
+    }
 }

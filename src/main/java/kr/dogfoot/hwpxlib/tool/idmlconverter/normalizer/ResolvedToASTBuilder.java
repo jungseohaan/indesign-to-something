@@ -255,6 +255,12 @@ public class ResolvedToASTBuilder {
             if (y < 0) { h += y; y = 0; }
             if (w <= 0 || h <= 0) continue;
 
+            // composedLines가 있으면 라인 그룹핑 기반 배치
+            if (tf.composedLines() != null && !tf.composedLines().isEmpty()) {
+                placeComposedLines(tf, section, pageLeft, pageTop);
+                continue;
+            }
+
             ASTTextFrameBlock block = new ASTTextFrameBlock();
             block.sourceId("u" + Integer.toHexString(Integer.parseInt(tf.id())));
             block.x(CoordinateConverter.pointsToHwpunits(x));
@@ -300,6 +306,136 @@ public class ResolvedToASTBuilder {
 
             section.addBlock(block);
         }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Phase 2a: composedLines 기반 글상자 배치
+    // ═══════════════════════════════════════════════════
+
+    /**
+     * InDesign 조판 결과(composedLines)를 기반으로 글상자를 배치한다.
+     * 연속 라인의 X 범위(left, right)가 같은 그룹을 하나의 글상자로 묶는다.
+     * TextWrap으로 좁아진 영역은 자연스럽게 별도 그룹이 된다.
+     */
+    private void placeComposedLines(ResolvedTextFrame tf, ASTSection section,
+                                     double pageLeft, double pageTop) {
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines.isEmpty()) return;
+
+        String sourceIdBase = "u" + Integer.toHexString(Integer.parseInt(tf.id()));
+        double tolerance = 2.0; // X 범위 허용 오차 (mm 단위, scaleFactor 적용 전)
+
+        // 라인을 X 범위(left, right)가 같은 그룹으로 묶기
+        List<List<ResolvedTextFrame.ComposedLine>> groups = new ArrayList<>();
+        List<ResolvedTextFrame.ComposedLine> currentGroup = new ArrayList<>();
+        double groupLeft = -1, groupRight = -1;
+
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line.bounds() == null || line.bounds().length < 4) continue;
+
+            double lineLeft = line.bounds()[1];
+            double lineRight = line.bounds()[3];
+
+            if (currentGroup.isEmpty()) {
+                currentGroup.add(line);
+                groupLeft = lineLeft;
+                groupRight = lineRight;
+            } else if (Math.abs(lineLeft - groupLeft) < tolerance
+                    && Math.abs(lineRight - groupRight) < tolerance) {
+                // 같은 X 범위 → 같은 그룹
+                currentGroup.add(line);
+            } else {
+                // X 범위 변경 → 새 그룹
+                groups.add(currentGroup);
+                currentGroup = new ArrayList<>();
+                currentGroup.add(line);
+                groupLeft = lineLeft;
+                groupRight = lineRight;
+            }
+        }
+        if (!currentGroup.isEmpty()) {
+            groups.add(currentGroup);
+        }
+
+        // 각 그룹을 ASTTextFrameBlock으로 변환
+        for (int gi = 0; gi < groups.size(); gi++) {
+            List<ResolvedTextFrame.ComposedLine> group = groups.get(gi);
+
+            // 그룹 bounds 계산
+            double minLeft = Double.MAX_VALUE, minTop = Double.MAX_VALUE;
+            double maxRight = -Double.MAX_VALUE, maxBottom = -Double.MAX_VALUE;
+            for (ResolvedTextFrame.ComposedLine line : group) {
+                double[] b = line.bounds();
+                if (b[0] < minTop) minTop = b[0];
+                if (b[1] < minLeft) minLeft = b[1];
+                if (b[2] > maxBottom) maxBottom = b[2];
+                if (b[3] > maxRight) maxRight = b[3];
+            }
+
+            // page-relative 변환
+            double gx = (minLeft - pageLeft) * scaleFactor;
+            double gy = (minTop - pageTop) * scaleFactor;
+            double gw = (maxRight - minLeft) * scaleFactor;
+            double gh = (maxBottom - minTop) * scaleFactor;
+
+            if (gx < 0) { gw += gx; gx = 0; }
+            if (gy < 0) { gh += gy; gy = 0; }
+            if (gw <= 0 || gh <= 0) continue;
+
+            ASTTextFrameBlock block = new ASTTextFrameBlock();
+            block.sourceId(sourceIdBase + (groups.size() > 1 ? "_g" + gi : ""));
+            block.x(CoordinateConverter.pointsToHwpunits(gx));
+            block.y(CoordinateConverter.pointsToHwpunits(gy));
+            block.width(CoordinateConverter.pointsToHwpunits(gw));
+            block.height(CoordinateConverter.pointsToHwpunits(gh));
+            block.zOrder(tf.zOrder());
+            block.storyId(tf.storyId());
+
+            // composedLines → ASTParagraph 변환
+            int prevParaIndex = -1;
+            ASTParagraph currentPara = null;
+            for (ResolvedTextFrame.ComposedLine line : group) {
+                // 단락 경계: paraIndex 변경 시 새 단락
+                if (line.paraIndex() != prevParaIndex) {
+                    currentPara = new ASTParagraph();
+                    block.addParagraph(currentPara);
+                    prevParaIndex = line.paraIndex();
+                }
+
+                // 런 변환
+                if (line.runs() != null) {
+                    for (ResolvedTextFrame.ComposedRun cr : line.runs()) {
+                        if (cr.text() == null || cr.text().isEmpty()) continue;
+                        ASTTextRun run = new ASTTextRun();
+                        run.text(cr.text());
+                        if (cr.fillColor() != null && !"Black".equals(cr.fillColor())
+                                && !"[Black]".equals(cr.fillColor())) {
+                            run.textColor(cr.fillColor());
+                        }
+                        if (cr.fontSize() != null) {
+                            run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
+                        }
+                        if (cr.fontFamily() != null) {
+                            run.fontFamily(cr.fontFamily());
+                        }
+                        if (cr.fontStyle() != null) {
+                            run.fontStyle(cr.fontStyle());
+                        }
+                        currentPara.addItem(run);
+                    }
+                } else if (line.text() != null && !line.text().isEmpty()) {
+                    // runs가 없으면 text로 폴백
+                    ASTTextRun run = new ASTTextRun();
+                    run.text(line.text());
+                    currentPara.addItem(run);
+                }
+            }
+
+            section.addBlock(block);
+        }
+
+        System.out.println("[ComposedLines] " + sourceIdBase + " → " + groups.size() + " groups, "
+                + lines.size() + " lines");
     }
 
     // ═══════════════════════════════════════════════════
@@ -378,12 +514,19 @@ public class ResolvedToASTBuilder {
             for (ASTBlock blk : sec.blocks()) {
                 if (blk instanceof ASTTextFrameBlock) {
                     ASTTextFrameBlock tfb = (ASTTextFrameBlock) blk;
+                    // composedLines 경로에서 이미 단락이 생성된 블록은 건너뜀
+                    if (tfb.paragraphs() != null && !tfb.paragraphs().isEmpty()) continue;
                     String sourceId = tfb.sourceId();
                     if (sourceId == null) continue;
                     // sourceId → DOM decimal → textFrame → storyId
-                    String domId = sourceId.startsWith("u")
-                            ? String.valueOf(Integer.parseInt(sourceId.substring(1), 16))
-                            : sourceId;
+                    String hexPart = sourceId.startsWith("u") ? sourceId.substring(1) : sourceId;
+                    if (hexPart.contains("_")) hexPart = hexPart.substring(0, hexPart.indexOf('_'));
+                    String domId;
+                    try {
+                        domId = String.valueOf(Integer.parseInt(hexPart, 16));
+                    } catch (NumberFormatException e) {
+                        continue;
+                    }
                     ResolvedTextFrame rtf = resolvedData.getTextFrame(domId);
                     if (rtf != null && rtf.storyId() != null) {
                         storyToBlocks.computeIfAbsent(rtf.storyId(), k -> new ArrayList<>()).add(tfb);

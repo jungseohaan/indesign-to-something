@@ -379,7 +379,7 @@ function main(args) {
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
             // 3. resolved 속성 수집 (페이지 범위 필터링)
-            var resolved = collectResolved(doc, outputDir, rangePageCount, startPage, endPage);
+            var resolved = collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableFrameIds);
             resolved.renderedTextFrames = renderedFrames;
             resolved.renderedPdfFrames = renderedPdfFrames;
             resolved.renderedGraphicFrames = renderedGraphicFrames;
@@ -2034,7 +2034,7 @@ function isLightColoredText(tf) {
 
 // --- resolved 속성 수집 ---
 
-function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
+function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableIds) {
     writeProgress(outputDir, "resolved_styles", 0, rangePageCount);
     var docInfo = collectDocumentInfo(doc);
     var paraStyles = collectParagraphStyles(doc);
@@ -2083,7 +2083,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage) {
     var stories = collectStories(doc, outputDir, rangePageCount, rangeStoryIds);
 
     writeProgress(outputDir, "resolved_frames", 0, rangePageCount);
-    var textFrames = collectTextFrames(doc, startPage, endPage);
+    var textFrames = collectTextFrames(doc, startPage, endPage, editableIds);
 
     writeProgress(outputDir, "resolved_items", 0, rangePageCount);
     var pages = collectPages(doc, startPage, endPage);
@@ -2900,6 +2900,86 @@ function collectFonts(doc) {
 }
 
 /**
+ * 텍스트 프레임의 조판 결과(composed lines)를 수집한다.
+ * InDesign 조판 엔진이 처리한 실제 라인 배치를 그대로 추출.
+ * @param tf TextFrame 객체
+ * @returns composedLines 배열 [{bounds, text, paraIndex, runs}]
+ */
+function collectComposedLines(tf) {
+    var result = [];
+    var lines = tf.lines.everyItem().getElements();
+    if (lines.length === 0) return result;
+
+    // 단락 인덱스 추적: line이 속한 paragraph의 index
+    var paraIndex = 0;
+    var paraElements = tf.paragraphs.everyItem().getElements();
+    var paraEndIndices = []; // 각 단락의 마지막 character index
+    var charOffset = 0;
+    for (var pi = 0; pi < paraElements.length; pi++) {
+        charOffset += paraElements[pi].characters.length;
+        paraEndIndices.push(charOffset);
+    }
+
+    var globalCharIdx = 0;
+    for (var li = 0; li < lines.length; li++) {
+        var line = lines[li];
+        var lineData = {
+            bounds: null,
+            text: "",
+            paraIndex: paraIndex,
+            runs: []
+        };
+
+        // line에는 geometricBounds가 없으므로 baseline/ascent/descent/horizontalOffset으로 계산
+        try {
+            var bl = line.baseline;
+            var asc = line.ascent;
+            var desc = line.descent;
+            var hOff = line.horizontalOffset;
+            var endH = line.endHorizontalOffset;
+            lineData.bounds = [bl - asc, hOff, bl + desc, endH];
+        } catch (e) { continue; }
+
+        try { lineData.text = line.contents; } catch (e) {}
+
+        // 런 수집: textStyleRanges로 색상/폰트 변화 추출
+        try {
+            var ranges = line.textStyleRanges.everyItem().getElements();
+            for (var ri = 0; ri < ranges.length; ri++) {
+                var rng = ranges[ri];
+                var run = {
+                    text: "",
+                    fillColor: null,
+                    fontSize: null,
+                    fontFamily: null,
+                    fontStyle: null
+                };
+                try { run.text = rng.contents; } catch (e) {}
+                try { run.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
+                try { run.fontSize = rng.pointSize; } catch (e) {}
+                try { run.fontFamily = rng.appliedFont ? rng.appliedFont.fontFamily : null; } catch (e) {}
+                try { run.fontStyle = rng.fontStyle; } catch (e) {}
+
+                // GREP/중첩 스타일 보정: 런 내 문자별 색상이 다르면 분할
+                var splitRuns = splitRunByCharColor(rng, run);
+                for (var sr = 0; sr < splitRuns.length; sr++) {
+                    lineData.runs.push(splitRuns[sr]);
+                }
+            }
+        } catch (e) {}
+
+        // 단락 인덱스 갱신
+        globalCharIdx += line.characters.length;
+        while (paraIndex < paraEndIndices.length - 1 && globalCharIdx >= paraEndIndices[paraIndex]) {
+            paraIndex++;
+        }
+
+        result.push(lineData);
+    }
+    return result;
+}
+
+/**
  * GREP/중첩 스타일 보정: textStyleRange 내에서 문자별 fillColor가 다르면 런을 분할.
  * 성능을 위해 첫 문자와 마지막 문자의 색상만 먼저 비교하고, 같으면 분할하지 않음.
  */
@@ -3232,7 +3312,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
 
 // --- 텍스트 프레임 수집 (오버플로/줄 수) ---
 
-function collectTextFrames(doc, startPage, endPage) {
+function collectTextFrames(doc, startPage, endPage, editableIds) {
+    if (!editableIds) editableIds = {};
     var frames = [];
     var collectedStoryIds = {};  // 범위 내 프레임의 storyId 수집
     var collectedTfIds = {};     // 수집된 프레임 ID 추적
@@ -3375,6 +3456,16 @@ function collectTextFrames(doc, startPage, endPage) {
                         fData.geometricBounds[2] - pageBounds[0],
                         fData.geometricBounds[3] - pageBounds[1]
                     ];
+                }
+            } catch (e) {}
+
+            // Phase 4: 조판 결과(composedLines) 수집 — editable 프레임만
+            try {
+                if (editableIds[tf.id]) {
+                    var _cl = collectComposedLines(tf);
+                    if (_cl && _cl.length > 0) {
+                        fData.composedLines = _cl;
+                    }
                 }
             } catch (e) {}
 
