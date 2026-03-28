@@ -77,6 +77,9 @@ public class ResolvedToASTBuilder {
         // Phase 2: TextFrame 분류 및 배치
         placeTextFrames(sections);
 
+        // Phase 2.5: 겹치는 프레임 폭 축소
+        shrinkOverlappingFrames(sections);
+
         // Phase 3: Story→단락→런 변환
         convertStories(sections);
 
@@ -296,6 +299,70 @@ public class ResolvedToASTBuilder {
             // storyTotalTextLength는 convertStories()에서 설정
 
             section.addBlock(block);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Phase 2.5: 겹치는 프레임 폭 축소
+    // ═══════════════════════════════════════════════════
+
+    /**
+     * 같은 페이지에서 editable 프레임끼리 겹치면 큰 프레임의 폭을 줄인다.
+     * 수직 겹침이 큰 프레임 높이의 30% 미만이면 무시.
+     */
+    private void shrinkOverlappingFrames(List<ASTSection> sections) {
+        for (ASTSection sec : sections) {
+            List<ASTTextFrameBlock> tfBlocks = new ArrayList<>();
+            for (ASTBlock blk : sec.blocks()) {
+                if (blk instanceof ASTTextFrameBlock) {
+                    tfBlocks.add((ASTTextFrameBlock) blk);
+                }
+            }
+            if (tfBlocks.size() < 2) continue;
+
+            for (int i = 0; i < tfBlocks.size(); i++) {
+                ASTTextFrameBlock a = tfBlocks.get(i);
+                long aArea = a.width() * a.height();
+                for (int j = i + 1; j < tfBlocks.size(); j++) {
+                    ASTTextFrameBlock b = tfBlocks.get(j);
+                    long bArea = b.width() * b.height();
+
+                    // 겹침 판정
+                    long aRight = a.x() + a.width();
+                    long aBottom = a.y() + a.height();
+                    long bRight = b.x() + b.width();
+                    long bBottom = b.y() + b.height();
+                    boolean hOverlap = aRight > b.x() && bRight > a.x();
+                    boolean vOverlap = aBottom > b.y() && bBottom > a.y();
+                    if (!hOverlap || !vOverlap) continue;
+
+                    // 수직 겹침 비율: 큰 프레임 높이의 30% 미만이면 무시
+                    long overlapTop = Math.max(a.y(), b.y());
+                    long overlapBottom = Math.min(aBottom, bBottom);
+                    long overlapH = overlapBottom - overlapTop;
+                    ASTTextFrameBlock big = aArea >= bArea ? a : b;
+                    ASTTextFrameBlock small = aArea >= bArea ? b : a;
+                    if (overlapH < big.height() * 3 / 10) continue;
+
+                    long bigRight = big.x() + big.width();
+                    long smallRight = small.x() + small.width();
+
+                    if (small.x() > big.x()) {
+                        // small이 big 우측에 있음 → big의 right를 축소
+                        long newWidth = small.x() - big.x();
+                        if (newWidth > 0 && newWidth < big.width()) {
+                            big.width(newWidth);
+                        }
+                    } else if (smallRight < bigRight) {
+                        // small이 big 좌측에 있음 → big의 left를 축소
+                        long shift = smallRight - big.x();
+                        if (shift > 0 && shift < big.width()) {
+                            big.x(big.x() + shift);
+                            big.width(big.width() - shift);
+                        }
+                    }
+                }
+            }
         }
     }
 

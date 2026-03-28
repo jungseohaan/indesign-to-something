@@ -48,6 +48,9 @@ public class ASTTextFrameBlock extends ASTBlock {
     // 드롭 섀도우
     private boolean dropShadow;
 
+    // 겹침 감지: SQUARE textWrap 적용 플래그
+    private boolean textWrapSquare;
+
     // 폴리곤 경로 (비사각형 프레임용, 페이지 상대 HWPUNIT 좌표)
     private long[] pathPointsX; // null이면 사각형
     private long[] pathPointsY;
@@ -143,6 +146,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean dropShadow() { return dropShadow; }
     public void dropShadow(boolean v) { this.dropShadow = v; }
+
+    public boolean textWrapSquare() { return textWrapSquare; }
+    public void textWrapSquare(boolean v) { this.textWrapSquare = v; }
 
     /** 실제 렌더링에 사용할 폭. narrowedWidth가 설정되면 그 값, 아니면 원래 width. */
     public long effectiveWidth() {

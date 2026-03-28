@@ -2899,6 +2899,54 @@ function collectFonts(doc) {
     return fonts;
 }
 
+/**
+ * GREP/중첩 스타일 보정: textStyleRange 내에서 문자별 fillColor가 다르면 런을 분할.
+ * 성능을 위해 첫 문자와 마지막 문자의 색상만 먼저 비교하고, 같으면 분할하지 않음.
+ */
+function splitRunByCharColor(rng, runData) {
+    try {
+        var chars = rng.characters.everyItem().getElements();
+        if (chars.length <= 1) return [runData];
+
+        // 첫 문자와 마지막 문자 색상 비교 (빠른 체크)
+        var firstColor = null, lastColor = null;
+        try { firstColor = chars[0].fillColor ? chars[0].fillColor.name : null; } catch (e) {}
+        try { lastColor = chars[chars.length - 1].fillColor ? chars[chars.length - 1].fillColor.name : null; } catch (e) {}
+        if (firstColor === lastColor) return [runData]; // 색상 동일 → 분할 불필요
+
+        // 문자별 스캔하여 색상 변화 지점에서 분할
+        var result = [];
+        var curColor = firstColor;
+        var curText = "";
+        for (var ci = 0; ci < chars.length; ci++) {
+            var chColor = null;
+            try { chColor = chars[ci].fillColor ? chars[ci].fillColor.name : null; } catch (e) {}
+            if (chColor !== curColor && curText.length > 0) {
+                // 색상 변경 → 이전 런 저장
+                var splitRun = {};
+                for (var k in runData) { if (runData.hasOwnProperty(k)) splitRun[k] = runData[k]; }
+                splitRun.text = curText;
+                splitRun.fillColor = curColor;
+                result.push(splitRun);
+                curText = "";
+                curColor = chColor;
+            }
+            try { curText += chars[ci].contents; } catch (e) {}
+        }
+        // 마지막 런
+        if (curText.length > 0) {
+            var lastRun = {};
+            for (var k2 in runData) { if (runData.hasOwnProperty(k2)) lastRun[k2] = runData[k2]; }
+            lastRun.text = curText;
+            lastRun.fillColor = curColor;
+            result.push(lastRun);
+        }
+        return result.length > 0 ? result : [runData];
+    } catch (e) {
+        return [runData];
+    }
+}
+
 // --- 스토리 수집 (문단 속성 + 런 확장 속성) ---
 
 function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
@@ -3055,7 +3103,11 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                             }
                         }
                     } else {
-                        paraData.runs.push(runData);
+                        // GREP/중첩 스타일 색상 보정: 런 내에서 문자별 색상이 다르면 분할
+                        var splitRuns = splitRunByCharColor(rng, runData);
+                        for (var sr = 0; sr < splitRuns.length; sr++) {
+                            paraData.runs.push(splitRuns[sr]);
+                        }
                     }
                 }
             } catch (e) {
