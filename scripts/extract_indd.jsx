@@ -3281,6 +3281,19 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
     var frames = [];
     var collectedStoryIds = {};  // 범위 내 프레임의 storyId 수집
     var collectedTfIds = {};     // 수집된 프레임 ID 추적
+
+    // DEBUG: editableIds 상태를 파일로 기록
+    var _dbgLines = [];
+    var _eidCount = 0;
+    var _sampleKeys = [];
+    for (var _ek in editableIds) {
+        if (editableIds.hasOwnProperty(_ek)) {
+            _eidCount++;
+            if (_sampleKeys.length < 5) _sampleKeys.push(_ek + "(" + typeof _ek + ")");
+        }
+    }
+    _dbgLines.push("editableIds count=" + _eidCount + " samples=" + _sampleKeys.join(","));
+
     try {
         // doc.textFrames는 페이지 소속 프레임만 포함할 수 있으므로
         // allPageItems에서 TextFrame을 수집하여 Spread 직속 프레임도 포함
@@ -3289,6 +3302,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
         for (var ai = 0; ai < allItems.length; ai++) {
             if (allItems[ai].constructor.name === "TextFrame") tfs.push(allItems[ai]);
         }
+        _dbgLines.push("tfs count=" + tfs.length);
 
         // Pass 1: 페이지 범위 내 프레임 수집
         for (var i = 0; i < tfs.length; i++) {
@@ -3425,10 +3439,15 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
 
             // Phase 4: 조판 결과(composedLines) 수집 — editable 프레임만
             try {
-                if (editableIds[tf.id]) {
+                var _eidMatch = !!(editableIds[tf.id]);
+                if (i < 5 || tf.id === 34295) {
+                    _dbgLines.push("P4 i=" + i + " tf.id=" + tf.id + " typeof=" + typeof tf.id + " match=" + _eidMatch);
+                }
+                if (_eidMatch) {
                     var _cl = collectComposedLines(tf);
                     if (_cl && _cl.length > 0) {
                         fData.composedLines = _cl;
+                        _dbgLines.push("  CL ok: " + _cl.length + " lines");
                     }
                 }
             } catch (e) {}
@@ -3491,6 +3510,15 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
     } catch (e) {
         // 텍스트 프레임 접근 실패 시 무시
     }
+    // DEBUG: 로그 파일 출력
+    _dbgLines.push("frames=" + frames.length);
+    try {
+        var _dbgFile = File("/tmp/_debug_collectTF.log");
+        _dbgFile.encoding = "UTF-8";
+        _dbgFile.open("w");
+        _dbgFile.write(_dbgLines.join("\n"));
+        _dbgFile.close();
+    } catch (e) {}
     return frames;
 }
 

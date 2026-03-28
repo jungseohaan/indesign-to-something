@@ -255,12 +255,12 @@ public class ResolvedToASTBuilder {
             if (y < 0) { h += y; y = 0; }
             if (w <= 0 || h <= 0) continue;
 
-            // composedLines: Y 점프 기반 글상자 분할 (비활성 — 앱에서 composedLines 수집 미동작)
-            // if (tf.composedLines() != null && tf.composedLines().size() > 1) {
-            //     if (placeByYGapSplit(tf, section, pageLeft, pageTop)) {
-            //         continue;
-            //     }
-            // }
+            // composedLines: Y 점프 기반 글상자 분할
+            if (tf.composedLines() != null && tf.composedLines().size() > 1) {
+                if (placeByYGapSplit(tf, section, pageLeft, pageTop)) {
+                    continue;
+                }
+            }
 
             ASTTextFrameBlock block = new ASTTextFrameBlock();
             block.sourceId("u" + Integer.toHexString(Integer.parseInt(tf.id())));
@@ -395,6 +395,7 @@ public class ResolvedToASTBuilder {
             block.height(CoordinateConverter.pointsToHwpunits(gh));
             block.zOrder(tf.zOrder());
             block.storyId(tf.storyId());
+            block.distributed(true); // 분할 블록: 연결 글상자 링크 해제
             block.composedCharStart(charOffset);
             block.composedCharEnd(charOffset + groupCharCount);
 
@@ -1697,18 +1698,31 @@ public class ResolvedToASTBuilder {
             paraRanges.add(new int[]{s, sb.length()});
         }
 
+        // 단락의 중심 위치가 블록 범위 안에 있으면 할당 (중복 방지)
+        Set<Integer> assigned = new HashSet<>();
         for (ASTTextFrameBlock block : blocks) {
             int blockStart = block.composedCharStart();
             int blockEnd = block.composedCharEnd();
             if (blockStart < 0) continue;
 
             for (int i = 0; i < paragraphs.size(); i++) {
+                if (assigned.contains(i)) continue;
                 int paraStart = paraRanges.get(i)[0];
                 int paraEnd = paraRanges.get(i)[1];
-                // 단락이 블록 범위와 겹치면 할당
-                if (paraEnd > blockStart && paraStart < blockEnd) {
+                int paraMid = (paraStart + paraEnd) / 2;
+                // 단락 중심이 블록 범위 안이면 할당
+                if (paraMid >= blockStart && paraMid < blockEnd) {
                     block.addParagraph(paragraphs.get(i));
+                    assigned.add(i);
                 }
+            }
+        }
+
+        // 미할당 단락은 마지막 블록에 추가
+        ASTTextFrameBlock lastBlock = blocks.get(blocks.size() - 1);
+        for (int i = 0; i < paragraphs.size(); i++) {
+            if (!assigned.contains(i)) {
+                lastBlock.addParagraph(paragraphs.get(i));
             }
         }
     }
@@ -1721,7 +1735,14 @@ public class ResolvedToASTBuilder {
             if (b.composedCharStart() >= 0) { hasComposedBlocks = true; break; }
         }
         if (hasComposedBlocks) {
+            System.out.println("[DistComposed] story=" + storyId + " paras=" + paragraphs.size() + " blocks=" + blocks.size());
+            for (ASTTextFrameBlock b : blocks) {
+                System.out.println("  block=" + b.sourceId() + " charRange=" + b.composedCharStart() + "~" + b.composedCharEnd());
+            }
             distributeByComposedCharRange(paragraphs, blocks);
+            for (ASTTextFrameBlock b : blocks) {
+                System.out.println("  → " + b.sourceId() + " paras=" + (b.paragraphs() != null ? b.paragraphs().size() : 0));
+            }
             return;
         }
 
