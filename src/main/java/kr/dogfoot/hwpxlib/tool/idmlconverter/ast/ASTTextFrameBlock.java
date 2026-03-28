@@ -51,6 +51,10 @@ public class ASTTextFrameBlock extends ASTBlock {
     // 겹침 감지: SQUARE textWrap 적용 플래그
     private boolean textWrapSquare;
 
+    // composedLines 기반 분할: Story 내 문자 범위
+    private int composedCharStart = -1;
+    private int composedCharEnd = -1;
+
     // 폴리곤 경로 (비사각형 프레임용, 페이지 상대 HWPUNIT 좌표)
     private long[] pathPointsX; // null이면 사각형
     private long[] pathPointsY;
@@ -149,6 +153,11 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean textWrapSquare() { return textWrapSquare; }
     public void textWrapSquare(boolean v) { this.textWrapSquare = v; }
+
+    public int composedCharStart() { return composedCharStart; }
+    public void composedCharStart(int v) { this.composedCharStart = v; }
+    public int composedCharEnd() { return composedCharEnd; }
+    public void composedCharEnd(int v) { this.composedCharEnd = v; }
 
     /** 실제 렌더링에 사용할 폭. narrowedWidth가 설정되면 그 값, 아니면 원래 width. */
     public long effectiveWidth() {

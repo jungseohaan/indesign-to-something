@@ -255,11 +255,11 @@ public class ResolvedToASTBuilder {
             if (y < 0) { h += y; y = 0; }
             if (w <= 0 || h <= 0) continue;
 
-            // composedLines가 있으면 라인 그룹핑 기반 배치
-            if (tf.composedLines() != null && !tf.composedLines().isEmpty()) {
-                placeComposedLines(tf, section, pageLeft, pageTop);
-                continue;
-            }
+            // composedLines 기반 배치 (비활성 — 성능/정확도 개선 필요)
+            // if (tf.composedLines() != null && !tf.composedLines().isEmpty()) {
+            //     placeComposedLines(tf, section, pageLeft, pageTop);
+            //     continue;
+            // }
 
             ASTTextFrameBlock block = new ASTTextFrameBlock();
             block.sourceId("u" + Integer.toHexString(Integer.parseInt(tf.id())));
@@ -316,6 +316,7 @@ public class ResolvedToASTBuilder {
      * InDesign 조판 결과(composedLines)를 기반으로 글상자를 배치한다.
      * 연속 라인의 X 범위(left, right)가 같은 그룹을 하나의 글상자로 묶는다.
      * TextWrap으로 좁아진 영역은 자연스럽게 별도 그룹이 된다.
+     * 텍스트/스타일은 convertStories에서 IDML Story 기반으로 채움.
      */
     private void placeComposedLines(ResolvedTextFrame tf, ASTSection section,
                                      double pageLeft, double pageTop) {
@@ -342,10 +343,8 @@ public class ResolvedToASTBuilder {
                 groupRight = lineRight;
             } else if (Math.abs(lineLeft - groupLeft) < tolerance
                     && Math.abs(lineRight - groupRight) < tolerance) {
-                // 같은 X 범위 → 같은 그룹
                 currentGroup.add(line);
             } else {
-                // X 범위 변경 → 새 그룹
                 groups.add(currentGroup);
                 currentGroup = new ArrayList<>();
                 currentGroup.add(line);
@@ -357,22 +356,28 @@ public class ResolvedToASTBuilder {
             groups.add(currentGroup);
         }
 
-        // 각 그룹을 ASTTextFrameBlock으로 변환
+        // 그룹이 1개면 기존 경로와 동일 (분할 불필요) → 일반 블록으로 배치
+        if (groups.size() <= 1) return; // fallback: 기존 placeTextFrames 경로 사용
+
+        // 각 그룹을 ASTTextFrameBlock으로 변환 (텍스트 없이 위치만)
+        // 각 그룹의 텍스트 범위를 문자 수로 기록하여 convertStories에서 분배
+        int charOffset = 0;
         for (int gi = 0; gi < groups.size(); gi++) {
             List<ResolvedTextFrame.ComposedLine> group = groups.get(gi);
 
             // 그룹 bounds 계산
             double minLeft = Double.MAX_VALUE, minTop = Double.MAX_VALUE;
             double maxRight = -Double.MAX_VALUE, maxBottom = -Double.MAX_VALUE;
+            int groupCharCount = 0;
             for (ResolvedTextFrame.ComposedLine line : group) {
                 double[] b = line.bounds();
                 if (b[0] < minTop) minTop = b[0];
                 if (b[1] < minLeft) minLeft = b[1];
                 if (b[2] > maxBottom) maxBottom = b[2];
                 if (b[3] > maxRight) maxRight = b[3];
+                if (line.text() != null) groupCharCount += line.text().length();
             }
 
-            // page-relative 변환
             double gx = (minLeft - pageLeft) * scaleFactor;
             double gy = (minTop - pageTop) * scaleFactor;
             double gw = (maxRight - minLeft) * scaleFactor;
@@ -383,54 +388,17 @@ public class ResolvedToASTBuilder {
             if (gw <= 0 || gh <= 0) continue;
 
             ASTTextFrameBlock block = new ASTTextFrameBlock();
-            block.sourceId(sourceIdBase + (groups.size() > 1 ? "_g" + gi : ""));
+            block.sourceId(sourceIdBase + "_g" + gi);
             block.x(CoordinateConverter.pointsToHwpunits(gx));
             block.y(CoordinateConverter.pointsToHwpunits(gy));
             block.width(CoordinateConverter.pointsToHwpunits(gw));
             block.height(CoordinateConverter.pointsToHwpunits(gh));
             block.zOrder(tf.zOrder());
             block.storyId(tf.storyId());
+            block.composedCharStart(charOffset);
+            block.composedCharEnd(charOffset + groupCharCount);
 
-            // composedLines → ASTParagraph 변환
-            int prevParaIndex = -1;
-            ASTParagraph currentPara = null;
-            for (ResolvedTextFrame.ComposedLine line : group) {
-                // 단락 경계: paraIndex 변경 시 새 단락
-                if (line.paraIndex() != prevParaIndex) {
-                    currentPara = new ASTParagraph();
-                    block.addParagraph(currentPara);
-                    prevParaIndex = line.paraIndex();
-                }
-
-                // 런 변환
-                if (line.runs() != null) {
-                    for (ResolvedTextFrame.ComposedRun cr : line.runs()) {
-                        if (cr.text() == null || cr.text().isEmpty()) continue;
-                        ASTTextRun run = new ASTTextRun();
-                        run.text(cr.text());
-                        if (cr.fillColor() != null && !"Black".equals(cr.fillColor())
-                                && !"[Black]".equals(cr.fillColor())) {
-                            run.textColor(cr.fillColor());
-                        }
-                        if (cr.fontSize() != null) {
-                            run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
-                        }
-                        if (cr.fontFamily() != null) {
-                            run.fontFamily(cr.fontFamily());
-                        }
-                        if (cr.fontStyle() != null) {
-                            run.fontStyle(cr.fontStyle());
-                        }
-                        currentPara.addItem(run);
-                    }
-                } else if (line.text() != null && !line.text().isEmpty()) {
-                    // runs가 없으면 text로 폴백
-                    ASTTextRun run = new ASTTextRun();
-                    run.text(line.text());
-                    currentPara.addItem(run);
-                }
-            }
-
+            charOffset += groupCharCount;
             section.addBlock(block);
         }
 
@@ -1609,8 +1577,50 @@ public class ResolvedToASTBuilder {
      * 텍스트 기반 단락 분배: frameParaTexts로 IDML 단락을 각 프레임에 할당.
      * paragraphStart/End 인덱스 대신, 텍스트 내용을 순차 매칭하여 프레임 간 단락 분할을 정확히 처리.
      */
+    /**
+     * composedLines 문자 범위 기반 단락 분배.
+     * 각 블록의 composedCharStart~composedCharEnd 범위에 해당하는 단락을 할당.
+     */
+    private void distributeByComposedCharRange(List<ASTParagraph> paragraphs,
+                                                List<ASTTextFrameBlock> blocks) {
+        // 전체 단락 텍스트를 연속 문자열로 합침
+        StringBuilder sb = new StringBuilder();
+        List<int[]> paraRanges = new ArrayList<>();
+        for (ASTParagraph p : paragraphs) {
+            int s = sb.length();
+            String pt = getParaPlainText(p);
+            sb.append(pt != null ? pt : "");
+            paraRanges.add(new int[]{s, sb.length()});
+        }
+
+        for (ASTTextFrameBlock block : blocks) {
+            int blockStart = block.composedCharStart();
+            int blockEnd = block.composedCharEnd();
+            if (blockStart < 0) continue;
+
+            for (int i = 0; i < paragraphs.size(); i++) {
+                int paraStart = paraRanges.get(i)[0];
+                int paraEnd = paraRanges.get(i)[1];
+                // 단락이 블록 범위와 겹치면 할당
+                if (paraEnd > blockStart && paraStart < blockEnd) {
+                    block.addParagraph(paragraphs.get(i));
+                }
+            }
+        }
+    }
+
     private void distributeParagraphs(List<ASTParagraph> paragraphs,
                                        List<ASTTextFrameBlock> blocks, String storyId) {
+        // composedLines 분할 블록 감지: composedCharStart >= 0인 블록이 있으면
+        boolean hasComposedBlocks = false;
+        for (ASTTextFrameBlock b : blocks) {
+            if (b.composedCharStart() >= 0) { hasComposedBlocks = true; break; }
+        }
+        if (hasComposedBlocks) {
+            distributeByComposedCharRange(paragraphs, blocks);
+            return;
+        }
+
         // 단일 프레임: 모든 단락을 그대로 할당 (분배/트리밍 불필요)
         if (blocks.size() == 1) {
             ASTTextFrameBlock block = blocks.get(0);

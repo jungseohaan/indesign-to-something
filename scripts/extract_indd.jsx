@@ -2910,24 +2910,15 @@ function collectComposedLines(tf) {
     var lines = tf.lines.everyItem().getElements();
     if (lines.length === 0) return result;
 
-    // 단락 인덱스 추적: line이 속한 paragraph의 index
+    // 단락 인덱스 추적: 라인의 contents에 \r이 있으면 단락 끝
     var paraIndex = 0;
-    var paraElements = tf.paragraphs.everyItem().getElements();
-    var paraEndIndices = []; // 각 단락의 마지막 character index
-    var charOffset = 0;
-    for (var pi = 0; pi < paraElements.length; pi++) {
-        charOffset += paraElements[pi].characters.length;
-        paraEndIndices.push(charOffset);
-    }
 
-    var globalCharIdx = 0;
     for (var li = 0; li < lines.length; li++) {
         var line = lines[li];
         var lineData = {
             bounds: null,
             text: "",
-            paraIndex: paraIndex,
-            runs: []
+            paraIndex: paraIndex
         };
 
         // line에는 geometricBounds가 없으므로 baseline/ascent/descent/horizontalOffset으로 계산
@@ -2942,35 +2933,8 @@ function collectComposedLines(tf) {
 
         try { lineData.text = line.contents; } catch (e) {}
 
-        // 런 수집: textStyleRanges로 색상/폰트 변화 추출
-        try {
-            var ranges = line.textStyleRanges.everyItem().getElements();
-            for (var ri = 0; ri < ranges.length; ri++) {
-                var rng = ranges[ri];
-                var run = {
-                    text: "",
-                    fillColor: null,
-                    fontSize: null,
-                    fontFamily: null,
-                    fontStyle: null
-                };
-                try { run.text = rng.contents; } catch (e) {}
-                try { run.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
-                try { run.fontSize = rng.pointSize; } catch (e) {}
-                try { run.fontFamily = rng.appliedFont ? rng.appliedFont.fontFamily : null; } catch (e) {}
-                try { run.fontStyle = rng.fontStyle; } catch (e) {}
-
-                // GREP/중첩 스타일 보정: 런 내 문자별 색상이 다르면 분할
-                var splitRuns = splitRunByCharColor(rng, run);
-                for (var sr = 0; sr < splitRuns.length; sr++) {
-                    lineData.runs.push(splitRuns[sr]);
-                }
-            }
-        } catch (e) {}
-
-        // 단락 인덱스 갱신
-        globalCharIdx += line.characters.length;
-        while (paraIndex < paraEndIndices.length - 1 && globalCharIdx >= paraEndIndices[paraIndex]) {
+        // \r로 끝나면 단락 끝 → 다음 라인은 새 단락
+        if (lineData.text && lineData.text.charAt(lineData.text.length - 1) === "\r") {
             paraIndex++;
         }
 
