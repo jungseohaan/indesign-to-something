@@ -2967,28 +2967,35 @@ function splitRunByCharColor(rng, runData) {
         var chars = rng.characters.everyItem().getElements();
         if (chars.length <= 1) return [runData];
 
-        // 첫 문자와 마지막 문자 색상 비교 (빠른 체크)
+        // 첫 문자와 마지막 문자 색상+크기 비교 (빠른 체크)
         var firstColor = null, lastColor = null;
+        var firstSize = null, lastSize = null;
         try { firstColor = chars[0].fillColor ? chars[0].fillColor.name : null; } catch (e) {}
         try { lastColor = chars[chars.length - 1].fillColor ? chars[chars.length - 1].fillColor.name : null; } catch (e) {}
-        if (firstColor === lastColor) return [runData]; // 색상 동일 → 분할 불필요
+        try { firstSize = chars[0].pointSize; } catch (e) {}
+        try { lastSize = chars[chars.length - 1].pointSize; } catch (e) {}
+        if (firstColor === lastColor && firstSize === lastSize) return [runData]; // 동일 → 분할 불필요
 
-        // 문자별 스캔하여 색상 변화 지점에서 분할
+        // 문자별 스캔하여 색상 또는 크기 변화 지점에서 분할
         var result = [];
         var curColor = firstColor;
+        var curSize = firstSize;
         var curText = "";
         for (var ci = 0; ci < chars.length; ci++) {
-            var chColor = null;
+            var chColor = null, chSize = null;
             try { chColor = chars[ci].fillColor ? chars[ci].fillColor.name : null; } catch (e) {}
-            if (chColor !== curColor && curText.length > 0) {
-                // 색상 변경 → 이전 런 저장
+            try { chSize = chars[ci].pointSize; } catch (e) {}
+            if ((chColor !== curColor || chSize !== curSize) && curText.length > 0) {
+                // 색상 또는 크기 변경 → 이전 런 저장
                 var splitRun = {};
                 for (var k in runData) { if (runData.hasOwnProperty(k)) splitRun[k] = runData[k]; }
                 splitRun.text = curText;
                 splitRun.fillColor = curColor;
+                if (curSize) splitRun.fontSize = curSize;
                 result.push(splitRun);
                 curText = "";
                 curColor = chColor;
+                curSize = chSize;
             }
             try { curText += chars[ci].contents; } catch (e) {}
         }
@@ -2998,6 +3005,7 @@ function splitRunByCharColor(rng, runData) {
             for (var k2 in runData) { if (runData.hasOwnProperty(k2)) lastRun[k2] = runData[k2]; }
             lastRun.text = curText;
             lastRun.fillColor = curColor;
+            if (curSize) lastRun.fontSize = curSize;
             result.push(lastRun);
         }
         return result.length > 0 ? result : [runData];
