@@ -173,6 +173,27 @@ public class ConverterCLI {
             }
         }
 
+        // --config 미지정 시 자동 탐색: JAR 위치 → 현재 디렉토리 → 입력 파일 디렉토리
+        if (options.configPath() == null) {
+            String[] searchPaths = {
+                    // JAR 파일과 같은 디렉토리
+                    new java.io.File(ConverterCLI.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getParent(),
+                    // 현재 작업 디렉토리
+                    System.getProperty("user.dir"),
+                    // 입력 파일 디렉토리
+                    new java.io.File(inputPath).getParent()
+            };
+            for (String dir : searchPaths) {
+                if (dir == null) continue;
+                java.io.File configFile = new java.io.File(dir, "conversion-config.json");
+                if (configFile.exists()) {
+                    options = options.configPath(configFile.getAbsolutePath());
+                    System.out.println("[CLI] Auto-detected config: " + configFile.getAbsolutePath());
+                    break;
+                }
+            }
+        }
+
         // .hwp 확장자 감지
         boolean exportHwp = outputPath.toLowerCase().endsWith(".hwp");
         String hwpxPath = exportHwp
