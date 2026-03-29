@@ -2217,7 +2217,7 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                 var trimmed = "";
                 try { trimmed = item.contents.replace(/[\s\uFEFF\r\n\u0018\uFFFC]/g, ""); } catch (e4) {}
                 var inMarginArea = (tfTop < pgH * 0.10 || tfBot > pgH * 0.90
-                    || tfRight <= pgW * 0.15 || tfLeft >= pgW * 0.85);
+                    || tfRight <= pgW * 0.20 || tfLeft >= pgW * 0.80);
                 if (trimmed.length <= 15 && inMarginArea) {
                     continue;
                 }

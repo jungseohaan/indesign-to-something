@@ -94,8 +94,8 @@ public class ResolvedToASTBuilder {
         // Phase 2: TextFrame 분류 및 배치
         placeTextFrames(sections);
 
-        // Phase 2.5: 겹치는 프레임 폭 축소
-        shrinkOverlappingFrames(sections);
+        // Phase 2.5: 겹치는 프레임 폭 축소 (비활성 — 과도한 축소 문제)
+        // shrinkOverlappingFrames(sections);
 
         // Phase 3: Story→단락→런 변환
         convertStories(sections);
