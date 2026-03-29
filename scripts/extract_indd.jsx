@@ -1839,7 +1839,7 @@ function isRenderableTextFrame(tf) {
 
     // 회전된 프레임 → 항상 렌더링 (HWPX에서 회전 텍스트 재현 불가)
     try {
-        if (Math.abs(tf.rotationAngle) > 0.1) return true;
+        if (Math.abs(tf.rotationAngle) > 3.0) return true; // 3도 이상만 회전으로 판정
     } catch (e) {}
 
     // 텍스트에 효과가 적용된 경우 → 렌더링 (HWPX에서 재현 불가)

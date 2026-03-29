@@ -206,8 +206,8 @@
         "spacing": 0
       },
       "둘기마요_고딕": {
-        "ko": "한컴 윤고딕 240",
-        "en": "한컴 윤고딕 240",
+        "ko": "함초롬바탕",
+        "en": "함초롬바탕",
         "spacing": 0,
         "ratio": 0.95
       },
@@ -481,7 +481,7 @@
         "xHeight": 5.31,
         "ascent": 9.0,
         "descent": 2.0,
-        "category": "serif"
+        "category": "handwriting"
       },
       "양재와당체M": {
         "korWidth": 9.88,
@@ -508,7 +508,7 @@
         "xHeight": 5.5,
         "ascent": 9.0,
         "descent": 2.0,
-        "category": "serif"
+        "category": "handwriting"
       },
       "휴먼굵은샘체": {
         "korWidth": 6.19,
@@ -562,7 +562,7 @@
         "xHeight": 3.86,
         "ascent": 9.0,
         "descent": 2.0,
-        "category": "serif"
+        "category": "handwriting"
       },
       "양재본목각체M": {
         "korWidth": 10.04,
@@ -580,7 +580,7 @@
         "xHeight": 5.31,
         "ascent": 9.0,
         "descent": 2.0,
-        "category": "serif"
+        "category": "handwriting"
       },
       "휴먼중간팸체": {
         "korWidth": 5.85,
@@ -589,7 +589,7 @@
         "xHeight": 3.86,
         "ascent": 9.0,
         "descent": 2.0,
-        "category": "serif"
+        "category": "handwriting"
       },
       "휴먼가는팸체": {
         "korWidth": 5.65,
@@ -607,7 +607,7 @@
         "xHeight": 3.72,
         "ascent": 9.0,
         "descent": 2.0,
-        "category": "sans"
+        "category": "handwriting"
       },
       "양재튼튼체B": {
         "korWidth": 10.12,

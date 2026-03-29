@@ -201,19 +201,34 @@ public class FontMapper {
             result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, 1.0, ext.ratio);
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
         }
-        // [2] 메트릭 기반 최적 매칭 (IDML + HWPX 메트릭이 모두 있을 때)
-        else if (!idmlMetrics.isEmpty() && !hwpxMetrics.isEmpty()) {
-            FontMetricEntry idmlInfo = idmlMetrics.get(idmlFontFamily);
-            if (idmlInfo != null) {
-                result = findBestMatchByMetrics(idmlFontFamily, idmlInfo);
-                System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + result.koFont + "\" (메트릭매칭)");
-            } else {
-                result = categoryFallback(idmlFontFamily, fontStyle);
-            }
-        }
-        // [3] 카테고리/키워드 폴백
+        // [2] 키워드/카테고리 폴백 (이름 기반 — 우선)
         else {
-            result = categoryFallback(idmlFontFamily, fontStyle);
+            // 키워드 매칭 먼저 시도
+            String lower = idmlFontFamily.toLowerCase();
+            String keywordMatch = keywordMapping(lower, fontStyle);
+            if (keywordMatch != null) {
+                // 키워드 매칭 성공 → 메트릭 매칭 불필요
+                String ko = keywordMatch;
+                if (DEFAULT_SERIF.equals(ko)) ko = configSerifKo;
+                else if (DEFAULT_SANS.equals(ko)) ko = configSansKo;
+                boolean isWestern = isWesternFont(idmlFontFamily);
+                String en = isWestern ? DEFAULT_LATIN_SANS : ko;
+                result = new MappingResult(ko, en, 0);
+                System.out.println("[FontMap] \"" + idmlFontFamily + "\" (style=" + fontStyle + ") → ko=\"" + ko + "\" (키워드매칭)");
+            } else {
+                // 키워드 미매칭 → 메트릭 매칭 시도 → 카테고리 폴백
+                if (!idmlMetrics.isEmpty() && !hwpxMetrics.isEmpty()) {
+                    FontMetricEntry idmlInfo = idmlMetrics.get(idmlFontFamily);
+                    if (idmlInfo != null) {
+                        result = findBestMatchByMetrics(idmlFontFamily, idmlInfo);
+                        System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + result.koFont + "\" (메트릭매칭)");
+                    } else {
+                        result = categoryFallback(idmlFontFamily, fontStyle);
+                    }
+                } else {
+                    result = categoryFallback(idmlFontFamily, fontStyle);
+                }
+            }
         }
 
         // heightScale 미설정 시 HWPX 메트릭에서 계산
@@ -361,7 +376,13 @@ public class FontMapper {
             return latSim * 0.60 + wSim * 0.15 + xSim * 0.15 + catBonus * 0.10;
         }
 
-        // 한글 슬롯: 기존 6차원 매칭
+        // 한글 슬롯: 카테고리 필터 + 메트릭 매칭
+        // 카테고리 불일치 시 후보에서 제외 (명조↔고딕 교차 매칭 방지)
+        if (!idmlCategory.equals(hwpx.category)
+                && !"unknown".equals(idmlCategory) && !"unknown".equals(hwpx.category)) {
+            return -1.0; // 카테고리 불일치 → 후보 제외
+        }
+
         double korSim = 0.5;
         if (idml.korWidth() > 0 && hwpx.korWidth > 0) {
             korSim = 1.0 - Math.abs(idml.korWidth() - hwpx.korWidth) / Math.max(idml.korWidth(), hwpx.korWidth);
@@ -381,9 +402,8 @@ public class FontMapper {
         if (idml.xHeight() > 0 && hwpx.xHeight > 0) {
             xSim = 1.0 - Math.abs(idml.xHeight() - hwpx.xHeight) / Math.max(idml.xHeight(), hwpx.xHeight);
         }
-        double catBonus = idmlCategory.equals(hwpx.category) ? 1.0 : 0.0;
 
-        return korSim * 0.40 + latSim * 0.20 + wSim * 0.15 + adSim * 0.10 + xSim * 0.05 + catBonus * 0.10;
+        return korSim * 0.45 + latSim * 0.20 + wSim * 0.20 + adSim * 0.10 + xSim * 0.05;
     }
 
     /** 영문 카테고리 폴백: serif → Times New Roman, sans → Arial */
@@ -402,9 +422,13 @@ public class FontMapper {
         // --- 1차: 키워드 기반 정밀 매핑 (한/글 번들 폰트명과 직접 연결) ---
         String keywordMatch = keywordMapping(lower, fontStyle);
         if (keywordMatch != null) {
-            String en = isWestern ? DEFAULT_LATIN_SANS : keywordMatch;
-            System.out.println("[FontMap] \"" + idmlFontFamily + "\" (style=" + fontStyle + ") → ko=\"" + keywordMatch + "\" en=\"" + en + "\" (키워드매핑)");
-            return new MappingResult(keywordMatch, en, 0);
+            // DEFAULT_SERIF/DEFAULT_SANS → config 기본 폰트로 교체
+            String ko = keywordMatch;
+            if (DEFAULT_SERIF.equals(ko)) ko = configSerifKo;
+            else if (DEFAULT_SANS.equals(ko)) ko = configSansKo;
+            String en = isWestern ? DEFAULT_LATIN_SANS : ko;
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" (style=" + fontStyle + ") → ko=\"" + ko + "\" en=\"" + en + "\" (키워드매핑)");
+            return new MappingResult(ko, en, 0);
         }
 
         // --- 2차: 대분류 폴백 (config 기본 폰트 사용) ---
