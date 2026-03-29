@@ -58,9 +58,8 @@ public class HwpxTableBuilder {
                 .borderFillIDRefAnd("1")
                 .noAdjustAnd(false);
 
-        // ShapeSize — 1×1 테이블(글상자 변환)은 높이를 0으로 설정하여 콘텐츠에 맞춤
-        boolean singleCellTable = astTable.rowCount() == 1 && astTable.colCount() == 1;
-        long tableHeight = singleCellTable ? 0 : astTable.height();
+        // ShapeSize — 높이 0: 콘텐츠에 맞게 자동 확장
+        long tableHeight = 0;
         table.createSZ();
         table.sz().widthAnd(totalWidth).widthRelToAnd(WidthRelTo.ABSOLUTE)
                 .heightAnd(tableHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
@@ -229,11 +228,9 @@ public class HwpxTableBuilder {
                 tc.cellSpan().colSpanAnd((short) colSpan)
                         .rowSpanAnd((short) rowSpan);
 
-                // 셀 크기 — 1×1 테이블(글상자 변환)은 높이 0으로 콘텐츠 맞춤
-                boolean isSingleCell = astTable.rowCount() == 1 && astTable.colCount() == 1;
-                long cellHeight = isSingleCell ? 0 : astCell.height();
+                // 셀 크기 — 높이 0: 콘텐츠에 맞게 자동 확장
                 tc.createCellSz();
-                tc.cellSz().widthAnd(astCell.width()).heightAnd(cellHeight);
+                tc.cellSz().widthAnd(astCell.width()).heightAnd(0L);
 
                 // 셀 여백
                 tc.createCellMargin();

@@ -83,8 +83,8 @@ public class ResolvedToASTBuilder {
         // Phase 3: Story→단락→런 변환
         convertStories(sections);
 
-        // Phase 4: 테이블 포함 TextFrame → ASTTable 변환 (비활성 — 테이블+제목 혼합 Story 미완)
-        // placeTablesFromIDML(sections);
+        // Phase 4: 테이블 포함 TextFrame → ASTTable 변환
+        placeTablesFromIDML(sections);
 
         // Phase 6: 페이지 배경 PNG 주입
         injectPageBackgrounds(sections);
@@ -589,8 +589,8 @@ public class ResolvedToASTBuilder {
 
         for (ResolvedTextFrame tf : resolvedData.textFrames()) {
             if (tf.isInline()) continue;
-            // editable 프레임은 이미 글상자로 배치됨 → 건너뜀
-            if (resolvedData.isEditableTextFrame(tf.id())) continue;
+            // editable 프레임만 처리 (non-editable은 배경 PNG에 이미 포함)
+            if (!resolvedData.isEditableTextFrame(tf.id())) continue;
 
             // Story에 테이블이 있는지 IDML에서 확인
             String storyId = tf.storyId();
@@ -614,12 +614,37 @@ public class ResolvedToASTBuilder {
             double x = gbAlreadyPageRelative ? gb[1] : (gb[1] - pageLeft);
             double y = gb[0] - pageTop;
 
-            long hx = CoordinateConverter.pointsToHwpunits(x * scaleFactor);
-            long hy = CoordinateConverter.pointsToHwpunits(y * scaleFactor);
+            long hx = CoordinateConverter.pointsToHwpunits(x);
+            long hy = CoordinateConverter.pointsToHwpunits(y);
 
-            // IDML 테이블 변환
+            // 테이블 앞 텍스트 높이 계산 (테이블 Y 오프셋)
+            // IDML paragraphIndexBefore로 테이블 앞 단락 수 파악
+            long tableYOffset = 0;
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : idmlStory.tables()) {
-                ASTTable astTable = ASTTableConverter.convertTableSimple(idmlTable, hx, hy, tf.zOrder());
+                // paragraphIndexBefore: 이 테이블 앞에 있는 단락 수
+                int parasBefore = idmlTable.paragraphIndexBefore();
+                if (parasBefore > 0) {
+                    // 앞 단락들의 높이를 추정 (단락당 ~leading 사용)
+                    // 정확한 값은 없으므로 resolved의 insetSpacing.top + leading * parasBefore
+                    double estLineHeight = 8.0 * scaleFactor; // 기본 행간 ~8mm
+                    tableYOffset = CoordinateConverter.pointsToHwpunits(parasBefore * estLineHeight);
+                }
+
+                ASTTable astTable = ASTTableConverter.convertTableSimple(
+                        idmlTable, hx, hy + tableYOffset, tf.zOrder());
+                // 디버그: 테이블 셀 텍스트 확인
+                int cellTextLen = 0;
+                for (ASTTableRow row : astTable.rows()) {
+                    for (ASTTableCell cell : row.cells()) {
+                        for (ASTParagraph p : cell.paragraphs()) {
+                            String pt = getParaPlainText(p);
+                            if (pt != null) cellTextLen += pt.length();
+                        }
+                    }
+                }
+                System.out.println("[Phase4-Table] story=" + storyId + " tf=" + tf.id()
+                        + " page=" + pageIdx + " rows=" + astTable.rowCount()
+                        + " cols=" + astTable.colCount() + " cellText=" + cellTextLen);
                 sections.get(pageIdx).addBlock(astTable);
                 tableCount++;
             }

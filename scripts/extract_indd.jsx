@@ -1833,10 +1833,9 @@ function isRenderableTextFrame(tf) {
     // 단, \t(0x09), \n(0x0A), \r(0x0D)은 정상적인 단락/줄 구분자이므로 허용
     if (/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFC]/.test(text)) return false;
 
-    // 공백 제거 후 길이 판정
+    // 공백 제거 후 길이 판정: 1자 이상이면 효과 체크 진행
     var trimmed = text.replace(/[\s\uFEFF]/g, "");
     if (trimmed.length === 0) return false;
-    if (trimmed.length >= 30) return false;
 
     // 회전된 프레임 → 항상 렌더링 (HWPX에서 회전 텍스트 재현 불가)
     try {
@@ -2188,50 +2187,25 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
     var editableFrameIds = {};  // id → true (Java에서 글상자 배치 시 사용)
     for (var i = 0; i < allItems.length; i++) {
         var item = allItems[i];
+        // 1. TextFrame만 처리
         if (item.constructor.name !== "TextFrame") continue;
+        // 2. 숨겨진 레이어
         if (isOnHiddenLayer(item)) continue;
+        // 3. 비인쇄
         try { if (item.nonprinting) continue; } catch (e) {}
-
-        // 페이징 정보(footer/하시라/header): 페이지 상하단 10% 영역의 짧은 텍스트 → 배경에 포함
+        // 5. 마스터 페이지 오버라이드
         try {
-            var sc = item.parentStory.contents;
-            if (sc.indexOf("\u0018") >= 0) continue; // 자동 페이지 번호 마커
+            if (item.masterPageItem) continue;
         } catch (e) {}
-        try {
-            if (item.masterPageItem) continue; // 마스터 페이지 override
-        } catch (e) {}
-        try {
-            var ppg = item.parentPage;
-            if (ppg) {
-                var pgB = ppg.bounds; // [top, left, bottom, right]
-                var pgW = pgB[3] - pgB[1];
-                var pgH = pgB[2] - pgB[0];
-                var tfB = item.geometricBounds;
-                var tfTop = tfB[0] - pgB[0];
-                var tfBot = tfB[2] - pgB[0];
-                var tfLeft = tfB[1] - pgB[1];
-                var tfRight = tfB[3] - pgB[1];
-                var trimmed = item.contents.replace(/[\s\uFEFF\r\n\u0018]/g, "");
-                // 상하단 10% 또는 좌우 마진 영역의 짧은 텍스트(≤15자) → 배경 포함
-                var inMarginArea = (tfTop < pgH * 0.10 || tfBot > pgH * 0.90
-                    || tfRight <= pgW * 0.15 || tfLeft >= pgW * 0.85);
-                if (trimmed.length <= 15 && inMarginArea) {
-                    continue;
-                }
-            }
-        } catch (e) {}
-
-        // 인라인 객체는 부모가 관리하므로 건너뜀
+        // 7. 인라인 객체는 부모가 관리
         if (isInlineItem(item)) continue;
 
-        // Group 안의 짧은 장식 TextFrame은 배경에 포함 (editable 아님)
-        // 조건: 10자 이하 + 글자 효과(색상, 특수 폰트)가 있는 경우만
+        // 8. Group 안의 짧은 장식 TextFrame (10자 이하 + 장식 효과)
         try {
             var parentType = item.parent.constructor.name;
             if (parentType === "Group") {
                 var groupText = item.contents.replace(/[\s\uFEFF\r\n]/g, "");
                 if (groupText.length <= 10) {
-                    // 일반 폰트(검정, 기본체)인지 확인 — 일반이면 editable 유지
                     var isDecorative = false;
                     try {
                         var chars = item.parentStory.characters;
@@ -2247,19 +2221,24 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
             }
         } catch (e) {}
 
-        // 렌더 대상 텍스트 프레임(배지, 장식)은 배경에 포함 → 숨기지 않음
+        // 9. 렌더 대상: 글자 1자 이상 + 회전/효과/특수 스타일
         if (isRenderableTextFrame(item)) continue;
 
-        // 테이블이 포함된 TextFrame은 배경에 포함
-        // (Java IDML 테이블 파싱은 구현되었으나, 테이블+제목 혼합 Story 처리 미완)
-        try {
-            if (item.parentStory && item.parentStory.tables.length > 0) continue;
-        } catch (e) {}
-
-        // 빈 TextFrame(텍스트 없음)은 그래픽 속성(테두리, 배경색, 회전 등)이 있으므로 배경에 포함
+        // 11. 빈 TextFrame + 투명 아닌(stroke/fill 있는) → 배경에 포함
         try {
             var trimmedContents = item.contents.replace(/[\r\n\s\uFFFC]/g, "");
-            if (trimmedContents.length === 0) continue;
+            if (trimmedContents.length === 0) {
+                var hasVisualProps = false;
+                try {
+                    var _fc = item.fillColor ? item.fillColor.name : "None";
+                    var _sc = item.strokeColor ? item.strokeColor.name : "None";
+                    var _sw = item.strokeWeight || 0;
+                    if ((_fc !== "None" && _fc !== "[None]") || ((_sc !== "None" && _sc !== "[None]") && _sw > 0)) {
+                        hasVisualProps = true;
+                    }
+                } catch (e2) {}
+                if (hasVisualProps) continue;
+            }
         } catch (e) {}
 
         // 나머지 = 편집 가능 본문 텍스트 → 숨겨서 배경에서 제외
