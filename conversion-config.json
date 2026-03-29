@@ -371,6 +371,12 @@
         "ko": "한컴 윤고딕 250",
         "en": "한컴 윤고딕 250",
         "spacing": 0
+      },
+      "Univers LT Std": {
+        "ko": "함초롬돋움",
+        "en": "Arial",
+        "spacing": 0,
+        "ratio": 0.85
       }
     },
     "hwpxFontMetrics": {

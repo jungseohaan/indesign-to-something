@@ -201,34 +201,10 @@ public class FontMapper {
             result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, 1.0, ext.ratio);
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
         }
-        // [2] 키워드/카테고리 폴백 (이름 기반 — 우선)
+        // [2] 카테고리/키워드 폴백 (이름 기반)
+        // 메트릭 매칭은 비활성 — hwpxFontMetrics 카테고리 정확도 개선 후 재활성화
         else {
-            // 키워드 매칭 먼저 시도
-            String lower = idmlFontFamily.toLowerCase();
-            String keywordMatch = keywordMapping(lower, fontStyle);
-            if (keywordMatch != null) {
-                // 키워드 매칭 성공 → 메트릭 매칭 불필요
-                String ko = keywordMatch;
-                if (DEFAULT_SERIF.equals(ko)) ko = configSerifKo;
-                else if (DEFAULT_SANS.equals(ko)) ko = configSansKo;
-                boolean isWestern = isWesternFont(idmlFontFamily);
-                String en = isWestern ? DEFAULT_LATIN_SANS : ko;
-                result = new MappingResult(ko, en, 0);
-                System.out.println("[FontMap] \"" + idmlFontFamily + "\" (style=" + fontStyle + ") → ko=\"" + ko + "\" (키워드매칭)");
-            } else {
-                // 키워드 미매칭 → 메트릭 매칭 시도 → 카테고리 폴백
-                if (!idmlMetrics.isEmpty() && !hwpxMetrics.isEmpty()) {
-                    FontMetricEntry idmlInfo = idmlMetrics.get(idmlFontFamily);
-                    if (idmlInfo != null) {
-                        result = findBestMatchByMetrics(idmlFontFamily, idmlInfo);
-                        System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + result.koFont + "\" (메트릭매칭)");
-                    } else {
-                        result = categoryFallback(idmlFontFamily, fontStyle);
-                    }
-                } else {
-                    result = categoryFallback(idmlFontFamily, fontStyle);
-                }
-            }
+            result = categoryFallback(idmlFontFamily, fontStyle);
         }
 
         // heightScale 미설정 시 HWPX 메트릭에서 계산
