@@ -2194,10 +2194,27 @@ public class ResolvedToASTBuilder {
         ResolvedTextFrame tf = resolvedData.getTextFrame(domId);
         if (tf == null || !tf.isInline()) return null;
 
+        // frameVisibleText 또는 IDML Story에서 텍스트 가져오기
         String visText = tf.frameVisibleText();
-        if (visText == null) return null;
-        visText = visText.replace("\uFFFC", "").replace("\n", "").replace("\r", "").trim();
-        if (visText.isEmpty() || visText.length() > 5) return null;
+        if (visText != null) {
+            visText = visText.replace("\uFFFC", "").replace("\n", "").replace("\r", "").trim();
+        }
+        if (visText == null || visText.isEmpty()) {
+            // IDML Story에서 폴백
+            if (tf.storyId() != null) {
+                IDMLStory idmlStory = loadIDMLStory(tf.storyId());
+                if (idmlStory != null) {
+                    StringBuilder sb = new StringBuilder();
+                    for (IDMLParagraph p : idmlStory.paragraphs()) {
+                        for (IDMLCharacterRun r : p.characterRuns()) {
+                            if (r.content() != null) sb.append(r.content());
+                        }
+                    }
+                    visText = sb.toString().replace("\uFFFC", "").trim();
+                }
+            }
+        }
+        if (visText == null || visText.isEmpty()) return null;
 
         // resolved story에서 런 스타일 가져오기
         ResolvedStory story = (tf.storyId() != null) ? resolvedData.getStory(tf.storyId()) : null;
@@ -2214,6 +2231,32 @@ public class ResolvedToASTBuilder {
                     run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
                 }
                 if (rr.fillColor() != null) run.textColor(resolveColorToHex(rr.fillColor()));
+                if (rr.underline() != null && rr.underline()) run.underline(true);
+                if (rr.strikeThru() != null && rr.strikeThru()) run.strikeThrough(true);
+            }
+        }
+        // IDML CharacterStyle에서 밑줄 추론
+        if (tf.storyId() != null) {
+            IDMLStory idmlStory = loadIDMLStory(tf.storyId());
+            if (idmlStory != null && !idmlStory.paragraphs().isEmpty()) {
+                IDMLParagraph ip = idmlStory.paragraphs().get(0);
+                if (!ip.characterRuns().isEmpty()) {
+                    IDMLCharacterRun cr = ip.characterRuns().get(0);
+                    if (cr.underline() != null && cr.underline()) run.underline(true);
+                    String cs = cr.appliedCharacterStyle();
+                    if (cs != null && (cs.contains("밑줄") || cs.toLowerCase().contains("underline"))) {
+                        run.underline(true);
+                    }
+                }
+            }
+        }
+
+        // 인라인 TextFrame의 ParagraphStyle에서 밑줄 추론
+        // resolved story의 styleName에 "선", "답+선", "underline" 등이 포함되면 밑줄
+        if (story != null && !story.paragraphs().isEmpty()) {
+            String styleName = story.paragraphs().get(0).styleName();
+            if (styleName != null && (styleName.contains("선") || styleName.toLowerCase().contains("underline"))) {
+                run.underline(true);
             }
         }
 
