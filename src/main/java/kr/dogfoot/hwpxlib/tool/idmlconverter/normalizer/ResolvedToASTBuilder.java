@@ -1085,9 +1085,14 @@ public class ResolvedToASTBuilder {
                         }
                         int anchorIdx = 0;
                         for (int pi = 0; pi < parts.length; pi++) {
-                            if (!parts[pi].isEmpty()) {
-                                ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, parts[pi]);
-                                ASTTextRun tr = createRunFromIDML(run, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+                            // 인라인 앵커 직전 텍스트의 후행 공백 제거 (위치 조정용 공백)
+                            String partText = parts[pi];
+                            if (pi < parts.length - 1 && partText.endsWith("  ")) {
+                                partText = partText.replaceAll("\\s+$", " "); // 후행 다중 공백 → 단일 공백
+                            }
+                            if (!partText.isEmpty()) {
+                                ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, partText);
+                                ASTTextRun tr = createRunFromIDML(run, partText, matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
                                 if (!splitBulletRun(tr, para)) {
                                     splitLatinVarsInMixedText(tr, para);
                                 }
