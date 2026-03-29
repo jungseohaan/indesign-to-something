@@ -1159,6 +1159,10 @@ public class ResolvedToASTBuilder {
             text = text.replace("\u0008", "");   // 단독 IndentToHere 제거
             text = text.replace("\n", "");       // Frame Break 제거
             text = text.replace("\t", " ");      // 탭 → 공백 (탭스톱 없는 경우 간격 방지)
+            text = text.replace("\u2009", "");   // Thin Space 제거
+            text = text.replace("\u2002", "");   // En Space 제거
+            text = text.replace("\u2003", "");   // Em Space 제거
+            text = text.replace("\u200A", "");   // Hair Space 제거
         }
         tr.text(text);
         // IDML CharacterRun 속성 우선
