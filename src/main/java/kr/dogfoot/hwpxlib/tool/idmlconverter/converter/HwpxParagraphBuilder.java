@@ -583,6 +583,14 @@ public class HwpxParagraphBuilder {
 
         String charPrId = defaultCharPrId;
 
+        // CharacterStyle 이름에서 밑줄 추론 (AST에서 설정되지 않은 경우)
+        if (!textRun.underline() && textRun.characterStyleRef() != null) {
+            String csRef = textRun.characterStyleRef();
+            if (csRef.contains("밑줄") || csRef.toLowerCase().contains("underline")) {
+                textRun.underline(true);
+            }
+        }
+
         // 인라인 스타일 오버라이드
         if (hasCharacterOverrides(textRun)) {
             charPrId = createOverrideCharPr(textRun);

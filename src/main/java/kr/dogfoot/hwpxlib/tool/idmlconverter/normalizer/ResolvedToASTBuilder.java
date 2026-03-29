@@ -1243,6 +1243,16 @@ public class ResolvedToASTBuilder {
         if (cr.strikeThrough() != null && cr.strikeThrough()) {
             tr.strikeThrough(true);
         }
+        // CharacterStyle 이름에서 밑줄/취소선 추론
+        String charStyle = cr.appliedCharacterStyle();
+        if (charStyle != null) {
+            if (charStyle.contains("밑줄") || charStyle.toLowerCase().contains("underline")) {
+                tr.underline(true);
+            }
+            if (charStyle.contains("취소선") || charStyle.toLowerCase().contains("strikethrough")) {
+                tr.strikeThrough(true);
+            }
+        }
         // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
         return tr;
     }
@@ -1431,6 +1441,12 @@ public class ResolvedToASTBuilder {
         tr.textColor(src.textColor());
         tr.letterSpacing(src.letterSpacing());
         tr.grepMathFont(src.grepMathFont());
+        tr.underline(src.underline());
+        tr.strikeThrough(src.strikeThrough());
+        tr.characterStyleRef(src.characterStyleRef());
+        tr.horizontalScale(src.horizontalScale());
+        tr.verticalScale(src.verticalScale());
+        tr.baselineShift(src.baselineShift());
         return tr;
     }
 
