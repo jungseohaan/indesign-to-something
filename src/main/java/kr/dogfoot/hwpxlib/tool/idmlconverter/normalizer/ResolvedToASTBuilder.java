@@ -1243,6 +1243,20 @@ public class ResolvedToASTBuilder {
         if (cr.strikeThrough() != null && cr.strikeThrough()) {
             tr.strikeThrough(true);
         }
+        // IDML UnderlineType → underlineShape 매핑 (Wavy → WAVE 등)
+        if (cr.underlineType() != null) {
+            String ulType = cr.underlineType().toLowerCase();
+            if (ulType.contains("wavy") || ulType.contains("wave")) {
+                tr.underline(true);
+                tr.underlineShape("WAVE");
+            } else if (ulType.contains("dashed") || ulType.contains("dash")) {
+                tr.underline(true);
+                tr.underlineShape("DASH");
+            } else if (ulType.contains("dotted") || ulType.contains("dot")) {
+                tr.underline(true);
+                tr.underlineShape("DOT");
+            }
+        }
         // CharacterStyle 이름에서 밑줄/취소선 추론
         String charStyle = cr.appliedCharacterStyle();
         if (charStyle != null) {
@@ -1251,6 +1265,10 @@ public class ResolvedToASTBuilder {
             }
             if (charStyle.contains("취소선") || charStyle.toLowerCase().contains("strikethrough")) {
                 tr.strikeThrough(true);
+            }
+            // CharacterStyle에서 물결 밑줄 추론
+            if (charStyle.contains("물결") || charStyle.toLowerCase().contains("wavy")) {
+                tr.underlineShape("WAVE");
             }
         }
         // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
@@ -1442,6 +1460,8 @@ public class ResolvedToASTBuilder {
         tr.letterSpacing(src.letterSpacing());
         tr.grepMathFont(src.grepMathFont());
         tr.underline(src.underline());
+        tr.underlineShape(src.underlineShape());
+        tr.underlineColor(src.underlineColor());
         tr.strikeThrough(src.strikeThrough());
         tr.characterStyleRef(src.characterStyleRef());
         tr.horizontalScale(src.horizontalScale());
