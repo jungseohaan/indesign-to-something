@@ -55,32 +55,32 @@
   },
   "fontMapping": {
     "_comment": "폰트 매핑 설정 — Java FontMapper에서 사용. InDesign 폰트를 HWPX 호환 폰트로 변환",
-    "defaultSerifKo": "한컴바탕",
+    "defaultSerifKo": "함초롬바탕",
     "_comment_defaultSerifKo": "명조(세리프) 계열 한글 기본 폰트",
-    "defaultSansKo": "한컴돋움",
+    "defaultSansKo": "함초롬돋움",
     "_comment_defaultSansKo": "고딕(산세리프) 계열 한글 기본 폰트",
     "defaultSerifEn": "Times New Roman",
     "defaultSansEn": "Arial",
     "mappings": {
       "_comment": "InDesign 폰트명 → HWPX 폰트 매핑. ko: 한글, en: 영문, spacing: 자간 보정(%), ratio: 장평 보정, scaleAdjust: 크기 보정(%)",
       "Sandoll 곧은부리": {
-        "ko": "한컴돋움",
+        "ko": "함초롬돋움",
         "en": "Arial",
         "spacing": 0
       },
       "Sandoll 고고RoundCond": {
-        "ko": "한컴돋움",
+        "ko": "함초롬돋움",
         "en": "Calibri",
         "spacing": -5
       },
       "Helvetica Neue": {
-        "ko": "한컴돋움",
+        "ko": "함초롬돋움",
         "en": "Arial",
         "spacing": 0,
         "scaleAdjust": 5
       },
       "Times New Roman": {
-        "ko": "한컴바탕",
+        "ko": "함초롬바탕",
         "en": "Times New Roman",
         "spacing": 0
       },
@@ -96,8 +96,8 @@
         "spacing": 0
       },
       "ViMaru OTF": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬바탕",
+        "en": "함초롬바탕",
         "spacing": 0
       },
       "210 라임OTF": {
@@ -212,8 +212,8 @@
         "ratio": 0.95
       },
       "마루 부리OTF": {
-        "ko": "한컴바탕",
-        "en": "한컴바탕",
+        "ko": "함초롬바탕",
+        "en": "함초롬바탕",
         "spacing": 0
       },
       "HU가는펜글씨": {
@@ -247,13 +247,13 @@
         "ratio": 0.82
       },
       "Rix착한아이_Pro": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬돋움",
+        "en": "함초롬돋움",
         "spacing": 0
       },
       "Rix착한아이 M": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬돋움",
+        "en": "함초롬돋움",
         "spacing": 0
       },
       "Rix개봉박두_Pro": {
@@ -267,8 +267,8 @@
         "spacing": 0
       },
       "Rix대학일기_Pro": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬돋움",
+        "en": "함초롬돋움",
         "spacing": 0
       },
       "Rix정고딕_Pro": {
@@ -283,8 +283,8 @@
         "ratio": 0.72
       },
       "Sandoll 명조Neo1": {
-        "ko": "한컴바탕",
-        "en": "한컴바탕",
+        "ko": "함초롬바탕",
+        "en": "함초롬바탕",
         "spacing": 0
       },
       "Sandoll 안단테": {
@@ -293,8 +293,8 @@
         "spacing": 0
       },
       "Sandoll 제비2": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬돋움",
+        "en": "함초롬돋움",
         "spacing": 0
       },
       "ONE 모바일POP OTF": {
@@ -303,18 +303,18 @@
         "spacing": 0
       },
       "THE삐끗삐끗 (TT)": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬돋움",
+        "en": "함초롬돋움",
         "spacing": 0
       },
       "THE수수깡": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬돋움",
+        "en": "함초롬돋움",
         "spacing": 0
       },
       "TT더좋은날에": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬돋움",
+        "en": "함초롬돋움",
         "spacing": 0
       },
       "땅스부대찌개 OTF": {
@@ -328,8 +328,8 @@
         "spacing": 0
       },
       "DX바른필기": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬돋움",
+        "en": "함초롬돋움",
         "spacing": 0
       },
       "DX새명조고어 Std": {
@@ -338,7 +338,7 @@
         "spacing": 0
       },
       "DIN (TT)": {
-        "ko": "한컴돋움",
+        "ko": "함초롬돋움",
         "en": "Arial",
         "spacing": 0
       },
@@ -348,8 +348,8 @@
         "spacing": 0
       },
       "HU바르게쓰다": {
-        "ko": "한컴돋움",
-        "en": "한컴돋움",
+        "ko": "함초롬돋움",
+        "en": "함초롬돋움",
         "spacing": 0
       },
       "나눔스퀘어라운드OTF": {
@@ -363,7 +363,7 @@
         "spacing": 0
       },
       "SD 격동명조2": {
-        "ko": "한컴바탕",
+        "ko": "함초롬바탕",
         "en": "Times New Roman",
         "spacing": 0
       },

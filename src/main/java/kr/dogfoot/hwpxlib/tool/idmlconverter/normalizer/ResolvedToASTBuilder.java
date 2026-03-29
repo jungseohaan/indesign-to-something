@@ -927,9 +927,11 @@ public class ResolvedToASTBuilder {
                 resolvedRuns = resolvedStory.paragraphs().get(i).runs();
             }
 
-            // ParagraphStyle에서 FillColor/Tracking 미리 구해둠 (런에서 없을 때 사용)
+            // ParagraphStyle에서 FillColor/Tracking/FontFamily 미리 구해둠 (런에서 없을 때 사용)
             String styleFillColor = getStyleFillColor(ip.appliedParagraphStyle());
             Double styleTracking = getStyleTracking(ip.appliedParagraphStyle());
+            String styleFontFamily = getStyleFontFamily(ip.appliedParagraphStyle());
+            Double styleFontSize = getStyleFontSize(ip.appliedParagraphStyle());
 
             // 런 변환: IDML CharacterRun → ASTTextRun + 수식 그룹화
             // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
@@ -1085,7 +1087,7 @@ public class ResolvedToASTBuilder {
                         for (int pi = 0; pi < parts.length; pi++) {
                             if (!parts[pi].isEmpty()) {
                                 ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, parts[pi]);
-                                ASTTextRun tr = createRunFromIDML(run, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking);
+                                ASTTextRun tr = createRunFromIDML(run, parts[pi], matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
                                 if (!splitBulletRun(tr, para)) {
                                     splitLatinVarsInMixedText(tr, para);
                                 }
@@ -1110,7 +1112,7 @@ public class ResolvedToASTBuilder {
                         }
                     } else {
                         ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
-                        ASTTextRun tr = createRunFromIDML(run, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor, styleTracking);
+                        ASTTextRun tr = createRunFromIDML(run, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
                         // ;...; 분수 GREP 패턴이 포함된 텍스트 → 분수 수식으로 분리
                         if (!splitBulletRun(tr, para)) {
                             if (EHFontGlyphMap.containsEHFractionPattern(text)) {
@@ -1145,7 +1147,7 @@ public class ResolvedToASTBuilder {
         return paragraphs;
     }
 
-    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, String styleFillColor, Double styleTracking) {
+    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, String styleFillColor, Double styleTracking, String styleFontFamily, Double styleFontSize) {
         ASTTextRun tr = new ASTTextRun();
         // 특수 제어 문자 제거
         // \u0008 = Indent to Here (ACE 7) — HWPX에 대응 없음
@@ -1235,6 +1237,13 @@ public class ResolvedToASTBuilder {
             if (rr.strikeThru() != null && rr.strikeThru()) {
                 tr.strikeThrough(true);
             }
+        }
+        // ParagraphStyle 폴백 (IDML 런과 resolved 런 모두 속성이 없을 때)
+        if (tr.fontFamily() == null && styleFontFamily != null) {
+            tr.fontFamily(styleFontFamily);
+        }
+        if (tr.fontSizeHwpunits() == null && styleFontSize != null && styleFontSize > 0) {
+            tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(styleFontSize));
         }
         // IDML CharacterRun의 underline/strikeThrough (resolved보다 우선)
         if (cr.underline() != null && cr.underline()) {
@@ -1400,6 +1409,18 @@ public class ResolvedToASTBuilder {
             return resolveColorToHex(resolved.fillColor());
         }
         return null;
+    }
+
+    private String getStyleFontFamily(String styleRef) {
+        if (styleResolver == null) return null;
+        IDMLStyleDef resolved = styleResolver.getResolvedParagraphStyle(styleRef);
+        return resolved != null ? resolved.fontFamily() : null;
+    }
+
+    private Double getStyleFontSize(String styleRef) {
+        if (styleResolver == null) return null;
+        IDMLStyleDef resolved = styleResolver.getResolvedParagraphStyle(styleRef);
+        return resolved != null ? resolved.fontSize() : null;
     }
 
     /**
