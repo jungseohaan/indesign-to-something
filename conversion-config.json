@@ -351,6 +351,26 @@
         "ko": "한컴돋움",
         "en": "한컴돋움",
         "spacing": 0
+      },
+      "나눔스퀘어라운드OTF": {
+        "ko": "한컴 윤고딕 240",
+        "en": "Arial",
+        "spacing": 0
+      },
+      "상상토끼 정묵바위": {
+        "ko": "한컴 윤고딕 230",
+        "en": "한컴 윤고딕 230",
+        "spacing": 0
+      },
+      "SD 격동명조2": {
+        "ko": "한컴바탕",
+        "en": "Times New Roman",
+        "spacing": 0
+      },
+      "SD 무브잇 TT": {
+        "ko": "한컴 윤고딕 250",
+        "en": "한컴 윤고딕 250",
+        "spacing": 0
       }
     },
     "hwpxFontMetrics": {

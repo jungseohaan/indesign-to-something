@@ -201,7 +201,17 @@ public class FontMapper {
             result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, 1.0, ext.ratio);
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
         }
-        // [2] 카테고리/키워드 폴백
+        // [2] 메트릭 기반 최적 매칭 (IDML + HWPX 메트릭이 모두 있을 때)
+        else if (!idmlMetrics.isEmpty() && !hwpxMetrics.isEmpty()) {
+            FontMetricEntry idmlInfo = idmlMetrics.get(idmlFontFamily);
+            if (idmlInfo != null) {
+                result = findBestMatchByMetrics(idmlFontFamily, idmlInfo);
+                System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + result.koFont + "\" (메트릭매칭)");
+            } else {
+                result = categoryFallback(idmlFontFamily, fontStyle);
+            }
+        }
+        // [3] 카테고리/키워드 폴백
         else {
             result = categoryFallback(idmlFontFamily, fontStyle);
         }
@@ -414,11 +424,38 @@ public class FontMapper {
         if (lower.contains("고딕") || lower.contains("돋움") || lower.contains("굴림")
                 || lower.contains("sans") || lower.contains("gothic") || lower.contains("grotesque")
                 || lower.contains("arial") || lower.contains("helvetica") || lower.contains("myriad")
-                || lower.contains("rounded") || lower.contains("futura") || lower.contains("din")) {
+                || lower.contains("rounded") || lower.contains("futura") || lower.contains("din")
+                || lower.contains("neo") || lower.contains("square") || lower.contains("스퀘어")) {
             String ko = configSansKo;
             String en = isWestern ? configSansEn : ko;
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + ko + "\" en=\"" + en + "\" (카테고리폴백: sans)");
             return new MappingResult(ko, en, 0);
+        }
+
+        // 손글씨/필기 계열 → 한컴돋움
+        if (lower.contains("필기") || lower.contains("hand") || lower.contains("펜")
+                || lower.contains("쓰다") || lower.contains("script") || lower.contains("brush")
+                || lower.contains("착한아이") || lower.contains("일기") || lower.contains("캘리")) {
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + configSansKo + "\" (카테고리폴백: handwriting)");
+            return new MappingResult(configSansKo, configSansKo, 0);
+        }
+
+        // 210 계열 장식 폰트 → weight 기반 윤고딕 매핑
+        if (lower.startsWith("210 ") || lower.startsWith("210")) {
+            int weight = parseFontStyleWeight(fontStyle);
+            String ko;
+            if (weight >= 600) ko = "한컴 윤고딕 250";
+            else if (weight >= 400) ko = "한컴 윤고딕 240";
+            else ko = "한컴 윤고딕 230";
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + ko + "\" (카테고리폴백: 210-decorative)");
+            return new MappingResult(ko, ko, 0);
+        }
+
+        // HU/Rix/SD 계열 → 한컴돋움
+        if (lower.startsWith("hu") || lower.startsWith("rix") || lower.startsWith("sd ")
+                || lower.contains("상상토끼") || lower.contains("둘기마요")) {
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + configSansKo + "\" (카테고리폴백: korean-decorative)");
+            return new MappingResult(configSansKo, configSansKo, 0);
         }
 
         // 서양 폰트 기본 → 산세리프
