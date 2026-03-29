@@ -196,10 +196,20 @@ class ASTTableConverter {
 
     /**
      * 새 파이프라인용: IDMLTable → ASTTable 변환 (좌표 직접 지정).
-     * ColorResolver/ASTImageLoader/IDMLDocument 없이 동작.
+     * IDMLDocument/ColorResolver/ASTImageLoader가 있으면 레거시 셀 변환 사용,
+     * 없으면 간소화 셀 변환으로 폴백.
      */
     static ASTTable convertTableSimple(IDMLTable idmlTable,
                                         long x, long y, int zOrder) {
+        return convertTableSimple(idmlTable, x, y, zOrder, null, null, null, null);
+    }
+
+    static ASTTable convertTableSimple(IDMLTable idmlTable,
+                                        long x, long y, int zOrder,
+                                        IDMLDocument idmlDoc,
+                                        kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver colorResolver,
+                                        kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader imageLoader,
+                                        ResolvedData resolvedData) {
         ASTTable table = new ASTTable();
         table.sourceId(idmlTable.selfId());
         table.zOrder(zOrder);
@@ -213,6 +223,7 @@ class ASTTableConverter {
         table.colCount(idmlTable.columnWidths().size());
 
         // 행 변환
+        boolean useFullConvert = (idmlDoc != null && colorResolver != null);
         long totalHeight = 0;
         int rowIdx = 0;
         for (IDMLTableRow idmlRow : idmlTable.rows()) {
@@ -223,7 +234,13 @@ class ASTTableConverter {
             totalHeight += row.rowHeight();
 
             for (IDMLTableCell idmlCell : idmlRow.cells()) {
-                ASTTableCell cell = convertTableCellSimple(idmlCell, rowIdx, idmlCell.columnIndex());
+                ASTTableCell cell;
+                if (useFullConvert) {
+                    cell = convertTableCell(idmlCell, rowIdx, idmlCell.columnIndex(),
+                            idmlDoc, colorResolver, imageLoader, resolvedData);
+                } else {
+                    cell = convertTableCellSimple(idmlCell, rowIdx, idmlCell.columnIndex());
+                }
                 row.addCell(cell);
             }
 

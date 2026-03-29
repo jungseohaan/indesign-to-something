@@ -40,6 +40,23 @@ public class ResolvedToASTBuilder {
     private StylePropertyResolver styleResolver;
     private ASTDocument astDoc; // Phase 0에서 스타일 정의 접근용
 
+    // Lazy-loaded IDML 인프라 (테이블 셀 변환용)
+    private kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDocument;
+    private kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver colorResolver;
+    private kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader imageLoader;
+
+    private void ensureIdmlInfra() {
+        if (idmlDocument != null || idmlDir == null) return;
+        try {
+            idmlDocument = kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader.loadFromDirectory(idmlDir);
+            colorResolver = new kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver(idmlDocument);
+            // imageLoader는 셀 내 인라인 이미지가 필요할 때만 생성 (ConvertOptions 필요)
+            imageLoader = null;
+        } catch (Exception e) {
+            System.err.println("[ResolvedToASTBuilder] IDML infra load failed: " + e.getMessage());
+        }
+    }
+
     public ResolvedToASTBuilder(ResolvedData resolvedData) {
         this(resolvedData, null, 300);
     }
@@ -630,8 +647,10 @@ public class ResolvedToASTBuilder {
                     tableYOffset = CoordinateConverter.pointsToHwpunits(parasBefore * estLineHeight);
                 }
 
+                ensureIdmlInfra();
                 ASTTable astTable = ASTTableConverter.convertTableSimple(
-                        idmlTable, hx, hy + tableYOffset, tf.zOrder());
+                        idmlTable, hx, hy + tableYOffset, tf.zOrder(),
+                        idmlDocument, colorResolver, imageLoader, resolvedData);
                 // 디버그: 테이블 셀 텍스트 확인
                 int cellTextLen = 0;
                 for (ASTTableRow row : astTable.rows()) {

@@ -2193,9 +2193,35 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         if (isOnHiddenLayer(item)) continue;
         // 3. 비인쇄
         try { if (item.nonprinting) continue; } catch (e) {}
+        // 4. 자동 페이지 번호 마커 → 배경에 포함
+        try {
+            var sc = item.parentStory.contents;
+            if (sc.indexOf("\u0018") >= 0) continue;
+        } catch (e) {}
         // 5. 마스터 페이지 오버라이드
         try {
             if (item.masterPageItem) continue;
+        } catch (e) {}
+        // 6. 마진 영역의 짧은 텍스트 (페이지 번호, 하시라 등) → 배경에 포함
+        try {
+            var ppg = item.parentPage;
+            if (ppg) {
+                var pgB = ppg.bounds;
+                var pgW = pgB[3] - pgB[1];
+                var pgH = pgB[2] - pgB[0];
+                var tfB = item.geometricBounds;
+                var tfTop = tfB[0] - pgB[0];
+                var tfBot = tfB[2] - pgB[0];
+                var tfLeft = tfB[1] - pgB[1];
+                var tfRight = tfB[3] - pgB[1];
+                var trimmed = "";
+                try { trimmed = item.contents.replace(/[\s\uFEFF\r\n\u0018\uFFFC]/g, ""); } catch (e4) {}
+                var inMarginArea = (tfTop < pgH * 0.10 || tfBot > pgH * 0.90
+                    || tfRight <= pgW * 0.15 || tfLeft >= pgW * 0.85);
+                if (trimmed.length <= 15 && inMarginArea) {
+                    continue;
+                }
+            }
         } catch (e) {}
         // 7. 인라인 객체는 부모가 관리
         if (isInlineItem(item)) continue;
