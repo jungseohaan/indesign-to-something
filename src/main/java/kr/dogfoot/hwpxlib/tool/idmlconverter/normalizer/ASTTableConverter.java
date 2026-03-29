@@ -194,6 +194,148 @@ class ASTTableConverter {
         return border;
     }
 
+    /**
+     * 새 파이프라인용: IDMLTable → ASTTable 변환 (좌표 직접 지정).
+     * ColorResolver/ASTImageLoader/IDMLDocument 없이 동작.
+     */
+    static ASTTable convertTableSimple(IDMLTable idmlTable,
+                                        long x, long y, int zOrder) {
+        ASTTable table = new ASTTable();
+        table.sourceId(idmlTable.selfId());
+        table.zOrder(zOrder);
+        table.x(x);
+        table.y(y);
+
+        // 컬럼 너비
+        for (double cw : idmlTable.columnWidths()) {
+            table.addColumnWidth(CoordinateConverter.pointsToHwpunits(cw));
+        }
+        table.colCount(idmlTable.columnWidths().size());
+
+        // 행 변환
+        long totalHeight = 0;
+        int rowIdx = 0;
+        for (IDMLTableRow idmlRow : idmlTable.rows()) {
+            ASTTableRow row = new ASTTableRow();
+            row.rowIndex(rowIdx);
+            row.rowHeight(CoordinateConverter.pointsToHwpunits(idmlRow.rowHeight()));
+            row.autoGrow(idmlRow.autoGrow());
+            totalHeight += row.rowHeight();
+
+            for (IDMLTableCell idmlCell : idmlRow.cells()) {
+                ASTTableCell cell = convertTableCellSimple(idmlCell, rowIdx, idmlCell.columnIndex());
+                row.addCell(cell);
+            }
+
+            table.addRow(row);
+            rowIdx++;
+        }
+        table.rowCount(rowIdx);
+
+        // 테이블 크기
+        long totalWidth = 0;
+        for (long cw : table.columnWidths()) totalWidth += cw;
+        table.width(totalWidth);
+        table.height(totalHeight);
+
+        // 셀 크기 계산
+        List<Long> colWidths = table.columnWidths();
+        for (ASTTableRow row : table.rows()) {
+            for (ASTTableCell cell : row.cells()) {
+                long cellWidth = 0;
+                int startCol = cell.columnIndex();
+                int endCol = Math.min(startCol + cell.columnSpan(), colWidths.size());
+                for (int c = startCol; c < endCol; c++) cellWidth += colWidths.get(c);
+                cell.width(cellWidth);
+
+                long cellHeight = 0;
+                int startRow = cell.rowIndex();
+                int endRow = Math.min(startRow + cell.rowSpan(), table.rows().size());
+                for (int r = startRow; r < endRow; r++) cellHeight += table.rows().get(r).rowHeight();
+                cell.height(cellHeight);
+            }
+        }
+
+        ASTTableSpacerMerger.merge(table);
+        return table;
+    }
+
+    /**
+     * 간소화 셀 변환 (ColorResolver 없이).
+     */
+    private static ASTTableCell convertTableCellSimple(IDMLTableCell idmlCell,
+                                                        int rowIdx, int colIdx) {
+        ASTTableCell cell = new ASTTableCell();
+        cell.rowIndex(rowIdx);
+        cell.columnIndex(colIdx);
+        cell.rowSpan(idmlCell.rowSpan());
+        cell.columnSpan(idmlCell.columnSpan());
+
+        // 색상: IDML 색상 이름을 그대로 저장 (HwpxTableBuilder에서 해석)
+        if (idmlCell.fillColor() != null) {
+            cell.fillColor(idmlCell.fillColor());
+        }
+        cell.verticalAlign(idmlCell.verticalJustification());
+
+        // 셀 여백
+        cell.marginTop(CoordinateConverter.pointsToHwpunits(idmlCell.topInset()));
+        cell.marginBottom(CoordinateConverter.pointsToHwpunits(idmlCell.bottomInset()));
+        cell.marginLeft(CoordinateConverter.pointsToHwpunits(idmlCell.leftInset()));
+        cell.marginRight(CoordinateConverter.pointsToHwpunits(idmlCell.rightInset()));
+
+        // 셀 테두리 (색상 해석 없이)
+        cell.topBorder(convertCellBorderSimple(idmlCell.topBorder()));
+        cell.bottomBorder(convertCellBorderSimple(idmlCell.bottomBorder()));
+        cell.leftBorder(convertCellBorderSimple(idmlCell.leftBorder()));
+        cell.rightBorder(convertCellBorderSimple(idmlCell.rightBorder()));
+
+        // 대각선
+        cell.topLeftDiagonalLine(idmlCell.topLeftDiagonalLine());
+        cell.topRightDiagonalLine(idmlCell.topRightDiagonalLine());
+        cell.diagonalBorder(convertCellBorderSimple(idmlCell.diagonalBorder()));
+
+        // 셀 내용: 단락 변환 (간소화 — 텍스트만)
+        for (IDMLParagraph cellPara : idmlCell.paragraphs()) {
+            ASTParagraph astPara = new ASTParagraph();
+            if (cellPara.appliedParagraphStyle() != null) {
+                astPara.paragraphStyleRef(cellPara.appliedParagraphStyle());
+            }
+            for (IDMLCharacterRun run : cellPara.characterRuns()) {
+                if (run.content() == null || run.content().isEmpty()) continue;
+                ASTTextRun textRun = new ASTTextRun();
+                textRun.text(run.content());
+                if (run.appliedCharacterStyle() != null) {
+                    textRun.characterStyleRef(run.appliedCharacterStyle());
+                }
+                if (run.fontSize() != null && run.fontSize() > 0) {
+                    textRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(run.fontSize()));
+                }
+                if (run.fontFamily() != null) {
+                    textRun.fontFamily(run.fontFamily());
+                }
+                if (run.fontStyle() != null) {
+                    textRun.fontStyle(run.fontStyle());
+                }
+                astPara.addItem(textRun);
+            }
+            cell.addParagraph(astPara);
+        }
+
+        return cell;
+    }
+
+    private static ASTTableCell.CellBorder convertCellBorderSimple(IDMLTableCell.CellBorder src) {
+        if (src == null || src.strokeWeight <= 0) return null;
+        ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
+        border.weight(src.strokeWeight);
+        border.strokeType(src.strokeType);
+        border.tint(src.strokeTint);
+        if (src.strokeColor != null) {
+            border.color(src.strokeColor); // 색상 이름 그대로 (hex 미해석)
+        }
+        return border;
+    }
+
     // ── 그리드 TextFrame 감지 및 ASTTable 변환 ──
 
     /**

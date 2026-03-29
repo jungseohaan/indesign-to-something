@@ -83,8 +83,8 @@ public class ResolvedToASTBuilder {
         // Phase 3: Story→단락→런 변환
         convertStories(sections);
 
-        // Phase 4: 테이블 배치 (TODO: API 매칭 후 구현)
-        // placeTables(sections);
+        // Phase 4: 테이블 포함 TextFrame → ASTTable 변환 (비활성 — 테이블+제목 혼합 Story 미완)
+        // placeTablesFromIDML(sections);
 
         // Phase 6: 페이지 배경 PNG 주입
         injectPageBackgrounds(sections);
@@ -572,6 +572,89 @@ public class ResolvedToASTBuilder {
                     }
                 }
             }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Phase 4: 테이블 포함 TextFrame → ASTTable 변환
+    // ═══════════════════════════════════════════════════
+
+    /**
+     * editable이 아닌(배경에 포함된) TextFrame 중 테이블을 포함한 프레임을 찾아
+     * IDML Story XML에서 테이블을 파싱하고 ASTTable로 변환한다.
+     */
+    private void placeTablesFromIDML(List<ASTSection> sections) {
+        if (idmlDir == null) return;
+        int tableCount = 0;
+
+        for (ResolvedTextFrame tf : resolvedData.textFrames()) {
+            if (tf.isInline()) continue;
+            // editable 프레임은 이미 글상자로 배치됨 → 건너뜀
+            if (resolvedData.isEditableTextFrame(tf.id())) continue;
+
+            // Story에 테이블이 있는지 IDML에서 확인
+            String storyId = tf.storyId();
+            if (storyId == null) continue;
+
+            IDMLStory idmlStory = loadIDMLStory(storyId);
+            if (idmlStory == null || !idmlStory.hasTables()) continue;
+
+            // 페이지 결정
+            int pageIdx = tf.pageIndex();
+            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+
+            // 좌표 계산
+            double[] gb = tf.geometricBounds();
+            if (gb == null || gb.length < 4) continue;
+            ResolvedPage rPage = (pageIdx < resolvedData.pages().size())
+                    ? resolvedData.pages().get(pageIdx) : null;
+            double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
+            double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
+            boolean gbAlreadyPageRelative = (pageLeft > 0 && gb[1] < pageLeft);
+            double x = gbAlreadyPageRelative ? gb[1] : (gb[1] - pageLeft);
+            double y = gb[0] - pageTop;
+
+            long hx = CoordinateConverter.pointsToHwpunits(x * scaleFactor);
+            long hy = CoordinateConverter.pointsToHwpunits(y * scaleFactor);
+
+            // IDML 테이블 변환
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : idmlStory.tables()) {
+                ASTTable astTable = ASTTableConverter.convertTableSimple(idmlTable, hx, hy, tf.zOrder());
+                sections.get(pageIdx).addBlock(astTable);
+                tableCount++;
+            }
+        }
+
+        if (tableCount > 0) {
+            System.out.println("[ResolvedToASTBuilder] Phase 4: " + tableCount + " tables from IDML");
+        }
+    }
+
+    /**
+     * IDML Story XML을 로드하고 캐시한다.
+     */
+    private IDMLStory loadIDMLStory(String storyId) {
+        if (idmlStoryCache.containsKey(storyId)) return idmlStoryCache.get(storyId);
+
+        String hexId;
+        try {
+            hexId = Integer.toHexString(Integer.parseInt(storyId));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        java.io.File storyFile = new java.io.File(idmlDir, "Stories/Story_u" + hexId + ".xml");
+        if (!storyFile.exists()) return null;
+
+        try {
+            javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(true);
+            org.w3c.dom.Document xmlDoc = factory.newDocumentBuilder().parse(storyFile);
+            String hexId2 = Integer.toHexString(Integer.parseInt(storyId));
+            IDMLStory story = IDMLStoryParser.parseStory(xmlDoc, "u" + hexId2);
+            idmlStoryCache.put(storyId, story);
+            return story;
+        } catch (Exception e) {
+            return null;
         }
     }
 
