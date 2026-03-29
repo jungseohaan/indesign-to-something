@@ -1225,6 +1225,20 @@ public class ResolvedToASTBuilder {
                 tr.textColor(styleFillColor);
             }
             if (tr.textColor() == null && rr.fillColor() != null) tr.textColor(resolveColorToHex(rr.fillColor()));
+            // underline / strikeThrough
+            if (rr.underline() != null && rr.underline()) {
+                tr.underline(true);
+            }
+            if (rr.strikeThru() != null && rr.strikeThru()) {
+                tr.strikeThrough(true);
+            }
+        }
+        // IDML CharacterRun의 underline/strikeThrough (resolved보다 우선)
+        if (cr.underline() != null && cr.underline()) {
+            tr.underline(true);
+        }
+        if (cr.strikeThrough() != null && cr.strikeThrough()) {
+            tr.strikeThrough(true);
         }
         // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
         return tr;

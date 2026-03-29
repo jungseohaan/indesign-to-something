@@ -1097,12 +1097,13 @@ public class HwpxTextBoxBuilder {
         tc.createCellSz();
         tc.cellSz().widthAnd(w).heightAnd(0L);
 
-        // 셀 여백 — 블록 인셋 적용 (InDesign insetSpacing)
+        // 셀 여백 — 블록 인셋 적용 (InDesign insetSpacing), 하단 최소 5pt
         tc.createCellMargin();
+        long bottomInset = Math.max(block.insetBottom(), 500L);
         tc.cellMargin().leftAnd(block.insetLeft())
                 .rightAnd(block.insetRight())
                 .topAnd(block.insetTop())
-                .bottomAnd(block.insetBottom());
+                .bottomAnd(bottomInset);
 
         // 셀 내부 SubList
         tc.createSubList();

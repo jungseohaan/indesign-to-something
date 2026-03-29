@@ -234,10 +234,12 @@ public class HwpxTableBuilder {
 
                 // 셀 여백
                 tc.createCellMargin();
+                // 하단 인셋 최소 5pt (500 HWPUNIT) 보장 — 밑줄 등이 잘리지 않도록
+                long bottomMargin = Math.max(astCell.marginBottom(), 500L);
                 tc.cellMargin().leftAnd(astCell.marginLeft())
                         .rightAnd(astCell.marginRight())
                         .topAnd(astCell.marginTop())
-                        .bottomAnd(astCell.marginBottom());
+                        .bottomAnd(bottomMargin);
 
                 // 셀 내부 SubList
                 tc.createSubList();
