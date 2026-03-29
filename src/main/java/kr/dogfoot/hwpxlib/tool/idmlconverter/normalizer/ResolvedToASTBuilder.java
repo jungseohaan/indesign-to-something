@@ -2219,6 +2219,31 @@ public class ResolvedToASTBuilder {
         }
         if (visText == null || visText.isEmpty()) return null;
 
+        // 장식 번호 인라인(≤3자 + 큰 폰트 또는 정사각형 프레임) → 텍스트 런 변환하지 않음 (PNG 유지)
+        if (visText.length() <= 3) {
+            ResolvedStory rs = (tf.storyId() != null) ? resolvedData.getStory(tf.storyId()) : null;
+            boolean isDecorativeNumber = false;
+            // 큰 폰트(≥16pt) 체크
+            if (rs != null && !rs.paragraphs().isEmpty()) {
+                ResolvedParagraph rp0 = rs.paragraphs().get(0);
+                if (rp0.runs() != null && !rp0.runs().isEmpty()) {
+                    Double fs = rp0.runs().get(0).fontSize();
+                    if (fs != null && fs >= 16) isDecorativeNumber = true;
+                }
+            }
+            // 정사각형에 가까운 프레임 (가로/세로 비율 0.7~1.4)
+            double[] gb = tf.geometricBounds();
+            if (gb != null && gb.length >= 4) {
+                double fw = gb[3] - gb[1];
+                double fh = gb[2] - gb[0];
+                if (fw > 0 && fh > 0) {
+                    double ratio = fw / fh;
+                    if (ratio >= 0.7 && ratio <= 1.4) isDecorativeNumber = true;
+                }
+            }
+            if (isDecorativeNumber) return null; // PNG 폴백 (loadInlineObject로 처리)
+        }
+
         // resolved story에서 런 스타일 가져오기
         ResolvedStory story = (tf.storyId() != null) ? resolvedData.getStory(tf.storyId()) : null;
         ASTTextRun run = new ASTTextRun();
@@ -2312,6 +2337,25 @@ public class ResolvedToASTBuilder {
                     }
 
                     obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+
+                    // 장식 번호 인라인(≤3자 + 큰 폰트/정사각형): 높이를 본문 줄 높이로 제한
+                    // 인라인 이미지 높이가 줄간격을 벌리는 것 방지
+                    ResolvedTextFrame rtf = resolvedData.getTextFrame(String.valueOf(anchoredObjectId));
+                    if (rtf != null && obj.height() > 1500) { // 15pt 초과
+                        // 프레임 가로/세로 비율이 정사각형에 가까우면 높이 제한
+                        double[] rtfGb = rtf.geometricBounds();
+                        if (rtfGb != null && rtfGb.length >= 4) {
+                            double fw = rtfGb[3] - rtfGb[1];
+                            double fh = rtfGb[2] - rtfGb[0];
+                            if (fw > 0 && fh > 0 && fw / fh >= 0.7 && fw / fh <= 1.4) {
+                                long maxH = 1200; // 12pt — 본문 줄 높이 이하
+                                long scaledW = obj.width() * maxH / obj.height();
+                                obj.height(maxH);
+                                obj.width(scaledW);
+                            }
+                        }
+                    }
+
                     return obj;
                 } catch (Exception e) {
                     return null;
