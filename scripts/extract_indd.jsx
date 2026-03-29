@@ -2215,10 +2215,16 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                 var tfLeft = tfB[1] - pgB[1];
                 var tfRight = tfB[3] - pgB[1];
                 var trimmed = "";
-                try { trimmed = item.contents.replace(/[\s\uFEFF\r\n\u0018\uFFFC]/g, ""); } catch (e4) {}
+                try { trimmed = item.contents.replace(/[\s\uFEFF\r\n\u0016\u0018\uFFFC]/g, ""); } catch (e4) {}
                 var inMarginArea = (tfTop < pgH * 0.10 || tfBot > pgH * 0.90
                     || tfRight <= pgW * 0.20 || tfLeft >= pgW * 0.80);
-                if (trimmed.length <= 15 && inMarginArea) {
+                // 테이블 앵커(\u0016) 또는 테이블 포함 프레임은 건너뛰지 않음
+                var hasTable6 = false;
+                try {
+                    hasTable6 = (item.parentStory && item.parentStory.tables.length > 0)
+                        || (item.contents.indexOf("\u0016") >= 0);
+                } catch (e5) {}
+                if (trimmed.length <= 15 && inMarginArea && !hasTable6) {
                     continue;
                 }
             }
@@ -2227,11 +2233,14 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         if (isInlineItem(item)) continue;
 
         // 8. Group 안의 짧은 장식 TextFrame (10자 이하 + 장식 효과)
+        // 단, 테이블 포함 프레임은 제외
         try {
             var parentType = item.parent.constructor.name;
             if (parentType === "Group") {
-                var groupText = item.contents.replace(/[\s\uFEFF\r\n]/g, "");
-                if (groupText.length <= 10) {
+                var groupText = item.contents.replace(/[\s\uFEFF\r\n\u0016]/g, "");
+                var hasTable8 = false;
+                try { hasTable8 = item.parentStory && item.parentStory.tables.length > 0; } catch (e6) {}
+                if (groupText.length <= 10 && !hasTable8) {
                     var isDecorative = false;
                     try {
                         var chars = item.parentStory.characters;
