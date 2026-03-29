@@ -871,9 +871,12 @@ public class ResolvedToASTBuilder {
                     para.alignment("LEFT_JUSTIFIED"); // 기본 왼쪽 정렬 (한컴한글 기본=양쪽정렬 방지)
                 }
                 // leading: IDML ParagraphStyle 우선, CharacterRun, resolved 순
+                // 단, auto leading(>50pt = percentage 값)은 무시
                 Double fixedLeading = getStyleLeading(ip.appliedParagraphStyle());
+                if (fixedLeading != null && fixedLeading > 50) fixedLeading = null; // auto leading percentage 무시
                 if (fixedLeading == null || fixedLeading <= 0) {
                     fixedLeading = ip.leading(); // IDML CharacterRun leading
+                    if (fixedLeading != null && fixedLeading > 50) fixedLeading = null;
                 }
                 if (fixedLeading == null || fixedLeading <= 0) {
                     fixedLeading = rp.fixedLeading(); // resolved fallback
