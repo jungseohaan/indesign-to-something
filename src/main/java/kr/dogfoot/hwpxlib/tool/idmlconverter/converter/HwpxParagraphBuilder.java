@@ -73,6 +73,9 @@ public class HwpxParagraphBuilder {
 
 
         // 단락 속성 오버라이드가 있으면 새 ParaPr 생성
+        if (astPara.lineSpacing() != null && astPara.lineSpacing() == 0) {
+            astPara.lineSpacing(null); // lineSpacing=0은 무의미 → null로 복원
+        }
         if (hasParagraphOverrides(astPara)) {
             paraPrId = createOverrideParaPr(astPara, paraPrId);
         }

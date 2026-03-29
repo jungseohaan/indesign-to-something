@@ -1139,10 +1139,13 @@ public class HwpxTextBoxBuilder {
         // InDesign에서는 FirstBaselineOffset이 첫 줄 위치를 제어하고 Leading은 줄간 간격만 담당하지만,
         // HWPX에서는 FIXED lineSpacing이 첫 줄의 baseline 위치에도 영향을 주므로,
         // 셀 높이를 넘는 lineSpacing은 baseline을 불필요하게 아래로 밀어냄.
-        int cellH = (int) h;
-        for (ASTParagraph para : paragraphs) {
-            if (para.lineSpacing() != null && para.lineSpacing() > cellH) {
-                para.lineSpacing(cellH);
+        // 단, h=0(자동 확장)이면 클램핑하지 않음
+        if (h > 0) {
+            int cellH = (int) h;
+            for (ASTParagraph para : paragraphs) {
+                if (para.lineSpacing() != null && para.lineSpacing() > cellH) {
+                    para.lineSpacing(cellH);
+                }
             }
         }
 
