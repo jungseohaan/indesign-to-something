@@ -375,6 +375,17 @@ function main(args) {
             var editableFrameIds = bgResult.editableFrameIds;
             try { $.gc(); } catch (e) {}
 
+            // 2.13. 배지 그룹 + 장식 텍스트 프레임 렌더링
+            _marker(outputDir, "05_badgeRendering");
+            var rtfResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems);
+            renderedFrames = rtfResult.frames;
+            var badgeChildIds = rtfResult.badgeChildIds;
+            // 배지 자식 항목을 renderedFloatingItems에 추가
+            for (var ri = 0; ri < renderedFrames.length; ri++) {
+                renderedFloatingItems.push(renderedFrames[ri]);
+            }
+            try { $.gc(); } catch (e) {}
+
             _marker(outputDir, "10_collectResolved");
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
@@ -1794,10 +1805,14 @@ function isBadgeGroup(group) {
         var gb = group.geometricBounds;
         var gw = gb[3] - gb[1];
         var gh = gb[2] - gb[0];
-        var pageW = group.parentPage.bounds[3] - group.parentPage.bounds[1];
-        var scale = 1;
-        if (pageW > 0 && pageW < 300) scale = 72 / 25.4;
-        else if (pageW > 0 && pageW < 30) scale = 72;
+        var scale = 72 / 25.4; // 기본 mm→pt
+        try {
+            var pageW = group.parentPage.bounds[3] - group.parentPage.bounds[1];
+            if (pageW > 0 && pageW < 300) scale = 72 / 25.4;
+            else if (pageW > 0 && pageW < 30) scale = 72;
+        } catch (e) {
+            // parentPage가 null(인라인 그룹) → 기본 스케일 사용
+        }
         var minDim = Math.min(gw, gh) * scale;
         if (minDim > cfg.maxSize) return false;
     } catch (e) {

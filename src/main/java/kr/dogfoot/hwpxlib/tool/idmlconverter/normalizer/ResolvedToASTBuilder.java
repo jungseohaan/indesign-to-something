@@ -1342,8 +1342,8 @@ public class ResolvedToASTBuilder {
         bulletRun.fontFamily(tr.fontFamily());
         bulletRun.fontStyle(tr.fontStyle());
         if (tr.fontSizeHwpunits() != null) {
-            // 불릿 크기: 본문의 70%
-            bulletRun.fontSizeHwpunits((int) (tr.fontSizeHwpunits() * 0.7));
+            // 불릿 크기: 본문의 50% (함초롬돋움의 ● 글리프가 크므로)
+            bulletRun.fontSizeHwpunits((int) (tr.fontSizeHwpunits() * 0.5));
         }
         bulletRun.letterSpacing(tr.letterSpacing());
         para.addItem(bulletRun);
