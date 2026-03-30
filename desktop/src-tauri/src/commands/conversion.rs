@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::process::Stdio;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -68,6 +69,7 @@ pub async fn convert_idml(
     }
 
     // 리소스 디렉토리에서 config 및 font-map 경로 추가
+    let mut config_found = false;
     if let Ok(resource_dir) = app.path().resource_dir() {
         // Tauri 번들에서 리소스는 _up_/_up_/ 하위에 위치할 수 있음
         let candidates = vec![
@@ -79,6 +81,7 @@ pub async fn convert_idml(
             if config_path.exists() {
                 args.push("--config".to_string());
                 args.push(config_path.to_string_lossy().to_string());
+                config_found = true;
                 break;
             }
         }
@@ -92,6 +95,15 @@ pub async fn convert_idml(
                     break;
                 }
             }
+        }
+    }
+    // 개발 모드 폴백: 프로젝트 루트에서 config 탐색
+    if !config_found {
+        let dev_config = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conversion-config.json");
+        if dev_config.exists() {
+            let resolved = dev_config.canonicalize().unwrap_or(dev_config);
+            args.push("--config".to_string());
+            args.push(resolved.to_string_lossy().to_string());
         }
     }
 

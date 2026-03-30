@@ -1108,6 +1108,11 @@ public class ResolvedToASTBuilder {
                                 String inlineHexId = inlineIds.get(anchorIdx);
                                 try {
                                     int domId = Integer.parseInt(inlineHexId.substring(1), 16);
+                                    // 커스텀 위치 앵커 객체 건너뛰기: resolved TextFrame의 중심X가 부모 범위 밖이면 인라인 삽입 안 함
+                                    if (isAnchoredOutsideParentByTextFrame(domId, storyId)) {
+                                        anchorIdx++;
+                                        continue;
+                                    }
                                     // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
                                     ASTTextRun textRun = tryInlineTextFrameAsRun(domId);
                                     if (textRun != null) {
@@ -1682,6 +1687,10 @@ public class ResolvedToASTBuilder {
                     if (run.isInlineAnchor()) {
                         Integer anchoredId = run.anchoredObjectId();
                         if (anchoredId != null) {
+                            // 커스텀 위치 앵커 객체 건너뛰기
+                            if (isAnchoredOutsideParent(anchoredId, story.id())) {
+                                continue;
+                            }
                             // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
                             ASTTextRun textRun = tryInlineTextFrameAsRun(anchoredId);
                             if (textRun != null) {
@@ -1691,6 +1700,12 @@ public class ResolvedToASTBuilder {
                             ASTInlineObject inlineObj = loadInlineObject(anchoredId);
                             if (inlineObj != null) {
                                 para.addItem(inlineObj);
+                                continue;
+                            }
+                            // PNG도 텍스트도 없는 인라인 앵커 → 빈칸 공백으로 대체
+                            ASTTextRun spaceRun = createSpaceRunForEmptyAnchor(anchoredId);
+                            if (spaceRun != null) {
+                                para.addItem(spaceRun);
                                 continue;
                             }
                         }
@@ -2365,6 +2380,72 @@ public class ResolvedToASTBuilder {
     }
 
     /**
+     * 인라인 앵커 객체가 부모 TextFrame의 X 범위 밖에 있는지 판별.
+     * 커스텀 위치 앵커(AnchoredPosition=Anchored + 큰 오프셋)는 텍스트 흐름과 무관하게 배치되므로
+     * 인라인 삽입하면 안 된다.
+     */
+    /** IDML 경로용: resolved TextFrame bounds만으로 판별 (renderedFloatingItems 사용 안 함) */
+    private boolean isAnchoredOutsideParentByTextFrame(int anchoredId, String parentStoryId) {
+        ResolvedTextFrame anchoredTf = resolvedData.getTextFrame(String.valueOf(anchoredId));
+        if (anchoredTf == null) return false;
+        double[] aGb = anchoredTf.geometricBounds();
+        if (aGb == null || aGb.length < 4) return false;
+        for (ResolvedTextFrame tf : resolvedData.textFrames()) {
+            if (parentStoryId.equals(tf.storyId()) && !tf.isInline()) {
+                double[] pGb = tf.geometricBounds();
+                if (pGb == null || pGb.length < 4) continue;
+                double aCenterX = (aGb[1] + aGb[3]) / 2.0;
+                return aCenterX > pGb[3] + 5.0 || aCenterX < pGb[1] - 5.0;
+            }
+        }
+        return false;
+    }
+
+    /** Resolved 경로용: resolved TextFrame + renderedFloatingItems bounds로 판별 */
+    private boolean isAnchoredOutsideParent(int anchoredId, String parentStoryId) {
+        double[] aGb = null;
+        // 1) resolved TextFrame에서 bounds
+        ResolvedTextFrame anchoredTf = resolvedData.getTextFrame(String.valueOf(anchoredId));
+        if (anchoredTf != null) {
+            aGb = anchoredTf.geometricBounds();
+        }
+        // 2) resolved에 없으면 renderedFloatingItems의 inline_object bounds
+        if (aGb == null || aGb.length < 4) {
+            for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+                if (rg.id() == anchoredId && "inline_object".equals(rg.itemType())) {
+                    aGb = rg.bounds();
+                    break;
+                }
+            }
+        }
+        if (aGb == null || aGb.length < 4) return false;
+
+        // 부모 Story의 첫 번째 (주) TextFrame 찾기
+        for (ResolvedTextFrame tf : resolvedData.textFrames()) {
+            if (parentStoryId.equals(tf.storyId()) && !tf.isInline()) {
+                double[] pGb = tf.geometricBounds();
+                if (pGb == null || pGb.length < 4) continue;
+                // 인라인 객체의 중심 X가 부모 프레임 X범위에서 5mm 이상 벗어나면 커스텀 위치 앵커
+                double aCenterX = (aGb[1] + aGb[3]) / 2.0;
+                boolean outside = aCenterX > pGb[3] + 5.0 || aCenterX < pGb[1] - 5.0;
+                return outside;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * PNG/텍스트 없는 인라인 빈칸 앵커를 공백 텍스트 런으로 대체.
+     * 교과서 빈칸 채우기 문제의 ( ) 안 공백 등.
+     */
+    private ASTTextRun createSpaceRunForEmptyAnchor(int anchoredObjectId) {
+        // 빈칸 그래픽의 기본 공백: 6칸 (약 20pt 폭)
+        ASTTextRun run = new ASTTextRun();
+        run.text("      "); // 6 spaces
+        return run;
+    }
+
+    /**
      * renderedFloatingItems에서 인라인 객체 PNG를 로드하여 ASTInlineObject로 변환.
      */
     private ASTInlineObject loadInlineObject(int anchoredObjectId) {
@@ -2381,6 +2462,8 @@ public class ResolvedToASTBuilder {
                     byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
                     BufferedImage img = ImageIO.read(pngFile);
                     if (img == null) return null;
+                    // 2x2 이하 빈 이미지 무시
+                    if (img.getWidth() <= 2 && img.getHeight() <= 2) return null;
 
                     ASTInlineObject obj = new ASTInlineObject();
                     obj.kind(ASTInlineObject.ObjectKind.IMAGE);

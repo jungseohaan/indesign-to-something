@@ -2232,7 +2232,7 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                 var trimmed = "";
                 try { trimmed = item.contents.replace(/[\s\uFEFF\r\n\u0016\u0018\uFFFC]/g, ""); } catch (e4) {}
                 var inMarginArea = (tfTop < pgH * 0.10 || tfBot > pgH * 0.90
-                    || tfRight <= pgW * 0.20 || tfLeft >= pgW * 0.80);
+                    || tfRight <= pgW * 0.25 || tfLeft >= pgW * 0.75);
                 // 테이블 앵커(\u0016) 또는 테이블 포함 프레임은 건너뛰지 않음
                 var hasTable6 = false;
                 try {
@@ -2297,20 +2297,52 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         editableFrameIds[item.id] = true;
     }
 
-    // 인라인 객체 추출: 편집 TextFrame 안의 앵커된 그래픽을 개별 PNG로 렌더
+    // 인라인 객체 추출: 편집 TextFrame의 Story에 앵커된 그래픽을 개별 PNG로 렌더
     var inlineObjects = [];  // { id, file, parentStoryId, bounds, pageIndex }
+    var processedStoryIds = {};  // Story 중복 방지
     for (var ei = 0; ei < editableFrames.length; ei++) {
         var eTf = editableFrames[ei];
         try {
             var eStory = eTf.parentStory;
-            var eAllItems = eTf.allPageItems;
+            // 같은 Story를 이미 처리했으면 건너뜀
+            var eStoryKey = eStory.id.toString();
+            if (processedStoryIds[eStoryKey]) continue;
+            processedStoryIds[eStoryKey] = true;
+            // Story의 모든 pageItems에서 인라인 객체 탐색 (TextFrame.allPageItems는 구조적 자식만 반환하므로 부족)
+            var eAllItems = eStory.allPageItems;
             for (var eai = 0; eai < eAllItems.length; eai++) {
                 var inItem = eAllItems[eai];
-                // TextFrame 자체는 건너뜀 (자식 객체만)
-                if (inItem === eTf) continue;
-                var inName = inItem.constructor.name;
+                // TextFrame 자체는 건너뜀
+                if (inItem.constructor.name === "TextFrame") continue;
                 // 인라인 앵커 객체만 (부모가 Character/InsertionPoint/Story)
                 if (!isInlineItem(inItem)) continue;
+                // Group 등의 자식이 중복으로 나오지 않도록 최상위 인라인 객체만 처리
+                // (부모가 Group이고 그 Group도 인라인이면 건너뜀 — Group 전체를 렌더링)
+                try {
+                    var inParent = inItem.parent;
+                    if (inParent && inParent.constructor.name === "Group" && isInlineItem(inParent)) continue;
+                    if (inParent && inParent.constructor.name === "Rectangle" && isInlineItem(inParent)) continue;
+                } catch (ep) {}
+
+                // 투명 스페이서 객체 건너뛰기 (fillColor=None, strokeColor=None, 콘텐츠 없음)
+                try {
+                    var inType = inItem.constructor.name;
+                    if (inType === "Rectangle" || inType === "Polygon" || inType === "Oval") {
+                        var inFill = inItem.fillColor ? inItem.fillColor.name : "None";
+                        var inStroke = inItem.strokeColor ? inItem.strokeColor.name : "None";
+                        var inSW = inItem.strokeWeight || 0;
+                        var inContent = inItem.contentType ? inItem.contentType.toString() : "";
+                        // 채움/선 없고, 그래픽 콘텐츠 없는 빈 프레임 → 스페이서
+                        if ((inFill === "None" || inFill === "[None]") &&
+                            ((inStroke === "None" || inStroke === "[None]") || inSW === 0) &&
+                            inContent !== "1886548852" /* GraphicType with image */ ) {
+                            // allGraphics 확인 — 이미지가 있으면 건너뛰지 않음
+                            var hasGraphic = false;
+                            try { hasGraphic = inItem.allGraphics && inItem.allGraphics.length > 0; } catch(eg) {}
+                            if (!hasGraphic) continue;
+                        }
+                    }
+                } catch (eSpacer) {}
 
                 var inId = inItem.id;
                 var inFileName = "inline_" + inId + ".png";
