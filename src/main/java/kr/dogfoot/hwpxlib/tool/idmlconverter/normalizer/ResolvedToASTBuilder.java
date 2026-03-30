@@ -634,6 +634,13 @@ public class ResolvedToASTBuilder {
             long hx = CoordinateConverter.pointsToHwpunits(x);
             long hy = CoordinateConverter.pointsToHwpunits(y);
 
+            // 프레임 insetSpacing 반영 (테이블 위치에 인셋 추가)
+            if (tf.insetSpacing() != null) {
+                double[] inset = tf.insetSpacing();
+                hy += CoordinateConverter.pointsToHwpunits(inset[0]); // top
+                hx += CoordinateConverter.pointsToHwpunits(inset[1]); // left
+            }
+
             // 테이블 앞 텍스트 높이 계산 (테이블 Y 오프셋)
             // IDML paragraphIndexBefore로 테이블 앞 단락 수 파악
             long tableYOffset = 0;
