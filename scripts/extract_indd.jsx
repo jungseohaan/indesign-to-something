@@ -2959,8 +2959,79 @@ function collectComposedLines(tf) {
 }
 
 /**
- * GREP/중첩 스타일 보정: textStyleRange 내에서 문자별 fillColor가 다르면 런을 분할.
- * 성능을 위해 첫 문자와 마지막 문자의 색상만 먼저 비교하고, 같으면 분할하지 않음.
+ * GREP/중첩 스타일 보정: story.characters로 문자별 색상/크기를 확인하여 런을 분할.
+ * textStyleRange.characters는 GREP 스타일을 반영하지 않으므로,
+ * story.characters의 index를 사용하여 실제 렌더링 속성을 조회.
+ */
+function splitRunByStoryChars(story, rng, runData, para) {
+    try {
+        // para.characters[idx] 개별 접근 (GREP 스타일 반영)
+        // everyItem().getElements()는 GREP 미반영 가능
+        var paraCharCount = para.characters.length;
+        var rngCharCount = rng.characters.length;
+        if (rngCharCount <= 1) return [runData];
+
+        // rng 시작 위치 계산
+        var rngStart = 0;
+        try {
+            var paraFirstIdx = para.characters[0].index;
+            var rngFirstIdx = rng.characters[0].index;
+            rngStart = rngFirstIdx - paraFirstIdx;
+        } catch (e) {}
+        if (rngStart < 0) rngStart = 0;
+        var rngLen = Math.min(rngCharCount, paraCharCount - rngStart);
+        if (rngLen <= 1) return [runData];
+
+        // 첫/마지막 문자 속성 비교 (빠른 체크) — 개별 인덱스 접근
+        var firstColor = null, lastColor = null;
+        var firstSize = null, lastSize = null;
+        try { firstColor = para.characters[rngStart].fillColor ? para.characters[rngStart].fillColor.name : null; } catch (e) {}
+        try { lastColor = para.characters[rngStart + rngLen - 1].fillColor ? para.characters[rngStart + rngLen - 1].fillColor.name : null; } catch (e) {}
+        try { firstSize = para.characters[rngStart].pointSize; } catch (e) {}
+        try { lastSize = para.characters[rngStart + rngLen - 1].pointSize; } catch (e) {}
+        if (firstColor === lastColor && firstSize === lastSize) return [runData];
+
+        // 문자별 스캔 — 개별 인덱스 접근
+        var result = [];
+        var curColor = firstColor;
+        var curSize = firstSize;
+        var curText = "";
+        for (var ci = 0; ci < rngLen; ci++) {
+            var idx = rngStart + ci;
+            var chColor = null, chSize = null;
+            try { chColor = para.characters[idx].fillColor ? para.characters[idx].fillColor.name : null; } catch (e) {}
+            try { chSize = para.characters[idx].pointSize; } catch (e) {}
+            if ((chColor !== curColor || chSize !== curSize) && curText.length > 0) {
+                var splitRun = {};
+                for (var k in runData) { if (runData.hasOwnProperty(k)) splitRun[k] = runData[k]; }
+                splitRun.text = curText;
+                splitRun.fillColor = curColor;
+                if (curSize) splitRun.fontSize = curSize;
+                result.push(splitRun);
+                curText = "";
+                curColor = chColor;
+                curSize = chSize;
+            }
+            try { curText += para.characters[idx].contents; } catch (e) {}
+        }
+        if (curText.length > 0) {
+            var lastRun = {};
+            for (var k2 in runData) { if (runData.hasOwnProperty(k2)) lastRun[k2] = runData[k2]; }
+            lastRun.text = curText;
+            lastRun.fillColor = curColor;
+            if (curSize) lastRun.fontSize = curSize;
+            result.push(lastRun);
+        }
+        return result.length > 0 ? result : [runData];
+    } catch (e) {
+        // 에러 시 runData에 디버그 정보 추가
+        runData._splitError = e.toString();
+        return [runData];
+    }
+}
+
+/**
+ * (레거시) textStyleRange.characters 기반 분할 — GREP 스타일 미반영.
  */
 function splitRunByCharColor(rng, runData) {
     try {
@@ -3170,8 +3241,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                             }
                         }
                     } else {
-                        // GREP/중첩 스타일 색상 보정: 런 내에서 문자별 색상이 다르면 분할
-                        var splitRuns = splitRunByCharColor(rng, runData);
+                        // GREP/중첩 스타일 보정: story.characters로 문자별 색상/크기 확인
+                        var splitRuns = splitRunByStoryChars(story, rng, runData, para);
                         for (var sr = 0; sr < splitRuns.length; sr++) {
                             paraData.runs.push(splitRuns[sr]);
                         }
