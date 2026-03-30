@@ -2308,7 +2308,7 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
             var eStoryKey = eStory.id.toString();
             if (processedStoryIds[eStoryKey]) continue;
             processedStoryIds[eStoryKey] = true;
-            // Story의 모든 pageItems에서 인라인 객체 탐색 (TextFrame.allPageItems는 구조적 자식만 반환하므로 부족)
+            // Story의 모든 pageItems에서 인라인 객체 탐색
             var eAllItems = eStory.allPageItems;
             for (var eai = 0; eai < eAllItems.length; eai++) {
                 var inItem = eAllItems[eai];

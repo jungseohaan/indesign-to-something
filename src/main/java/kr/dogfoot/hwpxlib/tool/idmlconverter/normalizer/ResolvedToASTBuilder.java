@@ -307,12 +307,17 @@ public class ResolvedToASTBuilder {
                 block.rotationAngle(tf.rotationAngle());
             }
 
-            // 시각 속성
-            if (tf.fillColor() != null && !"None".equals(tf.fillColor())) {
-                // TODO: 색상 이름 → hex 변환 (ColorResolver 필요)
+            // 시각 속성: 배경색
+            if (tf.fillColor() != null && !"None".equals(tf.fillColor()) && !"[None]".equals(tf.fillColor())) {
+                String hex = resolveColorToHex(tf.fillColor());
+                if (hex != null) {
+                    block.fillColor(hex);
+                    block.fillTint(tf.fillTint() >= 0 ? tf.fillTint() : 100);
+                }
             }
-            if (tf.strokeColor() != null && !"None".equals(tf.strokeColor())) {
-                // TODO: 스트로크
+            // 시각 속성: 둥근 모서리
+            if (tf.cornerRadius() > 0) {
+                block.cornerRadius(tf.cornerRadius());
             }
 
             // overflow 감지용 텍스트 길이 저장
