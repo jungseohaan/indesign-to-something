@@ -189,6 +189,23 @@ class ASTRunConverter {
                                               ColorResolver colorResolver,
                                               ASTImageLoader imageLoader,
                                               ResolvedData resolvedData) {
+        // renderedFloatingItems의 inline_object PNG가 있으면 즉시 사용 (imageLoader 불필요 — PNG 직접 로드)
+        if (resolvedData != null && ig.selfId() != null) {
+            int domId = -1;
+            try { domId = Integer.parseInt(ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId(), 16); } catch (Exception e) {}
+            if (domId > 0) {
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+                    if (rg.id() == domId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
+                        ASTInlineObject inlineImg = loadRenderedGroupAsInlineImage(ig, rg, null, resolvedData);
+                        if (inlineImg != null) {
+                            para.addItem(inlineImg);
+                            return;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
         // 배지 그룹이면 배지 PNG 이미지로 즉시 교체 (후속 래퍼/오버레이 처리 생략)
         if (resolvedData != null && ig.selfId() != null) {
             kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup badgeRg =
@@ -872,8 +889,9 @@ class ASTRunConverter {
                 double bw = rg.bounds()[3] - rg.bounds()[1];
                 double bh = rg.bounds()[2] - rg.bounds()[0];
                 if (bw > 0 && bh > 0) {
-                    widthPt = bw;
-                    heightPt = bh;
+                    // bounds는 문서 단위(mm) → pt 변환 필요
+                    widthPt = bw * 2.8346;
+                    heightPt = bh * 2.8346;
                 }
             }
             obj.width(CoordinateConverter.pointsToHwpunits(widthPt));
