@@ -2394,7 +2394,8 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         if (!hasPdf) {
             // PDF 없음 → PNG 렌더링
             // 1. 해당 페이지의 편집 가능 텍스트 프레임 숨기기
-            var hiddenItems = [];
+            var hiddenItems = [];    // visible=false로 숨긴 프레임
+            var clearedItems = [];   // 텍스트만 비운 프레임 (fillColor 보존)
             var pb = page.bounds;
             for (var hi = 0; hi < editableFrames.length; hi++) {
                 var tf = editableFrames[hi];
@@ -2408,15 +2409,38 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                         // visibleBounds 폴백: spread 좌표에서 페이지 bounds와 겹침 확인
                         try {
                             var tfb = tf.visibleBounds;
-                            // 겹침 확인 (중심점이 아닌 영역 겹침)
                             var overlapH = tfb[3] > pb[1] && tfb[1] < pb[3];
                             var overlapV = tfb[2] > pb[0] && tfb[0] < pb[2];
                             onThisPage = overlapH && overlapV;
                         } catch (e) {}
                     }
                     if (onThisPage && tf.visible) {
-                        tf.visible = false;
-                        hiddenItems.push(tf);
+                        // fillColor가 있는 프레임: 텍스트만 비우고 프레임(배경색/테두리)은 유지
+                        var hasFill = false;
+                        try {
+                            var fc = tf.fillColor ? tf.fillColor.name : "None";
+                            hasFill = (fc !== "None" && fc !== "[None]");
+                        } catch (e) {}
+                        if (hasFill) {
+                            try {
+                                // 텍스트를 투명하게 만들어 배경색만 남김 (contents 삭제 시 인라인 객체 파괴됨)
+                                var chars = tf.parentStory.characters;
+                                var savedColors = [];
+                                for (var ci = 0; ci < chars.length; ci++) {
+                                    try {
+                                        savedColors.push(chars[ci].fillColor);
+                                        chars[ci].fillColor = doc.swatches.itemByName("None");
+                                    } catch (ec) { savedColors.push(null); }
+                                }
+                                clearedItems.push({ tf: tf, colors: savedColors });
+                            } catch (e) {
+                                tf.visible = false;
+                                hiddenItems.push(tf);
+                            }
+                        } else {
+                            tf.visible = false;
+                            hiddenItems.push(tf);
+                        }
                     }
                 } catch (e) {}
             }
@@ -2433,6 +2457,16 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
             // 3. 숨긴 텍스트 프레임 복원
             for (var ri = 0; ri < hiddenItems.length; ri++) {
                 try { hiddenItems[ri].visible = true; } catch (e) {}
+            }
+            // 텍스트 색상 복원
+            for (var ci = 0; ci < clearedItems.length; ci++) {
+                try {
+                    var cChars = clearedItems[ci].tf.parentStory.characters;
+                    var cColors = clearedItems[ci].colors;
+                    for (var cci = 0; cci < cChars.length && cci < cColors.length; cci++) {
+                        try { if (cColors[cci]) cChars[cci].fillColor = cColors[cci]; } catch (er) {}
+                    }
+                } catch (e) {}
             }
         }
 

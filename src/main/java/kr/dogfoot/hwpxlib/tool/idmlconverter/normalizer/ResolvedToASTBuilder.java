@@ -307,18 +307,8 @@ public class ResolvedToASTBuilder {
                 block.rotationAngle(tf.rotationAngle());
             }
 
-            // 시각 속성: 배경색
-            if (tf.fillColor() != null && !"None".equals(tf.fillColor()) && !"[None]".equals(tf.fillColor())) {
-                String hex = resolveColorToHex(tf.fillColor());
-                if (hex != null) {
-                    block.fillColor(hex);
-                    block.fillTint(tf.fillTint() >= 0 ? tf.fillTint() : 100);
-                }
-            }
-            // 시각 속성: 둥근 모서리
-            if (tf.cornerRadius() > 0) {
-                block.cornerRadius(tf.cornerRadius());
-            }
+            // 시각 속성: 배경색은 배경 PNG에 포함됨 (텍스트만 비우고 프레임은 유지)
+            // HWPX 글상자에는 fillColor를 적용하지 않음 (이중 표시 방지)
 
             // overflow 감지용 텍스트 길이 저장
             String visText = tf.frameVisibleText();
