@@ -55,6 +55,10 @@ public class ResolvedData {
         return storyMap.get(storyId);
     }
 
+    public java.util.Set<String> allStoryIds() {
+        return storyMap.keySet();
+    }
+
     /**
      * 색상 이름 → hex 매핑 추가.
      */

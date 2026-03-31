@@ -84,6 +84,7 @@ public class ResolvedToASTBuilder {
         // Phase 0: IDML 폰트/스타일/색상 정의 복사 + 스타일 resolver 초기화
         this.styleResolver = StylePropertyResolver.fromIdmlDir(idmlDir);
         copyIDMLDefinitions(doc);
+        enrichStyleAlignmentFromResolved(doc);
 
         // Phase 1: 페이지/섹션 빌드
         List<ASTSection> sections = buildSections();
@@ -837,16 +838,23 @@ public class ResolvedToASTBuilder {
             }
 
             // 단락 속성: resolved에서 가져옴 (정확한 pt 값)
+            // 정렬: IDML 스타일 우선, resolved 보강
+            {
+                String idmlStyleName = ip.appliedParagraphStyle();
+                String cleanStyleName = (idmlStyleName != null && idmlStyleName.contains("/"))
+                        ? idmlStyleName.substring(idmlStyleName.lastIndexOf('/') + 1) : idmlStyleName;
+                String idmlStyleJust = resolveStyleAlignment(cleanStyleName, astDoc);
+                if (idmlStyleJust != null) {
+                    para.alignment(idmlStyleJust);
+                } else if (resolvedStory != null && i < resolvedStory.paragraphs().size()
+                        && resolvedStory.paragraphs().get(i).justification() != null) {
+                    para.alignment(resolvedStory.paragraphs().get(i).justification());
+                } else {
+                    para.alignment("LEFT_JUSTIFIED");
+                }
+            }
             if (resolvedStory != null && i < resolvedStory.paragraphs().size()) {
                 ResolvedParagraph rp = resolvedStory.paragraphs().get(i);
-                if (rp.justification() != null) {
-                    para.alignment(rp.justification());
-                } else if (rp.styleName() != null) {
-                    String styleJust = resolveStyleAlignment(rp.styleName(), astDoc);
-                    para.alignment(styleJust != null ? styleJust : "LEFT_JUSTIFIED");
-                } else {
-                    para.alignment("LEFT_JUSTIFIED"); // 기본 왼쪽 정렬 (한컴한글 기본=양쪽정렬 방지)
-                }
                 // leading: IDML ParagraphStyle 우선, CharacterRun, resolved 순
                 // 단, auto leading(>50pt = percentage 값)은 무시
                 Double fixedLeading = getStyleLeading(ip.appliedParagraphStyle());
@@ -895,6 +903,16 @@ public class ResolvedToASTBuilder {
                                     CoordinateConverter.pointsToHwpunits(posPt), align, null));
                         }
                     }
+                }
+            } else {
+                // resolvedStory 매칭 실패 → IDML 단락 스타일에서 정렬 상속
+                String idmlStyle = ip.appliedParagraphStyle();
+                if (idmlStyle != null) {
+                    // "ParagraphStyle/스타일명" → "스타일명"
+                    String styleName = idmlStyle.contains("/")
+                            ? idmlStyle.substring(idmlStyle.lastIndexOf('/') + 1) : idmlStyle;
+                    String styleJust = resolveStyleAlignment(styleName, astDoc);
+                    if (styleJust != null) para.alignment(styleJust);
                 }
             }
 
@@ -2648,5 +2666,40 @@ public class ResolvedToASTBuilder {
             }
         }
         return null;
+    }
+
+    /**
+     * resolved paragraphStyles의 justification으로 ASTDocument 스타일 보강.
+     * IDML Styles.xml에 Justification이 없는 스타일에 resolved 값을 채운다.
+     */
+    private void enrichStyleAlignmentFromResolved(ASTDocument doc) {
+        if (resolvedData == null) return;
+        // resolved paragraphStyles → Map
+        Map<String, String> resolvedJustMap = new HashMap<>();
+        try {
+            // resolved.json의 paragraphStyles에서 name → justification 매핑 수집
+            // resolvedData에 직접 접근 불가 → resolved.json을 다시 파싱하지 않고
+            // 이미 로드된 resolvedData에서 각 Story의 단락 스타일을 수집
+            // → 비효율적. 대신 ResolvedDataReader에서 paragraphStyles를 저장하도록 개선 필요.
+            // 우선: resolvedData의 모든 Story에서 styleName→justification 수집
+            for (String sid : resolvedData.allStoryIds()) {
+                ResolvedStory rs = resolvedData.getStory(sid);
+                if (rs == null || rs.paragraphs() == null) continue;
+                for (ResolvedParagraph rp : rs.paragraphs()) {
+                    if (rp.styleName() != null && rp.justification() != null) {
+                        resolvedJustMap.putIfAbsent(rp.styleName(), rp.justification());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            return;
+        }
+        // ASTDocument 스타일에 alignment 보강
+        for (ASTStyleDef sd : doc.paragraphStyles()) {
+            if (sd.alignment() == null && sd.styleName() != null) {
+                String just = resolvedJustMap.get(sd.styleName());
+                if (just != null) sd.alignment(just);
+            }
+        }
     }
 }
