@@ -50,8 +50,13 @@ public class ResolvedToASTBuilder {
         try {
             idmlDocument = kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader.loadFromDirectory(idmlDir);
             colorResolver = new kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver(idmlDocument);
-            // imageLoader는 셀 내 인라인 이미지가 필요할 때만 생성 (ConvertOptions 필요)
-            imageLoader = null;
+            // imageLoader: 테이블 셀 내 인라인 이미지/그래픽 렌더링용
+            kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions opts = new kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions();
+            opts.includeImages(true);
+            if (resolvedData.basePath() != null) {
+                opts.linksDirectory(resolvedData.basePath() + "/Links");
+            }
+            imageLoader = new kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader(idmlDocument, opts);
         } catch (Exception e) {
             System.err.println("[ResolvedToASTBuilder] IDML infra load failed: " + e.getMessage());
         }
