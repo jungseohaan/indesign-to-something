@@ -691,6 +691,12 @@ public class ResolvedToASTBuilder {
                     thisY = hy + tableYOffset;
                 }
 
+                // 테이블 셀 복잡도 체크: 인라인 객체가 포함된 테이블은 건너뜀
+                // (배경 PNG에서 렌더링됨 — editable에서 제외 필요)
+                if (hasInlineObjectsInTable(idmlTable)) {
+                    continue;
+                }
+
                 ensureIdmlInfra();
                 ASTTable astTable = ASTTableConverter.convertTableSimple(
                         idmlTable, thisX, thisY, tf.zOrder(),
@@ -2776,5 +2782,80 @@ public class ResolvedToASTBuilder {
             System.err.println("[ResolvedToASTBuilder] enrichStyleAlignment: " + enriched
                     + " styles enriched from resolved (topLevel=" + (topLevelJustMap != null ? topLevelJustMap.size() : 0) + ")");
         }
+    }
+
+    /**
+     * 테이블 셀에 인라인 객체(Group, Rectangle 등)가 포함되어 있는지 확인.
+     */
+    private static boolean hasInlineObjectsInTable(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table) {
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row : table.rows()) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell : row.cells()) {
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph para : cell.paragraphs()) {
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : para.characterRuns()) {
+                        if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) return true;
+                        if (run.inlineFrames() != null && !run.inlineFrames().isEmpty()) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 인라인 객체가 포함된 테이블을 rendered PNG 이미지(ASTFigure)로 변환.
+     * resolved renderedFloatingItems에서 테이블 부모 TextFrame의 rendered PNG를 찾아 사용.
+     */
+    private ASTFigure renderTableAsImage(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table,
+                                          ResolvedTextFrame tf, long x, long y, int pageIdx) {
+        if (basePath == null || resolvedData == null) return null;
+
+        // TextFrame의 DOM ID로 rendered PNG 찾기
+        String tfDomId = tf.id();
+        int domId = -1;
+        try { domId = Integer.parseInt(tfDomId); } catch (NumberFormatException e) { return null; }
+
+        // renderedFloatingItems에서 이 TextFrame 또는 테이블의 rendered PNG 검색
+        for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+            if (rg.id() == domId && rg.file() != null) {
+                File pngFile = new File(basePath, rg.file());
+                if (!pngFile.exists()) continue;
+                try {
+                    byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+                    if (img == null) continue;
+
+                    ASTFigure fig = new ASTFigure();
+                    fig.sourceId("tbl_" + table.selfId());
+                    fig.x(x);
+                    fig.y(y);
+                    fig.zOrder(tf.zOrder());
+                    fig.imageData(imageData);
+                    fig.imageFormat("png");
+                    fig.pixelWidth(img.getWidth());
+                    fig.pixelHeight(img.getHeight());
+
+                    // 크기: resolved bounds 또는 테이블 크기
+                    double[] bounds = rg.bounds();
+                    if (bounds != null && bounds.length >= 4) {
+                        double bw = Math.abs(bounds[3] - bounds[1]) * scaleFactor;
+                        double bh = Math.abs(bounds[2] - bounds[0]) * scaleFactor;
+                        fig.width(CoordinateConverter.pointsToHwpunits(bw));
+                        fig.height(CoordinateConverter.pointsToHwpunits(bh));
+                    } else {
+                        // 테이블 행 높이 + 컬럼 너비 합산
+                        long tw = 0, th = 0;
+                        for (double cw : table.columnWidths()) tw += CoordinateConverter.pointsToHwpunits(cw);
+                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow r : table.rows())
+                            th += CoordinateConverter.pointsToHwpunits(r.rowHeight());
+                        fig.width(tw);
+                        fig.height(th);
+                    }
+                    return fig;
+                } catch (Exception e) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 }
