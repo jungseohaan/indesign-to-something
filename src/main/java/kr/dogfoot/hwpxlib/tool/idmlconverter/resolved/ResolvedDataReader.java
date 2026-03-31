@@ -137,6 +137,18 @@ public class ResolvedDataReader {
             data.editableTextFrameIds(ids);
         }
 
+        // paragraphStyles (top-level 단락 스타일 정의 — justification 등)
+        if (root.has("paragraphStyles")) {
+            for (JsonElement e : root.getAsJsonArray("paragraphStyles")) {
+                JsonObject ps = e.getAsJsonObject();
+                String name = getString(ps, "name");
+                String just = getString(ps, "justification");
+                if (name != null && just != null) {
+                    data.addParagraphStyleJustification(name, just);
+                }
+            }
+        }
+
         // fontMetrics (InDesign에서 측정한 폰트 메트릭)
         if (root.has("fontMetrics")) {
             for (JsonElement e : root.getAsJsonArray("fontMetrics")) {

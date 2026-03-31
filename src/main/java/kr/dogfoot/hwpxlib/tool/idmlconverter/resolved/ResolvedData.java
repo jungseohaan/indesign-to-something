@@ -37,9 +37,25 @@ public class ResolvedData {
     private final Map<String, RenderedGroup> renderedFloatingItemMap = new LinkedHashMap<>();
     private Set<String> editableTextFrameIds;  // 배경에서 숨겨진 TextFrame DOM ID
     private String basePath;  // resolved.json 부모 디렉토리 경로
+    private final Map<String, String> paragraphStyleJustMap = new HashMap<>();  // styleName → justification (top-level paragraphStyles)
 
     public String basePath() { return basePath; }
     public void basePath(String path) { this.basePath = path; }
+
+    /** top-level paragraphStyles의 name → justification 매핑 추가 */
+    public void addParagraphStyleJustification(String name, String justification) {
+        if (name != null && justification != null) {
+            paragraphStyleJustMap.put(name, justification);
+        }
+    }
+
+    /** top-level paragraphStyles에서 스타일 이름으로 justification 조회 */
+    public String getParagraphStyleJustification(String styleName) {
+        return paragraphStyleJustMap.get(styleName);
+    }
+
+    /** top-level paragraphStyles justification 맵 전체 반환 */
+    public Map<String, String> paragraphStyleJustMap() { return paragraphStyleJustMap; }
 
     public Set<String> editableTextFrameIds() { return editableTextFrameIds; }
     public void editableTextFrameIds(Set<String> v) { this.editableTextFrameIds = v; }

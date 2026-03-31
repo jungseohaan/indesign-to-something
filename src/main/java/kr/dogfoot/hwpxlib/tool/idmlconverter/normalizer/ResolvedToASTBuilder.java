@@ -175,6 +175,11 @@ public class ResolvedToASTBuilder {
                     }
                     sd.textColor(ps.getAttribute("FillColor"));
                     sd.fontStyle(ps.getAttribute("FontStyle"));
+                    // 정렬 (Justification)
+                    String justification = ps.getAttribute("Justification");
+                    if (justification != null && !justification.isEmpty()) {
+                        sd.alignment(justification);
+                    }
                     doc.addParagraphStyle(sd);
                 }
             }
@@ -838,7 +843,7 @@ public class ResolvedToASTBuilder {
             }
 
             // 단락 속성: resolved에서 가져옴 (정확한 pt 값)
-            // 정렬: IDML 스타일 우선, resolved 보강
+            // 정렬: IDML 스타일 → resolved 단락 → resolved top-level paragraphStyles → JUSTIFY
             {
                 String idmlStyleName = ip.appliedParagraphStyle();
                 String cleanStyleName = (idmlStyleName != null && idmlStyleName.contains("/"))
@@ -849,9 +854,12 @@ public class ResolvedToASTBuilder {
                 } else if (resolvedStory != null && i < resolvedStory.paragraphs().size()
                         && resolvedStory.paragraphs().get(i).justification() != null) {
                     para.alignment(resolvedStory.paragraphs().get(i).justification());
-                } else {
-                    para.alignment("LEFT_JUSTIFIED");
+                } else if (cleanStyleName != null && resolvedData != null
+                        && resolvedData.getParagraphStyleJustification(cleanStyleName) != null) {
+                    // resolved.json top-level paragraphStyles fallback
+                    para.alignment(resolvedData.getParagraphStyleJustification(cleanStyleName));
                 }
+                // alignment가 null이면 HwpxParagraphBuilder에서 baseStyle 또는 기본 JUSTIFY 적용
             }
             if (resolvedStory != null && i < resolvedStory.paragraphs().size()) {
                 ResolvedParagraph rp = resolvedStory.paragraphs().get(i);
@@ -2670,36 +2678,51 @@ public class ResolvedToASTBuilder {
 
     /**
      * resolved paragraphStyles의 justification으로 ASTDocument 스타일 보강.
-     * IDML Styles.xml에 Justification이 없는 스타일에 resolved 값을 채운다.
+     * 1차: resolved.json top-level paragraphStyles (가장 정확한 소스)
+     * 2차: resolved Story 단락의 개별 justification (fallback)
+     * IDML Styles.xml에 이미 Justification이 설정된 스타일은 건너뜀.
      */
     private void enrichStyleAlignmentFromResolved(ASTDocument doc) {
         if (resolvedData == null) return;
-        // resolved paragraphStyles → Map
-        Map<String, String> resolvedJustMap = new HashMap<>();
+
+        // 1차 소스: resolved.json의 top-level paragraphStyles (ResolvedDataReader에서 파싱)
+        Map<String, String> topLevelJustMap = resolvedData.paragraphStyleJustMap();
+
+        // 2차 소스: 각 Story 단락의 개별 justification (fallback)
+        Map<String, String> storyParaJustMap = new HashMap<>();
         try {
-            // resolved.json의 paragraphStyles에서 name → justification 매핑 수집
-            // resolvedData에 직접 접근 불가 → resolved.json을 다시 파싱하지 않고
-            // 이미 로드된 resolvedData에서 각 Story의 단락 스타일을 수집
-            // → 비효율적. 대신 ResolvedDataReader에서 paragraphStyles를 저장하도록 개선 필요.
-            // 우선: resolvedData의 모든 Story에서 styleName→justification 수집
             for (String sid : resolvedData.allStoryIds()) {
                 ResolvedStory rs = resolvedData.getStory(sid);
                 if (rs == null || rs.paragraphs() == null) continue;
                 for (ResolvedParagraph rp : rs.paragraphs()) {
                     if (rp.styleName() != null && rp.justification() != null) {
-                        resolvedJustMap.putIfAbsent(rp.styleName(), rp.justification());
+                        storyParaJustMap.putIfAbsent(rp.styleName(), rp.justification());
                     }
                 }
             }
         } catch (Exception e) {
-            return;
+            // ignore
         }
+
         // ASTDocument 스타일에 alignment 보강
+        int enriched = 0;
         for (ASTStyleDef sd : doc.paragraphStyles()) {
             if (sd.alignment() == null && sd.styleName() != null) {
-                String just = resolvedJustMap.get(sd.styleName());
-                if (just != null) sd.alignment(just);
+                // 1차: top-level paragraphStyles
+                String just = topLevelJustMap != null ? topLevelJustMap.get(sd.styleName()) : null;
+                // 2차: Story 단락 fallback
+                if (just == null) {
+                    just = storyParaJustMap.get(sd.styleName());
+                }
+                if (just != null) {
+                    sd.alignment(just);
+                    enriched++;
+                }
             }
+        }
+        if (enriched > 0) {
+            System.err.println("[ResolvedToASTBuilder] enrichStyleAlignment: " + enriched
+                    + " styles enriched from resolved (topLevel=" + (topLevelJustMap != null ? topLevelJustMap.size() : 0) + ")");
         }
     }
 }
