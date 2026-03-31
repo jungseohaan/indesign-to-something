@@ -339,21 +339,6 @@ public class HwpxTextBoxBuilder {
     public void convertTextFrameBlock(Para framePara, ASTTextFrameBlock block) {
         long w = block.effectiveWidth();
         long h = block.height();
-        if ("u3547f".equals(block.sourceId())) {
-            System.out.println("[TFB-DBG] u3547f: x=" + block.effectiveX() + " y=" + block.y() + " w=" + w + " h=" + h + " paras=" + block.paragraphs().size());
-        }
-        if ("u9dd".equals(block.sourceId())) {
-            System.out.println("[TFB-DBG] u9dd: effectiveX=" + block.effectiveX() + " y=" + block.y() + " w=" + w + " h=" + h
-                + " rot=" + block.rotationAngle() + " colCount=" + block.columnCount() + " cornerR=" + block.cornerRadius());
-        }
-
-        if ("u3a525".equals(block.sourceId()) || "u243fd".equals(block.sourceId())) {
-            int colCount2 = Math.max(block.columnCount(), 1);
-            boolean hasOwnFill = block.fillColor() != null && block.fillColor().startsWith("#") && !block.fillColor().equals("#FFFFFF");
-            boolean hasWrap = block.hasWrapperFill() || hasOwnFill;
-            boolean hasStroke = block.strokeColor() != null && block.strokeColor().startsWith("#") && block.strokeWeight() > 0;
-            System.out.println("[TFB-DEBUG] " + block.sourceId() + ": w=" + w + " h=" + h + " rot=" + Math.round(block.rotationAngle()) + " colCount=" + colCount2 + " hasWrapper=" + hasWrap + " hasStroke=" + hasStroke + " cornerR=" + block.cornerRadius() + " fillColor=" + block.fillColor());
-        }
         // 음수 또는 0 크기 블록 건너뜀 (페이지 밖 객체)
         if (w <= 0 || h <= 0) return;
 
@@ -1057,10 +1042,6 @@ public class HwpxTextBoxBuilder {
                 .horzAlignAnd(HorzAlign.LEFT)
                 .vertOffsetAnd(adjustedY)
                 .horzOffsetAnd(x);
-
-        if (x > 18000 && x < 20000) {
-            System.out.println("[TBL-POS] horzOffset=" + x + " vertOffset=" + adjustedY + " w=" + w + " h=" + h + " src=" + block.sourceId());
-        }
 
         // OutMargin
         table.createOutMargin();

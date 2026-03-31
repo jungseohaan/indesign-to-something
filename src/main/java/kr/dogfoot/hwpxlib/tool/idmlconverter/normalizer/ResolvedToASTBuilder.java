@@ -106,7 +106,7 @@ public class ResolvedToASTBuilder {
         // Phase 6: 페이지 배경 PNG 주입
         injectPageBackgrounds(sections);
 
-        System.out.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
+        System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
         return doc;
     }
 
@@ -116,7 +116,7 @@ public class ResolvedToASTBuilder {
 
     private void copyIDMLDefinitions(ASTDocument doc) {
         if (idmlDir == null) {
-            System.out.println("[ResolvedToASTBuilder] Phase 0: idmlDir is null — skipping");
+            System.err.println("[ResolvedToASTBuilder] Phase 0: idmlDir is null — skipping");
             return;
         }
 
@@ -177,7 +177,7 @@ public class ResolvedToASTBuilder {
                     doc.addParagraphStyle(sd);
                 }
             }
-            System.out.println("[ResolvedToASTBuilder] Phase 0: fonts=" + doc.fonts().size()
+            System.err.println("[ResolvedToASTBuilder] Phase 0: fonts=" + doc.fonts().size()
                     + " styles=" + doc.paragraphStyles().size());
         } catch (Exception e) {
             System.err.println("[ResolvedToASTBuilder] IDML 정의 복사 실패: " + e.getMessage());
@@ -237,11 +237,6 @@ public class ResolvedToASTBuilder {
             // 단, 스레드 체인(연결 텍스트 프레임)은 무조건 배치 — 본문 텍스트일 가능성 높음
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             if (!resolvedData.isEditableTextFrame(tf.id())) continue;
-
-            // DEBUG: TF 추적
-            if ("238885".equals(tf.id()) || "148477".equals(tf.id())) {
-                System.out.println("[DEBUG-TF] " + tf.id() + ": inline=" + tf.isInline() + " nested=" + isNestedInTextFrame(tf) + " editable=" + resolvedData.isEditableTextFrame(tf.id()) + " pageIdx=" + tf.pageIndex() + " gb=" + java.util.Arrays.toString(tf.geometricBounds()));
-            }
 
             // 페이지 인덱스 결정
             int pageIdx = tf.pageIndex();
@@ -424,8 +419,6 @@ public class ResolvedToASTBuilder {
             section.addBlock(block);
         }
 
-        System.out.println("[YGapSplit] " + sourceIdBase + " → " + groups.size()
-                + " groups (splits at: " + splitPoints + "), " + lines.size() + " lines");
         return true;
     }
 
@@ -519,8 +512,6 @@ public class ResolvedToASTBuilder {
             section.addBlock(block);
         }
 
-        System.out.println("[ComposedLines] " + sourceIdBase + " → " + groups.size() + " groups, "
-                + lines.size() + " lines");
     }
 
     // ═══════════════════════════════════════════════════
@@ -653,26 +644,13 @@ public class ResolvedToASTBuilder {
                 ASTTable astTable = ASTTableConverter.convertTableSimple(
                         idmlTable, hx, hy + tableYOffset, tf.zOrder(),
                         idmlDocument, colorResolver, imageLoader, resolvedData);
-                // 디버그: 테이블 셀 텍스트 확인
-                int cellTextLen = 0;
-                for (ASTTableRow row : astTable.rows()) {
-                    for (ASTTableCell cell : row.cells()) {
-                        for (ASTParagraph p : cell.paragraphs()) {
-                            String pt = getParaPlainText(p);
-                            if (pt != null) cellTextLen += pt.length();
-                        }
-                    }
-                }
-                System.out.println("[Phase4-Table] story=" + storyId + " tf=" + tf.id()
-                        + " page=" + pageIdx + " rows=" + astTable.rowCount()
-                        + " cols=" + astTable.colCount() + " cellText=" + cellTextLen);
                 sections.get(pageIdx).addBlock(astTable);
                 tableCount++;
             }
         }
 
         if (tableCount > 0) {
-            System.out.println("[ResolvedToASTBuilder] Phase 4: " + tableCount + " tables from IDML");
+            System.err.println("[ResolvedToASTBuilder] Phase 4: " + tableCount + " tables from IDML");
         }
     }
 
@@ -737,7 +715,7 @@ public class ResolvedToASTBuilder {
             }
         }
 
-        System.out.println("[ResolvedToASTBuilder] Phase 3: " + storyToBlocks.size() + " stories matched to TextFrameBlocks");
+        System.err.println("[ResolvedToASTBuilder] Phase 3: " + storyToBlocks.size() + " stories matched to TextFrameBlocks");
 
         // 각 Story → 단락 변환 후 TextFrameBlock에 분배
         // IDML Story XML 우선, 없으면 resolved fallback
@@ -800,15 +778,9 @@ public class ResolvedToASTBuilder {
             }
 
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
-            if ("238888".equals(storyId) || "148480".equals(storyId)) {
-                System.out.println("[DEBUG-STORY] " + storyId + ": paragraphs=" + paragraphs.size() + " blocks=" + blocks.size() + " useIdml=" + useIdml);
-                for (ASTTextFrameBlock b : blocks) {
-                    System.out.println("[DEBUG-STORY]   block=" + b.sourceId() + " x=" + b.x() + " y=" + b.y());
-                }
-            }
             distributeParagraphs(paragraphs, blocks, storyId);
         }
-        System.out.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
+        System.err.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
     }
 
     /**
@@ -1962,14 +1934,7 @@ public class ResolvedToASTBuilder {
             if (b.composedCharStart() >= 0) { hasComposedBlocks = true; break; }
         }
         if (hasComposedBlocks) {
-            System.out.println("[DistComposed] story=" + storyId + " paras=" + paragraphs.size() + " blocks=" + blocks.size());
-            for (ASTTextFrameBlock b : blocks) {
-                System.out.println("  block=" + b.sourceId() + " charRange=" + b.composedCharStart() + "~" + b.composedCharEnd());
-            }
             distributeByComposedCharRange(paragraphs, blocks);
-            for (ASTTextFrameBlock b : blocks) {
-                System.out.println("  → " + b.sourceId() + " paras=" + (b.paragraphs() != null ? b.paragraphs().size() : 0));
-            }
             return;
         }
 
@@ -2047,9 +2012,6 @@ public class ResolvedToASTBuilder {
             frameRanges[fi][0] = foundStart;
             frameRanges[fi][1] = Math.min(foundEnd, storyText.length());
             searchFrom = frameRanges[fi][1];
-            if (ordered.size() > 1) {
-                System.out.println("[FRANGE] " + storyId + " TF=" + domId + " range=[" + foundStart + "," + frameRanges[fi][1] + "] visLen=" + (visibleText != null ? visibleText.length() : 0));
-            }
         }
 
         // 프레임별 단락 할당
