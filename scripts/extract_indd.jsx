@@ -373,6 +373,12 @@ function main(args) {
             var bgResult = exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems);
             var renderedFloatingItems = bgResult.items;
             var editableFrameIds = bgResult.editableFrameIds;
+            // 테이블+인라인 렌더링 결과를 renderedFloatingItems에 추가
+            if (bgResult.tableInlineRendered) {
+                for (var tir = 0; tir < bgResult.tableInlineRendered.length; tir++) {
+                    renderedFloatingItems.push(bgResult.tableInlineRendered[tir]);
+                }
+            }
             try { $.gc(); } catch (e) {}
 
             // 2.13. 배지 그룹 + 장식 텍스트 프레임 렌더링
@@ -2297,6 +2303,65 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         editableFrameIds[item.id] = true;
     }
 
+    // 테이블+인라인 TextFrame 별도 렌더링:
+    // 테이블 셀에 인라인 객체(Group/Rectangle 등)가 포함된 TextFrame은
+    // 통째로 PNG로 렌더링하여 renderedFloatingItems에 추가
+    var tableInlineRendered = [];  // { id, file, bounds, pageIndex, type }
+    for (var ti = 0; ti < editableFrames.length; ti++) {
+        var tTf = editableFrames[ti];
+        try {
+            var tStory = tTf.parentStory;
+            // 테이블이 있는지
+            if (!tStory.tables || tStory.tables.length === 0) continue;
+            // 테이블 셀에 인라인 객체가 있는지
+            var hasTableInline = false;
+            for (var tbi = 0; tbi < tStory.tables.length && !hasTableInline; tbi++) {
+                var tbl = tStory.tables[tbi];
+                for (var tci = 0; tci < tbl.cells.length && !hasTableInline; tci++) {
+                    var tCell = tbl.cells[tci];
+                    // 셀 텍스트 길이
+                    var cellText = "";
+                    try { cellText = tCell.contents.replace(/\uFFFC/g, "").replace(/[\r\n]/g, ""); } catch(e) {}
+                    if (cellText.length >= 30) continue; // 긴 텍스트는 글상자 변환 유지
+                    // 셀에 인라인 객체(Group, Rectangle 등)가 있는지
+                    try {
+                        var cellItems = tCell.allPageItems;
+                        for (var cii = 0; cii < cellItems.length; cii++) {
+                            var cn = cellItems[cii].constructor.name;
+                            if (cn === "Group" || cn === "Rectangle" || cn === "Polygon" || cn === "Oval") {
+                                hasTableInline = true;
+                                break;
+                            }
+                        }
+                    } catch(e) {}
+                }
+            }
+            if (!hasTableInline) continue;
+
+            // 이 TextFrame을 통째로 PNG로 렌더링
+            var tDomId = tTf.id;
+            var tOutFile = File(outputDir + "/rendered_frames/table_" + tDomId + ".png");
+            try {
+                tTf.exportFile(ExportFormat.PNG_FORMAT, tOutFile);
+                if (tOutFile.exists) {
+                    var tBounds = tTf.visibleBounds; // [top, left, bottom, right]
+                    var tPageIdx = -1;
+                    try { tPageIdx = tTf.parentPage.documentOffset; } catch(e) {}
+                    if (tPageIdx >= 0 && startPage > 0) tPageIdx -= (startPage - 1);
+                    tableInlineRendered.push({
+                        id: tDomId,
+                        file: "rendered_frames/table_" + tDomId + ".png",
+                        bounds: [tBounds[0], tBounds[1], tBounds[2], tBounds[3]],
+                        pageIndex: tPageIdx,
+                        type: "table_inline"
+                    });
+                }
+            } catch(e) {
+                $.writeln("[TableInline] render failed: " + tDomId + " — " + e.message);
+            }
+        } catch(e) {}
+    }
+
     // 인라인 객체 추출: 편집 TextFrame의 Story에 앵커된 그래픽을 개별 PNG로 렌더
     var inlineObjects = [];  // { id, file, parentStoryId, bounds, pageIndex }
     var processedStoryIds = {};  // Story 중복 방지
@@ -2506,7 +2571,7 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         $.writeln("[exportPageBackgrounds] " + inlineObjects.length + " inline objects rendered");
     }
 
-    return { items: results, editableFrameIds: editableFrameIds };
+    return { items: results, editableFrameIds: editableFrameIds, tableInlineRendered: tableInlineRendered };
 }
 
 /**

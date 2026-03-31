@@ -691,9 +691,13 @@ public class ResolvedToASTBuilder {
                     thisY = hy + tableYOffset;
                 }
 
-                // 테이블 셀 복잡도 체크: 인라인 객체가 포함된 테이블은 건너뜀
-                // (배경 PNG에서 렌더링됨 — editable에서 제외 필요)
+                // 테이블 셀 복잡도 체크: 인라인 객체가 포함된 테이블은 플로팅 이미지로 변환
                 if (hasInlineObjectsInTable(idmlTable)) {
+                    ASTFigure fig = renderTableAsImage(idmlTable, tf, thisX, thisY, pageIdx);
+                    if (fig != null) {
+                        sections.get(pageIdx).addBlock(fig);
+                        tableCount++;
+                    }
                     continue;
                 }
 
@@ -2812,7 +2816,7 @@ public class ResolvedToASTBuilder {
 
     /**
      * 인라인 객체가 포함된 테이블을 rendered PNG 이미지(ASTFigure)로 변환.
-     * resolved renderedFloatingItems에서 테이블 부모 TextFrame의 rendered PNG를 찾아 사용.
+     * renderedFloatingItems에서 type="table_inline"인 항목을 찾아 사용.
      */
     private ASTFigure renderTableAsImage(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table,
                                           ResolvedTextFrame tf, long x, long y, int pageIdx) {
@@ -2823,48 +2827,62 @@ public class ResolvedToASTBuilder {
         int domId = -1;
         try { domId = Integer.parseInt(tfDomId); } catch (NumberFormatException e) { return null; }
 
-        // renderedFloatingItems에서 이 TextFrame 또는 테이블의 rendered PNG 검색
-        for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
-            if (rg.id() == domId && rg.file() != null) {
-                File pngFile = new File(basePath, rg.file());
-                if (!pngFile.exists()) continue;
-                try {
-                    byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                    java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-                    if (img == null) continue;
+        // 1. 직접 파일 (table_XXXXX.png) 또는 renderedFloatingItems에서 검색
+        File directFile = new File(basePath, "rendered_frames/table_" + domId + ".png");
+        File pngFile = null;
+        double[] rgBounds = null;
 
-                    ASTFigure fig = new ASTFigure();
-                    fig.sourceId("tbl_" + table.selfId());
-                    fig.x(x);
-                    fig.y(y);
-                    fig.zOrder(tf.zOrder());
-                    fig.imageData(imageData);
-                    fig.imageFormat("png");
-                    fig.pixelWidth(img.getWidth());
-                    fig.pixelHeight(img.getHeight());
-
-                    // 크기: resolved bounds 또는 테이블 크기
-                    double[] bounds = rg.bounds();
-                    if (bounds != null && bounds.length >= 4) {
-                        double bw = Math.abs(bounds[3] - bounds[1]) * scaleFactor;
-                        double bh = Math.abs(bounds[2] - bounds[0]) * scaleFactor;
-                        fig.width(CoordinateConverter.pointsToHwpunits(bw));
-                        fig.height(CoordinateConverter.pointsToHwpunits(bh));
-                    } else {
-                        // 테이블 행 높이 + 컬럼 너비 합산
-                        long tw = 0, th = 0;
-                        for (double cw : table.columnWidths()) tw += CoordinateConverter.pointsToHwpunits(cw);
-                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow r : table.rows())
-                            th += CoordinateConverter.pointsToHwpunits(r.rowHeight());
-                        fig.width(tw);
-                        fig.height(th);
+        if (directFile.exists()) {
+            pngFile = directFile;
+        }
+        // renderedFloatingItems에서도 검색
+        if (pngFile == null) {
+            for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+                if (rg.id() == domId && rg.file() != null) {
+                    File f = new File(basePath, rg.file());
+                    if (f.exists()) {
+                        pngFile = f;
+                        rgBounds = rg.bounds();
+                        break;
                     }
-                    return fig;
-                } catch (Exception e) {
-                    return null;
                 }
             }
         }
-        return null;
+        if (pngFile == null) return null;
+
+        try {
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+            if (img == null) return null;
+
+            ASTFigure fig = new ASTFigure();
+            fig.sourceId("tbl_" + table.selfId());
+            fig.x(x);
+            fig.y(y);
+            fig.zOrder(tf.zOrder());
+            fig.imageData(imageData);
+            fig.imageFormat("png");
+            fig.pixelWidth(img.getWidth());
+            fig.pixelHeight(img.getHeight());
+
+            // 크기: resolved bounds 또는 테이블 크기
+            if (rgBounds != null && rgBounds.length >= 4) {
+                double bw = Math.abs(rgBounds[3] - rgBounds[1]) * scaleFactor;
+                double bh = Math.abs(rgBounds[2] - rgBounds[0]) * scaleFactor;
+                fig.width(CoordinateConverter.pointsToHwpunits(bw));
+                fig.height(CoordinateConverter.pointsToHwpunits(bh));
+            } else {
+                // 테이블 행 높이 + 컬럼 너비 합산
+                long tw = 0, th = 0;
+                for (double cw : table.columnWidths()) tw += CoordinateConverter.pointsToHwpunits(cw);
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow r : table.rows())
+                    th += CoordinateConverter.pointsToHwpunits(r.rowHeight());
+                fig.width(tw);
+                fig.height(th);
+            }
+            return fig;
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
