@@ -640,20 +640,60 @@ public class ResolvedToASTBuilder {
 
             // 테이블 앞 텍스트 높이 계산 (테이블 Y 오프셋)
             // IDML paragraphIndexBefore로 테이블 앞 단락 수 파악
+            // 중첩 테이블 감지: selfId가 다른 테이블의 selfId를 접두사로 포함하면 중첩
+            List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> allTables = idmlStory.tables();
+            Map<String, kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> parentTableMap = new HashMap<>();
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t1 : allTables) {
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t2 : allTables) {
+                    if (!t1.selfId().equals(t2.selfId()) && t1.selfId().startsWith(t2.selfId())) {
+                        parentTableMap.put(t1.selfId(), t2); // t1은 t2의 중첩 테이블
+                    }
+                }
+            }
+
             long tableYOffset = 0;
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : idmlStory.tables()) {
-                // paragraphIndexBefore: 이 테이블 앞에 있는 단락 수
-                int parasBefore = idmlTable.paragraphIndexBefore();
-                if (parasBefore > 0) {
-                    // 앞 단락들의 높이를 추정 (단락당 ~leading 사용)
-                    // 정확한 값은 없으므로 resolved의 insetSpacing.top + leading * parasBefore
-                    double estLineHeight = 8.0 * scaleFactor; // 기본 행간 ~8mm
-                    tableYOffset = CoordinateConverter.pointsToHwpunits(parasBefore * estLineHeight);
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : allTables) {
+                long thisX = hx;
+                long thisY = hy;
+
+                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable parentTable = parentTableMap.get(idmlTable.selfId());
+                if (parentTable != null) {
+                    // 중첩 테이블: 부모 테이블의 행 높이를 합산하여 y 오프셋 계산
+                    // selfId에서 셀 인덱스 추출: "u1cf74i1cf91i6i1cf9b" → "i6" → 셀 row=6
+                    String parentId = parentTable.selfId();
+                    String remainder = idmlTable.selfId().substring(parentId.length()); // "i6i1cf9b"
+                    int cellRowIdx = -1;
+                    if (remainder.startsWith("i")) {
+                        // "i6i..." → 6
+                        String cellPart = remainder.substring(1);
+                        int nextI = cellPart.indexOf('i');
+                        String rowStr = (nextI > 0) ? cellPart.substring(0, nextI) : cellPart;
+                        try { cellRowIdx = Integer.parseInt(rowStr); } catch (NumberFormatException e) { /* ignore */ }
+                    }
+                    if (cellRowIdx >= 0) {
+                        // 부모 테이블의 row 0 ~ cellRowIdx-1 높이 합산
+                        long rowHeightSum = 0;
+                        int ri = 0;
+                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow pr : parentTable.rows()) {
+                            if (ri >= cellRowIdx) break;
+                            rowHeightSum += CoordinateConverter.pointsToHwpunits(pr.rowHeight());
+                            ri++;
+                        }
+                        thisY = hy + rowHeightSum;
+                    }
+                } else {
+                    // 최상위 테이블
+                    int parasBefore = idmlTable.paragraphIndexBefore();
+                    if (parasBefore > 0) {
+                        double estLineHeight = 8.0 * scaleFactor;
+                        tableYOffset = CoordinateConverter.pointsToHwpunits(parasBefore * estLineHeight);
+                    }
+                    thisY = hy + tableYOffset;
                 }
 
                 ensureIdmlInfra();
                 ASTTable astTable = ASTTableConverter.convertTableSimple(
-                        idmlTable, hx, hy + tableYOffset, tf.zOrder(),
+                        idmlTable, thisX, thisY, tf.zOrder(),
                         idmlDocument, colorResolver, imageLoader, resolvedData);
                 sections.get(pageIdx).addBlock(astTable);
                 tableCount++;
