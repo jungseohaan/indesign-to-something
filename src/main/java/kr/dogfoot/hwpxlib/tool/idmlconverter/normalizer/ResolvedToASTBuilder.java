@@ -1199,6 +1199,9 @@ public class ResolvedToASTBuilder {
             // 불릿 단락이면 불릿 이후 런 색상을 검정으로 리셋
             resetBulletParagraphColors(para);
 
+            // 인라인 객체 boundsX 기반 재정렬 (테이블 셀뿐 아니라 일반 TextFrame에서도)
+            ASTTableConverter.reorderInlineObjectsByBoundsX(para);
+
             paragraphs.add(para);
         }
 
@@ -1787,6 +1790,9 @@ public class ResolvedToASTBuilder {
                     para.addItem(textRun);
                 }
             }
+
+            // 인라인 객체 boundsX 기반 재정렬
+            ASTTableConverter.reorderInlineObjectsByBoundsX(para);
 
             paragraphs.add(para);
         }
@@ -2512,6 +2518,7 @@ public class ResolvedToASTBuilder {
                     // 크기: bounds [top, left, bottom, right]
                     double[] bounds = rg.bounds();
                     if (bounds != null && bounds.length >= 4) {
+                        obj.boundsX(bounds[1]); // rendered X 좌표 (인라인 정렬용)
                         double bw = Math.abs(bounds[3] - bounds[1]) * scaleFactor; // right - left
                         double bh = Math.abs(bounds[2] - bounds[0]) * scaleFactor; // bottom - top
                         // PNG 비율로 보정 (bounds가 부정확한 경우)
