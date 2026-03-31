@@ -94,7 +94,8 @@ public class HwpxImageBuilder {
             twm = mapTextWrapMethod(wrapMode);
             tfs = mapTextFlowSide(obj.textWrapSide());
         } else {
-            twm = TextWrapMethod.TOP_AND_BOTTOM;
+            // 인라인 (treatAsChar=1): BEHIND_TEXT로 설정하여 텍스트 흐름에 영향 없게
+            twm = TextWrapMethod.BEHIND_TEXT;
             tfs = TextFlowSide.BOTH_SIDES;
         }
 

@@ -680,17 +680,19 @@ class ASTTableConverter {
                     continue;
                 }
             }
-            // 텍스트 런이 나오면, 미뤄둔 인라인을 텍스트 뒤에 삽입
+            // 미뤄둔 인라인이 있을 때 탭/빈 텍스트는 제거 (원래 인라인 간 간격용이었으므로)
             if (item instanceof ASTTextRun && !deferredInlines.isEmpty()) {
                 ASTTextRun tr = (ASTTextRun) item;
                 String text = tr.text();
-                if (text != null && !text.trim().isEmpty() && !"\t".equals(text.trim())) {
-                    reordered.add(item);
-                    // 미뤄둔 인라인 삽입
-                    reordered.addAll(deferredInlines);
-                    deferredInlines.clear();
-                    continue;
+                // 탭이나 빈 텍스트 → 제거 (인라인 재배치 시 불필요한 간격)
+                if (text == null || text.trim().isEmpty() || "\t".equals(text)) {
+                    continue; // skip
                 }
+                // 실질적 텍스트 → 먼저 추가, 그 뒤에 미뤄둔 인라인 삽입
+                reordered.add(item);
+                reordered.addAll(deferredInlines);
+                deferredInlines.clear();
+                continue;
             }
             reordered.add(item);
         }
