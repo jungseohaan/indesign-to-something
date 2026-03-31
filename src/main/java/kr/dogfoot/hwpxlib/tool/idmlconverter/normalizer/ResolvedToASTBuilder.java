@@ -2787,15 +2787,24 @@ public class ResolvedToASTBuilder {
     /**
      * 테이블 셀에 인라인 객체(Group, Rectangle 등)가 포함되어 있는지 확인.
      */
+    /**
+     * 테이블이 배경 PNG fallback 대상인지 판정.
+     * 셀 텍스트가 30자 미만이면서 인라인 객체를 포함하면 → 배경 PNG로 처리.
+     * (짧은 텍스트 + 인라인 배지/아이콘 = 글상자 변환 시 레이아웃 깨짐)
+     */
     private static boolean hasInlineObjectsInTable(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table) {
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row : table.rows()) {
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell : row.cells()) {
+                boolean hasInline = false;
+                int textLen = 0;
                 for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph para : cell.paragraphs()) {
                     for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : para.characterRuns()) {
-                        if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) return true;
-                        if (run.inlineFrames() != null && !run.inlineFrames().isEmpty()) return true;
+                        if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) hasInline = true;
+                        if (run.inlineFrames() != null && !run.inlineFrames().isEmpty()) hasInline = true;
+                        if (run.content() != null) textLen += run.content().replace("\uFFFC", "").trim().length();
                     }
                 }
+                if (hasInline && textLen < 30) return true;
             }
         }
         return false;
