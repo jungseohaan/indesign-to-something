@@ -15,6 +15,9 @@ public class ASTInlineObject extends ASTInlineItem {
     private long width;
     private long height;
 
+    // rendered bounds X 좌표 (mm, 인라인 객체 정렬용)
+    private double boundsX = -1;
+
     // 이미지 데이터 (IMAGE, RENDERED_GROUP)
     private String imageFormat;
     private byte[] imageData;
@@ -98,6 +101,9 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public long height() { return height; }
     public void height(long v) { this.height = v; }
+
+    public double boundsX() { return boundsX; }
+    public void boundsX(double v) { this.boundsX = v; }
 
     public String imageFormat() { return imageFormat; }
     public void imageFormat(String v) { this.imageFormat = v; }

@@ -897,6 +897,11 @@ class ASTRunConverter {
             obj.width(CoordinateConverter.pointsToHwpunits(widthPt));
             obj.height(CoordinateConverter.pointsToHwpunits(heightPt));
 
+            // rendered bounds X 좌표 저장 (인라인 객체 정렬용)
+            if (rg.bounds() != null && rg.bounds().length >= 4) {
+                obj.boundsX(rg.bounds()[1]);
+            }
+
             obj.anchoredPosition(ig.anchoredPosition());
             obj.textWrapMode(ig.textWrapMode());
 

@@ -168,6 +168,11 @@ class ASTTableConverter {
             }
         }
 
+        // 인라인 객체 boundsX 기반 재정렬
+        for (ASTParagraph p : cell.paragraphs()) {
+            reorderInlineObjectsByBoundsX(p);
+        }
+
         // 마지막 빈 단락 제거
         ASTPageProcessor.removeTrailingEmptyParagraphs(cell.paragraphs());
 
@@ -632,6 +637,70 @@ class ASTTableConverter {
                     Math.max(0, Math.min(255, b)));
         } catch (Exception e) {
             return hex;
+        }
+    }
+
+    /**
+     * 인라인 객체를 boundsX 기반으로 재정렬.
+     * IDML에서 인라인 객체 순서(FFFC 순서)가 시각적 배치 순서와 다를 때,
+     * rendered bounds의 X 좌표로 올바른 위치에 재배치한다.
+     * 예: [IMG(01,x=359) IMG(풍선,x=419) TEXT] → [IMG(01,x=359) TEXT IMG(풍선,x=419)]
+     */
+    static void reorderInlineObjectsByBoundsX(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.size() < 3) return;
+
+        // boundsX가 설정된 인라인 객체가 있는지 확인
+        boolean hasBoundsX = false;
+        double minBoundsX = Double.MAX_VALUE;
+        double maxBoundsX = Double.MIN_VALUE;
+        for (ASTInlineItem item : items) {
+            if (item instanceof ASTInlineObject) {
+                ASTInlineObject io = (ASTInlineObject) item;
+                if (io.boundsX() >= 0) {
+                    hasBoundsX = true;
+                    minBoundsX = Math.min(minBoundsX, io.boundsX());
+                    maxBoundsX = Math.max(maxBoundsX, io.boundsX());
+                }
+            }
+        }
+        if (!hasBoundsX || maxBoundsX - minBoundsX < 1) return; // boundsX 차이 없으면 skip
+
+        // boundsX가 큰 인라인 객체 → 텍스트 뒤로 이동
+        // 전략: 연속 인라인 객체 + 텍스트 시퀀스에서, boundsX가 큰 인라인을 텍스트 뒤로 재배치
+        List<ASTInlineItem> reordered = new ArrayList<>();
+        List<ASTInlineObject> deferredInlines = new ArrayList<>();
+
+        for (ASTInlineItem item : items) {
+            if (item instanceof ASTInlineObject) {
+                ASTInlineObject io = (ASTInlineObject) item;
+                if (io.boundsX() > minBoundsX + 10) {
+                    // boundsX가 큰 인라인 → 뒤로 미룸
+                    deferredInlines.add(io);
+                    continue;
+                }
+            }
+            // 텍스트 런이 나오면, 미뤄둔 인라인을 텍스트 뒤에 삽입
+            if (item instanceof ASTTextRun && !deferredInlines.isEmpty()) {
+                ASTTextRun tr = (ASTTextRun) item;
+                String text = tr.text();
+                if (text != null && !text.trim().isEmpty() && !"\t".equals(text.trim())) {
+                    reordered.add(item);
+                    // 미뤄둔 인라인 삽입
+                    reordered.addAll(deferredInlines);
+                    deferredInlines.clear();
+                    continue;
+                }
+            }
+            reordered.add(item);
+        }
+        // 남은 미뤄둔 인라인 추가
+        reordered.addAll(deferredInlines);
+
+        // items 교체
+        if (!reordered.equals(items)) {
+            items.clear();
+            items.addAll(reordered);
         }
     }
 }
