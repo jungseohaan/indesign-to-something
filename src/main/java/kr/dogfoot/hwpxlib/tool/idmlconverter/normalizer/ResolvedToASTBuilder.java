@@ -841,6 +841,9 @@ public class ResolvedToASTBuilder {
                 ResolvedParagraph rp = resolvedStory.paragraphs().get(i);
                 if (rp.justification() != null) {
                     para.alignment(rp.justification());
+                } else if (rp.styleName() != null) {
+                    String styleJust = resolveStyleAlignment(rp.styleName(), astDoc);
+                    para.alignment(styleJust != null ? styleJust : "LEFT_JUSTIFIED");
                 } else {
                     para.alignment("LEFT_JUSTIFIED"); // 기본 왼쪽 정렬 (한컴한글 기본=양쪽정렬 방지)
                 }
@@ -1627,7 +1630,13 @@ public class ResolvedToASTBuilder {
             }
 
             // 단락 속성 (leading, spacing, indent는 InDesign에서 항상 pt 단위)
-            if (rp.justification() != null) para.alignment(rp.justification());
+            if (rp.justification() != null) {
+                para.alignment(rp.justification());
+            } else if (rp.styleName() != null) {
+                // 개별 단락에 justification 없으면 스타일에서 상속
+                String styleJust = resolveStyleAlignment(rp.styleName(), astDoc);
+                if (styleJust != null) para.alignment(styleJust);
+            }
             Double fixedLeading = rp.fixedLeading();
             if (fixedLeading != null && fixedLeading > 0) {
                 // InDesign Leading(pt) → HWPX 고정 줄간격(HWPUNIT)
@@ -2626,5 +2635,18 @@ public class ResolvedToASTBuilder {
 
             sections.get(pageIdx).addBlock(fig);
         }
+    }
+
+    /**
+     * paragraphStyles에서 스타일 이름으로 alignment를 조회한다.
+     */
+    private static String resolveStyleAlignment(String styleName, ASTDocument doc) {
+        if (styleName == null || doc == null) return null;
+        for (ASTStyleDef sd : doc.paragraphStyles()) {
+            if (styleName.equals(sd.styleName())) {
+                return sd.alignment();
+            }
+        }
+        return null;
     }
 }
