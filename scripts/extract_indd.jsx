@@ -2441,105 +2441,76 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         } catch (eInline) {}
     }
 
-    // ── 페이지별 배경 렌더링 ──
-    // PDF 배경은 별도 스크립트(export_pdf_bg.jsx)에서 생성.
-    // 여기서는 PNG 폴백 + 결과 항목 생성.
+    // ── 페이지별 배경 렌더링 (PDF + PNG 폴백) ──
+    // PDF 고해상도 배경을 직접 생성 (editable 판별 통일을 위해 extract_indd.jsx에서 수행)
+    // PDF 설정 (고해상도 유지)
+    try {
+        app.pdfExportPreferences.exportReaderSpreads = false;
+        try { app.pdfExportPreferences.colorBitmapSampling = Sampling.NONE; } catch(e1){}
+        try { app.pdfExportPreferences.colorBitmapCompression = BitmapCompression.NONE; } catch(e2){}
+        try { app.pdfExportPreferences.grayscaleBitmapSampling = Sampling.NONE; } catch(e3){}
+        try { app.pdfExportPreferences.grayscaleBitmapCompression = BitmapCompression.NONE; } catch(e4){}
+        try { app.pdfExportPreferences.monochromeBitmapSampling = Sampling.NONE; } catch(e5){}
+        try { app.pdfExportPreferences.monochromeBitmapCompression = BitmapCompression.NONE; } catch(e6){}
+    } catch (ePdfPref) {}
 
     for (var pi = 0; pi < doc.pages.length; pi++) {
         var page = doc.pages[pi];
         var pgIdx = page.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
 
-        // PDF 파일 존재 여부 확인 (export_pdf_bg.jsx가 먼저 실행된 경우)
+        // 1. 해당 페이지의 편집 가능 텍스트 프레임 숨기기 (PDF/PNG 공통)
+        var hiddenItems = [];
+        var pb = page.bounds;
+        for (var hi = 0; hi < editableFrames.length; hi++) {
+            var tf = editableFrames[hi];
+            try {
+                var onThisPage = false;
+                try {
+                    onThisPage = (tf.parentPage === page);
+                } catch (e) {}
+                if (!onThisPage) {
+                    try {
+                        var tfb = tf.visibleBounds;
+                        var overlapH = tfb[3] > pb[1] && tfb[1] < pb[3];
+                        var overlapV = tfb[2] > pb[0] && tfb[0] < pb[2];
+                        onThisPage = overlapH && overlapV;
+                    } catch (e) {}
+                }
+                if (onThisPage && tf.visible) {
+                    tf.visible = false;
+                    hiddenItems.push(tf);
+                }
+            } catch (e) {}
+        }
+
+        // 2. PDF 배경 렌더링
         var pdfFileName = "page_bg_" + pi + ".pdf";
         var bgPdfFile = File(renderDir + "/" + pdfFileName);
-        var hasPdf = bgPdfFile.exists;
+        try {
+            app.pdfExportPreferences.pageRange = page.name;
+            doc.exportFile(ExportFormat.PDF_TYPE, bgPdfFile);
+        } catch (ePdf) {}
 
-        var pngFileName = null;
-        if (!hasPdf) {
-            // PDF 없음 → PNG 렌더링
-            // 1. 해당 페이지의 편집 가능 텍스트 프레임 숨기기
-            var hiddenItems = [];    // visible=false로 숨긴 프레임
-            var clearedItems = [];   // 텍스트만 비운 프레임 (fillColor 보존)
-            var pb = page.bounds;
-            for (var hi = 0; hi < editableFrames.length; hi++) {
-                var tf = editableFrames[hi];
-                try {
-                    // parentPage 비교 또는 visibleBounds로 페이지 소속 판단
-                    var onThisPage = false;
-                    try {
-                        onThisPage = (tf.parentPage === page);
-                    } catch (e) {}
-                    if (!onThisPage) {
-                        // visibleBounds 폴백: spread 좌표에서 페이지 bounds와 겹침 확인
-                        try {
-                            var tfb = tf.visibleBounds;
-                            var overlapH = tfb[3] > pb[1] && tfb[1] < pb[3];
-                            var overlapV = tfb[2] > pb[0] && tfb[0] < pb[2];
-                            onThisPage = overlapH && overlapV;
-                        } catch (e) {}
-                    }
-                    if (onThisPage && tf.visible) {
-                        // fillColor가 있는 프레임: 텍스트만 비우고 프레임(배경색/테두리)은 유지
-                        var hasFill = false;
-                        try {
-                            var fc = tf.fillColor ? tf.fillColor.name : "None";
-                            hasFill = (fc !== "None" && fc !== "[None]");
-                        } catch (e) {}
-                        if (hasFill) {
-                            try {
-                                // 텍스트를 투명하게 만들어 배경색만 남김 (contents 삭제 시 인라인 객체 파괴됨)
-                                var chars = tf.parentStory.characters;
-                                var savedColors = [];
-                                for (var ci = 0; ci < chars.length; ci++) {
-                                    try {
-                                        savedColors.push(chars[ci].fillColor);
-                                        chars[ci].fillColor = doc.swatches.itemByName("None");
-                                    } catch (ec) { savedColors.push(null); }
-                                }
-                                clearedItems.push({ tf: tf, colors: savedColors });
-                            } catch (e) {
-                                tf.visible = false;
-                                hiddenItems.push(tf);
-                            }
-                        } else {
-                            tf.visible = false;
-                            hiddenItems.push(tf);
-                        }
-                    }
-                } catch (e) {}
-            }
+        // 3. PNG 배경도 항상 생성 (Java에서 PDF 래스터화 비활성화 상태)
+        var pngFileName = "page_bg_" + pi + ".png";
+        var outFile = File(renderDir + "/" + pngFileName);
+        try {
+            app.pngExportPreferences.pageString = page.name;
+            app.pngExportPreferences.pngExportRange = PNGExportRangeEnum.EXPORT_RANGE;
+            doc.exportFile(ExportFormat.PNG_FORMAT, outFile);
+        } catch (e) {}
 
-            // 2. 페이지 PNG 렌더링
-            pngFileName = "page_bg_" + pi + ".png";
-            var outFile = File(renderDir + "/" + pngFileName);
-            try {
-                app.pngExportPreferences.pageString = page.name;
-                app.pngExportPreferences.pngExportRange = PNGExportRangeEnum.EXPORT_RANGE;
-                doc.exportFile(ExportFormat.PNG_FORMAT, outFile);
-            } catch (e) {}
-
-            // 3. 숨긴 텍스트 프레임 복원
-            for (var ri = 0; ri < hiddenItems.length; ri++) {
-                try { hiddenItems[ri].visible = true; } catch (e) {}
-            }
-            // 텍스트 색상 복원
-            for (var ci = 0; ci < clearedItems.length; ci++) {
-                try {
-                    var cChars = clearedItems[ci].tf.parentStory.characters;
-                    var cColors = clearedItems[ci].colors;
-                    for (var cci = 0; cci < cChars.length && cci < cColors.length; cci++) {
-                        try { if (cColors[cci]) cChars[cci].fillColor = cColors[cci]; } catch (er) {}
-                    }
-                } catch (e) {}
-            }
+        // 4. 숨긴 텍스트 프레임 복원
+        for (var ri = 0; ri < hiddenItems.length; ri++) {
+            try { hiddenItems[ri].visible = true; } catch (e) {}
         }
 
         // 4. 결과 추가
         var pageBounds = page.bounds;
         var entry = {
             id: pi,
-            file: hasPdf ? null : (pngFileName ? ("rendered_frames/" + pngFileName) : null),
+            file: "rendered_frames/" + pngFileName,
             pdfFile: "rendered_frames/" + pdfFileName,
             pdfPageIndex: 0,
             bounds: [0, 0, pageBounds[2] - pageBounds[0], pageBounds[3] - pageBounds[1]],

@@ -245,8 +245,6 @@ public class ResolvedToASTBuilder {
             if (isNestedInTextFrame(tf)) continue;
 
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
-            // 단, 스레드 체인(연결 텍스트 프레임)은 무조건 배치 — 본문 텍스트일 가능성 높음
-            // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             if (!resolvedData.isEditableTextFrame(tf.id())) continue;
 
             // 페이지 인덱스 결정

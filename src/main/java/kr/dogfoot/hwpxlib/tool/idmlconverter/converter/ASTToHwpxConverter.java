@@ -53,8 +53,22 @@ public class ASTToHwpxConverter {
     public static ConvertResult convert(ASTDocument doc, ProgressReporter reporter,
                                          int progressOffset, int progressTotal,
                                          Map<String, String> customFontMap) throws ConvertException {
+        return convert(doc, reporter, customFontMap, null, null);
+    }
+
+    /**
+     * FontMapper + ConversionConfig를 지원하는 팩토리 메서드.
+     * FlatToHwpxConverter를 대체하는 메인 엔트리포인트.
+     */
+    public static ConvertResult convert(ASTDocument doc, ProgressReporter reporter,
+                                         Map<String, String> customFontMap,
+                                         FontMapper fontMapper,
+                                         kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config) throws ConvertException {
         try {
-            return new ASTToHwpxConverter(doc, reporter, progressOffset, progressTotal, customFontMap).doConvert();
+            ASTToHwpxConverter converter = new ASTToHwpxConverter(doc, reporter, 0, 0, customFontMap);
+            converter.fontMapper = fontMapper;
+            converter.config = config;
+            return converter.doConvert();
         } catch (ConvertException ce) {
             throw ce;
         } catch (Exception e) {
@@ -71,6 +85,8 @@ public class ASTToHwpxConverter {
     private final int progressOffset;
     private final int progressTotal;
     private final Map<String, String> customFontMap;
+    private FontMapper fontMapper;
+    private kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config;
 
     // 통계
     private int pagesConverted;
@@ -103,10 +119,14 @@ public class ASTToHwpxConverter {
 
         // 2. 레지스트리 초기화
         FontRegistry fontRegistry = new FontRegistry(hwpxFile, customFontMap);
+        if (fontMapper != null) {
+            fontRegistry.setFontMapper(fontMapper);
+        }
         StyleRegistry styleRegistry = new StyleRegistry(hwpxFile, fontRegistry);
 
         // 3. 컨텍스트 + 빌더 생성
         ctx = new HwpxConverterContext(hwpxFile, styleRegistry, fontRegistry, doc.paragraphStyles());
+        ctx.config = config;
 
         paragraphBuilder = new HwpxParagraphBuilder(ctx);
         textBoxBuilder = new HwpxTextBoxBuilder(ctx, paragraphBuilder);
@@ -226,10 +246,10 @@ public class ASTToHwpxConverter {
         ASTPageLayout layout = section.layout();
         if (layout == null) return;
 
-        // 현재 섹션의 컬럼 너비 계산 (오버레이 위치 계산용)
-        long mLeft = layout.marginLeft() > 0 ? layout.marginLeft() : 1417;
-        long mRight = layout.marginRight() > 0 ? layout.marginRight() : 1417;
-        ctx.currentColumnWidth = Math.max(100, layout.pageWidth() - mLeft - mRight);
+        // 현재 섹션의 컬럼 너비 = 페이지 전체 (마진 0)
+        ctx.currentColumnWidth = Math.max(100, layout.pageWidth());
+        ctx.pageMarginTop = 0;
+        ctx.pageMarginLeft = 0;
 
         // TEXT_FRAME_BLOCK 수집
         List<ASTTextFrameBlock> textFrameBlocks = new ArrayList<>();
@@ -406,12 +426,14 @@ public class ASTToHwpxConverter {
             hwpxHeight = (int) layout.pageHeight();
         }
 
-        // 마진
-        int mTop = layout.marginTop() > 0 ? (int) layout.marginTop() : 1417;
-        int mBottom = layout.marginBottom() > 0 ? (int) layout.marginBottom() : 1417;
-        int mLeft = layout.marginLeft() > 0 ? (int) layout.marginLeft() : 1417;
-        int mRight = layout.marginRight() > 0 ? (int) layout.marginRight() : 1417;
-        int headerFooter = 1417;
+        // 마진: 모든 콘텐츠가 절대 좌표(PAPER 기준)로 배치되므로 0으로 설정.
+        // 한글 뷰어가 BEHIND_TEXT 이미지를 본문 영역으로 클리핑하기 때문에
+        // 마진이 있으면 페이지 배경 PNG가 잘림.
+        int mTop = 0;
+        int mBottom = 0;
+        int mLeft = 0;
+        int mRight = 0;
+        int headerFooter = 0;
 
         secPr.createPagePr();
         secPr.pagePr()

@@ -3,9 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter;
 import kr.dogfoot.hwpxlib.object.HWPXFile;
 import kr.dogfoot.hwpxlib.writer.HWPXWriter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.flat.ASTToFlatConverter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.flat.FlatDocument;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.flat.FlatToHwpxConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
@@ -207,9 +205,8 @@ public class IDMLToHwpxConverter {
                 }
             }
 
-            // Phase 3: AST -> Flat -> HWPX (페이지별 진행률: 10~90)
-            FlatDocument flatDoc = ASTToFlatConverter.convert(astDoc);
-            ConvertResult result = FlatToHwpxConverter.convert(flatDoc, reporter, null, fontMapper, config);
+            // Phase 3: AST -> HWPX 직접 변환
+            ConvertResult result = ASTToHwpxConverter.convert(astDoc, reporter, null, fontMapper, config);
 
             // 초기 단계 경고 + AST 정규화 경고를 결과에 병합
             for (String w : earlyWarnings) { result.addWarning(w); }
@@ -246,8 +243,7 @@ public class IDMLToHwpxConverter {
         try {
             String sourceFileName = new File(idmlPath).getName();
             ASTDocument astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName);
-            FlatDocument flatDoc = ASTToFlatConverter.convert(astDoc);
-            ConvertResult result = FlatToHwpxConverter.convert(flatDoc);
+            ConvertResult result = ASTToHwpxConverter.convert(astDoc);
             return result.hwpxFile();
         } finally {
             idmlDoc.cleanup();
