@@ -604,27 +604,12 @@ public class ResolvedToASTBuilder {
             // editable 프레임만 처리 (non-editable은 배경 PNG에 이미 포함)
             if (!resolvedData.isEditableTextFrame(tf.id())) continue;
 
-            // frameVisibleText가 거의 비어있고 Story가 긴 경우 → 오버플로우/미표시 프레임
-            String fvtChk = tf.frameVisibleText();
-            int fvtLen = (fvtChk != null) ? fvtChk.replace("\uFFFC", "").trim().length() : 0;
-
             // Story에 테이블이 있는지 IDML에서 확인
             String storyId = tf.storyId();
             if (storyId == null) continue;
 
             IDMLStory idmlStory = loadIDMLStory(storyId);
             if (idmlStory == null || !idmlStory.hasTables()) continue;
-
-            // Story 텍스트가 길고 프레임에 보이는 텍스트가 거의 없으면 건너뜀
-            if (fvtLen <= 1) {
-                int storyTextLen = 0;
-                for (IDMLParagraph sp : idmlStory.paragraphs()) {
-                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun sr : sp.characterRuns()) {
-                        if (sr.content() != null) storyTextLen += sr.content().length();
-                    }
-                }
-                if (storyTextLen > 20) continue;
-            }
 
             // 페이지 결정
             int pageIdx = tf.pageIndex();
@@ -849,6 +834,15 @@ public class ResolvedToASTBuilder {
             }
             for (ASTTextFrameBlock b : blocks) {
                 b.storyTotalTextLength(storyTextLen);
+            }
+
+            // 오버플로우 감지: 모든 블록의 frameVisibleText가 거의 비어있고 Story가 길면 할당 안 함
+            if (storyTextLen > 20) {
+                boolean allBlocksEmpty = true;
+                for (ASTTextFrameBlock b : blocks) {
+                    if (b.frameVisibleTextLength() > 0) { allBlocksEmpty = false; break; }
+                }
+                if (allBlocksEmpty) continue;
             }
 
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
@@ -2058,8 +2052,8 @@ public class ResolvedToASTBuilder {
                 if (pt != null) storyLen += pt.length();
             }
             int visLen = block.frameVisibleTextLength();
-            if (storyLen > 20 && visLen <= 1) {
-                // Story가 20자 이상인데 프레임에 보이는 텍스트가 1자 이하 → 오버플로우/미표시 프레임
+            if (storyLen > 20 && visLen == 0) {
+                // Story가 20자 이상인데 프레임에 보이는 텍스트가 공백만 → 오버플로우/미표시 프레임
                 return;
             }
             for (ASTParagraph p : paragraphs) {
