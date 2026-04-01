@@ -1283,7 +1283,10 @@ public class ResolvedToASTBuilder {
             Double trackingVal = (cr.tracking() != null && cr.tracking() != 0)
                     ? cr.tracking() : styleTracking;
             if (trackingVal != null && trackingVal != 0) {
-                String fn = (fontFamily != null) ? fontFamily : (rr != null ? rr.fontFamily() : null);
+                String fn = (fontFamily != null) ? fontFamily
+                        : (tr.fontFamily() != null ? tr.fontFamily()
+                        : (styleFontFamily != null ? styleFontFamily
+                        : (rr != null ? rr.fontFamily() : null)));
                 boolean isDefaultFallback = isKoreanFontName(fn);
                 if (isDefaultFallback) {
                     // 한컴돋움 fallback: tracking 값의 50%
