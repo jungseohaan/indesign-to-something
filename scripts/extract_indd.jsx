@@ -3090,6 +3090,17 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     try { runData.fontStyle = rng.fontStyle; } catch (e) {}
                     try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
                     try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
+                    // GREP 스타일 색상 감지: textStyleRange.fillColor와 첫 문자의 fillColor가 다르면
+                    // 개별 문자의 색상이 실제 렌더링 색상 (GREP 스타일 반영)
+                    try {
+                        var rngChars = rng.characters;
+                        if (rngChars.length > 0) {
+                            var firstCharFc = rngChars[0].fillColor ? rngChars[0].fillColor.name : null;
+                            if (firstCharFc && firstCharFc !== runData.fillColor) {
+                                runData.fillColor = firstCharFc;
+                            }
+                        }
+                    } catch (eGrepColor) {}
                     // GREP 스타일로 적용된 수식 폰트 감지 → ParagraphStyle 폰트로 대체
                     // CharacterStyle이 [없음]인데 fontFamily가 BT수식/NP/EH이면 GREP 스타일
                     if (runData.fontFamily && runData.charStyle &&

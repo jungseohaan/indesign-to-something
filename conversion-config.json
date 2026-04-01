@@ -297,6 +297,12 @@
         "spacing": -5,
         "scaleAdjust": -20
       },
+      "Sandoll 고딕NeoRound": {
+        "ko": "한컴 윤고딕 250",
+        "en": "한컴 윤고딕 250",
+        "spacing": 0,
+        "scaleAdjust": 5
+      },
       "Sandoll 고고Round": {
         "ko": "한컴 윤고딕 230",
         "en": "한컴 윤고딕 230",
