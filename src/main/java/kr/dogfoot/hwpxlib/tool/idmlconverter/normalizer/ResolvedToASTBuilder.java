@@ -840,7 +840,7 @@ public class ResolvedToASTBuilder {
             if (storyTextLen > 20) {
                 boolean allBlocksEmpty = true;
                 for (ASTTextFrameBlock b : blocks) {
-                    if (b.frameVisibleTextLength() > 0) { allBlocksEmpty = false; break; }
+                    if (b.frameVisibleTextLength() > 1) { allBlocksEmpty = false; break; }
                 }
                 if (allBlocksEmpty) continue;
             }
@@ -2052,8 +2052,8 @@ public class ResolvedToASTBuilder {
                 if (pt != null) storyLen += pt.length();
             }
             int visLen = block.frameVisibleTextLength();
-            if (storyLen > 20 && visLen == 0) {
-                // Story가 20자 이상인데 프레임에 보이는 텍스트가 공백만 → 오버플로우/미표시 프레임
+            if (storyLen > 20 && visLen <= 1) {
+                // Story가 20자 이상인데 프레임에 보이는 텍스트가 0~1자 → 오버플로우/미표시 프레임
                 return;
             }
             for (ASTParagraph p : paragraphs) {
