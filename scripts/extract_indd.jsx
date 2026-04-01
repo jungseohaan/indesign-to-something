@@ -1906,11 +1906,16 @@ function classifyTextFrame(item) {
             }
         }
     } catch (e) {}
-    // 11. 실질적으로 빈 프레임: contents와 parentStory.contents가 모두 공백
+    // 11. 실질적으로 빈 프레임: parentStory.contents가 공백이고 테이블도 없음
     // (IDML Story에는 긴 텍스트가 있지만 InDesign DOM에서는 이 프레임에 표시되지 않음)
+    // 단, 테이블이 있으면 editable 유지 (테이블은 contents에 포함되지 않음)
     try {
         var storyText11 = item.parentStory.contents.replace(/[\s\uFEFF\uFFFC\r\n\u0016\u0018]/g, "");
-        if (storyText11.length <= 1) return "background";
+        if (storyText11.length <= 1) {
+            var hasTables11 = false;
+            try { hasTables11 = item.parentStory.tables.length > 0; } catch (e2) {}
+            if (!hasTables11) return "background";
+        }
     } catch (e) {}
     // 나머지 = 편집 가능 본문 텍스트
     return "editable";
