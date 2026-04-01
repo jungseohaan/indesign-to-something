@@ -3090,26 +3090,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     try { runData.fontStyle = rng.fontStyle; } catch (e) {}
                     try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
                     try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
-                    // GREP 스타일 색상은 Java에서 IDML GREP 규칙 기반으로 처리
-                    // (ExtendScript 문자별 순회는 성능 문제)
-                    // GREP 스타일로 적용된 수식 폰트 감지 → ParagraphStyle 폰트로 대체
-                    // CharacterStyle이 [없음]인데 fontFamily가 BT수식/NP/EH이면 GREP 스타일
-                    if (runData.fontFamily && runData.charStyle &&
-                        (runData.charStyle === "\uc5c6\uc74c" || runData.charStyle === "[None]" || runData.charStyle === "[없음]") &&
-                        (/^BT|^NP|^EH/.test(runData.fontFamily))) {
-                        // ParagraphStyle의 원래 폰트로 대체
-                        try {
-                            var paraStyle = para.appliedParagraphStyle;
-                            var pFont = paraStyle.appliedFont ? paraStyle.appliedFont.fontFamily : null;
-                            var pSize = paraStyle.pointSize;
-                            var pStyle = paraStyle.fontStyle;
-                            if (pFont) {
-                                runData.fontFamily = pFont;
-                                if (pSize) runData.fontSize = pSize;
-                                if (pStyle) runData.fontStyle = pStyle;
-                            }
-                        } catch (ePS) {}
-                    }
+                    // GREP 스타일(폰트/색상)은 Java에서 IDML GREP 규칙 기반으로 처리
+                    // ExtendScript에서는 textStyleRanges 값을 그대로 사용
                     // 확장 속성
                     try { runData.tracking = rng.tracking; } catch (e) {}
                     try { runData.horizontalScale = rng.horizontalScale; } catch (e) {}
