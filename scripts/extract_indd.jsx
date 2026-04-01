@@ -3063,7 +3063,10 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                 }
             } catch (e) {}
 
-            // textStyleRanges 사용 (성능 최적화 — architecture.md 섹션 10)
+            // runs 수집 제거 — IDML에서 GREP 스타일 포함 완전한 run 정보 추출
+            // resolved에서는 단락 속성(leading, spacing, indent 등)만 사용
+            // textStyleRanges 순회가 전체 추출 시간의 75%를 차지하므로 성능 대폭 개선
+            if (false) { // 비활성화
             try {
                 var ranges = para.textStyleRanges.everyItem().getElements();
                 for (var r = 0; r < ranges.length; r++) {
@@ -3090,64 +3093,8 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     try { runData.fontStyle = rng.fontStyle; } catch (e) {}
                     try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
                     try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
-                    // GREP 스타일 색상 감지: 개별 문자의 fillColor가 textStyleRange와 다르면
-                    // 색상 변화 지점에서 run을 분할하여 각 구간에 실제 색상 적용
-                    try {
-                        var rngChars = rng.characters;
-                        if (rngChars.length > 1) {
-                            // 문자별 색상 변화 감지 (제어문자 제외)
-                            var colorSegments = []; // [{start, end, color}]
-                            var segStart = 0;
-                            var segColor = runData.fillColor;
-                            for (var gci = 0; gci < rngChars.length; gci++) {
-                                var gc = rngChars[gci].contents;
-                                if (gc === "\uFFFC" || gc === "\u0016" || gc === "\u0018") continue;
-                                var charFc = null;
-                                try { charFc = rngChars[gci].fillColor ? rngChars[gci].fillColor.name : null; } catch(e2){}
-                                if (charFc && charFc !== segColor) {
-                                    if (gci > segStart) {
-                                        colorSegments.push({start: segStart, end: gci, color: segColor});
-                                    }
-                                    segStart = gci;
-                                    segColor = charFc;
-                                }
-                            }
-                            // 색상 변화가 있었으면 run을 분할
-                            if (colorSegments.length > 0) {
-                                colorSegments.push({start: segStart, end: rngChars.length, color: segColor});
-                                // 첫 번째 run의 텍스트/색상 축소
-                                var firstSeg = colorSegments[0];
-                                var firstText = "";
-                                for (var fi = firstSeg.start; fi < firstSeg.end; fi++) firstText += rngChars[fi].contents;
-                                runData.text = firstText;
-                                runData.fillColor = firstSeg.color;
-                                // 나머지 세그먼트를 추가 run으로 생성
-                                for (var si = 1; si < colorSegments.length; si++) {
-                                    var seg = colorSegments[si];
-                                    var segText = "";
-                                    for (var sti = seg.start; sti < seg.end; sti++) segText += rngChars[sti].contents;
-                                    if (segText.length === 0) continue;
-                                    var splitRun = {
-                                        text: segText,
-                                        fontFamily: runData.fontFamily,
-                                        fontSize: runData.fontSize,
-                                        fontStyle: runData.fontStyle,
-                                        fillColor: seg.color,
-                                        charStyle: runData.charStyle,
-                                        tracking: runData.tracking,
-                                        horizontalScale: runData.horizontalScale,
-                                        verticalScale: runData.verticalScale,
-                                        baselineShift: runData.baselineShift,
-                                        position: runData.position,
-                                        underline: runData.underline,
-                                        strikeThru: runData.strikeThru
-                                    };
-                                    paraData.runs.push(splitRun);
-                                }
-                                // 원래 runData는 첫 세그먼트로 축소됨 → 이후 push에서 정상 처리
-                            }
-                        }
-                    } catch (eGrepColor) {}
+                    // GREP 스타일 색상은 Java에서 IDML GREP 규칙 기반으로 처리
+                    // (ExtendScript 문자별 순회는 성능 문제)
                     // GREP 스타일로 적용된 수식 폰트 감지 → ParagraphStyle 폰트로 대체
                     // CharacterStyle이 [없음]인데 fontFamily가 BT수식/NP/EH이면 GREP 스타일
                     if (runData.fontFamily && runData.charStyle &&
@@ -3226,6 +3173,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
             } catch (e) {
                 // textStyleRanges 접근 실패 시 무시
             }
+            } // end if (false)
 
             storyData.paragraphs.push(paraData);
         }

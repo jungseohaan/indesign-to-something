@@ -23,6 +23,7 @@ public class IDMLCharacterRun {
     private List<InlineAnchor> inlineAnchors; // FFFC 위치 기반 인터리빙 순서
     private Double tracking;
     private boolean grepMathFont;  // GREP 스타일에서 BT수식M이 동적 적용된 런
+    private String grepFillColor;  // GREP 스타일에서 동적 적용된 FillColor (IDML 색상 참조명)
     private String grepAppliedCharStyle;  // GREP 스타일에서 동적 적용된 문자 스타일 참조 ID
     private Boolean underline;     // 밑줄 (IDML Underline="true")
     private String underlineType;  // 밑줄 타입 (IDML UnderlineType: "StrokeStyle/$ID/Wavy" 등)
@@ -280,6 +281,8 @@ public class IDMLCharacterRun {
 
     public boolean grepMathFont() { return grepMathFont; }
     public void grepMathFont(boolean v) { this.grepMathFont = v; }
+    public String grepFillColor() { return grepFillColor; }
+    public void grepFillColor(String v) { this.grepFillColor = v; }
 
     public String grepAppliedCharStyle() { return grepAppliedCharStyle; }
     public void grepAppliedCharStyle(String v) { this.grepAppliedCharStyle = v; }

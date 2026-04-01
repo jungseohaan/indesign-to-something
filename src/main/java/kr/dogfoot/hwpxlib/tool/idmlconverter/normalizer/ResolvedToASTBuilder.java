@@ -1257,6 +1257,24 @@ public class ResolvedToASTBuilder {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
         }
         if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
+        // GREP 스타일 색상 적용: grepAppliedCharStyle의 FillColor가 있으면 우선
+        if (cr.grepAppliedCharStyle() != null && idmlDocument != null) {
+            ensureIdmlInfra();
+            if (idmlDocument != null) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef grepCharStyle =
+                        idmlDocument.charStyles().get(cr.grepAppliedCharStyle());
+                if (grepCharStyle == null) {
+                    // "CharacterStyle/" 접두사 제거 시도
+                    String shortRef = cr.grepAppliedCharStyle();
+                    if (shortRef.startsWith("CharacterStyle/")) shortRef = shortRef.substring("CharacterStyle/".length());
+                    grepCharStyle = idmlDocument.charStyles().get(shortRef);
+                }
+                if (grepCharStyle != null && grepCharStyle.fillColor() != null) {
+                    String grepColor = resolveColorToHex(grepCharStyle.fillColor());
+                    if (grepColor != null) tr.textColor(grepColor);
+                }
+            }
+        }
         // InDesign Tracking → HWPX 자간
         // 한컴돋움/한컴바탕 fallback 폰트 매핑 시: tracking 값 그대로 (e.g., -15 → -15%)
         // 명시적 매핑 폰트: tracking / 10 (e.g., -30 → -3%)
