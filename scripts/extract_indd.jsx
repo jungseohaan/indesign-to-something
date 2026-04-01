@@ -669,7 +669,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems) 
         var pgIdx = parentPage.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
 
-        if (isTextFrame && !isRenderableTextFrame(item)) continue;
+        if (isTextFrame && classifyTextFrame(item) !== "renderable") continue;
 
         var renderTarget = item;
         var parentItem = null;
@@ -1829,6 +1829,88 @@ function isBadgeGroup(group) {
 }
 
 /**
+ * TextFrame을 분류한다.
+ * @param {PageItem} item - allPageItems 항목
+ * @return {string|null}
+ *   "background" - 배경 PNG에 포함 (non-editable)
+ *   "editable"   - 배경에서 숨기고 HWPX 글상자로 변환
+ *   "renderable" - 배경에 포함 + 별도 장식 PNG 렌더링
+ *   null         - TextFrame이 아님 (건너뜀)
+ */
+function classifyTextFrame(item) {
+    // 1. TextFrame만 처리
+    if (item.constructor.name !== "TextFrame") return null;
+    // 2. 숨겨진 레이어
+    if (isOnHiddenLayer(item)) return "background";
+    // 3. 비인쇄
+    try { if (item.nonprinting) return "background"; } catch (e) {}
+    // 4. 자동 페이지 번호 마커
+    try {
+        if (item.parentStory.contents.indexOf("\u0018") >= 0) return "background";
+    } catch (e) {}
+    // 5. 마스터 페이지 오버라이드
+    try { if (item.masterPageItem) return "background"; } catch (e) {}
+    // 6. 마진 영역의 짧은 텍스트 (페이지 번호, 하시라 등)
+    try {
+        var ppg = item.parentPage;
+        if (ppg) {
+            var pgB = ppg.bounds;
+            var pgW = pgB[3] - pgB[1], pgH = pgB[2] - pgB[0];
+            var tfB = item.geometricBounds;
+            var tfTop = tfB[0] - pgB[0], tfBot = tfB[2] - pgB[0];
+            var tfLeft = tfB[1] - pgB[1], tfRight = tfB[3] - pgB[1];
+            var trimmed6 = "";
+            try { trimmed6 = item.contents.replace(/[\s\uFEFF\r\n\u0016\u0018\uFFFC]/g, ""); } catch (e4) {}
+            var inMarginArea = (tfTop < pgH * 0.10 || tfBot > pgH * 0.90
+                || tfRight <= pgW * 0.25 || tfLeft >= pgW * 0.75);
+            var hasTable6 = false;
+            try {
+                hasTable6 = (item.parentStory && item.parentStory.tables.length > 0)
+                    || (item.contents.indexOf("\u0016") >= 0);
+            } catch (e5) {}
+            if (trimmed6.length <= 15 && inMarginArea && !hasTable6) return "background";
+        }
+    } catch (e) {}
+    // 7. 인라인 객체는 부모가 관리
+    if (isInlineItem(item)) return "background";
+    // 8. Group 안의 짧은 장식 TextFrame (10자 이하 + 비검정색)
+    try {
+        var parentType8 = item.parent.constructor.name;
+        if (parentType8 === "Group") {
+            var groupText8 = item.contents.replace(/[\s\uFEFF\r\n\u0016]/g, "");
+            var hasTable8 = false;
+            try { hasTable8 = item.parentStory && item.parentStory.tables.length > 0; } catch (e6) {}
+            if (groupText8.length <= 10 && !hasTable8) {
+                var isDeco8 = false;
+                try {
+                    var fc8 = item.parentStory.characters[0].fillColor;
+                    if (fc8 && fc8.name && fc8.name !== "Black" && fc8.name !== "[Black]") isDeco8 = true;
+                } catch (e2) { isDeco8 = true; }
+                if (isDeco8) return "background";
+            }
+        }
+    } catch (e) {}
+    // 9. 회전/효과/특수 스타일 → 별도 PNG 렌더링
+    if (isRenderableTextFrame(item)) return "renderable";
+    // 10. 빈 TextFrame + fill/stroke → 배경에 포함
+    try {
+        var trimmed10 = item.contents.replace(/[\r\n\s\uFFFC]/g, "");
+        if (trimmed10.length === 0) {
+            var fc10 = "None", sc10 = "None", sw10 = 0;
+            try { fc10 = item.fillColor ? item.fillColor.name : "None"; } catch (e) {}
+            try { sc10 = item.strokeColor ? item.strokeColor.name : "None"; } catch (e) {}
+            try { sw10 = item.strokeWeight || 0; } catch (e) {}
+            if ((fc10 !== "None" && fc10 !== "[None]") ||
+                ((sc10 !== "None" && sc10 !== "[None]") && sw10 > 0)) {
+                return "background";
+            }
+        }
+    } catch (e) {}
+    // 나머지 = 편집 가능 본문 텍스트
+    return "editable";
+}
+
+/**
  * TextFrame이 이미지 렌더링 대상인지 판별한다.
  * 회전, 스트로크, 그림자 등 HWPX에서 재현 불가한 효과가 있는 경우에만 렌더링.
  */
@@ -2202,105 +2284,15 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
 
     var results = [];
 
-    // 편집 가능 텍스트 프레임 수집 (숨길 대상)
-    // 조건: 본문 텍스트 (긴 텍스트, 비장식)
+    // 편집 가능 텍스트 프레임 수집 — classifyTextFrame()으로 단일 분류
     var editableFrames = [];
-    var editableFrameIds = {};  // id → true (Java에서 글상자 배치 시 사용)
+    var editableFrameIds = {};
     for (var i = 0; i < allItems.length; i++) {
-        var item = allItems[i];
-        // 1. TextFrame만 처리
-        if (item.constructor.name !== "TextFrame") continue;
-        // 2. 숨겨진 레이어
-        if (isOnHiddenLayer(item)) continue;
-        // 3. 비인쇄
-        try { if (item.nonprinting) continue; } catch (e) {}
-        // 4. 자동 페이지 번호 마커 → 배경에 포함
-        try {
-            var sc = item.parentStory.contents;
-            if (sc.indexOf("\u0018") >= 0) continue;
-        } catch (e) {}
-        // 5. 마스터 페이지 오버라이드
-        try {
-            if (item.masterPageItem) continue;
-        } catch (e) {}
-        // 6. 마진 영역의 짧은 텍스트 (페이지 번호, 하시라 등) → 배경에 포함
-        try {
-            var ppg = item.parentPage;
-            if (ppg) {
-                var pgB = ppg.bounds;
-                var pgW = pgB[3] - pgB[1];
-                var pgH = pgB[2] - pgB[0];
-                var tfB = item.geometricBounds;
-                var tfTop = tfB[0] - pgB[0];
-                var tfBot = tfB[2] - pgB[0];
-                var tfLeft = tfB[1] - pgB[1];
-                var tfRight = tfB[3] - pgB[1];
-                var trimmed = "";
-                try { trimmed = item.contents.replace(/[\s\uFEFF\r\n\u0016\u0018\uFFFC]/g, ""); } catch (e4) {}
-                var inMarginArea = (tfTop < pgH * 0.10 || tfBot > pgH * 0.90
-                    || tfRight <= pgW * 0.25 || tfLeft >= pgW * 0.75);
-                // 테이블 앵커(\u0016) 또는 테이블 포함 프레임은 건너뛰지 않음
-                var hasTable6 = false;
-                try {
-                    hasTable6 = (item.parentStory && item.parentStory.tables.length > 0)
-                        || (item.contents.indexOf("\u0016") >= 0);
-                } catch (e5) {}
-                if (trimmed.length <= 15 && inMarginArea && !hasTable6) {
-                    continue;
-                }
-            }
-        } catch (e) {}
-        // 7. 인라인 객체는 부모가 관리
-        if (isInlineItem(item)) continue;
-
-        // 8. Group 안의 짧은 장식 TextFrame (10자 이하 + 장식 효과)
-        // 단, 테이블 포함 프레임은 제외
-        try {
-            var parentType = item.parent.constructor.name;
-            if (parentType === "Group") {
-                var groupText = item.contents.replace(/[\s\uFEFF\r\n\u0016]/g, "");
-                var hasTable8 = false;
-                try { hasTable8 = item.parentStory && item.parentStory.tables.length > 0; } catch (e6) {}
-                if (groupText.length <= 10 && !hasTable8) {
-                    var isDecorative = false;
-                    try {
-                        var chars = item.parentStory.characters;
-                        if (chars.length > 0) {
-                            var fc = chars[0].fillColor;
-                            if (fc && fc.name && fc.name !== "Black" && fc.name !== "[Black]") {
-                                isDecorative = true;
-                            }
-                        }
-                    } catch (e2) { isDecorative = true; }
-                    if (isDecorative) continue;
-                }
-            }
-        } catch (e) {}
-
-        // 9. 렌더 대상: 글자 1자 이상 + 회전/효과/특수 스타일
-        if (isRenderableTextFrame(item)) continue;
-
-        // 11. 빈 TextFrame + 투명 아닌(stroke/fill 있는) → 배경에 포함
-        try {
-            var trimmedContents = item.contents.replace(/[\r\n\s\uFFFC]/g, "");
-            if (trimmedContents.length === 0) {
-                var hasVisualProps = false;
-                try {
-                    var _fc = item.fillColor ? item.fillColor.name : "None";
-                    var _sc = item.strokeColor ? item.strokeColor.name : "None";
-                    var _sw = item.strokeWeight || 0;
-                    if ((_fc !== "None" && _fc !== "[None]") || ((_sc !== "None" && _sc !== "[None]") && _sw > 0)) {
-                        hasVisualProps = true;
-                    }
-                } catch (e2) {}
-                if (hasVisualProps) continue;
-            }
-        } catch (e) {}
-
-        // 나머지 = 편집 가능 본문 텍스트 → 숨겨서 배경에서 제외
-        editableFrames.push(item);
-        // ID 기록 (Java에서 글상자 배치 시 사용)
-        editableFrameIds[item.id] = true;
+        var cls = classifyTextFrame(allItems[i]);
+        if (cls === "editable") {
+            editableFrames.push(allItems[i]);
+            editableFrameIds[allItems[i].id] = true;
+        }
     }
 
     // 테이블+인라인 TextFrame 별도 렌더링:
@@ -2634,9 +2626,9 @@ function exportAllFloatingItems(doc, outputDir, startPage, endPage, allItems, al
         // 인라인(앵커) 객체 제외
         if (isInlineItem(item)) continue;
 
-        // TextFrame: 본문 텍스트는 제외, 장식/배지만 렌더
+        // TextFrame: renderable(장식/효과) 프레임만 렌더
         if (cName === "TextFrame") {
-            if (!isRenderableTextFrame(item)) continue;
+            if (classifyTextFrame(item) !== "renderable") continue;
         }
 
         // 페이지 판별
