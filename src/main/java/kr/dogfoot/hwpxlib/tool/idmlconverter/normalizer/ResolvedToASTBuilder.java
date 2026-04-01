@@ -1342,6 +1342,15 @@ public class ResolvedToASTBuilder {
         if (tr.fontFamily() == null && styleFontFamily != null) {
             tr.fontFamily(styleFontFamily);
         }
+        // 디버그: "우무" 텍스트의 폰트 결정 과정
+        if (text != null && text.contains("\uc6b0\ubb34")) {
+            System.err.println("[FontDebug] text=" + text.substring(0, Math.min(20, text.length()))
+                + " cr.font=" + cr.fontFamily()
+                + " rr.font=" + (rr != null ? rr.fontFamily() : "null")
+                + " styleFontFamily=" + styleFontFamily
+                + " → tr.font=" + tr.fontFamily()
+                + " tr.size=" + tr.fontSizeHwpunits());
+        }
         if (tr.fontSizeHwpunits() == null && styleFontSize != null && styleFontSize > 0) {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(styleFontSize));
         }
