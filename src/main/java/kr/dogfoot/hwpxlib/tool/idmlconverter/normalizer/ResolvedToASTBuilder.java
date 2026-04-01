@@ -1325,6 +1325,11 @@ public class ResolvedToASTBuilder {
             if (tr.fontSizeHwpunits() == null && rr.fontSize() != null && rr.fontSize() > 0) {
                 tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
             }
+            // horizontalScale: IDML에 없으면 resolved에서 보강
+            if (tr.horizontalScale() == null && rr.horizontalScale() != null
+                    && rr.horizontalScale() != 0 && rr.horizontalScale() != 100) {
+                tr.horizontalScale((short) rr.horizontalScale().doubleValue());
+            }
             // FillColor: ParagraphStyle 우선, resolved fallback
             if (tr.textColor() == null && styleFillColor != null) {
                 tr.textColor(styleFillColor);
@@ -1341,15 +1346,6 @@ public class ResolvedToASTBuilder {
         // ParagraphStyle 폴백 (IDML 런과 resolved 런 모두 속성이 없을 때)
         if (tr.fontFamily() == null && styleFontFamily != null) {
             tr.fontFamily(styleFontFamily);
-        }
-        // 디버그: "우무" 텍스트의 폰트 결정 과정
-        if (text != null && text.contains("\uc6b0\ubb34")) {
-            System.err.println("[FontDebug] text=" + text.substring(0, Math.min(20, text.length()))
-                + " cr.font=" + cr.fontFamily()
-                + " rr.font=" + (rr != null ? rr.fontFamily() : "null")
-                + " styleFontFamily=" + styleFontFamily
-                + " → tr.font=" + tr.fontFamily()
-                + " tr.size=" + tr.fontSizeHwpunits());
         }
         if (tr.fontSizeHwpunits() == null && styleFontSize != null && styleFontSize > 0) {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(styleFontSize));
