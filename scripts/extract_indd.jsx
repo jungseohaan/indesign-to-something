@@ -3063,10 +3063,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                 }
             } catch (e) {}
 
-            // runs 수집 제거 — IDML에서 GREP 스타일 포함 완전한 run 정보 추출
-            // resolved에서는 단락 속성(leading, spacing, indent 등)만 사용
-            // textStyleRanges 순회가 전체 추출 시간의 75%를 차지하므로 성능 대폭 개선
-            if (false) { // 비활성화
+            // textStyleRanges 사용 (성능 최적화 — architecture.md 섹션 10)
             try {
                 var ranges = para.textStyleRanges.everyItem().getElements();
                 for (var r = 0; r < ranges.length; r++) {
@@ -3173,8 +3170,6 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
             } catch (e) {
                 // textStyleRanges 접근 실패 시 무시
             }
-            } // end if (false)
-
             storyData.paragraphs.push(paraData);
         }
 
