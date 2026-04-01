@@ -604,12 +604,27 @@ public class ResolvedToASTBuilder {
             // editable 프레임만 처리 (non-editable은 배경 PNG에 이미 포함)
             if (!resolvedData.isEditableTextFrame(tf.id())) continue;
 
+            // frameVisibleText가 거의 비어있고 Story가 긴 경우 → 오버플로우/미표시 프레임
+            String fvtChk = tf.frameVisibleText();
+            int fvtLen = (fvtChk != null) ? fvtChk.replace("\uFFFC", "").trim().length() : 0;
+
             // Story에 테이블이 있는지 IDML에서 확인
             String storyId = tf.storyId();
             if (storyId == null) continue;
 
             IDMLStory idmlStory = loadIDMLStory(storyId);
             if (idmlStory == null || !idmlStory.hasTables()) continue;
+
+            // Story 텍스트가 길고 프레임에 보이는 텍스트가 거의 없으면 건너뜀
+            if (fvtLen <= 1) {
+                int storyTextLen = 0;
+                for (IDMLParagraph sp : idmlStory.paragraphs()) {
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun sr : sp.characterRuns()) {
+                        if (sr.content() != null) storyTextLen += sr.content().length();
+                    }
+                }
+                if (storyTextLen > 20) continue;
+            }
 
             // 페이지 결정
             int pageIdx = tf.pageIndex();
@@ -2032,9 +2047,21 @@ public class ResolvedToASTBuilder {
             return;
         }
 
-        // 단일 프레임: 모든 단락을 그대로 할당 (분배/트리밍 불필요)
+        // 단일 프레임: frameVisibleText와 Story 텍스트 길이 비교
         if (blocks.size() == 1) {
             ASTTextFrameBlock block = blocks.get(0);
+            // Story 텍스트가 길고 frameVisibleText가 거의 비어있으면 할당하지 않음
+            // (다른 페이지의 프레임에서 실제로 표시되는 텍스트가 이 프레임에 잘못 할당되는 것 방지)
+            int storyLen = 0;
+            for (ASTParagraph p : paragraphs) {
+                String pt = getParaPlainText(p);
+                if (pt != null) storyLen += pt.length();
+            }
+            int visLen = block.frameVisibleTextLength();
+            if (storyLen > 20 && visLen <= 1) {
+                // Story가 20자 이상인데 프레임에 보이는 텍스트가 1자 이하 → 오버플로우/미표시 프레임
+                return;
+            }
             for (ASTParagraph p : paragraphs) {
                 block.addParagraph(p);
             }
