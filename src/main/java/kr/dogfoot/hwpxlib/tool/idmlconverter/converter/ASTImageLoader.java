@@ -1032,12 +1032,7 @@ public class ASTImageLoader {
 
         // 채우기 (tint는 색상 농도로 RGB에 적용, opacity만 alpha에 적용)
         if (actualFillHex != null && renderTarget.hasFill()) {
-            Color fillColor = hexToColor(actualFillHex);
-            if (fillColor != null) {
-                Color tintedFill = applyTint(fillColor, renderTarget.fillTint());
-                g.setColor(withAlpha(tintedFill, alpha));
-                g.fill(awtShape);
-            }
+            fillWithColor(g, awtShape, actualFillHex, renderTarget.fillTint(), alpha);
         }
 
         // 선
@@ -1046,26 +1041,10 @@ public class ASTImageLoader {
             if (strokeColor != null) {
                 Color tintedStroke = applyTint(strokeColor, renderTarget.strokeTint());
                 g.setColor(withAlpha(tintedStroke, alpha));
-
-                int cap = BasicStroke.CAP_BUTT;
-                int join = BasicStroke.JOIN_MITER;
-                if (renderTarget.endCap() == IDMLVectorShape.LineCap.ROUND) cap = BasicStroke.CAP_ROUND;
-                if (renderTarget.endCap() == IDMLVectorShape.LineCap.PROJECTING) cap = BasicStroke.CAP_SQUARE;
-                if (renderTarget.lineJoin() == IDMLVectorShape.LineJoin.ROUND) join = BasicStroke.JOIN_ROUND;
-                if (renderTarget.lineJoin() == IDMLVectorShape.LineJoin.BEVEL) join = BasicStroke.JOIN_BEVEL;
-
-                float strokeW = (float) (renderTarget.strokeWeight() * scale);
-                BasicStroke stroke;
-                if (renderTarget.hasDashPattern()) {
-                    float[] dashArr = new float[renderTarget.dashPattern().length];
-                    for (int i = 0; i < dashArr.length; i++)
-                        dashArr[i] = (float) (renderTarget.dashPattern()[i] * scale);
-                    stroke = new BasicStroke(strokeW, cap, join, (float) renderTarget.miterLimit(), dashArr, 0);
-                } else {
-                    stroke = new BasicStroke(strokeW, cap, join, (float) renderTarget.miterLimit());
-                }
+                BasicStroke stroke = createStroke(renderTarget, scale);
                 g.setStroke(stroke);
                 g.draw(awtShape);
+                float strokeW = (float)(renderTarget.strokeWeight() * scale);
 
                 // 선 끝 장식 (CircleArrowHead 등) — 열린 경로의 시작/끝점에 원 그리기
                 drawLineEndDecorations(g, renderTarget, awtShape, strokeColor, tintedStroke, alpha, strokeW, scale);
@@ -1393,51 +1372,21 @@ public class ASTImageLoader {
             // 도형별 불투명도
             float alpha = (float) (sc.shape.opacity() / 100.0);
 
-            // 채우기 (tint는 색상 농도로 RGB에 적용, opacity만 alpha에 적용)
+            // 채우기
             if (sc.fillHex != null) {
-                Color fillColor = hexToColor(sc.fillHex);
-                if (fillColor != null) {
-                    Color tintedFill = applyTint(fillColor, sc.shape.fillTint());
-                    g.setColor(withAlpha(tintedFill, alpha));
-                    g.fill(awtShape);
-                }
+                fillWithColor(g, awtShape, sc.fillHex, sc.shape.fillTint(), alpha);
             }
 
-            // 선 (strokeHex가 Group 폴백으로 설정된 경우 shape 자체에 색상이 없을 수 있으므로
-            // hasStroke() 대신 strokeWeight > 0만 확인)
+            // 선
             if (sc.strokeHex != null && sc.shape.strokeWeight() > 0) {
                 Color strokeColor = hexToColor(sc.strokeHex);
                 if (strokeColor != null) {
                     Color tintedStroke = applyTint(strokeColor, sc.shape.strokeTint());
                     g.setColor(withAlpha(tintedStroke, alpha));
-                    float strokeW = (float) (sc.shape.strokeWeight() * scale);
-                    // 점선 패턴이 있는 얇은 선은 최소 1pt로 렌더링 (화면 96DPI에서 1px 보장)
-                    if (sc.shape.hasDashPattern() && sc.shape.strokeWeight() < 1.0) {
-                        strokeW = (float) (1.0 * scale);
-                    }
-
-                    int cap = java.awt.BasicStroke.CAP_BUTT;
-                    int join = java.awt.BasicStroke.JOIN_MITER;
-                    if (sc.shape.endCap() == IDMLVectorShape.LineCap.ROUND) cap = java.awt.BasicStroke.CAP_ROUND;
-                    else if (sc.shape.endCap() == IDMLVectorShape.LineCap.PROJECTING) cap = java.awt.BasicStroke.CAP_SQUARE;
-                    if (sc.shape.lineJoin() == IDMLVectorShape.LineJoin.ROUND) join = java.awt.BasicStroke.JOIN_ROUND;
-                    else if (sc.shape.lineJoin() == IDMLVectorShape.LineJoin.BEVEL) join = java.awt.BasicStroke.JOIN_BEVEL;
-
-                    BasicStroke stroke;
-                    if (sc.shape.hasDashPattern()) {
-                        float[] dashArr = new float[sc.shape.dashPattern().length];
-                        for (int di = 0; di < dashArr.length; di++)
-                            dashArr[di] = (float) (sc.shape.dashPattern()[di] * scale);
-                        stroke = new BasicStroke(strokeW, cap, join,
-                                (float) sc.shape.miterLimit(), dashArr, 0);
-                    } else {
-                        stroke = new BasicStroke(strokeW, cap, join,
-                                (float) sc.shape.miterLimit());
-                    }
+                    BasicStroke stroke = createStroke(sc.shape, scale);
                     g.setStroke(stroke);
                     g.draw(awtShape);
-
-                    // 선 끝 장식 (CircleArrowHead 등)
+                    float strokeW = (float)(sc.shape.strokeWeight() * scale);
                     drawLineEndDecorations(g, sc.shape, awtShape, strokeColor, tintedStroke, 1.0f, strokeW, scale);
                 }
             }
@@ -1655,14 +1604,9 @@ public class ASTImageLoader {
             g.setClip(transformedClip);
         }
 
-        // 채우기 (tint는 색상 농도로 RGB에 적용, opacity만 alpha에 적용)
+        // 채우기
         if (actualFillHex != null && renderTarget.hasFill()) {
-            Color fillColor = hexToColor(actualFillHex);
-            if (fillColor != null) {
-                Color tintedFill = applyTint(fillColor, renderTarget.fillTint());
-                g.setColor(withAlpha(tintedFill, alpha));
-                g.fill(transformedShape);
-            }
+            fillWithColor(g, transformedShape, actualFillHex, renderTarget.fillTint(), alpha);
         }
 
         // 선
@@ -1671,28 +1615,10 @@ public class ASTImageLoader {
             if (strokeColor != null) {
                 Color tintedStroke = applyTint(strokeColor, renderTarget.strokeTint());
                 g.setColor(withAlpha(tintedStroke, alpha));
-
-                int cap = BasicStroke.CAP_BUTT;
-                int join = BasicStroke.JOIN_MITER;
-                if (renderTarget.endCap() == IDMLVectorShape.LineCap.ROUND) cap = BasicStroke.CAP_ROUND;
-                if (renderTarget.endCap() == IDMLVectorShape.LineCap.PROJECTING) cap = BasicStroke.CAP_SQUARE;
-                if (renderTarget.lineJoin() == IDMLVectorShape.LineJoin.ROUND) join = BasicStroke.JOIN_ROUND;
-                if (renderTarget.lineJoin() == IDMLVectorShape.LineJoin.BEVEL) join = BasicStroke.JOIN_BEVEL;
-
-                float strokeW = (float) (renderTarget.strokeWeight() * scale);
-                BasicStroke stroke;
-                if (renderTarget.hasDashPattern()) {
-                    float[] dashArr = new float[renderTarget.dashPattern().length];
-                    for (int i = 0; i < dashArr.length; i++)
-                        dashArr[i] = (float) (renderTarget.dashPattern()[i] * scale);
-                    stroke = new BasicStroke(strokeW, cap, join, (float) renderTarget.miterLimit(), dashArr, 0);
-                } else {
-                    stroke = new BasicStroke(strokeW, cap, join, (float) renderTarget.miterLimit());
-                }
+                BasicStroke stroke = createStroke(renderTarget, scale);
                 g.setStroke(stroke);
                 g.draw(transformedShape);
-
-                // 선 끝 장식 (CircleArrowHead 등)
+                float strokeW = (float)(renderTarget.strokeWeight() * scale);
                 drawLineEndDecorations(g, renderTarget, transformedShape, strokeColor, tintedStroke, alpha, strokeW, scale);
             }
         }
@@ -1803,43 +1729,14 @@ public class ASTImageLoader {
             String fillRef = child.fillColor();
             if (fillRef != null && child.hasFill()) {
                 String fillHex = colorResolver.resolve(fillRef);
-                Color fillColor = hexToColor(fillHex);
-                if (fillColor != null) {
-                    Color tintedFill = applyTint(fillColor, child.fillTint());
-                    g.setColor(withAlpha(tintedFill, alpha));
-                    g.fill(childShape);
-                }
+                fillWithColor(g, childShape, fillHex, child.fillTint(), alpha);
             }
 
             // 선
             String strokeRef = child.strokeColor();
             if (strokeRef != null && child.hasStroke()) {
                 String strokeHex = colorResolver.resolve(strokeRef);
-                Color strokeColor = hexToColor(strokeHex);
-                if (strokeColor != null) {
-                    Color tintedStroke = applyTint(strokeColor, child.strokeTint());
-                    g.setColor(withAlpha(tintedStroke, alpha));
-
-                    int cap = BasicStroke.CAP_BUTT;
-                    int join = BasicStroke.JOIN_MITER;
-                    if (child.endCap() == IDMLVectorShape.LineCap.ROUND) cap = BasicStroke.CAP_ROUND;
-                    if (child.endCap() == IDMLVectorShape.LineCap.PROJECTING) cap = BasicStroke.CAP_SQUARE;
-                    if (child.lineJoin() == IDMLVectorShape.LineJoin.ROUND) join = BasicStroke.JOIN_ROUND;
-                    if (child.lineJoin() == IDMLVectorShape.LineJoin.BEVEL) join = BasicStroke.JOIN_BEVEL;
-
-                    float strokeW = (float) (child.strokeWeight() * scale);
-                    BasicStroke stroke;
-                    if (child.hasDashPattern()) {
-                        float[] dashArr = new float[child.dashPattern().length];
-                        for (int di = 0; di < dashArr.length; di++)
-                            dashArr[di] = (float) (child.dashPattern()[di] * scale);
-                        stroke = new BasicStroke(strokeW, cap, join, (float) child.miterLimit(), dashArr, 0);
-                    } else {
-                        stroke = new BasicStroke(strokeW, cap, join, (float) child.miterLimit());
-                    }
-                    g.setStroke(stroke);
-                    g.draw(childShape);
-                }
+                strokeWithColor(g, childShape, strokeHex, child.strokeTint(), alpha, child, scale);
             }
         }
 
@@ -2262,22 +2159,10 @@ public class ASTImageLoader {
         if (awtShape == null) return;
 
         if (fillHex != null) {
-            Color fillColor = hexToColor(fillHex);
-            if (fillColor != null) {
-                Color tintedFill = applyTint(fillColor, shape.fillTint());
-                g.setColor(tintedFill);
-                g.fill(awtShape);
-            }
+            fillWithColor(g, awtShape, fillHex, shape.fillTint(), 1.0f);
         }
         if (strokeHex != null && shape.strokeWeight() > 0) {
-            Color strokeColor = hexToColor(strokeHex);
-            if (strokeColor != null) {
-                Color tintedStroke = applyTint(strokeColor, shape.strokeTint());
-                g.setColor(tintedStroke);
-                float strokeW = (float) (shape.strokeWeight() * scale);
-                g.setStroke(new BasicStroke(strokeW));
-                g.draw(awtShape);
-            }
+            strokeWithColor(g, awtShape, strokeHex, shape.strokeTint(), 1.0f, shape, scale);
         }
     }
 
