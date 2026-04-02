@@ -727,6 +727,7 @@ public class HwpxParagraphBuilder {
 
     boolean hasCharacterOverrides(ASTTextRun run) {
         return run.fontFamily() != null
+                || run.fontStyle() != null
                 || run.fontSizeHwpunits() != null
                 || run.textColor() != null
                 || run.letterSpacing() != null
@@ -810,6 +811,13 @@ public class HwpxParagraphBuilder {
             try {
                 int num = Integer.parseInt(lower.split("\\s+")[0]);
                 if (num >= 65) return true;
+            } catch (NumberFormatException ignored) {}
+        }
+        // 가변폰트 숫자 weight: "40", "50" 등 — 30 이상이면 볼드 (기본 weight "20" 대비)
+        if (lower.matches("^\\d+$")) {
+            try {
+                int weight = Integer.parseInt(lower);
+                if (weight >= 30) return true;
             } catch (NumberFormatException ignored) {}
         }
         return false;

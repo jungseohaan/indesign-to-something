@@ -1188,11 +1188,19 @@ public class ResolvedToASTBuilder {
                                 partText = partText.replaceAll("\\s+$", " "); // 후행 다중 공백 → 단일 공백
                             }
                             if (!partText.isEmpty()) {
-                                ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, partText);
-                                if (matchedRR != null) resolvedRunIdx = lastMatchResult[0] + 1;
-                                ASTTextRun tr = createRunFromIDML(run, partText, matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
-                                if (!splitBulletRun(tr, para)) {
-                                    splitLatinVarsInMixedText(tr, para);
+                                // resolved 런 스타일 차이가 있으면 분할 시도
+                                boolean partSplit = false;
+                                if (resolvedRuns != null && resolvedRuns.size() > 1 && hasStyleVariation(resolvedRuns)) {
+                                    partSplit = splitIdmlRunByResolvedRuns(run, partText, resolvedRuns, resolvedRunIdx,
+                                            para, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+                                }
+                                if (!partSplit) {
+                                    ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, partText);
+                                    if (matchedRR != null) resolvedRunIdx = lastMatchResult[0] + 1;
+                                    ASTTextRun tr = createRunFromIDML(run, partText, matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+                                    if (!splitBulletRun(tr, para)) {
+                                        splitLatinVarsInMixedText(tr, para);
+                                    }
                                 }
                             }
                             if (pi < parts.length - 1 && anchorIdx < inlineIds.size()) {
@@ -1222,7 +1230,7 @@ public class ResolvedToASTBuilder {
                         // GREP 스타일 분할: IDML 단일 런이 resolved에서 여러 런(다른 색상/폰트)으로 분할된 경우
                         // resolved 런 경계에서 IDML 런을 분할하여 각각의 색상을 적용
                         boolean splitByResolved = false;
-                        if (run.fillColor() == null && resolvedRuns != null && resolvedRuns.size() > 1) {
+                        if (resolvedRuns != null && resolvedRuns.size() > 1 && hasStyleVariation(resolvedRuns)) {
                             splitByResolved = splitIdmlRunByResolvedRuns(run, text, resolvedRuns, resolvedRunIdx,
                                     para, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
                         }
@@ -1358,12 +1366,13 @@ public class ResolvedToASTBuilder {
                     tr.fontFamily(rr.fontFamily());
                 }
             }
-            if (tr.fontStyle() == null && rr.fontStyle() != null) {
+            if (rr.fontStyle() != null) {
                 boolean isEHorBT = rr.fontFamily() != null
                         && (EHFontGlyphMap.isEHFontFamily(rr.fontFamily()) || rr.fontFamily().contains("BT수식"));
                 boolean isSingleLatin = text != null && text.trim().length() == 1
                         && Character.isLetter(text.trim().charAt(0));
                 if (!isEHorBT || isSingleLatin) {
+                    // resolved fontStyle 우선 (GREP/중첩 스타일 반영 — IDML은 미반영)
                     tr.fontStyle(rr.fontStyle());
                 }
             }
@@ -1763,7 +1772,16 @@ public class ResolvedToASTBuilder {
             if (rrText == null || rrText.isEmpty()) { rIdx++; continue; }
 
             // resolved 런 텍스트가 remaining의 접두사인지 확인
-            if (remaining.startsWith(rrText)) {
+            // 특수 공백(Figure Space \u2007 등)을 일반 공백으로 정규화하여 비교
+            String normRemaining = normalizeSpaces(remaining);
+            String normRRText = normalizeSpaces(rrText);
+            if (normRemaining.startsWith(normRRText)) {
+                // 원본 텍스트에서 정규화된 길이만큼 잘라냄
+                int cutLen = findOriginalLength(remaining, normRRText.length());
+                segments.add(new String[]{remaining.substring(0, cutLen), String.valueOf(rIdx)});
+                remaining = remaining.substring(cutLen);
+                rIdx++;
+            } else if (remaining.startsWith(rrText)) {
                 segments.add(new String[]{rrText, String.valueOf(rIdx)});
                 remaining = remaining.substring(rrText.length());
                 rIdx++;
@@ -1812,6 +1830,44 @@ public class ResolvedToASTBuilder {
             }
         }
         return true;
+    }
+
+    /** resolved 런 간 스타일(색상, 폰트, fontStyle) 차이가 있는지 확인 */
+    private boolean hasStyleVariation(List<ResolvedRun> runs) {
+        if (runs == null || runs.size() <= 1) return false;
+        String firstColor = null, firstFont = null, firstStyle = null;
+        boolean initialized = false;
+        for (ResolvedRun rr : runs) {
+            if (rr.text() == null || rr.text().isEmpty()) continue;
+            String color = rr.fillColor();
+            String font = rr.fontFamily();
+            String style = rr.fontStyle();
+            if (!initialized) {
+                firstColor = color; firstFont = font; firstStyle = style;
+                initialized = true;
+            } else {
+                if (!eq(color, firstColor) || !eq(font, firstFont) || !eq(style, firstStyle)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean eq(String a, String b) {
+        if (a == null && b == null) return true;
+        if (a == null || b == null) return false;
+        return a.equals(b);
+    }
+
+    /** 특수 공백(Figure Space, En/Em Space 등)을 일반 공백으로 정규화 */
+    private static String normalizeSpaces(String s) {
+        if (s == null) return "";
+        return s.replace('\u2007', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+                .replace('\u2009', ' ').replace('\u200A', ' ').replace('\u00A0', ' ');
+    }
+
+    /** 정규화된 길이에 대응하는 원본 문자열의 실제 길이 (1:1 매핑이므로 동일) */
+    private static int findOriginalLength(String original, int normalizedLen) {
+        return Math.min(normalizedLen, original.length());
     }
 
     /**
