@@ -110,7 +110,7 @@ public class ResolvedToASTBuilder {
         // Phase 4: 테이블 포함 TextFrame → ASTTable 변환
         placeTablesFromIDML(sections);
 
-        // Phase 6: 페이지 배경 PNG 주입
+        // Phase 5: 페이지 배경 PNG 주입
         injectPageBackgrounds(sections);
 
         System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
@@ -2807,11 +2807,6 @@ public class ResolvedToASTBuilder {
     // Phase 4: 테이블 배치
     // ═══════════════════════════════════════════════════
 
-    private void placeTables(List<ASTSection> sections) {
-        // TODO: ResolvedStory에 tables 지원이 추가되면 구현
-        // 현재 ResolvedStory는 paragraphs만 보유하고 tables 접근자가 없음
-    }
-
     private int findPageForStory(String storyId) {
         // storyId → textFrame → pageIndex (section index로 변환)
         for (ResolvedTextFrame tf : resolvedData.textFrames()) {
@@ -2823,14 +2818,7 @@ public class ResolvedToASTBuilder {
     }
 
     // ═══════════════════════════════════════════════════
-    // Phase 5: Figure/Image 배치 (향후 구현)
-    // ═══════════════════════════════════════════════════
-
-    // ExtendScript에서 렌더한 개별 이미지를 ASTFigure로 배치
-    // 현재는 Phase 6 (페이지 배경)으로 대체
-
-    // ═══════════════════════════════════════════════════
-    // Phase 6: 페이지 배경 PNG 주입
+    // Phase 5: 페이지 배경 PNG 주입
     // ═══════════════════════════════════════════════════
 
     private void injectPageBackgrounds(List<ASTSection> sections) {

@@ -77,4 +77,24 @@ public final class ConverterConstants {
 
     /** 기본 컬럼 간격 (points) */
     public static final double DEFAULT_COLUMN_GUTTER_POINTS = 12.0;
+
+    // ===== SecPr 기본값 =====
+    /** 탭 정지 간격 (HWPUNIT) */
+    public static final int TAB_STOP = 8000;
+
+    /** 탭 정지 값 (HWPUNIT) */
+    public static final int TAB_STOP_VAL = 4000;
+
+    /** 각주 사이 간격 (HWPUNIT) */
+    public static final int FOOTNOTE_BETWEEN_NOTES = 283;
+
+    /** 각주 줄 아래 간격 (HWPUNIT) */
+    public static final int FOOTNOTE_BELOW_LINE = 567;
+
+    /** 각주 줄 위 간격 (HWPUNIT) */
+    public static final int FOOTNOTE_ABOVE_LINE = 850;
+
+    // ===== 인라인 이미지 줄간격 =====
+    /** 인라인 이미지/수식이 이 높이(HWPUNIT)를 넘으면 줄 간격 자동 조정 */
+    public static final int INLINE_LINE_SPACING_THRESHOLD = 2000;
 }

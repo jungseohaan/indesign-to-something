@@ -89,7 +89,7 @@ public class HwpxParagraphBuilder {
         // 인라인 텍스트 프레임이 줄 간격보다 크면 줄 간격 확장
         // 단, ASTParagraph에 명시적 lineSpacing이 있으면 그 값 우선 (인라인보다 작아도 유지)
         long maxInlineH = maxInlineObjectHeight(astPara);
-        if (maxInlineH > 2000 && astPara.lineSpacing() == null) {
+        if (maxInlineH > ConverterConstants.INLINE_LINE_SPACING_THRESHOLD && astPara.lineSpacing() == null) {
             paraPrId = ensureLineSpacingForInline(paraPrId, maxInlineH);
         }
 
@@ -102,7 +102,7 @@ public class HwpxParagraphBuilder {
 
         // 분수 수식이 줄 간격보다 크면 줄 간격 확장 (명시적 lineSpacing 없을 때만)
         long maxEqH = maxFractionEquationHeight(astPara);
-        if (maxEqH > maxInlineH && maxEqH > 2000 && astPara.lineSpacing() == null) {
+        if (maxEqH > maxInlineH && maxEqH > ConverterConstants.INLINE_LINE_SPACING_THRESHOLD && astPara.lineSpacing() == null) {
             paraPrId = ensureLineSpacingForInline(paraPrId, maxEqH);
         }
 

@@ -387,8 +387,8 @@ public class ASTToHwpxConverter {
         secPr.idAnd("")
                 .textDirectionAnd(TextDirection.HORIZONTAL)
                 .spaceColumnsAnd(1134)
-                .tabStopAnd(8000)
-                .tabStopValAnd(4000)
+                .tabStopAnd(ConverterConstants.TAB_STOP)
+                .tabStopValAnd(ConverterConstants.TAB_STOP_VAL)
                 .tabStopUnitAnd(ValueUnit1.HWPUNIT)
                 .outlineShapeIDRefAnd("1")
                 .memoShapeIDRefAnd("0")
@@ -457,7 +457,10 @@ public class ASTToHwpxConverter {
         secPr.footNotePr().noteLine().lengthAnd(-1)
                 .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
         secPr.footNotePr().createNoteSpacing();
-        secPr.footNotePr().noteSpacing().betweenNotesAnd(283).belowLineAnd(567).aboveLine(850);
+        secPr.footNotePr().noteSpacing()
+                .betweenNotesAnd(ConverterConstants.FOOTNOTE_BETWEEN_NOTES)
+                .belowLineAnd(ConverterConstants.FOOTNOTE_BELOW_LINE)
+                .aboveLine(ConverterConstants.FOOTNOTE_ABOVE_LINE);
         secPr.footNotePr().createNumbering();
         secPr.footNotePr().numbering().typeAnd(FootNoteNumberingType.CONTINUOUS).newNum(1);
         secPr.footNotePr().createPlacement();
@@ -472,7 +475,10 @@ public class ASTToHwpxConverter {
         secPr.endNotePr().noteLine().lengthAnd(14692344)
                 .typeAnd(LineType2.SOLID).widthAnd(LineWidth.MM_0_12).color("#000000");
         secPr.endNotePr().createNoteSpacing();
-        secPr.endNotePr().noteSpacing().betweenNotesAnd(0).belowLineAnd(567).aboveLine(850);
+        secPr.endNotePr().noteSpacing()
+                .betweenNotesAnd(0)
+                .belowLineAnd(ConverterConstants.FOOTNOTE_BELOW_LINE)
+                .aboveLine(ConverterConstants.FOOTNOTE_ABOVE_LINE);
         secPr.endNotePr().createNumbering();
         secPr.endNotePr().numbering().typeAnd(EndNoteNumberingType.CONTINUOUS).newNum(1);
         secPr.endNotePr().createPlacement();
