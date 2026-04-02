@@ -41,6 +41,21 @@ public class ResolvedToASTBuilder {
     private ASTDocument astDoc; // Phase 0에서 스타일 정의 접근용
     private Map<Integer, Integer> pageDocOffsetToSection; // document pageIndex → section list index
 
+    /** ParagraphStyle에서 미리 구한 스타일 속성 (런에서 없을 때 폴백용) */
+    private static class StyleContext {
+        final String fillColor;
+        final Double tracking;
+        final String fontFamily;
+        final Double fontSize;
+
+        StyleContext(String fillColor, Double tracking, String fontFamily, Double fontSize) {
+            this.fillColor = fillColor;
+            this.tracking = tracking;
+            this.fontFamily = fontFamily;
+            this.fontSize = fontSize;
+        }
+    }
+
     // Lazy-loaded IDML 인프라 (테이블 셀 변환용)
     private kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDocument;
     private kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver colorResolver;
@@ -1025,10 +1040,11 @@ public class ResolvedToASTBuilder {
             }
 
             // ParagraphStyle에서 FillColor/Tracking/FontFamily 미리 구해둠 (런에서 없을 때 사용)
-            String styleFillColor = getStyleFillColor(ip.appliedParagraphStyle());
-            Double styleTracking = getStyleTracking(ip.appliedParagraphStyle());
-            String styleFontFamily = getStyleFontFamily(ip.appliedParagraphStyle());
-            Double styleFontSize = getStyleFontSize(ip.appliedParagraphStyle());
+            StyleContext sc = new StyleContext(
+                    getStyleFillColor(ip.appliedParagraphStyle()),
+                    getStyleTracking(ip.appliedParagraphStyle()),
+                    getStyleFontFamily(ip.appliedParagraphStyle()),
+                    getStyleFontSize(ip.appliedParagraphStyle()));
 
             // 런 변환: IDML CharacterRun → ASTTextRun + 수식 그룹화
             // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
@@ -1192,12 +1208,12 @@ public class ResolvedToASTBuilder {
                                 boolean partSplit = false;
                                 if (resolvedRuns != null && resolvedRuns.size() > 1 && hasStyleVariation(resolvedRuns)) {
                                     partSplit = splitIdmlRunByResolvedRuns(run, partText, resolvedRuns, resolvedRunIdx,
-                                            para, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+                                            para, sc);
                                 }
                                 if (!partSplit) {
                                     ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, partText);
                                     if (matchedRR != null) resolvedRunIdx = lastMatchResult[0] + 1;
-                                    ASTTextRun tr = createRunFromIDML(run, partText, matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+                                    ASTTextRun tr = createRunFromIDML(run, partText, matchedRR != null ? matchedRR : defaultRR, sc);
                                     if (!splitBulletRun(tr, para)) {
                                         splitLatinVarsInMixedText(tr, para);
                                     }
@@ -1232,12 +1248,12 @@ public class ResolvedToASTBuilder {
                         boolean splitByResolved = false;
                         if (resolvedRuns != null && resolvedRuns.size() > 1 && hasStyleVariation(resolvedRuns)) {
                             splitByResolved = splitIdmlRunByResolvedRuns(run, text, resolvedRuns, resolvedRunIdx,
-                                    para, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+                                    para, sc);
                         }
                         if (!splitByResolved) {
                             ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
                             if (matchedRR2 != null) resolvedRunIdx = lastMatchResult[0] + 1;
-                            ASTTextRun tr = createRunFromIDML(run, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+                            ASTTextRun tr = createRunFromIDML(run, text, matchedRR2 != null ? matchedRR2 : defaultRR, sc);
                             // ;...; 분수 GREP 패턴이 포함된 텍스트 → 분수 수식으로 분리
                             if (!splitBulletRun(tr, para)) {
                                 if (EHFontGlyphMap.containsEHFractionPattern(text)) {
@@ -1275,7 +1291,7 @@ public class ResolvedToASTBuilder {
         return paragraphs;
     }
 
-    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, String styleFillColor, Double styleTracking, String styleFontFamily, Double styleFontSize) {
+    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, StyleContext sc) {
         ASTTextRun tr = new ASTTextRun();
         // 특수 제어 문자 제거
         // \u0008 = Indent to Here (ACE 7) — HWPX에 대응 없음
@@ -1332,11 +1348,11 @@ public class ResolvedToASTBuilder {
         // 한국어 폰트(한글 포함 이름)는 대부분 한컴돋움 fallback → 그대로 사용
         {
             Double trackingVal = (cr.tracking() != null && cr.tracking() != 0)
-                    ? cr.tracking() : styleTracking;
+                    ? cr.tracking() : sc.tracking;
             if (trackingVal != null && trackingVal != 0) {
                 String fn = (fontFamily != null) ? fontFamily
                         : (tr.fontFamily() != null ? tr.fontFamily()
-                        : (styleFontFamily != null ? styleFontFamily
+                        : (sc.fontFamily != null ? sc.fontFamily
                         : (rr != null ? rr.fontFamily() : null)));
                 boolean isDefaultFallback = isKoreanFontName(fn);
                 if (isDefaultFallback) {
@@ -1386,8 +1402,8 @@ public class ResolvedToASTBuilder {
                 tr.horizontalScale((short) rr.horizontalScale().doubleValue());
             }
             // FillColor: ParagraphStyle 우선, resolved fallback
-            if (tr.textColor() == null && styleFillColor != null) {
-                tr.textColor(styleFillColor);
+            if (tr.textColor() == null && sc.fillColor != null) {
+                tr.textColor(sc.fillColor);
             }
             if (tr.textColor() == null && rr.fillColor() != null) tr.textColor(resolveColorToHex(rr.fillColor()));
             // underline / strikeThrough
@@ -1399,11 +1415,11 @@ public class ResolvedToASTBuilder {
             }
         }
         // ParagraphStyle 폴백 (IDML 런과 resolved 런 모두 속성이 없을 때)
-        if (tr.fontFamily() == null && styleFontFamily != null) {
-            tr.fontFamily(styleFontFamily);
+        if (tr.fontFamily() == null && sc.fontFamily != null) {
+            tr.fontFamily(sc.fontFamily);
         }
-        if (tr.fontSizeHwpunits() == null && styleFontSize != null && styleFontSize > 0) {
-            tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(styleFontSize));
+        if (tr.fontSizeHwpunits() == null && sc.fontSize != null && sc.fontSize > 0) {
+            tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(sc.fontSize));
         }
         // IDML CharacterRun의 underline/strikeThrough (resolved보다 우선)
         if (cr.underline() != null && cr.underline()) {
@@ -1756,8 +1772,7 @@ public class ResolvedToASTBuilder {
      */
     private boolean splitIdmlRunByResolvedRuns(IDMLCharacterRun cr, String text,
             List<ResolvedRun> resolvedRuns, int startIdx,
-            ASTParagraph para, String styleFillColor, Double styleTracking,
-            String styleFontFamily, Double styleFontSize) {
+            ASTParagraph para, StyleContext sc) {
         if (text == null || text.isEmpty() || resolvedRuns == null) return false;
 
         // resolved 런에서 이 텍스트와 겹치는 연속 런들을 찾기
@@ -1824,8 +1839,7 @@ public class ResolvedToASTBuilder {
             String segText = seg[0];
             int rrIdx = Integer.parseInt(seg[1]);
             ResolvedRun rr = (rrIdx >= 0 && rrIdx < resolvedRuns.size()) ? resolvedRuns.get(rrIdx) : null;
-            ASTTextRun tr = createRunFromIDML(cr, segText, rr != null ? rr : findDefaultResolvedRun(resolvedRuns),
-                    styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+            ASTTextRun tr = createRunFromIDML(cr, segText, rr != null ? rr : findDefaultResolvedRun(resolvedRuns), sc);
             if (!splitBulletRun(tr, para)) {
                 splitLatinVarsInMixedText(tr, para);
             }
