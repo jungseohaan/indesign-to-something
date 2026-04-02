@@ -40,8 +40,8 @@ public class ASTImageLoader {
     // 디렉토리 파일 목록 캐시: dirPath → {lowerName → File} (대소문자 무시 검색 O(1))
     private final ConcurrentHashMap<String, Map<String, File>> dirListingCache = new ConcurrentHashMap<>();
 
-    // 이미지 로드 실패 경고 수집
-    private final List<String> warnings = new ArrayList<>();
+    // 이미지 로드 실패 경고 수집 (병렬 loadImage 대응 — synchronized)
+    private final List<String> warnings = java.util.Collections.synchronizedList(new ArrayList<>());
     public List<String> warnings() { return warnings; }
 
     public ASTImageLoader(IDMLDocument idmlDoc, ConvertOptions options) {
@@ -702,6 +702,7 @@ public class ASTImageLoader {
         g.setClip(path);
         g.drawImage(img, 0, 0, null);
         g.dispose();
+        img.flush();
 
         return encodePng(masked);
     }
@@ -736,6 +737,7 @@ public class ASTImageLoader {
         g.setClip(clip);
         g.drawImage(img, 0, 0, null);
         g.dispose();
+        img.flush();
 
         return encodePng(masked);
     }
@@ -802,6 +804,7 @@ public class ASTImageLoader {
         g.setClip(path);
         g.drawImage(img, 0, 0, null);
         g.dispose();
+        img.flush();
 
         return encodePng(masked);
     }
@@ -1972,6 +1975,7 @@ public class ASTImageLoader {
                     RenderingHints.VALUE_RENDER_QUALITY);
             g.drawImage(srcImg, 0, 0, newPixW, newPixH, null);
             g.dispose();
+            srcImg.flush();
 
             byte[] pngData = encodePng(resized);
             ImageResult result = new ImageResult();
@@ -2695,6 +2699,7 @@ public class ASTImageLoader {
             Graphics2D g = flipped.createGraphics();
             g.drawImage(img, w, 0, 0, h, 0, 0, w, h, null);
             g.dispose();
+            img.flush();
             return encodePng(flipped);
         } catch (IOException e) {
             return pngData;
@@ -2710,6 +2715,7 @@ public class ASTImageLoader {
             Graphics2D g = flipped.createGraphics();
             g.drawImage(img, 0, h, w, 0, 0, 0, w, h, null);
             g.dispose();
+            img.flush();
             return encodePng(flipped);
         } catch (IOException e) {
             return pngData;
@@ -2774,6 +2780,7 @@ public class ASTImageLoader {
             g.transform(rotFlip);
             g.drawImage(srcImg, 0, 0, null);
             g.dispose();
+            srcImg.flush();
 
             byte[] pngData = encodePng(dstImg);
             ImageResult result = new ImageResult();
@@ -2844,6 +2851,7 @@ public class ASTImageLoader {
     private static byte[] encodePng(BufferedImage image) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(image, "png", baos);
+        image.flush(); // 인코딩 후 즉시 네이티브 리소스 해제
         return baos.toByteArray();
     }
 
@@ -2934,9 +2942,11 @@ public class ASTImageLoader {
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
         g.drawImage(original, 0, 0, targetWidth, targetHeight, null);
         g.dispose();
+        original.flush();
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         ImageIO.write(resized, "png", baos);
+        resized.flush();
         return baos.toByteArray();
     }
 
@@ -3085,5 +3095,53 @@ public class ASTImageLoader {
         } catch (IOException e) {
             return pngData;
         }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // 공통 헬퍼: 색상/스트로크 적용
+    // ═══════════════════════════════════════════════════
+
+    /** fill 색상 적용 (hexToColor → applyTint → withAlpha → g.fill) */
+    private void fillWithColor(Graphics2D g, Shape shape, String hex, double tint, float alpha) {
+        if (hex == null) return;
+        Color color = hexToColor(hex);
+        if (color == null) return;
+        Color tinted = applyTint(color, tint);
+        g.setColor(withAlpha(tinted, alpha));
+        g.fill(shape);
+    }
+
+    /** stroke 색상 + BasicStroke 적용 (hexToColor → applyTint → withAlpha → g.draw) */
+    private void strokeWithColor(Graphics2D g, Shape shape, String hex, double tint, float alpha,
+                                  IDMLVectorShape vs, double scale) {
+        if (hex == null) return;
+        Color color = hexToColor(hex);
+        if (color == null) return;
+        Color tinted = applyTint(color, tint);
+        g.setColor(withAlpha(tinted, alpha));
+        g.setStroke(createStroke(vs, scale));
+        g.draw(shape);
+    }
+
+    /** IDMLVectorShape의 LineCap/LineJoin → BasicStroke 생성 */
+    private BasicStroke createStroke(IDMLVectorShape vs, double scale) {
+        int cap = BasicStroke.CAP_BUTT;
+        int join = BasicStroke.JOIN_MITER;
+        if (vs.endCap() == IDMLVectorShape.LineCap.ROUND) cap = BasicStroke.CAP_ROUND;
+        else if (vs.endCap() == IDMLVectorShape.LineCap.PROJECTING) cap = BasicStroke.CAP_SQUARE;
+        if (vs.lineJoin() == IDMLVectorShape.LineJoin.ROUND) join = BasicStroke.JOIN_ROUND;
+        else if (vs.lineJoin() == IDMLVectorShape.LineJoin.BEVEL) join = BasicStroke.JOIN_BEVEL;
+        double strokeW = vs.strokeWeight() * scale;
+        if (strokeW < 1) strokeW = 1;
+        double[] dashPattern = vs.dashPattern();
+        if (dashPattern != null && dashPattern.length > 0) {
+            float[] scaledDash = new float[dashPattern.length];
+            for (int i = 0; i < dashPattern.length; i++) {
+                scaledDash[i] = (float)(dashPattern[i] * scale);
+                if (scaledDash[i] < 1) scaledDash[i] = 1;
+            }
+            return new BasicStroke((float) strokeW, cap, join, 10.0f, scaledDash, 0);
+        }
+        return new BasicStroke((float) strokeW, cap, join);
     }
 }
