@@ -191,10 +191,13 @@ public class ASTTextFrameBlock extends ASTBlock {
     // overflow 감지용: Story 전체 텍스트 길이 vs 프레임에 보이는 텍스트 길이
     private int storyTotalTextLength;
     private int frameVisibleTextLength;
+    private String frameVisibleText; // wrap 분할 시 블록별 보이는 텍스트
     public int storyTotalTextLength() { return storyTotalTextLength; }
     public void storyTotalTextLength(int v) { this.storyTotalTextLength = v; }
     public int frameVisibleTextLength() { return frameVisibleTextLength; }
     public void frameVisibleTextLength(int v) { this.frameVisibleTextLength = v; }
+    public String frameVisibleText() { return frameVisibleText; }
+    public void frameVisibleText(String v) { this.frameVisibleText = v; }
 
     /**
      * 배경 전용 블록인지 판별.

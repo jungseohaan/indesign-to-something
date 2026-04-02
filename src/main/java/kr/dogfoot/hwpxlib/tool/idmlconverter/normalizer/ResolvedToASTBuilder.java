@@ -464,9 +464,8 @@ public class ResolvedToASTBuilder {
             block.height(CoordinateConverter.pointsToHwpunits(groupH));
             block.zOrder(tf.zOrder());
             block.columnCount(1);
-
-            // composedLines 텍스트로 직접 단락 생성 (Phase 3 분배 우회)
-            // 같은 paraIndex를 가진 행들을 하나의 단락으로 합침
+            // composedLines 텍스트로 직접 단락 생성
+            // (Phase 3 분배는 동일 sourceId 블록의 단락 경계 분할이 불안정하므로 직접 생성)
             int prevParaIdx = -1;
             ASTParagraph curPara = null;
             for (ResolvedTextFrame.ComposedLine cl : group) {
@@ -478,26 +477,29 @@ public class ResolvedToASTBuilder {
                 String lineText = cl.text();
                 if (lineText != null && !lineText.isEmpty()) {
                     if (lineText.endsWith("\r")) lineText = lineText.substring(0, lineText.length() - 1);
-                    ASTTextRun run = new ASTTextRun();
-                    run.text(lineText);
+                    // composedLine의 모든 런 스타일 적용 (첫 런만이 아님)
                     if (cl.runs() != null && !cl.runs().isEmpty()) {
-                        ResolvedTextFrame.ComposedRun cr = cl.runs().get(0);
-                        if (cr.fillColor() != null) run.textColor(resolveColorToHex(cr.fillColor()));
-                        if (cr.fontFamily() != null) run.fontFamily(cr.fontFamily());
-                        if (cr.fontStyle() != null) run.fontStyle(cr.fontStyle());
-                        if (cr.fontSize() != null && cr.fontSize() > 0)
-                            run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
+                        for (ResolvedTextFrame.ComposedRun cr : cl.runs()) {
+                            String runText = cr.text();
+                            if (runText == null || runText.isEmpty()) continue;
+                            if (runText.endsWith("\r")) runText = runText.substring(0, runText.length() - 1);
+                            ASTTextRun run = new ASTTextRun();
+                            run.text(runText);
+                            if (cr.fillColor() != null) run.textColor(resolveColorToHex(cr.fillColor()));
+                            if (cr.fontFamily() != null) run.fontFamily(cr.fontFamily());
+                            if (cr.fontStyle() != null) run.fontStyle(cr.fontStyle());
+                            if (cr.fontSize() != null && cr.fontSize() > 0)
+                                run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
+                            curPara.addItem(run);
+                        }
+                    } else {
+                        ASTTextRun run = new ASTTextRun();
+                        run.text(lineText);
+                        curPara.addItem(run);
                     }
-                    curPara.addItem(run);
                 }
             }
 
-            System.err.println("[WrapIndent]   Group: x=" + String.format("%.1f", groupX)
-                    + " y=" + String.format("%.1f", groupY)
-                    + " w=" + String.format("%.1f", groupW)
-                    + " h=" + String.format("%.1f", groupH)
-                    + " paras=" + (block.paragraphs() != null ? block.paragraphs().size() : 0)
-                    + " indR=" + String.format("%.1f", indR));
             section.addBlock(block);
         }
 
@@ -2356,6 +2358,68 @@ public class ResolvedToASTBuilder {
      * paragraphStart/End 인덱스 대신, 텍스트 내용을 순차 매칭하여 프레임 간 단락 분할을 정확히 처리.
      */
     /**
+     * wrap 분할 블록에 대한 텍스트 분배.
+     * 각 블록의 frameVisibleText를 기반으로 전체 스토리 텍스트에서 해당 범위를 찾아 단락을 할당.
+     */
+    private void distributeByWrapVisibleText(List<ASTParagraph> paragraphs,
+                                              List<ASTTextFrameBlock> blocks) {
+        // 전체 단락 텍스트 합침
+        StringBuilder sb = new StringBuilder();
+        List<int[]> paraRanges = new ArrayList<>();
+        for (ASTParagraph p : paragraphs) {
+            int s = sb.length();
+            String pt = getParaPlainText(p);
+            sb.append(pt != null ? pt : "");
+            paraRanges.add(new int[]{s, sb.length()});
+        }
+        String storyText = sb.toString();
+
+        // 각 wrap 블록의 frameVisibleText로 storyText 내 범위 결정
+        int searchFrom = 0;
+        for (ASTTextFrameBlock block : blocks) {
+            String visText = block.frameVisibleText();
+            if (visText == null || visText.isEmpty()) continue;
+
+            // 특수 문자 정규화하여 검색
+            String cleanVis = normalizeSpaces(visText.replace("\uFFFC", "").replace("\r", "").replace("\n", ""));
+            String cleanStory = normalizeSpaces(storyText);
+
+            // visText의 앞부분(20자)으로 시작 위치 찾기
+            String startKey = cleanVis.length() > 15 ? cleanVis.substring(0, 15) : cleanVis;
+            int foundStart = cleanStory.indexOf(startKey, searchFrom);
+            if (foundStart < 0) foundStart = searchFrom;
+
+            int foundEnd = foundStart + cleanVis.length();
+            if (foundEnd > storyText.length()) foundEnd = storyText.length();
+
+            // 범위에 겹치는 단락 할당
+            for (int i = 0; i < paragraphs.size(); i++) {
+                int pStart = paraRanges.get(i)[0];
+                int pEnd = paraRanges.get(i)[1];
+                if (pEnd <= foundStart) continue;
+                if (pStart >= foundEnd) break;
+
+                if (pStart >= foundStart && pEnd <= foundEnd) {
+                    block.addParagraph(paragraphs.get(i));
+                } else if (pStart < foundEnd && pEnd > foundEnd) {
+                    int cutLen = foundEnd - pStart;
+                    String fullText = getParaPlainText(paragraphs.get(i));
+                    ASTParagraph trimmed = createSplitParagraph(paragraphs.get(i),
+                            fullText != null ? fullText.substring(0, Math.min(cutLen, fullText.length())) : "");
+                    if (trimmed != null) block.addParagraph(trimmed);
+                } else if (pStart < foundStart && pEnd > foundStart) {
+                    int skipLen = foundStart - pStart;
+                    String fullText = getParaPlainText(paragraphs.get(i));
+                    String contText = (fullText != null && skipLen < fullText.length()) ? fullText.substring(skipLen) : "";
+                    ASTParagraph cont = createContinuationParagraph(paragraphs.get(i), skipLen, contText);
+                    if (cont != null) block.addParagraph(cont);
+                }
+            }
+            searchFrom = foundEnd;
+        }
+    }
+
+    /**
      * composedLines 문자 범위 기반 단락 분배.
      * 각 블록의 composedCharStart~composedCharEnd 범위에 해당하는 단락을 할당.
      */
@@ -2371,31 +2435,39 @@ public class ResolvedToASTBuilder {
             paraRanges.add(new int[]{s, sb.length()});
         }
 
-        // 단락의 중심 위치가 블록 범위 안에 있으면 할당 (중복 방지)
-        Set<Integer> assigned = new HashSet<>();
+        // 범위 겹침 기반 분배 (단락이 블록 경계를 걸치면 분할)
         for (ASTTextFrameBlock block : blocks) {
             int blockStart = block.composedCharStart();
             int blockEnd = block.composedCharEnd();
             if (blockStart < 0) continue;
 
             for (int i = 0; i < paragraphs.size(); i++) {
-                if (assigned.contains(i)) continue;
                 int paraStart = paraRanges.get(i)[0];
                 int paraEnd = paraRanges.get(i)[1];
-                int paraMid = (paraStart + paraEnd) / 2;
-                // 단락 중심이 블록 범위 안이면 할당
-                if (paraMid >= blockStart && paraMid < blockEnd) {
-                    block.addParagraph(paragraphs.get(i));
-                    assigned.add(i);
-                }
-            }
-        }
 
-        // 미할당 단락은 마지막 블록에 추가
-        ASTTextFrameBlock lastBlock = blocks.get(blocks.size() - 1);
-        for (int i = 0; i < paragraphs.size(); i++) {
-            if (!assigned.contains(i)) {
-                lastBlock.addParagraph(paragraphs.get(i));
+                if (paraEnd <= blockStart) continue; // 단락이 블록 이전
+                if (paraStart >= blockEnd) break;    // 단락이 블록 이후
+
+                if (paraStart >= blockStart && paraEnd <= blockEnd) {
+                    // 단락이 블록 안에 완전히 포함
+                    block.addParagraph(paragraphs.get(i));
+                } else if (paraStart < blockEnd && paraEnd > blockEnd) {
+                    // 단락이 블록 끝을 넘김 → 앞부분만
+                    int cutLen = blockEnd - paraStart;
+                    ASTParagraph trimmed = createSplitParagraph(paragraphs.get(i),
+                            getParaPlainText(paragraphs.get(i)) != null
+                                    ? getParaPlainText(paragraphs.get(i)).substring(0, Math.min(cutLen, getParaPlainText(paragraphs.get(i)).length()))
+                                    : "");
+                    if (trimmed != null) block.addParagraph(trimmed);
+                } else if (paraStart < blockStart && paraEnd > blockStart) {
+                    // 이전 블록에서 시작된 단락의 나머지
+                    int skipLen = blockStart - paraStart;
+                    String fullText = getParaPlainText(paragraphs.get(i));
+                    String contText = (fullText != null && skipLen < fullText.length())
+                            ? fullText.substring(skipLen) : "";
+                    ASTParagraph cont = createContinuationParagraph(paragraphs.get(i), skipLen, contText);
+                    if (cont != null) block.addParagraph(cont);
+                }
             }
         }
     }
@@ -2457,8 +2529,11 @@ public class ResolvedToASTBuilder {
                     ? String.valueOf(Integer.parseInt(block.sourceId().substring(1), 16))
                     : block.sourceId();
             ResolvedTextFrame rtf = resolvedData.getTextFrame(domId);
-            // frameVisibleText 사용 (정확한 프레임 보이는 텍스트)
-            String visibleText = (rtf != null) ? rtf.frameVisibleText() : null;
+            // wrap 분할 블록은 블록 자체의 frameVisibleText 우선
+            String visibleText = block.frameVisibleText();
+            if (visibleText == null) {
+                visibleText = (rtf != null) ? rtf.frameVisibleText() : null;
+            }
             if (visibleText != null) {
                 visibleText = visibleText.replace("\uFFFC", "").replace("\n", "");
             }
