@@ -2906,16 +2906,17 @@ function splitRunByStoryChars(story, rng, runData, para) {
         var propsCache = {};
         function getCharProps(absIdx) {
             if (propsCache[absIdx]) return propsCache[absIdx];
-            var color = null, size = null, font = null;
+            var color = null, size = null, font = null, style = null;
             try { color = para.characters[absIdx].fillColor ? para.characters[absIdx].fillColor.name : null; } catch (e) {}
             try { size = para.characters[absIdx].pointSize; } catch (e) {}
             try { font = para.characters[absIdx].appliedFont.fontFamily; } catch (e) {}
-            var p = { color: color, size: size, font: font };
+            try { style = para.characters[absIdx].fontStyle; } catch (e) {}
+            var p = { color: color, size: size, font: font, style: style };
             propsCache[absIdx] = p;
             return p;
         }
         function propsEqual(a, b) {
-            return a.color === b.color && a.size === b.size && a.font === b.font;
+            return a.color === b.color && a.size === b.size && a.font === b.font && a.style === b.style;
         }
 
         // 빠른 체크: 첫/중간/마지막 비교 (A-B-A 패턴 대응)
@@ -2984,6 +2985,7 @@ function splitRunByStoryChars(story, rng, runData, para) {
                 splitRun.fillColor = segProps.color;
                 if (segProps.size) splitRun.fontSize = segProps.size;
                 if (segProps.font) splitRun.fontFamily = segProps.font;
+                if (segProps.style) splitRun.fontStyle = segProps.style;
                 result.push(splitRun);
             }
         }
