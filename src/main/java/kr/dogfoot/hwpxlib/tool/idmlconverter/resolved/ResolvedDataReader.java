@@ -248,6 +248,8 @@ public class ResolvedDataReader {
                 }
                 cl.text(getString(clObj, "text"));
                 cl.paraIndex(getInt(clObj, "paraIndex", 0));
+                if (clObj.has("wrapIndentLeft")) cl.wrapIndentLeft(clObj.get("wrapIndentLeft").getAsDouble());
+                if (clObj.has("wrapIndentRight")) cl.wrapIndentRight(clObj.get("wrapIndentRight").getAsDouble());
                 if (clObj.has("runs") && !clObj.get("runs").isJsonNull()) {
                     JsonArray runsArr = clObj.getAsJsonArray("runs");
                     java.util.List<ResolvedTextFrame.ComposedRun> runs = new java.util.ArrayList<>();

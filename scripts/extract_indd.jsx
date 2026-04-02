@@ -2845,6 +2845,16 @@ function collectComposedLines(tf) {
     var lines = tf.lines.everyItem().getElements();
     if (lines.length === 0) return result;
 
+    // 프레임 기준 좌표 (insetSpacing 반영)
+    var fBounds = tf.geometricBounds; // [top, left, bottom, right]
+    var fLeft = fBounds[1];
+    var fRight = fBounds[3];
+    try {
+        var inset = tf.textFramePreferences.insetSpacing;
+        fLeft += inset[1];   // left inset
+        fRight -= inset[3];  // right inset
+    } catch (e) {}
+
     // 단락 인덱스 추적: 라인의 contents에 \r이 있으면 단락 끝
     var paraIndex = 0;
 
@@ -2853,7 +2863,9 @@ function collectComposedLines(tf) {
         var lineData = {
             bounds: null,
             text: "",
-            paraIndex: paraIndex
+            paraIndex: paraIndex,
+            wrapIndentLeft: 0,
+            wrapIndentRight: 0
         };
 
         // line에는 geometricBounds가 없으므로 baseline/ascent/descent/horizontalOffset으로 계산
@@ -2864,6 +2876,12 @@ function collectComposedLines(tf) {
             var hOff = line.horizontalOffset;
             var endH = line.endHorizontalOffset;
             lineData.bounds = [bl - asc, hOff, bl + desc, endH];
+
+            // wrap indent: 프레임 내부 기준 좌우 밀림량 (양수 = 밀림)
+            var indentL = hOff - fLeft;
+            var indentR = fRight - endH;
+            if (indentL > 0.5) lineData.wrapIndentLeft = Math.round(indentL * 100) / 100;
+            if (indentR > 0.5) lineData.wrapIndentRight = Math.round(indentR * 100) / 100;
         } catch (e) { continue; }
 
         try { lineData.text = line.contents; } catch (e) {}

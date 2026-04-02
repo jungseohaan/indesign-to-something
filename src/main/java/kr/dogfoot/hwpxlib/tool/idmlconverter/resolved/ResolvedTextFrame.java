@@ -135,6 +135,8 @@ public class ResolvedTextFrame {
         private String text;
         private int paraIndex;
         private java.util.List<ComposedRun> runs;
+        private double wrapIndentLeft;   // 왼쪽 밀림 (points, wrap에 의한)
+        private double wrapIndentRight;  // 오른쪽 밀림 (points, wrap에 의한)
 
         public double[] bounds() { return bounds; }
         public void bounds(double[] v) { this.bounds = v; }
@@ -144,6 +146,10 @@ public class ResolvedTextFrame {
         public void paraIndex(int v) { this.paraIndex = v; }
         public java.util.List<ComposedRun> runs() { return runs; }
         public void runs(java.util.List<ComposedRun> v) { this.runs = v; }
+        public double wrapIndentLeft() { return wrapIndentLeft; }
+        public void wrapIndentLeft(double v) { this.wrapIndentLeft = v; }
+        public double wrapIndentRight() { return wrapIndentRight; }
+        public void wrapIndentRight(double v) { this.wrapIndentRight = v; }
     }
 
     public static class ComposedRun {

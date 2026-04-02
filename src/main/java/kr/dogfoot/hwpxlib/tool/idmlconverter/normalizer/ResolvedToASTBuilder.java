@@ -308,8 +308,13 @@ public class ResolvedToASTBuilder {
             if (y < 0) { h += y; y = 0; }
             if (w <= 0 || h <= 0) continue;
 
-            // composedLines: Y 점프 기반 글상자 분할
+            // composedLines 기반 글상자 분할
             if (tf.composedLines() != null && tf.composedLines().size() > 1) {
+                // 1) wrap indent 기반 분할 (텍스트가 이미지를 비껴가는 경우)
+                if (placeByWrapIndent(tf, section, pageLeft, pageTop)) {
+                    continue;
+                }
+                // 2) Y 점프 기반 분할 (큰 수직 갭이 있는 경우)
                 if (placeByYGapSplit(tf, section, pageLeft, pageTop)) {
                     continue;
                 }
@@ -360,6 +365,100 @@ public class ResolvedToASTBuilder {
     // ═══════════════════════════════════════════════════
     // Phase 2a: composedLines 기반 글상자 배치
     // ═══════════════════════════════════════════════════
+
+    /**
+     * composedLines의 wrapIndent(X축 밀림)를 감지하여 글상자를 분할한다.
+     * wrap indent가 변하는 행 그룹을 별도 글상자로 분할하여 각각의 X/width를 조정.
+     * wrap indent가 없으면 false 반환 → 기존 경로 사용.
+     */
+    private boolean placeByWrapIndent(ResolvedTextFrame tf, ASTSection section,
+                                       double pageLeft, double pageTop) {
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines == null || lines.size() < 2) return false;
+
+        // wrap indent가 있는 행이 있는지 확인
+        boolean hasWrapIndent = false;
+        for (ResolvedTextFrame.ComposedLine cl : lines) {
+            if (cl.wrapIndentLeft() > 1.0 || cl.wrapIndentRight() > 1.0) {
+                hasWrapIndent = true;
+                break;
+            }
+        }
+        if (!hasWrapIndent) return false;
+
+        // 행을 indent 패턴 그룹으로 분할
+        // 같은 indent 패턴(좌/우 밀림 유사)인 연속 행을 하나의 그룹으로
+        List<List<ResolvedTextFrame.ComposedLine>> groups = new ArrayList<>();
+        List<ResolvedTextFrame.ComposedLine> currentGroup = new ArrayList<>();
+        double curIndentL = 0, curIndentR = 0;
+
+        for (int i = 0; i < lines.size(); i++) {
+            ResolvedTextFrame.ComposedLine cl = lines.get(i);
+            double indL = cl.wrapIndentLeft();
+            double indR = cl.wrapIndentRight();
+
+            // indent 변화 감지 (2pt 허용 오차)
+            boolean indentChanged = Math.abs(indL - curIndentL) > 2.0
+                    || Math.abs(indR - curIndentR) > 2.0;
+
+            if (indentChanged && !currentGroup.isEmpty()) {
+                groups.add(currentGroup);
+                currentGroup = new ArrayList<>();
+            }
+            currentGroup.add(cl);
+            curIndentL = indL;
+            curIndentR = indR;
+        }
+        if (!currentGroup.isEmpty()) groups.add(currentGroup);
+
+        // 그룹이 1개면 분할 불필요
+        if (groups.size() <= 1) return false;
+
+        // 각 그룹을 별도 글상자로 배치
+        double[] gb = tf.geometricBounds();
+        double frameW = gb[3] - gb[1];
+        int charOffset = 0;
+
+        for (List<ResolvedTextFrame.ComposedLine> group : groups) {
+            ResolvedTextFrame.ComposedLine first = group.get(0);
+            ResolvedTextFrame.ComposedLine last = group.get(group.size() - 1);
+
+            double indL = first.wrapIndentLeft();
+            double indR = first.wrapIndentRight();
+
+            // 글상자 좌표: 프레임 기준 + indent 반영
+            double groupX = (gb[1] + indL) - pageLeft;
+            double groupY = first.bounds()[0] - pageTop;
+            double groupW = frameW - indL - indR;
+            double groupH = last.bounds()[2] - first.bounds()[0];
+
+            if (groupX < 0) groupX = 0;
+            if (groupW <= 0 || groupH <= 0) continue;
+
+            ASTTextFrameBlock block = new ASTTextFrameBlock();
+            block.sourceId("u" + Integer.toHexString(Integer.parseInt(tf.id())));
+            block.x(CoordinateConverter.pointsToHwpunits(groupX));
+            block.y(CoordinateConverter.pointsToHwpunits(groupY));
+            block.width(CoordinateConverter.pointsToHwpunits(groupW));
+            block.height(CoordinateConverter.pointsToHwpunits(groupH));
+            block.zOrder(tf.zOrder());
+            block.columnCount(1);
+            block.distributed(true);
+
+            // 문자 범위 추적 (단락 분배용)
+            int charCount = 0;
+            for (ResolvedTextFrame.ComposedLine cl : group) {
+                charCount += (cl.text() != null ? cl.text().length() : 0);
+            }
+            block.composedCharStart(charOffset);
+            block.composedCharEnd(charOffset + charCount);
+            charOffset += charCount;
+
+            section.addBlock(block);
+        }
+
+        return true;
+    }
 
     /**
      * composedLines에서 Y 간격이 비정상적으로 큰 지점을 감지하여 글상자를 분할한다.
