@@ -1291,6 +1291,7 @@ public class ResolvedToASTBuilder {
             text = text.replace("\u2002", "");   // En Space 제거
             text = text.replace("\u2003", "");   // Em Space 제거
             text = text.replace("\u200A", "");   // Hair Space 제거
+            text = text.replace("\uFFE3", "~");  // Fullwidth Macron → 물결 (한글 호환)
         }
         tr.text(text);
         // IDML CharacterRun 속성 우선
