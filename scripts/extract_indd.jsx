@@ -2889,32 +2889,39 @@ function splitRunByStoryChars(story, rng, runData, para) {
         // 첫/마지막 문자 속성 비교 (빠른 체크) — 개별 인덱스 접근
         var firstColor = null, lastColor = null;
         var firstSize = null, lastSize = null;
+        var firstFont = null, lastFont = null;
         try { firstColor = para.characters[rngStart].fillColor ? para.characters[rngStart].fillColor.name : null; } catch (e) {}
         try { lastColor = para.characters[rngStart + rngLen - 1].fillColor ? para.characters[rngStart + rngLen - 1].fillColor.name : null; } catch (e) {}
         try { firstSize = para.characters[rngStart].pointSize; } catch (e) {}
         try { lastSize = para.characters[rngStart + rngLen - 1].pointSize; } catch (e) {}
-        if (firstColor === lastColor && firstSize === lastSize) return [runData];
+        try { firstFont = para.characters[rngStart].appliedFont.fontFamily; } catch (e) {}
+        try { lastFont = para.characters[rngStart + rngLen - 1].appliedFont.fontFamily; } catch (e) {}
+        if (firstColor === lastColor && firstSize === lastSize && firstFont === lastFont) return [runData];
 
-        // 문자별 스캔 — 개별 인덱스 접근
+        // 문자별 스캔 — 개별 인덱스 접근 (색상, 크기, 폰트 변경 감지)
         var result = [];
         var curColor = firstColor;
         var curSize = firstSize;
+        var curFont = firstFont;
         var curText = "";
         for (var ci = 0; ci < rngLen; ci++) {
             var idx = rngStart + ci;
-            var chColor = null, chSize = null;
+            var chColor = null, chSize = null, chFont = null;
             try { chColor = para.characters[idx].fillColor ? para.characters[idx].fillColor.name : null; } catch (e) {}
             try { chSize = para.characters[idx].pointSize; } catch (e) {}
-            if ((chColor !== curColor || chSize !== curSize) && curText.length > 0) {
+            try { chFont = para.characters[idx].appliedFont.fontFamily; } catch (e) {}
+            if ((chColor !== curColor || chSize !== curSize || chFont !== curFont) && curText.length > 0) {
                 var splitRun = {};
                 for (var k in runData) { if (runData.hasOwnProperty(k)) splitRun[k] = runData[k]; }
                 splitRun.text = curText;
                 splitRun.fillColor = curColor;
                 if (curSize) splitRun.fontSize = curSize;
+                if (curFont) splitRun.fontFamily = curFont;
                 result.push(splitRun);
                 curText = "";
                 curColor = chColor;
                 curSize = chSize;
+                curFont = chFont;
             }
             try { curText += para.characters[idx].contents; } catch (e) {}
         }
@@ -2924,6 +2931,7 @@ function splitRunByStoryChars(story, rng, runData, para) {
             lastRun.text = curText;
             lastRun.fillColor = curColor;
             if (curSize) lastRun.fontSize = curSize;
+            if (curFont) lastRun.fontFamily = curFont;
             result.push(lastRun);
         }
         return result.length > 0 ? result : [runData];
