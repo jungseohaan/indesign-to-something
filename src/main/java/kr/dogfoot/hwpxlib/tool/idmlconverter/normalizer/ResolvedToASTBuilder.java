@@ -376,27 +376,11 @@ public class ResolvedToASTBuilder {
         List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
         if (lines == null || lines.size() < 2) return false;
 
-        // 실제 wrap 감지:
-        // - 왼쪽 indent가 변하는 행이 3개 이상, 또는
-        // - 오른쪽 indent가 10pt 이상인 행이 3개 이상 연속 (이미지 비껴가기)
-        // (마지막 행이 짧은 것은 자연스러운 현상이므로 마지막 행 제외)
-        int leftIndentedLines = 0;
-        int rightIndentedLines = 0; // 연속 오른쪽 indent 카운트
+        // 실제 wrap 감지: 오른쪽 indent > 30pt가 3행 이상 연속 (이미지 비껴가기)
+        int rightIndentedLines = 0;
         int maxConsecutiveRight = 0;
-        boolean hasLeftIndentVariation = false;
-        double prevLeftIndent = -1;
         for (int i = 0; i < lines.size(); i++) {
-            ResolvedTextFrame.ComposedLine cl = lines.get(i);
-            double indL = cl.wrapIndentLeft();
-            double indR = cl.wrapIndentRight();
-            if (indL > 2.0) {
-                leftIndentedLines++;
-                if (prevLeftIndent >= 0 && Math.abs(indL - prevLeftIndent) > 1.0) {
-                    hasLeftIndentVariation = true;
-                }
-            }
-            if (indL > 0) prevLeftIndent = indL;
-            // 오른쪽 indent 연속 감지: 30pt 이상만 (마지막 행 제외)
+            double indR = lines.get(i).wrapIndentRight();
             if (indR > 30.0 && i < lines.size() - 1) {
                 rightIndentedLines++;
                 maxConsecutiveRight = Math.max(maxConsecutiveRight, rightIndentedLines);
@@ -404,7 +388,6 @@ public class ResolvedToASTBuilder {
                 rightIndentedLines = 0;
             }
         }
-        // 실제 wrap 판정: 큰 indent(>30pt)가 여러 행에 연속되어야 함
         // 작은 indent(<10pt)는 프레임 모양/인셋 차이일 뿐
         boolean hasRightWrap = maxConsecutiveRight >= 3;
         if (!hasRightWrap) return false; // 현재는 오른쪽 wrap만 지원
@@ -413,11 +396,10 @@ public class ResolvedToASTBuilder {
         // 같은 indent 패턴(좌/우 밀림 유사)인 연속 행을 하나의 그룹으로
         List<List<ResolvedTextFrame.ComposedLine>> groups = new ArrayList<>();
         List<ResolvedTextFrame.ComposedLine> currentGroup = new ArrayList<>();
-        double curIndentL = 0, curIndentR = 0;
+        double curIndentR = 0;
 
         for (int i = 0; i < lines.size(); i++) {
             ResolvedTextFrame.ComposedLine cl = lines.get(i);
-            double indL = cl.wrapIndentLeft();
             double indR = cl.wrapIndentRight();
 
             // indent 변화 분할 기준: 오른쪽의 큰 변화 (30pt 이상), 마지막 행은 분할 제외
@@ -430,7 +412,6 @@ public class ResolvedToASTBuilder {
                 currentGroup = new ArrayList<>();
             }
             currentGroup.add(cl);
-            curIndentL = indL;
             curIndentR = indR;
         }
         if (!currentGroup.isEmpty()) groups.add(currentGroup);
@@ -496,11 +477,9 @@ public class ResolvedToASTBuilder {
                 }
                 String lineText = cl.text();
                 if (lineText != null && !lineText.isEmpty()) {
-                    // 행 끝 \r 제거 (단락 구분자)
                     if (lineText.endsWith("\r")) lineText = lineText.substring(0, lineText.length() - 1);
                     ASTTextRun run = new ASTTextRun();
                     run.text(lineText);
-                    // composedLine의 run 스타일 적용
                     if (cl.runs() != null && !cl.runs().isEmpty()) {
                         ResolvedTextFrame.ComposedRun cr = cl.runs().get(0);
                         if (cr.fillColor() != null) run.textColor(resolveColorToHex(cr.fillColor()));
