@@ -2616,15 +2616,17 @@ public class ResolvedToASTBuilder {
     /** IDML 경로용: resolved TextFrame bounds만으로 판별 (renderedFloatingItems 사용 안 함) */
     private boolean isAnchoredOutsideParentByTextFrame(int anchoredId, String parentStoryId) {
         ResolvedTextFrame anchoredTf = resolvedData.getTextFrame(String.valueOf(anchoredId));
-        if (anchoredTf == null) return false;
+        if (anchoredTf == null) {
+            // TextFrame이 아닌 인라인(Polygon/Rectangle 등): renderedFloatingItems에서 bounds 확인
+            return isAnchoredOutsideParent(anchoredId, parentStoryId);
+        }
         double[] aGb = anchoredTf.geometricBounds();
         if (aGb == null || aGb.length < 4) return false;
         for (ResolvedTextFrame tf : resolvedData.textFrames()) {
             if (parentStoryId.equals(tf.storyId()) && !tf.isInline()) {
                 double[] pGb = tf.geometricBounds();
                 if (pGb == null || pGb.length < 4) continue;
-                double aCenterX = (aGb[1] + aGb[3]) / 2.0;
-                return aCenterX > pGb[3] + 5.0 || aCenterX < pGb[1] - 5.0;
+                return isOutsideParentBounds(aGb, pGb);
             }
         }
         return false;
@@ -2654,11 +2656,31 @@ public class ResolvedToASTBuilder {
             if (parentStoryId.equals(tf.storyId()) && !tf.isInline()) {
                 double[] pGb = tf.geometricBounds();
                 if (pGb == null || pGb.length < 4) continue;
-                // 인라인 객체의 중심 X가 부모 프레임 X범위에서 5mm 이상 벗어나면 커스텀 위치 앵커
-                double aCenterX = (aGb[1] + aGb[3]) / 2.0;
-                boolean outside = aCenterX > pGb[3] + 5.0 || aCenterX < pGb[1] - 5.0;
-                return outside;
+                return isOutsideParentBounds(aGb, pGb);
             }
+        }
+        return false;
+    }
+
+    /**
+     * 인라인 객체 bounds가 부모 프레임 밖에 위치하는지 판단.
+     * - 중심 X가 부모 밖 3pt 이상 → outside
+     * - 오른쪽 끝이 부모 밖으로 돌출하고 폭의 50% 이상 밖 → outside (장식 그래픽)
+     */
+    private boolean isOutsideParentBounds(double[] aGb, double[] pGb) {
+        double aCenterX = (aGb[1] + aGb[3]) / 2.0;
+        // 중심 X 기준 (기존 로직, 허용 오차 3pt)
+        if (aCenterX > pGb[3] + 3.0 || aCenterX < pGb[1] - 3.0) return true;
+        // 오른쪽 돌출 체크: 인라인 객체의 절반 이상이 부모 밖
+        double aWidth = aGb[3] - aGb[1];
+        if (aWidth > 0 && aGb[3] > pGb[3]) {
+            double overshoot = aGb[3] - pGb[3];
+            if (overshoot > aWidth * 0.5) return true;
+        }
+        // 왼쪽 돌출 체크
+        if (aWidth > 0 && aGb[1] < pGb[1]) {
+            double overshoot = pGb[1] - aGb[1];
+            if (overshoot > aWidth * 0.5) return true;
         }
         return false;
     }
