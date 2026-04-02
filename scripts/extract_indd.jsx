@@ -3143,7 +3143,11 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                                 var partRun = {};
                                 for (var rk in runData) { partRun[rk] = runData[rk]; }
                                 partRun.text = parts[pi2];
-                                paraData.runs.push(partRun);
+                                // GREP 스타일 보정: FFFC 분할된 텍스트 부분도 문자별 속성 확인
+                                var partSplits = splitRunByStoryChars(story, rng, partRun, para);
+                                for (var ps = 0; ps < partSplits.length; ps++) {
+                                    paraData.runs.push(partSplits[ps]);
+                                }
                             }
                             // U+FFFC 마커 (마지막 part 뒤에는 없음)
                             if (pi2 < parts.length - 1) {
