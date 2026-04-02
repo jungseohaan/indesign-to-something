@@ -6,12 +6,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonReader;
 
-import java.io.IOException;
-import java.io.StringReader;
-import java.util.HashSet;
+import java.io.*;
 import java.util.Set;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 
 /**
  * resolved.json 파서.
@@ -23,8 +19,16 @@ public class ResolvedDataReader {
      * resolved.json 파일을 읽어 ResolvedData로 변환한다.
      */
     public static ResolvedData read(String filePath) throws IOException {
-        String json = new String(Files.readAllBytes(Paths.get(filePath)), "UTF-8");
-        return fromJson(json);
+        // 파일을 직접 스트리밍 파싱 (String 중간 변환 없이 메모리 절감)
+        JsonReader reader = new JsonReader(new BufferedReader(new InputStreamReader(
+                new FileInputStream(filePath), "UTF-8"), 65536));
+        try {
+            reader.setLenient(true);
+            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+            return fromJsonObject(root);
+        } finally {
+            reader.close();
+        }
     }
 
     public static ResolvedData fromJson(String json) {
@@ -33,6 +37,15 @@ public class ResolvedDataReader {
         try {
         reader.setLenient(true);
         JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+        return fromJsonObject(root);
+        } finally {
+            try { reader.close(); } catch (IOException e) {
+                System.err.println("[ResolvedDataReader] JSON reader close 실패: " + e.getMessage());
+            }
+        }
+    }
+
+    private static ResolvedData fromJsonObject(JsonObject root) {
         ResolvedData data = new ResolvedData();
 
         // colors → colorHexMap
@@ -158,11 +171,6 @@ public class ResolvedDataReader {
         }
 
         return data;
-        } finally {
-            try { reader.close(); } catch (IOException e) {
-                System.err.println("[ResolvedDataReader] JSON reader close 실패: " + e.getMessage());
-            }
-        }
     }
 
     private static ResolvedTextFrame parseTextFrame(JsonObject o) {

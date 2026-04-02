@@ -39,6 +39,7 @@ public class ResolvedToASTBuilder {
     private final Map<String, IDMLStory> idmlStoryCache = new HashMap<>();
     private StylePropertyResolver styleResolver;
     private ASTDocument astDoc; // Phase 0에서 스타일 정의 접근용
+    private Map<Integer, Integer> pageDocOffsetToSection; // document pageIndex → section list index
 
     // Lazy-loaded IDML 인프라 (테이블 셀 변환용)
     private kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDocument;
@@ -227,7 +228,23 @@ public class ResolvedToASTBuilder {
             sections.add(section);
         }
 
+        // document pageIndex → section list index 매핑 빌드
+        pageDocOffsetToSection = new HashMap<>();
+        for (int i = 0; i < pages.size(); i++) {
+            pageDocOffsetToSection.put(pages.get(i).index(), i);
+        }
+
         return sections;
+    }
+
+    /**
+     * document pageIndex (페이지 오프셋) → sections 리스트 인덱스 변환.
+     * 부분 추출 시 pageIndex가 4,5,6이지만 sections는 0,1,2인 경우 매핑.
+     */
+    private int toSectionIndex(int docPageIndex) {
+        if (pageDocOffsetToSection == null) return docPageIndex;
+        Integer secIdx = pageDocOffsetToSection.get(docPageIndex);
+        return secIdx != null ? secIdx : docPageIndex;
     }
 
     // ═══════════════════════════════════════════════════
@@ -247,8 +264,8 @@ public class ResolvedToASTBuilder {
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             if (!resolvedData.isEditableTextFrame(tf.id())) continue;
 
-            // 페이지 인덱스 결정
-            int pageIdx = tf.pageIndex();
+            // 페이지 인덱스 결정 (document offset → section index 매핑)
+            int pageIdx = toSectionIndex(tf.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
             // 좌표 계산: geometricBounds는 spread 좌표 (applyScale 후 pt)
@@ -611,8 +628,8 @@ public class ResolvedToASTBuilder {
             IDMLStory idmlStory = loadIDMLStory(storyId);
             if (idmlStory == null || !idmlStory.hasTables()) continue;
 
-            // 페이지 결정
-            int pageIdx = tf.pageIndex();
+            // 페이지 결정 (document offset → section index 매핑)
+            int pageIdx = toSectionIndex(tf.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
             // 좌표 계산
@@ -640,11 +657,26 @@ public class ResolvedToASTBuilder {
             // IDML paragraphIndexBefore로 테이블 앞 단락 수 파악
             // 중첩 테이블 감지: selfId가 다른 테이블의 selfId를 접두사로 포함하면 중첩
             List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> allTables = idmlStory.tables();
+            // 중첩 테이블 부모 탐색: O(n) — selfId를 HashMap에 등록 후 접두사로 부모 lookup
+            Map<String, kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> tableById = new HashMap<>();
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t : allTables) {
+                tableById.put(t.selfId(), t);
+            }
             Map<String, kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> parentTableMap = new HashMap<>();
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t1 : allTables) {
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t2 : allTables) {
-                    if (!t1.selfId().equals(t2.selfId()) && t1.selfId().startsWith(t2.selfId())) {
-                        parentTableMap.put(t1.selfId(), t2); // t1은 t2의 중첩 테이블
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t : allTables) {
+                // selfId 형식: "부모ID/Cell:N/Table" — 접두사에서 부모 테이블 ID 추출
+                String sid = t.selfId();
+                int lastSlash = sid.lastIndexOf('/');
+                if (lastSlash > 0) {
+                    // 부모 후보: "부모ID/Cell:N" → 그 앞의 테이블 ID
+                    String parentPart = sid.substring(0, lastSlash);
+                    int prevSlash = parentPart.lastIndexOf('/');
+                    if (prevSlash > 0) {
+                        String candidateId = parentPart.substring(0, prevSlash);
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable parent = tableById.get(candidateId);
+                        if (parent != null) {
+                            parentTableMap.put(sid, parent);
+                        }
                     }
                 }
             }
@@ -1157,6 +1189,7 @@ public class ResolvedToASTBuilder {
                             }
                             if (!partText.isEmpty()) {
                                 ResolvedRun matchedRR = findResolvedRun(resolvedRuns, resolvedRunIdx, partText);
+                                if (matchedRR != null) resolvedRunIdx = lastMatchResult[0] + 1;
                                 ASTTextRun tr = createRunFromIDML(run, partText, matchedRR != null ? matchedRR : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
                                 if (!splitBulletRun(tr, para)) {
                                     splitLatinVarsInMixedText(tr, para);
@@ -1186,15 +1219,24 @@ public class ResolvedToASTBuilder {
                             }
                         }
                     } else {
-                        ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
-                        ASTTextRun tr = createRunFromIDML(run, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
-                        // ;...; 분수 GREP 패턴이 포함된 텍스트 → 분수 수식으로 분리
-                        if (!splitBulletRun(tr, para)) {
-                            if (EHFontGlyphMap.containsEHFractionPattern(text)) {
-                                splitFractionPatternInText(text, tr, para);
-                            } else {
-                                // 한국어 사이 단일 라틴 문자를 수식 변수로 분리
-                                splitLatinVarsInMixedText(tr, para);
+                        // GREP 스타일 분할: IDML 단일 런이 resolved에서 여러 런(다른 색상/폰트)으로 분할된 경우
+                        // resolved 런 경계에서 IDML 런을 분할하여 각각의 색상을 적용
+                        boolean splitByResolved = false;
+                        if (run.fillColor() == null && resolvedRuns != null && resolvedRuns.size() > 1) {
+                            splitByResolved = splitIdmlRunByResolvedRuns(run, text, resolvedRuns, resolvedRunIdx,
+                                    para, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+                        }
+                        if (!splitByResolved) {
+                            ResolvedRun matchedRR2 = findResolvedRun(resolvedRuns, resolvedRunIdx, text);
+                            if (matchedRR2 != null) resolvedRunIdx = lastMatchResult[0] + 1;
+                            ASTTextRun tr = createRunFromIDML(run, text, matchedRR2 != null ? matchedRR2 : defaultRR, styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+                            // ;...; 분수 GREP 패턴이 포함된 텍스트 → 분수 수식으로 분리
+                            if (!splitBulletRun(tr, para)) {
+                                if (EHFontGlyphMap.containsEHFractionPattern(text)) {
+                                    splitFractionPatternInText(text, tr, para);
+                                } else {
+                                    splitLatinVarsInMixedText(tr, para);
+                                }
                             }
                         }
                     }
@@ -1696,21 +1738,110 @@ public class ResolvedToASTBuilder {
      * resolved 런 목록에서 텍스트가 매칭되는 런을 찾음.
      * IDML 런과 resolved 런의 텍스트 경계가 다를 수 있으므로, 텍스트 포함 여부로 매칭.
      */
+    /**
+     * IDML 단일 런을 resolved 런 경계에서 분할.
+     * GREP 스타일로 인해 하나의 IDML CharacterStyleRange가 resolved에서 여러 런(다른 색상/폰트)으로
+     * 분리된 경우, resolved 런의 텍스트를 기준으로 IDML 런을 분할하여 각각 올바른 색상을 적용.
+     * @return 분할 성공 시 true, 실패 시 false (호출측에서 기존 로직 사용)
+     */
+    private boolean splitIdmlRunByResolvedRuns(IDMLCharacterRun cr, String text,
+            List<ResolvedRun> resolvedRuns, int startIdx,
+            ASTParagraph para, String styleFillColor, Double styleTracking,
+            String styleFontFamily, Double styleFontSize) {
+        if (text == null || text.isEmpty() || resolvedRuns == null) return false;
+
+        // resolved 런에서 이 텍스트와 겹치는 연속 런들을 찾기
+        // 텍스트 시작부터 순차적으로 resolved 런 텍스트를 매칭
+        String remaining = text;
+        List<String[]> segments = new ArrayList<>(); // [segText, resolvedRunIndex]
+        int rIdx = startIdx;
+        boolean foundSplit = false;
+
+        while (!remaining.isEmpty() && rIdx < resolvedRuns.size()) {
+            ResolvedRun rr = resolvedRuns.get(rIdx);
+            String rrText = rr.text();
+            if (rrText == null || rrText.isEmpty()) { rIdx++; continue; }
+
+            // resolved 런 텍스트가 remaining의 접두사인지 확인
+            if (remaining.startsWith(rrText)) {
+                segments.add(new String[]{rrText, String.valueOf(rIdx)});
+                remaining = remaining.substring(rrText.length());
+                rIdx++;
+            } else if (rrText.length() > 0 && remaining.startsWith(rrText.substring(0, Math.min(3, rrText.length())))) {
+                // 부분 매칭: resolved 런 텍스트의 앞 3자가 remaining에 포함
+                // remaining에서 다음 resolved 런의 시작 위치를 찾아 분할
+                if (rIdx + 1 < resolvedRuns.size()) {
+                    ResolvedRun nextRR = resolvedRuns.get(rIdx + 1);
+                    String nextText = nextRR.text();
+                    if (nextText != null && nextText.length() >= 3) {
+                        String nextKey = nextText.substring(0, Math.min(5, nextText.length()));
+                        int splitPos = remaining.indexOf(nextKey);
+                        if (splitPos > 0) {
+                            segments.add(new String[]{remaining.substring(0, splitPos), String.valueOf(rIdx)});
+                            remaining = remaining.substring(splitPos);
+                            rIdx++;
+                            foundSplit = true;
+                            continue;
+                        }
+                    }
+                }
+                // 분할 실패 시 나머지를 현재 런으로
+                segments.add(new String[]{remaining, String.valueOf(rIdx)});
+                remaining = "";
+                rIdx++;
+            } else {
+                rIdx++; // 매칭 안 되면 다음 resolved 런 시도
+            }
+        }
+        if (!remaining.isEmpty()) {
+            segments.add(new String[]{remaining, String.valueOf(Math.max(0, rIdx - 1))});
+        }
+
+        // 분할이 없으면(세그먼트 1개) 기존 로직 사용
+        if (segments.size() <= 1 && !foundSplit) return false;
+
+        // 각 세그먼트별로 ASTTextRun 생성
+        for (String[] seg : segments) {
+            String segText = seg[0];
+            int rrIdx = Integer.parseInt(seg[1]);
+            ResolvedRun rr = (rrIdx >= 0 && rrIdx < resolvedRuns.size()) ? resolvedRuns.get(rrIdx) : null;
+            ASTTextRun tr = createRunFromIDML(cr, segText, rr != null ? rr : findDefaultResolvedRun(resolvedRuns),
+                    styleFillColor, styleTracking, styleFontFamily, styleFontSize);
+            if (!splitBulletRun(tr, para)) {
+                splitLatinVarsInMixedText(tr, para);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 텍스트 기반 resolved 런 매칭.
+     * 매칭 성공 시 resolvedRunIdx를 매칭된 인덱스+1로 갱신 (순차 추적).
+     * 매칭 실패 시 null 반환 (호출측에서 defaultRR 사용).
+     */
+    private int[] lastMatchResult = new int[]{0}; // [0]=matched index
+
     private ResolvedRun findResolvedRun(List<ResolvedRun> runs, int startIdx, String text) {
         if (runs == null || runs.isEmpty() || text == null || text.isEmpty()) return null;
         String key = text.length() > 5 ? text.substring(0, 5) : text;
         // startIdx부터 순차 검색
         for (int i = startIdx; i < runs.size(); i++) {
             String rt = runs.get(i).text();
-            if (rt != null && rt.contains(key)) return runs.get(i);
+            if (rt != null && rt.contains(key)) {
+                lastMatchResult[0] = i;
+                return runs.get(i);
+            }
         }
         // 못 찾으면 처음부터
         for (int i = 0; i < Math.min(startIdx, runs.size()); i++) {
             String rt = runs.get(i).text();
-            if (rt != null && rt.contains(key)) return runs.get(i);
+            if (rt != null && rt.contains(key)) {
+                lastMatchResult[0] = i;
+                return runs.get(i);
+            }
         }
-        // 그래도 못 찾으면 첫 번째 런 반환 (스타일 상속용)
-        return runs.isEmpty() ? null : runs.get(0);
+        // 매칭 실패 시 null 반환 — 호출측에서 defaultRR 사용
+        return null;
     }
 
     private List<ASTParagraph> convertStoryParagraphs(ResolvedStory story) {
@@ -2660,10 +2791,10 @@ public class ResolvedToASTBuilder {
     }
 
     private int findPageForStory(String storyId) {
-        // storyId → textFrame → pageIndex
+        // storyId → textFrame → pageIndex (section index로 변환)
         for (ResolvedTextFrame tf : resolvedData.textFrames()) {
             if (storyId.equals(tf.storyId())) {
-                return tf.pageIndex();
+                return toSectionIndex(tf.pageIndex());
             }
         }
         return -1;
@@ -2691,7 +2822,7 @@ public class ResolvedToASTBuilder {
         for (RenderedGroup rg : floatingItems) {
             if (!"page_background".equals(rg.itemType())) continue;
 
-            int pageIdx = rg.pageIndex();
+            int pageIdx = toSectionIndex(rg.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
             double[] bounds = rg.bounds();

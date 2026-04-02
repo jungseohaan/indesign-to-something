@@ -1462,9 +1462,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
         } catch (e) { allTextSpecial = false; }
         if (!allTextSpecial) continue;
 
-        $.writeln("[Pass3 MATCH] id=" + cDomId
-            + " container=" + containerShape.constructor.name + " area=" + containerArea.toFixed(0)
-            + " children=" + cNested.length);
+
 
         // 페이지 범위 확인
         var cPage = null;
@@ -1563,8 +1561,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
         var p4PgIdx = p4Page.documentOffset + 1;
         if (p4PgIdx < startPage || p4PgIdx > endPage) continue;
 
-        $.writeln("[Pass4 MATCH] id=" + p4Id + " nonRectPolygons=" + nonRectCount
-            + " children=" + p4Nested.length);
+
 
         // 렌더링
         try {
@@ -2360,7 +2357,6 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                     });
                 }
             } catch(e) {
-                $.writeln("[TableInline] render failed: " + tDomId + " — " + e.message);
             }
         } catch(e) {}
     }
@@ -2457,6 +2453,25 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         try { app.pdfExportPreferences.monochromeBitmapCompression = BitmapCompression.NONE; } catch(e6){}
     } catch (ePdfPref) {}
 
+    // 페이지별 프레임 인덱스 미리 빌드 (O(pages × frames) → O(frames) + O(pages))
+    var framesByPage = {};  // pageOffset → [frame, ...]
+    var spreadFrames = [];  // parentPage 없는 프레임 (Spread 직속)
+    for (var fi = 0; fi < editableFrames.length; fi++) {
+        var efr = editableFrames[fi];
+        try {
+            var efPage = efr.parentPage;
+            if (efPage) {
+                var efPgOff = efPage.documentOffset;
+                if (!framesByPage[efPgOff]) framesByPage[efPgOff] = [];
+                framesByPage[efPgOff].push(efr);
+            } else {
+                spreadFrames.push(efr);
+            }
+        } catch (e) {
+            spreadFrames.push(efr);
+        }
+    }
+
     for (var pi = 0; pi < doc.pages.length; pi++) {
         var page = doc.pages[pi];
         var pgIdx = page.documentOffset + 1;
@@ -2464,25 +2479,27 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
 
         // 1. 해당 페이지의 편집 가능 텍스트 프레임 숨기기 (PDF/PNG 공통)
         var hiddenItems = [];
-        var pb = page.bounds;
-        for (var hi = 0; hi < editableFrames.length; hi++) {
-            var tf = editableFrames[hi];
+        // 이 페이지 소속 프레임
+        var pageOwnFrames = framesByPage[page.documentOffset] || [];
+        for (var hi = 0; hi < pageOwnFrames.length; hi++) {
             try {
-                var onThisPage = false;
-                try {
-                    onThisPage = (tf.parentPage === page);
-                } catch (e) {}
-                if (!onThisPage) {
-                    try {
-                        var tfb = tf.visibleBounds;
-                        var overlapH = tfb[3] > pb[1] && tfb[1] < pb[3];
-                        var overlapV = tfb[2] > pb[0] && tfb[0] < pb[2];
-                        onThisPage = overlapH && overlapV;
-                    } catch (e) {}
+                if (pageOwnFrames[hi].visible) {
+                    pageOwnFrames[hi].visible = false;
+                    hiddenItems.push(pageOwnFrames[hi]);
                 }
-                if (onThisPage && tf.visible) {
-                    tf.visible = false;
-                    hiddenItems.push(tf);
+            } catch (e) {}
+        }
+        // Spread 직속 프레임은 bounds 겹침 체크
+        var pb = page.bounds;
+        for (var si = 0; si < spreadFrames.length; si++) {
+            var sf = spreadFrames[si];
+            try {
+                var sfb = sf.visibleBounds;
+                var overlapH = sfb[3] > pb[1] && sfb[1] < pb[3];
+                var overlapV = sfb[2] > pb[0] && sfb[0] < pb[2];
+                if (overlapH && overlapV && sf.visible) {
+                    sf.visible = false;
+                    hiddenItems.push(sf);
                 }
             } catch (e) {}
         }
@@ -2542,7 +2559,6 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         results.push(inlineObjects[ioi]);
     }
     if (inlineObjects.length > 0) {
-        $.writeln("[exportPageBackgrounds] " + inlineObjects.length + " inline objects rendered");
     }
 
     return { items: results, editableFrameIds: editableFrameIds, tableInlineRendered: tableInlineRendered };
@@ -2886,57 +2902,94 @@ function splitRunByStoryChars(story, rng, runData, para) {
         var rngLen = Math.min(rngCharCount, paraCharCount - rngStart);
         if (rngLen <= 1) return [runData];
 
-        // 첫/마지막 문자 속성 비교 (빠른 체크) — 개별 인덱스 접근
-        var firstColor = null, lastColor = null;
-        var firstSize = null, lastSize = null;
-        var firstFont = null, lastFont = null;
-        try { firstColor = para.characters[rngStart].fillColor ? para.characters[rngStart].fillColor.name : null; } catch (e) {}
-        try { lastColor = para.characters[rngStart + rngLen - 1].fillColor ? para.characters[rngStart + rngLen - 1].fillColor.name : null; } catch (e) {}
-        try { firstSize = para.characters[rngStart].pointSize; } catch (e) {}
-        try { lastSize = para.characters[rngStart + rngLen - 1].pointSize; } catch (e) {}
-        try { firstFont = para.characters[rngStart].appliedFont.fontFamily; } catch (e) {}
-        try { lastFont = para.characters[rngStart + rngLen - 1].appliedFont.fontFamily; } catch (e) {}
-        if (firstColor === lastColor && firstSize === lastSize && firstFont === lastFont) return [runData];
+        // DOM 접근 캐시 (동일 인덱스 재접근 방지)
+        var propsCache = {};
+        function getCharProps(absIdx) {
+            if (propsCache[absIdx]) return propsCache[absIdx];
+            var color = null, size = null, font = null;
+            try { color = para.characters[absIdx].fillColor ? para.characters[absIdx].fillColor.name : null; } catch (e) {}
+            try { size = para.characters[absIdx].pointSize; } catch (e) {}
+            try { font = para.characters[absIdx].appliedFont.fontFamily; } catch (e) {}
+            var p = { color: color, size: size, font: font };
+            propsCache[absIdx] = p;
+            return p;
+        }
+        function propsEqual(a, b) {
+            return a.color === b.color && a.size === b.size && a.font === b.font;
+        }
 
-        // 문자별 스캔 — 개별 인덱스 접근 (색상, 크기, 폰트 변경 감지)
+        // 빠른 체크: 첫/중간/마지막 비교 (A-B-A 패턴 대응)
+        var firstProps = getCharProps(rngStart);
+        var lastProps = getCharProps(rngStart + rngLen - 1);
+        var midProps = rngLen > 2 ? getCharProps(rngStart + Math.floor(rngLen / 2)) : firstProps;
+        if (propsEqual(firstProps, lastProps) && propsEqual(firstProps, midProps)) return [runData];
+
+        // 이진 탐색으로 스타일 변경 경계 찾기 — O(k × log n) DOM 접근
+        // (k=변경점 수, 보통 1~3개. 100자 런에서 300회→30회로 감소)
+        var boundaries = [];
+        function findBoundaries(lo, hi) {
+            if (hi - lo <= 0) return;
+            var loProps = getCharProps(rngStart + lo);
+            var hiProps = getCharProps(rngStart + hi);
+            if (hi - lo === 1) {
+                if (!propsEqual(loProps, hiProps)) boundaries.push(hi);
+                return;
+            }
+            var mid = Math.floor((lo + hi) / 2);
+            var midProps = getCharProps(rngStart + mid);
+            // A-B-A 대응: lo==hi여도 mid가 다르면 양쪽 재귀
+            if (propsEqual(loProps, hiProps) && propsEqual(loProps, midProps)) return;
+            findBoundaries(lo, mid);
+            findBoundaries(mid, hi);
+        }
+        findBoundaries(0, rngLen - 1);
+
+        if (boundaries.length === 0) return [runData];
+
+        // 경계 정렬 & 중복 제거
+        boundaries.sort(function(a, b) { return a - b; });
+        var uniq = [boundaries[0]];
+        for (var bi = 1; bi < boundaries.length; bi++) {
+            if (boundaries[bi] !== boundaries[bi - 1]) uniq.push(boundaries[bi]);
+        }
+
+        // 세그먼트별 런 생성
+        var fullText = runData.text || "";
+        var useSlice = (fullText.length === rngLen);
+        var segStarts = [0];
+        for (var si = 0; si < uniq.length; si++) segStarts.push(uniq[si]);
+        var segEnds = [];
+        for (var si2 = 0; si2 < uniq.length; si2++) segEnds.push(uniq[si2]);
+        segEnds.push(rngLen);
+
         var result = [];
-        var curColor = firstColor;
-        var curSize = firstSize;
-        var curFont = firstFont;
-        var curText = "";
-        for (var ci = 0; ci < rngLen; ci++) {
-            var idx = rngStart + ci;
-            var chColor = null, chSize = null, chFont = null;
-            try { chColor = para.characters[idx].fillColor ? para.characters[idx].fillColor.name : null; } catch (e) {}
-            try { chSize = para.characters[idx].pointSize; } catch (e) {}
-            try { chFont = para.characters[idx].appliedFont.fontFamily; } catch (e) {}
-            if ((chColor !== curColor || chSize !== curSize || chFont !== curFont) && curText.length > 0) {
+        for (var s = 0; s < segStarts.length; s++) {
+            var segS = segStarts[s];
+            var segE = segEnds[s];
+            var segProps = getCharProps(rngStart + segS);
+
+            var segText = "";
+            if (useSlice) {
+                segText = fullText.substring(segS, segE);
+            } else {
+                for (var ci = segS; ci < segE; ci++) {
+                    try { segText += para.characters[rngStart + ci].contents; } catch (e) {}
+                }
+            }
+
+            if (segText.length > 0) {
                 var splitRun = {};
                 for (var k in runData) { if (runData.hasOwnProperty(k)) splitRun[k] = runData[k]; }
-                splitRun.text = curText;
-                splitRun.fillColor = curColor;
-                if (curSize) splitRun.fontSize = curSize;
-                if (curFont) splitRun.fontFamily = curFont;
+                splitRun.text = segText;
+                splitRun.fillColor = segProps.color;
+                if (segProps.size) splitRun.fontSize = segProps.size;
+                if (segProps.font) splitRun.fontFamily = segProps.font;
                 result.push(splitRun);
-                curText = "";
-                curColor = chColor;
-                curSize = chSize;
-                curFont = chFont;
             }
-            try { curText += para.characters[idx].contents; } catch (e) {}
         }
-        if (curText.length > 0) {
-            var lastRun = {};
-            for (var k2 in runData) { if (runData.hasOwnProperty(k2)) lastRun[k2] = runData[k2]; }
-            lastRun.text = curText;
-            lastRun.fillColor = curColor;
-            if (curSize) lastRun.fontSize = curSize;
-            if (curFont) lastRun.fontFamily = curFont;
-            result.push(lastRun);
-        }
+
         return result.length > 0 ? result : [runData];
     } catch (e) {
-        // 에러 시 runData에 디버그 정보 추가
         runData._splitError = e.toString();
         return [runData];
     }
@@ -3293,18 +3346,6 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
     var collectedStoryIds = {};  // 범위 내 프레임의 storyId 수집
     var collectedTfIds = {};     // 수집된 프레임 ID 추적
 
-    // DEBUG: editableIds 상태를 파일로 기록
-    var _dbgLines = [];
-    var _eidCount = 0;
-    var _sampleKeys = [];
-    for (var _ek in editableIds) {
-        if (editableIds.hasOwnProperty(_ek)) {
-            _eidCount++;
-            if (_sampleKeys.length < 5) _sampleKeys.push(_ek + "(" + typeof _ek + ")");
-        }
-    }
-    _dbgLines.push("editableIds count=" + _eidCount + " samples=" + _sampleKeys.join(","));
-
     try {
         // doc.textFrames는 페이지 소속 프레임만 포함할 수 있으므로
         // allPageItems에서 TextFrame을 수집하여 Spread 직속 프레임도 포함
@@ -3313,8 +3354,6 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
         for (var ai = 0; ai < allItems.length; ai++) {
             if (allItems[ai].constructor.name === "TextFrame") tfs.push(allItems[ai]);
         }
-        _dbgLines.push("tfs count=" + tfs.length);
-
         // Pass 1: 페이지 범위 내 프레임 수집
         for (var i = 0; i < tfs.length; i++) {
             var tf = tfs[i];
@@ -3515,21 +3554,11 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
                 try { fData2.verticalJustification = tf2.textFramePreferences.verticalJustification.toString(); } catch (e) {}
                 try { fData2.rotationAngle = tf2.absoluteRotationAngle; } catch (e) {}
                 frames.push(fData2);
-                $.writeln("[collectTextFrames] Pass2: added thread frame id=" + tf2.id + " storyId=" + sid2);
             }
         }
     } catch (e) {
         // 텍스트 프레임 접근 실패 시 무시
     }
-    // DEBUG: 로그 파일 출력
-    _dbgLines.push("frames=" + frames.length);
-    try {
-        var _dbgFile = File("/tmp/_debug_collectTF.log");
-        _dbgFile.encoding = "UTF-8";
-        _dbgFile.open("w");
-        _dbgFile.write(_dbgLines.join("\n"));
-        _dbgFile.close();
-    } catch (e) {}
     return frames;
 }
 
