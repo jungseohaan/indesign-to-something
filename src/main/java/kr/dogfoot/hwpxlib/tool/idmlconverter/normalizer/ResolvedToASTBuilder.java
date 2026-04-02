@@ -310,10 +310,11 @@ public class ResolvedToASTBuilder {
 
             // composedLines 기반 글상자 분할
             if (tf.composedLines() != null && tf.composedLines().size() > 1) {
-                // TODO: wrap indent 기반 분할은 텍스트 분배 로직 보강 후 활성화
-                // if (placeByWrapIndent(tf, section, pageLeft, pageTop)) { continue; }
-
-                // Y 점프 기반 분할 (큰 수직 갭이 있는 경우)
+                // 1) wrap indent 기반 분할 (텍스트가 이미지를 비껴가는 경우)
+                if (placeByWrapIndent(tf, section, pageLeft, pageTop)) {
+                    continue;
+                }
+                // 2) Y 점프 기반 분할 (큰 수직 갭이 있는 경우)
                 if (placeByYGapSplit(tf, section, pageLeft, pageTop)) {
                     continue;
                 }
@@ -395,17 +396,18 @@ public class ResolvedToASTBuilder {
                 }
             }
             if (indL > 0) prevLeftIndent = indL;
-            // 오른쪽 indent 연속 감지 (마지막 행은 짧을 수 있으므로 제외)
-            if (indR > 10.0 && i < lines.size() - 1) {
+            // 오른쪽 indent 연속 감지: 30pt 이상만 (마지막 행 제외)
+            if (indR > 30.0 && i < lines.size() - 1) {
                 rightIndentedLines++;
                 maxConsecutiveRight = Math.max(maxConsecutiveRight, rightIndentedLines);
             } else {
                 rightIndentedLines = 0;
             }
         }
-        boolean hasLeftWrap = leftIndentedLines >= 3 || hasLeftIndentVariation;
+        // 실제 wrap 판정: 큰 indent(>30pt)가 여러 행에 연속되어야 함
+        // 작은 indent(<10pt)는 프레임 모양/인셋 차이일 뿐
         boolean hasRightWrap = maxConsecutiveRight >= 3;
-        if (!hasLeftWrap && !hasRightWrap) return false;
+        if (!hasRightWrap) return false; // 현재는 오른쪽 wrap만 지원
 
         // 행을 indent 패턴 그룹으로 분할
         // 같은 indent 패턴(좌/우 밀림 유사)인 연속 행을 하나의 그룹으로
@@ -418,9 +420,10 @@ public class ResolvedToASTBuilder {
             double indL = cl.wrapIndentLeft();
             double indR = cl.wrapIndentRight();
 
-            // indent 변화 분할 기준: 왼쪽 또는 오른쪽의 큰 변화 (10pt 이상)
-            boolean indentChanged = Math.abs(indL - curIndentL) > 2.0
-                    || (Math.abs(indR - curIndentR) > 10.0 && (indR > 10.0 || curIndentR > 10.0));
+            // indent 변화 분할 기준: 오른쪽의 큰 변화 (30pt 이상), 마지막 행은 분할 제외
+            boolean isLastLine = (i == lines.size() - 1);
+            boolean indentChanged = !isLastLine
+                    && (Math.abs(indR - curIndentR) > 30.0 && (indR > 30.0 || curIndentR > 30.0));
 
             if (indentChanged && !currentGroup.isEmpty()) {
                 groups.add(currentGroup);
@@ -435,21 +438,37 @@ public class ResolvedToASTBuilder {
         // 그룹이 1개면 분할 불필요
         if (groups.size() <= 1) return false;
 
+        System.err.println("[WrapIndent] TF " + tf.id() + " → " + groups.size() + " groups");
+
         // 각 그룹을 별도 글상자로 배치
         double[] gb = tf.geometricBounds();
         double frameW = gb[3] - gb[1];
-        int charOffset = 0;
 
         for (List<ResolvedTextFrame.ComposedLine> group : groups) {
             ResolvedTextFrame.ComposedLine first = group.get(0);
             ResolvedTextFrame.ComposedLine last = group.get(group.size() - 1);
 
-            double indL = first.wrapIndentLeft();
-            double indR = first.wrapIndentRight();
+            // 그룹 내 대표 indent (마지막 행 제외한 최대값)
+            double indL = 0, indR = 0;
+            for (int gi = 0; gi < group.size() - 1; gi++) {
+                indL = Math.max(indL, group.get(gi).wrapIndentLeft());
+                indR = Math.max(indR, group.get(gi).wrapIndentRight());
+            }
+            if (group.size() == 1) {
+                indL = first.wrapIndentLeft();
+                indR = first.wrapIndentRight();
+            }
 
-            // 글상자 좌표: 프레임 기준 + indent 반영
-            double groupX = (gb[1] + indL) - pageLeft;
-            double groupY = first.bounds()[0] - pageTop;
+            // 글상자 좌표: 프레임 bounds 기준 (spread 좌표 → page-relative)
+            // facing pages 보정: pageRelativeBounds가 있으면 사용
+            double frameX = gb[1] - pageLeft;
+            double frameY = gb[0] - pageTop;
+            boolean gbPageRelative = (pageLeft > 0 && gb[1] < pageLeft);
+            if (gbPageRelative) { frameX = gb[1]; frameY = gb[0] - pageTop; }
+
+            // 글상자 X 위치: 프레임 원본 X 사용 (indL은 첫 줄 들여쓰기일 수 있으므로 위치에 반영 안 함)
+            double groupX = frameX;
+            double groupY = frameY + (first.bounds()[0] - gb[0]);
             double groupW = frameW - indL - indR;
             double groupH = last.bounds()[2] - first.bounds()[0];
 
@@ -464,17 +483,42 @@ public class ResolvedToASTBuilder {
             block.height(CoordinateConverter.pointsToHwpunits(groupH));
             block.zOrder(tf.zOrder());
             block.columnCount(1);
-            block.distributed(true);
 
-            // 문자 범위 추적 (단락 분배용)
-            int charCount = 0;
+            // composedLines 텍스트로 직접 단락 생성 (Phase 3 분배 우회)
+            // 같은 paraIndex를 가진 행들을 하나의 단락으로 합침
+            int prevParaIdx = -1;
+            ASTParagraph curPara = null;
             for (ResolvedTextFrame.ComposedLine cl : group) {
-                charCount += (cl.text() != null ? cl.text().length() : 0);
+                if (cl.paraIndex() != prevParaIdx || curPara == null) {
+                    curPara = new ASTParagraph();
+                    block.addParagraph(curPara);
+                    prevParaIdx = cl.paraIndex();
+                }
+                String lineText = cl.text();
+                if (lineText != null && !lineText.isEmpty()) {
+                    // 행 끝 \r 제거 (단락 구분자)
+                    if (lineText.endsWith("\r")) lineText = lineText.substring(0, lineText.length() - 1);
+                    ASTTextRun run = new ASTTextRun();
+                    run.text(lineText);
+                    // composedLine의 run 스타일 적용
+                    if (cl.runs() != null && !cl.runs().isEmpty()) {
+                        ResolvedTextFrame.ComposedRun cr = cl.runs().get(0);
+                        if (cr.fillColor() != null) run.textColor(resolveColorToHex(cr.fillColor()));
+                        if (cr.fontFamily() != null) run.fontFamily(cr.fontFamily());
+                        if (cr.fontStyle() != null) run.fontStyle(cr.fontStyle());
+                        if (cr.fontSize() != null && cr.fontSize() > 0)
+                            run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
+                    }
+                    curPara.addItem(run);
+                }
             }
-            block.composedCharStart(charOffset);
-            block.composedCharEnd(charOffset + charCount);
-            charOffset += charCount;
 
+            System.err.println("[WrapIndent]   Group: x=" + String.format("%.1f", groupX)
+                    + " y=" + String.format("%.1f", groupY)
+                    + " w=" + String.format("%.1f", groupW)
+                    + " h=" + String.format("%.1f", groupH)
+                    + " paras=" + (block.paragraphs() != null ? block.paragraphs().size() : 0)
+                    + " indR=" + String.format("%.1f", indR));
             section.addBlock(block);
         }
 

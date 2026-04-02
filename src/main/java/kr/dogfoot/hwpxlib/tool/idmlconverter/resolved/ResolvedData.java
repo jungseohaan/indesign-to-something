@@ -441,12 +441,20 @@ public class ResolvedData {
             pi.dropShadowSize(pi.dropShadowSize() * s);
             pi.gradientFeatherLength(pi.gradientFeatherLength() * s);
         }
-        // textFrames: bounds, spacing
+        // textFrames: bounds, spacing, composedLines
         for (ResolvedTextFrame tf : textFrames) {
             scaleDoubleArray(tf.geometricBounds(), s);
             scaleDoubleArray(tf.insetSpacing(), s);
             tf.columnGutter(tf.columnGutter() * s);
             scaleDoubleArray(tf.paragraphYOffsets(), s);
+            // composedLines bounds + wrapIndent도 스케일
+            if (tf.composedLines() != null) {
+                for (ResolvedTextFrame.ComposedLine cl : tf.composedLines()) {
+                    scaleDoubleArray(cl.bounds(), s);
+                    cl.wrapIndentLeft(cl.wrapIndentLeft() * s);
+                    cl.wrapIndentRight(cl.wrapIndentRight() * s);
+                }
+            }
         }
         // renderedTextFrames: bounds
         for (RenderedGroup rt : renderedTextFrameMap.values()) {
