@@ -310,11 +310,10 @@ public class ResolvedToASTBuilder {
 
             // composedLines 기반 글상자 분할
             if (tf.composedLines() != null && tf.composedLines().size() > 1) {
-                // 1) wrap indent 기반 분할 (텍스트가 이미지를 비껴가는 경우)
-                if (placeByWrapIndent(tf, section, pageLeft, pageTop)) {
-                    continue;
-                }
-                // 2) Y 점프 기반 분할 (큰 수직 갭이 있는 경우)
+                // TODO: wrap indent 기반 분할은 텍스트 분배 로직 보강 후 활성화
+                // if (placeByWrapIndent(tf, section, pageLeft, pageTop)) { continue; }
+
+                // Y 점프 기반 분할 (큰 수직 갭이 있는 경우)
                 if (placeByYGapSplit(tf, section, pageLeft, pageTop)) {
                     continue;
                 }
@@ -376,15 +375,37 @@ public class ResolvedToASTBuilder {
         List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
         if (lines == null || lines.size() < 2) return false;
 
-        // wrap indent가 있는 행이 있는지 확인
-        boolean hasWrapIndent = false;
-        for (ResolvedTextFrame.ComposedLine cl : lines) {
-            if (cl.wrapIndentLeft() > 1.0 || cl.wrapIndentRight() > 1.0) {
-                hasWrapIndent = true;
-                break;
+        // 실제 wrap 감지:
+        // - 왼쪽 indent가 변하는 행이 3개 이상, 또는
+        // - 오른쪽 indent가 10pt 이상인 행이 3개 이상 연속 (이미지 비껴가기)
+        // (마지막 행이 짧은 것은 자연스러운 현상이므로 마지막 행 제외)
+        int leftIndentedLines = 0;
+        int rightIndentedLines = 0; // 연속 오른쪽 indent 카운트
+        int maxConsecutiveRight = 0;
+        boolean hasLeftIndentVariation = false;
+        double prevLeftIndent = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            ResolvedTextFrame.ComposedLine cl = lines.get(i);
+            double indL = cl.wrapIndentLeft();
+            double indR = cl.wrapIndentRight();
+            if (indL > 2.0) {
+                leftIndentedLines++;
+                if (prevLeftIndent >= 0 && Math.abs(indL - prevLeftIndent) > 1.0) {
+                    hasLeftIndentVariation = true;
+                }
+            }
+            if (indL > 0) prevLeftIndent = indL;
+            // 오른쪽 indent 연속 감지 (마지막 행은 짧을 수 있으므로 제외)
+            if (indR > 10.0 && i < lines.size() - 1) {
+                rightIndentedLines++;
+                maxConsecutiveRight = Math.max(maxConsecutiveRight, rightIndentedLines);
+            } else {
+                rightIndentedLines = 0;
             }
         }
-        if (!hasWrapIndent) return false;
+        boolean hasLeftWrap = leftIndentedLines >= 3 || hasLeftIndentVariation;
+        boolean hasRightWrap = maxConsecutiveRight >= 3;
+        if (!hasLeftWrap && !hasRightWrap) return false;
 
         // 행을 indent 패턴 그룹으로 분할
         // 같은 indent 패턴(좌/우 밀림 유사)인 연속 행을 하나의 그룹으로
@@ -397,9 +418,9 @@ public class ResolvedToASTBuilder {
             double indL = cl.wrapIndentLeft();
             double indR = cl.wrapIndentRight();
 
-            // indent 변화 감지 (2pt 허용 오차)
+            // indent 변화 분할 기준: 왼쪽 또는 오른쪽의 큰 변화 (10pt 이상)
             boolean indentChanged = Math.abs(indL - curIndentL) > 2.0
-                    || Math.abs(indR - curIndentR) > 2.0;
+                    || (Math.abs(indR - curIndentR) > 10.0 && (indR > 10.0 || curIndentR > 10.0));
 
             if (indentChanged && !currentGroup.isEmpty()) {
                 groups.add(currentGroup);
