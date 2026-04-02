@@ -2899,7 +2899,26 @@ function splitRunByStoryChars(story, rng, runData, para) {
             rngStart = rngFirstIdx - paraFirstIdx;
         } catch (e) {}
         if (rngStart < 0) rngStart = 0;
-        var rngLen = Math.min(rngCharCount, paraCharCount - rngStart);
+
+        // FFFC 분할된 partRun인 경우: runData.text가 rng.contents의 부분 문자열
+        // → rng 내에서 partRun 텍스트의 실제 시작 위치를 찾아 rngStart 보정
+        var runText = runData.text || "";
+        var rngContents = "";
+        try { rngContents = rng.contents; } catch (e) {}
+        if (runText.length < rngCharCount && rngContents.indexOf("\uFFFC") >= 0) {
+            // rng 원본에서 runText의 시작 위치 찾기 (FFFC 포함 인덱스)
+            var searchIdx = rngContents.indexOf(runText);
+            if (searchIdx > 0) {
+                rngStart += searchIdx;
+            } else if (searchIdx < 0 && runText.length > 3) {
+                // 정확한 매칭 실패 시 앞부분 3자로 검색
+                var key3 = runText.substring(0, 3);
+                var keyIdx = rngContents.indexOf(key3);
+                if (keyIdx > 0) rngStart += keyIdx;
+            }
+        }
+
+        var rngLen = Math.min(runText.length > 0 ? runText.length : rngCharCount, paraCharCount - rngStart);
         if (rngLen <= 1) return [runData];
 
         // DOM 접근 캐시 (동일 인덱스 재접근 방지)
