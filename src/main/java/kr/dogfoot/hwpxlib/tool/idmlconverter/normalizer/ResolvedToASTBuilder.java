@@ -477,48 +477,24 @@ public class ResolvedToASTBuilder {
                 String lineText = cl.text();
                 if (lineText != null && !lineText.isEmpty()) {
                     if (lineText.endsWith("\r")) lineText = lineText.substring(0, lineText.length() - 1);
-                    // composedLine의 모든 런 스타일 적용 + 인라인 객체(\uFFFC) 처리
+                    // composedLine의 모든 런 스타일 적용 (첫 런만이 아님)
                     if (cl.runs() != null && !cl.runs().isEmpty()) {
                         for (ResolvedTextFrame.ComposedRun cr : cl.runs()) {
                             String runText = cr.text();
                             if (runText == null || runText.isEmpty()) continue;
                             if (runText.endsWith("\r")) runText = runText.substring(0, runText.length() - 1);
-                            if (runText.contains("\uFFFC")) {
-                                // \uFFFC 포함 → 텍스트와 인라인 객체 분리
-                                String[] ffParts = runText.split("\uFFFC", -1);
-                                for (int ffi = 0; ffi < ffParts.length; ffi++) {
-                                    if (!ffParts[ffi].isEmpty()) {
-                                        ASTTextRun tr = new ASTTextRun();
-                                        tr.text(ffParts[ffi]);
-                                        if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
-                                        if (cr.fontFamily() != null) tr.fontFamily(cr.fontFamily());
-                                        if (cr.fontStyle() != null) tr.fontStyle(cr.fontStyle());
-                                        if (cr.fontSize() != null && cr.fontSize() > 0)
-                                            tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
-                                        curPara.addItem(tr);
-                                    }
-                                    if (ffi < ffParts.length - 1) {
-                                        // \uFFFC 위치 → 인라인 객체 (resolved anchoredObjectId로 로드)
-                                        // composedRun에 anchoredObjectId가 없으므로 빈칸 대체
-                                        ASTTextRun space = new ASTTextRun();
-                                        space.text(" ");
-                                        curPara.addItem(space);
-                                    }
-                                }
-                            } else {
-                                ASTTextRun run = new ASTTextRun();
-                                run.text(runText);
-                                if (cr.fillColor() != null) run.textColor(resolveColorToHex(cr.fillColor()));
-                                if (cr.fontFamily() != null) run.fontFamily(cr.fontFamily());
-                                if (cr.fontStyle() != null) run.fontStyle(cr.fontStyle());
-                                if (cr.fontSize() != null && cr.fontSize() > 0)
-                                    run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
-                                curPara.addItem(run);
-                            }
+                            ASTTextRun run = new ASTTextRun();
+                            run.text(runText);
+                            if (cr.fillColor() != null) run.textColor(resolveColorToHex(cr.fillColor()));
+                            if (cr.fontFamily() != null) run.fontFamily(cr.fontFamily());
+                            if (cr.fontStyle() != null) run.fontStyle(cr.fontStyle());
+                            if (cr.fontSize() != null && cr.fontSize() > 0)
+                                run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
+                            curPara.addItem(run);
                         }
                     } else {
                         ASTTextRun run = new ASTTextRun();
-                        run.text(lineText.replace("\uFFFC", " ")); // 인라인 마커 → 공백
+                        run.text(lineText);
                         curPara.addItem(run);
                     }
                 }
