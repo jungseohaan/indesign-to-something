@@ -464,8 +464,23 @@ public class ResolvedToASTBuilder {
             block.height(CoordinateConverter.pointsToHwpunits(groupH));
             block.zOrder(tf.zOrder());
             block.columnCount(1);
-            // composedLines 텍스트로 직접 단락 생성
-            // (Phase 3 분배는 동일 sourceId 블록의 단락 경계 분할이 불안정하므로 직접 생성)
+            // composedLines 텍스트로 직접 단락 생성 + 인라인 객체 로드
+            // resolved Story에서 anchoredObjectId 목록 수집 (인라인 객체 로드용)
+            List<Integer> storyAnchorIds = new ArrayList<>();
+            ResolvedStory rs = resolvedData.getStory(tf.storyId());
+            if (rs != null) {
+                for (ResolvedParagraph rp : rs.paragraphs()) {
+                    if (rp.runs() != null) {
+                        for (ResolvedRun rr : rp.runs()) {
+                            if (rr.anchoredObjectId() != null) {
+                                storyAnchorIds.add(rr.anchoredObjectId());
+                            }
+                        }
+                    }
+                }
+            }
+            int anchorIdx = 0;
+
             int prevParaIdx = -1;
             ASTParagraph curPara = null;
             for (ResolvedTextFrame.ComposedLine cl : group) {
@@ -477,24 +492,47 @@ public class ResolvedToASTBuilder {
                 String lineText = cl.text();
                 if (lineText != null && !lineText.isEmpty()) {
                     if (lineText.endsWith("\r")) lineText = lineText.substring(0, lineText.length() - 1);
-                    // composedLine의 모든 런 스타일 적용 (첫 런만이 아님)
                     if (cl.runs() != null && !cl.runs().isEmpty()) {
                         for (ResolvedTextFrame.ComposedRun cr : cl.runs()) {
                             String runText = cr.text();
                             if (runText == null || runText.isEmpty()) continue;
                             if (runText.endsWith("\r")) runText = runText.substring(0, runText.length() - 1);
-                            ASTTextRun run = new ASTTextRun();
-                            run.text(runText);
-                            if (cr.fillColor() != null) run.textColor(resolveColorToHex(cr.fillColor()));
-                            if (cr.fontFamily() != null) run.fontFamily(cr.fontFamily());
-                            if (cr.fontStyle() != null) run.fontStyle(cr.fontStyle());
-                            if (cr.fontSize() != null && cr.fontSize() > 0)
-                                run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
-                            curPara.addItem(run);
+                            // \uFFFC → 인라인 객체 로드
+                            if (runText.contains("\uFFFC")) {
+                                String[] parts = runText.split("\uFFFC", -1);
+                                for (int ffi = 0; ffi < parts.length; ffi++) {
+                                    if (!parts[ffi].isEmpty()) {
+                                        ASTTextRun tr = new ASTTextRun();
+                                        tr.text(parts[ffi]);
+                                        if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
+                                        if (cr.fontFamily() != null) tr.fontFamily(cr.fontFamily());
+                                        if (cr.fontStyle() != null) tr.fontStyle(cr.fontStyle());
+                                        if (cr.fontSize() != null && cr.fontSize() > 0)
+                                            tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
+                                        curPara.addItem(tr);
+                                    }
+                                    if (ffi < parts.length - 1 && anchorIdx < storyAnchorIds.size()) {
+                                        int aid = storyAnchorIds.get(anchorIdx++);
+                                        ASTInlineObject inlineObj = loadInlineObject(aid);
+                                        if (inlineObj != null) {
+                                            curPara.addItem(inlineObj);
+                                        }
+                                    }
+                                }
+                            } else {
+                                ASTTextRun run = new ASTTextRun();
+                                run.text(runText);
+                                if (cr.fillColor() != null) run.textColor(resolveColorToHex(cr.fillColor()));
+                                if (cr.fontFamily() != null) run.fontFamily(cr.fontFamily());
+                                if (cr.fontStyle() != null) run.fontStyle(cr.fontStyle());
+                                if (cr.fontSize() != null && cr.fontSize() > 0)
+                                    run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
+                                curPara.addItem(run);
+                            }
                         }
                     } else {
                         ASTTextRun run = new ASTTextRun();
-                        run.text(lineText);
+                        run.text(lineText.replace('\uFFFC', ' '));
                         curPara.addItem(run);
                     }
                 }
