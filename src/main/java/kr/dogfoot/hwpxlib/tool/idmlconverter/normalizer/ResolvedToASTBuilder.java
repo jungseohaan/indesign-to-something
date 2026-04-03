@@ -125,7 +125,10 @@ public class ResolvedToASTBuilder {
         // Phase 4: 테이블 포함 TextFrame → ASTTable 변환
         placeTablesFromIDML(sections);
 
-        // Phase 5: 페이지 배경 PNG 주입
+        // Phase 5: textwrap 글상자 분할 (변환 완료된 블록을 wrapIndent 기반으로 분할)
+        splitByWrapIndent(sections);
+
+        // Phase 6: 페이지 배경 PNG 주입
         injectPageBackgrounds(sections);
 
         System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
@@ -311,9 +314,8 @@ public class ResolvedToASTBuilder {
             // composedLines 기반 글상자 분할
             if (tf.composedLines() != null && tf.composedLines().size() > 1) {
                 // 1) wrap indent 기반 분할 (텍스트가 이미지를 비껴가는 경우)
-                if (placeByWrapIndent(tf, section, pageLeft, pageTop)) {
-                    continue;
-                }
+                // placeByWrapIndent는 Phase 5에서 후처리 (Phase 3 변환 파이프라인 유지)
+                // if (placeByWrapIndent(tf, section, pageLeft, pageTop)) continue;
                 // 2) Y 점프 기반 분할 (큰 수직 갭이 있는 경우)
                 if (placeByYGapSplit(tf, section, pageLeft, pageTop)) {
                     continue;
@@ -366,10 +368,186 @@ public class ResolvedToASTBuilder {
     // Phase 2a: composedLines 기반 글상자 배치
     // ═══════════════════════════════════════════════════
 
+    // ═══════════════════════════════════════════════════
+    // Phase 5: textwrap 글상자 분할 (후처리)
+    // Phase 3에서 완성된 블록을 composedLine wrapIndent 기반으로 분할.
+    // 런 분할, 인라인 처리, 폰트 매핑 등이 모두 적용된 후 실행.
+    // ═══════════════════════════════════════════════════
+
+    private void splitByWrapIndent(List<ASTSection> sections) {
+        int splitCount = 0;
+        for (ASTSection section : sections) {
+            List<ASTBlock> newBlocks = new ArrayList<>();
+            for (ASTBlock blk : section.blocks()) {
+                if (!(blk instanceof ASTTextFrameBlock)) {
+                    newBlocks.add(blk);
+                    continue;
+                }
+                ASTTextFrameBlock tfb = (ASTTextFrameBlock) blk;
+                // sourceId → resolved TextFrame → composedLines
+                String hexPart = tfb.sourceId() != null && tfb.sourceId().startsWith("u")
+                        ? tfb.sourceId().substring(1) : null;
+                if (hexPart == null) { newBlocks.add(blk); continue; }
+                if (hexPart.contains("_")) hexPart = hexPart.substring(0, hexPart.indexOf('_'));
+                String domId;
+                try { domId = String.valueOf(Integer.parseInt(hexPart, 16)); }
+                catch (NumberFormatException e) { newBlocks.add(blk); continue; }
+
+                ResolvedTextFrame rtf = resolvedData.getTextFrame(domId);
+                if (rtf == null || rtf.composedLines() == null || rtf.composedLines().size() < 2) {
+                    newBlocks.add(blk);
+                    continue;
+                }
+
+                List<ResolvedTextFrame.ComposedLine> lines = rtf.composedLines();
+
+                // wrap 감지: 오른쪽 indent > 30pt가 3행 이상 연속
+                int rightIndentedLines = 0;
+                int maxConsecutiveRight = 0;
+                for (int i = 0; i < lines.size(); i++) {
+                    double indR = lines.get(i).wrapIndentRight();
+                    if (indR > 30.0 && i < lines.size() - 1) {
+                        rightIndentedLines++;
+                        maxConsecutiveRight = Math.max(maxConsecutiveRight, rightIndentedLines);
+                    } else {
+                        rightIndentedLines = 0;
+                    }
+                }
+                if (maxConsecutiveRight < 3) { newBlocks.add(blk); continue; }
+
+                // indent 패턴으로 행 그룹 분할
+                List<List<ResolvedTextFrame.ComposedLine>> groups = new ArrayList<>();
+                List<ResolvedTextFrame.ComposedLine> currentGroup = new ArrayList<>();
+                double curIndentR = 0;
+                for (int i = 0; i < lines.size(); i++) {
+                    ResolvedTextFrame.ComposedLine cl = lines.get(i);
+                    double indR = cl.wrapIndentRight();
+                    boolean isLastLine = (i == lines.size() - 1);
+                    boolean indentChanged = !isLastLine
+                            && (Math.abs(indR - curIndentR) > 30.0 && (indR > 30.0 || curIndentR > 30.0));
+                    if (indentChanged && !currentGroup.isEmpty()) {
+                        groups.add(currentGroup);
+                        currentGroup = new ArrayList<>();
+                    }
+                    currentGroup.add(cl);
+                    curIndentR = indR;
+                }
+                if (!currentGroup.isEmpty()) groups.add(currentGroup);
+                if (groups.size() <= 1) { newBlocks.add(blk); continue; }
+
+                // 블록의 단락 텍스트를 연결하여 문자 범위 매핑
+                StringBuilder storyText = new StringBuilder();
+                List<int[]> paraRanges = new ArrayList<>();
+                if (tfb.paragraphs() != null) {
+                    for (ASTParagraph p : tfb.paragraphs()) {
+                        int s = storyText.length();
+                        String pt = getParaPlainText(p);
+                        storyText.append(pt != null ? pt : "");
+                        paraRanges.add(new int[]{s, storyText.length()});
+                    }
+                }
+
+                // 각 그룹의 문자 범위 계산 (composedLine 텍스트 누적)
+                double[] gb = rtf.geometricBounds();
+                double frameW = (gb[3] - gb[1]) * scaleFactor; // mm → pt
+
+                int charOffset = 0;
+                for (int gi = 0; gi < groups.size(); gi++) {
+                    List<ResolvedTextFrame.ComposedLine> group = groups.get(gi);
+                    ResolvedTextFrame.ComposedLine first = group.get(0);
+                    ResolvedTextFrame.ComposedLine last = group.get(group.size() - 1);
+
+                    // 그룹의 indent
+                    double indR = 0;
+                    for (ResolvedTextFrame.ComposedLine cl : group) {
+                        indR = Math.max(indR, cl.wrapIndentRight());
+                    }
+                    double indL = 0;
+                    for (ResolvedTextFrame.ComposedLine cl : group) {
+                        indL = Math.max(indL, cl.wrapIndentLeft());
+                    }
+
+                    double groupW = frameW - indL * scaleFactor - indR * scaleFactor;
+                    double groupH = (last.bounds()[2] - first.bounds()[0]) * scaleFactor;
+                    double groupY = tfb.y() + CoordinateConverter.pointsToHwpunits(
+                            (first.bounds()[0] - gb[0]) * scaleFactor);
+
+                    if (groupW <= 0 || groupH <= 0) {
+                        charOffset += groupTextLen(group);
+                        continue;
+                    }
+
+                    // 그룹의 문자 범위
+                    int groupCharStart = charOffset;
+                    int groupCharEnd = charOffset + groupTextLen(group);
+                    charOffset = groupCharEnd;
+
+                    // 새 블록 생성
+                    ASTTextFrameBlock splitBlock = new ASTTextFrameBlock();
+                    splitBlock.sourceId(tfb.sourceId());
+                    splitBlock.x(tfb.x());
+                    splitBlock.y((long) groupY);
+                    splitBlock.width(CoordinateConverter.pointsToHwpunits(groupW));
+                    splitBlock.height(CoordinateConverter.pointsToHwpunits(groupH));
+                    splitBlock.zOrder(tfb.zOrder());
+                    splitBlock.columnCount(1);
+                    splitBlock.insetTop(tfb.insetTop());
+                    splitBlock.insetLeft(tfb.insetLeft());
+                    splitBlock.insetBottom(tfb.insetBottom());
+                    splitBlock.insetRight(tfb.insetRight());
+
+                    // 문자 범위에 해당하는 단락 분배
+                    if (tfb.paragraphs() != null) {
+                        for (int pi = 0; pi < tfb.paragraphs().size(); pi++) {
+                            int paraStart = paraRanges.get(pi)[0];
+                            int paraEnd = paraRanges.get(pi)[1];
+                            if (paraEnd <= groupCharStart) continue;
+                            if (paraStart >= groupCharEnd) break;
+                            if (paraStart >= groupCharStart && paraEnd <= groupCharEnd) {
+                                splitBlock.addParagraph(tfb.paragraphs().get(pi));
+                            } else if (paraStart < groupCharEnd && paraEnd > groupCharEnd) {
+                                int cutLen = groupCharEnd - paraStart;
+                                ASTParagraph trimmed = createSplitParagraph(tfb.paragraphs().get(pi),
+                                        getParaPlainText(tfb.paragraphs().get(pi)) != null
+                                                ? getParaPlainText(tfb.paragraphs().get(pi)).substring(0, Math.min(cutLen, getParaPlainText(tfb.paragraphs().get(pi)).length()))
+                                                : "");
+                                if (trimmed != null) splitBlock.addParagraph(trimmed);
+                            } else if (paraStart < groupCharStart && paraEnd > groupCharStart) {
+                                int skipLen = groupCharStart - paraStart;
+                                String fullText = getParaPlainText(tfb.paragraphs().get(pi));
+                                String contText = (fullText != null && skipLen < fullText.length())
+                                        ? fullText.substring(skipLen) : "";
+                                ASTParagraph cont = createContinuationParagraph(tfb.paragraphs().get(pi), skipLen, contText);
+                                if (cont != null) splitBlock.addParagraph(cont);
+                            }
+                        }
+                    }
+
+                    newBlocks.add(splitBlock);
+                }
+                splitCount++;
+            }
+            // 블록 리스트 교체
+            section.blocks().clear();
+            for (ASTBlock b : newBlocks) section.addBlock(b);
+        }
+        if (splitCount > 0) {
+            System.err.println("[SplitByWrapIndent] " + splitCount + " blocks split");
+        }
+    }
+
+    private int groupTextLen(List<ResolvedTextFrame.ComposedLine> group) {
+        int len = 0;
+        for (ResolvedTextFrame.ComposedLine cl : group) {
+            String t = cl.text();
+            if (t != null) len += t.replace("\r", "").length();
+        }
+        return len;
+    }
+
     /**
-     * composedLines의 wrapIndent(X축 밀림)를 감지하여 글상자를 분할한다.
-     * wrap indent가 변하는 행 그룹을 별도 글상자로 분할하여 각각의 X/width를 조정.
-     * wrap indent가 없으면 false 반환 → 기존 경로 사용.
+     * (레거시) composedLines의 wrapIndent(X축 밀림)를 감지하여 글상자를 분할한다.
+     * Phase 5 splitByWrapIndent로 대체됨.
      */
     private boolean placeByWrapIndent(ResolvedTextFrame tf, ASTSection section,
                                        double pageLeft, double pageTop) {
@@ -452,6 +630,9 @@ public class ResolvedToASTBuilder {
             double groupY = frameY + (first.bounds()[0] - gb[0]);
             double groupW = frameW - indL - indR;
             double groupH = last.bounds()[2] - first.bounds()[0];
+
+            // 줄바꿈 방지: groupW가 너무 좁으면 프레임 전체 폭으로 확장
+            if (groupW < frameW * 0.15) groupW = frameW;
 
             if (groupX < 0) groupX = 0;
             if (groupW <= 0 || groupH <= 0) continue;
