@@ -51,6 +51,11 @@ public class ASTTextFrameBlock extends ASTBlock {
     // 겹침 감지: SQUARE textWrap 적용 플래그
     private boolean textWrapSquare;
 
+    // textwrap 연결 글상자 (wrapIndent 분할)
+    private String wrapGroupId;    // 같은 원본 프레임의 분할 블록끼리 공유
+    private int wrapGroupIndex = -1; // 그룹 내 순서 (0=첫 번째, 텍스트 보유)
+    private int wrapGroupSize;     // 그룹 전체 크기
+
     // composedLines 기반 분할: Story 내 문자 범위
     private int composedCharStart = -1;
     private int composedCharEnd = -1;
@@ -158,6 +163,13 @@ public class ASTTextFrameBlock extends ASTBlock {
     public void composedCharStart(int v) { this.composedCharStart = v; }
     public int composedCharEnd() { return composedCharEnd; }
     public void composedCharEnd(int v) { this.composedCharEnd = v; }
+
+    public String wrapGroupId() { return wrapGroupId; }
+    public void wrapGroupId(String v) { this.wrapGroupId = v; }
+    public int wrapGroupIndex() { return wrapGroupIndex; }
+    public void wrapGroupIndex(int v) { this.wrapGroupIndex = v; }
+    public int wrapGroupSize() { return wrapGroupSize; }
+    public void wrapGroupSize(int v) { this.wrapGroupSize = v; }
 
     /** 실제 렌더링에 사용할 폭. narrowedWidth가 설정되면 그 값, 아니면 원래 width. */
     public long effectiveWidth() {

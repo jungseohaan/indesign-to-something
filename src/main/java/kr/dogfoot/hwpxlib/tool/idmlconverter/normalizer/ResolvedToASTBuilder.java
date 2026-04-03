@@ -421,11 +421,13 @@ public class ResolvedToASTBuilder {
 
         System.err.println("[WrapIndent] TF " + tf.id() + " → " + groups.size() + " groups");
 
-        // 각 그룹을 별도 글상자로 배치
+        // 각 그룹을 연결 글상자로 배치
         double[] gb = tf.geometricBounds();
         double frameW = gb[3] - gb[1];
+        String wrapGroupId = "wrap_" + tf.id();
 
-        for (List<ResolvedTextFrame.ComposedLine> group : groups) {
+        for (int groupIdx = 0; groupIdx < groups.size(); groupIdx++) {
+            List<ResolvedTextFrame.ComposedLine> group = groups.get(groupIdx);
             ResolvedTextFrame.ComposedLine first = group.get(0);
             ResolvedTextFrame.ComposedLine last = group.get(group.size() - 1);
 
@@ -464,79 +466,23 @@ public class ResolvedToASTBuilder {
             block.height(CoordinateConverter.pointsToHwpunits(groupH));
             block.zOrder(tf.zOrder());
             block.columnCount(1);
-            // composedLines 텍스트로 직접 단락 생성 + 인라인 객체 로드
-            // resolved Story에서 anchoredObjectId 목록 수집 (인라인 객체 로드용)
-            List<Integer> storyAnchorIds = new ArrayList<>();
-            ResolvedStory rs = resolvedData.getStory(tf.storyId());
-            if (rs != null) {
-                for (ResolvedParagraph rp : rs.paragraphs()) {
-                    if (rp.runs() != null) {
-                        for (ResolvedRun rr : rp.runs()) {
-                            if (rr.anchoredObjectId() != null) {
-                                storyAnchorIds.add(rr.anchoredObjectId());
-                            }
-                        }
-                    }
-                }
-            }
-            int anchorIdx = 0;
 
-            int prevParaIdx = -1;
-            ASTParagraph curPara = null;
-            for (ResolvedTextFrame.ComposedLine cl : group) {
-                if (cl.paraIndex() != prevParaIdx || curPara == null) {
-                    curPara = new ASTParagraph();
-                    block.addParagraph(curPara);
-                    prevParaIdx = cl.paraIndex();
-                }
-                String lineText = cl.text();
-                if (lineText != null && !lineText.isEmpty()) {
-                    if (lineText.endsWith("\r")) lineText = lineText.substring(0, lineText.length() - 1);
-                    if (cl.runs() != null && !cl.runs().isEmpty()) {
-                        for (ResolvedTextFrame.ComposedRun cr : cl.runs()) {
-                            String runText = cr.text();
-                            if (runText == null || runText.isEmpty()) continue;
-                            if (runText.endsWith("\r")) runText = runText.substring(0, runText.length() - 1);
-                            // \uFFFC → 인라인 객체 로드
-                            if (runText.contains("\uFFFC")) {
-                                String[] parts = runText.split("\uFFFC", -1);
-                                for (int ffi = 0; ffi < parts.length; ffi++) {
-                                    if (!parts[ffi].isEmpty()) {
-                                        ASTTextRun tr = new ASTTextRun();
-                                        tr.text(parts[ffi]);
-                                        if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
-                                        if (cr.fontFamily() != null) tr.fontFamily(cr.fontFamily());
-                                        if (cr.fontStyle() != null) tr.fontStyle(cr.fontStyle());
-                                        if (cr.fontSize() != null && cr.fontSize() > 0)
-                                            tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
-                                        curPara.addItem(tr);
-                                    }
-                                    if (ffi < parts.length - 1 && anchorIdx < storyAnchorIds.size()) {
-                                        int aid = storyAnchorIds.get(anchorIdx++);
-                                        ASTInlineObject inlineObj = loadInlineObject(aid);
-                                        if (inlineObj != null) {
-                                            curPara.addItem(inlineObj);
-                                        }
-                                    }
-                                }
-                            } else {
-                                ASTTextRun run = new ASTTextRun();
-                                run.text(runText);
-                                if (cr.fillColor() != null) run.textColor(resolveColorToHex(cr.fillColor()));
-                                if (cr.fontFamily() != null) run.fontFamily(cr.fontFamily());
-                                if (cr.fontStyle() != null) run.fontStyle(cr.fontStyle());
-                                if (cr.fontSize() != null && cr.fontSize() > 0)
-                                    run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
-                                curPara.addItem(run);
-                            }
-                        }
-                    } else {
-                        ASTTextRun run = new ASTTextRun();
-                        run.text(lineText.replace('\uFFFC', ' '));
-                        curPara.addItem(run);
-                    }
-                }
+            // 연결 글상자 메타데이터
+            block.wrapGroupId(wrapGroupId);
+            block.wrapGroupIndex(groupIdx);
+            block.wrapGroupSize(groups.size());
+
+            // 프레임 속성 복사
+            if (tf.insetSpacing() != null) {
+                double[] inset = tf.insetSpacing();
+                block.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
+                block.insetLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
+                block.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
+                block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
             }
+
+            // 단락은 비워둠 → Phase 3에서 IDML 기반으로 채움 (첫 블록만)
+            // 후속 블록은 HWPX 연결 글상자로 자동 텍스트 흐름
 
             section.addBlock(block);
         }
@@ -1067,12 +1013,15 @@ public class ResolvedToASTBuilder {
             }
 
             // 오버플로우 감지: 모든 블록의 frameVisibleText가 거의 비어있고 Story가 길면 할당 안 함
+            // 단, textwrap 연결 글상자는 제외 (frameVisibleTextLength 미설정)
             if (storyTextLen > 20) {
+                boolean hasWrapBlock = false;
                 boolean allBlocksEmpty = true;
                 for (ASTTextFrameBlock b : blocks) {
+                    if (b.wrapGroupId() != null) { hasWrapBlock = true; break; }
                     if (b.frameVisibleTextLength() > 1) { allBlocksEmpty = false; break; }
                 }
-                if (allBlocksEmpty) continue;
+                if (!hasWrapBlock && allBlocksEmpty) continue;
             }
 
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
@@ -2512,6 +2461,26 @@ public class ResolvedToASTBuilder {
 
     private void distributeParagraphs(List<ASTParagraph> paragraphs,
                                        List<ASTTextFrameBlock> blocks, String storyId) {
+        // 연결 글상자(textwrap 분할): 첫 번째 블록(wrapGroupIndex=0)에만 모든 단락 할당
+        // 후속 블록은 HWPX 연결 글상자로 자동 텍스트 흐름
+        {
+            ASTTextFrameBlock wrapFirst = null;
+            for (ASTTextFrameBlock b : blocks) {
+                if (b.wrapGroupId() != null && b.wrapGroupIndex() == 0) {
+                    wrapFirst = b;
+                    break;
+                }
+            }
+            if (wrapFirst != null) {
+                System.err.println("[DistWrap] storyId=" + storyId + " blocks=" + blocks.size()
+                    + " paras=" + paragraphs.size() + " → wrapFirst=" + wrapFirst.sourceId());
+                for (ASTParagraph p : paragraphs) {
+                    wrapFirst.addParagraph(p);
+                }
+                return;
+            }
+        }
+
         // composedLines 분할 블록 감지: composedCharStart >= 0인 블록이 있으면
         boolean hasComposedBlocks = false;
         for (ASTTextFrameBlock b : blocks) {

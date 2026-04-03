@@ -342,6 +342,12 @@ public class HwpxTextBoxBuilder {
         // 음수 또는 0 크기 블록 건너뜀 (페이지 밖 객체)
         if (w <= 0 || h <= 0) return;
 
+        // textwrap 연결 글상자 → Rectangle+DrawText + 링크
+        if (block.wrapGroupId() != null && block.wrapGroupSize() > 1) {
+            convertLinkedFloatingBlock(framePara, block, w, h);
+            return;
+        }
+
         // 회전이 있는 블록은 Table 대신 Rectangle(DrawTextBox)로 변환
         short rotAngle = (short) Math.round(block.rotationAngle());
         if (rotAngle != 0) {
@@ -815,6 +821,78 @@ public class HwpxTextBoxBuilder {
                 .vertOffsetAnd(block.y())
                 .horzOffset(block.x());
 
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+    }
+
+    /**
+     * textwrap 분할 연결 글상자: Rectangle+DrawText + linkListIDRef 체인.
+     * 첫 번째 블록에 모든 텍스트, 후속 블록은 빈 단락 (HWPX 자동 텍스트 흐름).
+     */
+    private void convertLinkedFloatingBlock(Para framePara, ASTTextFrameBlock block,
+                                             long w, long h) {
+        Run anchorRun = framePara.addNewRun();
+        anchorRun.charPrIDRef("0");
+        Rectangle rect = anchorRun.addNewRectangle();
+        String shapeId = HwpxUtil.nextShapeId();
+
+        rect.idAnd(shapeId).zOrderAnd(block.zOrder())
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false).dropcapstyleAnd(resolveDropCapStyle(block.paragraphs()));
+        rect.hrefAnd("").groupLevelAnd((short) 0).instidAnd(HwpxUtil.nextShapeId());
+        rect.createOffset(); rect.offset().set(0L, 0L);
+        rect.createOrgSz(); rect.orgSz().set(w, h);
+        rect.createCurSz(); rect.curSz().set(w, h);
+        rect.createFlip(); rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0).centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+
+        setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(), block.strokeType(), block.strokeTint());
+        setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint());
+
+        rect.createDrawText();
+        DrawText dt = rect.drawText();
+        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
+        dt.createTextMargin();
+        dt.textMargin().leftAnd(block.insetLeft()).rightAnd(block.insetRight())
+                .topAnd(block.insetTop()).bottomAnd(block.insetBottom());
+
+        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
+        VerticalAlign2 cellVAlign = mapVerticalJustification(block.verticalJustification());
+        dt.createSubList();
+        SubList subList = dt.subList();
+        subList.idAnd("").textDirectionAnd(textDir).lineWrapAnd(LineWrapMethod.BREAK).vertAlignAnd(cellVAlign);
+        applySubListLink(subList, block.wrapGroupId());
+
+        if (block.wrapGroupIndex() == 0) {
+            for (ASTParagraph para : block.paragraphs()) {
+                paragraphBuilder.addParagraphToSubList(subList, para);
+            }
+        }
+        if (subList.countOfPara() == 0) {
+            paragraphBuilder.addEmptySubListPara(subList);
+        }
+
+        rect.ratioAnd((short) 0);
+        rect.createPt0(); rect.pt0().set(0L, 0L);
+        rect.createPt1(); rect.pt1().set(w, 0L);
+        rect.createPt2(); rect.pt2().set(w, h);
+        rect.createPt3(); rect.pt3().set(0L, h);
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE).protectAnd(false);
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false).affectLSpacingAnd(false).flowWithTextAnd(false)
+                .allowOverlapAnd(true).holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER).horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP).horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(block.y()).horzOffset(block.x());
         rect.createOutMargin();
         rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
     }
