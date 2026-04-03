@@ -3195,8 +3195,21 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     try { runData.fontStyle = rng.fontStyle; } catch (e) {}
                     try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
                     try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
-                    // GREP 스타일(폰트/색상)은 Java에서 IDML GREP 규칙 기반으로 처리
-                    // ExtendScript에서는 textStyleRanges 값을 그대로 사용
+                    // GREP/Nested 스타일 색상 감지: 첫 번째 비제어 문자의 fillColor 확인
+                    // textStyleRanges는 GREP 색상을 반영하지 않으므로 characters로 보정
+                    try {
+                        var rngChars = rng.characters;
+                        for (var gci = 0; gci < rngChars.length && gci < 10; gci++) {
+                            var gc = rngChars[gci].contents;
+                            if (gc === "\uFFFC" || gc === "\u0016" || gc === "\u0018"
+                                || gc === "\t" || gc === "\r" || gc === "\n" || gc === " ") continue;
+                            var charFc = rngChars[gci].fillColor ? rngChars[gci].fillColor.name : null;
+                            if (charFc && charFc !== runData.fillColor) {
+                                runData.fillColor = charFc;
+                            }
+                            break;
+                        }
+                    } catch (eGrepColor) {}
                     // 확장 속성
                     try { runData.tracking = rng.tracking; } catch (e) {}
                     try { runData.horizontalScale = rng.horizontalScale; } catch (e) {}
