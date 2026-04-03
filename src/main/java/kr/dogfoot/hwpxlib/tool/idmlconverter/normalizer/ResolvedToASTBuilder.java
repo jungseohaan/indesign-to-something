@@ -415,24 +415,40 @@ public class ResolvedToASTBuilder {
                 }
                 if (maxConsecutiveRight < 3) { newBlocks.add(blk); continue; }
 
-                // indent 패턴으로 행 그룹 분할
+                // indent 패턴으로 행 그룹 분할: 넓은(indR≤30) vs 좁은(indR>30) 연속 구간
+                // 1~2행만 다른 패턴이면 앞/뒤 그룹에 병합 (너무 세밀한 분할 방지)
+                // Step 1: 행별 narrow 판정
+                boolean[] narrowFlags = new boolean[lines.size()];
+                for (int i = 0; i < lines.size(); i++) {
+                    double indR = lines.get(i).wrapIndentRight();
+                    narrowFlags[i] = indR > 30.0 && i < lines.size() - 1;
+                }
+                // Step 2: 1~2행짜리 좁은(true) 구간만 넓은(false)으로 병합
+                // 넓은 구간은 병합 안 함 (넓은 행을 좁게 만들면 텍스트 잘림)
+                for (int i = 1; i < lines.size() - 1; i++) {
+                    if (narrowFlags[i] && !narrowFlags[i - 1]) {
+                        // 좁은→넓은 변화 지점: 좁은 구간이 1~2행이면 넓은으로 병합
+                        int runLen = 1;
+                        while (i + runLen < lines.size() && narrowFlags[i + runLen]) runLen++;
+                        if (runLen <= 2) {
+                            for (int j = i; j < i + runLen && j < lines.size(); j++) {
+                                narrowFlags[j] = false;
+                            }
+                        }
+                    }
+                }
+                // Step 3: 그룹 생성
                 List<List<ResolvedTextFrame.ComposedLine>> groups = new ArrayList<>();
                 List<ResolvedTextFrame.ComposedLine> currentGroup = new ArrayList<>();
-                double curIndentR = 0;
                 for (int i = 0; i < lines.size(); i++) {
-                    ResolvedTextFrame.ComposedLine cl = lines.get(i);
-                    double indR = cl.wrapIndentRight();
-                    boolean isLastLine = (i == lines.size() - 1);
-                    boolean indentChanged = !isLastLine
-                            && (Math.abs(indR - curIndentR) > 30.0 && (indR > 30.0 || curIndentR > 30.0));
-                    if (indentChanged && !currentGroup.isEmpty()) {
+                    if (i > 0 && narrowFlags[i] != narrowFlags[i - 1] && !currentGroup.isEmpty()) {
                         groups.add(currentGroup);
                         currentGroup = new ArrayList<>();
                     }
-                    currentGroup.add(cl);
-                    curIndentR = indR;
+                    currentGroup.add(lines.get(i));
                 }
                 if (!currentGroup.isEmpty()) groups.add(currentGroup);
+                System.err.println("[WrapPhase5] tf=" + domId + " groups=" + groups.size() + " narrowFlags=" + java.util.Arrays.toString(narrowFlags));
                 if (groups.size() <= 1) { newBlocks.add(blk); continue; }
 
                 // 블록의 단락 텍스트를 연결하여 문자 범위 매핑
@@ -449,7 +465,8 @@ public class ResolvedToASTBuilder {
 
                 // 각 그룹의 문자 범위 계산 (composedLine 텍스트 누적)
                 double[] gb = rtf.geometricBounds();
-                double frameW = (gb[3] - gb[1]) * scaleFactor; // mm → pt
+                double frameW = gb[3] - gb[1];
+                System.err.println("[WrapPhase5] tf=" + domId + " sourceId=" + tfb.sourceId() + " frameW=" + String.format("%.1f", frameW) + " lines=" + lines.size() + " maxConsR=" + maxConsecutiveRight);
 
                 int charOffset = 0;
                 for (int gi = 0; gi < groups.size(); gi++) {
@@ -457,20 +474,29 @@ public class ResolvedToASTBuilder {
                     ResolvedTextFrame.ComposedLine first = group.get(0);
                     ResolvedTextFrame.ComposedLine last = group.get(group.size() - 1);
 
-                    // 그룹의 indent
+                    // 그룹의 indent: 좁은 그룹은 최소 indR(가장 넓은 행), 넓은 그룹은 0
+                    int firstLineIdx = lines.indexOf(group.get(0));
+                    boolean groupNarrow = firstLineIdx >= 0 && narrowFlags[firstLineIdx];
                     double indR = 0;
-                    for (ResolvedTextFrame.ComposedLine cl : group) {
-                        indR = Math.max(indR, cl.wrapIndentRight());
-                    }
                     double indL = 0;
-                    for (ResolvedTextFrame.ComposedLine cl : group) {
-                        indL = Math.max(indL, cl.wrapIndentLeft());
+                    if (groupNarrow) {
+                        indR = Double.MAX_VALUE;
+                        indL = Double.MAX_VALUE;
+                        for (ResolvedTextFrame.ComposedLine cl : group) {
+                            indR = Math.min(indR, cl.wrapIndentRight());
+                            indL = Math.min(indL, cl.wrapIndentLeft());
+                        }
+                        if (indR == Double.MAX_VALUE) indR = 0;
+                        if (indL == Double.MAX_VALUE) indL = 0;
                     }
 
-                    double groupW = frameW - indL * scaleFactor - indR * scaleFactor;
-                    double groupH = (last.bounds()[2] - first.bounds()[0]) * scaleFactor;
-                    double groupY = tfb.y() + CoordinateConverter.pointsToHwpunits(
-                            (first.bounds()[0] - gb[0]) * scaleFactor);
+                    // frameW, gb는 pt(normalizeToPoints 적용), indent/bounds는 mm → scaleFactor로 변환
+                    double groupW = frameW - (indL + indR) * scaleFactor;
+                    double firstTopPt = first.bounds()[0] * scaleFactor;
+                    double lastBottomPt = last.bounds()[2] * scaleFactor;
+                    double gbTopPt = gb[0]; // 이미 pt
+                    double groupH = lastBottomPt - firstTopPt;
+                    double groupY = tfb.y() + CoordinateConverter.pointsToHwpunits(firstTopPt - gbTopPt);
 
                     if (groupW <= 0 || groupH <= 0) {
                         charOffset += groupTextLen(group);
@@ -523,6 +549,7 @@ public class ResolvedToASTBuilder {
                         }
                     }
 
+                    System.err.println("[WrapSplit] group " + gi + ": w=" + splitBlock.width() + " h=" + splitBlock.height() + " y=" + splitBlock.y() + " paras=" + (splitBlock.paragraphs() != null ? splitBlock.paragraphs().size() : 0));
                     newBlocks.add(splitBlock);
                 }
                 splitCount++;
