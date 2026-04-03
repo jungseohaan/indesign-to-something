@@ -238,29 +238,6 @@ public class ASTToHwpxConverter {
                 ctx.storyLinkIndex.put(entry.getKey(), 0);
             }
         }
-
-        // textwrap 연결 글상자: wrapGroupId → linkId 사전 할당
-        Map<String, Integer> wrapGroupCount = new LinkedHashMap<>();
-        for (ASTSection section : doc.sections()) {
-            for (ASTBlock block : section.blocks()) {
-                if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
-                    ASTTextFrameBlock tfb = (ASTTextFrameBlock) block;
-                    if (tfb.wrapGroupId() != null) {
-                        wrapGroupCount.merge(tfb.wrapGroupId(), 1, Integer::sum);
-                    }
-                }
-            }
-        }
-        for (Map.Entry<String, Integer> entry : wrapGroupCount.entrySet()) {
-            if (entry.getValue() > 1) {
-                List<String> linkIds = new ArrayList<>();
-                for (int i = 0; i < entry.getValue(); i++) {
-                    linkIds.add(String.valueOf(linkIdCounter++));
-                }
-                ctx.storyLinkIds.put(entry.getKey(), linkIds);
-                ctx.storyLinkIndex.put(entry.getKey(), 0);
-            }
-        }
     }
 
     // ── 섹션 변환 ──
