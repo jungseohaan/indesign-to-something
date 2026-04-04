@@ -1503,6 +1503,7 @@ public class ResolvedToASTBuilder {
         for (int i = 0; i < idmlParas.size(); i++) {
             IDMLParagraph ip = idmlParas.get(i);
             ASTParagraph para = new ASTParagraph();
+            boolean hasIdmlInlineAnchors = false; // FFFC 앵커 순서로 인라인 삽입된 경우 true
 
             // 칼럼 브레이크 (ACE 8)
             if (ip.columnBreakAfter()) {
@@ -1747,16 +1748,31 @@ public class ResolvedToASTBuilder {
                     if (text == null || text.isEmpty()) continue;
 
                     if (text.contains("\uFFFC")) {
+                        hasIdmlInlineAnchors = true;
                         String[] parts = text.split("\uFFFC", -1);
+                        // inlineAnchors 순서로 인라인 ID 목록 생성 (FFFC 출현 순서 보장)
                         List<String> inlineIds = new ArrayList<>();
-                        if (run.inlineFrames() != null) {
-                            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame itf : run.inlineFrames()) {
-                                inlineIds.add(itf.selfId());
+                        if (run.inlineAnchors() != null && !run.inlineAnchors().isEmpty()) {
+                            for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+                                if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME
+                                        && run.inlineFrames() != null && anchor.index() < run.inlineFrames().size()) {
+                                    inlineIds.add(run.inlineFrames().get(anchor.index()).selfId());
+                                } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC
+                                        && run.inlineGraphics() != null && anchor.index() < run.inlineGraphics().size()) {
+                                    inlineIds.add(run.inlineGraphics().get(anchor.index()).selfId());
+                                }
                             }
-                        }
-                        if (run.inlineGraphics() != null) {
-                            for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
-                                inlineIds.add(ig.selfId());
+                        } else {
+                            // fallback: inlineFrames + inlineGraphics 순서
+                            if (run.inlineFrames() != null) {
+                                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame itf : run.inlineFrames()) {
+                                    inlineIds.add(itf.selfId());
+                                }
+                            }
+                            if (run.inlineGraphics() != null) {
+                                for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
+                                    inlineIds.add(ig.selfId());
+                                }
                             }
                         }
                         int anchorIdx = 0;
@@ -1845,8 +1861,11 @@ public class ResolvedToASTBuilder {
             // 불릿 단락이면 불릿 이후 런 색상을 검정으로 리셋
             resetBulletParagraphColors(para);
 
-            // 인라인 객체 boundsX 기반 재정렬 (테이블 셀뿐 아니라 일반 TextFrame에서도)
-            ASTTableConverter.reorderInlineObjectsByBoundsX(para);
+            // 인라인 객체 boundsX 기반 재정렬: FFFC 앵커 순서가 없는 경우에만
+            // (IDML 경로에서 FFFC 분할 후 앵커 순서로 삽입된 경우 재정렬하면 순서 깨짐)
+            if (!hasIdmlInlineAnchors) {
+                ASTTableConverter.reorderInlineObjectsByBoundsX(para);
+            }
 
             paragraphs.add(para);
         }
@@ -1866,7 +1885,7 @@ public class ResolvedToASTBuilder {
             text = text.replace("\u0008", "");   // 단독 IndentToHere 제거
             text = text.replace("\n", "");       // Frame Break 제거
             text = text.replace("\t", " ");      // 탭 → 공백 (탭스톱 없는 경우 간격 방지)
-            text = text.replace("\u2009", "");   // Thin Space 제거
+            text = text.replace("\u2009", " ");   // Thin Space → 공백
             text = text.replace("\u2002", "");   // En Space 제거
             text = text.replace("\u2003", "");   // Em Space 제거
             text = text.replace("\u200A", "");   // Hair Space 제거

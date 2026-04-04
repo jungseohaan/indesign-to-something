@@ -86,11 +86,11 @@ public class HwpxParagraphBuilder {
             paraCharPrId = getOrCreateTinyCharPr();
         }
 
-        // 인라인 객체(사각형 박스 등)가 줄 간격보다 크면 줄 간격 확장
-        // lineSpacing이 이미 설정되어 있어도 인라인 객체가 더 크면 확장
+        // 인라인 객체(사각형 박스 등)가 있으면 줄간격을 BETWEEN_LINES(여백만)으로 전환
+        // 인라인 객체 높이에 따라 줄이 자연스럽게 확장됨
         long maxInlineH = maxInlineObjectHeight(astPara);
-        if (maxInlineH > ConverterConstants.INLINE_LINE_SPACING_THRESHOLD) {
-            paraPrId = ensureLineSpacingForInline(paraPrId, maxInlineH);
+        if (maxInlineH > 0) {
+            paraPrId = applyBetweenLinesSpacing(paraPrId, astPara);
         }
 
         // 큰 폰트 인라인 텍스트가 줄간격을 벌리는 것 방지:
@@ -330,6 +330,45 @@ public class HwpxParagraphBuilder {
             }
         }
         return max;
+    }
+
+    /**
+     * 인라인 객체가 있는 단락의 줄간격을 BETWEEN_LINES(여백만)으로 전환.
+     * FIXED leading에서 fontSize를 빼서 줄 사이 여백만 지정하면
+     * 인라인 객체 높이에 따라 줄이 자연스럽게 확장됨.
+     */
+    private String applyBetweenLinesSpacing(String paraPrId, ASTParagraph astPara) {
+        ParaPr basePr = findParaPrById(paraPrId);
+        if (basePr == null) return paraPrId;
+
+        // 인라인 객체 최대 높이
+        long maxObjH = maxInlineObjectHeight(astPara);
+        // 대표 폰트 크기 결정
+        int bodyFs = 0;
+        int bodyMaxLen = 0;
+        for (ASTInlineItem item : astPara.items()) {
+            if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun tr =
+                        (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) item;
+                Integer fs = tr.fontSizeHwpunits();
+                String text = tr.text();
+                int len = (text != null) ? text.trim().length() : 0;
+                if (fs != null && fs > 0 && len > bodyMaxLen) { bodyMaxLen = len; bodyFs = fs; }
+            }
+        }
+        if (bodyFs <= 0) bodyFs = 1000; // 기본 10pt
+        // 여백 = (인라인 객체 높이 - 폰트 크기) × 0.5
+        int betweenValue = (int) Math.max((maxObjH - bodyFs) / 2, bodyFs / 3);
+
+        String newId = ctx.styleRegistry.nextParaPrId();
+        ParaPr newPr = ctx.hwpxFile.headerXMLFile().refList().paraProperties().addNew();
+        newPr.copyFrom(basePr);
+        newPr.id(newId);
+        if (newPr.lineSpacing() == null) {
+            newPr.createLineSpacing();
+        }
+        newPr.lineSpacing().typeAnd(LineSpacingType.BETWEEN_LINES).valueAnd(betweenValue).unit(ValueUnit2.HWPUNIT);
+        return newId;
     }
 
     private String ensureLineSpacingForInline(String paraPrId, long inlineHeight) {
