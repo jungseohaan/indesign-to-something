@@ -288,8 +288,11 @@ public class ResolvedToASTBuilder {
             if (tf.isInline()) {
                 String vis = tf.frameVisibleText();
                 boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 5;
-                if (hasText && !resolvedData.isEditableTextFrame(tf.id())) {
-                    inlineToFloating = true; // 플로팅으로 전환
+                int domIdInt = -1;
+                try { domIdInt = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
+                if (hasText && !resolvedData.isEditableTextFrame(tf.id())
+                        && (domIdInt < 0 || !resolvedData.isRenderedByOtherChannel(domIdInt))) {
+                    inlineToFloating = true; // 플로팅으로 전환 (배경에 미포함 시에만)
                 } else {
                     continue;
                 }
