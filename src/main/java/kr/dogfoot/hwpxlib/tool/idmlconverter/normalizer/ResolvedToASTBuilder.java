@@ -2025,14 +2025,19 @@ public class ResolvedToASTBuilder {
         }
         // IDML에 없는 속성은 ParagraphStyle → resolved 런 순으로 보강
         if (rr != null) {
-            if (tr.fontFamily() == null && rr.fontFamily() != null) {
-                // EH/BT 수식 폰트는 수식 기호가 있는 텍스트에만 적용
-                boolean isEHorBT = EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
-                        || (rr.fontFamily() != null && rr.fontFamily().contains("BT수식"));
-                boolean isSingleLatin = text != null && text.trim().length() == 1
-                        && Character.isLetter(text.trim().charAt(0));
-                if (!isEHorBT || isSingleLatin) {
-                    tr.fontFamily(rr.fontFamily());
+            if (tr.fontFamily() == null) {
+                // ParagraphStyle 기본 폰트 우선 (IDML CSR에 명시 없을 때)
+                if (sc.fontFamily != null) {
+                    tr.fontFamily(sc.fontFamily);
+                } else if (rr.fontFamily() != null) {
+                    // EH/BT 수식 폰트는 수식 기호가 있는 텍스트에만 적용
+                    boolean isEHorBT = EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
+                            || (rr.fontFamily() != null && rr.fontFamily().contains("BT수식"));
+                    boolean isSingleLatin = text != null && text.trim().length() == 1
+                            && Character.isLetter(text.trim().charAt(0));
+                    if (!isEHorBT || isSingleLatin) {
+                        tr.fontFamily(rr.fontFamily());
+                    }
                 }
             }
             if (rr.fontStyle() != null) {
@@ -2045,8 +2050,13 @@ public class ResolvedToASTBuilder {
                     tr.fontStyle(rr.fontStyle());
                 }
             }
-            if (tr.fontSizeHwpunits() == null && rr.fontSize() != null && rr.fontSize() > 0) {
-                tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+            if (tr.fontSizeHwpunits() == null) {
+                // ParagraphStyle 기본 fontSize 우선
+                if (sc.fontSize != null && sc.fontSize > 0) {
+                    tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(sc.fontSize));
+                } else if (rr.fontSize() != null && rr.fontSize() > 0) {
+                    tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+                }
             }
             // horizontalScale: IDML에 없으면 resolved에서 보강
             if (tr.horizontalScale() == null && rr.horizontalScale() != null
@@ -2063,11 +2073,15 @@ public class ResolvedToASTBuilder {
                     tr.horizontalScale((short) rr.horizontalScale().doubleValue());
                 }
             }
-            // FillColor: ParagraphStyle 우선, resolved fallback
-            if (tr.textColor() == null && sc.fillColor != null) {
-                tr.textColor(sc.fillColor);
+            // FillColor: IDML CSR 없으면 → ParagraphStyle → Black 기본값
+            // (resolved 색상은 중첩 스타일에 의해 잘못될 수 있으므로 우선하지 않음)
+            if (tr.textColor() == null) {
+                if (sc.fillColor != null) {
+                    tr.textColor(sc.fillColor);
+                } else {
+                    tr.textColor("#000000"); // 기본 Black
+                }
             }
-            if (tr.textColor() == null && rr.fillColor() != null) tr.textColor(resolveColorToHex(rr.fillColor()));
             // underline / strikeThrough
             if (rr.underline() != null && rr.underline()) {
                 tr.underline(true);
