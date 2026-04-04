@@ -2453,11 +2453,31 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         try { app.pdfExportPreferences.monochromeBitmapCompression = BitmapCompression.NONE; } catch(e6){}
     } catch (ePdfPref) {}
 
+    // 같은 story를 editable TF와 공유하는 non-editable TF도 배경에서 숨김 대상에 추가
+    var editableStoryIds = {};
+    for (var esi = 0; esi < editableFrames.length; esi++) {
+        try {
+            var esId = editableFrames[esi].parentStory.id;
+            editableStoryIds[esId] = true;
+        } catch (e) {}
+    }
+    var framesToHide = editableFrames.slice(0); // 복사
+    for (var ai = 0; ai < allItems.length; ai++) {
+        try {
+            if (allItems[ai].constructor.name === "TextFrame"
+                && !editableFrameIds[allItems[ai].id]
+                && allItems[ai].parentStory
+                && editableStoryIds[allItems[ai].parentStory.id]) {
+                framesToHide.push(allItems[ai]);
+            }
+        } catch (e) {}
+    }
+
     // 페이지별 프레임 인덱스 미리 빌드 (O(pages × frames) → O(frames) + O(pages))
     var framesByPage = {};  // pageOffset → [frame, ...]
     var spreadFrames = [];  // parentPage 없는 프레임 (Spread 직속)
-    for (var fi = 0; fi < editableFrames.length; fi++) {
-        var efr = editableFrames[fi];
+    for (var fi = 0; fi < framesToHide.length; fi++) {
+        var efr = framesToHide[fi];
         try {
             var efPage = efr.parentPage;
             if (efPage) {

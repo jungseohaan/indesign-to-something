@@ -302,7 +302,19 @@ public class ResolvedToASTBuilder {
             if (!inlineToFloating && isNestedInTextFrame(tf)) continue;
 
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
-            if (!inlineToFloating && !resolvedData.isEditableTextFrame(tf.id())) continue;
+            // 단, 같은 story를 editable TF와 공유하는 non-editable TF는 배치
+            if (!inlineToFloating && !resolvedData.isEditableTextFrame(tf.id())) {
+                boolean sharedWithEditable = false;
+                if (tf.storyId() != null) {
+                    for (ResolvedTextFrame other : frames) {
+                        if (tf.storyId().equals(other.storyId()) && resolvedData.isEditableTextFrame(other.id())) {
+                            sharedWithEditable = true;
+                            break;
+                        }
+                    }
+                }
+                if (!sharedWithEditable) continue;
+            }
 
             // 연결 글상자 체인: 후속 프레임은 건너뜀 (첫 프레임에서 병합 처리)
             if (tf.previousFrameId() != null) continue;
