@@ -371,8 +371,17 @@ public class HwpxParagraphBuilder {
             }
         }
         if (bodyFs <= 0) bodyFs = 1000; // 기본 10pt
-        // 여백 = (인라인 객체 높이 - 폰트 크기) × 0.5
-        int betweenValue = (int) Math.max((maxObjH - bodyFs) / 2, bodyFs / 3);
+        // 여백 계산: 인라인 객체 기반 여백과 원본 leading 기반 여백 중 큰 값
+        int inlineBetween = (int) Math.max((maxObjH - bodyFs) / 2, bodyFs / 3);
+        // 원본 FIXED leading이 있으면 leading - bodyFs를 여백으로
+        int leadingBetween = 0;
+        if (basePr.lineSpacing() != null && basePr.lineSpacing().type() == LineSpacingType.FIXED) {
+            leadingBetween = Math.max(basePr.lineSpacing().value() - bodyFs, 0);
+        }
+        if (astPara.lineSpacing() != null && "fixed".equals(astPara.lineSpacingType())) {
+            leadingBetween = Math.max(astPara.lineSpacing() - bodyFs, leadingBetween);
+        }
+        int betweenValue = Math.max(inlineBetween, leadingBetween);
 
         String newId = ctx.styleRegistry.nextParaPrId();
         ParaPr newPr = ctx.hwpxFile.headerXMLFile().refList().paraProperties().addNew();

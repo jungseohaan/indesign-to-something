@@ -3586,9 +3586,16 @@ public class ResolvedToASTBuilder {
                         // PNG 비율로 보정 (bounds가 부정확한 경우)
                         double pngRatio = (double) img.getWidth() / img.getHeight();
                         double boundsRatio = bw / bh;
-                        // bounds 비율과 PNG 비율이 크게 다르면 PNG 비율 기준으로 보정
-                        if (Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.3) {
-                            bh = bw / pngRatio;
+                        // bounds 비율과 PNG 비율이 다르면 PNG 비율 기준으로 보정
+                        // bounds의 작은 쪽을 기준으로 맞춤 (원본 크기 초과 방지)
+                        if (Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
+                            if (pngRatio < 1.0) {
+                                // 세로가 더 긴 PNG → 높이 유지, 폭 축소
+                                bw = bh * pngRatio;
+                            } else {
+                                // 가로가 더 긴 PNG → 폭 유지, 높이 축소
+                                bh = bw / pngRatio;
+                            }
                         }
                         obj.width(CoordinateConverter.pointsToHwpunits(bw));
                         obj.height(CoordinateConverter.pointsToHwpunits(bh));
