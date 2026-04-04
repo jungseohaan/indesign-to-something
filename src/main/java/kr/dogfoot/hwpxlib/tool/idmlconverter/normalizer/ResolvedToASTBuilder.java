@@ -125,6 +125,9 @@ public class ResolvedToASTBuilder {
         // Phase 4: 테이블 포함 TextFrame → ASTTable 변환
         placeTablesFromIDML(sections);
 
+        // Phase 4.5: 큰 숫자 런 + 작은 본문 패턴의 단락 분리
+        splitLargeNumberParagraphs(sections);
+
         // Phase 5: textwrap 글상자 분할 (변환 완료된 블록을 wrapIndent 기반으로 분할)
         splitByWrapIndent(sections);
 
@@ -398,9 +401,7 @@ public class ResolvedToASTBuilder {
                     continue;
                 }
                 ASTTextFrameBlock tfb = (ASTTextFrameBlock) blk;
-                // YGapSplit된 블록(_g 접미사)은 Phase 2에서 이미 분할됨 → 재분할 안 함
                 String srcId = tfb.sourceId();
-                if (srcId != null && srcId.contains("_g")) { newBlocks.add(blk); continue; }
                 // sourceId → resolved TextFrame → composedLines
                 String hexPart = srcId != null && srcId.startsWith("u")
                         ? srcId.substring(1) : null;
@@ -423,7 +424,24 @@ public class ResolvedToASTBuilder {
 
                 List<ResolvedTextFrame.ComposedLine> lines = rtf.composedLines();
 
-                // wrap 감지: 좌/우 indent > 85pt (≈30mm) 가 3행 이상 연속
+                // YGapSplit 블록: 해당 paraIndex 범위의 composedLines만 사용
+                if (srcId != null && srcId.contains("_g") && tfb.composedCharStart() >= 0) {
+                    int tfParaStart = rtf.paragraphStart();
+                    int gParaStart = tfb.composedCharStart();
+                    int gParaEnd = tfb.composedCharEnd();
+                    // 절대 paraIndex → TF 내부 상대 paraIndex
+                    int relStart = gParaStart - tfParaStart;
+                    int relEnd = gParaEnd - tfParaStart;
+                    List<ResolvedTextFrame.ComposedLine> filtered = new ArrayList<>();
+                    for (ResolvedTextFrame.ComposedLine cl : lines) {
+                        int pi = cl.paraIndex();
+                        if (pi >= relStart && pi <= relEnd) filtered.add(cl);
+                    }
+                    lines = filtered;
+                    if (lines.size() < 2) { newBlocks.add(blk); continue; }
+                }
+
+                // wrap 감지: 좌/우 indent > threshold 가 3행 이상 연속
                 // (normalizeToPoints 후 indent는 pt 단위)
                 double[] gb0 = rtf.geometricBounds();
                 double frameW0 = gb0[3] - gb0[1];
@@ -581,8 +599,18 @@ public class ResolvedToASTBuilder {
                     // frameW, gb, indent, bounds 모두 pt (normalizeToPoints 적용)
                     double groupW = frameW - indL - indR;
                     double groupH = last.bounds()[2] - first.bounds()[0];
-                    double groupY = tfb.y() + CoordinateConverter.pointsToHwpunits(
-                            first.bounds()[0] - gb[0]);
+                    // Y 위치: _g 블록은 tfb.y()가 이미 절대 좌표 → 그룹 내 상대 오프셋 사용
+                    boolean isYGapBlock = srcId != null && srcId.contains("_g");
+                    double groupY;
+                    if (isYGapBlock) {
+                        // _g 블록의 첫 composedLine과 필터링된 lines의 첫 줄 사이 오프셋
+                        double blockFirstLineTop = lines.get(0).bounds()[0];
+                        groupY = tfb.y() + CoordinateConverter.pointsToHwpunits(
+                                first.bounds()[0] - blockFirstLineTop);
+                    } else {
+                        groupY = tfb.y() + CoordinateConverter.pointsToHwpunits(
+                                first.bounds()[0] - gb[0]);
+                    }
 
                     if (groupW <= 0 || groupH <= 0) {
                         charOffset += groupTextLen(group);
@@ -3517,6 +3545,92 @@ public class ResolvedToASTBuilder {
     }
 
     // ═══════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════════
+    // Phase 4.5: 큰 숫자 런 단락 분리
+    // ═══════════════════════════════════════════════════
+
+    /**
+     * 첫 런이 큰 폰트(나머지의 1.5배 이상)이고 짧은 텍스트(≤3자)인 단락을 분리.
+     * 번호(큰 폰트) + 본문(작은 폰트) 패턴 → 번호를 별도 단락으로 분리하여 줄간격 독립 적용.
+     */
+    private void splitLargeNumberParagraphs(List<ASTSection> sections) {
+        int splitCount = 0;
+        for (ASTSection section : sections) {
+            for (ASTBlock blk : section.blocks()) {
+                if (!(blk instanceof ASTTextFrameBlock)) continue;
+                ASTTextFrameBlock tfb = (ASTTextFrameBlock) blk;
+                if (tfb.paragraphs() == null) continue;
+
+                List<ASTParagraph> newParas = new ArrayList<>();
+                for (ASTParagraph para : tfb.paragraphs()) {
+                    List<ASTInlineItem> items = para.items();
+                    if (items == null || items.size() < 2) { newParas.add(para); continue; }
+
+                    // 첫 런이 큰 폰트 + 짧은 텍스트인지 감지
+                    ASTInlineItem first = items.get(0);
+                    if (first.itemType() != ASTInlineItem.ItemType.TEXT_RUN) { newParas.add(para); continue; }
+                    ASTTextRun firstRun = (ASTTextRun) first;
+                    Integer firstFs = firstRun.fontSizeHwpunits();
+                    String firstText = firstRun.text();
+                    if (firstFs == null || firstText == null || firstText.trim().length() > 3) { newParas.add(para); continue; }
+
+                    // 나머지 런의 대표 폰트 크기 (가장 긴 텍스트)
+                    int bodyFs = 0;
+                    int bodyMaxLen = 0;
+                    for (int i = 1; i < items.size(); i++) {
+                        if (items.get(i).itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                            ASTTextRun tr = (ASTTextRun) items.get(i);
+                            Integer fs = tr.fontSizeHwpunits();
+                            String t = tr.text();
+                            int len = (t != null) ? t.trim().length() : 0;
+                            if (fs != null && len > bodyMaxLen) { bodyMaxLen = len; bodyFs = fs; }
+                        }
+                    }
+
+                    if (bodyFs > 0 && firstFs > bodyFs * 1.5) {
+                        // 분리: 첫 런만 별도 단락
+                        ASTParagraph numPara = new ASTParagraph();
+                        numPara.paragraphStyleRef(para.paragraphStyleRef());
+                        numPara.alignment(para.alignment());
+                        numPara.addItem(firstRun);
+                        // 첫 런 크기에 맞는 줄간격 설정
+                        numPara.lineSpacing((int)(firstFs * 1.3));
+                        numPara.lineSpacingType("fixed");
+                        newParas.add(numPara);
+
+                        // 나머지 런들을 새 단락으로
+                        ASTParagraph bodyPara = new ASTParagraph();
+                        bodyPara.paragraphStyleRef(para.paragraphStyleRef());
+                        bodyPara.alignment(para.alignment());
+                        if (para.lineSpacing() != null) {
+                            bodyPara.lineSpacing(para.lineSpacing());
+                            bodyPara.lineSpacingType(para.lineSpacingType());
+                        }
+                        if (para.spaceBefore() != null) bodyPara.spaceBefore(para.spaceBefore());
+                        if (para.spaceAfter() != null) bodyPara.spaceAfter(para.spaceAfter());
+                        if (para.firstLineIndent() != null) bodyPara.firstLineIndent(para.firstLineIndent());
+                        if (para.leftMargin() != null) bodyPara.leftMargin(para.leftMargin());
+                        for (int i = 1; i < items.size(); i++) {
+                            bodyPara.addItem(items.get(i));
+                        }
+                        newParas.add(bodyPara);
+                        splitCount++;
+                    } else {
+                        newParas.add(para);
+                    }
+                }
+                // 단락 리스트 교체
+                if (newParas.size() != tfb.paragraphs().size()) {
+                    tfb.paragraphs().clear();
+                    for (ASTParagraph p : newParas) tfb.addParagraph(p);
+                }
+            }
+        }
+        if (splitCount > 0) {
+            System.err.println("[ResolvedToASTBuilder] Phase 4.5: " + splitCount + " large-number paragraphs split");
+        }
+    }
+
     // Phase 5: 페이지 배경 PNG 주입
     // ═══════════════════════════════════════════════════
 
