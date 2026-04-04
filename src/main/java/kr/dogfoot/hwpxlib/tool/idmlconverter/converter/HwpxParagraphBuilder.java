@@ -86,18 +86,12 @@ public class HwpxParagraphBuilder {
             paraCharPrId = getOrCreateTinyCharPr();
         }
 
-        // 인라인 객체(사각형 박스 등)가 있으면 줄간격을 BETWEEN_LINES(여백만)으로 전환
-        // 인라인 객체 높이에 따라 줄이 자연스럽게 확장됨
+        // 인라인 객체 또는 혼합 폰트 크기가 있으면 BETWEEN_LINES(여백만) 줄간격 적용
+        // → 큰 인라인 객체/큰 폰트 런이 줄간격을 자연스럽게 확장
         long maxInlineH = maxInlineObjectHeight(astPara);
-        if (maxInlineH > 0) {
+        boolean hasMixedFontSizes = hasMixedFontSizeRuns(astPara);
+        if (maxInlineH > 0 || hasMixedFontSizes) {
             paraPrId = applyBetweenLinesSpacing(paraPrId, astPara);
-        }
-
-        // 큰 폰트 인라인 텍스트가 줄간격을 벌리는 것 방지:
-        // 단락 내 가장 큰 폰트와 본문 대표 폰트 크기가 1.5배 이상 차이나면
-        // 본문 폰트 기준 고정 줄간격 설정
-        if (astPara.lineSpacing() == null) {
-            paraPrId = clampLineSpacingForMixedFontSizes(paraPrId, astPara);
         }
 
         // 분수 수식이 줄 간격보다 크면 줄 간격 확장 (명시적 lineSpacing 없을 때만)
@@ -300,6 +294,26 @@ public class HwpxParagraphBuilder {
             return ensureLineSpacingForInline(paraPrId, fixedH);
         }
         return paraPrId;
+    }
+
+    /**
+     * 단락 내 텍스트 런의 폰트 크기가 본문 대비 1.5배 이상 차이나는지 판별.
+     */
+    private boolean hasMixedFontSizeRuns(ASTParagraph astPara) {
+        int maxFs = 0, bodyFs = 0, bodyMaxLen = 0;
+        for (ASTInlineItem item : astPara.items()) {
+            if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun tr =
+                        (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun) item;
+                Integer fs = tr.fontSizeHwpunits();
+                if (fs == null || fs <= 0) continue;
+                if (fs > maxFs) maxFs = fs;
+                String text = tr.text();
+                int len = (text != null) ? text.trim().length() : 0;
+                if (len > bodyMaxLen) { bodyMaxLen = len; bodyFs = fs; }
+            }
+        }
+        return bodyFs > 0 && maxFs > bodyFs * 1.5;
     }
 
     private long maxInlineObjectHeight(ASTParagraph astPara) {

@@ -126,7 +126,8 @@ public class ResolvedToASTBuilder {
         placeTablesFromIDML(sections);
 
         // Phase 4.5: 큰 숫자 런 단락 분리 + 불릿 스타일 자동 삽입
-        splitLargeNumberParagraphs(sections);
+        // splitLargeNumberParagraphs — 비활성화: 번호와 본문이 같은 줄에 있어야 함
+        // 대신 HwpxParagraphBuilder.applyBetweenLinesSpacing에서 줄간격 조정
         insertBulletsForBulletStyles(sections);
 
         // Phase 5: textwrap 글상자 분할 (변환 완료된 블록을 wrapIndent 기반으로 분할)
@@ -432,17 +433,32 @@ public class ResolvedToASTBuilder {
                 catch (NumberFormatException e) { newBlocks.add(blk); continue; }
 
                 ResolvedTextFrame rtf = resolvedData.getTextFrame(domId);
-                if (rtf == null || rtf.composedLines() == null || rtf.composedLines().size() < 2) {
+                if (rtf == null) { newBlocks.add(blk); continue; }
+
+                // 연결 글상자 체인이면 모든 TF의 composedLines를 합침
+                List<ResolvedTextFrame.ComposedLine> allComposedLines = new ArrayList<>();
+                if (rtf.composedLines() != null) allComposedLines.addAll(rtf.composedLines());
+                if (rtf.nextFrameId() != null) {
+                    String nextId = rtf.nextFrameId();
+                    while (nextId != null) {
+                        ResolvedTextFrame nextTf = resolvedData.getTextFrame(nextId);
+                        if (nextTf == null) break;
+                        if (nextTf.composedLines() != null) allComposedLines.addAll(nextTf.composedLines());
+                        nextId = nextTf.nextFrameId();
+                    }
+                }
+                if (allComposedLines.size() < 2) {
                     newBlocks.add(blk);
                     continue;
                 }
+                boolean isLinkedChain = allComposedLines.size() > (rtf.composedLines() != null ? rtf.composedLines().size() : 0);
                 // 문단이 비어있는 블록은 분할하지 않음 (다단 분할 등으로 문단 미배분)
                 if (tfb.paragraphs() == null || tfb.paragraphs().isEmpty()) {
                     newBlocks.add(blk);
                     continue;
                 }
 
-                List<ResolvedTextFrame.ComposedLine> lines = rtf.composedLines();
+                List<ResolvedTextFrame.ComposedLine> lines = allComposedLines;
 
                 // YGapSplit 블록: 해당 paraIndex 범위의 composedLines만 사용
                 if (srcId != null && srcId.contains("_g") && tfb.composedCharStart() >= 0) {
@@ -465,7 +481,8 @@ public class ResolvedToASTBuilder {
                 // (normalizeToPoints 후 indent는 pt 단위)
                 double[] gb0 = rtf.geometricBounds();
                 double frameW0 = gb0[3] - gb0[1];
-                double indentThreshold = frameW0 * 0.20; // 프레임 폭의 20% 이상이면 narrow
+                // 연결 글상자 체인은 indent가 작아도 일관되면 textwrap → threshold 낮춤
+                double indentThreshold = frameW0 * (isLinkedChain ? 0.12 : 0.20);
                 int indentedConsecutive = 0;
                 int maxConsecutive = 0;
                 for (int i = 0; i < lines.size(); i++) {
@@ -478,7 +495,29 @@ public class ResolvedToASTBuilder {
                         indentedConsecutive = 0;
                     }
                 }
-                if (maxConsecutive < 3) { newBlocks.add(blk); continue; }
+                if (maxConsecutive < 3) {
+                    // 연결 글상자: 대부분의 줄에 일관된 indent가 있으면 폭 축소 (중앙값)
+                    if (isLinkedChain && lines.size() >= 3) {
+                        List<Double> indRs2 = new ArrayList<>(), indLs2 = new ArrayList<>();
+                        for (ResolvedTextFrame.ComposedLine cl : lines) {
+                            if (cl.wrapIndentRight() > 10) indRs2.add(cl.wrapIndentRight());
+                            if (cl.wrapIndentLeft() > 10) indLs2.add(cl.wrapIndentLeft());
+                        }
+                        if (indRs2.size() >= lines.size() / 2) {
+                            java.util.Collections.sort(indRs2);
+                            double medR = indRs2.get(indRs2.size() / 2);
+                            tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(medR));
+                        }
+                        if (indLs2.size() >= lines.size() / 2) {
+                            java.util.Collections.sort(indLs2);
+                            double medL = indLs2.get(indLs2.size() / 2);
+                            tfb.x(tfb.x() + CoordinateConverter.pointsToHwpunits(medL));
+                            tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(medL));
+                        }
+                    }
+                    newBlocks.add(blk);
+                    continue;
+                }
 
                 // indent 패턴으로 행 그룹 분할: 넓은 vs 좁은(좌/우 indent 큰) 연속 구간
                 // 1~2행만 다른 패턴이면 앞/뒤 그룹에 병합 (너무 세밀한 분할 방지)
@@ -553,7 +592,35 @@ public class ResolvedToASTBuilder {
                     }
                 }
                 System.err.println("[WrapPhase5] tf=" + domId + " groups=" + groups.size() + " narrowDir=" + java.util.Arrays.toString(narrowDir));
-                if (groups.size() <= 1) { newBlocks.add(blk); continue; }
+                if (groups.size() <= 1) {
+                    // 전체가 narrow이면 블록 폭을 일관된 indent만큼 축소
+                    if (groups.size() == 1 && narrowFlags[0]) {
+                        int firstLineIdx2 = 0;
+                        int groupDir2 = narrowDir[firstLineIdx2];
+                        // 줄별 indent를 수집하여 하위 25% 값 사용 (outlier 제거)
+                        double adjIndR = 0, adjIndL = 0;
+                        if (groupDir2 == 1 || groupDir2 == 3) {
+                            for (ResolvedTextFrame.ComposedLine cl : lines) {
+                                if (cl.wrapIndentRight() > adjIndR) adjIndR = cl.wrapIndentRight();
+                            }
+                        }
+                        if (groupDir2 == 2 || groupDir2 == 3) {
+                            for (ResolvedTextFrame.ComposedLine cl : lines) {
+                                if (cl.wrapIndentLeft() > adjIndL) adjIndL = cl.wrapIndentLeft();
+                            }
+                        }
+                        if (adjIndR > 0) {
+                            tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(adjIndR));
+                        }
+                        if (adjIndL > 0) {
+                            tfb.x(tfb.x() + CoordinateConverter.pointsToHwpunits(adjIndL));
+                            tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(adjIndL));
+                        }
+                        System.err.println("[WrapNarrow]   newW=" + tfb.width());
+                    }
+                    newBlocks.add(blk);
+                    continue;
+                }
 
                 // 블록의 단락 텍스트를 연결하여 문자 범위 매핑
                 StringBuilder storyText = new StringBuilder();
