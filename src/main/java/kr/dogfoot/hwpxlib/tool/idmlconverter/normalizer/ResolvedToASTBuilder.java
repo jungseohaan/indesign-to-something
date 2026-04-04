@@ -300,6 +300,9 @@ public class ResolvedToASTBuilder {
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             if (!inlineToFloating && !resolvedData.isEditableTextFrame(tf.id())) continue;
 
+            // 연결 글상자 체인: 후속 프레임은 건너뜀 (첫 프레임에서 병합 처리)
+            if (tf.previousFrameId() != null) continue;
+
             // 페이지 인덱스 결정 (document offset → section index 매핑)
             int pageIdx = toSectionIndex(tf.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
@@ -313,6 +316,22 @@ public class ResolvedToASTBuilder {
                     ? resolvedData.pages().get(pageIdx) : null;
             double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
             double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
+
+            // 연결 글상자 체인이면 전체 bounds 합산 (복사본 사용)
+            if (tf.nextFrameId() != null) {
+                gb = new double[]{gb[0], gb[1], gb[2], gb[3]};
+                String nextId = tf.nextFrameId();
+                while (nextId != null) {
+                    ResolvedTextFrame next = resolvedData.getTextFrame(nextId);
+                    if (next == null || next.geometricBounds() == null) break;
+                    double[] ngb = next.geometricBounds();
+                    if (ngb[0] < gb[0]) gb[0] = ngb[0];
+                    if (ngb[1] < gb[1]) gb[1] = ngb[1];
+                    if (ngb[2] > gb[2]) gb[2] = ngb[2];
+                    if (ngb[3] > gb[3]) gb[3] = ngb[3];
+                    nextId = next.nextFrameId();
+                }
+            }
 
             // facing pages: InDesign geometricBounds가 이미 page-relative인 경우 감지
             // gb.left < pageBounds.left이면 spread 좌표가 아닌 page-relative 좌표
@@ -1176,16 +1195,15 @@ public class ResolvedToASTBuilder {
         int tableCount = 0;
 
         for (ResolvedTextFrame tf : resolvedData.textFrames()) {
-            if (tf.isInline()) continue;
-            // editable 프레임만 처리 (non-editable은 배경 PNG에 이미 포함)
-            if (!resolvedData.isEditableTextFrame(tf.id())) continue;
-
-            // Story에 테이블이 있는지 IDML에서 확인
+            // Story에 테이블이 있는지 먼저 확인
             String storyId = tf.storyId();
             if (storyId == null) continue;
-
             IDMLStory idmlStory = loadIDMLStory(storyId);
             if (idmlStory == null || !idmlStory.hasTables()) continue;
+
+            // inline + non-editable이면 테이블이 있어도 건너뜀 (단, 테이블 포함 TF는 예외)
+            if (tf.isInline() && resolvedData.isEditableTextFrame(tf.id())) continue;
+            if (!tf.isInline() && !resolvedData.isEditableTextFrame(tf.id())) continue;
 
             // 페이지 결정 (document offset → section index 매핑)
             int pageIdx = toSectionIndex(tf.pageIndex());
