@@ -1889,6 +1889,11 @@ public class ResolvedToASTBuilder {
                                         anchorIdx++;
                                         continue;
                                     }
+                                    // rendered된 TF(badge 등)는 이미 PNG로 배치됨 → 건너뜀
+                                    if (resolvedData.isRenderedByOtherChannel(domId)) {
+                                        anchorIdx++;
+                                        continue;
+                                    }
                                     // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
                                     ASTTextRun textRun = tryInlineTextFrameAsRun(domId);
                                     if (textRun != null) {
@@ -3374,6 +3379,9 @@ public class ResolvedToASTBuilder {
         String domId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame tf = resolvedData.getTextFrame(domId);
         if (tf == null || !tf.isInline()) return null;
+
+        // rendered된 TF(badge_group 등)는 PNG로 이미 배치됨 → 텍스트 런 변환 안 함
+        if (resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
 
         // frameVisibleText 또는 IDML Story에서 텍스트 가져오기
         String visText = tf.frameVisibleText();
