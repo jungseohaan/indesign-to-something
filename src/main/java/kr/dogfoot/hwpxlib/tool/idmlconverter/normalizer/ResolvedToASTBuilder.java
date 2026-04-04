@@ -3387,10 +3387,15 @@ public class ResolvedToASTBuilder {
             aGb = anchoredTf.geometricBounds();
         }
         // 2) resolved에 없으면 renderedFloatingItems의 inline_object bounds
+        //    renderedFloatingItems bounds は mm 単位 → pt に変換が必要
         if (aGb == null || aGb.length < 4) {
             for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
                 if (rg.id() == anchoredId && "inline_object".equals(rg.itemType())) {
-                    aGb = rg.bounds();
+                    double[] raw = rg.bounds();
+                    if (raw != null && raw.length >= 4) {
+                        aGb = new double[]{raw[0] * scaleFactor, raw[1] * scaleFactor,
+                                raw[2] * scaleFactor, raw[3] * scaleFactor};
+                    }
                     break;
                 }
             }
@@ -3634,6 +3639,94 @@ public class ResolvedToASTBuilder {
      * 첫 런이 큰 폰트(나머지의 1.5배 이상)이고 짧은 텍스트(≤3자)인 단락을 분리.
      * 번호(큰 폰트) + 본문(작은 폰트) 패턴 → 번호를 별도 단락으로 분리하여 줄간격 독립 적용.
      */
+    /**
+     * 인라인 객체(INLINE_OBJECT)가 포함된 단락을 분리.
+     * 인라인 객체 전 텍스트 / 인라인 객체 / 인라인 객체 후 텍스트를 각각 별도 단락으로 분리하여
+     * 인라인 객체 단락에는 객체 높이에 맞는 줄간격을 설정.
+     */
+    private void splitInlineObjectParagraphs(List<ASTSection> sections) {
+        int splitCount = 0;
+        for (ASTSection section : sections) {
+            for (ASTBlock blk : section.blocks()) {
+                if (!(blk instanceof ASTTextFrameBlock)) continue;
+                ASTTextFrameBlock tfb = (ASTTextFrameBlock) blk;
+                if (tfb.paragraphs() == null) continue;
+
+                List<ASTParagraph> newParas = new ArrayList<>();
+                for (ASTParagraph para : tfb.paragraphs()) {
+                    List<ASTInlineItem> items = para.items();
+                    if (items == null) { newParas.add(para); continue; }
+
+                    // 인라인 객체가 있는지 확인
+                    boolean hasInlineObj = false;
+                    for (ASTInlineItem item : items) {
+                        if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+                            ASTInlineObject obj = (ASTInlineObject) item;
+                            if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE && obj.height() > 1000) {
+                                hasInlineObj = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!hasInlineObj) { newParas.add(para); continue; }
+
+                    // 인라인 객체 기준으로 단락 분리
+                    List<ASTInlineItem> currentRuns = new ArrayList<>();
+                    for (ASTInlineItem item : items) {
+                        if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+                            ASTInlineObject obj = (ASTInlineObject) item;
+                            if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE && obj.height() > 1000) {
+                                // 이전 텍스트 런들을 별도 단락으로
+                                if (!currentRuns.isEmpty()) {
+                                    ASTParagraph textPara = new ASTParagraph();
+                                    textPara.paragraphStyleRef(para.paragraphStyleRef());
+                                    textPara.alignment(para.alignment());
+                                    if (para.lineSpacing() != null) {
+                                        textPara.lineSpacing(para.lineSpacing());
+                                        textPara.lineSpacingType(para.lineSpacingType());
+                                    }
+                                    for (ASTInlineItem r : currentRuns) textPara.addItem(r);
+                                    newParas.add(textPara);
+                                    currentRuns = new ArrayList<>();
+                                }
+                                // 인라인 객체를 별도 단락으로 (높이에 맞는 줄간격)
+                                ASTParagraph objPara = new ASTParagraph();
+                                objPara.paragraphStyleRef(para.paragraphStyleRef());
+                                objPara.alignment(para.alignment());
+                                objPara.lineSpacing((int)(obj.height() * 1.2));
+                                objPara.lineSpacingType("fixed");
+                                objPara.addItem(item);
+                                newParas.add(objPara);
+                                splitCount++;
+                                continue;
+                            }
+                        }
+                        currentRuns.add(item);
+                    }
+                    // 나머지 텍스트 런
+                    if (!currentRuns.isEmpty()) {
+                        ASTParagraph tailPara = new ASTParagraph();
+                        tailPara.paragraphStyleRef(para.paragraphStyleRef());
+                        tailPara.alignment(para.alignment());
+                        if (para.lineSpacing() != null) {
+                            tailPara.lineSpacing(para.lineSpacing());
+                            tailPara.lineSpacingType(para.lineSpacingType());
+                        }
+                        for (ASTInlineItem r : currentRuns) tailPara.addItem(r);
+                        newParas.add(tailPara);
+                    }
+                }
+                if (newParas.size() != tfb.paragraphs().size()) {
+                    tfb.paragraphs().clear();
+                    for (ASTParagraph p : newParas) tfb.addParagraph(p);
+                }
+            }
+        }
+        if (splitCount > 0) {
+            System.err.println("[ResolvedToASTBuilder] Phase 4.5: " + splitCount + " inline-object paragraphs split");
+        }
+    }
+
     private void splitLargeNumberParagraphs(List<ASTSection> sections) {
         int splitCount = 0;
         for (ASTSection section : sections) {

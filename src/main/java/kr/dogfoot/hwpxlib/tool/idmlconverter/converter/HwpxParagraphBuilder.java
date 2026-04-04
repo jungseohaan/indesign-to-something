@@ -86,10 +86,10 @@ public class HwpxParagraphBuilder {
             paraCharPrId = getOrCreateTinyCharPr();
         }
 
-        // 인라인 텍스트 프레임이 줄 간격보다 크면 줄 간격 확장
-        // 단, ASTParagraph에 명시적 lineSpacing이 있으면 그 값 우선 (인라인보다 작아도 유지)
+        // 인라인 객체(사각형 박스 등)가 줄 간격보다 크면 줄 간격 확장
+        // lineSpacing이 이미 설정되어 있어도 인라인 객체가 더 크면 확장
         long maxInlineH = maxInlineObjectHeight(astPara);
-        if (maxInlineH > ConverterConstants.INLINE_LINE_SPACING_THRESHOLD && astPara.lineSpacing() == null) {
+        if (maxInlineH > ConverterConstants.INLINE_LINE_SPACING_THRESHOLD) {
             paraPrId = ensureLineSpacingForInline(paraPrId, maxInlineH);
         }
 
@@ -307,8 +307,7 @@ public class HwpxParagraphBuilder {
         for (ASTInlineItem item : astPara.items()) {
             if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                 ASTInlineObject obj = (ASTInlineObject) item;
-                // IMAGE, INLINE_TEXT_FRAME 타입은 줄간격 확장에서 제외
-                if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE) continue;
+                // INLINE_TEXT_FRAME 타입은 줄간격 확장에서 제외 (테이블 셀 내 인라인 프레임)
                 if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) continue;
                 if (obj.height() > max) {
                     max = obj.height();
