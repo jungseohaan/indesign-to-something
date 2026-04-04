@@ -485,17 +485,21 @@ public class FontMapper {
             int styleWeight = parseFontStyleWeight(fontStyle);
             if (isVariable && styleWeight > 0) {
                 weight = styleWeight;
+            } else if (styleWeight > 0 && styleWeight < 100) {
+                // 비가변 폰트의 fontStyle이 숫자(30~90)이면 10배하여 weight로 사용
+                // (윤고딕 700Std style=40 → weight 400 = Regular)
+                weight = styleWeight * 10;
             } else {
                 weight = extractWeightNumber(lowerName);
             }
             // 한컴 윤고딕 매핑 (한컴한글 2014 호환: 230, 240, 250, 760만 사용):
             // ~99 → 함초롬돋움 (극세: 한컴 윤고딕 230보다 얇은 느낌)
-            // 100~300 → 한컴 윤고딕 230 (가는)
-            // 301~500 → 한컴 윤고딕 240 (중간)
+            // 100~400 → 한컴 윤고딕 230 (가는)
+            // 401~500 → 한컴 윤고딕 240 (중간)
             // 501~700 → 한컴 윤고딕 250 (굵은)
             // 701~ → 한컴 윤고딕 760 (진한)
             if (weight < 100) return "함초롬돋움";
-            if (weight <= 300) return "한컴 윤고딕 230";
+            if (weight <= 400) return "한컴 윤고딕 230";
             if (weight <= 500) return "한컴 윤고딕 240";
             if (weight <= 700) return "한컴 윤고딕 250";
             return "한컴 윤고딕 760";

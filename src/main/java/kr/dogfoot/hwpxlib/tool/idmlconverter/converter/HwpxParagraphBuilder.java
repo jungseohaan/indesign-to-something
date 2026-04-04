@@ -307,9 +307,9 @@ public class HwpxParagraphBuilder {
         for (ASTInlineItem item : astPara.items()) {
             if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                 ASTInlineObject obj = (ASTInlineObject) item;
-                // IMAGE 타입 인라인 객체는 줄간격 확장에서 제외
-                // (affectLSpacing=false로 처리되므로 줄간격에 영향 없음)
+                // IMAGE, INLINE_TEXT_FRAME 타입은 줄간격 확장에서 제외
                 if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE) continue;
+                if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) continue;
                 if (obj.height() > max) {
                     max = obj.height();
                 }

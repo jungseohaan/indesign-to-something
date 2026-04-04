@@ -131,6 +131,10 @@ public class ResolvedToASTBuilder {
         // Phase 6: 페이지 배경 PNG 주입
         injectPageBackgrounds(sections);
 
+        // Phase 7: IDML 독립 이미지 프레임 배치 — 비활성화
+        // (배경 PNG에 이미 포함된 이미지와 중복 배치 문제)
+        // placeUnrenderedImages(sections);
+
         System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
         return doc;
     }
@@ -274,13 +278,23 @@ public class ResolvedToASTBuilder {
 
         for (ResolvedTextFrame tf : frames) {
             // 인라인 프레임은 Phase 3에서 처리
-            if (tf.isInline()) continue;
+            // 단, non-editable 인라인이면서 텍스트가 있으면 플로팅으로 전환 배치
+            boolean inlineToFloating = false;
+            if (tf.isInline()) {
+                String vis = tf.frameVisibleText();
+                boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 5;
+                if (hasText && !resolvedData.isEditableTextFrame(tf.id())) {
+                    inlineToFloating = true; // 플로팅으로 전환
+                } else {
+                    continue;
+                }
+            }
 
             // 다른 TextFrame 안에 중첩된 프레임은 건너뜀 (부모가 배경에 포함)
-            if (isNestedInTextFrame(tf)) continue;
+            if (!inlineToFloating && isNestedInTextFrame(tf)) continue;
 
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
-            if (!resolvedData.isEditableTextFrame(tf.id())) continue;
+            if (!inlineToFloating && !resolvedData.isEditableTextFrame(tf.id())) continue;
 
             // 페이지 인덱스 결정 (document offset → section index 매핑)
             int pageIdx = toSectionIndex(tf.pageIndex());
@@ -384,9 +398,12 @@ public class ResolvedToASTBuilder {
                     continue;
                 }
                 ASTTextFrameBlock tfb = (ASTTextFrameBlock) blk;
+                // YGapSplit된 블록(_g 접미사)은 Phase 2에서 이미 분할됨 → 재분할 안 함
+                String srcId = tfb.sourceId();
+                if (srcId != null && srcId.contains("_g")) { newBlocks.add(blk); continue; }
                 // sourceId → resolved TextFrame → composedLines
-                String hexPart = tfb.sourceId() != null && tfb.sourceId().startsWith("u")
-                        ? tfb.sourceId().substring(1) : null;
+                String hexPart = srcId != null && srcId.startsWith("u")
+                        ? srcId.substring(1) : null;
                 if (hexPart == null) { newBlocks.add(blk); continue; }
                 if (hexPart.contains("_")) hexPart = hexPart.substring(0, hexPart.indexOf('_'));
                 String domId;
@@ -398,57 +415,106 @@ public class ResolvedToASTBuilder {
                     newBlocks.add(blk);
                     continue;
                 }
+                // 문단이 비어있는 블록은 분할하지 않음 (다단 분할 등으로 문단 미배분)
+                if (tfb.paragraphs() == null || tfb.paragraphs().isEmpty()) {
+                    newBlocks.add(blk);
+                    continue;
+                }
 
                 List<ResolvedTextFrame.ComposedLine> lines = rtf.composedLines();
 
-                // wrap 감지: 오른쪽 indent > 30pt가 3행 이상 연속
-                int rightIndentedLines = 0;
-                int maxConsecutiveRight = 0;
+                // wrap 감지: 좌/우 indent > 85pt (≈30mm) 가 3행 이상 연속
+                // (normalizeToPoints 후 indent는 pt 단위)
+                double[] gb0 = rtf.geometricBounds();
+                double frameW0 = gb0[3] - gb0[1];
+                double indentThreshold = frameW0 * 0.20; // 프레임 폭의 20% 이상이면 narrow
+                int indentedConsecutive = 0;
+                int maxConsecutive = 0;
                 for (int i = 0; i < lines.size(); i++) {
                     double indR = lines.get(i).wrapIndentRight();
-                    if (indR > 30.0 && i < lines.size() - 1) {
-                        rightIndentedLines++;
-                        maxConsecutiveRight = Math.max(maxConsecutiveRight, rightIndentedLines);
+                    double indL = lines.get(i).wrapIndentLeft();
+                    if ((indR > indentThreshold || indL > indentThreshold) && i < lines.size() - 1) {
+                        indentedConsecutive++;
+                        maxConsecutive = Math.max(maxConsecutive, indentedConsecutive);
                     } else {
-                        rightIndentedLines = 0;
+                        indentedConsecutive = 0;
                     }
                 }
-                if (maxConsecutiveRight < 3) { newBlocks.add(blk); continue; }
+                if (maxConsecutive < 3) { newBlocks.add(blk); continue; }
 
-                // indent 패턴으로 행 그룹 분할: 넓은(indR≤30) vs 좁은(indR>30) 연속 구간
+                // indent 패턴으로 행 그룹 분할: 넓은 vs 좁은(좌/우 indent 큰) 연속 구간
                 // 1~2행만 다른 패턴이면 앞/뒤 그룹에 병합 (너무 세밀한 분할 방지)
-                // Step 1: 행별 narrow 판정
+                // Step 1: 행별 narrow 판정 (좌/우 어느 쪽이든 threshold 초과)
+                // narrowDir: 0=wide, 1=narrowRight, 2=narrowLeft, 3=narrowBoth
+                int[] narrowDir = new int[lines.size()];
                 boolean[] narrowFlags = new boolean[lines.size()];
                 for (int i = 0; i < lines.size(); i++) {
                     double indR = lines.get(i).wrapIndentRight();
-                    narrowFlags[i] = indR > 30.0 && i < lines.size() - 1;
+                    double indL = lines.get(i).wrapIndentLeft();
+                    boolean isLast = (i >= lines.size() - 1);
+                    // 문단 끝 줄(\r로 끝남)의 indR은 텍스트가 짧아서 생기는 빈 공간 → narrow 제외
+                    String lineText = lines.get(i).text();
+                    boolean isParagraphEnd = lineText != null && lineText.endsWith("\r");
+                    boolean nr = indR > indentThreshold && !isLast && !isParagraphEnd;
+                    boolean nl = indL > indentThreshold && !isLast;
+                    narrowFlags[i] = nr || nl;
+                    if (nr && nl) narrowDir[i] = 3;
+                    else if (nl) narrowDir[i] = 2;
+                    else if (nr) narrowDir[i] = 1;
+                    else narrowDir[i] = 0;
                 }
-                // Step 2: 1~2행짜리 좁은(true) 구간만 넓은(false)으로 병합
-                // 넓은 구간은 병합 안 함 (넓은 행을 좁게 만들면 텍스트 잘림)
-                for (int i = 1; i < lines.size() - 1; i++) {
-                    if (narrowFlags[i] && !narrowFlags[i - 1]) {
-                        // 좁은→넓은 변화 지점: 좁은 구간이 1~2행이면 넓은으로 병합
+                // Step 2: 1~2행짜리 구간은 이전 구간에 병합 (좁은→넓은 방향만, 또는 마지막 구간)
+                for (int i = 1; i < lines.size(); i++) {
+                    if (narrowDir[i] != narrowDir[i - 1]) {
                         int runLen = 1;
-                        while (i + runLen < lines.size() && narrowFlags[i + runLen]) runLen++;
+                        while (i + runLen < lines.size() && narrowDir[i + runLen] == narrowDir[i]) runLen++;
                         if (runLen <= 2) {
-                            for (int j = i; j < i + runLen && j < lines.size(); j++) {
-                                narrowFlags[j] = false;
+                            boolean mergeToWide = narrowFlags[i]; // 좁은 구간이면 넓은으로
+                            boolean isTrailing = (i + runLen >= lines.size()); // 마지막 구간
+                            if (mergeToWide || isTrailing) {
+                                for (int j = i; j < i + runLen && j < lines.size(); j++) {
+                                    narrowFlags[j] = narrowFlags[i - 1];
+                                    narrowDir[j] = narrowDir[i - 1];
+                                }
                             }
                         }
                     }
                 }
-                // Step 3: 그룹 생성
+                // Step 3: 그룹 생성 (narrowDir이 다르면 새 그룹)
                 List<List<ResolvedTextFrame.ComposedLine>> groups = new ArrayList<>();
                 List<ResolvedTextFrame.ComposedLine> currentGroup = new ArrayList<>();
                 for (int i = 0; i < lines.size(); i++) {
-                    if (i > 0 && narrowFlags[i] != narrowFlags[i - 1] && !currentGroup.isEmpty()) {
+                    if (i > 0 && narrowDir[i] != narrowDir[i - 1] && !currentGroup.isEmpty()) {
                         groups.add(currentGroup);
                         currentGroup = new ArrayList<>();
                     }
                     currentGroup.add(lines.get(i));
                 }
                 if (!currentGroup.isEmpty()) groups.add(currentGroup);
-                System.err.println("[WrapPhase5] tf=" + domId + " groups=" + groups.size() + " narrowFlags=" + java.util.Arrays.toString(narrowFlags));
+                // 마지막 그룹이 실질 텍스트가 적으면 이전 그룹에 병합
+                // (빈 줄, 인라인 마커, 짧은 문장 끝부분 등)
+                while (groups.size() > 1) {
+                    List<ResolvedTextFrame.ComposedLine> lastGrp = groups.get(groups.size() - 1);
+                    String lastText = "";
+                    int substantiveLines = 0;
+                    for (ResolvedTextFrame.ComposedLine cl : lastGrp) {
+                        String t = cl.text();
+                        if (t != null) {
+                            lastText += t;
+                            String stripped = t.replace("\r", "").replace("\n", "").replace("\uFFFC", "").trim();
+                            if (!stripped.isEmpty()) substantiveLines++;
+                        }
+                    }
+                    lastText = lastText.replace("\r", "").replace("\n", "").replace("\uFFFC", "").trim();
+                    // 실질 텍스트 줄이 1줄 이하이면 병합
+                    if (substantiveLines <= 1) {
+                        groups.remove(groups.size() - 1);
+                        groups.get(groups.size() - 1).addAll(lastGrp);
+                    } else {
+                        break;
+                    }
+                }
+                System.err.println("[WrapPhase5] tf=" + domId + " groups=" + groups.size() + " narrowDir=" + java.util.Arrays.toString(narrowDir));
                 if (groups.size() <= 1) { newBlocks.add(blk); continue; }
 
                 // 블록의 단락 텍스트를 연결하여 문자 범위 매핑
@@ -466,7 +532,7 @@ public class ResolvedToASTBuilder {
                 // 각 그룹의 문자 범위 계산 (composedLine 텍스트 누적)
                 double[] gb = rtf.geometricBounds();
                 double frameW = gb[3] - gb[1];
-                System.err.println("[WrapPhase5] tf=" + domId + " sourceId=" + tfb.sourceId() + " frameW=" + String.format("%.1f", frameW) + " lines=" + lines.size() + " maxConsR=" + maxConsecutiveRight);
+                System.err.println("[WrapPhase5] tf=" + domId + " sourceId=" + tfb.sourceId() + " frameW=" + String.format("%.1f", frameW) + " lines=" + lines.size() + " maxConsR=" + maxConsecutive);
 
                 int charOffset = 0;
                 for (int gi = 0; gi < groups.size(); gi++) {
@@ -474,29 +540,49 @@ public class ResolvedToASTBuilder {
                     ResolvedTextFrame.ComposedLine first = group.get(0);
                     ResolvedTextFrame.ComposedLine last = group.get(group.size() - 1);
 
-                    // 그룹의 indent: 좁은 그룹은 최소 indR(가장 넓은 행), 넓은 그룹은 0
+                    // 그룹의 indent 계산: narrow 그룹은 해당 방향의 최소 indent
+                    // wide 그룹도 일관된 indent가 있으면 반영 (사이드바 등)
                     int firstLineIdx = lines.indexOf(group.get(0));
-                    boolean groupNarrow = firstLineIdx >= 0 && narrowFlags[firstLineIdx];
+                    int groupDir = firstLineIdx >= 0 ? narrowDir[firstLineIdx] : 0;
                     double indR = 0;
                     double indL = 0;
-                    if (groupNarrow) {
-                        indR = Double.MAX_VALUE;
-                        indL = Double.MAX_VALUE;
-                        for (ResolvedTextFrame.ComposedLine cl : group) {
-                            indR = Math.min(indR, cl.wrapIndentRight());
-                            indL = Math.min(indL, cl.wrapIndentLeft());
+                    if (groupDir != 0) {
+                        // narrowRight(1) 또는 both(3) → indR 사용
+                        if (groupDir == 1 || groupDir == 3) {
+                            indR = Double.MAX_VALUE;
+                            for (ResolvedTextFrame.ComposedLine cl : group) {
+                                if (cl.wrapIndentRight() > 0) indR = Math.min(indR, cl.wrapIndentRight());
+                            }
+                            if (indR == Double.MAX_VALUE) indR = 0;
                         }
-                        if (indR == Double.MAX_VALUE) indR = 0;
-                        if (indL == Double.MAX_VALUE) indL = 0;
+                        // narrowLeft(2) 또는 both(3) → indL 사용
+                        if (groupDir == 2 || groupDir == 3) {
+                            indL = Double.MAX_VALUE;
+                            for (ResolvedTextFrame.ComposedLine cl : group) {
+                                if (cl.wrapIndentLeft() > 0) indL = Math.min(indL, cl.wrapIndentLeft());
+                            }
+                            if (indL == Double.MAX_VALUE) indL = 0;
+                        }
+                    } else {
+                        // wide 그룹이라도 일관된 indent가 있으면 폭에 반영
+                        double minIndR = Double.MAX_VALUE;
+                        double minIndL = Double.MAX_VALUE;
+                        boolean allHaveR = true, allHaveL = true;
+                        for (ResolvedTextFrame.ComposedLine cl : group) {
+                            if (cl.wrapIndentRight() > 0) minIndR = Math.min(minIndR, cl.wrapIndentRight());
+                            else allHaveR = false;
+                            if (cl.wrapIndentLeft() > 0) minIndL = Math.min(minIndL, cl.wrapIndentLeft());
+                            else allHaveL = false;
+                        }
+                        if (allHaveR && minIndR != Double.MAX_VALUE && minIndR > 10) indR = minIndR;
+                        if (allHaveL && minIndL != Double.MAX_VALUE && minIndL > 10) indL = minIndL;
                     }
 
-                    // frameW, gb는 pt(normalizeToPoints 적용), indent/bounds는 mm → scaleFactor로 변환
-                    double groupW = frameW - (indL + indR) * scaleFactor;
-                    double firstTopPt = first.bounds()[0] * scaleFactor;
-                    double lastBottomPt = last.bounds()[2] * scaleFactor;
-                    double gbTopPt = gb[0]; // 이미 pt
-                    double groupH = lastBottomPt - firstTopPt;
-                    double groupY = tfb.y() + CoordinateConverter.pointsToHwpunits(firstTopPt - gbTopPt);
+                    // frameW, gb, indent, bounds 모두 pt (normalizeToPoints 적용)
+                    double groupW = frameW - indL - indR;
+                    double groupH = last.bounds()[2] - first.bounds()[0];
+                    double groupY = tfb.y() + CoordinateConverter.pointsToHwpunits(
+                            first.bounds()[0] - gb[0]);
 
                     if (groupW <= 0 || groupH <= 0) {
                         charOffset += groupTextLen(group);
@@ -511,7 +597,7 @@ public class ResolvedToASTBuilder {
                     // 새 블록 생성
                     ASTTextFrameBlock splitBlock = new ASTTextFrameBlock();
                     splitBlock.sourceId(tfb.sourceId());
-                    splitBlock.x(tfb.x());
+                    splitBlock.x(tfb.x() + CoordinateConverter.pointsToHwpunits(indL));
                     splitBlock.y((long) groupY);
                     splitBlock.width(CoordinateConverter.pointsToHwpunits(groupW));
                     splitBlock.height(CoordinateConverter.pointsToHwpunits(groupH));
@@ -804,23 +890,40 @@ public class ResolvedToASTBuilder {
         for (int gi = 0; gi < groups.size(); gi++) {
             List<ResolvedTextFrame.ComposedLine> group = groups.get(gi);
 
-            // 그룹 bounds
+            // 그룹 bounds (앞뒤 빈 줄은 높이 계산에서 제외)
+            int firstSubstantive = 0;
+            while (firstSubstantive < group.size()) {
+                String lt = group.get(firstSubstantive).text();
+                if (lt != null && !lt.replace("\r", "").replace("\n", "").replace("\uFFFC", "").trim().isEmpty()) break;
+                firstSubstantive++;
+            }
+            int lastSubstantive = group.size() - 1;
+            while (lastSubstantive > firstSubstantive) {
+                String lt = group.get(lastSubstantive).text();
+                if (lt != null && !lt.replace("\r", "").replace("\n", "").replace("\uFFFC", "").trim().isEmpty()) break;
+                lastSubstantive--;
+            }
             double minLeft = Double.MAX_VALUE, minTop = Double.MAX_VALUE;
             double maxRight = -Double.MAX_VALUE, maxBottom = -Double.MAX_VALUE;
             int groupCharCount = 0;
-            for (ResolvedTextFrame.ComposedLine line : group) {
+            for (int li = 0; li < group.size(); li++) {
+                ResolvedTextFrame.ComposedLine line = group.get(li);
                 double[] b = line.bounds();
-                if (b[0] < minTop) minTop = b[0];
+                // 앞뒤 빈 줄은 top/bottom 계산에서 제외
+                if (li >= firstSubstantive && b[0] < minTop) minTop = b[0];
                 if (b[1] < minLeft) minLeft = b[1];
-                if (b[2] > maxBottom) maxBottom = b[2];
+                if (li <= lastSubstantive && b[2] > maxBottom) maxBottom = b[2];
                 if (b[3] > maxRight) maxRight = b[3];
                 if (line.text() != null) groupCharCount += line.text().length();
             }
 
-            double gx = (minLeft - pageLeft) * scaleFactor;
-            double gy = (minTop - pageTop) * scaleFactor;
-            double gw = (maxRight - minLeft) * scaleFactor;
-            double gh = (maxBottom - minTop) * scaleFactor;
+            // normalizeToPoints() 후 bounds는 이미 pt 단위
+            // 폭은 TF의 geometricBounds를 사용 (composedLine bounds는 텍스트 영역만 반영하여 좁음)
+            double[] tfGb = tf.geometricBounds();
+            double gx = tfGb[1] - pageLeft;
+            double gy = minTop - pageTop;
+            double gw = tfGb[3] - tfGb[1];
+            double gh = maxBottom - minTop;
 
             if (gx < 0) { gw += gx; gx = 0; }
             if (gy < 0) { gh += gy; gy = 0; }
@@ -835,10 +938,31 @@ public class ResolvedToASTBuilder {
             block.zOrder(tf.zOrder());
             block.storyId(tf.storyId());
             block.distributed(true); // 분할 블록: 연결 글상자 링크 해제
-            block.composedCharStart(charOffset);
-            block.composedCharEnd(charOffset + groupCharCount);
+            block.frameVisibleTextLength(groupCharCount);
+            // frameVisibleText 설정 (distributeParagraphs에서 텍스트 기반 분배 사용)
+            StringBuilder groupText = new StringBuilder();
+            for (int li = firstSubstantive; li <= lastSubstantive && li < group.size(); li++) {
+                ResolvedTextFrame.ComposedLine cl = group.get(li);
+                if (cl.text() != null) groupText.append(cl.text());
+            }
+            block.frameVisibleText(groupText.toString());
+            // paraIndex를 resolved TF의 paragraphStart 기준 절대 인덱스로 변환
+            int tfParaStart = tf.paragraphStart();
+            int absParaStart = Integer.MAX_VALUE, absParaEnd = -1;
+            for (int li = firstSubstantive; li <= lastSubstantive && li < group.size(); li++) {
+                int pi = group.get(li).paraIndex();
+                if (pi >= 0) {
+                    int abs = tfParaStart + pi;
+                    if (abs < absParaStart) absParaStart = abs;
+                    if (abs > absParaEnd) absParaEnd = abs;
+                }
+            }
+            if (absParaStart != Integer.MAX_VALUE) {
+                block.composedCharStart(absParaStart);
+                block.composedCharEnd(absParaEnd);
+            }
 
-            // 프레임 속성 복사
+            // 프레임 속성 복사 (insetSpacing은 이미 pt)
             if (tf.insetSpacing() != null) {
                 double[] inset = tf.insetSpacing();
                 block.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
@@ -1127,14 +1251,15 @@ public class ResolvedToASTBuilder {
                     thisY = hy + tableYOffset;
                 }
 
-                // 테이블 셀 복잡도 체크: 인라인 객체가 포함된 테이블은 플로팅 이미지로 변환
+                // 테이블 셀 복잡도 체크: 인라인 객체가 포함된 테이블은 플로팅 이미지로 변환 시도
                 if (hasInlineObjectsInTable(idmlTable)) {
                     ASTFigure fig = renderTableAsImage(idmlTable, tf, thisX, thisY, pageIdx);
                     if (fig != null) {
                         sections.get(pageIdx).addBlock(fig);
                         tableCount++;
+                        continue;
                     }
-                    continue;
+                    // PNG 없으면 일반 테이블로 폴백
                 }
 
                 ensureIdmlInfra();
@@ -1790,7 +1915,17 @@ public class ResolvedToASTBuilder {
             // horizontalScale: IDML에 없으면 resolved에서 보강
             if (tr.horizontalScale() == null && rr.horizontalScale() != null
                     && rr.horizontalScale() != 0 && rr.horizontalScale() != 100) {
-                tr.horizontalScale((short) rr.horizontalScale().doubleValue());
+                // horizontalScale == verticalScale인 경우: 비례 확대 → fontSize에 반영, ratio는 100 유지
+                Double vs = rr.verticalScale();
+                if (vs != null && Math.abs(rr.horizontalScale() - vs) < 1.0) {
+                    // 비례 확대: fontSize를 스케일 비율만큼 키움
+                    if (tr.fontSizeHwpunits() != null) {
+                        tr.fontSizeHwpunits((int) Math.round(tr.fontSizeHwpunits() * rr.horizontalScale() / 100.0));
+                    }
+                    // horizontalScale, verticalScale 모두 적용하지 않음
+                } else {
+                    tr.horizontalScale((short) rr.horizontalScale().doubleValue());
+                }
             }
             // FillColor: ParagraphStyle 우선, resolved fallback
             if (tr.textColor() == null && sc.fillColor != null) {
@@ -2418,7 +2553,15 @@ public class ResolvedToASTBuilder {
                         textRun.letterSpacing((short) Math.round(run.tracking() / 10.0));
                     }
                     if (run.horizontalScale() != null && run.horizontalScale() != 0 && run.horizontalScale() != 100) {
-                        textRun.horizontalScale((short) run.horizontalScale().doubleValue());
+                        Double vs = run.verticalScale();
+                        if (vs != null && Math.abs(run.horizontalScale() - vs) < 1.0) {
+                            // 비례 확대: fontSize에 반영
+                            if (textRun.fontSizeHwpunits() != null) {
+                                textRun.fontSizeHwpunits((int) Math.round(textRun.fontSizeHwpunits() * run.horizontalScale() / 100.0));
+                            }
+                        } else {
+                            textRun.horizontalScale((short) run.horizontalScale().doubleValue());
+                        }
                     }
                     if (run.baselineShift() != null && run.baselineShift() != 0) {
                         textRun.baselineShift((short) run.baselineShift().doubleValue());
@@ -2687,6 +2830,17 @@ public class ResolvedToASTBuilder {
             int blockEnd = block.composedCharEnd();
             if (blockStart < 0) continue;
 
+            // YGapSplit 블록: composedCharStart/End가 paraIndex 범위를 의미
+            boolean isYGapBlock = block.sourceId() != null && block.sourceId().contains("_g");
+            if (isYGapBlock) {
+                for (int i = 0; i < paragraphs.size(); i++) {
+                    if (i >= blockStart && i <= blockEnd) {
+                        block.addParagraph(paragraphs.get(i));
+                    }
+                }
+                continue;
+            }
+
             for (int i = 0; i < paragraphs.size(); i++) {
                 int paraStart = paraRanges.get(i)[0];
                 int paraEnd = paraRanges.get(i)[1];
@@ -2771,9 +2925,12 @@ public class ResolvedToASTBuilder {
         int searchFrom = 0;
         for (int fi = 0; fi < ordered.size(); fi++) {
             ASTTextFrameBlock block = ordered.get(fi);
-            String domId = block.sourceId().startsWith("u")
-                    ? String.valueOf(Integer.parseInt(block.sourceId().substring(1), 16))
-                    : block.sourceId();
+            String sid2 = block.sourceId();
+            String hex2 = sid2 != null && sid2.startsWith("u") ? sid2.substring(1) : sid2;
+            if (hex2 != null && hex2.contains("_")) hex2 = hex2.substring(0, hex2.indexOf('_'));
+            String domId;
+            try { domId = String.valueOf(Integer.parseInt(hex2, 16)); }
+            catch (NumberFormatException e) { domId = sid2; }
             ResolvedTextFrame rtf = resolvedData.getTextFrame(domId);
             // wrap 분할 블록은 블록 자체의 frameVisibleText 우선
             String visibleText = block.frameVisibleText();
@@ -2826,10 +2983,13 @@ public class ResolvedToASTBuilder {
             ASTTextFrameBlock block = ordered.get(fi);
             int frameStart = frameRanges[fi][0];
             int frameEnd = frameRanges[fi][1];
-            String domId = block.sourceId().startsWith("u")
-                    ? String.valueOf(Integer.parseInt(block.sourceId().substring(1), 16))
-                    : block.sourceId();
-            ResolvedTextFrame rtf = resolvedData.getTextFrame(domId);
+            String sid3 = block.sourceId();
+            String hex3 = sid3 != null && sid3.startsWith("u") ? sid3.substring(1) : sid3;
+            if (hex3 != null && hex3.contains("_")) hex3 = hex3.substring(0, hex3.indexOf('_'));
+            String domId3;
+            try { domId3 = String.valueOf(Integer.parseInt(hex3, 16)); }
+            catch (NumberFormatException e) { domId3 = sid3; }
+            ResolvedTextFrame rtf = resolvedData.getTextFrame(domId3);
             java.util.List<String> frameTexts = (rtf != null) ? rtf.frameParaTexts() : null;
 
             if (frameTexts == null || frameTexts.isEmpty()) {
@@ -2997,9 +3157,13 @@ public class ResolvedToASTBuilder {
         // domId → block 매핑
         Map<String, ASTTextFrameBlock> byDomId = new java.util.LinkedHashMap<String, ASTTextFrameBlock>();
         for (ASTTextFrameBlock b : blocks) {
-            String domId = b.sourceId().startsWith("u")
-                    ? String.valueOf(Integer.parseInt(b.sourceId().substring(1), 16))
-                    : b.sourceId();
+            String sid = b.sourceId();
+            if (sid == null) continue;
+            String hexPart = sid.startsWith("u") ? sid.substring(1) : sid;
+            if (hexPart.contains("_")) hexPart = hexPart.substring(0, hexPart.indexOf('_'));
+            String domId;
+            try { domId = String.valueOf(Integer.parseInt(hexPart, 16)); }
+            catch (NumberFormatException e) { domId = sid; }
             byDomId.put(domId, b);
         }
 
@@ -3444,6 +3608,107 @@ public class ResolvedToASTBuilder {
 
             sections.get(pageIdx).addBlock(fig);
         }
+    }
+
+    // ═══════════════════════════════════════════════════
+    // Phase 7: IDML 독립 이미지 프레임 배치
+    // ═══════════════════════════════════════════════════
+
+    /**
+     * renderedFloatingItems에 포함되지 않은 IDML 이미지 프레임을 찾아 ASTFigure로 변환한다.
+     * ExtendScript에서 렌더링하지 못한 독립 이미지(Group 내 이미지 포함)를 보완.
+     */
+    private void placeUnrenderedImages(List<ASTSection> sections) {
+        ensureIdmlInfra();
+        if (idmlDocument == null) return;
+
+        // 이미 rendered된 ID 수집 (배경 PNG에 포함된 이미지는 중복 배치 방지)
+        Set<String> renderedIds = new HashSet<>();
+        for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+            renderedIds.add(String.valueOf(rg.id()));
+            if (rg.childIds() != null) {
+                for (int cid : rg.childIds()) renderedIds.add(String.valueOf(cid));
+            }
+        }
+        for (RenderedGroup rt : resolvedData.allRenderedTextFrames()) {
+            renderedIds.add(String.valueOf(rt.id()));
+            if (rt.childIds() != null) {
+                for (int cid : rt.childIds()) renderedIds.add(String.valueOf(cid));
+            }
+        }
+        // 이미 ASTFigure로 배치된 sourceId 수집
+        Set<String> placedSourceIds = new HashSet<>();
+        for (ASTSection section : sections) {
+            for (ASTBlock blk : section.blocks()) {
+                if (blk.blockType() == ASTBlock.BlockType.FIGURE) {
+                    ASTFigure fig = (ASTFigure) blk;
+                    if (fig.sourceId() != null) placedSourceIds.add(fig.sourceId());
+                }
+            }
+        }
+
+        System.err.println("[Phase7] renderedIds=" + renderedIds.size() + " placedSourceIds=" + placedSourceIds.size());
+        int imageCount = 0;
+        int skippedRendered = 0, skippedPlaced = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread spread : idmlDocument.spreads()) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLPage page : spread.pages()) {
+                int pageIdx = findSectionIndex(page, sections);
+                if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+
+                List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLImageFrame> imageFrames = spread.getImageFramesOnPage(page);
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLImageFrame imgFrame : imageFrames) {
+                    String selfId = imgFrame.selfId();
+                    if (selfId == null) continue;
+
+                    // IDML hex ID → decimal
+                    String decimalId = selfId.startsWith("u")
+                            ? String.valueOf(Integer.parseInt(selfId.substring(1), 16))
+                            : selfId;
+
+                    // 이미 rendered 또는 배치된 이미지는 건너뜀
+                    if (renderedIds.contains(decimalId)) { skippedRendered++; continue; }
+                    if (placedSourceIds.contains(selfId)) { skippedPlaced++; continue; }
+
+                    // 이미지 로딩 및 ASTFigure 생성
+                    ResolvedPage rPage = (pageIdx < resolvedData.pages().size())
+                            ? resolvedData.pages().get(pageIdx) : null;
+                    ASTFigure fig = ASTFigureBuilder.createFigureFromImageFrame(
+                            imgFrame, page, imageLoader, colorResolver, resolvedData, rPage);
+                    if (fig != null && fig.imageData() != null && fig.width() > 0 && fig.height() > 0) {
+                        fig.fromGroup(true); // IN_FRONT_OF_TEXT
+                        sections.get(pageIdx).addBlock(fig);
+                        placedSourceIds.add(selfId);
+                        imageCount++;
+                    }
+                }
+            }
+        }
+        if (imageCount > 0 || skippedRendered > 0) {
+            System.err.println("[ResolvedToASTBuilder] Phase 7: " + imageCount + " images placed, " + skippedRendered + " skipped(rendered), " + skippedPlaced + " skipped(placed)");
+        }
+    }
+
+    /**
+     * IDMLPage → section index 매핑.
+     */
+    private int findSectionIndex(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLPage page, List<ASTSection> sections) {
+        String pageName = page.name();
+        if (pageName != null) {
+            for (int i = 0; i < sections.size(); i++) {
+                try {
+                    if (sections.get(i).pageNumber() == Integer.parseInt(pageName)) return i;
+                } catch (NumberFormatException e) { /* ignore */ }
+            }
+        }
+        // fallback: spread 내 페이지 순서로 매핑
+        int idx = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread s : idmlDocument.spreads()) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLPage p : s.pages()) {
+                if (p == page) return idx < sections.size() ? idx : -1;
+                idx++;
+            }
+        }
+        return -1;
     }
 
     /**
