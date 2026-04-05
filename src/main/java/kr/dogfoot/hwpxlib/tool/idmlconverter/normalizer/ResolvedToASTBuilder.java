@@ -511,8 +511,10 @@ public class ResolvedToASTBuilder {
                     }
                 }
                 if (maxConsecutive < 3) {
-                    // 연결 글상자: 대부분의 줄에 일관된 indent가 있으면 폭 축소 (중앙값)
-                    if (isLinkedChain && lines.size() >= 3) {
+                    // 대부분의 줄에 일관된 indent가 있으면 폭을 중앙값만큼 축소 (분할 대신 shrink)
+                    // 안전 장치: 최소값 사용, 프레임 폭의 15% 이상 축소 안 함
+                    if (lines.size() >= 3) {
+                        double maxShrink = frameW0 * 0.15; // 최대 축소량
                         List<Double> indRs2 = new ArrayList<>(), indLs2 = new ArrayList<>();
                         for (ResolvedTextFrame.ComposedLine cl : lines) {
                             if (cl.wrapIndentRight() > 10) indRs2.add(cl.wrapIndentRight());
@@ -520,14 +522,15 @@ public class ResolvedToASTBuilder {
                         }
                         if (indRs2.size() >= lines.size() / 2) {
                             java.util.Collections.sort(indRs2);
-                            double medR = indRs2.get(indRs2.size() / 2);
-                            tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(medR));
+                            // 최소값 사용 (문단 끝 줄의 큰 indR 무시)
+                            double shrinkR = Math.min(indRs2.get(0), maxShrink);
+                            tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(shrinkR));
                         }
                         if (indLs2.size() >= lines.size() / 2) {
                             java.util.Collections.sort(indLs2);
-                            double medL = indLs2.get(indLs2.size() / 2);
-                            tfb.x(tfb.x() + CoordinateConverter.pointsToHwpunits(medL));
-                            tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(medL));
+                            double shrinkL = Math.min(indLs2.get(0), maxShrink);
+                            tfb.x(tfb.x() + CoordinateConverter.pointsToHwpunits(shrinkL));
+                            tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(shrinkL));
                         }
                     }
                     newBlocks.add(blk);
