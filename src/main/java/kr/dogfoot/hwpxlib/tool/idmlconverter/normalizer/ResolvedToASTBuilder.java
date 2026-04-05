@@ -283,27 +283,14 @@ public class ResolvedToASTBuilder {
 
         for (ResolvedTextFrame tf : frames) {
             // 인라인 프레임은 Phase 3에서 처리
-            // 단, non-editable 인라인이면서 텍스트가 있으면 플로팅으로 전환 배치
-            boolean inlineToFloating = false;
-            if (tf.isInline()) {
-                String vis = tf.frameVisibleText();
-                boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 5;
-                int domIdInt = -1;
-                try { domIdInt = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
-                if (hasText && !resolvedData.isEditableTextFrame(tf.id())
-                        && (domIdInt < 0 || !resolvedData.isRenderedByOtherChannel(domIdInt))) {
-                    inlineToFloating = true; // 플로팅으로 전환 (배경에 미포함 시에만)
-                } else {
-                    continue;
-                }
-            }
+            if (tf.isInline()) continue;
 
             // 다른 TextFrame 안에 중첩된 프레임은 건너뜀 (부모가 배경에 포함)
-            if (!inlineToFloating && isNestedInTextFrame(tf)) continue;
+            if (isNestedInTextFrame(tf)) continue;
 
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             // 단, 같은 story를 editable TF와 공유하는 non-editable TF는 배치
-            if (!inlineToFloating && !resolvedData.isEditableTextFrame(tf.id())) {
+            if (!resolvedData.isEditableTextFrame(tf.id())) {
                 boolean sharedWithEditable = false;
                 if (tf.storyId() != null) {
                     for (ResolvedTextFrame other : frames) {
