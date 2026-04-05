@@ -4000,8 +4000,9 @@ public class ResolvedToASTBuilder {
                 double[] bounds = rt.bounds();
                 if (bounds == null || bounds.length < 4) continue;
 
-                double bw = Math.abs(bounds[3] - bounds[1]) * scaleFactor;
-                double bh = Math.abs(bounds[2] - bounds[0]) * scaleFactor;
+                // bounds는 normalizeToPoints()에서 이미 pt 단위로 변환됨
+                double bw = Math.abs(bounds[3] - bounds[1]);
+                double bh = Math.abs(bounds[2] - bounds[0]);
                 if (bw <= 0 || bh <= 0) continue;
 
                 // PNG 비율 보정
@@ -4011,8 +4012,8 @@ public class ResolvedToASTBuilder {
                     if (pngRatio < 1.0) { bw = bh * pngRatio; } else { bh = bw / pngRatio; }
                 }
 
-                double x = bounds[1] * scaleFactor;
-                double y = bounds[0] * scaleFactor;
+                double x = bounds[1];
+                double y = bounds[0];
 
                 ASTFigure fig = new ASTFigure();
                 fig.sourceId("renderable_" + rt.id());
