@@ -2031,7 +2031,9 @@ public class ResolvedToASTBuilder {
         if (cr.fontSize() != null && cr.fontSize() > 0) {
             tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
         }
-        if (cr.fillColor() != null) tr.textColor(resolveColorToHex(cr.fillColor()));
+        if (cr.fillColor() != null) {
+            tr.textColor(resolveColorToHex(cr.fillColor()));
+        }
         // GREP 스타일 색상 적용: grepAppliedCharStyle의 FillColor가 있으면 우선
         if (cr.grepAppliedCharStyle() != null && idmlDocument != null) {
             ensureIdmlInfra();
@@ -2451,6 +2453,16 @@ public class ResolvedToASTBuilder {
         // resolvedData에서 조회
         String hex = resolvedData.resolveColorHex(name);
         if (hex != null) return hex;
+        // IDML color ID (예: "Color/u1fc", "u1fc") → colorResolver로 해석
+        ensureIdmlInfra();
+        if (colorResolver != null) {
+            String crHex = colorResolver.resolve(color);
+            if (crHex != null) return crHex;
+            crHex = colorResolver.resolve("Color/" + name);
+            if (crHex != null) return crHex;
+            crHex = colorResolver.resolve(name);
+            if (crHex != null) return crHex;
+        }
         // CMYK 문자열 파싱: "C=0 M=15 Y=80 K=0"
         if (name.contains("C=") && name.contains("M=")) {
             try {
