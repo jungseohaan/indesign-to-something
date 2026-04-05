@@ -304,7 +304,24 @@ public class ResolvedToASTBuilder {
             }
 
             // 연결 글상자 체인: 후속 프레임은 건너뜀 (첫 프레임에서 병합 처리)
-            if (tf.previousFrameId() != null) continue;
+            // 단, 체인의 프레임들이 Y 방향으로 떨어져 있으면 병합하지 않음 (각각 배치)
+            if (tf.previousFrameId() != null) {
+                ResolvedTextFrame prevTf = resolvedData.getTextFrame(tf.previousFrameId());
+                if (prevTf != null && prevTf.geometricBounds() != null && tf.geometricBounds() != null) {
+                    double prevBottom = prevTf.geometricBounds()[2];
+                    double curTop = tf.geometricBounds()[0];
+                    double gap = curTop - prevBottom;
+                    double lineH = tf.geometricBounds()[2] - tf.geometricBounds()[0];
+                    // gap이 한 줄 높이 이상이면 독립 배치
+                    if (gap > lineH * 0.5) {
+                        // 병합하지 않고 독립 배치 → continue하지 않음
+                    } else {
+                        continue; // 인접 → 병합 (첫 프레임에서 처리)
+                    }
+                } else {
+                    continue;
+                }
+            }
 
             // 페이지 인덱스 결정 (document offset → section index 매핑)
             int pageIdx = toSectionIndex(tf.pageIndex());
@@ -320,7 +337,7 @@ public class ResolvedToASTBuilder {
             double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
             double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
 
-            // 연결 글상자 체인이면 전체 bounds 합산 (복사본 사용)
+            // 연결 글상자 체인이면 인접한 프레임만 bounds 합산 (복사본 사용)
             if (tf.nextFrameId() != null) {
                 gb = new double[]{gb[0], gb[1], gb[2], gb[3]};
                 String nextId = tf.nextFrameId();
@@ -328,6 +345,10 @@ public class ResolvedToASTBuilder {
                     ResolvedTextFrame next = resolvedData.getTextFrame(nextId);
                     if (next == null || next.geometricBounds() == null) break;
                     double[] ngb = next.geometricBounds();
+                    // Y 간격이 한 줄 높이의 50% 이상이면 합산 중단
+                    double gap = ngb[0] - gb[2];
+                    double lineH = ngb[2] - ngb[0];
+                    if (gap > lineH * 0.5) break;
                     if (ngb[0] < gb[0]) gb[0] = ngb[0];
                     if (ngb[1] < gb[1]) gb[1] = ngb[1];
                     if (ngb[2] > gb[2]) gb[2] = ngb[2];
