@@ -1608,16 +1608,16 @@ public class ResolvedToASTBuilder {
             }
             if (resolvedStory != null && i < resolvedStory.paragraphs().size()) {
                 ResolvedParagraph rp = resolvedStory.paragraphs().get(i);
-                // leading: IDML ParagraphStyle 우선, CharacterRun, resolved 순
+                // leading: resolved 우선 (실제 렌더링 값), IDML 스타일 fallback
                 // 단, auto leading(>50pt = percentage 값)은 무시
-                Double fixedLeading = getStyleLeading(ip.appliedParagraphStyle());
-                if (fixedLeading != null && fixedLeading > 50) fixedLeading = null; // auto leading percentage 무시
+                Double fixedLeading = rp.fixedLeading(); // resolved (실제 렌더링 값)
                 if (fixedLeading == null || fixedLeading <= 0) {
-                    fixedLeading = ip.leading(); // IDML CharacterRun leading
+                    fixedLeading = getStyleLeading(ip.appliedParagraphStyle()); // IDML 스타일
                     if (fixedLeading != null && fixedLeading > 50) fixedLeading = null;
                 }
                 if (fixedLeading == null || fixedLeading <= 0) {
-                    fixedLeading = rp.fixedLeading(); // resolved fallback
+                    fixedLeading = ip.leading(); // IDML CharacterRun leading
+                    if (fixedLeading != null && fixedLeading > 50) fixedLeading = null;
                 }
                 if (fixedLeading != null && fixedLeading > 0) {
                     // InDesign Leading(pt) → HWPX 고정 줄간격(HWPUNIT)
