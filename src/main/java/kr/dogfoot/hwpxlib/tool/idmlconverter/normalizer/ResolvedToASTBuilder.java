@@ -337,12 +337,14 @@ public class ResolvedToASTBuilder {
             if (tf.previousFrameId() != null) {
                 ResolvedTextFrame prevTf = resolvedData.getTextFrame(tf.previousFrameId());
                 if (prevTf != null && prevTf.geometricBounds() != null && tf.geometricBounds() != null) {
+                    // 다른 페이지에 있으면 독립 배치
+                    boolean diffPage = prevTf.pageIndex() != tf.pageIndex();
                     double prevBottom = prevTf.geometricBounds()[2];
                     double curTop = tf.geometricBounds()[0];
                     double gap = curTop - prevBottom;
                     double lineH = tf.geometricBounds()[2] - tf.geometricBounds()[0];
-                    // gap이 한 줄 높이 이상이면 독립 배치
-                    if (gap > lineH * 0.5) {
+                    // gap이 한 줄 높이 이상이거나 다른 페이지이면 독립 배치
+                    if (diffPage || gap > lineH * 0.5) {
                         // 병합하지 않고 독립 배치 → continue하지 않음
                     } else {
                         continue; // 인접 → 병합 (첫 프레임에서 처리)
@@ -374,7 +376,8 @@ public class ResolvedToASTBuilder {
                     ResolvedTextFrame next = resolvedData.getTextFrame(nextId);
                     if (next == null || next.geometricBounds() == null) break;
                     double[] ngb = next.geometricBounds();
-                    // Y 간격이 한 줄 높이의 50% 이상이면 합산 중단
+                    // 다른 페이지이거나 Y 간격이 한 줄 높이의 50% 이상이면 합산 중단
+                    if (next.pageIndex() != tf.pageIndex()) break;
                     double gap = ngb[0] - gb[2];
                     double lineH = ngb[2] - ngb[0];
                     if (gap > lineH * 0.5) break;
