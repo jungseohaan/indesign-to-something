@@ -499,7 +499,7 @@ public class FontMapper {
             // 701~800 → 한컴 윤고딕 250 (굵은)
             // 801~ → 한컴 윤고딕 760 (진한)
             if (weight < 100) return "함초롬돋움";
-            if (weight <= 400) return "한컴 윤고딕 230";
+            if (weight <= 400) return "한컴 윤고딕 720";
             if (weight <= 700) return "한컴 윤고딕 240";
             if (weight <= 800) return "한컴 윤고딕 250";
             return "한컴 윤고딕 760";
