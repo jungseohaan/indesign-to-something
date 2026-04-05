@@ -283,14 +283,44 @@ public class ResolvedToASTBuilder {
 
         for (ResolvedTextFrame tf : frames) {
             // 인라인 프레임은 Phase 3에서 처리
-            if (tf.isInline()) continue;
+            // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
+            boolean inlineToFloating = false;
+            if (tf.isInline()) {
+                if (!resolvedData.isEditableTextFrame(tf.id())) {
+                    String vis = tf.frameVisibleText();
+                    boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 5;
+                    int domIdInt = -1;
+                    try { domIdInt = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
+                    boolean rendered = domIdInt >= 0 && resolvedData.isRenderedByOtherChannel(domIdInt);
+                    boolean sharedWithEditable = false;
+                    if (tf.storyId() != null) {
+                        for (ResolvedTextFrame other : frames) {
+                            if (tf.storyId().equals(other.storyId()) && resolvedData.isEditableTextFrame(other.id())) {
+                                sharedWithEditable = true;
+                                break;
+                            }
+                        }
+                    }
+                    // parentId가 있으면 다른 객체 안에 중첩 → 배경에서 부모와 함께 숨겨짐
+                    boolean hasParent = false;
+                    ResolvedPageItem rpi = resolvedData.getPageItem(tf.id());
+                    if (rpi != null && rpi.parentId() != null) hasParent = true;
+                    if (hasText && !rendered && !sharedWithEditable && hasParent) {
+                        inlineToFloating = true;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
 
             // 다른 TextFrame 안에 중첩된 프레임은 건너뜀 (부모가 배경에 포함)
-            if (isNestedInTextFrame(tf)) continue;
+            if (!inlineToFloating && isNestedInTextFrame(tf)) continue;
 
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             // 단, 같은 story를 editable TF와 공유하는 non-editable TF는 배치
-            if (!resolvedData.isEditableTextFrame(tf.id())) {
+            if (!inlineToFloating && !resolvedData.isEditableTextFrame(tf.id())) {
                 boolean sharedWithEditable = false;
                 if (tf.storyId() != null) {
                     for (ResolvedTextFrame other : frames) {
