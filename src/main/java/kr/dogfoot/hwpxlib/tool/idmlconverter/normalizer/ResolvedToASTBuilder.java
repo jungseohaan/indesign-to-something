@@ -1879,12 +1879,8 @@ public class ResolvedToASTBuilder {
                                         anchorIdx++;
                                         continue;
                                     }
-                                    // rendered된 TF(badge 등)는 이미 PNG로 배치됨 → 건너뜀
-                                    if (resolvedData.isRenderedByOtherChannel(domId)) {
-                                        anchorIdx++;
-                                        continue;
-                                    }
                                     // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
+                                    // (rendered badge는 tryInlineTextFrameAsRun에서 건너뛰고 loadInlineObject로 PNG 로드)
                                     ASTTextRun textRun = tryInlineTextFrameAsRun(domId);
                                     if (textRun != null) {
                                         para.addItem(textRun);
