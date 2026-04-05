@@ -1887,6 +1887,20 @@ function classifyTextFrame(item) {
             }
         }
     } catch (e) {}
+    // 8.5. 부모에 배경색이 있는 짧은 텍스트 → renderable (배지)
+    try {
+        var trimmed85 = item.contents.replace(/[\s\uFEFF\r\n\u0016\uFFFC]/g, "");
+        if (trimmed85.length > 0 && trimmed85.length <= 10) {
+            var parent85 = item.parent;
+            if (parent85 && parent85.constructor.name !== "Story" && parent85.constructor.name !== "Spread" && parent85.constructor.name !== "Page") {
+                var pFill85 = "None";
+                try { pFill85 = parent85.fillColor ? parent85.fillColor.name : "None"; } catch (e) {}
+                if (pFill85 !== "None" && pFill85 !== "[None]") {
+                    return "renderable";
+                }
+            }
+        }
+    } catch (e) {}
     // 9. 회전/효과/특수 스타일 → 별도 PNG 렌더링
     if (isRenderableTextFrame(item)) return "renderable";
     // 10. 빈 TextFrame + fill/stroke → 배경에 포함
@@ -2048,6 +2062,16 @@ function isRenderableTextFrame(tf) {
                         try {
                             if (tf.topLeftCornerOption !== CornerOptions.NONE
                                 || tf.topRightCornerOption !== CornerOptions.NONE) hasObjStyle = true;
+                        } catch (e) {}
+                    }
+                    // 부모 객체의 배경색 체크 (TextFrame이 Rectangle 안에 있는 경우)
+                    if (!hasObjStyle) {
+                        try {
+                            var parent = tf.parent;
+                            if (parent && parent.constructor.name !== "Story" && parent.constructor.name !== "Spread" && parent.constructor.name !== "Page") {
+                                var pFill = parent.fillColor ? parent.fillColor.name : "None";
+                                if (pFill !== "None" && pFill !== "[None]") hasObjStyle = true;
+                            }
                         } catch (e) {}
                     }
                 } else {
@@ -2453,6 +2477,28 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         try { app.pdfExportPreferences.monochromeBitmapCompression = BitmapCompression.NONE; } catch(e6){}
     } catch (ePdfPref) {}
 
+    // renderable TF와 부모 객체도 배경에서 숨김 대상에 추가
+    var renderableItems = [];
+    for (var ri2 = 0; ri2 < allItems.length; ri2++) {
+        try {
+            if (allItems[ri2].constructor.name === "TextFrame") {
+                var cls2 = classifyTextFrame(allItems[ri2]);
+                if (cls2 === "renderable") {
+                    renderableItems.push(allItems[ri2]);
+                    // 부모 객체(배경 도형)도 숨김
+                    try {
+                        var rParent = allItems[ri2].parent;
+                        if (rParent && rParent.constructor.name !== "Story"
+                            && rParent.constructor.name !== "Spread"
+                            && rParent.constructor.name !== "Page") {
+                            renderableItems.push(rParent);
+                        }
+                    } catch (e) {}
+                }
+            }
+        } catch (e) {}
+    }
+
     // 같은 story를 editable TF와 공유하는 non-editable TF도 배경에서 숨김 대상에 추가
     var editableStoryIds = {};
     for (var esi = 0; esi < editableFrames.length; esi++) {
@@ -2462,6 +2508,9 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         } catch (e) {}
     }
     var framesToHide = editableFrames.slice(0); // 복사
+    for (var rhi = 0; rhi < renderableItems.length; rhi++) {
+        framesToHide.push(renderableItems[rhi]);
+    }
     for (var ai = 0; ai < allItems.length; ai++) {
         try {
             if (allItems[ai].constructor.name === "TextFrame"

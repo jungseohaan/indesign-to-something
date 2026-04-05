@@ -136,9 +136,8 @@ public class ResolvedToASTBuilder {
         // Phase 6: 페이지 배경 PNG 주입
         injectPageBackgrounds(sections);
 
-        // Phase 7: IDML 독립 이미지 프레임 배치 — 비활성화
-        // (배경 PNG에 이미 포함된 이미지와 중복 배치 문제)
-        // placeUnrenderedImages(sections);
+        // Phase 7: renderable TF(배지)를 플로팅 이미지로 배치
+        placeRenderableFrames(sections);
 
         System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
         return doc;
@@ -3974,6 +3973,67 @@ public class ResolvedToASTBuilder {
 
     // Phase 5: 페이지 배경 PNG 주입
     // ═══════════════════════════════════════════════════
+
+    /**
+     * renderable TF(배지: 부모에 배경색이 있는 짧은 텍스트)를 플로팅 이미지로 배치.
+     * renderedTextFrames에서 type이 없는(일반 renderable) 항목의 PNG를 ASTFigure로 변환.
+     */
+    private void placeRenderableFrames(List<ASTSection> sections) {
+        if (basePath == null) return;
+        int count = 0;
+        for (RenderedGroup rt : resolvedData.allRenderedTextFrames()) {
+            if (rt.file() == null) continue;
+            // badge_group은 이미 인라인으로 처리됨 → 건너뜀
+            if (rt.isBadgeGroup()) continue;
+
+            File pngFile = new File(basePath, rt.file());
+            if (!pngFile.exists()) continue;
+
+            int pageIdx = toSectionIndex(rt.pageIndex());
+            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+
+            try {
+                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+                if (img == null || img.getWidth() <= 2) continue;
+
+                double[] bounds = rt.bounds();
+                if (bounds == null || bounds.length < 4) continue;
+
+                double bw = Math.abs(bounds[3] - bounds[1]) * scaleFactor;
+                double bh = Math.abs(bounds[2] - bounds[0]) * scaleFactor;
+                if (bw <= 0 || bh <= 0) continue;
+
+                // PNG 비율 보정
+                double pngRatio = (double) img.getWidth() / img.getHeight();
+                double boundsRatio = bw / bh;
+                if (Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
+                    if (pngRatio < 1.0) { bw = bh * pngRatio; } else { bh = bw / pngRatio; }
+                }
+
+                double x = bounds[1] * scaleFactor;
+                double y = bounds[0] * scaleFactor;
+
+                ASTFigure fig = new ASTFigure();
+                fig.sourceId("renderable_" + rt.id());
+                fig.x(CoordinateConverter.pointsToHwpunits(x));
+                fig.y(CoordinateConverter.pointsToHwpunits(y));
+                fig.width(CoordinateConverter.pointsToHwpunits(bw));
+                fig.height(CoordinateConverter.pointsToHwpunits(bh));
+                fig.imageData(imageData);
+                fig.imageFormat("png");
+                fig.pixelWidth(img.getWidth());
+                fig.pixelHeight(img.getHeight());
+                fig.zOrder(Math.max(rt.zOrder(), 10)); // 배경(0) 위에 배치
+                fig.fromGroup(true); // IN_FRONT_OF_TEXT
+                sections.get(pageIdx).addBlock(fig);
+                count++;
+            } catch (Exception e) { /* skip */ }
+        }
+        if (count > 0) {
+            System.err.println("[ResolvedToASTBuilder] Phase 7: " + count + " renderable frames placed");
+        }
+    }
 
     private void injectPageBackgrounds(List<ASTSection> sections) {
         List<RenderedGroup> floatingItems = resolvedData.allRenderedFloatingItems();
