@@ -388,7 +388,7 @@ function main(args) {
 
             // 2.13. 배지 그룹 + 장식 텍스트 프레임 렌더링
             _marker(outputDir, "05_badgeRendering");
-            var rtfResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems);
+            var rtfResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, editableFrameIds);
             renderedFrames = rtfResult.frames;
             var badgeChildIds = rtfResult.badgeChildIds;
             // 배지 자식 항목을 renderedFloatingItems에 추가
@@ -527,13 +527,14 @@ function main(args) {
 /**
  * 짧은 텍스트 프레임(장식 텍스트)과 배지 그룹을 PNG로 렌더링한다.
  */
-function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems) {
+function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, editableFrameIds) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
     var renderedFrames = [];
     var renderedIds = {};
     var badgeGroupChildIds = {};
+    if (!editableFrameIds) editableFrameIds = {};
 
     app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 220;
     app.pngExportPreferences.antiAlias = true;
@@ -706,6 +707,26 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems) 
         var fileName = "frame_" + domId + ".png";
         var outFile = File(renderDir + "/" + fileName);
 
+        // renderTarget이 컨테이너(부모)이면 그 안의 editable TextFrame을
+        // 임시로 숨겨서 PNG에 본문 텍스트가 중복 캡처되는 것을 방지.
+        var hiddenEditable = [];
+        if (renderTarget !== item) {
+            try {
+                var nestedItems = renderTarget.allPageItems;
+                for (var nei = 0; nei < nestedItems.length; nei++) {
+                    var nItem = nestedItems[nei];
+                    try {
+                        if (nItem.constructor.name === "TextFrame"
+                            && editableFrameIds[nItem.id]
+                            && nItem.visible) {
+                            nItem.visible = false;
+                            hiddenEditable.push(nItem);
+                        }
+                    } catch (eHide) {}
+                }
+            } catch (eHideAll) {}
+        }
+
         try {
             renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
 
@@ -741,6 +762,11 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems) 
                 });
             }
         } catch (e) {}
+
+        // 숨긴 editable TextFrame 복원
+        for (var rh = 0; rh < hiddenEditable.length; rh++) {
+            try { hiddenEditable[rh].visible = true; } catch (eR) {}
+        }
     }
 
     return { frames: renderedFrames, badgeChildIds: badgeGroupChildIds };
