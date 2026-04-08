@@ -113,7 +113,9 @@ public class IDMLToHwpxConverter {
             ASTDocument astDoc;
             // IDML-Free 파이프라인: resolved.json에 renderedFloatingItems가 있으면 새 빌더 사용
             if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) {
-                astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(resolvedData, idmlDoc.tempDir(), options.config().pngExportResolution()).build();
+                astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(resolvedData, idmlDoc.tempDir(), options.config().pngExportResolution())
+                        .debugAst(options.debugAst())
+                        .build();
             } else {
                 // 레거시: IDML 기반 4단계 정규화
                 astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);

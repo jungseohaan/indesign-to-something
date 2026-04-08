@@ -56,6 +56,10 @@ public class ResolvedToASTBuilder {
     // [0]=HIGH, [1]=MEDIUM, [2]=LOW. ctx.spec016Counts와 같은 배열을 공유.
     private final int[] spec016Counts = new int[3];
 
+    // SPEC-015: --debug-ast 활성화 여부. true면 phase별로 새로 만든 블록에 DebugMeta.createdAt 자동 부여.
+    private boolean debugAst;
+    public ResolvedToASTBuilder debugAst(boolean v) { this.debugAst = v; return this; }
+
 
     // Lazy-loaded IDML 인프라 (테이블 셀 변환용)
     private kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDocument;
@@ -116,25 +120,32 @@ public class ResolvedToASTBuilder {
 
         // Phase 2: TextFrame 분류 및 배치
         placeTextFrames(sections);
+        tagPhase(sections, "Phase2.placeTextFrames");
 
         // Phase 3: Story→단락→런 변환
         convertStories(sections);
+        tagPhase(sections, "Phase3.convertStories");
 
         // Phase 4: 테이블 포함 TextFrame → ASTTable 변환
         placeTablesFromIDML(sections);
+        tagPhase(sections, "Phase4.placeTablesFromIDML");
 
         // Phase 4.5: 불릿 스타일 자동 삽입
         // 대신 HwpxParagraphBuilder.applyBetweenLinesSpacing에서 줄간격 조정
         insertBulletsForBulletStyles(sections);
+        tagPhase(sections, "Phase4_5.insertBulletsForBulletStyles");
 
         // Phase 5: textwrap 글상자 분할 (변환 완료된 블록을 wrapIndent 기반으로 분할)
         splitByWrapIndent(sections);
+        tagPhase(sections, "Phase5.splitByWrapIndent");
 
         // Phase 6: 페이지 배경 PNG 주입
         injectPageBackgrounds(sections);
+        tagPhase(sections, "Phase6.injectPageBackgrounds");
 
         // Phase 7: renderable TF(배지)를 플로팅 이미지로 배치
         placeRenderableFrames(sections);
+        tagPhase(sections, "Phase7.placeRenderableFrames");
 
         System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
         // SPEC-016 Phase 2: 매칭 신뢰도 비율 리포트
@@ -146,6 +157,23 @@ public class ResolvedToASTBuilder {
                     + " (total=" + total + ")");
         }
         return doc;
+    }
+
+    /**
+     * SPEC-015: 디버그 모드일 때 phase 종료 후 createdAt 미설정 블록을 현재 phase로 태그.
+     * 새로 추가된 블록만 식별하기 어려우므로 "처음 발견 시점"을 createdAt으로 본다 — 한 번
+     * 태그된 블록은 다음 phase가 덮어쓰지 않으므로 "최초로 만든 phase"가 정확히 기록된다.
+     */
+    private void tagPhase(List<ASTSection> sections, String phase) {
+        if (!debugAst) return;
+        for (ASTSection s : sections) {
+            for (ASTBlock b : s.blocks()) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.DebugMeta dm = b.debug();
+                if (dm == null || dm.createdAt == null) {
+                    b.debugOrNew().createdAt = phase;
+                }
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════

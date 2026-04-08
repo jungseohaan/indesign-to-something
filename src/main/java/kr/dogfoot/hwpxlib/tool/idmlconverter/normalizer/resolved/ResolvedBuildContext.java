@@ -88,6 +88,17 @@ public final class ResolvedBuildContext {
     /** Phase 3 findResolvedRun에서 마지막 매칭 인덱스를 기록하는 1-element 배열. */
     public int[] lastMatchResult;
 
+    /**
+     * SPEC-015: {@code --debug-ast} 활성화 여부. true일 때만 phase 진입 시 currentPhase를 채우고
+     * 새로 생성된 블록에 DebugMeta가 자동 부여된다.
+     */
+    public boolean debugAst;
+
+    /**
+     * SPEC-015: 현재 실행 중인 Phase 이름 (예: "Phase2.placeTextFrames"). debugAst가 true일 때만 의미.
+     */
+    public String currentPhase;
+
     public ResolvedBuildContext() {
     }
 }

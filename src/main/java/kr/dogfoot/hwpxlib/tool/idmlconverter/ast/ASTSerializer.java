@@ -221,6 +221,7 @@ public class ASTSerializer {
         boolean first = true;
         first = writeStringField(sb, "blockType", "TEXT_FRAME_BLOCK", first);
         first = writeStringField(sb, "sourceId", tf.sourceId(), first);
+        first = writeDebugMeta(sb, tf.debug(), first);
         first = writeStringField(sb, "storyId", tf.storyId(), first);
         first = writeLongField(sb, "x", tf.x(), first);
         first = writeLongField(sb, "y", tf.y(), first);
@@ -281,6 +282,7 @@ public class ASTSerializer {
         boolean first = true;
         first = writeStringField(sb, "blockType", "TABLE", first);
         first = writeStringField(sb, "sourceId", table.sourceId(), first);
+        first = writeDebugMeta(sb, table.debug(), first);
         first = writeLongField(sb, "x", table.x(), first);
         first = writeLongField(sb, "y", table.y(), first);
         first = writeLongField(sb, "width", table.width(), first);
@@ -441,6 +443,7 @@ public class ASTSerializer {
         boolean first = true;
         first = writeStringField(sb, "blockType", "FIGURE", first);
         first = writeStringField(sb, "sourceId", fig.sourceId(), first);
+        first = writeDebugMeta(sb, fig.debug(), first);
         if (fig.kind() != null) {
             first = writeStringField(sb, "kind", fig.kind().name(), first);
         }
@@ -821,6 +824,43 @@ public class ASTSerializer {
         if (value == null) return first;
         if (!first) sb.append(',');
         sb.append('"').append(key).append("\":\"").append(escapeJson(value)).append('"');
+        return false;
+    }
+
+    /**
+     * SPEC-015: DebugMeta를 {@code "debug": { ... }} 객체로 직렬화. 비어있으면 생략.
+     */
+    private static boolean writeDebugMeta(StringBuilder sb, DebugMeta dm, boolean first) {
+        if (dm == null || dm.isEmpty()) return first;
+        if (!first) sb.append(',');
+        sb.append("\"debug\":{");
+        boolean inner = true;
+        inner = writeStringField(sb, "createdAt", dm.createdAt, inner);
+        inner = writeStringField(sb, "sourceId", dm.sourceId, inner);
+        if (dm.appliedFrom != null && !dm.appliedFrom.isEmpty()) {
+            if (!inner) sb.append(',');
+            sb.append("\"appliedFrom\":{");
+            boolean afFirst = true;
+            for (java.util.Map.Entry<String, String> e : dm.appliedFrom.entrySet()) {
+                if (!afFirst) sb.append(',');
+                sb.append('"').append(escapeJson(e.getKey())).append("\":\"")
+                        .append(escapeJson(String.valueOf(e.getValue()))).append('"');
+                afFirst = false;
+            }
+            sb.append('}');
+            inner = false;
+        }
+        if (dm.notes != null && !dm.notes.isEmpty()) {
+            if (!inner) sb.append(',');
+            sb.append("\"notes\":[");
+            for (int i = 0; i < dm.notes.size(); i++) {
+                if (i > 0) sb.append(',');
+                sb.append('"').append(escapeJson(dm.notes.get(i))).append('"');
+            }
+            sb.append(']');
+            inner = false;
+        }
+        sb.append('}');
         return false;
     }
 
