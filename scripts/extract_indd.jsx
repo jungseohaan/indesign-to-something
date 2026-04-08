@@ -2359,8 +2359,19 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
     }
 
     // 테이블+인라인 TextFrame 별도 렌더링:
-    // 테이블 셀에 인라인 객체(Group/Rectangle 등)가 포함된 TextFrame은
-    // 통째로 PNG로 렌더링하여 renderedFloatingItems에 추가
+    // 테이블 셀에 인라인 객체(Group/Rectangle 등)가 포함된 TextFrame을 통째로 PNG로
+    // 렌더링하여 renderedFloatingItems에 추가한다.
+    //
+    // SPEC-018: 트리거 조건 강화 (점검 내용 테이블 등 편집성 손실 방지)
+    //   - 셀 텍스트 임계값 5: "예/아니요" 같은 라벨 셀은 텍스트로 인정.
+    //   - 본문 텍스트 셀(임계값 이상)이 TEXT_CELL_FLOOR개 이상이면 fallback 안 함.
+    //     점검 내용 표는 본문 셀 9개라서 안전하게 ASTTable 경로 유지.
+    //   - 보조 조건: 인라인 셀 비율 70% 이상일 때만 fallback (옵션 안전 가드)
+    //   - 셀 안 인라인 객체는 inlineObjects 메커니즘이 별도 PNG로 추출하고
+    //     Java TableBuilder.extractCellInlines가 floating ASTFigure로 분리한다.
+    var TABLE_INLINE_TEXT_THRESHOLD = 5;
+    var TABLE_INLINE_RATIO = 0.7;
+    var TABLE_TEXT_CELL_FLOOR = 4; // 본문 텍스트 셀이 이 수 이상이면 fallback 안 함
     var tableInlineRendered = [];  // { id, file, bounds, pageIndex, type }
     for (var ti = 0; ti < editableFrames.length; ti++) {
         var tTf = editableFrames[ti];
@@ -2368,29 +2379,39 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
             var tStory = tTf.parentStory;
             // 테이블이 있는지
             if (!tStory.tables || tStory.tables.length === 0) continue;
-            // 테이블 셀에 인라인 객체가 있는지
-            var hasTableInline = false;
-            for (var tbi = 0; tbi < tStory.tables.length && !hasTableInline; tbi++) {
+            var inlineCellCount = 0;
+            var textCellCount = 0;
+            var totalCellCount = 0;
+            for (var tbi = 0; tbi < tStory.tables.length; tbi++) {
                 var tbl = tStory.tables[tbi];
-                for (var tci = 0; tci < tbl.cells.length && !hasTableInline; tci++) {
+                for (var tci = 0; tci < tbl.cells.length; tci++) {
                     var tCell = tbl.cells[tci];
-                    // 셀 텍스트 길이
+                    totalCellCount++;
                     var cellText = "";
                     try { cellText = tCell.contents.replace(/\uFFFC/g, "").replace(/[\r\n]/g, ""); } catch(e) {}
-                    if (cellText.length >= 30) continue; // 긴 텍스트는 글상자 변환 유지
-                    // 셀에 인라인 객체(Group, Rectangle 등)가 있는지
+                    if (cellText.length >= TABLE_INLINE_TEXT_THRESHOLD) {
+                        textCellCount++;
+                        continue;
+                    }
+                    var cellHasInline = false;
                     try {
                         var cellItems = tCell.allPageItems;
                         for (var cii = 0; cii < cellItems.length; cii++) {
                             var cn = cellItems[cii].constructor.name;
                             if (cn === "Group" || cn === "Rectangle" || cn === "Polygon" || cn === "Oval") {
-                                hasTableInline = true;
+                                cellHasInline = true;
                                 break;
                             }
                         }
                     } catch(e) {}
+                    if (cellHasInline) inlineCellCount++;
                 }
             }
+            // 본문 텍스트 셀이 충분하면 (점검 내용 등) fallback 안 함
+            if (textCellCount >= TABLE_TEXT_CELL_FLOOR) continue;
+            // 인라인 셀 비율 70% 이상에서만 fallback 발동
+            var hasTableInline = totalCellCount > 0
+                && (inlineCellCount / totalCellCount) >= TABLE_INLINE_RATIO;
             if (!hasTableInline) continue;
 
             // 이 TextFrame을 통째로 PNG로 렌더링
