@@ -16,9 +16,6 @@ import java.util.List;
  *
  * <p>{@code ResolvedToASTBuilder.placeTextFrames + placeByYGapSplit + isNestedInTextFrame}
  * 에서 stateless static helper로 발췌. 동작은 동일.</p>
- *
- * <p>주의: 비활성/데드 헬퍼(placeByWrapIndent, placeComposedLines)는 builder에 잔존
- * (stage 12 정리 작업).</p>
  */
 public final class FramePlacer {
 
