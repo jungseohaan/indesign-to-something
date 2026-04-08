@@ -2018,38 +2018,51 @@ public class ResolvedToASTBuilder {
             text = text.replace("\uFFE3", "~");  // Fullwidth Macron → 물결 (한글 호환)
         }
         tr.text(text);
-        // IDML CharacterRun 속성 우선
-        // EH 수식 폰트가 한국어 텍스트에 잘못 적용되면 제거
-        String fontFamily = cr.fontFamily();
-        if (fontFamily != null && EHFontGlyphMap.isEHFontFamily(fontFamily)
-                && text != null && EHTextClassifier.isKoreanOnly(text)) {
-            fontFamily = null; // 한국어 텍스트에 EH 폰트 적용 방지
-            tr.fontStyle(null); // EH 폰트의 Italic fontStyle 제거
-        }
-        if (fontFamily != null) tr.fontFamily(fontFamily);
-        if (cr.fontStyle() != null) tr.fontStyle(cr.fontStyle());
-        if (cr.fontSize() != null && cr.fontSize() > 0) {
-            tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
-        }
-        if (cr.fillColor() != null) {
-            tr.textColor(resolveColorToHex(cr.fillColor()));
-        }
-        // GREP 스타일 색상 적용: grepAppliedCharStyle의 FillColor가 있으면 우선
+
+        // ── 속성 적용: SPEC-012 RunPropertyResolver 사용 ──
+        // 우선순위: resolved → IDML CharacterRun → ParagraphStyle → default
+        // resolved는 GREP/중첩 스타일이 모두 적용된 실제 렌더링 값이므로 가장 권위 있음.
+
+        // GREP 적용 캐릭터 스타일이 있으면 IDML CR 색상의 효과 값 미리 계산 (CR보다 우선)
+        String effectiveIdmlColor = cr.fillColor();
         if (cr.grepAppliedCharStyle() != null && idmlDocument != null) {
             ensureIdmlInfra();
             if (idmlDocument != null) {
                 kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef grepCharStyle =
                         idmlDocument.charStyles().get(cr.grepAppliedCharStyle());
                 if (grepCharStyle == null) {
-                    // "CharacterStyle/" 접두사 제거 시도
                     String shortRef = cr.grepAppliedCharStyle();
                     if (shortRef.startsWith("CharacterStyle/")) shortRef = shortRef.substring("CharacterStyle/".length());
                     grepCharStyle = idmlDocument.charStyles().get(shortRef);
                 }
                 if (grepCharStyle != null && grepCharStyle.fillColor() != null) {
-                    String grepColor = resolveColorToHex(grepCharStyle.fillColor());
-                    if (grepColor != null) tr.textColor(grepColor);
+                    effectiveIdmlColor = grepCharStyle.fillColor();
                 }
+            }
+        }
+
+        // fontFamily / fontSize / textColor: 헬퍼로 단일 우선순위 적용
+        String resolvedFontFamily = RunPropertyResolver.resolveFontFamily(rr, cr, sc.fontFamily, text);
+        if (resolvedFontFamily != null) {
+            tr.fontFamily(resolvedFontFamily);
+        }
+        Integer resolvedFontSize = RunPropertyResolver.resolveFontSizeHwpunits(rr, cr, sc.fontSize);
+        if (resolvedFontSize != null) {
+            tr.fontSizeHwpunits(resolvedFontSize);
+        }
+        String resolvedColor = RunPropertyResolver.resolveTextColorHex(rr, effectiveIdmlColor, sc.fillColor, this::resolveColorToHex);
+        if (resolvedColor != null) {
+            tr.textColor(resolvedColor);
+        }
+
+        // fontStyle: IDML CR이 EH/BT 수식 폰트를 한국어에 잘못 적용한 경우 리셋
+        if (cr.fontStyle() != null) {
+            String crFf = cr.fontFamily();
+            boolean crIsEHOrBT = crFf != null && (EHFontGlyphMap.isEHFontFamily(crFf) || crFf.contains("BT수식"));
+            if (crIsEHOrBT && text != null && EHTextClassifier.isKoreanOnly(text)) {
+                // 한국어 텍스트에 EH/BT 폰트의 fontStyle 적용 안 함
+            } else {
+                tr.fontStyle(cr.fontStyle());
             }
         }
         // InDesign Tracking → HWPX 자간
@@ -2060,10 +2073,9 @@ public class ResolvedToASTBuilder {
             Double trackingVal = (cr.tracking() != null && cr.tracking() != 0)
                     ? cr.tracking() : sc.tracking;
             if (trackingVal != null && trackingVal != 0) {
-                String fn = (fontFamily != null) ? fontFamily
-                        : (tr.fontFamily() != null ? tr.fontFamily()
+                String fn = (tr.fontFamily() != null) ? tr.fontFamily()
                         : (sc.fontFamily != null ? sc.fontFamily
-                        : (rr != null ? rr.fontFamily() : null)));
+                        : (rr != null ? rr.fontFamily() : null));
                 boolean isDefaultFallback = isKoreanFontName(fn);
                 if (isDefaultFallback) {
                     // 한컴돋움 fallback: tracking 값의 50%
@@ -2081,23 +2093,9 @@ public class ResolvedToASTBuilder {
             short bsPct = (short) Math.round((bsPt / fs) * 100);
             tr.baselineShift(bsPct);
         }
-        // IDML에 없는 속성은 ParagraphStyle → resolved 런 순으로 보강
+        // resolved에서만 가져오는 보조 속성: fontStyle / horizontalScale / underline / strikeThrough
+        // (fontFamily/fontSize/textColor는 위쪽에서 RunPropertyResolver로 이미 처리됨)
         if (rr != null) {
-            if (tr.fontFamily() == null) {
-                // resolved 폰트 우선 (실제 렌더링 값), ParagraphStyle 폴백
-                if (rr.fontFamily() != null) {
-                    boolean isEHorBT = EHFontGlyphMap.isEHFontFamily(rr.fontFamily())
-                            || (rr.fontFamily() != null && rr.fontFamily().contains("BT수식"));
-                    boolean isSingleLatin = text != null && text.trim().length() == 1
-                            && Character.isLetter(text.trim().charAt(0));
-                    if (!isEHorBT || isSingleLatin) {
-                        tr.fontFamily(rr.fontFamily());
-                    }
-                }
-                if (tr.fontFamily() == null && sc.fontFamily != null) {
-                    tr.fontFamily(sc.fontFamily);
-                }
-            }
             if (rr.fontStyle() != null) {
                 boolean isEHorBT = rr.fontFamily() != null
                         && (EHFontGlyphMap.isEHFontFamily(rr.fontFamily()) || rr.fontFamily().contains("BT수식"));
@@ -2106,14 +2104,6 @@ public class ResolvedToASTBuilder {
                 if (!isEHorBT || isSingleLatin) {
                     // resolved fontStyle 우선 (GREP/중첩 스타일 반영 — IDML은 미반영)
                     tr.fontStyle(rr.fontStyle());
-                }
-            }
-            if (tr.fontSizeHwpunits() == null) {
-                // resolved fontSize 우선 (실제 렌더링 값), ParagraphStyle 폴백
-                if (rr.fontSize() != null && rr.fontSize() > 0) {
-                    tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
-                } else if (sc.fontSize != null && sc.fontSize > 0) {
-                    tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(sc.fontSize));
                 }
             }
             // horizontalScale: IDML에 없으면 resolved에서 보강
@@ -2131,18 +2121,6 @@ public class ResolvedToASTBuilder {
                     tr.horizontalScale((short) rr.horizontalScale().doubleValue());
                 }
             }
-            // FillColor: resolved 우선, ParagraphStyle 폴백, 최후 Black
-            if (tr.textColor() == null) {
-                if (rr.fillColor() != null) {
-                    tr.textColor(resolveColorToHex(rr.fillColor()));
-                }
-                if (tr.textColor() == null && sc.fillColor != null) {
-                    tr.textColor(sc.fillColor);
-                }
-                if (tr.textColor() == null) {
-                    tr.textColor("#000000");
-                }
-            }
             // underline / strikeThrough
             if (rr.underline() != null && rr.underline()) {
                 tr.underline(true);
@@ -2151,12 +2129,9 @@ public class ResolvedToASTBuilder {
                 tr.strikeThrough(true);
             }
         }
-        // ParagraphStyle 폴백 (IDML 런과 resolved 런 모두 속성이 없을 때)
-        if (tr.fontFamily() == null && sc.fontFamily != null) {
-            tr.fontFamily(sc.fontFamily);
-        }
-        if (tr.fontSizeHwpunits() == null && sc.fontSize != null && sc.fontSize > 0) {
-            tr.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(sc.fontSize));
+        // 색상 default 폴백 (헬퍼에서 처리되지 않은 경우)
+        if (tr.textColor() == null) {
+            tr.textColor("#000000");
         }
         // IDML CharacterRun의 underline/strikeThrough (resolved보다 우선)
         if (cr.underline() != null && cr.underline()) {
