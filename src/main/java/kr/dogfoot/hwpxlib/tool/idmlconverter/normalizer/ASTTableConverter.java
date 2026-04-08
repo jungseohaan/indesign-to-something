@@ -646,7 +646,7 @@ public class ASTTableConverter {
      * rendered bounds의 X 좌표로 올바른 위치에 재배치한다.
      * 예: [IMG(01,x=359) IMG(풍선,x=419) TEXT] → [IMG(01,x=359) TEXT IMG(풍선,x=419)]
      */
-    static void reorderInlineObjectsByBoundsX(ASTParagraph para) {
+    public static void reorderInlineObjectsByBoundsX(ASTParagraph para) {
         List<ASTInlineItem> items = para.items();
         if (items == null || items.size() < 3) return;
 

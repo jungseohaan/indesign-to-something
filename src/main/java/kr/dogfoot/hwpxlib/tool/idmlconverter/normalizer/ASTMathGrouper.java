@@ -21,14 +21,14 @@ import java.util.List;
  * BT 수식 폰트 런 그룹핑 및 수식 변환 로직.
  * Stage4_BuildAST에서 분리됨.
  */
-class ASTMathGrouper {
+public class ASTMathGrouper {
 
     /**
      * 한국어+수식마커 혼합 런을 한국어/비한국어 경계에서 분리한다.
      * 예: "&P_r를 구해 보자" → "&P_r" + "를 구해 보자"
      * BT 폰트/grepMath 런이나 한국어/수식마커가 혼합되지 않은 런은 그대로 통과.
      */
-    static List<IDMLCharacterRun> splitMathKoreanMixedRuns(List<IDMLCharacterRun> runs) {
+    public static List<IDMLCharacterRun> splitMathKoreanMixedRuns(List<IDMLCharacterRun> runs) {
         List<IDMLCharacterRun> result = new ArrayList<>();
         for (IDMLCharacterRun run : runs) {
             // BT/grepMath 런도 한국어+수식 혼합이면 분리 대상 (한국어 부분을 수식에서 제외하기 위해)
@@ -156,7 +156,7 @@ class ASTMathGrouper {
      * 텍스트가 수식처럼 보이는지 확인.
      * BT 마커(_^&\), BT 키워드(.c3), 또는 연산자+변수 조합을 감지한다.
      */
-    static boolean looksLikeMathRun(String text) {
+    public static boolean looksLikeMathRun(String text) {
         if (text == null || text.isEmpty()) return false;
         // BT 마커
         boolean hasOperator = false;
@@ -209,7 +209,7 @@ class ASTMathGrouper {
      * 한국어 + 공백/구두점만 있고 라틴 문자, 숫자, 수식 마커/연산자가 없으면 true.
      * BT 폰트 런이라도 한국어만 있으면 수식이 아닌 일반 텍스트로 처리하기 위해 사용.
      */
-    static boolean isBTRunWithOnlyKorean(String text) {
+    public static boolean isBTRunWithOnlyKorean(String text) {
         if (text == null || text.isEmpty()) return false;
         boolean hasKorean = false;
         for (int i = 0; i < text.length(); i++) {
@@ -231,7 +231,7 @@ class ASTMathGrouper {
      * BT 수식 런 사이 또는 뒤의 비수식 런이 수식 그룹에 포함될 수 있는지 확인.
      * 비한국어 텍스트이고, (1) 뒤에 BT 수식 런이 이어지거나 (2) BT 마커를 포함하면 수식 그룹에 포함.
      */
-    static boolean isMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+    public static boolean isMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
         // 한국어 포함 또는 탭 포함 → 브릿지 아님 (탭은 열 구분자)
@@ -279,7 +279,7 @@ class ASTMathGrouper {
      * NP 폰트 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
      * 수식으로 변환할 수 없는 경우 유니코드 변환 후 일반 텍스트 런으로 폴백.
      */
-    static void flushNPMathGroup(List<IDMLCharacterRun> npRuns, ASTParagraph para) {
+    public static void flushNPMathGroup(List<IDMLCharacterRun> npRuns, ASTParagraph para) {
         String hwpScript = NPFontEquationConverter.convert(npRuns);
         if (hwpScript != null) {
             para.addItem(new ASTEquation(hwpScript, "NP_FONT"));
@@ -307,7 +307,7 @@ class ASTMathGrouper {
      * 한국어 없음, 수학 연산자(=, <, >, ±) 포함, 문자/숫자 존재 시 수식으로 인정.
      * 예: "x=k", "0<k<8", "A+B"
      */
-    static boolean isStandaloneMathRun(IDMLCharacterRun run) {
+    public static boolean isStandaloneMathRun(IDMLCharacterRun run) {
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
         // 한국어/탭 포함 → 불가
@@ -330,7 +330,7 @@ class ASTMathGrouper {
      * "y=log" [NoStyle] + "2" [NP_ISHS] → "y=log_{2}" 로 합치기 위함.
      * 조건: 한국어 없음, 수학 연산자/변수 포함, 바로 뒤에 NP 런이 있음.
      */
-    static boolean isPreNPMathRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+    public static boolean isPreNPMathRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
         if (run.isNPFont() || run.isBTFont() || run.grepMathFont()) return false;
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
@@ -374,7 +374,7 @@ class ASTMathGrouper {
      * NP 수식 그룹 사이의 비NP 런이 브릿지될 수 있는지 확인.
      * 한국어/탭 포함 → 브릿지 아님. 뒤에 NP 런이 이어지면 → 브릿지.
      */
-    static boolean isNPMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+    public static boolean isNPMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
         // 한국어 포함 또는 탭 포함 → 브릿지 아님
@@ -405,7 +405,7 @@ class ASTMathGrouper {
      * EH 수식 런 사이의 비EH 런이 수식 그룹에 포함될 수 있는지 확인.
      * 한국어/탭/원문자 포함 → 브릿지 아님. 뒤에 EH 런이 이어지면 → 브릿지.
      */
-    static boolean isEHMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
+    public static boolean isEHMathBridgeRun(IDMLCharacterRun run, List<IDMLCharacterRun> runs, int idx) {
         String text = run.content();
         if (text == null || text.isEmpty()) return false;
         for (int i = 0; i < text.length(); i++) {
@@ -436,7 +436,7 @@ class ASTMathGrouper {
      * EH 수식 폰트 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
      * 수식으로 변환할 수 없는 경우 일반 텍스트 런으로 폴백.
      */
-    static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
+    public static void flushEHMathGroup(List<IDMLCharacterRun> ehRuns, ASTParagraph para) {
         String hwpScript = EHFontEquationConverter.convert(ehRuns);
         if (hwpScript != null) {
             // 선행 번호 "(숫자) " 분리
@@ -469,7 +469,7 @@ class ASTMathGrouper {
      * 연속된 수식 폰트 런 그룹을 ASTEquation으로 변환하여 단락에 추가.
      * 수식으로 변환할 수 없는 경우 (순수 텍스트 등) 일반 텍스트 런으로 폴백.
      */
-    static void flushMathGroup(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
+    public static void flushMathGroup(List<IDMLCharacterRun> mathRuns, ASTParagraph para) {
         String hwpScript = BTFontEquationConverter.convert(mathRuns);
         if (hwpScript != null) {
             String sourceType = mathRuns.get(0).isBTFont() ? "BT_FONT" : "GREP_FONT";

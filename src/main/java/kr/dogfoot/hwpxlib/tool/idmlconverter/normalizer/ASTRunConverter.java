@@ -14,7 +14,7 @@ import java.util.Set;
  * 문자런 변환 + FFFC 기반 인라인 항목 인터리빙.
  * ASTStoryConverter에서 분리됨.
  */
-class ASTRunConverter {
+public class ASTRunConverter {
 
     private static final java.util.regex.Pattern R_N_PAR = java.util.regex.Pattern.compile("r(\\d+)par");
 
@@ -22,7 +22,7 @@ class ASTRunConverter {
      * 원문자(r1par → ①) 변환.
      * 수식 그룹화 전에 호출해야 한다 (원문자는 수식이 아닌 일반 텍스트로 처리).
      */
-    static void convertCircledNumberRuns(List<IDMLCharacterRun> runs) {
+    public static void convertCircledNumberRuns(List<IDMLCharacterRun> runs) {
         for (IDMLCharacterRun run : runs) {
             String text = run.content();
             if (text == null || !text.contains("par")) continue;

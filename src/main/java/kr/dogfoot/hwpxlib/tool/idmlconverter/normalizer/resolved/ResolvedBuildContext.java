@@ -74,6 +74,20 @@ public final class ResolvedBuildContext {
      */
     public Function<String, IDMLStory> loadIDMLStory;
 
+    /**
+     * SPEC-016 Phase 2: 매칭 신뢰도 누적 카운터.
+     * 인덱스: [0]=HIGH, [1]=MEDIUM, [2]=LOW.
+     * Phase 3가 createRunFromIDML 단일 집계 지점에서 ++한다.
+     * builder가 같은 배열 참조를 보관하여 build() 종료 시 요약 로그를 출력.
+     */
+    public int[] spec016Counts;
+
+    /** Phase 3 IDML Story XML 캐시. builder의 idmlStoryCache와 같은 Map 참조를 공유. */
+    public Map<String, IDMLStory> idmlStoryCache;
+
+    /** Phase 3 findResolvedRun에서 마지막 매칭 인덱스를 기록하는 1-element 배열. */
+    public int[] lastMatchResult;
+
     public ResolvedBuildContext() {
     }
 }
