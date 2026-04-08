@@ -3081,7 +3081,17 @@ function splitRunByStoryChars(story, rng, runData, para) {
         var firstProps = getCharProps(rngStart);
         var lastProps = getCharProps(rngStart + rngLen - 1);
         var midProps = rngLen > 2 ? getCharProps(rngStart + Math.floor(rngLen / 2)) : firstProps;
-        if (propsEqual(firstProps, lastProps) && propsEqual(firstProps, midProps)) return [runData];
+        if (propsEqual(firstProps, lastProps) && propsEqual(firstProps, midProps)) {
+            // SPEC-019: 호출 전 단계(줄 ~3329)에서 runData.fillColor가 rng 첫 비제어
+            // 문자(예: 단락 시작 GREP "A_문항번호-자주"의 "4")의 색상으로 덮어써졌을 수
+            // 있음. partRun 텍스트는 본문 위치(rngStart 보정 후)이므로 firstProps가
+            // 진짜 본문 속성. 일관성 위해 runData를 firstProps로 갱신해서 반환.
+            runData.fillColor = firstProps.color;
+            if (firstProps.size) runData.fontSize = firstProps.size;
+            if (firstProps.font) runData.fontFamily = firstProps.font;
+            if (firstProps.style) runData.fontStyle = firstProps.style;
+            return [runData];
+        }
 
         // 이진 탐색으로 스타일 변경 경계 찾기 — O(k × log n) DOM 접근
         // (k=변경점 수, 보통 1~3개. 100자 런에서 300회→30회로 감소)
