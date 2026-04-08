@@ -1,12 +1,18 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.StylePropertyResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 import java.io.File;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
+import java.util.function.Supplier;
 
 /**
  * SPEC-013 Stage 1: Phase별 빌더가 공유하는 컨텍스트.
@@ -46,6 +52,27 @@ public final class ResolvedBuildContext {
 
     /** SPEC-013: Phase 분리 시 각 phase가 호출하는 helper. 인스턴스 메서드 위임. */
     public IntUnaryOperator toSectionIndex;
+
+    /**
+     * SPEC-013 Stage 6: lazy IDML 인프라(테이블 셀 변환용) 셋업 콜백.
+     * Phase 클래스가 호출하면 ResolvedToASTBuilder의 인스턴스 필드(idmlDocument 등)가 초기화된다.
+     * 호출 직후 {@link #idmlDocumentSupplier}/{@link #colorResolverSupplier}/{@link #imageLoaderSupplier}
+     * 가 최신 값을 반환한다.
+     */
+    public Runnable ensureIdmlInfra;
+
+    /** lazy 초기화된 IDMLDocument 공급. ensureIdmlInfra 호출 후 사용. */
+    public Supplier<IDMLDocument> idmlDocumentSupplier;
+    /** lazy 초기화된 ColorResolver 공급. */
+    public Supplier<ColorResolver> colorResolverSupplier;
+    /** lazy 초기화된 ASTImageLoader 공급. */
+    public Supplier<ASTImageLoader> imageLoaderSupplier;
+
+    /**
+     * Story XML 로딩(캐싱 포함). storyId(decimal) → IDMLStory.
+     * ResolvedToASTBuilder의 idmlStoryCache 인스턴스 상태에 위임.
+     */
+    public Function<String, IDMLStory> loadIDMLStory;
 
     public ResolvedBuildContext() {
     }

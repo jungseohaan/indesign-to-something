@@ -5,6 +5,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase0.InfraSetup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.PageLayoutBuilder;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_5.BulletInserter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7.RenderableFramePlacer;
 // FontMapper import removed (unused in new pipeline)
@@ -1247,137 +1249,11 @@ public class ResolvedToASTBuilder {
      * editable이 아닌(배경에 포함된) TextFrame 중 테이블을 포함한 프레임을 찾아
      * IDML Story XML에서 테이블을 파싱하고 ASTTable로 변환한다.
      */
+    /**
+     * SPEC-013 Stage 6: Phase 4 테이블 변환은 {@link TableBuilder}로 위임. 동작 동일.
+     */
     private void placeTablesFromIDML(List<ASTSection> sections) {
-        if (idmlDir == null) return;
-        int tableCount = 0;
-
-        for (ResolvedTextFrame tf : resolvedData.textFrames()) {
-            // Story에 테이블이 있는지 먼저 확인
-            String storyId = tf.storyId();
-            if (storyId == null) continue;
-            IDMLStory idmlStory = loadIDMLStory(storyId);
-            if (idmlStory == null || !idmlStory.hasTables()) continue;
-
-            // inline + non-editable이면 테이블이 있어도 건너뜀 (단, 테이블 포함 TF는 예외)
-            if (tf.isInline() && resolvedData.isEditableTextFrame(tf.id())) continue;
-            if (!tf.isInline() && !resolvedData.isEditableTextFrame(tf.id())) continue;
-
-            // 페이지 결정 (document offset → section index 매핑)
-            int pageIdx = toSectionIndex(tf.pageIndex());
-            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
-
-            // 좌표 계산
-            double[] gb = tf.geometricBounds();
-            if (gb == null || gb.length < 4) continue;
-            ResolvedPage rPage = (pageIdx < resolvedData.pages().size())
-                    ? resolvedData.pages().get(pageIdx) : null;
-            double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
-            double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
-            boolean gbAlreadyPageRelative = (pageLeft > 0 && gb[1] < pageLeft);
-            double x = gbAlreadyPageRelative ? gb[1] : (gb[1] - pageLeft);
-            double y = gb[0] - pageTop;
-
-            long hx = CoordinateConverter.pointsToHwpunits(x);
-            long hy = CoordinateConverter.pointsToHwpunits(y);
-
-            // 프레임 insetSpacing 반영 (테이블 위치에 인셋 추가)
-            if (tf.insetSpacing() != null) {
-                double[] inset = tf.insetSpacing();
-                hy += CoordinateConverter.pointsToHwpunits(inset[0]); // top
-                hx += CoordinateConverter.pointsToHwpunits(inset[1]); // left
-            }
-
-            // 테이블 앞 텍스트 높이 계산 (테이블 Y 오프셋)
-            // IDML paragraphIndexBefore로 테이블 앞 단락 수 파악
-            // 중첩 테이블 감지: selfId가 다른 테이블의 selfId를 접두사로 포함하면 중첩
-            List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> allTables = idmlStory.tables();
-            // 중첩 테이블 부모 탐색: O(n) — selfId를 HashMap에 등록 후 접두사로 부모 lookup
-            Map<String, kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> tableById = new HashMap<>();
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t : allTables) {
-                tableById.put(t.selfId(), t);
-            }
-            Map<String, kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> parentTableMap = new HashMap<>();
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t : allTables) {
-                // selfId 형식: "부모ID/Cell:N/Table" — 접두사에서 부모 테이블 ID 추출
-                String sid = t.selfId();
-                int lastSlash = sid.lastIndexOf('/');
-                if (lastSlash > 0) {
-                    // 부모 후보: "부모ID/Cell:N" → 그 앞의 테이블 ID
-                    String parentPart = sid.substring(0, lastSlash);
-                    int prevSlash = parentPart.lastIndexOf('/');
-                    if (prevSlash > 0) {
-                        String candidateId = parentPart.substring(0, prevSlash);
-                        kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable parent = tableById.get(candidateId);
-                        if (parent != null) {
-                            parentTableMap.put(sid, parent);
-                        }
-                    }
-                }
-            }
-
-            long tableYOffset = 0;
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : allTables) {
-                long thisX = hx;
-                long thisY = hy;
-
-                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable parentTable = parentTableMap.get(idmlTable.selfId());
-                if (parentTable != null) {
-                    // 중첩 테이블: 부모 테이블의 행 높이를 합산하여 y 오프셋 계산
-                    // selfId에서 셀 인덱스 추출: "u1cf74i1cf91i6i1cf9b" → "i6" → 셀 row=6
-                    String parentId = parentTable.selfId();
-                    String remainder = idmlTable.selfId().substring(parentId.length()); // "i6i1cf9b"
-                    int cellRowIdx = -1;
-                    if (remainder.startsWith("i")) {
-                        // "i6i..." → 6
-                        String cellPart = remainder.substring(1);
-                        int nextI = cellPart.indexOf('i');
-                        String rowStr = (nextI > 0) ? cellPart.substring(0, nextI) : cellPart;
-                        try { cellRowIdx = Integer.parseInt(rowStr); } catch (NumberFormatException e) { /* ignore */ }
-                    }
-                    if (cellRowIdx >= 0) {
-                        // 부모 테이블의 row 0 ~ cellRowIdx-1 높이 합산
-                        long rowHeightSum = 0;
-                        int ri = 0;
-                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow pr : parentTable.rows()) {
-                            if (ri >= cellRowIdx) break;
-                            rowHeightSum += CoordinateConverter.pointsToHwpunits(pr.rowHeight());
-                            ri++;
-                        }
-                        thisY = hy + rowHeightSum;
-                    }
-                } else {
-                    // 최상위 테이블
-                    int parasBefore = idmlTable.paragraphIndexBefore();
-                    if (parasBefore > 0) {
-                        double estLineHeight = 8.0 * scaleFactor;
-                        tableYOffset = CoordinateConverter.pointsToHwpunits(parasBefore * estLineHeight);
-                    }
-                    thisY = hy + tableYOffset;
-                }
-
-                // 테이블 셀 복잡도 체크: 인라인 객체가 포함된 테이블은 플로팅 이미지로 변환 시도
-                if (hasInlineObjectsInTable(idmlTable)) {
-                    ASTFigure fig = renderTableAsImage(idmlTable, tf, thisX, thisY, pageIdx);
-                    if (fig != null) {
-                        sections.get(pageIdx).addBlock(fig);
-                        tableCount++;
-                        continue;
-                    }
-                    // PNG 없으면 일반 테이블로 폴백
-                }
-
-                ensureIdmlInfra();
-                ASTTable astTable = ASTTableConverter.convertTableSimple(
-                        idmlTable, thisX, thisY, tf.zOrder(),
-                        idmlDocument, colorResolver, imageLoader, resolvedData);
-                sections.get(pageIdx).addBlock(astTable);
-                tableCount++;
-            }
-        }
-
-        if (tableCount > 0) {
-            System.err.println("[ResolvedToASTBuilder] Phase 4: " + tableCount + " tables from IDML");
-        }
+        TableBuilder.placeTablesFromIDML(buildPhaseContext(), sections);
     }
 
     /**
@@ -3715,65 +3591,10 @@ public class ResolvedToASTBuilder {
     // ═══════════════════════════════════════════════════
 
     /**
-     * BulletList 스타일(스타일 이름에 • 포함)의 단락에 불릿 문자를 자동 삽입.
-     * InDesign의 자동 불릿은 텍스트에 포함되지 않으므로 변환 시 명시적으로 추가.
+     * SPEC-013 Stage 7: Phase 4.5 불릿 삽입은 {@link BulletInserter}로 위임. 동작 동일.
      */
     private void insertBulletsForBulletStyles(List<ASTSection> sections) {
-        int count = 0;
-        for (ASTSection section : sections) {
-            for (ASTBlock blk : section.blocks()) {
-                if (!(blk instanceof ASTTextFrameBlock)) continue;
-                ASTTextFrameBlock tfb = (ASTTextFrameBlock) blk;
-                if (tfb.paragraphs() == null) continue;
-                for (ASTParagraph para : tfb.paragraphs()) {
-                    String styleRef = para.paragraphStyleRef();
-                    if (styleRef == null || !styleRef.contains("\u2022")) continue; // • = \u2022
-                    // 이미 불릿으로 시작하면 건너뜀
-                    List<ASTInlineItem> items = para.items();
-                    if (items != null && !items.isEmpty()) {
-                        ASTInlineItem first = items.get(0);
-                        if (first.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
-                            String firstText = ((ASTTextRun) first).text();
-                            if (firstText != null && (firstText.startsWith("\u2022") || firstText.startsWith("\u00B7")
-                                    || firstText.startsWith("•") || firstText.startsWith("·"))) {
-                                continue; // 이미 불릿 있음
-                            }
-                        }
-                    }
-                    // 불릿 런 삽입 (가장 긴 텍스트 런의 폰트/크기 상속)
-                    ASTTextRun bulletRun = new ASTTextRun();
-                    bulletRun.text("\u00B7 "); // middle dot + space
-                    // 대표 런 결정: 가장 긴 텍스트 런
-                    ASTTextRun bodyRun = null;
-                    int bodyMaxLen = 0;
-                    if (items != null) {
-                        for (ASTInlineItem it : items) {
-                            if (it.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
-                                ASTTextRun tr = (ASTTextRun) it;
-                                int len = (tr.text() != null) ? tr.text().trim().length() : 0;
-                                if (len > bodyMaxLen) { bodyMaxLen = len; bodyRun = tr; }
-                            }
-                        }
-                    }
-                    if (bodyRun != null) {
-                        bulletRun.fontFamily(bodyRun.fontFamily());
-                        // fontSizeHwpunits가 null이면 스타일에서 가져옴
-                        Integer bodyFs = bodyRun.fontSizeHwpunits();
-                        if (bodyFs == null || bodyFs <= 0) {
-                            // resolved에서 fontSize 확인
-                            bodyFs = 1100; // 기본 11pt
-                        }
-                        bulletRun.fontSizeHwpunits(bodyFs);
-                        bulletRun.fontStyle(bodyRun.fontStyle());
-                    }
-                    para.items().add(0, bulletRun);
-                    count++;
-                }
-            }
-        }
-        if (count > 0) {
-            System.err.println("[ResolvedToASTBuilder] Phase 4.5: " + count + " bullets inserted");
-        }
+        BulletInserter.run(buildPhaseContext(), sections);
     }
 
     /**
@@ -3981,6 +3802,12 @@ public class ResolvedToASTBuilder {
         ctx.styleResolver = this.styleResolver;
         ctx.pageDocOffsetToSection = this.pageDocOffsetToSection;
         ctx.toSectionIndex = this::toSectionIndex;
+        // SPEC-013 Stage 6: lazy IDML 인프라 콜백/공급자
+        ctx.ensureIdmlInfra = this::ensureIdmlInfra;
+        ctx.idmlDocumentSupplier = () -> this.idmlDocument;
+        ctx.colorResolverSupplier = () -> this.colorResolver;
+        ctx.imageLoaderSupplier = () -> this.imageLoader;
+        ctx.loadIDMLStory = this::loadIDMLStory;
         return ctx;
     }
 
@@ -4115,99 +3942,7 @@ public class ResolvedToASTBuilder {
 
     /**
      * 테이블 셀에 인라인 객체(Group, Rectangle 등)가 포함되어 있는지 확인.
+     * SPEC-013 Stage 6: hasInlineObjectsInTable / renderTableAsImage 는
+     * {@link kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder}로 이동.
      */
-    /**
-     * 테이블이 배경 PNG fallback 대상인지 판정.
-     * 셀 텍스트가 30자 미만이면서 인라인 객체를 포함하면 → 배경 PNG로 처리.
-     * (짧은 텍스트 + 인라인 배지/아이콘 = 글상자 변환 시 레이아웃 깨짐)
-     */
-    private static boolean hasInlineObjectsInTable(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table) {
-        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row : table.rows()) {
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell : row.cells()) {
-                boolean hasInline = false;
-                int textLen = 0;
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph para : cell.paragraphs()) {
-                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : para.characterRuns()) {
-                        if (run.inlineGraphics() != null && !run.inlineGraphics().isEmpty()) hasInline = true;
-                        if (run.inlineFrames() != null && !run.inlineFrames().isEmpty()) hasInline = true;
-                        if (run.content() != null) textLen += run.content().replace("\uFFFC", "").trim().length();
-                    }
-                }
-                if (hasInline && textLen < 30) return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 인라인 객체가 포함된 테이블을 rendered PNG 이미지(ASTFigure)로 변환.
-     * renderedFloatingItems에서 type="table_inline"인 항목을 찾아 사용.
-     */
-    private ASTFigure renderTableAsImage(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table,
-                                          ResolvedTextFrame tf, long x, long y, int pageIdx) {
-        if (basePath == null || resolvedData == null) return null;
-
-        // TextFrame의 DOM ID로 rendered PNG 찾기
-        String tfDomId = tf.id();
-        int domId = -1;
-        try { domId = Integer.parseInt(tfDomId); } catch (NumberFormatException e) { return null; }
-
-        // 1. 직접 파일 (table_XXXXX.png) 또는 renderedFloatingItems에서 검색
-        File directFile = new File(basePath, "rendered_frames/table_" + domId + ".png");
-        File pngFile = null;
-        double[] rgBounds = null;
-
-        if (directFile.exists()) {
-            pngFile = directFile;
-        }
-        // renderedFloatingItems에서도 검색
-        if (pngFile == null) {
-            for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
-                if (rg.id() == domId && rg.file() != null) {
-                    File f = new File(basePath, rg.file());
-                    if (f.exists()) {
-                        pngFile = f;
-                        rgBounds = rg.bounds();
-                        break;
-                    }
-                }
-            }
-        }
-        if (pngFile == null) return null;
-
-        try {
-            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-            if (img == null) return null;
-
-            ASTFigure fig = new ASTFigure();
-            fig.sourceId("tbl_" + table.selfId());
-            fig.x(x);
-            fig.y(y);
-            fig.zOrder(tf.zOrder());
-            fig.imageData(imageData);
-            fig.imageFormat("png");
-            fig.pixelWidth(img.getWidth());
-            fig.pixelHeight(img.getHeight());
-
-            // 크기: resolved bounds 또는 테이블 크기
-            if (rgBounds != null && rgBounds.length >= 4) {
-                double bw = Math.abs(rgBounds[3] - rgBounds[1]) * scaleFactor;
-                double bh = Math.abs(rgBounds[2] - rgBounds[0]) * scaleFactor;
-                fig.width(CoordinateConverter.pointsToHwpunits(bw));
-                fig.height(CoordinateConverter.pointsToHwpunits(bh));
-            } else {
-                // 테이블 행 높이 + 컬럼 너비 합산
-                long tw = 0, th = 0;
-                for (double cw : table.columnWidths()) tw += CoordinateConverter.pointsToHwpunits(cw);
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow r : table.rows())
-                    th += CoordinateConverter.pointsToHwpunits(r.rowHeight());
-                fig.width(tw);
-                fig.height(th);
-            }
-            return fig;
-        } catch (Exception e) {
-            return null;
-        }
-    }
 }

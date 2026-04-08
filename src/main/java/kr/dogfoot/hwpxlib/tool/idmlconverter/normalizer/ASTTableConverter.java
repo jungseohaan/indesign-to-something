@@ -16,7 +16,7 @@ import java.util.List;
  * 테이블/그리드 변환 전담.
  * ASTInlineObjectBuilder에서 분리됨.
  */
-class ASTTableConverter {
+public class ASTTableConverter {
 
     /**
      * IDMLTable → ASTTable 변환 (플로팅 스토리 레벨 테이블).
@@ -204,12 +204,12 @@ class ASTTableConverter {
      * IDMLDocument/ColorResolver/ASTImageLoader가 있으면 레거시 셀 변환 사용,
      * 없으면 간소화 셀 변환으로 폴백.
      */
-    static ASTTable convertTableSimple(IDMLTable idmlTable,
+    public static ASTTable convertTableSimple(IDMLTable idmlTable,
                                         long x, long y, int zOrder) {
         return convertTableSimple(idmlTable, x, y, zOrder, null, null, null, null);
     }
 
-    static ASTTable convertTableSimple(IDMLTable idmlTable,
+    public static ASTTable convertTableSimple(IDMLTable idmlTable,
                                         long x, long y, int zOrder,
                                         IDMLDocument idmlDoc,
                                         kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver colorResolver,
