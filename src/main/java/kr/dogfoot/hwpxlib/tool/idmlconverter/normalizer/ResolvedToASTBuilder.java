@@ -1999,7 +1999,12 @@ public class ResolvedToASTBuilder {
         return paragraphs;
     }
 
+    /** 기본 매칭 신뢰도(LOW)로 createRunFromIDML 호출 — 호환용 래퍼. */
     private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, StyleContext sc) {
+        return createRunFromIDML(cr, text, rr, sc, MatchConfidence.LOW);
+    }
+
+    private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, StyleContext sc, MatchConfidence confidence) {
         ASTTextRun tr = new ASTTextRun();
         // 특수 제어 문자 제거
         // \u0008 = Indent to Here (ACE 7) — HWPX에 대응 없음
@@ -2042,15 +2047,19 @@ public class ResolvedToASTBuilder {
         }
 
         // fontFamily / fontSize / textColor: 헬퍼로 단일 우선순위 적용
-        String resolvedFontFamily = RunPropertyResolver.resolveFontFamily(rr, cr, sc.fontFamily, text);
+        // SPEC-016: 매칭 신뢰도(confidence)에 따라 resolved 오버라이드 여부 결정
+        String resolvedFontFamily = RunPropertyResolver.resolveFontFamilyWithConfidence(
+                rr, cr, sc.fontFamily, text, confidence);
         if (resolvedFontFamily != null) {
             tr.fontFamily(resolvedFontFamily);
         }
-        Integer resolvedFontSize = RunPropertyResolver.resolveFontSizeHwpunits(rr, cr, sc.fontSize);
+        Integer resolvedFontSize = RunPropertyResolver.resolveFontSizeHwpunitsWithConfidence(
+                rr, cr, sc.fontSize, confidence);
         if (resolvedFontSize != null) {
             tr.fontSizeHwpunits(resolvedFontSize);
         }
-        String resolvedColor = RunPropertyResolver.resolveTextColorHex(rr, effectiveIdmlColor, sc.fillColor, this::resolveColorToHex);
+        String resolvedColor = RunPropertyResolver.resolveTextColorHexWithConfidence(
+                rr, effectiveIdmlColor, sc.fillColor, this::resolveColorToHex, confidence);
         if (resolvedColor != null) {
             tr.textColor(resolvedColor);
         }
@@ -2492,6 +2501,19 @@ public class ResolvedToASTBuilder {
      * 분리된 경우, resolved 런의 텍스트를 기준으로 IDML 런을 분할하여 각각 올바른 색상을 적용.
      * @return 분할 성공 시 true, 실패 시 false (호출측에서 기존 로직 사용)
      */
+    /** SPEC-016: 분할 세그먼트 정보 (텍스트 + 매칭된 resolved 런 + 매칭 신뢰도). */
+    private static class Segment {
+        final String text;
+        final int rrIdx;
+        final MatchConfidence confidence;
+
+        Segment(String text, int rrIdx, MatchConfidence confidence) {
+            this.text = text;
+            this.rrIdx = rrIdx;
+            this.confidence = confidence;
+        }
+    }
+
     private boolean splitIdmlRunByResolvedRuns(IDMLCharacterRun cr, String text,
             List<ResolvedRun> resolvedRuns, int startIdx,
             ASTParagraph para, StyleContext sc) {
@@ -2500,7 +2522,7 @@ public class ResolvedToASTBuilder {
         // resolved 런에서 이 텍스트와 겹치는 연속 런들을 찾기
         // 텍스트 시작부터 순차적으로 resolved 런 텍스트를 매칭
         String remaining = text;
-        List<String[]> segments = new ArrayList<>(); // [segText, resolvedRunIndex]
+        List<Segment> segments = new ArrayList<>();
         int rIdx = startIdx;
         boolean foundSplit = false;
 
@@ -2514,18 +2536,19 @@ public class ResolvedToASTBuilder {
             String normRemaining = normalizeSpaces(remaining);
             String normRRText = normalizeSpaces(rrText);
             if (normRemaining.startsWith(normRRText)) {
-                // 원본 텍스트에서 정규화된 길이만큼 잘라냄
+                // 정규화 후 정확 접두사 매칭 → HIGH
                 int cutLen = findOriginalLength(remaining, normRRText.length());
-                segments.add(new String[]{remaining.substring(0, cutLen), String.valueOf(rIdx)});
+                segments.add(new Segment(remaining.substring(0, cutLen), rIdx, MatchConfidence.HIGH));
                 remaining = remaining.substring(cutLen);
                 rIdx++;
             } else if (remaining.startsWith(rrText)) {
-                segments.add(new String[]{rrText, String.valueOf(rIdx)});
+                // 원문 그대로 접두사 매칭 → HIGH
+                segments.add(new Segment(rrText, rIdx, MatchConfidence.HIGH));
                 remaining = remaining.substring(rrText.length());
                 rIdx++;
             } else if (rrText.length() > 0 && remaining.startsWith(rrText.substring(0, Math.min(3, rrText.length())))) {
-                // 부분 매칭: resolved 런 텍스트의 앞 3자가 remaining에 포함
-                // remaining에서 다음 resolved 런의 시작 위치를 찾아 분할
+                // 부분 매칭: 앞 3자만 일치 → 다음 런 키워드로 분할
+                // 성공하면 MEDIUM, 분할 실패 시 LOW
                 if (rIdx + 1 < resolvedRuns.size()) {
                     ResolvedRun nextRR = resolvedRuns.get(rIdx + 1);
                     String nextText = nextRR.text();
@@ -2533,7 +2556,7 @@ public class ResolvedToASTBuilder {
                         String nextKey = nextText.substring(0, Math.min(5, nextText.length()));
                         int splitPos = remaining.indexOf(nextKey);
                         if (splitPos > 0) {
-                            segments.add(new String[]{remaining.substring(0, splitPos), String.valueOf(rIdx)});
+                            segments.add(new Segment(remaining.substring(0, splitPos), rIdx, MatchConfidence.MEDIUM));
                             remaining = remaining.substring(splitPos);
                             rIdx++;
                             foundSplit = true;
@@ -2541,27 +2564,30 @@ public class ResolvedToASTBuilder {
                         }
                     }
                 }
-                // 분할 실패 시 나머지를 현재 런으로
-                segments.add(new String[]{remaining, String.valueOf(rIdx)});
+                // 분할 실패: 남은 텍스트 전체를 LOW로 처리
+                segments.add(new Segment(remaining, rIdx, MatchConfidence.LOW));
                 remaining = "";
                 rIdx++;
             } else {
-                rIdx++; // 매칭 안 되면 다음 resolved 런 시도
+                rIdx++; // 매칭 실패 → 다음 런 시도
             }
         }
         if (!remaining.isEmpty()) {
-            segments.add(new String[]{remaining, String.valueOf(Math.max(0, rIdx - 1))});
+            // 루프 탈출 후 남은 텍스트: 매칭 없음 → LOW
+            segments.add(new Segment(remaining, Math.max(0, rIdx - 1), MatchConfidence.LOW));
         }
 
         // 분할이 없으면(세그먼트 1개) 기존 로직 사용
         if (segments.size() <= 1 && !foundSplit) return false;
 
-        // 각 세그먼트별로 ASTTextRun 생성
-        for (String[] seg : segments) {
-            String segText = seg[0];
-            int rrIdx = Integer.parseInt(seg[1]);
-            ResolvedRun rr = (rrIdx >= 0 && rrIdx < resolvedRuns.size()) ? resolvedRuns.get(rrIdx) : null;
-            ASTTextRun tr = createRunFromIDML(cr, segText, rr != null ? rr : findDefaultResolvedRun(resolvedRuns), sc);
+        // 각 세그먼트별로 ASTTextRun 생성 (confidence 전달)
+        for (Segment seg : segments) {
+            ResolvedRun rr = (seg.rrIdx >= 0 && seg.rrIdx < resolvedRuns.size())
+                    ? resolvedRuns.get(seg.rrIdx) : null;
+            ResolvedRun effectiveRr = rr != null ? rr : findDefaultResolvedRun(resolvedRuns);
+            // findDefaultResolvedRun 폴백은 신뢰도 강등
+            MatchConfidence effConf = (rr != null) ? seg.confidence : MatchConfidence.LOW;
+            ASTTextRun tr = createRunFromIDML(cr, seg.text, effectiveRr, sc, effConf);
             if (!splitBulletRun(tr, para)) {
                 splitLatinVarsInMixedText(tr, para);
             }

@@ -105,6 +105,63 @@ public final class RunPropertyResolver {
         return null;
     }
 
+    // ── SPEC-016: confidence-aware 변형 ───────────────────────────────────
+
+    /**
+     * SPEC-016: 매칭 신뢰도를 고려한 fontFamily 해석.
+     *
+     * <p>HIGH: resolved 우선. MEDIUM/LOW: IDML CR 우선 (기존 동작).
+     */
+    public static String resolveFontFamilyWithConfidence(
+            ResolvedRun rr,
+            IDMLCharacterRun cr,
+            String paragraphStyleFontFamily,
+            String text,
+            MatchConfidence confidence) {
+        if (confidence == MatchConfidence.HIGH && rr != null) {
+            String ff = rr.fontFamily();
+            if (ff != null && passesFontFilter(ff, text)) return ff;
+        }
+        // IDML CR 우선 (MEDIUM/LOW 또는 HIGH에서 resolved가 없을 때)
+        return resolveFontFamily(rr, cr, paragraphStyleFontFamily, text);
+    }
+
+    /**
+     * SPEC-016: 매칭 신뢰도를 고려한 fontSize 해석.
+     *
+     * <p>HIGH/MEDIUM: resolved 우선. LOW: IDML CR 우선.
+     */
+    public static Integer resolveFontSizeHwpunitsWithConfidence(
+            ResolvedRun rr,
+            IDMLCharacterRun cr,
+            Double paragraphStyleFontSize,
+            MatchConfidence confidence) {
+        if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
+                && rr != null && rr.fontSize() != null && rr.fontSize() > 0) {
+            return (int) CoordinateConverter.pointsToHwpunits(rr.fontSize());
+        }
+        return resolveFontSizeHwpunits(rr, cr, paragraphStyleFontSize);
+    }
+
+    /**
+     * SPEC-016: 매칭 신뢰도를 고려한 textColor 해석.
+     *
+     * <p>HIGH/MEDIUM: resolved 우선. LOW: IDML CR 우선.
+     */
+    public static String resolveTextColorHexWithConfidence(
+            ResolvedRun rr,
+            String effectiveIdmlColor,
+            String paragraphStyleColorHex,
+            Function<String, String> colorResolver,
+            MatchConfidence confidence) {
+        if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
+                && rr != null && rr.fillColor() != null) {
+            String hex = colorResolver.apply(rr.fillColor());
+            if (hex != null) return hex;
+        }
+        return resolveTextColorHex(rr, effectiveIdmlColor, paragraphStyleColorHex, colorResolver);
+    }
+
     /**
      * EH/BT 수식 폰트가 한국어 텍스트에 잘못 매칭되는 케이스를 거른다.
      *
