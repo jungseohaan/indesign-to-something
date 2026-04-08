@@ -12,11 +12,15 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
  * 텍스트 런(ASTTextRun)에 fontFamily/fontSize/textColor 등 핵심 속성을 적용할 때
  * 단일 우선순위 규칙을 강제하는 헬퍼.
  *
- * <p>우선순위: <b>resolved → IDML CharacterRun → ParagraphStyle → default</b>
+ * <p>우선순위: <b>IDML CharacterRun → resolved → ParagraphStyle → default</b>
  *
- * <p>이유: resolved는 InDesign이 GREP/중첩 캐릭터 스타일을 모두 적용한 후 실제로
- * 렌더링한 값이므로 가장 권위 있는 출처. IDML CharacterRun은 XML에 직접 명시된
- * 값이라 GREP/중첩 스타일 오버라이드 이전 상태일 수 있다.
+ * <p>초기 SPEC-012 초안은 resolved 우선을 시도했으나(검증 시 회귀 발견):
+ * splitIdmlRunByResolvedRuns의 rr 매칭이 불완전한 케이스에서 잘못된 resolved 런의
+ * 속성이 적용되어 IDML의 올바른 값을 덮어쓰는 문제가 있었다. 따라서 IDML CR을
+ * 우선하고 resolved는 IDML에 값이 없는 경우의 폴백으로만 사용한다.
+ *
+ * <p>이 헬퍼의 가치: (1) 우선순위 로직을 단일 지점에 집중 (2) 추후 튜닝 시 한 곳만
+ * 수정하면 모든 호출 경로에 반영.
  *
  * <p>관련 SPEC: docs/specs/SPEC-012-resolved-priority-unified.md
  */
@@ -36,14 +40,14 @@ public final class RunPropertyResolver {
             IDMLCharacterRun cr,
             String paragraphStyleFontFamily,
             String text) {
-        // 1. resolved 우선
-        if (rr != null) {
-            String ff = rr.fontFamily();
-            if (ff != null && passesFontFilter(ff, text)) return ff;
-        }
-        // 2. IDML CharacterRun
+        // 1. IDML CharacterRun 우선 (원본 의도)
         if (cr != null) {
             String ff = cr.fontFamily();
+            if (ff != null && passesFontFilter(ff, text)) return ff;
+        }
+        // 2. resolved 폴백 (IDML에 값이 없을 때)
+        if (rr != null) {
+            String ff = rr.fontFamily();
             if (ff != null && passesFontFilter(ff, text)) return ff;
         }
         // 3. ParagraphStyle 폴백
@@ -60,11 +64,11 @@ public final class RunPropertyResolver {
             ResolvedRun rr,
             IDMLCharacterRun cr,
             Double paragraphStyleFontSize) {
-        if (rr != null && rr.fontSize() != null && rr.fontSize() > 0) {
-            return (int) CoordinateConverter.pointsToHwpunits(rr.fontSize());
-        }
         if (cr != null && cr.fontSize() != null && cr.fontSize() > 0) {
             return (int) CoordinateConverter.pointsToHwpunits(cr.fontSize());
+        }
+        if (rr != null && rr.fontSize() != null && rr.fontSize() > 0) {
+            return (int) CoordinateConverter.pointsToHwpunits(rr.fontSize());
         }
         if (paragraphStyleFontSize != null && paragraphStyleFontSize > 0) {
             return (int) CoordinateConverter.pointsToHwpunits(paragraphStyleFontSize);
@@ -87,12 +91,12 @@ public final class RunPropertyResolver {
             String effectiveIdmlColor,
             String paragraphStyleColorHex,
             Function<String, String> colorResolver) {
-        if (rr != null && rr.fillColor() != null) {
-            String hex = colorResolver.apply(rr.fillColor());
-            if (hex != null) return hex;
-        }
         if (effectiveIdmlColor != null) {
             String hex = colorResolver.apply(effectiveIdmlColor);
+            if (hex != null) return hex;
+        }
+        if (rr != null && rr.fillColor() != null) {
+            String hex = colorResolver.apply(rr.fillColor());
             if (hex != null) return hex;
         }
         if (paragraphStyleColorHex != null) {

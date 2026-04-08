@@ -114,4 +114,39 @@ if (resolvedRun != null && resolvedRun.fontSize() > 0) {
 - 이미 동작 중인 회귀 테스트 결과를 깨뜨릴 수 있음 — 변경 전후 testFile 비교 필수
 - "이미 설정된 값은 덮어쓰지 않는다" 가정이 깨지면 복합 결함 발생
 
-## 상태: 대기
+## 상태: 부분 완료 (우선순위 역전 회귀로 재조정)
+
+### 구현 결과
+
+- `RunPropertyResolver.java` 신규: fontFamily/fontSize/textColor 단일 진실 공급원
+- `createRunFromIDML`이 이 헬퍼를 사용하도록 리팩터링
+- 중복된 resolved/ParagraphStyle 폴백 블록(~70줄) 삭제
+
+### 검증 결과 및 방향 조정
+
+1. **1차 시도**: 우선순위를 `resolved → IDML CR → PS`로 역전 → 회귀 발생
+   - 22개정 비상 고등 논술 교과서 변환 결과에서 "발생합니다" 등 여러 런이
+     원본 파란색(#3380ff)에서 검정색(#000000)으로 바뀜
+   - 원인: `splitIdmlRunByResolvedRuns`의 resolved 런 매칭이 불완전한 경우,
+     잘못된 resolved 런의 fillColor가 적용되어 IDML CR의 올바른 색상을 덮어씀
+   - 검증 방법: 변경 전/후 HWPX section0.xml을 formatted diff → 170+줄 차이
+     발견 → charPrID가 가리키는 색상이 파랑 → 검정으로 변경됨 확인
+
+2. **2차 조정**: 우선순위를 `IDML CR → resolved → PS`로 복원
+   - 헬퍼 구조는 그대로 유지 (SSoT 가치 유지)
+   - 변환 결과는 기존 behavior와 bit-identical (MD5 일치)
+
+### 잔존 과제
+
+- 원래 SPEC이 해결하려 했던 "33페이지 예쁜 텍스트" (IDML CR=10pt 검정, resolved=13pt 마젠타)
+  은 아직 **미해결**. 이 케이스는 rr 매칭이 정확한 경우에만 resolved 우선이 유효한데,
+  현재 우선순위는 항상 IDML CR이 이김.
+- 후속 접근: `splitIdmlRunByResolvedRuns`의 매칭 품질을 올리고, 매칭이 고신뢰일 때만
+  resolved 속성을 적용하는 선택적 덮어쓰기 로직 추가. 별도 SPEC으로 분리 필요.
+
+### 회귀 테스트 결과
+
+세 문서 모두 `warnings=0`:
+- 22개정 비상 고등 논술 (33p/510f/186img) — before와 MD5 일치
+- 중3-2 국어 1단원(2) (24p/193f/121img)
+- 7페이지 소형 문서 (7p/45f/26img)
