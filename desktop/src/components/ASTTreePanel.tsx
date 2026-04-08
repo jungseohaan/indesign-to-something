@@ -634,7 +634,7 @@ export function ASTTreePanel() {
             <div className="text-xs">{error}</div>
           </div>
         ) : (
-          "IDML 파일을 열어주세요"
+          "인디자인 문서 (INDD) 또는 폴더를 열어주세요"
         )}
       </div>
     );
