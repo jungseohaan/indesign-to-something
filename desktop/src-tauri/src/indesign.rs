@@ -339,6 +339,11 @@ pub fn emit_progress_pub(app: &AppHandle, phase: &str, message: &str) {
     emit_progress(app, phase, message);
 }
 
+/// `find_bundled_config`의 공개 래퍼 (캐시 키 계산용).
+pub fn find_bundled_config_pub(app: &AppHandle) -> String {
+    find_bundled_config(app)
+}
+
 /// 추출 진행률 이벤트를 프론트엔드로 emit한다.
 fn emit_progress(app: &AppHandle, phase: &str, message: &str) {
     let _ = app.emit(

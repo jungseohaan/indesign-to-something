@@ -2,6 +2,7 @@ use tauri::{AppHandle, Manager};
 use tokio::process::Command;
 
 use super::find_java;
+use crate::extract_cache;
 
 // ─────────────────────────────────────────────────────────────────
 // InDesign (.indd) Extraction
@@ -10,6 +11,9 @@ use super::find_java;
 /// Extract IDML + resolved.json from an InDesign (.indd) file.
 /// InDesign Desktop이 설치되어 있어야 한다 (macOS).
 /// 흐름: osascript → InDesign do javascript → ExtendScript → IDML + resolved.json
+///
+/// SPEC-011: 캐시 우선 조회. INDD/Links/스크립트/config 모두 변경 없으면
+/// 이전 추출 결과를 ~/Library/Caches 에서 즉시 반환.
 #[tauri::command]
 pub async fn extract_indd(
     app: AppHandle,
@@ -17,7 +21,7 @@ pub async fn extract_indd(
     _jar_path: String,
     spread_mode: Option<bool>,
 ) -> Result<crate::indesign::InddExtractResult, String> {
-    // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵
+    // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵 (기존 동작 유지)
     let indd = std::path::Path::new(&indd_path);
     if let Some(indd_parent) = indd.parent() {
         let sibling_idml = indd_parent
@@ -41,17 +45,56 @@ pub async fn extract_indd(
         return Err(format!("INDD 파일을 찾을 수 없습니다: {}", indd_path));
     }
 
-    // 2. InDesign 설치 확인
-    let indesign_app_path = crate::indesign::find_indesign_app()?;
+    // 2. InDesign 설치 확인 (캐시 적중이어도 동일성 검증용으로 미리 필요하진 않음 →
+    //    캐시 조회 후 필요 시에만 호출)
 
-    // 3. 임시 디렉토리 생성
+    // 3. ExtendScript 경로 (캐시 키 계산에 필요)
+    let jsx_path = crate::indesign::find_extendscript(&app)?;
+    let config_path = crate::indesign::find_bundled_config_pub(&app);
+    let sm = spread_mode.unwrap_or(false);
+
+    // Links 디렉토리 탐지
+    let links_dir = indd
+        .parent()
+        .map(|p| p.join("Links"))
+        .filter(|p| p.is_dir());
+
+    // 4. 캐시 키 계산 및 조회
+    let cache_key = extract_cache::compute_cache_key(
+        indd,
+        links_dir.as_deref(),
+        std::path::Path::new(&jsx_path),
+        if config_path.is_empty() {
+            None
+        } else {
+            Some(std::path::Path::new(&config_path))
+        },
+        sm,
+    );
+
+    if let Some(cached) = extract_cache::lookup(&cache_key) {
+        crate::indesign::emit_progress_pub(
+            &app,
+            "cached",
+            "캐시된 추출 결과 사용 중... (ExtendScript 건너뜀)",
+        );
+        // 캐시 디렉토리에 Links 심볼릭 링크가 없으면 다시 만들어둔다
+        if let Some(src_links) = links_dir.as_deref() {
+            let target_links = std::path::Path::new(&cached.temp_dir).join("Links");
+            if !target_links.exists() {
+                #[cfg(unix)]
+                {
+                    let _ = std::os::unix::fs::symlink(src_links, &target_links);
+                }
+            }
+        }
+        return Ok(cached);
+    }
+
+    // 5. 캐시 미스 → 실제 추출 실행
+    let indesign_app_path = crate::indesign::find_indesign_app()?;
     let output_dir = crate::indesign::create_extraction_temp_dir()?;
 
-    // 4. ExtendScript 경로 찾기
-    let jsx_path = crate::indesign::find_extendscript(&app)?;
-
-    // 5. 추출 실행 (타임아웃은 run_extraction 내부에서 처리 — 600초)
-    let sm = spread_mode.unwrap_or(false);
     let result = crate::indesign::run_extraction(
         &app,
         &indd_path,
@@ -69,8 +112,7 @@ pub async fn extract_indd(
         e
     })?;
 
-    // 5. 원본 INDD 파일 옆 Links/ 폴더를 temp 디렉토리에 심볼릭 링크
-    //    → 이미지 프리뷰/변환 시 IDML 옆 Links/ 폴더를 자동으로 찾을 수 있도록
+    // 6. 원본 INDD 파일 옆 Links/ 폴더를 temp 디렉토리에 심볼릭 링크
     if let Some(indd_parent) = std::path::Path::new(&indd_path).parent() {
         let source_links = indd_parent.join("Links");
         let target_links = output_dir.join("Links");
@@ -82,7 +124,38 @@ pub async fn extract_indd(
         }
     }
 
-    Ok(result)
+    // 7. 캐시에 저장 (이동). 실패해도 원본 결과는 그대로 반환.
+    match extract_cache::store(&cache_key, &indd_path, &output_dir) {
+        Ok(moved) => {
+            // 캐시 이동 성공 시 Links 심볼릭 링크 다시 연결
+            if let Some(src_links) = links_dir.as_deref() {
+                let target_links = std::path::Path::new(&moved.temp_dir).join("Links");
+                if !target_links.exists() {
+                    #[cfg(unix)]
+                    {
+                        let _ = std::os::unix::fs::symlink(src_links, &target_links);
+                    }
+                }
+            }
+            Ok(moved)
+        }
+        Err(e) => {
+            eprintln!("[extract_cache] 캐시 저장 실패(무시): {}", e);
+            Ok(result)
+        }
+    }
+}
+
+/// 추출 캐시 전체 비우기.
+#[tauri::command]
+pub fn clear_extract_cache() -> Result<(usize, u64), String> {
+    extract_cache::clear_all()
+}
+
+/// 추출 캐시 통계 (항목 수, 총 바이트).
+#[tauri::command]
+pub fn extract_cache_stats() -> Result<(usize, u64), String> {
+    extract_cache::stats()
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -109,148 +182,3 @@ pub async fn export_ast(idml_path: String, jar_path: String) -> Result<serde_jso
         .map_err(|e| format!("Failed to parse AST JSON: {}", e))
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Question Extraction (Python-based)
-// ─────────────────────────────────────────────────────────────────
-
-/// Find Python 3 executable path
-fn find_python() -> String {
-    let python_paths = [
-        "/opt/homebrew/bin/python3",
-        "/usr/local/bin/python3",
-        "/usr/bin/python3",
-    ];
-
-    for path in &python_paths {
-        if std::path::Path::new(path).exists() {
-            return path.to_string();
-        }
-    }
-
-    // Try `which python3`
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("python3")
-        .output()
-    {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return path;
-            }
-        }
-    }
-
-    "python3".to_string()
-}
-
-/// Find the extract_physics.py script
-fn find_extract_script(app: &AppHandle) -> Result<String, String> {
-    // Try bundled resource first
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let path = resource_dir.join("extract_physics.py");
-        if path.exists() {
-            return Ok(path.to_string_lossy().to_string());
-        }
-    }
-
-    // Development mode: search relative paths from current working directory
-    if let Ok(current_dir) = std::env::current_dir() {
-        let paths_to_try = [
-            current_dir.join("../../extract_physics.py"),
-            current_dir.join("../extract_physics.py"),
-            current_dir.join("extract_physics.py"),
-        ];
-
-        for path in &paths_to_try {
-            if path.exists() {
-                return Ok(path.canonicalize()
-                    .unwrap_or(path.clone())
-                    .to_string_lossy()
-                    .to_string());
-            }
-        }
-    }
-
-    // Absolute fallback for development
-    if let Ok(home) = std::env::var("HOME") {
-        let path = std::path::PathBuf::from(&home)
-            .join("works/indesign-to-something/extract_physics.py");
-        if path.exists() {
-            return Ok(path.to_string_lossy().to_string());
-        }
-    }
-
-    Err("extract_physics.py를 찾을 수 없습니다.".to_string())
-}
-
-/// Extract question items from an IDML file using the Python extraction script
-#[tauri::command]
-pub async fn extract_questions(
-    app: AppHandle,
-    idml_path: String,
-    spreads: Vec<String>,
-) -> Result<serde_json::Value, String> {
-    let python = find_python();
-    let script = find_extract_script(&app)?;
-
-    // 1. Create temp directory for IDML extraction
-    let temp_dir = std::env::temp_dir().join(format!(
-        "idml-extract-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    ));
-    std::fs::create_dir_all(&temp_dir)
-        .map_err(|e| format!("임시 디렉토리 생성 실패: {}", e))?;
-
-    // 2. Unzip IDML to temp dir
-    let temp_dir_str = temp_dir.to_string_lossy().to_string();
-    let unzip_output = Command::new("unzip")
-        .args(["-o", "-q", &idml_path, "-d", &temp_dir_str])
-        .output()
-        .await
-        .map_err(|e| format!("IDML 압축 해제 실패: {}", e))?;
-
-    if !unzip_output.status.success() {
-        let stderr = String::from_utf8_lossy(&unzip_output.stderr);
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        return Err(format!("IDML 압축 해제 실패: {}", stderr));
-    }
-
-    // 3. Determine Links directory (same parent as IDML file + "/Links")
-    let idml_parent = std::path::Path::new(&idml_path)
-        .parent()
-        .ok_or("잘못된 IDML 경로")?;
-    let links_dir = idml_parent.join("Links");
-    let links_dir_str = links_dir.to_string_lossy().to_string();
-
-    // 4. Join spread filenames with commas
-    let spreads_arg = spreads.join(",");
-
-    // 5. Run Python script
-    let output = Command::new(&python)
-        .args([
-            &script,
-            "--idml-dir", &temp_dir_str,
-            "--links-dir", &links_dir_str,
-            "--spreads", &spreads_arg,
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("Python 실행 실패: {}", e))?;
-
-    // 6. Clean up temp directory
-    let _ = std::fs::remove_dir_all(&temp_dir);
-
-    // 7. Check for errors
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("문제 추출 실패:\n{}", stderr));
-    }
-
-    // 8. Parse stdout JSON
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(&stdout)
-        .map_err(|e| format!("추출 결과 파싱 실패: {}\n출력: {}", e, &stdout[..stdout.len().min(500)]))
-}

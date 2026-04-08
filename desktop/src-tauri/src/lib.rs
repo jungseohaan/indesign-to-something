@@ -1,4 +1,5 @@
 mod commands;
+mod extract_cache;
 mod indesign;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -38,16 +39,6 @@ pub fn run() {
                 "quit" => {
                     app.exit(0);
                 }
-                "playground" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.emit("menu-playground", ());
-                    }
-                }
-                "extract" => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.emit("menu-extract", ());
-                    }
-                }
                 "about" => {
                     // 프론트엔드에 정보 이벤트 전달
                     if let Some(window) = app.get_webview_window("main") {
@@ -67,14 +58,12 @@ pub fn run() {
             commands::generate_vector_preview,
             commands::generate_master_preview,
             commands::get_text_frame_detail,
-            commands::create_idml_from_masters,
-            commands::extract_template_schema,
-            commands::merge_idml,
             commands::read_text_file,
             commands::write_text_file,
-            commands::extract_questions,
             commands::export_ast,
             commands::extract_indd,
+            commands::clear_extract_cache,
+            commands::extract_cache_stats,
             commands::read_resolved_json,
             commands::check_indesign,
             commands::open_file,
@@ -175,9 +164,6 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     )?;
 
     // View 메뉴
-    let playground = MenuItem::with_id(handle, "playground", "Playground", true, Some("CmdOrCtrl+P"))?;
-    let extract = MenuItem::with_id(handle, "extract", "문제 추출하기", true, Some("CmdOrCtrl+E"))?;
-
     #[cfg(debug_assertions)]
     let view_menu = {
         let devtools = MenuItem::with_id(handle, "devtools", "Toggle DevTools", true, Some("CmdOrCtrl+Shift+I"))?;
@@ -186,9 +172,6 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
             "View",
             true,
             &[
-                &playground,
-                &extract,
-                &PredefinedMenuItem::separator(handle)?,
                 &PredefinedMenuItem::fullscreen(handle, Some("Toggle Fullscreen"))?,
                 &PredefinedMenuItem::separator(handle)?,
                 &devtools,
@@ -202,9 +185,6 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         "View",
         true,
         &[
-            &playground,
-            &extract,
-            &PredefinedMenuItem::separator(handle)?,
             &PredefinedMenuItem::fullscreen(handle, Some("Toggle Fullscreen"))?,
         ],
     )?;
