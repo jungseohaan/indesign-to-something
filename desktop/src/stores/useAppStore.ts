@@ -547,9 +547,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       batchCancelled: false,
     });
 
-    // 완료 후 일괄 열기를 위한 경로 수집
-    const completedFiles: { hwpx: string; pdf: string | null }[] = [];
-
     for (let i = 0; i < selectedPaths.length; i++) {
       // 중단 확인
       if (get().batchCancelled) break;
@@ -640,7 +637,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           ),
         }));
 
-        completedFiles.push({ hwpx: hwpxOutputPath, pdf: pdfOutputPath });
+        // 변환된 파일을 즉시 열기 (HWPX → PDF 순)
+        try { await invoke("open_file", { path: hwpxOutputPath }); } catch {}
+        if (pdfOutputPath) {
+          try { await invoke("open_file", { path: pdfOutputPath }); } catch {}
+        }
 
         // 단일 파일일 때 AST 자동 로드 (시멘틱 레이어 탭용)
         if (selectedPaths.length === 1 && jarPath) {
@@ -660,15 +661,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
-    // 완료: 모든 파일을 일괄 열기
     set({ isBatchProcessing: false, batchCurrentIndex: -1 });
-
-    for (const f of completedFiles) {
-      try { await invoke("open_file", { path: f.hwpx }); } catch {}
-      if (f.pdf) {
-        try { await invoke("open_file", { path: f.pdf }); } catch {}
-      }
-    }
   },
 
   extractForSemantic: async () => {

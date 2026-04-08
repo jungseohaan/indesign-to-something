@@ -153,7 +153,7 @@ pub async fn run_extraction(
     let applescript = format!(
         r#"tell application "{app_name}"
     activate
-    with timeout of 600 seconds
+    with timeout of 3600 seconds
         do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}"}}
     end timeout
 end tell"#,
@@ -178,12 +178,16 @@ end tell"#,
         .spawn()
         .map_err(|e| format!("osascript 실행 실패: {}", e))?;
 
-    // .progress 파일 폴링 (600초 타임아웃 — 대용량 문서 대응)
+    // .progress 파일 폴링
+    // - 절대 타임아웃: 3600초 (1시간)
+    // - 정체 타임아웃: 600초 동안 진행률 업데이트가 없으면 중단
     let progress_path = output_dir.join(".progress");
     let done_path = output_dir.join(".done");
     let mut last_message = String::new();
-    let timeout_secs = 600u64;
+    let timeout_secs = 3600u64;
+    let stale_secs = 600u64;
     let started = std::time::Instant::now();
+    let mut last_progress_at = std::time::Instant::now();
 
     loop {
         // 프로세스 완료 확인
@@ -193,8 +197,10 @@ end tell"#,
             Err(_) => break,
         }
 
-        // 타임아웃 확인
-        if started.elapsed().as_secs() > timeout_secs {
+        // 타임아웃 확인 (절대 또는 정체)
+        let elapsed = started.elapsed().as_secs();
+        let stale = last_progress_at.elapsed().as_secs();
+        if elapsed > timeout_secs || stale > stale_secs {
             // osascript 프로세스 강제 종료
             let _ = child.kill().await;
             let last_step = if last_message.is_empty() {
@@ -202,9 +208,14 @@ end tell"#,
             } else {
                 last_message.clone()
             };
+            let reason = if elapsed > timeout_secs {
+                format!("절대 타임아웃 {}초 초과", timeout_secs)
+            } else {
+                format!("진행률 정체 {}초 초과", stale_secs)
+            };
             return Err(format!(
-                "InDesign 추출 시간 초과 ({}초). 마지막 단계: {}",
-                timeout_secs, last_step
+                "InDesign 추출 중단 ({}). 마지막 단계: {}",
+                reason, last_step
             ));
         }
 
@@ -233,6 +244,7 @@ end tell"#,
 
                 if display != last_message {
                     last_message = display.clone();
+                    last_progress_at = std::time::Instant::now();
                     let phase = match step {
                         "open" => "launching",
                         "pdf" => "checking",
