@@ -138,14 +138,17 @@ public final class TableBuilder {
                 }
 
                 // 테이블 셀 복잡도 체크: 인라인 객체가 포함된 테이블은 플로팅 이미지로 변환 시도
-                if (hasInlineObjectsInTable(idmlTable)) {
+                boolean fallbackInline = hasInlineObjectsInTable(idmlTable);
+                if (fallbackInline) {
                     ASTFigure fig = renderTableAsImage(ctx, idmlTable, tf, thisX, thisY, pageIdx);
                     if (fig != null) {
                         sections.get(pageIdx).addBlock(fig);
                         tableCount++;
+                        System.err.println("[Phase 4] table → PNG fallback (인라인 객체 포함), tf=" + tf.id());
                         continue;
                     }
-                    // PNG 없으면 일반 테이블로 폴백
+                    System.err.println("[Phase 4] table 인라인 감지했지만 rendered PNG 없음 → 일반 변환, tf=" + tf.id()
+                            + " (배지 중복 가능성)");
                 }
 
                 ctx.ensureIdmlInfra.run();
@@ -165,10 +168,23 @@ public final class TableBuilder {
 
     /**
      * 테이블이 배경 PNG fallback 대상인지 판정.
-     * 셀 텍스트가 30자 미만이면서 인라인 객체를 포함하면 → 배경 PNG로 처리.
-     * (짧은 텍스트 + 인라인 배지/아이콘 = 글상자 변환 시 레이아웃 깨짐)
+     * 셀 텍스트가 임계 길이 미만이면서 인라인 객체를 포함하면 → 배경 PNG로 처리.
+     *
+     * <p>임계값을 시스템 프로퍼티로 오버라이드 가능: {@code -Dtable.qualityGate.maxTextLength=80}.
+     * 기본값 60. (이전 기본값 30은 너무 빡빡해서 중3과학 p28의 원형 배지 셀이 게이트에서
+     * 빠졌고, 결과적으로 ASTTable inline + 배경 PNG 양쪽에 배지가 중복 표시됐음.)</p>
      */
+    private static final int DEFAULT_MAX_TEXT_LEN_WITH_INLINE = 60;
+    private static int maxTextLenWithInline() {
+        String prop = System.getProperty("table.qualityGate.maxTextLength");
+        if (prop != null) {
+            try { return Integer.parseInt(prop); } catch (NumberFormatException ignored) {}
+        }
+        return DEFAULT_MAX_TEXT_LEN_WITH_INLINE;
+    }
+
     private static boolean hasInlineObjectsInTable(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table) {
+        int threshold = maxTextLenWithInline();
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row : table.rows()) {
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell : row.cells()) {
                 boolean hasInline = false;
@@ -180,7 +196,7 @@ public final class TableBuilder {
                         if (run.content() != null) textLen += run.content().replace("\uFFFC", "").trim().length();
                     }
                 }
-                if (hasInline && textLen < 30) return true;
+                if (hasInline && textLen < threshold) return true;
             }
         }
         return false;
