@@ -3155,5 +3155,18 @@
     "_comment_spaceCondenseRatio": "공백 문자 장평 축소 비율 (%). 50이면 공백 폭을 50%로 축소",
     "textBoxWidthExpandPercent": 5,
     "_comment_textBoxWidthExpandPercent": "글상자 너비 확장 비율 (%). 3이면 원래 너비의 103%로 확장"
+  },
+  "tables": {
+    "_comment": "SPEC-017 테이블 셀 품질 게이트 — Phase4 TableBuilder가 사용",
+    "qualityGate": {
+      "maxTextLengthWithInline": 60,
+      "_comment_maxTextLengthWithInline": "셀 텍스트가 이 길이 미만이면서 인라인 객체 포함 → 게이트 트리거",
+      "preferCellLevel": true,
+      "_comment_preferCellLevel": "true(기본): 셀 단위 분기 — 트리거 셀의 인라인만 floating으로 추출, 본문 셀은 ASTTable 유지. false: 표 전체 PNG fallback (레거시)",
+      "fallbackToBackgroundCrop": true,
+      "_comment_fallbackToBackgroundCrop": "단독 PNG 못 찾으면 페이지 배경 PNG에서 표 영역 crop 시도",
+      "nestedTableForcesPng": true,
+      "_comment_nestedTableForcesPng": "중첩 테이블 감지 시 무조건 표 전체 PNG fallback"
+    }
   }
 }

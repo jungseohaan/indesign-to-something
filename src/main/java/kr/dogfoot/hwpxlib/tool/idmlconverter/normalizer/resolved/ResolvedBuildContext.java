@@ -99,6 +99,11 @@ public final class ResolvedBuildContext {
      */
     public String currentPhase;
 
+    /**
+     * SPEC-017: 테이블 셀 품질 게이트 정책. null이면 기본값 사용.
+     */
+    public kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.TableQualityGateConfig tableQualityGate;
+
     public ResolvedBuildContext() {
     }
 }

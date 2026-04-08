@@ -52,6 +52,9 @@ public class ConversionConfig {
     private int imageDpi = 72;
     private int maxPixelDimension = 2000;
 
+    // --- tables (SPEC-017) ---
+    private TableQualityGateConfig tableQualityGate = new TableQualityGateConfig();
+
     /**
      * JSON 파일에서 설정을 로드한다.
      */
@@ -191,6 +194,18 @@ public class ConversionConfig {
             if (img.has("defaultDpi")) imageDpi = img.get("defaultDpi").getAsInt();
             if (img.has("maxPixelDimension")) maxPixelDimension = img.get("maxPixelDimension").getAsInt();
         }
+
+        // tables (SPEC-017)
+        if (root.has("tables")) {
+            JsonObject t = root.getAsJsonObject("tables");
+            if (t.has("qualityGate")) {
+                JsonObject qg = t.getAsJsonObject("qualityGate");
+                if (qg.has("maxTextLengthWithInline")) tableQualityGate.maxTextLengthWithInline = qg.get("maxTextLengthWithInline").getAsInt();
+                if (qg.has("preferCellLevel")) tableQualityGate.preferCellLevel = qg.get("preferCellLevel").getAsBoolean();
+                if (qg.has("fallbackToBackgroundCrop")) tableQualityGate.fallbackToBackgroundCrop = qg.get("fallbackToBackgroundCrop").getAsBoolean();
+                if (qg.has("nestedTableForcesPng")) tableQualityGate.nestedTableForcesPng = qg.get("nestedTableForcesPng").getAsBoolean();
+            }
+        }
     }
 
     // --- Getters ---
@@ -230,6 +245,9 @@ public class ConversionConfig {
     // vectorRendering
     public int vectorDpi() { return vectorDpi; }
 
+    // tables (SPEC-017)
+    public TableQualityGateConfig tableQualityGate() { return tableQualityGate; }
+
     // image
     public int imageDpi() { return imageDpi; }
     public int maxPixelDimension() { return maxPixelDimension; }
@@ -242,6 +260,21 @@ public class ConversionConfig {
         public int spacing;
         public int scaleAdjust;
         public double ratio = 1.0;
+    }
+
+    /**
+     * SPEC-017: 테이블 셀 품질 게이트 정책. {@code tables.qualityGate} 섹션에서 파싱.
+     */
+    public static class TableQualityGateConfig {
+        /** 셀 텍스트가 이 길이 미만 + 인라인 객체 포함 → 게이트 트리거. 기본 60자. */
+        public int maxTextLengthWithInline = 60;
+        /** true(기본): 셀 단위 분기 (트리거 셀의 인라인만 floating으로 추출).
+         * false: 이전 동작 (테이블 전체 PNG fallback). */
+        public boolean preferCellLevel = true;
+        /** true(기본): 단독 PNG 못 찾으면 페이지 배경 PNG에서 셀 영역 crop 시도 (Step E, v2). */
+        public boolean fallbackToBackgroundCrop = true;
+        /** true(기본): 중첩 테이블 감지 시 무조건 표 전체 PNG fallback (Step F, v2). */
+        public boolean nestedTableForcesPng = true;
     }
 
     public static class FontMetricEntry {

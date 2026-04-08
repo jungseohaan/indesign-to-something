@@ -115,6 +115,7 @@ public class IDMLToHwpxConverter {
             if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) {
                 astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(resolvedData, idmlDoc.tempDir(), options.config().pngExportResolution())
                         .debugAst(options.debugAst())
+                        .tableQualityGate(options.config().tableQualityGate())
                         .build();
             } else {
                 // 레거시: IDML 기반 4단계 정규화

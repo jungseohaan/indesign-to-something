@@ -1,8 +1,15 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
@@ -13,42 +20,61 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.io.File;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
 /**
- * SPEC-013 Phase 4: 테이블 포함 TextFrame → ASTTable / ASTFigure 변환.
+ * SPEC-013 Phase 4 + SPEC-017 v2: 테이블 포함 TextFrame → ASTTable / ASTFigure 변환.
  *
- * <p>{@code ResolvedToASTBuilder.placeTablesFromIDML / hasInlineObjectsInTable / renderTableAsImage}
- * 에서 stateless static helper로 발췌. 동작은 동일.</p>
+ * <p>분기 정책 (SPEC-017):</p>
+ * <ul>
+ *   <li><b>중첩 테이블</b> + {@code nestedTableForcesPng} → 표 전체 PNG fallback</li>
+ *   <li><b>cell-level 모드</b>(기본) → ASTTable로 변환 후 트리거 셀의 인라인 객체만
+ *       개별 floating ASTFigure로 추출. 본문 셀은 ASTTable로 유지되어 검색/편집 가능</li>
+ *   <li><b>preferCellLevel = false</b>(레거시) → 인라인 감지 시 표 전체 PNG fallback</li>
+ *   <li>PNG fallback이 필요한데 PNG 못 찾으면 ASTTable로 폴백 + "배지 중복 위험" 카운트</li>
+ * </ul>
  *
  * <p>의존: ctx.idmlDir, resolvedData, scaleFactor, basePath, toSectionIndex, loadIDMLStory,
- * ensureIdmlInfra + idmlDocumentSupplier/colorResolverSupplier/imageLoaderSupplier.</p>
+ * ensureIdmlInfra + idmlDocumentSupplier/colorResolverSupplier/imageLoaderSupplier,
+ * tableQualityGate, debugAst.</p>
  */
 public final class TableBuilder {
 
     private TableBuilder() {}
 
+    /** 변환 종료 시 stderr에 출력할 분기 카운터. */
+    private static final class Phase4Report {
+        int asTableCleanCount;          // ASTTable, 인라인 추출 0건
+        int asTableWithExtraction;      // ASTTable + 셀 인라인 추출 1건 이상
+        int totalCellsExtracted;        // 추출된 셀 수
+        int totalInlinesExtracted;      // 추출된 인라인 객체 수
+        int wholeTablePngRendered;      // 표 전체 PNG (rendered_frames에서 발견)
+        int wholeTablePngForced;        // 중첩 테이블 등 정책상 강제 PNG
+        int pngMissingFallback;         // 인라인 있지만 PNG 없어서 ASTTable로 떨어진 케이스 (배지 중복 위험)
+        int total;
+    }
+
     public static void placeTablesFromIDML(ResolvedBuildContext ctx, List<ASTSection> sections) {
         if (ctx.idmlDir == null) return;
-        int tableCount = 0;
+        ConversionConfig.TableQualityGateConfig policy = ctx.tableQualityGate != null
+                ? ctx.tableQualityGate
+                : new ConversionConfig.TableQualityGateConfig();
+        Phase4Report report = new Phase4Report();
 
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
-            // Story에 테이블이 있는지 먼저 확인
             String storyId = tf.storyId();
             if (storyId == null) continue;
             IDMLStory idmlStory = ctx.loadIDMLStory.apply(storyId);
             if (idmlStory == null || !idmlStory.hasTables()) continue;
 
-            // inline + non-editable이면 테이블이 있어도 건너뜀 (단, 테이블 포함 TF는 예외)
             if (tf.isInline() && ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
             if (!tf.isInline() && !ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
 
-            // 페이지 결정 (document offset → section index 매핑)
             int pageIdx = ctx.toSectionIndex.applyAsInt(tf.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
-            // 좌표 계산
             double[] gb = tf.geometricBounds();
             if (gb == null || gb.length < 4) continue;
             ResolvedPage rPage = (pageIdx < ctx.resolvedData.pages().size())
@@ -62,37 +88,29 @@ public final class TableBuilder {
             long hx = CoordinateConverter.pointsToHwpunits(x);
             long hy = CoordinateConverter.pointsToHwpunits(y);
 
-            // 프레임 insetSpacing 반영 (테이블 위치에 인셋 추가)
             if (tf.insetSpacing() != null) {
                 double[] inset = tf.insetSpacing();
-                hy += CoordinateConverter.pointsToHwpunits(inset[0]); // top
-                hx += CoordinateConverter.pointsToHwpunits(inset[1]); // left
+                hy += CoordinateConverter.pointsToHwpunits(inset[0]);
+                hx += CoordinateConverter.pointsToHwpunits(inset[1]);
             }
 
-            // 테이블 앞 텍스트 높이 계산 (테이블 Y 오프셋)
-            // IDML paragraphIndexBefore로 테이블 앞 단락 수 파악
-            // 중첩 테이블 감지: selfId가 다른 테이블의 selfId를 접두사로 포함하면 중첩
+            // 중첩 테이블 부모 탐색 (selfId 접두사 매칭)
             List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> allTables = idmlStory.tables();
-            // 중첩 테이블 부모 탐색: O(n) — selfId를 HashMap에 등록 후 접두사로 부모 lookup
             Map<String, kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> tableById = new HashMap<>();
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t : allTables) {
                 tableById.put(t.selfId(), t);
             }
             Map<String, kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable> parentTableMap = new HashMap<>();
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable t : allTables) {
-                // selfId 형식: "부모ID/Cell:N/Table" — 접두사에서 부모 테이블 ID 추출
                 String sid = t.selfId();
                 int lastSlash = sid.lastIndexOf('/');
                 if (lastSlash > 0) {
-                    // 부모 후보: "부모ID/Cell:N" → 그 앞의 테이블 ID
                     String parentPart = sid.substring(0, lastSlash);
                     int prevSlash = parentPart.lastIndexOf('/');
                     if (prevSlash > 0) {
                         String candidateId = parentPart.substring(0, prevSlash);
                         kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable parent = tableById.get(candidateId);
-                        if (parent != null) {
-                            parentTableMap.put(sid, parent);
-                        }
+                        if (parent != null) parentTableMap.put(sid, parent);
                     }
                 }
             }
@@ -103,21 +121,19 @@ public final class TableBuilder {
                 long thisY = hy;
 
                 kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable parentTable = parentTableMap.get(idmlTable.selfId());
-                if (parentTable != null) {
-                    // 중첩 테이블: 부모 테이블의 행 높이를 합산하여 y 오프셋 계산
-                    // selfId에서 셀 인덱스 추출: "u1cf74i1cf91i6i1cf9b" → "i6" → 셀 row=6
+                boolean isNested = parentTable != null;
+
+                if (isNested) {
                     String parentId = parentTable.selfId();
-                    String remainder = idmlTable.selfId().substring(parentId.length()); // "i6i1cf9b"
+                    String remainder = idmlTable.selfId().substring(parentId.length());
                     int cellRowIdx = -1;
                     if (remainder.startsWith("i")) {
-                        // "i6i..." → 6
                         String cellPart = remainder.substring(1);
                         int nextI = cellPart.indexOf('i');
                         String rowStr = (nextI > 0) ? cellPart.substring(0, nextI) : cellPart;
                         try { cellRowIdx = Integer.parseInt(rowStr); } catch (NumberFormatException e) { /* ignore */ }
                     }
                     if (cellRowIdx >= 0) {
-                        // 부모 테이블의 row 0 ~ cellRowIdx-1 높이 합산
                         long rowHeightSum = 0;
                         int ri = 0;
                         for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow pr : parentTable.rows()) {
@@ -128,7 +144,6 @@ public final class TableBuilder {
                         thisY = hy + rowHeightSum;
                     }
                 } else {
-                    // 최상위 테이블
                     int parasBefore = idmlTable.paragraphIndexBefore();
                     if (parasBefore > 0) {
                         double estLineHeight = 8.0 * ctx.scaleFactor;
@@ -137,54 +152,193 @@ public final class TableBuilder {
                     thisY = hy + tableYOffset;
                 }
 
-                // 테이블 셀 복잡도 체크: 인라인 객체가 포함된 테이블은 플로팅 이미지로 변환 시도
-                boolean fallbackInline = hasInlineObjectsInTable(idmlTable);
-                if (fallbackInline) {
+                report.total++;
+                ASTSection section = sections.get(pageIdx);
+
+                // 분기 1: 중첩 테이블 + 정책상 강제 PNG
+                if (isNested && policy.nestedTableForcesPng) {
                     ASTFigure fig = renderTableAsImage(ctx, idmlTable, tf, thisX, thisY, pageIdx);
+                    if (fig == null && policy.fallbackToBackgroundCrop) {
+                        fig = cropTableFromPageBackground(ctx, idmlTable, thisX, thisY, tf.zOrder(), pageIdx);
+                    }
                     if (fig != null) {
-                        sections.get(pageIdx).addBlock(fig);
-                        tableCount++;
-                        System.err.println("[Phase 4] table → PNG fallback (인라인 객체 포함), tf=" + tf.id());
+                        if (ctx.debugAst) fig.debugOrNew().note("nested table forced to PNG");
+                        section.addBlock(fig);
+                        report.wholeTablePngForced++;
                         continue;
                     }
-                    System.err.println("[Phase 4] table 인라인 감지했지만 rendered PNG 없음 → 일반 변환, tf=" + tf.id()
-                            + " (배지 중복 가능성)");
+                    System.err.println("[Phase 4] 중첩 테이블이지만 PNG 없음 → ASTTable 폴백, tf=" + tf.id());
                 }
 
+                // 분기 2: 레거시 모드 (preferCellLevel=false) — 표 단위 게이트 + 표 전체 PNG
+                if (!policy.preferCellLevel) {
+                    if (idmlTableHasInlineWithShortText(idmlTable, policy.maxTextLengthWithInline)) {
+                        ASTFigure fig = renderTableAsImage(ctx, idmlTable, tf, thisX, thisY, pageIdx);
+                        if (fig == null && policy.fallbackToBackgroundCrop) {
+                            fig = cropTableFromPageBackground(ctx, idmlTable, thisX, thisY, tf.zOrder(), pageIdx);
+                            if (fig != null) {
+                                section.addBlock(fig);
+                                report.wholeTablePngRendered++; // crop도 같은 카운터 (rendered로 간주)
+                                if (ctx.debugAst) fig.debugOrNew().note("background-cropped");
+                                continue;
+                            }
+                        }
+                        if (fig != null) {
+                            section.addBlock(fig);
+                            report.wholeTablePngRendered++;
+                            continue;
+                        }
+                        report.pngMissingFallback++;
+                        System.err.println("[Phase 4] (legacy) 인라인 감지했지만 PNG 없음 → ASTTable, tf="
+                                + tf.id() + " — 배지 중복 위험");
+                    }
+                }
+
+                // 분기 3 (기본): ASTTable로 변환
                 ctx.ensureIdmlInfra.run();
                 ASTTable astTable = ASTTableConverter.convertTableSimple(
                         idmlTable, thisX, thisY, tf.zOrder(),
                         ctx.idmlDocumentSupplier.get(), ctx.colorResolverSupplier.get(),
                         ctx.imageLoaderSupplier.get(), ctx.resolvedData);
-                sections.get(pageIdx).addBlock(astTable);
-                tableCount++;
+                section.addBlock(astTable);
+
+                // 분기 3a: cell-level 모드 — 트리거 셀의 인라인 객체를 floating으로 추출
+                int extractedInThisTable = 0;
+                int triggerCells = 0;
+                if (policy.preferCellLevel) {
+                    int[] result = extractInlinesFromCells(astTable, section, policy, ctx);
+                    extractedInThisTable = result[0];
+                    triggerCells = result[1];
+                    report.totalInlinesExtracted += extractedInThisTable;
+                    report.totalCellsExtracted += triggerCells;
+                }
+                if (extractedInThisTable > 0) {
+                    report.asTableWithExtraction++;
+                    if (ctx.debugAst) astTable.debugOrNew().note("cell-level extraction: " + triggerCells
+                            + " cells, " + extractedInThisTable + " inlines");
+                } else {
+                    report.asTableCleanCount++;
+                }
             }
         }
 
-        if (tableCount > 0) {
-            System.err.println("[ResolvedToASTBuilder] Phase 4: " + tableCount + " tables from IDML");
-        }
+        printReport(report);
     }
 
     /**
-     * 테이블이 배경 PNG fallback 대상인지 판정.
-     * 셀 텍스트가 임계 길이 미만이면서 인라인 객체를 포함하면 → 배경 PNG로 처리.
+     * SPEC-017 Step D: ASTTable의 트리거 셀에서 인라인 객체를 floating ASTFigure로 추출.
      *
-     * <p>임계값을 시스템 프로퍼티로 오버라이드 가능: {@code -Dtable.qualityGate.maxTextLength=80}.
-     * 기본값 60. (이전 기본값 30은 너무 빡빡해서 중3과학 p28의 원형 배지 셀이 게이트에서
-     * 빠졌고, 결과적으로 ASTTable inline + 배경 PNG 양쪽에 배지가 중복 표시됐음.)</p>
+     * @return {@code [총 추출 인라인 수, 트리거 셀 수]}
      */
-    private static final int DEFAULT_MAX_TEXT_LEN_WITH_INLINE = 60;
-    private static int maxTextLenWithInline() {
-        String prop = System.getProperty("table.qualityGate.maxTextLength");
-        if (prop != null) {
-            try { return Integer.parseInt(prop); } catch (NumberFormatException ignored) {}
+    private static int[] extractInlinesFromCells(ASTTable astTable, ASTSection section,
+                                                   ConversionConfig.TableQualityGateConfig policy,
+                                                   ResolvedBuildContext ctx) {
+        int totalExtracted = 0;
+        int triggerCells = 0;
+
+        // 컬럼 X 누적 오프셋 (HWPUNIT)
+        List<Long> colWidths = astTable.columnWidths();
+        long[] colXOffset = new long[colWidths == null ? 1 : colWidths.size() + 1];
+        for (int i = 1; i < colXOffset.length; i++) {
+            colXOffset[i] = colXOffset[i - 1] + colWidths.get(i - 1);
         }
-        return DEFAULT_MAX_TEXT_LEN_WITH_INLINE;
+
+        long rowYAccum = 0;
+        for (ASTTableRow row : astTable.rows()) {
+            for (ASTTableCell cell : row.cells()) {
+                if (!cellShouldExtract(cell, policy.maxTextLengthWithInline)) continue;
+                int colIdx = cell.columnIndex();
+                long cellX = astTable.x()
+                        + (colIdx >= 0 && colIdx < colXOffset.length ? colXOffset[colIdx] : 0);
+                long cellY = astTable.y() + rowYAccum;
+                int extracted = extractCellInlines(cell, cellX, cellY, section, astTable.zOrder(), ctx);
+                if (extracted > 0) {
+                    triggerCells++;
+                    totalExtracted += extracted;
+                }
+            }
+            rowYAccum += row.rowHeight();
+        }
+        return new int[]{totalExtracted, triggerCells};
     }
 
-    private static boolean hasInlineObjectsInTable(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table) {
-        int threshold = maxTextLenWithInline();
+    /** 셀이 게이트 조건(짧은 텍스트 + 인라인)을 만족하는지 — ASTTableCell 기반 검사. */
+    private static boolean cellShouldExtract(ASTTableCell cell, int maxTextLen) {
+        if (cell.paragraphs() == null) return false;
+        boolean hasInline = false;
+        int textLen = 0;
+        for (ASTParagraph para : cell.paragraphs()) {
+            if (para.items() == null) continue;
+            for (ASTInlineItem item : para.items()) {
+                if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+                    ASTInlineObject io = (ASTInlineObject) item;
+                    if (io.imageData() != null) hasInline = true;
+                } else if (item instanceof ASTTextRun) {
+                    String t = ((ASTTextRun) item).text();
+                    if (t != null) textLen += t.replace("\uFFFC", "").trim().length();
+                }
+            }
+        }
+        return hasInline && textLen < maxTextLen;
+    }
+
+    /**
+     * 셀 안의 모든 imageData를 가진 인라인 객체를 floating ASTFigure로 추출.
+     * 추출된 인라인은 cell.paragraphs.items에서 제거된다.
+     */
+    private static int extractCellInlines(ASTTableCell cell, long cellX, long cellY,
+                                            ASTSection section, int tableZOrder, ResolvedBuildContext ctx) {
+        if (cell.paragraphs() == null) return 0;
+        int extracted = 0;
+        for (ASTParagraph para : cell.paragraphs()) {
+            if (para.items() == null) continue;
+            Iterator<ASTInlineItem> it = para.items().iterator();
+            while (it.hasNext()) {
+                ASTInlineItem item = it.next();
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject inline = (ASTInlineObject) item;
+                if (inline.imageData() == null) continue;
+
+                ASTFigure fig = inlineToFigure(inline, cellX, cellY, tableZOrder);
+                if (fig == null) continue;
+                if (ctx.debugAst) {
+                    fig.debugOrNew().createdAt = "Phase4.cellInlineExtraction";
+                    fig.debug().note("from cell r=" + cell.rowIndex() + " c=" + cell.columnIndex());
+                }
+                section.addBlock(fig);
+                it.remove();
+                extracted++;
+            }
+        }
+        return extracted;
+    }
+
+    /** ASTInlineObject → ASTFigure (page-level floating image). */
+    private static ASTFigure inlineToFigure(ASTInlineObject inline, long cellX, long cellY, int tableZOrder) {
+        ASTFigure fig = new ASTFigure();
+        // 위치: resolved 절대 좌표 우선, 없으면 셀 좌상단
+        long figX = (inline.resolvedPageX() >= 0) ? inline.resolvedPageX() : cellX;
+        long figY = (inline.resolvedPageY() >= 0) ? inline.resolvedPageY() : cellY;
+        fig.x(figX);
+        fig.y(figY);
+        // 크기: resolved width/height 우선, 없으면 inline 자체 크기
+        long figW = (inline.resolvedWidth() > 0) ? inline.resolvedWidth() : inline.width();
+        long figH = (inline.resolvedHeight() > 0) ? inline.resolvedHeight() : inline.height();
+        if (figW <= 0 || figH <= 0) return null;
+        fig.width(figW);
+        fig.height(figH);
+        fig.zOrder(tableZOrder + 1); // 표보다 위
+        fig.imageData(inline.imageData());
+        fig.imageFormat(inline.imageFormat() != null ? inline.imageFormat() : "png");
+        fig.pixelWidth(inline.pixelWidth());
+        fig.pixelHeight(inline.pixelHeight());
+        fig.sourceId(inline.sourceId());
+        return fig;
+    }
+
+    /** 레거시(preferCellLevel=false) 경로용 — IDML 단계에서 표 전체 게이트 검사. */
+    private static boolean idmlTableHasInlineWithShortText(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table, int threshold) {
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row : table.rows()) {
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell : row.cells()) {
                 boolean hasInline = false;
@@ -203,7 +357,7 @@ public final class TableBuilder {
     }
 
     /**
-     * 인라인 객체가 포함된 테이블을 rendered PNG 이미지(ASTFigure)로 변환.
+     * 인라인 객체가 포함된 테이블 전체를 rendered PNG로 변환.
      * renderedFloatingItems에서 type="table_inline"인 항목을 찾아 사용.
      */
     private static ASTFigure renderTableAsImage(ResolvedBuildContext ctx,
@@ -211,20 +365,16 @@ public final class TableBuilder {
                                                 ResolvedTextFrame tf, long x, long y, int pageIdx) {
         if (ctx.basePath == null || ctx.resolvedData == null) return null;
 
-        // TextFrame의 DOM ID로 rendered PNG 찾기
         String tfDomId = tf.id();
-        int domId = -1;
+        int domId;
         try { domId = Integer.parseInt(tfDomId); } catch (NumberFormatException e) { return null; }
 
-        // 1. 직접 파일 (table_XXXXX.png) 또는 renderedFloatingItems에서 검색
         File directFile = new File(ctx.basePath, "rendered_frames/table_" + domId + ".png");
         File pngFile = null;
         double[] rgBounds = null;
-
         if (directFile.exists()) {
             pngFile = directFile;
         }
-        // renderedFloatingItems에서도 검색
         if (pngFile == null) {
             for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
                 if (rg.id() == domId && rg.file() != null) {
@@ -254,14 +404,12 @@ public final class TableBuilder {
             fig.pixelWidth(img.getWidth());
             fig.pixelHeight(img.getHeight());
 
-            // 크기: resolved bounds 또는 테이블 크기
             if (rgBounds != null && rgBounds.length >= 4) {
                 double bw = Math.abs(rgBounds[3] - rgBounds[1]) * ctx.scaleFactor;
                 double bh = Math.abs(rgBounds[2] - rgBounds[0]) * ctx.scaleFactor;
                 fig.width(CoordinateConverter.pointsToHwpunits(bw));
                 fig.height(CoordinateConverter.pointsToHwpunits(bh));
             } else {
-                // 테이블 행 높이 + 컬럼 너비 합산
                 long tw = 0, th = 0;
                 for (double cw : table.columnWidths()) tw += CoordinateConverter.pointsToHwpunits(cw);
                 for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow r : table.rows())
@@ -272,6 +420,106 @@ public final class TableBuilder {
             return fig;
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /**
+     * SPEC-017 Step E: 페이지 배경 PNG에서 테이블 영역만 crop하여 ASTFigure 생성.
+     * renderedFloatingItems에 단독 표 PNG가 없을 때 fallback.
+     *
+     * <p>좌표 변환: 표는 thisX/thisY/tw/th(HWPUNIT, 페이지 기준). 페이지 배경 PNG는
+     * 픽셀 크기 + bounds(points). 픽셀 스케일 = pageImg.width / pageWidthHwpunit.</p>
+     */
+    private static ASTFigure cropTableFromPageBackground(ResolvedBuildContext ctx,
+                                                          kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable table,
+                                                          long tableX, long tableY, int zOrder, int pageIdx) {
+        if (ctx.basePath == null || ctx.resolvedData == null) return null;
+
+        // 1. 표 크기 (HWPUNIT) — column widths 합 + row heights 합
+        long tableW = 0, tableH = 0;
+        for (double cw : table.columnWidths()) tableW += CoordinateConverter.pointsToHwpunits(cw);
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow r : table.rows())
+            tableH += CoordinateConverter.pointsToHwpunits(r.rowHeight());
+        if (tableW <= 0 || tableH <= 0) return null;
+
+        // 2. 해당 페이지의 page_background RG 검색
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (!"page_background".equals(rg.itemType())) continue;
+            int rgPageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
+            if (rgPageIdx != pageIdx) continue;
+            if (rg.file() == null) continue;
+
+            File pngFile = new File(ctx.basePath, rg.file());
+            if (!pngFile.exists()) continue;
+
+            try {
+                java.awt.image.BufferedImage pageImg = javax.imageio.ImageIO.read(pngFile);
+                if (pageImg == null) continue;
+
+                double[] bounds = rg.bounds();
+                if (bounds == null || bounds.length < 4) continue;
+
+                long pageWHwp = CoordinateConverter.pointsToHwpunits((bounds[3] - bounds[1]) * ctx.scaleFactor);
+                long pageHHwp = CoordinateConverter.pointsToHwpunits((bounds[2] - bounds[0]) * ctx.scaleFactor);
+                if (pageWHwp <= 0 || pageHHwp <= 0) continue;
+
+                double scaleX = (double) pageImg.getWidth() / pageWHwp;
+                double scaleY = (double) pageImg.getHeight() / pageHHwp;
+
+                int px = Math.max(0, (int) Math.round(tableX * scaleX));
+                int py = Math.max(0, (int) Math.round(tableY * scaleY));
+                int pw = (int) Math.round(tableW * scaleX);
+                int ph = (int) Math.round(tableH * scaleY);
+
+                if (px + pw > pageImg.getWidth()) pw = pageImg.getWidth() - px;
+                if (py + ph > pageImg.getHeight()) ph = pageImg.getHeight() - py;
+                if (pw <= 8 || ph <= 8) return null; // 너무 작으면 거부 (화질 우려)
+
+                java.awt.image.BufferedImage cropped = pageImg.getSubimage(px, py, pw, ph);
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                javax.imageio.ImageIO.write(cropped, "png", baos);
+                byte[] data = baos.toByteArray();
+
+                ASTFigure fig = new ASTFigure();
+                fig.sourceId("tbl_crop_" + table.selfId());
+                fig.x(tableX);
+                fig.y(tableY);
+                fig.width(tableW);
+                fig.height(tableH);
+                fig.zOrder(zOrder);
+                fig.imageData(data);
+                fig.imageFormat("png");
+                fig.pixelWidth(pw);
+                fig.pixelHeight(ph);
+                return fig;
+            } catch (Exception e) {
+                System.err.println("[Phase 4] background crop 실패: " + e.getMessage());
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static void printReport(Phase4Report r) {
+        if (r.total == 0) return;
+        System.err.println("[Phase 4] Tables: " + r.total + " total");
+        if (r.asTableCleanCount > 0) {
+            System.err.println("  · " + r.asTableCleanCount + " → ASTTable (clean)");
+        }
+        if (r.asTableWithExtraction > 0) {
+            System.err.println("  · " + r.asTableWithExtraction + " → ASTTable + "
+                    + r.totalInlinesExtracted + " inline figures extracted (cells: "
+                    + r.totalCellsExtracted + ")");
+        }
+        if (r.wholeTablePngRendered > 0) {
+            System.err.println("  · " + r.wholeTablePngRendered + " → whole-table PNG fallback (rendered)");
+        }
+        if (r.wholeTablePngForced > 0) {
+            System.err.println("  · " + r.wholeTablePngForced + " → whole-table PNG fallback (nested forced)");
+        }
+        if (r.pngMissingFallback > 0) {
+            System.err.println("  · WARNING: " + r.pngMissingFallback
+                    + " → ASTTable forced (PNG missing, badge duplication risk!)");
         }
     }
 }

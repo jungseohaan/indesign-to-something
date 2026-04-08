@@ -60,6 +60,12 @@ public class ResolvedToASTBuilder {
     private boolean debugAst;
     public ResolvedToASTBuilder debugAst(boolean v) { this.debugAst = v; return this; }
 
+    // SPEC-017: 테이블 셀 품질 게이트 정책 (ConversionConfig에서 주입).
+    private kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.TableQualityGateConfig tableQualityGate;
+    public ResolvedToASTBuilder tableQualityGate(kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.TableQualityGateConfig v) {
+        this.tableQualityGate = v; return this;
+    }
+
 
     // Lazy-loaded IDML 인프라 (테이블 셀 변환용)
     private kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDocument;
@@ -372,6 +378,8 @@ public class ResolvedToASTBuilder {
         ctx.spec016Counts = this.spec016Counts;
         ctx.idmlStoryCache = this.idmlStoryCache;
         ctx.lastMatchResult = this.lastMatchResult;
+        ctx.tableQualityGate = this.tableQualityGate;
+        ctx.debugAst = this.debugAst;
         return ctx;
     }
 
