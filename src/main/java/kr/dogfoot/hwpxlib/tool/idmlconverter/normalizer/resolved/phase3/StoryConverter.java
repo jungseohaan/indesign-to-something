@@ -1931,14 +1931,17 @@ public final class StoryConverter {
         }
         double[] aGb = anchoredTf.geometricBounds();
         if (aGb == null || aGb.length < 4) return false;
+        // 다중 컬럼 스레드 스토리: 어느 한 프레임에라도 포함되면 outside가 아님
+        boolean anyParentChecked = false;
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             if (parentStoryId.equals(tf.storyId()) && !tf.isInline()) {
                 double[] pGb = tf.geometricBounds();
                 if (pGb == null || pGb.length < 4) continue;
-                return isOutsideParentBounds(ctx, aGb, pGb);
+                anyParentChecked = true;
+                if (!isOutsideParentBounds(ctx, aGb, pGb)) return false;
             }
         }
-        return false;
+        return anyParentChecked;
     }
 
     /** Resolved 경로용: resolved TextFrame + renderedFloatingItems bounds로 판별 */
@@ -1950,7 +1953,7 @@ public final class StoryConverter {
             aGb = anchoredTf.geometricBounds();
         }
         // 2) resolved에 없으면 renderedFloatingItems의 inline_object bounds
-        //    renderedFloatingItems bounds は mm 単位 → pt に変換が必要
+        //    renderedFloatingItems bounds は mm 単位 → pt に変환이 필요
         if (aGb == null || aGb.length < 4) {
             for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
                 if (rg.id() == anchoredId && "inline_object".equals(rg.itemType())) {
@@ -1965,15 +1968,18 @@ public final class StoryConverter {
         }
         if (aGb == null || aGb.length < 4) return false;
 
-        // 부모 Story의 첫 번째 (주) TextFrame 찾기
+        // 부모 Story의 모든 비인라인 TextFrame을 검사. 어느 한 프레임에라도 포함되면 outside가 아님.
+        // (스레드 체인된 다중 컬럼 스토리에서 한쪽 컬럼에만 포함되어도 정상)
+        boolean anyParentChecked = false;
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             if (parentStoryId.equals(tf.storyId()) && !tf.isInline()) {
                 double[] pGb = tf.geometricBounds();
                 if (pGb == null || pGb.length < 4) continue;
-                return isOutsideParentBounds(ctx, aGb, pGb);
+                anyParentChecked = true;
+                if (!isOutsideParentBounds(ctx, aGb, pGb)) return false;
             }
         }
-        return false;
+        return anyParentChecked;
     }
 
     /**

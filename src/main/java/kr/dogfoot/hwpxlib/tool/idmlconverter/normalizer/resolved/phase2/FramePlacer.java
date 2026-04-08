@@ -270,6 +270,7 @@ public final class FramePlacer {
 
         String sourceIdBase = "u" + Integer.toHexString(Integer.parseInt(tf.id()));
         int charOffset = 0;
+        List<ASTTextFrameBlock> createdBlocks = new ArrayList<>();
 
         for (int gi = 0; gi < groups.size(); gi++) {
             List<ResolvedTextFrame.ComposedLine> group = groups.get(gi);
@@ -356,7 +357,27 @@ public final class FramePlacer {
             }
 
             charOffset += groupCharCount;
+            createdBlocks.add(block);
             section.addBlock(block);
+        }
+
+        // 빈 단락(인라인 앵커 전용 등) 흡수: 각 YGap 블록의 absParaEnd를 다음 블록의 absParaStart-1까지 확장
+        // 예) g0=[18,18], g1=[20,20] → g0=[18,19], g1=[20,20]
+        // 마지막 블록은 tf.paragraphEnd까지 확장
+        for (int bi = 0; bi < createdBlocks.size(); bi++) {
+            ASTTextFrameBlock cb = createdBlocks.get(bi);
+            if (cb.composedCharStart() < 0) continue;
+            int curEnd = cb.composedCharEnd();
+            int nextStart;
+            if (bi + 1 < createdBlocks.size()) {
+                ASTTextFrameBlock nb = createdBlocks.get(bi + 1);
+                nextStart = nb.composedCharStart() >= 0 ? nb.composedCharStart() : Integer.MAX_VALUE;
+            } else {
+                nextStart = (tf.paragraphEnd() >= 0) ? tf.paragraphEnd() + 1 : Integer.MAX_VALUE;
+            }
+            if (nextStart > curEnd + 1 && nextStart != Integer.MAX_VALUE) {
+                cb.composedCharEnd(nextStart - 1);
+            }
         }
 
         return true;

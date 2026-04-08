@@ -2487,13 +2487,55 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                 var inId = inItem.id;
                 var inFileName = "inline_" + inId + ".png";
                 var inOutFile = File(renderDir + "/" + inFileName);
+                // Group 내부의 TextFrame/Table 텍스트는 별도로 floating textbox/table로 배치되므로
+                // 렌더링 PNG에는 텍스트를 제외 (배경 도형/테이블 셀 그리드만 캡처).
+                // parentStory.texts[0].fillColor와 cell.texts[0].fillColor를 None Swatch로 잠시 변경 → export → 복원.
+                var savedFills = []; // [{txt, fillColor, fillTint}]
+                var noneSwatch = null;
+                try { noneSwatch = doc.swatches.itemByName("None"); } catch (eNone) {}
+                try {
+                    if (inItem.constructor.name === "Group" && noneSwatch && noneSwatch.isValid) {
+                        var groupItems = inItem.allPageItems;
+                        for (var gki = 0; gki < groupItems.length; gki++) {
+                            var gki_it = groupItems[gki];
+                            if (gki_it.constructor.name === "TextFrame") {
+                                try {
+                                    var st = gki_it.parentStory;
+                                    if (st && st.texts.length > 0) {
+                                        var txt = st.texts[0];
+                                        savedFills.push({txt: txt, fillColor: txt.fillColor, fillTint: txt.fillTint});
+                                        txt.fillColor = noneSwatch;
+                                    }
+                                    // 테이블 셀 텍스트도 숨김 (story.tables[].cells[].texts)
+                                    if (st && st.tables && st.tables.length > 0) {
+                                        for (var ti = 0; ti < st.tables.length; ti++) {
+                                            var tbl = st.tables[ti];
+                                            try {
+                                                for (var ci = 0; ci < tbl.cells.length; ci++) {
+                                                    var cell = tbl.cells[ci];
+                                                    try {
+                                                        if (cell.texts.length > 0) {
+                                                            var ctx = cell.texts[0];
+                                                            savedFills.push({txt: ctx, fillColor: ctx.fillColor, fillTint: ctx.fillTint});
+                                                            ctx.fillColor = noneSwatch;
+                                                        }
+                                                    } catch (eCell) {}
+                                                }
+                                            } catch (eTbl) {}
+                                        }
+                                    }
+                                } catch (eHide) {}
+                            }
+                        }
+                    }
+                } catch (eWalk) {}
                 try {
                     inItem.exportFile(ExportFormat.PNG_FORMAT, inOutFile);
                     if (inOutFile.exists) {
                         var inBounds = null;
                         try {
-                            inBounds = arrCopy(inItem.visibleBounds);
-                            if (!inBounds) inBounds = arrCopy(inItem.geometricBounds);
+                            // 텍스트 숨김 상태에서는 visibleBounds가 축소될 수 있으므로 geometricBounds 우선
+                            inBounds = arrCopy(inItem.geometricBounds);
                         } catch (eb) {}
 
                         var inPageIdx = -1;
@@ -2512,6 +2554,13 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                         });
                     }
                 } catch (eRender) {}
+                // fillColor 복원
+                for (var hri = 0; hri < savedFills.length; hri++) {
+                    try {
+                        savedFills[hri].txt.fillColor = savedFills[hri].fillColor;
+                        savedFills[hri].txt.fillTint = savedFills[hri].fillTint;
+                    } catch (eRestore) {}
+                }
             }
         } catch (eInline) {}
     }
