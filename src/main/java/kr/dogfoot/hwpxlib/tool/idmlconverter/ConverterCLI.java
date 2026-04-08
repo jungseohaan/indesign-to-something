@@ -87,6 +87,8 @@ public class ConverterCLI {
                 runConvertAst(args);
             } else if ("--diagnose".equals(command)) {
                 runDiagnose(args);
+            } else if ("--analyze-fonts".equals(command)) {
+                runAnalyzeFonts(args);
             } else {
                 printUsage();
                 System.exit(1);
@@ -1325,6 +1327,51 @@ public class ConverterCLI {
         CoordinateDiagnoser.diagnose(idmlDoc, resolved, startPage, endPage, System.out);
 
         idmlDoc.cleanup();
+    }
+
+    /**
+     * SPEC-014: IDML 폰트 목록을 추출해 후보 매핑 분석 결과를 JSON으로 출력.
+     * Usage: --analyze-fonts &lt;input.idml&gt; [--config &lt;conversion-config.json&gt;]
+     */
+    private static void runAnalyzeFonts(String[] args) throws Exception {
+        if (args.length < 2) {
+            System.err.println("Error: Missing IDML path");
+            System.err.println("Usage: --analyze-fonts <input.idml> [--config <conversion-config.json>]");
+            System.exit(1);
+        }
+        String idmlPath = args[1];
+        String configPath = null;
+        for (int i = 2; i < args.length; i++) {
+            if ("--config".equals(args[i]) && i + 1 < args.length) {
+                configPath = args[++i];
+            }
+        }
+
+        if (configPath == null) {
+            // 기본 위치: 작업 디렉토리의 conversion-config.json
+            java.io.File def = new java.io.File("conversion-config.json");
+            if (def.exists()) configPath = def.getAbsolutePath();
+        }
+        ConversionConfig config = ConversionConfig.load(configPath);
+
+        IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
+        try {
+            java.util.List<String> fontNames = new java.util.ArrayList<>();
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLFontDef def : idmlDoc.fonts().values()) {
+                String fam = def.fontFamily();
+                if (fam != null && !fontNames.contains(fam)) fontNames.add(fam);
+            }
+            java.util.Collections.sort(fontNames);
+
+            java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.font.FontCandidateMatcher.FontAnalysis> analyses =
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.font.FontCandidateMatcher.analyzeAll(
+                            fontNames, null, config);
+
+            com.google.gson.Gson gson = new com.google.gson.GsonBuilder().setPrettyPrinting().create();
+            System.out.println(gson.toJson(java.util.Collections.singletonMap("fonts", analyses)));
+        } finally {
+            idmlDoc.cleanup();
+        }
     }
 
     private static void printUsage() {
