@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { FileSelector } from "./components/FileSelector";
 import { ASTTreePanel } from "./components/ASTTreePanel";
 import { ASTDetailPanel } from "./components/ASTDetailPanel";
@@ -24,6 +25,7 @@ function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [currentTab, setCurrentTab] = useState<Tab>("converter");
   const [rightPanel, setRightPanel] = useState<RightPanel>("ast");
+  const [cacheStats, setCacheStats] = useState<{ count: number; bytes: number } | null>(null);
 
   useEffect(() => {
     initJarPath();
@@ -47,13 +49,33 @@ function App() {
       setShowAbout(true);
     });
 
+    const unlistenClearCache = listen("menu-clear-extract-cache", async () => {
+      try {
+        const [count, bytes] = await invoke<[number, number]>("clear_extract_cache");
+        const mb = (bytes / (1024 * 1024)).toFixed(1);
+        alert(`추출 캐시 ${count}개 삭제 (${mb} MB)`);
+        setCacheStats({ count: 0, bytes: 0 });
+      } catch (e: any) {
+        alert(`캐시 비우기 실패: ${e}`);
+      }
+    });
+
     return () => {
       unlistenOpenIndd.then((f) => f());
       unlistenOpenInddFolder.then((f) => f());
       unlistenOpenHwpx.then((f) => f());
       unlistenAbout.then((f) => f());
+      unlistenClearCache.then((f) => f());
     };
   }, [initJarPath, selectInddFile, selectInddFolder, selectHwpxFile]);
+
+  // About 다이얼로그를 열 때 캐시 통계 갱신
+  useEffect(() => {
+    if (!showAbout) return;
+    invoke<[number, number]>("extract_cache_stats")
+      .then(([count, bytes]) => setCacheStats({ count, bytes }))
+      .catch(() => setCacheStats(null));
+  }, [showAbout]);
 
   const showReextractReview = useSemanticStore((s) => s.showReextractReview);
 
@@ -149,6 +171,17 @@ function App() {
             <p className="text-gray-500 text-sm mb-4">
               Adobe InDesign IDML 파일을 한글 HWPX 파일로 변환합니다.
             </p>
+            <div className="text-xs text-gray-500 mb-4 border-t pt-3">
+              <div className="font-medium text-gray-600 mb-1">추출 캐시</div>
+              {cacheStats ? (
+                <div>
+                  {cacheStats.count}개 항목 ·{" "}
+                  {(cacheStats.bytes / (1024 * 1024)).toFixed(1)} MB
+                </div>
+              ) : (
+                <div className="text-gray-400">로드 중...</div>
+              )}
+            </div>
             <div className="text-right">
               <button
                 onClick={() => setShowAbout(false)}

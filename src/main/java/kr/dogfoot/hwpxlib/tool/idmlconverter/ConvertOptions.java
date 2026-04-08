@@ -25,6 +25,9 @@ public class ConvertOptions {
     private String configPath;
     private ConversionConfig config;
     private int pdfBgDpi;
+    /** SPEC-015: AST 노드에 디버그 메타데이터(생성 phase, appliedFrom 등)를 채울지 여부.
+     *  활성화 시 ASTSerializer가 debug 필드를 출력한다. 기본 비활성. */
+    private boolean debugAst;
 
     public ConvertOptions() {
         this.startPage = 0;
@@ -296,6 +299,20 @@ public class ConvertOptions {
 
     public ConvertOptions pdfBgDpi(int pdfBgDpi) {
         this.pdfBgDpi = pdfBgDpi;
+        return this;
+    }
+
+    /**
+     * SPEC-015: AST 디버그 메타데이터 출력 활성화 여부.
+     * true이면 ASTSerializer가 노드별 createdAt/appliedFrom/notes 필드를 직렬화한다.
+     * 활성화되어도 메타데이터가 채워지려면 후속 SPEC-012/013 작업이 필요하다.
+     */
+    public boolean debugAst() {
+        return debugAst;
+    }
+
+    public ConvertOptions debugAst(boolean debugAst) {
+        this.debugAst = debugAst;
         return this;
     }
 

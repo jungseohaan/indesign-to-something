@@ -1,9 +1,12 @@
 import { useState, useRef, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../stores/useAppStore";
 
 export function ConversionPanel() {
   const {
     idmlPath,
+    jarPath,
     isConverting,
     progress,
     result,
@@ -13,6 +16,9 @@ export function ConversionPanel() {
     layoutMode,
     conversionLogs,
     fontMappings,
+    debugStartPage,
+    debugEndPage,
+    setDebugPageRange,
     startConversion,
     setSpreadBased,
     setVectorDpi,
@@ -20,6 +26,33 @@ export function ConversionPanel() {
     clearError,
     openFontMappingModal,
   } = useAppStore();
+
+  const debugRangeEnabled = debugStartPage > 0 || debugEndPage > 0;
+  const [isExportingAst, setIsExportingAst] = useState(false);
+
+  // SPEC-015: AST JSON 저장 — 기존 export_ast Tauri 커맨드를 호출해 사용자 지정 경로에 파일로 기록.
+  async function handleExportAst() {
+    if (!idmlPath || !jarPath || isExportingAst) return;
+    const defaultName = idmlPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, ".ast.json");
+    const outputPath = await save({
+      defaultPath: defaultName,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (!outputPath) return;
+    setIsExportingAst(true);
+    try {
+      const ast = await invoke<unknown>("export_ast", { idmlPath, jarPath });
+      await invoke("write_text_file", {
+        path: outputPath,
+        content: JSON.stringify(ast, null, 2),
+      });
+      try { await invoke("open_file", { path: outputPath }); } catch {}
+    } catch (e: any) {
+      alert(`AST 저장 실패: ${e}`);
+    } finally {
+      setIsExportingAst(false);
+    }
+  }
 
   const [showWarnings, setShowWarnings] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -190,6 +223,38 @@ export function ConversionPanel() {
               ? `폰트 (${Object.keys(fontMappings).length}개 변경)`
               : "폰트 매핑"}
           </button>
+          {/* SPEC-011: 디버그 페이지 범위 추출 (다음 INDD 추출에 적용, 캐시 우회) */}
+          <label className="flex items-center gap-1.5 text-xs text-gray-500" title="다음 INDD 추출 시에만 적용. 캐시를 우회한다.">
+            <input
+              type="checkbox"
+              checked={debugRangeEnabled}
+              onChange={(e) => {
+                if (e.target.checked) setDebugPageRange(1, 1);
+                else setDebugPageRange(0, 0);
+              }}
+              className="rounded border-gray-300"
+            />
+            디버그 추출
+            {debugRangeEnabled && (
+              <>
+                <input
+                  type="number"
+                  min={1}
+                  value={debugStartPage || ""}
+                  onChange={(e) => setDebugPageRange(Number(e.target.value) || 0, debugEndPage)}
+                  className="w-12 border border-gray-300 rounded px-1 py-0.5 text-xs"
+                />
+                <span>~</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={debugEndPage || ""}
+                  onChange={(e) => setDebugPageRange(debugStartPage, Number(e.target.value) || 0)}
+                  className="w-12 border border-gray-300 rounded px-1 py-0.5 text-xs"
+                />
+              </>
+            )}
+          </label>
         </div>
 
         {/* Progress / Convert Button */}
@@ -199,6 +264,15 @@ export function ConversionPanel() {
               {progress.message} ({progress.current}/{progress.total})
             </span>
           )}
+          {/* SPEC-015: 디버깅용 AST JSON 저장 */}
+          <button
+            onClick={handleExportAst}
+            disabled={!idmlPath || isConverting || isExportingAst}
+            className="px-3 py-2 text-sm border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="AST 중간 표현을 JSON 파일로 저장 (디버깅용)"
+          >
+            {isExportingAst ? "AST 저장 중..." : "AST JSON 저장"}
+          </button>
           <button
             onClick={startConversion}
             disabled={!idmlPath || isConverting}

@@ -62,6 +62,9 @@ interface AppState {
   spreadBased: boolean;
   vectorDpi: 96 | 150;
   layoutMode: "preserve" | "editable";
+  // SPEC-011: 디버그용 페이지 범위 추출 (0=전체)
+  debugStartPage: number;
+  debugEndPage: number;
   // InDesign
   indesignPath: string | null;
 
@@ -98,6 +101,7 @@ interface AppState {
   setSpreadBased: (v: boolean) => void;
   setVectorDpi: (v: 96 | 150) => void;
   setLayoutMode: (v: "preserve" | "editable") => void;
+  setDebugPageRange: (start: number, end: number) => void;
   clearError: () => void;
   setFontMappings: (mappings: Record<string, string>) => void;
   openFontMappingModal: () => void;
@@ -143,6 +147,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   spreadBased: false,
   vectorDpi: 150,
   layoutMode: "preserve",
+  debugStartPage: 0,
+  debugEndPage: 0,
   indesignPath: null,
   fontMappings: {},
   showFontMappingModal: false,
@@ -459,6 +465,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSpreadBased: (v) => set({ spreadBased: v }),
   setVectorDpi: (v) => set({ vectorDpi: v }),
   setLayoutMode: (v) => set({ layoutMode: v }),
+  setDebugPageRange: (start, end) => set({ debugStartPage: start, debugEndPage: end }),
   clearError: () => set({ error: null }),
   setFontMappings: (mappings) => set({ fontMappings: mappings }),
   openFontMappingModal: () => set({ showFontMappingModal: true }),
@@ -566,12 +573,30 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       }));
 
+      // SPEC-011: 추출 캐시 적중 감지 — `phase: "cached"` progress 이벤트 수신 시 현재 항목에 표시
+      const unlistenExtractProgress = await listen<InddExtractionProgress>(
+        "indd-extraction-progress",
+        (event) => {
+          if (event.payload.phase === "cached") {
+            const idx = get().batchCurrentIndex;
+            set((s) => ({
+              batchResults: s.batchResults.map((r, j) =>
+                j === idx ? { ...r, cached: true } : r
+              ),
+            }));
+          }
+        }
+      );
+
       try {
-        // 1. InDesign으로 추출 (전체 페이지)
+        const { debugStartPage, debugEndPage } = get();
+        // 1. InDesign으로 추출 (디버그 페이지 범위가 있으면 일부만)
         const extractResult = await invoke<InddExtractResult>("extract_indd", {
           inddPath,
           jarPath,
           spreadMode: spreadBased,
+          startPage: debugStartPage,
+          endPage: debugEndPage,
         });
 
         if (get().batchCancelled) break;
@@ -658,6 +683,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             idx === i ? { ...r, status: "error" as const, error: String(e) } : r
           ),
         }));
+      } finally {
+        unlistenExtractProgress();
       }
     }
 
@@ -681,10 +708,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!jarPath) throw new Error("JAR 경로를 찾을 수 없습니다");
 
       // 1. InDesign ExtendScript로 추출
+      const { debugStartPage, debugEndPage } = get();
       const extractResult = await invoke<InddExtractResult>("extract_indd", {
         inddPath: path,
         jarPath,
         spreadMode: false,
+        startPage: debugStartPage,
+        endPage: debugEndPage,
       });
 
       // 2. AST 로드

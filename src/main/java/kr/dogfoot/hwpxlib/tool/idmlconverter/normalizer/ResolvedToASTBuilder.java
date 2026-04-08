@@ -2,6 +2,11 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase0.InfraSetup;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.PageLayoutBuilder;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7.RenderableFramePlacer;
 // FontMapper import removed (unused in new pipeline)
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
@@ -40,6 +45,17 @@ public class ResolvedToASTBuilder {
     private StylePropertyResolver styleResolver;
     private ASTDocument astDoc; // Phase 0에서 스타일 정의 접근용
     private Map<Integer, Integer> pageDocOffsetToSection; // document pageIndex → section list index
+
+    // SPEC-016 Phase 2: 매칭 신뢰도 카운터 — build() 종료 시 stderr에 비율 출력
+    private int spec016HighCount;
+    private int spec016MediumCount;
+    private int spec016LowCount;
+    /**
+     * SPEC-016 Phase 2: LOW 매칭 진단용 텍스트 마커. 시스템 프로퍼티
+     * {@code -Dspec016.debug.text=예쁜} 으로 지정하면 해당 텍스트가 포함된 LOW 세그먼트를
+     * stderr에 상세 출력한다. 잔존 과제 1번(첫 번째 "예쁜" 케이스 LOW 원인 분석)용.
+     */
+    private static final String SPEC016_DEBUG_TEXT = System.getProperty("spec016.debug.text");
 
     /** ParagraphStyle에서 미리 구한 스타일 속성 (런에서 없을 때 폴백용) */
     private static class StyleContext {
@@ -140,6 +156,14 @@ public class ResolvedToASTBuilder {
         placeRenderableFrames(sections);
 
         System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
+        // SPEC-016 Phase 2: 매칭 신뢰도 비율 리포트
+        int total = spec016HighCount + spec016MediumCount + spec016LowCount;
+        if (total > 0) {
+            System.err.println("[SPEC-016] HIGH=" + spec016HighCount
+                    + " MEDIUM=" + spec016MediumCount
+                    + " LOW=" + spec016LowCount
+                    + " (total=" + total + ")");
+        }
         return doc;
     }
 
@@ -147,119 +171,27 @@ public class ResolvedToASTBuilder {
     // Phase 0: IDML 정의 복사
     // ═══════════════════════════════════════════════════
 
+    /**
+     * SPEC-013 Stage 3: Phase 0 IDML 정의 복사는 {@link InfraSetup}로 위임. 동작 동일.
+     */
     private void copyIDMLDefinitions(ASTDocument doc) {
-        if (idmlDir == null) {
-            System.err.println("[ResolvedToASTBuilder] Phase 0: idmlDir is null — skipping");
-            return;
-        }
-
-        try {
-            // Styles.xml에서 폰트, 단락스타일, 색상 파싱
-            File stylesFile = new File(new File(idmlDir, "Resources"), "Styles.xml");
-            if (!stylesFile.exists()) return;
-            DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-            // IDML의 ParagraphStyle은 200+ 속성을 가질 수 있으므로 제한 해제
-            try { dbf.setAttribute("http://www.oracle.com/xml/jaxp/properties/elementAttributeLimit", "0"); } catch (Exception e) {}
-            try { dbf.setAttribute("http://www.oracle.com/xml/jaxp/properties/totalEntitySizeLimit", "0"); } catch (Exception e) {}
-            DocumentBuilder db = dbf.newDocumentBuilder();
-            org.w3c.dom.Document xmlDoc = db.parse(stylesFile);
-
-            // 폰트 정의 수집 (Fonts.xml에서)
-            File fontsFile = new File(new File(idmlDir, "Resources"), "Fonts.xml");
-            if (fontsFile.exists()) {
-                try {
-                    org.w3c.dom.Document fontsDoc = db.parse(fontsFile);
-                    org.w3c.dom.NodeList fontFamilies = fontsDoc.getElementsByTagName("FontFamily");
-                    for (int i = 0; i < fontFamilies.getLength(); i++) {
-                        org.w3c.dom.Element ff = (org.w3c.dom.Element) fontFamilies.item(i);
-                        String name = ff.getAttribute("Name");
-                        if (name != null && !name.isEmpty()) {
-                            ASTFontDef fd = new ASTFontDef();
-                            fd.fontFamily(name);
-                            doc.addFont(fd);
-                        }
-                    }
-                } catch (Exception e) {
-                    System.err.println("[ResolvedToASTBuilder] Fonts.xml 파싱 실패: " + e.getMessage());
-                }
-            }
-
-            // 단락 스타일 수집
-            org.w3c.dom.NodeList paraStyles = xmlDoc.getElementsByTagName("ParagraphStyle");
-            for (int i = 0; i < paraStyles.getLength(); i++) {
-                org.w3c.dom.Element ps = (org.w3c.dom.Element) paraStyles.item(i);
-                String self = ps.getAttribute("Self");
-                String name = ps.getAttribute("Name");
-                if (self != null && name != null) {
-                    // 폰트 정보 추출
-                    org.w3c.dom.NodeList appliedFonts = ps.getElementsByTagName("AppliedFont");
-                    String font = null;
-                    if (appliedFonts.getLength() > 0) {
-                        font = appliedFonts.item(0).getTextContent();
-                    }
-                    ASTStyleDef sd = new ASTStyleDef();
-                    sd.styleId(self);
-                    sd.styleName(name);
-                    if (font != null) sd.fontFamily(font);
-                    String fontSize = ps.getAttribute("PointSize");
-                    if (fontSize != null && !fontSize.isEmpty()) {
-                        try { sd.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(Double.parseDouble(fontSize))); } catch (NumberFormatException e) {}
-                    }
-                    sd.textColor(ps.getAttribute("FillColor"));
-                    sd.fontStyle(ps.getAttribute("FontStyle"));
-                    // 정렬 (Justification)
-                    String justification = ps.getAttribute("Justification");
-                    if (justification != null && !justification.isEmpty()) {
-                        sd.alignment(justification);
-                    }
-                    doc.addParagraphStyle(sd);
-                }
-            }
-            System.err.println("[ResolvedToASTBuilder] Phase 0: fonts=" + doc.fonts().size()
-                    + " styles=" + doc.paragraphStyles().size());
-        } catch (Exception e) {
-            System.err.println("[ResolvedToASTBuilder] IDML 정의 복사 실패: " + e.getMessage());
-        }
+        ResolvedBuildContext ctx = buildPhaseContext();
+        ctx.astDocument = doc; // Phase 0 시점은 build()의 로컬 doc과 동일
+        InfraSetup.copyIDMLDefinitions(ctx);
     }
 
     // ═══════════════════════════════════════════════════
     // Phase 1: 페이지/섹션 빌드
     // ═══════════════════════════════════════════════════
 
+    /**
+     * SPEC-013 Stage 4: Phase 1 페이지/섹션 빌드는 {@link PageLayoutBuilder}로 위임. 동작 동일.
+     * ctx에 채워진 pageDocOffsetToSection 매핑을 인스턴스 필드로 다시 복사해 toSectionIndex 호환 유지.
+     */
     private List<ASTSection> buildSections() {
-        List<ASTSection> sections = new ArrayList<>();
-        List<ResolvedPage> pages = resolvedData.pages();
-
-        for (int i = 0; i < pages.size(); i++) {
-            ResolvedPage page = pages.get(i);
-            ASTSection section = new ASTSection();
-
-            // 페이지 번호: name이 숫자면 사용, 아니면 인덱스+1
-            int pageNum = i + 1;
-            try { pageNum = Integer.parseInt(page.name()); } catch (NumberFormatException e) {}
-            section.pageNumber(pageNum);
-
-            // 페이지 레이아웃 (normalizeToPoints() 후 이미 pt 단위)
-            ASTPageLayout layout = new ASTPageLayout();
-            layout.pageWidth(CoordinateConverter.pointsToHwpunits(page.width()));
-            layout.pageHeight(CoordinateConverter.pointsToHwpunits(page.height()));
-            layout.marginTop(CoordinateConverter.pointsToHwpunits(page.marginTop()));
-            layout.marginBottom(CoordinateConverter.pointsToHwpunits(page.marginBottom()));
-            layout.marginLeft(CoordinateConverter.pointsToHwpunits(page.marginLeft()));
-            layout.marginRight(CoordinateConverter.pointsToHwpunits(page.marginRight()));
-            layout.columnCount(1);
-            layout.columnGutter(0);
-            section.layout(layout);
-
-            sections.add(section);
-        }
-
-        // document pageIndex → section list index 매핑 빌드
-        pageDocOffsetToSection = new HashMap<>();
-        for (int i = 0; i < pages.size(); i++) {
-            pageDocOffsetToSection.put(pages.get(i).index(), i);
-        }
-
+        ResolvedBuildContext ctx = buildPhaseContext();
+        List<ASTSection> sections = PageLayoutBuilder.build(ctx);
+        this.pageDocOffsetToSection = ctx.pageDocOffsetToSection;
         return sections;
     }
 
@@ -2005,6 +1937,12 @@ public class ResolvedToASTBuilder {
     }
 
     private ASTTextRun createRunFromIDML(IDMLCharacterRun cr, String text, ResolvedRun rr, StyleContext sc, MatchConfidence confidence) {
+        // SPEC-016 Phase 2: 신뢰도 카운터 (모든 IDML→AST 런 생성 경로 단일 집계 지점)
+        switch (confidence) {
+            case HIGH: spec016HighCount++; break;
+            case MEDIUM: spec016MediumCount++; break;
+            case LOW: spec016LowCount++; break;
+        }
         ASTTextRun tr = new ASTTextRun();
         // 특수 제어 문자 제거
         // \u0008 = Indent to Here (ACE 7) — HWPX에 대응 없음
@@ -2587,6 +2525,24 @@ public class ResolvedToASTBuilder {
             ResolvedRun effectiveRr = rr != null ? rr : findDefaultResolvedRun(resolvedRuns);
             // findDefaultResolvedRun 폴백은 신뢰도 강등
             MatchConfidence effConf = (rr != null) ? seg.confidence : MatchConfidence.LOW;
+
+            // SPEC-016 Phase 2: LOW 진단 — 마커 텍스트가 포함되면 컨텍스트 덤프
+            if (effConf == MatchConfidence.LOW && SPEC016_DEBUG_TEXT != null
+                    && seg.text != null && seg.text.contains(SPEC016_DEBUG_TEXT)) {
+                System.err.println("[SPEC-016 LOW] segment=\"" + seg.text + "\""
+                        + " idmlCRtext=\"" + text + "\""
+                        + " rrIdx=" + seg.rrIdx
+                        + " resolvedRuns(" + resolvedRuns.size() + ")=");
+                for (int i = 0; i < resolvedRuns.size(); i++) {
+                    ResolvedRun dbg = resolvedRuns.get(i);
+                    System.err.println("  rr[" + i + "] text=\""
+                            + (dbg.text() == null ? "<null>" : dbg.text())
+                            + "\" font=" + dbg.fontFamily()
+                            + " size=" + dbg.fontSize()
+                            + " color=" + dbg.fillColor());
+                }
+            }
+
             ASTTextRun tr = createRunFromIDML(cr, seg.text, effectiveRr, sc, effConf);
             if (!splitBulletRun(tr, para)) {
                 splitLatinVarsInMixedText(tr, para);
@@ -3994,155 +3950,38 @@ public class ResolvedToASTBuilder {
     // ═══════════════════════════════════════════════════
 
     /**
-     * renderable TF(배지: 부모에 배경색이 있는 짧은 텍스트)를 플로팅 이미지로 배치.
-     * renderedTextFrames에서 type이 없는(일반 renderable) 항목의 PNG를 ASTFigure로 변환.
+     * SPEC-013 Stage 5: Phase 7(renderable 배지 배치)는 {@link RenderableFramePlacer}로 위임.
+     * 동작은 동일.
      */
     private void placeRenderableFrames(List<ASTSection> sections) {
-        if (basePath == null) return;
-        int count = 0;
-        for (RenderedGroup rt : resolvedData.allRenderedTextFrames()) {
-            if (rt.file() == null) continue;
-            // badge_group은 이미 인라인으로 처리됨 → 건너뜀
-            if (rt.isBadgeGroup()) continue;
-
-            File pngFile = new File(basePath, rt.file());
-            if (!pngFile.exists()) continue;
-
-            int pageIdx = toSectionIndex(rt.pageIndex());
-            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
-
-            try {
-                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-                if (img == null || img.getWidth() <= 2) continue;
-
-                double[] bounds = rt.bounds();
-                if (bounds == null || bounds.length < 4) continue;
-
-                // bounds는 normalizeToPoints()에서 이미 pt 단위로 변환됨
-                double bw = Math.abs(bounds[3] - bounds[1]);
-                double bh = Math.abs(bounds[2] - bounds[0]);
-                if (bw <= 0 || bh <= 0) continue;
-
-                // PNG 비율 보정
-                double pngRatio = (double) img.getWidth() / img.getHeight();
-                double boundsRatio = bw / bh;
-                if (Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
-                    if (pngRatio < 1.0) { bw = bh * pngRatio; } else { bh = bw / pngRatio; }
-                }
-
-                double x = bounds[1];
-                double y = bounds[0];
-
-                ASTFigure fig = new ASTFigure();
-                fig.sourceId("renderable_" + rt.id());
-                fig.x(CoordinateConverter.pointsToHwpunits(x));
-                fig.y(CoordinateConverter.pointsToHwpunits(y));
-                fig.width(CoordinateConverter.pointsToHwpunits(bw));
-                fig.height(CoordinateConverter.pointsToHwpunits(bh));
-                fig.imageData(imageData);
-                fig.imageFormat("png");
-                fig.pixelWidth(img.getWidth());
-                fig.pixelHeight(img.getHeight());
-                fig.zOrder(Math.max(rt.zOrder(), 10)); // 배경(0) 위에 배치
-                fig.fromGroup(true); // IN_FRONT_OF_TEXT
-                sections.get(pageIdx).addBlock(fig);
-                count++;
-            } catch (Exception e) { /* skip */ }
-        }
-        if (count > 0) {
-            System.err.println("[ResolvedToASTBuilder] Phase 7: " + count + " renderable frames placed");
-        }
+        RenderableFramePlacer.place(buildPhaseContext(), sections);
     }
 
+    /**
+     * SPEC-013 Stage 5: Phase 6(페이지 배경 PNG 주입)는 {@link BackgroundInjector}로 위임.
+     * 동작은 동일.
+     */
     private void injectPageBackgrounds(List<ASTSection> sections) {
-        List<RenderedGroup> floatingItems = resolvedData.allRenderedFloatingItems();
-        if (floatingItems == null || floatingItems.isEmpty()) return;
+        BackgroundInjector.inject(buildPhaseContext(), sections);
+    }
 
-        // PDF 래스터화 캐시 (한 번만 로드)
-        java.util.List<byte[]> pdfPages = null;
-        String loadedPdfPath = null;
-
-        for (RenderedGroup rg : floatingItems) {
-            if (!"page_background".equals(rg.itemType())) continue;
-
-            int pageIdx = toSectionIndex(rg.pageIndex());
-            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
-
-            double[] bounds = rg.bounds();
-            if (bounds == null || bounds.length < 4) continue;
-
-            byte[] imageData = null;
-            int pixelW = 0, pixelH = 0;
-
-            // PDF 배경 래스터화 비활성화 — PNG 600dpi가 더 고품질
-            if (false && rg.pdfFile() != null && rg.pdfPageIndex() >= 0) {
-                try {
-                    File pdfFile = new File(basePath, rg.pdfFile());
-                    if (pdfFile.exists()) {
-                        String pdfPath = pdfFile.getAbsolutePath();
-                        if (pdfPages == null || !pdfPath.equals(loadedPdfPath)) {
-                            pdfPages = kr.dogfoot.hwpxlib.tool.idmlconverter.converter
-                                    .PdfPageRenderer.renderAllPages(pdfFile, 600);
-                            loadedPdfPath = pdfPath;
-                        }
-                        int pdfIdx = rg.pdfPageIndex();
-                        if (pdfIdx >= 0 && pdfIdx < pdfPages.size()) {
-                            imageData = pdfPages.get(pdfIdx);
-                            BufferedImage pdfImg = ImageIO.read(
-                                    new java.io.ByteArrayInputStream(imageData));
-                            if (pdfImg != null) {
-                                pixelW = pdfImg.getWidth();
-                                pixelH = pdfImg.getHeight();
-                                pdfImg.flush();
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    System.err.println("[ResolvedToASTBuilder] PDF 배경 래스터화 실패: " + e.getMessage());
-                    imageData = null;
-                }
-            }
-
-            // PNG 폴백
-            if (imageData == null && rg.file() != null) {
-                try {
-                    File pngFile = new File(basePath, rg.file());
-                    if (pngFile.exists()) {
-                        imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                        BufferedImage img = ImageIO.read(pngFile);
-                        if (img != null) {
-                            pixelW = img.getWidth();
-                            pixelH = img.getHeight();
-                            img.flush();
-                        }
-                    }
-                } catch (Exception e) {
-                    System.err.println("[ResolvedToASTBuilder] PNG 배경 로드 실패: " + e.getMessage());
-                    continue;
-                }
-            }
-
-            if (imageData == null) continue;
-
-            long figW = CoordinateConverter.pointsToHwpunits((bounds[3] - bounds[1]) * scaleFactor);
-            long figH = CoordinateConverter.pointsToHwpunits((bounds[2] - bounds[0]) * scaleFactor);
-
-            ASTFigure fig = new ASTFigure();
-            fig.x(0);
-            fig.y(0);
-            fig.width(figW);
-            fig.height(figH);
-            fig.imageData(imageData);
-            fig.imageFormat("png");
-            fig.pixelWidth(pixelW);
-            fig.pixelHeight(pixelH);
-            fig.zOrder(0);
-            fig.fromGroup(false);  // BEHIND_TEXT
-            fig.sourceId("page_bg_" + pageIdx);
-
-            sections.get(pageIdx).addBlock(fig);
-        }
+    /**
+     * 분리된 Phase 클래스가 사용할 컨텍스트를 ResolvedToASTBuilder의 인스턴스 상태에서 채워서 반환.
+     * 점진적 분리 단계라 매 호출마다 새 컨텍스트를 만들지만, 후속 단계에서 build() 시작 시
+     * 한 번만 만들고 재사용하도록 바뀔 예정.
+     */
+    private ResolvedBuildContext buildPhaseContext() {
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = this.resolvedData;
+        ctx.basePath = this.basePath;
+        ctx.scaleFactor = this.scaleFactor;
+        ctx.idmlDir = this.idmlDir;
+        ctx.pngExportDpi = this.pngExportDpi;
+        ctx.astDocument = this.astDoc;
+        ctx.styleResolver = this.styleResolver;
+        ctx.pageDocOffsetToSection = this.pageDocOffsetToSection;
+        ctx.toSectionIndex = this::toSectionIndex;
+        return ctx;
     }
 
     // ═══════════════════════════════════════════════════
@@ -4265,48 +4104,13 @@ public class ResolvedToASTBuilder {
      * 2차: resolved Story 단락의 개별 justification (fallback)
      * IDML Styles.xml에 이미 Justification이 설정된 스타일은 건너뜀.
      */
+    /**
+     * SPEC-013 Stage 3: Phase 0 스타일 alignment 보강은 {@link InfraSetup}로 위임. 동작 동일.
+     */
     private void enrichStyleAlignmentFromResolved(ASTDocument doc) {
-        if (resolvedData == null) return;
-
-        // 1차 소스: resolved.json의 top-level paragraphStyles (ResolvedDataReader에서 파싱)
-        Map<String, String> topLevelJustMap = resolvedData.paragraphStyleJustMap();
-
-        // 2차 소스: 각 Story 단락의 개별 justification (fallback)
-        Map<String, String> storyParaJustMap = new HashMap<>();
-        try {
-            for (String sid : resolvedData.allStoryIds()) {
-                ResolvedStory rs = resolvedData.getStory(sid);
-                if (rs == null || rs.paragraphs() == null) continue;
-                for (ResolvedParagraph rp : rs.paragraphs()) {
-                    if (rp.styleName() != null && rp.justification() != null) {
-                        storyParaJustMap.putIfAbsent(rp.styleName(), rp.justification());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // ignore
-        }
-
-        // ASTDocument 스타일에 alignment 보강
-        int enriched = 0;
-        for (ASTStyleDef sd : doc.paragraphStyles()) {
-            if (sd.alignment() == null && sd.styleName() != null) {
-                // 1차: top-level paragraphStyles
-                String just = topLevelJustMap != null ? topLevelJustMap.get(sd.styleName()) : null;
-                // 2차: Story 단락 fallback
-                if (just == null) {
-                    just = storyParaJustMap.get(sd.styleName());
-                }
-                if (just != null) {
-                    sd.alignment(just);
-                    enriched++;
-                }
-            }
-        }
-        if (enriched > 0) {
-            System.err.println("[ResolvedToASTBuilder] enrichStyleAlignment: " + enriched
-                    + " styles enriched from resolved (topLevel=" + (topLevelJustMap != null ? topLevelJustMap.size() : 0) + ")");
-        }
+        ResolvedBuildContext ctx = buildPhaseContext();
+        ctx.astDocument = doc;
+        InfraSetup.enrichStyleAlignmentFromResolved(ctx);
     }
 
     /**

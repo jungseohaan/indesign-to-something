@@ -20,23 +20,32 @@ pub async fn extract_indd(
     indd_path: String,
     _jar_path: String,
     spread_mode: Option<bool>,
+    start_page: Option<i32>,
+    end_page: Option<i32>,
 ) -> Result<crate::indesign::InddExtractResult, String> {
-    // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵 (기존 동작 유지)
-    let indd = std::path::Path::new(&indd_path);
-    if let Some(indd_parent) = indd.parent() {
-        let sibling_idml = indd_parent
-            .join(indd.file_stem().unwrap_or_default())
-            .with_extension("idml");
-        let sibling_resolved = indd_parent.join("resolved.json");
+    let sp = start_page.unwrap_or(0);
+    let ep = end_page.unwrap_or(0);
+    let debug_range = sp > 0 || ep > 0;
 
-        if sibling_idml.exists() && sibling_resolved.exists() {
-            crate::indesign::emit_progress_pub(&app, "cached", "기존 IDML/resolved 사용 중...");
-            return Ok(crate::indesign::InddExtractResult {
-                idml_path: sibling_idml.to_string_lossy().to_string(),
-                resolved_json_path: Some(sibling_resolved.to_string_lossy().to_string()),
-                preview_pdf_path: None,
-                temp_dir: indd_parent.to_string_lossy().to_string(),
-            });
+    // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵 (기존 동작 유지)
+    //    단, 디버그 페이지 범위가 지정되면 항상 신규 추출.
+    let indd = std::path::Path::new(&indd_path);
+    if !debug_range {
+        if let Some(indd_parent) = indd.parent() {
+            let sibling_idml = indd_parent
+                .join(indd.file_stem().unwrap_or_default())
+                .with_extension("idml");
+            let sibling_resolved = indd_parent.join("resolved.json");
+
+            if sibling_idml.exists() && sibling_resolved.exists() {
+                crate::indesign::emit_progress_pub(&app, "cached", "기존 IDML/resolved 사용 중...");
+                return Ok(crate::indesign::InddExtractResult {
+                    idml_path: sibling_idml.to_string_lossy().to_string(),
+                    resolved_json_path: Some(sibling_resolved.to_string_lossy().to_string()),
+                    preview_pdf_path: None,
+                    temp_dir: indd_parent.to_string_lossy().to_string(),
+                });
+            }
         }
     }
 
@@ -59,7 +68,7 @@ pub async fn extract_indd(
         .map(|p| p.join("Links"))
         .filter(|p| p.is_dir());
 
-    // 4. 캐시 키 계산 및 조회
+    // 4. 캐시 키 계산 및 조회 (디버그 페이지 범위면 캐시 우회)
     let cache_key = extract_cache::compute_cache_key(
         indd,
         links_dir.as_deref(),
@@ -72,23 +81,25 @@ pub async fn extract_indd(
         sm,
     );
 
-    if let Some(cached) = extract_cache::lookup(&cache_key) {
-        crate::indesign::emit_progress_pub(
-            &app,
-            "cached",
-            "캐시된 추출 결과 사용 중... (ExtendScript 건너뜀)",
-        );
-        // 캐시 디렉토리에 Links 심볼릭 링크가 없으면 다시 만들어둔다
-        if let Some(src_links) = links_dir.as_deref() {
-            let target_links = std::path::Path::new(&cached.temp_dir).join("Links");
-            if !target_links.exists() {
-                #[cfg(unix)]
-                {
-                    let _ = std::os::unix::fs::symlink(src_links, &target_links);
+    if !debug_range {
+        if let Some(cached) = extract_cache::lookup(&cache_key) {
+            crate::indesign::emit_progress_pub(
+                &app,
+                "cached",
+                "캐시된 추출 결과 사용 중... (ExtendScript 건너뜀)",
+            );
+            // 캐시 디렉토리에 Links 심볼릭 링크가 없으면 다시 만들어둔다
+            if let Some(src_links) = links_dir.as_deref() {
+                let target_links = std::path::Path::new(&cached.temp_dir).join("Links");
+                if !target_links.exists() {
+                    #[cfg(unix)]
+                    {
+                        let _ = std::os::unix::fs::symlink(src_links, &target_links);
+                    }
                 }
             }
+            return Ok(cached);
         }
-        return Ok(cached);
     }
 
     // 5. 캐시 미스 → 실제 추출 실행
@@ -101,8 +112,8 @@ pub async fn extract_indd(
         &output_dir,
         &jsx_path,
         &indesign_app_path,
-        0,
-        0,
+        sp,
+        ep,
         sm,
     )
     .await
@@ -124,7 +135,10 @@ pub async fn extract_indd(
         }
     }
 
-    // 7. 캐시에 저장 (이동). 실패해도 원본 결과는 그대로 반환.
+    // 7. 캐시에 저장 (이동). 디버그 페이지 범위는 캐시에 저장하지 않는다.
+    if debug_range {
+        return Ok(result);
+    }
     match extract_cache::store(&cache_key, &indd_path, &output_dir) {
         Ok(moved) => {
             // 캐시 이동 성공 시 Links 심볼릭 링크 다시 연결

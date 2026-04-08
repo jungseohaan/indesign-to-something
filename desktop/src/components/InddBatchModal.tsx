@@ -82,7 +82,15 @@ export function InddBatchModal() {
                   <span className="flex-1 truncate text-gray-700" title={r.path}>
                     {r.filename}
                   </span>
-                  <span className="text-xs text-gray-400 shrink-0">
+                  <span className="text-xs text-gray-400 shrink-0 flex items-center gap-1">
+                    {r.cached && (
+                      <span
+                        className="px-1.5 py-0.5 rounded bg-green-50 text-green-600 text-[10px] font-medium"
+                        title="추출 캐시 사용 (ExtendScript 건너뜀)"
+                      >
+                        캐시
+                      </span>
+                    )}
                     {r.status === "extracting" && "추출 중..."}
                     {r.status === "converting" && "변환 중..."}
                     {r.status === "done" && "완료"}

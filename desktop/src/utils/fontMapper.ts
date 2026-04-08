@@ -113,30 +113,112 @@ const SERIF_KEYWORDS = ["serif", "roman", "garamond", "minion", "times", "palati
 const SANS_KEYWORDS = ["sans", "gothic", "grotesque", "arial", "helvetica", "myriad", "rounded"];
 
 /**
- * IDML 폰트명을 HWPX 디폴트 폰트명으로 매핑한다.
+ * SPEC-014: 폰트 매핑 결과의 신뢰도 등급.
+ * - exact: 폰트명 정확 매치 (서양 폰트 테이블)
+ * - partial: 부분 문자열 매치 (한글 폰트 테이블)
+ * - keyword: "명조"/"고딕" 등 키워드 매치
+ * - fallback: 매치 실패 → 기본값 (수동 검토 권장)
  */
-export function mapToHwpxFont(idmlFontFamily: string): string {
-  if (!idmlFontFamily) return DEFAULT_HWPX_FONT;
+export type MatchConfidence = "exact" | "partial" | "keyword" | "fallback";
+
+export interface FontMatch {
+  font: string;
+  confidence: MatchConfidence;
+  reason: string;
+}
+
+const CONFIDENCE_RANK: Record<MatchConfidence, number> = {
+  exact: 0,
+  partial: 1,
+  keyword: 2,
+  fallback: 3,
+};
+
+/**
+ * 가장 신뢰도 높은 매치 한 건을 반환한다.
+ * 신뢰도와 사유를 함께 노출해 사용자가 검토할 수 있게 한다.
+ */
+export function getFontMatch(idmlFontFamily: string): FontMatch {
+  if (!idmlFontFamily) {
+    return { font: DEFAULT_HWPX_FONT, confidence: "fallback", reason: "빈 폰트명" };
+  }
 
   // 1. 한글 폰트 부분 매치
   for (const [key, value] of KOREAN_FONT_MAP) {
-    if (idmlFontFamily.includes(key)) return value;
+    if (idmlFontFamily.includes(key)) {
+      return { font: value, confidence: "partial", reason: `한글 부분 매치: "${key}"` };
+    }
   }
 
   // 2. 서양 폰트 정확 매치
   const western = WESTERN_FONT_MAP.get(idmlFontFamily);
-  if (western) return western;
+  if (western) {
+    return { font: western, confidence: "exact", reason: "서양 폰트 정확 매치" };
+  }
 
   // 3. 한국어 키워드 폴백
-  if (idmlFontFamily.includes("명조") || idmlFontFamily.includes("부리")) return "함초롬바탕";
-  if (idmlFontFamily.includes("고딕") || idmlFontFamily.includes("돋움")) return "함초롬돋움";
+  if (idmlFontFamily.includes("명조") || idmlFontFamily.includes("부리")) {
+    return { font: "함초롬바탕", confidence: "keyword", reason: "키워드: 명조/부리" };
+  }
+  if (idmlFontFamily.includes("고딕") || idmlFontFamily.includes("돋움")) {
+    return { font: "함초롬돋움", confidence: "keyword", reason: "키워드: 고딕/돋움" };
+  }
 
   // 4. 영문 키워드 폴백
   const lower = idmlFontFamily.toLowerCase();
-  if (SERIF_KEYWORDS.some((k) => lower.includes(k))) return "함초롬바탕";
-  if (SANS_KEYWORDS.some((k) => lower.includes(k))) return "함초롬돋움";
+  for (const k of SERIF_KEYWORDS) {
+    if (lower.includes(k)) {
+      return { font: "함초롬바탕", confidence: "keyword", reason: `영문 키워드: ${k}` };
+    }
+  }
+  for (const k of SANS_KEYWORDS) {
+    if (lower.includes(k)) {
+      return { font: "함초롬돋움", confidence: "keyword", reason: `영문 키워드: ${k}` };
+    }
+  }
 
-  return DEFAULT_HWPX_FONT;
+  return {
+    font: DEFAULT_HWPX_FONT,
+    confidence: "fallback",
+    reason: "매치 실패 — 수동 검토 권장",
+  };
+}
+
+/**
+ * IDML 폰트명을 HWPX 디폴트 폰트명으로 매핑한다 (호환용).
+ */
+export function mapToHwpxFont(idmlFontFamily: string): string {
+  return getFontMatch(idmlFontFamily).font;
+}
+
+/**
+ * 후보 매칭. 최상위 매치 + 대안(서로 다른 family, 최대 limit개).
+ * 현재는 가벼운 휴리스틱: best match + 한글/영문 family 양쪽을 추가 후보로 노출.
+ */
+export function getFontCandidates(
+  idmlFontFamily: string,
+  limit: number = 3
+): FontMatch[] {
+  const best = getFontMatch(idmlFontFamily);
+  const candidates: FontMatch[] = [best];
+
+  // best와 다른 family 추가
+  const ALTERNATES: FontMatch[] = [
+    { font: "함초롬돋움", confidence: "fallback", reason: "대안: 돋움 계열" },
+    { font: "함초롬바탕", confidence: "fallback", reason: "대안: 바탕 계열" },
+    { font: "한컴돋움", confidence: "fallback", reason: "대안: 한컴돋움" },
+    { font: "한컴바탕", confidence: "fallback", reason: "대안: 한컴바탕" },
+  ];
+  for (const alt of ALTERNATES) {
+    if (candidates.length >= limit) break;
+    if (!candidates.some((c) => c.font === alt.font)) candidates.push(alt);
+  }
+  return candidates;
+}
+
+/** 신뢰도 정렬 비교자: fallback이 가장 위로. */
+export function compareConfidence(a: MatchConfidence, b: MatchConfidence): number {
+  return CONFIDENCE_RANK[b] - CONFIDENCE_RANK[a];
 }
 
 /** HWPX 콤보박스에 표시할 한컴오피스 기본 제공 폰트 목록 */

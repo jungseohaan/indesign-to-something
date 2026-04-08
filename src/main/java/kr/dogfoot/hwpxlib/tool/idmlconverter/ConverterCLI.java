@@ -168,6 +168,10 @@ public class ConverterCLI {
                         options = options.linksDirectory(args[++i]);
                     }
                     break;
+                case "--debug-ast":
+                    // SPEC-015: AST 디버그 메타데이터 출력 활성화 (export-ast 시 의미 있음)
+                    options = options.debugAst(true);
+                    break;
                 default:
                     System.err.println("Unknown option: " + arg);
             }
@@ -1170,6 +1174,13 @@ public class ConverterCLI {
         }
 
         String idmlPath = args[1];
+        boolean debugAst = false;
+        // SPEC-015: --debug-ast 플래그 파싱 (resolved 등 추가 옵션은 후속 단계에서 확장)
+        for (int i = 2; i < args.length; i++) {
+            if ("--debug-ast".equals(args[i])) {
+                debugAst = true;
+            }
+        }
 
         // IDML 로드
         IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
@@ -1184,7 +1195,7 @@ public class ConverterCLI {
         if (lastSlash >= 0) fileName = idmlPath.substring(lastSlash + 1);
 
         // 4단계 정규화 → AST (이미지 포함하여 마스터 페이지 객체도 처리)
-        ConvertOptions options = ConvertOptions.defaults().includeImages(true);
+        ConvertOptions options = ConvertOptions.defaults().includeImages(true).debugAst(debugAst);
         ASTDocument ast = IDMLNormalizer.normalize(idmlDoc, options, fileName);
 
         // JSON 직렬화
@@ -1336,6 +1347,7 @@ public class ConverterCLI {
         System.out.println("  (Links folder is auto-detected next to IDML file)");
         System.out.println("  --start-page <num>   Start page number (1-based)");
         System.out.println("  --end-page <num>     End page number (1-based)");
+        System.out.println("  --debug-ast          Emit AST debug metadata (createdAt, appliedFrom, notes)");
         System.out.println();
         System.out.println("HWPX to IDML Options:");
         System.out.println("  --progress           Output progress as JSON");

@@ -36,6 +36,12 @@ pub fn run() {
                         let _ = window.emit("menu-open-indd-folder", ());
                     }
                 }
+                "clear-extract-cache" => {
+                    // SPEC-011: 추출 캐시 비우기
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.emit("menu-clear-extract-cache", ());
+                    }
+                }
                 "quit" => {
                     app.exit(0);
                 }
@@ -113,6 +119,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     let open_indd = MenuItem::with_id(handle, "open-indd", "Open InDesign...", true, Some("CmdOrCtrl+Shift+I"))?;
     let open_indd_folder = MenuItem::with_id(handle, "open-indd-folder", "Open InDesign Folder...", true, Some("CmdOrCtrl+Shift+F"))?;
     let open_hwpx = MenuItem::with_id(handle, "open-hwpx", "Open HWPX...", true, Some("CmdOrCtrl+Shift+O"))?;
+    let clear_cache = MenuItem::with_id(handle, "clear-extract-cache", "Clear Extract Cache", true, None::<&str>)?;
 
     #[cfg(not(target_os = "macos"))]
     let quit = MenuItem::with_id(handle, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
@@ -128,6 +135,8 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
             &open_indd_folder,
             &open_hwpx,
             &PredefinedMenuItem::separator(handle)?,
+            &clear_cache,
+            &PredefinedMenuItem::separator(handle)?,
             &PredefinedMenuItem::close_window(handle, Some("Close Window"))?,
         ],
     )?;
@@ -142,6 +151,8 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
             &open_indd,
             &open_indd_folder,
             &open_hwpx,
+            &PredefinedMenuItem::separator(handle)?,
+            &clear_cache,
             &PredefinedMenuItem::separator(handle)?,
             &quit,
         ],

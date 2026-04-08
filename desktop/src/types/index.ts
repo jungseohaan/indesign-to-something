@@ -236,6 +236,7 @@ export interface BatchFileResult {
   filename: string;
   status: "pending" | "extracting" | "converting" | "done" | "error";
   error?: string;
+  cached?: boolean;
 }
 
 // Resolved Data Types (InDesign DOM에서 추출한 계산된 속성)
