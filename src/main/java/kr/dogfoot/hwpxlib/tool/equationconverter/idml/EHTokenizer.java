@@ -171,11 +171,20 @@ public class EHTokenizer {
             }
 
             if (c >= 0x80) {
-                // 확장 범위 → 기본 범위 버퍼 플러시
-                flushBaseBuf(baseBuf, baseType, tokens);
+                // 확장 범위 → 디코딩 후 연산자(÷×±)는 baseBuf, 나머지는 extBuf
                 char decoded = EHFontGlyphMap.decodeSubSupGlyph(c);
                 if (decoded != c) {
-                    extBuf.append(decoded);
+                    // 수학 연산자는 위첨자/아래첨자가 아닌 일반 텍스트로 분류
+                    if (decoded == '\u00F7' || decoded == '\u00D7' || decoded == '\u00B1') {
+                        flushExtBuf(extBuf, glyphType, tokens);
+                        baseBuf.append(decoded);
+                    } else {
+                        flushBaseBuf(baseBuf, baseType, tokens);
+                        extBuf.append(decoded);
+                    }
+                } else {
+                    // 매핑 없는 확장 문자 → 스킵 (빈 글리프/장식선)
+                    flushBaseBuf(baseBuf, baseType, tokens);
                 }
             } else {
                 // 기본 범위 → 확장 범위 버퍼 플러시

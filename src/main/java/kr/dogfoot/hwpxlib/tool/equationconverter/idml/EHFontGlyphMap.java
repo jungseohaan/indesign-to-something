@@ -338,7 +338,7 @@ public class EHFontGlyphMap {
             case 0xBF: return '\u00B0'; // ¿ → ° (도)
 
             // 0xC0 영역: 소문자, 기호
-            case 0xC1: return 'l';    // Á → l (소문자 L)
+            case 0xC1: return '1';    // Á → 1 (숫자 1, EH상부자 이탤릭체에서 l과 1이 동일 글리프)
             case 0xC2: return 'l';    // Â → l (소문자 L, 변형)
             case 0xC3: return 'v';    // Ã → v
             case 0xC4: return 'f';    // Ä → f
