@@ -215,6 +215,18 @@ public class IDMLToHwpxConverter {
             for (String w : earlyWarnings) { result.addWarning(w); }
             for (String w : astDoc.warnings()) { result.addWarning(w); }
 
+            // Phase 3.5: 시멘틱 레이어 추출 (SPEC-018 M3, 옵션)
+            if (options.extractSemantics()) {
+                try {
+                    reporter.reportProgress(93, 100, "시멘틱 레이어 추출 중...");
+                    extractSemanticLayer(astDoc, hwpxPath, options, result);
+                } catch (Exception e) {
+                    String msg = "[Semantic] 시멘틱 추출 실패 (HWPX 변환은 계속 진행): " + e.getMessage();
+                    System.err.println(msg);
+                    result.addWarning(msg);
+                }
+            }
+
             // Phase 4: HWPX 파일 저장
             reporter.reportProgress(95, 100, "HWPX 파일 저장 중...");
             try {
@@ -1422,6 +1434,83 @@ public class IDMLToHwpxConverter {
             resolvedFile = resolvedFile.getAbsoluteFile();
         }
         return resolvedFile.getParent();
+    }
+
+    /**
+     * SPEC-018 M3: 시멘틱 레이어 추출 + JSON 저장.
+     *
+     * <p>{@link ConvertOptions#extractSemantics()} 가 true 일 때만 호출.
+     * 실패해도 변환 자체는 계속 진행 (호출 측에서 try/catch).</p>
+     *
+     * <p>스키마 해석 우선순위:</p>
+     * <ol>
+     *   <li>options.semanticSchema() 가 절대/상대 파일 경로로 존재하면 그 파일</li>
+     *   <li>그 외에는 classpath 리소스 {@code semantic-schemas/<value>.schema.json}</li>
+     *   <li>null/빈값이면 기본 스키마 {@code common}</li>
+     * </ol>
+     */
+    private static void extractSemanticLayer(
+            ASTDocument astDoc,
+            String hwpxPath,
+            ConvertOptions options,
+            ConvertResult result) throws java.io.IOException {
+        kr.dogfoot.hwpxlib.tool.idmlconverter.semantic.io.SchemaLoader loader =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.semantic.io.SchemaLoader();
+
+        String schemaSpec = options.semanticSchema();
+        kr.dogfoot.hwpxlib.tool.idmlconverter.semantic.SemanticSchema schema;
+        if (schemaSpec == null || schemaSpec.isEmpty()) {
+            schema = loader.loadResource("semantic-schemas/common.schema.json");
+        } else {
+            java.io.File f = new java.io.File(schemaSpec);
+            if (f.isFile()) {
+                schema = loader.loadFromFile(f.toPath());
+            } else {
+                // 단순 ID 또는 classpath 경로 둘 다 시도
+                String resourcePath = schemaSpec.contains("/")
+                        ? schemaSpec
+                        : ("semantic-schemas/" + schemaSpec + ".schema.json");
+                schema = loader.loadResource(resourcePath);
+            }
+        }
+
+        kr.dogfoot.hwpxlib.tool.idmlconverter.semantic.SemanticLayer layer =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.semantic.SemanticExtractor.extract(astDoc, schema);
+
+        String outputPath = options.semanticOutput();
+        if (outputPath == null || outputPath.isEmpty()) {
+            outputPath = defaultSemanticOutputPath(hwpxPath);
+        }
+
+        java.nio.file.Path outPath = java.nio.file.Paths.get(outputPath);
+        java.nio.file.Path parent = outPath.getParent();
+        if (parent != null && !java.nio.file.Files.exists(parent)) {
+            java.nio.file.Files.createDirectories(parent);
+        }
+        kr.dogfoot.hwpxlib.tool.idmlconverter.semantic.io.SemanticLayerWriter.write(layer, outPath);
+
+        int classified = 0;
+        int unknown = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.semantic.SemanticNode n : layer.nodes) {
+            if (kr.dogfoot.hwpxlib.tool.idmlconverter.semantic.SemanticTypes.LABEL_UNKNOWN.equals(n.label)) {
+                unknown++;
+            } else {
+                classified++;
+            }
+        }
+        System.out.println("[Semantic] " + layer.nodes.size() + " nodes ("
+                + classified + " classified, " + unknown + " unknown), "
+                + layer.relations.size() + " relations → " + outputPath);
+        result.addWarning("[Semantic] 추출 완료: " + layer.nodes.size() + " 노드, "
+                + classified + " 분류 → " + outputPath);
+    }
+
+    /** hwpx 경로 → 같은 디렉토리의 .semantic.json. */
+    private static String defaultSemanticOutputPath(String hwpxPath) {
+        if (hwpxPath == null) return "out.semantic.json";
+        int dot = hwpxPath.lastIndexOf('.');
+        if (dot < 0) return hwpxPath + ".semantic.json";
+        return hwpxPath.substring(0, dot) + ".semantic.json";
     }
 
     /**

@@ -29,6 +29,21 @@ public class ConvertOptions {
      *  활성화 시 ASTSerializer가 debug 필드를 출력한다. 기본 비활성. */
     private boolean debugAst;
 
+    // SPEC-018 M3: 시멘틱 레이어 추출 옵션
+    /** 변환 후 SemanticLayer JSON 자동 추출 여부. */
+    private boolean extractSemantics;
+    /**
+     * 사용할 시멘틱 스키마.
+     * 값은 다음 셋 중 하나로 해석:
+     *   1) classpath 리소스 경로 (예: "semantic-schemas/common.schema.json")
+     *   2) 단순 ID (예: "common", "math-reference-v1") — classpath에서 자동 찾기
+     *   3) 절대/상대 파일 경로
+     * null 이면 "common" 사용.
+     */
+    private String semanticSchema;
+    /** SemanticLayer JSON 출력 경로. null 이면 hwpx 옆에 .semantic.json 으로 자동 생성. */
+    private String semanticOutput;
+
     public ConvertOptions() {
         this.startPage = 0;
         this.endPage = 0;
@@ -316,4 +331,32 @@ public class ConvertOptions {
         return this;
     }
 
+    // ─── SPEC-018 M3: 시멘틱 추출 옵션 ─────────────────
+
+    public boolean extractSemantics() {
+        return extractSemantics;
+    }
+
+    public ConvertOptions extractSemantics(boolean extractSemantics) {
+        this.extractSemantics = extractSemantics;
+        return this;
+    }
+
+    public String semanticSchema() {
+        return semanticSchema;
+    }
+
+    public ConvertOptions semanticSchema(String semanticSchema) {
+        this.semanticSchema = semanticSchema;
+        return this;
+    }
+
+    public String semanticOutput() {
+        return semanticOutput;
+    }
+
+    public ConvertOptions semanticOutput(String semanticOutput) {
+        this.semanticOutput = semanticOutput;
+        return this;
+    }
 }

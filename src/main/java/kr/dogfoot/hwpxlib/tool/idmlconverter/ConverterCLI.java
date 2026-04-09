@@ -174,6 +174,22 @@ public class ConverterCLI {
                     // SPEC-015: AST 디버그 메타데이터 출력 활성화 (export-ast 시 의미 있음)
                     options = options.debugAst(true);
                     break;
+                case "--extract-semantics":
+                    // SPEC-018 M3: 변환 후 시멘틱 레이어 JSON 자동 추출
+                    options = options.extractSemantics(true);
+                    break;
+                case "--semantic-schema":
+                    if (i + 1 < args.length) {
+                        // 단순 ID(common, math-reference-v1) | classpath 경로 | 절대/상대 파일 경로
+                        options = options.semanticSchema(args[++i]);
+                    }
+                    break;
+                case "--semantic-output":
+                    if (i + 1 < args.length) {
+                        // 미지정 시 hwpx 옆에 .semantic.json
+                        options = options.semanticOutput(args[++i]);
+                    }
+                    break;
                 default:
                     System.err.println("Unknown option: " + arg);
             }
@@ -1395,6 +1411,9 @@ public class ConverterCLI {
         System.out.println("  --start-page <num>   Start page number (1-based)");
         System.out.println("  --end-page <num>     End page number (1-based)");
         System.out.println("  --debug-ast          Emit AST debug metadata (createdAt, appliedFrom, notes)");
+        System.out.println("  --extract-semantics            Extract semantic layer JSON after conversion (SPEC-018)");
+        System.out.println("  --semantic-schema <id|path>    Schema id (common, math-reference-v1) or .schema.json path");
+        System.out.println("  --semantic-output <path>       Output path for .semantic.json (default: <hwpx>.semantic.json)");
         System.out.println();
         System.out.println("HWPX to IDML Options:");
         System.out.println("  --progress           Output progress as JSON");
