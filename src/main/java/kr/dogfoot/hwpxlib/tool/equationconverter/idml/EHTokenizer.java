@@ -177,8 +177,15 @@ public class EHTokenizer {
                 // 확장 범위 → 디코딩 후 연산자(÷×±)는 baseBuf, 나머지는 extBuf
                 char decoded = EHFontGlyphMap.decodeSubSupGlyph(c);
                 if (decoded != c) {
+                    // overline marker: 앞 baseBuf 텍스트를 overline{...}으로 래핑
+                    if (decoded == '\u0305') {
+                        String base = baseBuf.toString();
+                        baseBuf.setLength(0);
+                        flushExtBuf(extBuf, glyphType, tokens);
+                        tokens.add(new EHToken(baseType, "overline{" + base + "}"));
+                    }
                     // 수학 연산자는 위첨자/아래첨자가 아닌 일반 텍스트로 분류
-                    if (decoded == '\u00F7' || decoded == '\u00D7' || decoded == '\u00B1') {
+                    else if (decoded == '\u00F7' || decoded == '\u00D7' || decoded == '\u00B1') {
                         flushExtBuf(extBuf, glyphType, tokens);
                         baseBuf.append(decoded);
                     } else {

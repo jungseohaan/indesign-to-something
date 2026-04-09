@@ -592,6 +592,9 @@ public final class StoryConverter {
                 para.firstLineIndent(null);
             }
 
+            // overline 마커(\uE000...\uE001)가 포함된 TextRun을 ASTEquation으로 분리
+            splitOverlineRuns(para);
+
             // 불릿 단락이면 불릿 이후 런 색상을 검정으로 리셋
             resetBulletParagraphColors(ctx, para);
 
@@ -637,6 +640,11 @@ public final class StoryConverter {
             text = text.replace("\u2003", "");   // Em Space 제거
             text = text.replace("\u200A", "");   // Hair Space 제거
             text = text.replace("\uFFE3", "~");  // Fullwidth Macron → 물결 (한글 호환)
+            // EH상부자 overline marker: Ó(0xD3) → \uE000{letters}\uE001 마커로 치환
+            // 단락 후처리(splitOverlineRuns)에서 ASTEquation overline{AB}로 변환
+            if (text.indexOf('\u00D3') >= 0) {
+                text = markOverlineSegments(text);
+            }
         }
 
         // ── 속성 적용: SPEC-012 RunPropertyResolver 사용 ──
@@ -1371,6 +1379,10 @@ public final class StoryConverter {
                         runText = runText.replace("\t\u0008", "");
                         runText = runText.replace("\u0008", "");
                         runText = runText.replace("\n", "");
+                        // overline marker: Ó(0xD3) → \uE000{letters}\uE001 마커로 치환
+                        if (runText.indexOf('\u00D3') >= 0) {
+                            runText = markOverlineSegments(runText);
+                        }
                         if (!para.hasTabStops()) {
                             runText = runText.replace("\t", " ");
                         }
@@ -1412,6 +1424,7 @@ public final class StoryConverter {
         // 수식 폰트 런 → ASTEquation 변환 (단락별 후처리)
         for (ASTParagraph para : paragraphs) {
             convertMathRunsInParagraph(ctx, para);
+            splitOverlineRuns(para);
         }
 
         return paragraphs;
@@ -2190,6 +2203,102 @@ public final class StoryConverter {
             }
         }
         return null;
+    }
+
+    /**
+     * Ó(U+00D3) → \uE000{대문자들}\uE001 마커로 치환.
+     * 예: "ABÓ=APÓ" → "\uE000AB\uE001=\uE000AP\uE001"
+     */
+    private static String markOverlineSegments(String text) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\u00D3') {
+                // Ó: 앞으로 거슬러 올라가며 연속 대문자를 찾아 마커로 감싸기
+                int endPos = sb.length();
+                int startPos = endPos;
+                while (startPos > 0 && sb.charAt(startPos - 1) >= 'A' && sb.charAt(startPos - 1) <= 'Z') {
+                    startPos--;
+                }
+                if (startPos < endPos) {
+                    String letters = sb.substring(startPos, endPos);
+                    sb.replace(startPos, endPos, "\uE000" + letters + "\uE001");
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * \uE000...\uE001 overline 마커가 포함된 TextRun을 분리하여 ASTEquation(overline{AB})으로 변환.
+     */
+    private static void splitOverlineRuns(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.isEmpty()) return;
+        boolean hasMarker = false;
+        for (ASTInlineItem it : items) {
+            if (it instanceof ASTTextRun) {
+                String t = ((ASTTextRun) it).text();
+                if (t != null && t.indexOf('\uE000') >= 0) { hasMarker = true; break; }
+            }
+        }
+        if (!hasMarker) return;
+
+        List<ASTInlineItem> newItems = new ArrayList<>();
+        for (ASTInlineItem item : items) {
+            if (!(item instanceof ASTTextRun)) {
+                newItems.add(item);
+                continue;
+            }
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || text.indexOf('\uE000') < 0) {
+                newItems.add(item);
+                continue;
+            }
+            // \uE000...\uE001 패턴으로 분할
+            int pos = 0;
+            while (pos < text.length()) {
+                int markerStart = text.indexOf('\uE000', pos);
+                if (markerStart < 0) {
+                    // 나머지 텍스트
+                    String rest = text.substring(pos);
+                    if (!rest.isEmpty()) {
+                        ASTTextRun tr = new ASTTextRun();
+                        tr.text(rest);
+                        tr.fontFamily(run.fontFamily());
+                        tr.fontStyle(run.fontStyle());
+                        tr.fontSizeHwpunits(run.fontSizeHwpunits());
+                        tr.textColor(run.textColor());
+                        newItems.add(tr);
+                    }
+                    break;
+                }
+                // 마커 앞 텍스트
+                if (markerStart > pos) {
+                    ASTTextRun tr = new ASTTextRun();
+                    tr.text(text.substring(pos, markerStart));
+                    tr.fontFamily(run.fontFamily());
+                    tr.fontStyle(run.fontStyle());
+                    tr.fontSizeHwpunits(run.fontSizeHwpunits());
+                    tr.textColor(run.textColor());
+                    newItems.add(tr);
+                }
+                int markerEnd = text.indexOf('\uE001', markerStart + 1);
+                if (markerEnd < 0) markerEnd = text.length();
+                String letters = text.substring(markerStart + 1, markerEnd);
+                // ASTEquation: overline{AB}
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(
+                                "overline{" + letters + "}", "EH_FONT");
+                newItems.add(eq);
+                pos = markerEnd + 1;
+            }
+        }
+        items.clear();
+        items.addAll(newItems);
     }
 
 }

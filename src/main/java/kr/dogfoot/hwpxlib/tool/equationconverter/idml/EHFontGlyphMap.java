@@ -473,7 +473,7 @@ public class EHFontGlyphMap {
 
             // 0xD0 영역
             case 0xD2: return 'L';
-            case 0xD3: return 'v';
+            case 0xD3: return '\u0305'; // Ó → overline marker (선분 기호 AB̅ → overline{AB})
             case 0xD4: return 'F';
             case 0xD7: return 'N';
             case 0xD8: return 'U';
