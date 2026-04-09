@@ -735,6 +735,14 @@ public class ASTRunConverter {
                 if (grepCharStyle.fontSize() != null) fontSize = grepCharStyle.fontSize();
                 if (grepCharStyle.fontStyle() != null) fontStyle = grepCharStyle.fontStyle();
                 textRun.grepStyleApplied(true);
+                // EH상부자/하부자 GREP 적용 시 ASCII 글리프 매핑 (예: '_' → '×')
+                if (grepCharStyle.fontFamily() != null
+                        && kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap
+                                .isEHFontFamily(grepCharStyle.fontFamily())) {
+                    String mapped = kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap
+                            .applyEHGrepAsciiGlyphMap(textRun.text());
+                    textRun.text(mapped);
+                }
             }
         }
 

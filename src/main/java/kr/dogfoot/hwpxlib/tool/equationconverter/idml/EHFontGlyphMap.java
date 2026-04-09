@@ -510,6 +510,32 @@ public class EHFontGlyphMap {
     }
 
     /**
+     * EH 상부자/하부자 폰트가 GREP으로 적용된 ASCII 텍스트의 글리프 매핑.
+     * <p>
+     * 일반 본문 폰트(예: 윤고딕)의 ASCII 문자가 ParagraphStyle GREP 규칙으로
+     * EH상부자/하부자 폰트로 교체되는 경우, 실제 EH 폰트의 글리프가 ASCII 원형과
+     * 다른 케이스(예: '_' → '×')만 시각적으로 일치시킨다.
+     * <p>
+     * 주의: decodeSubSupText는 0x80+ 범위 미매핑 문자를 스킵하므로 한국어 등이
+     * 사라진다. 이 메서드는 GREP 적용으로 분리된 단일/짧은 ASCII 서브런 전용.
+     */
+    public static String applyEHGrepAsciiGlyphMap(String text) {
+        if (text == null || text.isEmpty()) return text;
+        boolean changed = false;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '_') {
+                sb.append('\u00D7'); // EH상부자: '_' → '×' (곱셈 기호)
+                changed = true;
+            } else {
+                sb.append(c);
+            }
+        }
+        return changed ? sb.toString() : text;
+    }
+
+    /**
      * EH 폰트 텍스트를 디코딩 (폰트 패밀리에 따라 적절한 디코딩 적용).
      */
     public static String decodeText(String text, String fontFamily) {

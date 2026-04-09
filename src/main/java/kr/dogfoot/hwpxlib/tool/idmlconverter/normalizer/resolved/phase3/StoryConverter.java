@@ -611,19 +611,18 @@ public final class StoryConverter {
             text = text.replace("\u200A", "");   // Hair Space 제거
             text = text.replace("\uFFE3", "~");  // Fullwidth Macron → 물결 (한글 호환)
         }
-        tr.text(text);
 
         // ── 속성 적용: SPEC-012 RunPropertyResolver 사용 ──
         // 우선순위: resolved → IDML CharacterRun → ParagraphStyle → default
         // resolved는 GREP/중첩 스타일이 모두 적용된 실제 렌더링 값이므로 가장 권위 있음.
 
-        // GREP 적용 캐릭터 스타일이 있으면 IDML CR 색상의 효과 값 미리 계산 (CR보다 우선)
+        // GREP 적용 캐릭터 스타일이 있으면 색상/글리프 매핑에 활용
         String effectiveIdmlColor = cr.fillColor();
+        kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef grepCharStyle = null;
         if (cr.grepAppliedCharStyle() != null && ctx.idmlDocumentSupplier.get() != null) {
             ctx.ensureIdmlInfra.run();
             if (ctx.idmlDocumentSupplier.get() != null) {
-                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef grepCharStyle =
-                        ctx.idmlDocumentSupplier.get().charStyles().get(cr.grepAppliedCharStyle());
+                grepCharStyle = ctx.idmlDocumentSupplier.get().charStyles().get(cr.grepAppliedCharStyle());
                 if (grepCharStyle == null) {
                     String shortRef = cr.grepAppliedCharStyle();
                     if (shortRef.startsWith("CharacterStyle/")) shortRef = shortRef.substring("CharacterStyle/".length());
@@ -634,6 +633,14 @@ public final class StoryConverter {
                 }
             }
         }
+
+        // EH상부자/하부자 GREP 적용 시 ASCII 글리프 매핑 (예: '_' → '×')
+        // GREP으로 분리된 단일/짧은 ASCII 서브런만 영향을 받는다.
+        if (text != null && grepCharStyle != null && grepCharStyle.fontFamily() != null
+                && EHFontGlyphMap.isEHFontFamily(grepCharStyle.fontFamily())) {
+            text = EHFontGlyphMap.applyEHGrepAsciiGlyphMap(text);
+        }
+        tr.text(text);
 
         // fontFamily / fontSize / textColor: 헬퍼로 단일 우선순위 적용
         // SPEC-016: 매칭 신뢰도(confidence)에 따라 resolved 오버라이드 여부 결정

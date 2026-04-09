@@ -62,7 +62,13 @@ public class EHTokenizer {
                         tokens.add(new EHToken(EHToken.Type.FRACTION_NUMERATOR, decoded));
                     }
                 } else {
-                    tokens.add(new EHToken(EHToken.Type.SQRT_MARKER, text));
+                    // EH분수대문자의 { } 글리프는 큰 괄호 — SQRT_MARKER가 아님
+                    if (isEHBracketGlyph(text)) {
+                        String translated = text.replace('{', '(').replace('}', ')');
+                        tokens.add(new EHToken(EHToken.Type.BASE_TEXT, translated));
+                    } else {
+                        tokens.add(new EHToken(EHToken.Type.SQRT_MARKER, text));
+                    }
                 }
                 continue;
             }
@@ -134,6 +140,14 @@ public class EHTokenizer {
             // { → (, } → )
             if (c == '{') c = '(';
             else if (c == '}') c = ')';
+
+            // 원문자 ①-⑳(U+2460-U+2473), ⑴-⒇(U+2474-U+2487) → 선택지 번호, 별도 토큰
+            if ((c >= 0x2460 && c <= 0x2473) || (c >= 0x2474 && c <= 0x2487)) {
+                flushExtBuf(extBuf, glyphType, tokens);
+                flushBaseBuf(baseBuf, baseType, tokens);
+                tokens.add(new EHToken(EHToken.Type.BASE_TEXT, String.valueOf(c)));
+                continue;
+            }
 
             if (c >= 0x80) {
                 // 확장 범위 → 기본 범위 버퍼 플러시
@@ -277,6 +291,20 @@ public class EHTokenizer {
                 tokens.add(new EHToken(type, text));
             }
         }
+    }
+
+    /**
+     * EH분수대문자 텍스트가 괄호 글리프({, })만 포함하는지 확인.
+     * EH분수대문자의 { → 큰 여는 괄호, } → 큰 닫는 괄호.
+     * 루트 마커(', ", ®, Ã, 0x8C, 0x8D 등)와 구분.
+     */
+    private static boolean isEHBracketGlyph(String text) {
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c != '{' && c != '}') return false;
+        }
+        return true;
     }
 
     /** 텍스트를 탭(\t) 기준으로 분리하여 각각 BASE_TEXT 토큰으로 추가 */

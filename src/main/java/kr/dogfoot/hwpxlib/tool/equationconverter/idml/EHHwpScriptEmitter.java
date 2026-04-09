@@ -63,8 +63,16 @@ public class EHHwpScriptEmitter {
     }
 
     private static void emitChildren(List<EHNode> children, StringBuilder sb) {
-        for (EHNode child : children) {
+        for (int i = 0; i < children.size(); i++) {
+            EHNode child = children.get(i);
+            // Sqrt 뒤에 Superscript가 오면 → {sqrt{...}}^{n} 형태로 감싸야
+            // HWP 수식 에디터에서 ^가 sqrt 내부로 흡수되지 않도록 함
+            boolean wrapSqrt = (child instanceof EHNode.Sqrt)
+                    && i + 1 < children.size()
+                    && children.get(i + 1) instanceof EHNode.Superscript;
+            if (wrapSqrt) sb.append("{");
             emitNode(child, sb);
+            if (wrapSqrt) sb.append("}");
         }
     }
 

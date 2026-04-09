@@ -128,8 +128,13 @@ public class EHIRBuilder {
                 continue;
             }
 
-            // SUPERSCRIPT/SUBSCRIPT 글리프 → radicand 안에 첨자 포함
+            // SUPERSCRIPT/SUBSCRIPT 글리프
             if (t.type() == EHToken.Type.SUPERSCRIPT_GLYPH) {
+                // radicand 뒤에 오는 지수(예: √23² → sqrt{23}^{2})인지 확인
+                // 이후에 radicand에 기여할 토큰이 없으면 → sqrt 밖 지수로 처리
+                if (!sqrt.radicand().isEmpty() && isTrailingExponent(tokens, i)) {
+                    break; // sqrt 종료, 상위에서 superscript 처리
+                }
                 i = processSuperscriptGlyphs(tokens, i, sqrt.radicand());
                 continue;
             }
@@ -138,8 +143,11 @@ public class EHIRBuilder {
                 continue;
             }
 
-            // BACKTICK_SUPER → radicand 안에 위첨자
+            // BACKTICK_SUPER → 지수 여부 확인
             if (t.type() == EHToken.Type.BACKTICK_SUPER) {
+                if (!sqrt.radicand().isEmpty() && isTrailingExponent(tokens, i)) {
+                    break; // sqrt 종료, 상위에서 superscript 처리
+                }
                 EHNode.Superscript sup = new EHNode.Superscript();
                 sup.content().add(new EHNode.Text(t.text()));
                 sqrt.radicand().add(sup);
@@ -278,6 +286,45 @@ public class EHIRBuilder {
      *
      * @return 종료 인덱스 (해당 위치 이전까지가 radicand), -1이면 전체가 radicand
      */
+    /**
+     * 위첨자 토큰이 sqrt 밖의 지수(trailing exponent)인지 판별.
+     * superPos 이후에 radicand에 기여할 토큰이 없으면 trailing exponent.
+     * 예: √23² → SQRT_MARKER, BASE_TEXT "23", SUPERSCRIPT_GLYPH "2"
+     *     → "2"는 trailing → sqrt{23}^{2}
+     */
+    private static boolean isTrailingExponent(List<EHToken> tokens, int superPos) {
+        boolean passedSeparator = false;
+        for (int j = superPos + 1; j < tokens.size(); j++) {
+            EHToken next = tokens.get(j);
+            EHToken.Type nt = next.type();
+            // 연속 위첨자/스킵/백틱 → 같이 trailing
+            if (nt == EHToken.Type.SKIP || nt == EHToken.Type.BACKTICK_SUPER
+                    || nt == EHToken.Type.SUPERSCRIPT_GLYPH) continue;
+            // BASE_TEXT/SUP_BASE_TEXT: 구분자(탭, 공백, 원문자 등)인지 확인
+            if (nt == EHToken.Type.BASE_TEXT || nt == EHToken.Type.SUP_BASE_TEXT) {
+                String text = next.text();
+                if (text == null || text.isEmpty()) continue;
+                char c = text.charAt(0);
+                if (c == '`' || c == '\t' || c == '\r' || c == '\n' || c == ' ') {
+                    passedSeparator = true;
+                    continue;
+                }
+                if (c >= 0xAC00 && c <= 0xD7AF) { passedSeparator = true; continue; } // 한국어
+                if (c >= 0x2460 && c <= 0x2487) { passedSeparator = true; continue; } // 원문자 ①⑴
+                // 구분자 이후 새 내용 → 다른 수식이므로 trailing
+                if (passedSeparator) continue;
+                return false; // 구분자 없이 직접 이어지는 내용 → radicand
+            }
+            // SQRT_MARKER/FRACTION: 구분자 이후이면 새 수식 시작 → trailing
+            if (nt == EHToken.Type.SQRT_MARKER || nt == EHToken.Type.FRACTION_NUMERATOR
+                    || nt == EHToken.Type.GREP_FRACTION) {
+                if (passedSeparator) continue;
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static int findRadicandEnd(String text) {
         int parenDepth = 0;
         for (int i = 0; i < text.length(); i++) {
