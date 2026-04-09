@@ -51,6 +51,9 @@ public class EHFontEquationConverter {
         while (i < raw.length()) {
             char c = raw.charAt(i);
 
+            // U+FFFC (Object Replacement Character) — 인라인 앵커 잔여물 제거
+            if (c == '\uFFFC') { i++; continue; }
+
             // 유니코드 수학 기호 → HWP 키워드
             String mapped = mapUnicodeToHwp(c);
             if (mapped != null) {
