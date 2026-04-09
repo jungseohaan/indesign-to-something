@@ -40,6 +40,20 @@
     </developers>
 
     <build>
+        <!-- SPEC-018 M1: 시멘틱 스키마 SSOT 패키지 (TypeScript와 공유)
+             classpath 리소스로 묶여 SchemaLoader가 읽는다. -->
+        <resources>
+            <resource>
+                <directory>${project.basedir}/src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/packages/semantic-schemas/schemas</directory>
+                <targetPath>semantic-schemas</targetPath>
+                <includes>
+                    <include>**/*.json</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
             <!-- compile -->
             <plugin>

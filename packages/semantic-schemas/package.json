@@ -1,0 +1,16 @@
+{
+  "name": "@its/semantic-schemas",
+  "version": "0.1.0",
+  "description": "Canonical semantic layer schemas (SSOT shared by TypeScript and Java).",
+  "private": true,
+  "type": "module",
+  "files": [
+    "schemas/**/*.json",
+    "README.md"
+  ],
+  "exports": {
+    "./schemas/common.schema.json": "./schemas/common.schema.json",
+    "./schemas/math-reference.schema.json": "./schemas/math-reference.schema.json",
+    "./schemas/*.json": "./schemas/*.json"
+  }
+}

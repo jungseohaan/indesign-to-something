@@ -31,15 +31,14 @@ export function SemanticPage() {
   const loadLayerFromFile = useSemanticStore((s) => s.loadLayerFromFile);
   const schemaLoader = useSemanticStore((s) => s.schemaLoader);
 
-  // 내장 스키마 로드
+  // 내장 스키마 로드 (SPEC-018 M1: @its/semantic-schemas SSOT 패키지)
   useEffect(() => {
     try {
-      // Vite JSON import를 통해 스키마 로드
-      import("../../../packages/semantic-layer/schemas/common.schema.json").then(
+      import("@its/semantic-schemas/schemas/common.schema.json").then(
         (m) => loadSchema(m.default ?? m),
         () => {} // 없으면 무시
       );
-      import("../../../packages/semantic-layer/schemas/math-reference.schema.json").then(
+      import("@its/semantic-schemas/schemas/math-reference.schema.json").then(
         (m) => loadSchema(m.default ?? m),
         () => {} // 없으면 무시
       );
