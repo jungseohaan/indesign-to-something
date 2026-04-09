@@ -191,8 +191,40 @@ public class EHIRBuilder {
                 }
             }
 
-            // FRACTION_DENOMINATOR (단독) → radicand 밖
-            if (t.type() == EHToken.Type.FRACTION_DENOMINATOR) break;
+            // FRACTION_DENOMINATOR → √(분수) 패턴이면 radicand에 분수 포함
+            if (t.type() == EHToken.Type.FRACTION_DENOMINATOR) {
+                // EH 분수소문자 연속 토큰을 모아서 decodeFractionInner로 분자/분모 분리
+                // 토크나이저의 decodeText가 분수소문자 ASCII(;@#$)를 그대로 통과시키므로
+                // text()가 raw와 동일 → decodeFractionInner에 직접 전달 가능
+                StringBuilder fracRaw = new StringBuilder();
+                fracRaw.append(t.text());
+                int fi = i + 1;
+                while (fi < tokens.size()) {
+                    EHToken ft = tokens.get(fi);
+                    if (ft.type() == EHToken.Type.FRACTION_DENOMINATOR) {
+                        fracRaw.append(ft.text());
+                        fi++;
+                    } else if (ft.type() == EHToken.Type.SUP_BASE_TEXT
+                            || ft.type() == EHToken.Type.BASE_TEXT) {
+                        fracRaw.append(ft.text());
+                        fi++;
+                    } else if (ft.type() == EHToken.Type.SKIP) {
+                        fi++;
+                    } else {
+                        break;
+                    }
+                }
+                String[] parts = EHFontGlyphMap.decodeFractionInner(fracRaw.toString());
+                if (parts != null && (parts[0].length() > 0 || parts[1].length() > 0)) {
+                    EHNode.Fraction frac = new EHNode.Fraction();
+                    if (parts[0].length() > 0) frac.numerator().add(new EHNode.Text(parts[0]));
+                    if (parts[1].length() > 0) frac.denominator().add(new EHNode.Text(parts[1]));
+                    sqrt.radicand().add(frac);
+                    i = fi;
+                    continue;
+                }
+                break; // 분수 구성 실패 → radicand 밖
+            }
 
             // 기타 → radicand 밖
             break;

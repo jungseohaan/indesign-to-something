@@ -56,8 +56,29 @@ public class EHTokenizer {
                 if (followedByDenom) {
                     String decoded = EHFontGlyphMap.decodeText(text, fontFamily);
                     // 분수선 장식 글리프(®, Â, É 등)는 스킵 — 실제 분자 정보가 없음
-                    if (decoded == null || decoded.isEmpty() || EHFontGlyphMap.isFractionBarDecoration(text)) {
-                        tokens.add(new EHToken(EHToken.Type.SKIP, text));
+                    // 단, 바로 다음이 분수소문자(분자 없이 √분수 구조)이면 SQRT_MARKER
+                    boolean isBarDecoration = (decoded == null || decoded.isEmpty()
+                            || EHFontGlyphMap.isFractionBarDecoration(text));
+                    if (isBarDecoration) {
+                        // √(분수) 패턴: ®/Â 등 + [분수대문자...] + 분수소문자 → SQRT_MARKER
+                        // 이 분수선 장식 뒤로 분수소문자까지 분수대문자만 있으면 sqrt 구조
+                        boolean sqrtFracPattern = false;
+                        for (int nj = ri + 1; nj < runs.size(); nj++) {
+                            String njFont = runs.get(nj).fontFamily();
+                            if (EHFontGlyphMap.isFractionDenominatorFont(njFont)) {
+                                sqrtFracPattern = true;
+                                break;
+                            }
+                            if (!EHFontGlyphMap.isFractionNumeratorFont(njFont)) break;
+                            // 중간 분수대문자가 실제 분자 값이면 sqrt가 아님
+                            String njText = runs.get(nj).content();
+                            if (njText != null && !EHFontGlyphMap.isFractionBarDecoration(njText)) break;
+                        }
+                        if (sqrtFracPattern) {
+                            tokens.add(new EHToken(EHToken.Type.SQRT_MARKER, text));
+                        } else {
+                            tokens.add(new EHToken(EHToken.Type.SKIP, text));
+                        }
                     } else {
                         tokens.add(new EHToken(EHToken.Type.FRACTION_NUMERATOR, decoded));
                     }
