@@ -331,10 +331,13 @@ public class EHIRBuilder {
             char ch = text.charAt(i);
             // 한국어
             if (ch >= 0xAC00 && ch <= 0xD7A3) return i;
-            // thin space / 줄바꿈 / 탭 (선택지 구분자)
-            if (ch == '\u2009' || ch == '\r' || ch == '\n' || ch == '\t') return i;
+            // thin space / four-per-em space / 줄바꿈 / 탭 (선택지 구분자)
+            // \u2005 (FOUR-PER-EM SPACE)는 InDesign에서 × (곱셈) 표현에 사용됨
+            if (ch == '\u2009' || ch == '\u2005' || ch == '\r' || ch == '\n' || ch == '\t') return i;
             // 무조건 종료 연산자
             if (ch == '=' || ch == ',' || ch == '<' || ch == '>') return i;
+            // _ = × (EH상부자 곱셈 기호) → radicand 분리
+            if (ch == '_' && i > 0) return i;
             // 이항 연산자: 첫 문자가 아닐 때만 종료 (단항 -, + 허용)
             if ((ch == '+' || ch == '-') && i > 0 && parenDepth == 0) return i;
             // 괄호 균형

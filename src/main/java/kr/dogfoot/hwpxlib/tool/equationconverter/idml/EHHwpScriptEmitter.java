@@ -83,6 +83,11 @@ public class EHHwpScriptEmitter {
         String result = raw.trim();
         if (result.isEmpty()) return null;
 
+        // HWP 수식 키워드 앞뒤 공백 보장 (TIMES, div 등이 인접 토큰에 붙는 것 방지)
+        result = result.replaceAll("(?<=[^ ])TIMES(?=[^ ])", " TIMES ");
+        result = result.replaceAll("(?<=[^ ])TIMES$", " TIMES");
+        result = result.replaceAll("^TIMES(?=[^ ])", "TIMES ");
+
         // 빈 sqrt{} 제거 (단독 sqrt{ }는 유지)
         while (result.contains("sqrt{}")) {
             result = result.replace("sqrt{}", "");

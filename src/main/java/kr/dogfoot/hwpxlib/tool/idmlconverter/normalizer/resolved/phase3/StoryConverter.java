@@ -50,6 +50,7 @@ public final class StoryConverter {
         final Double tracking;
         final String fontFamily;
         final Double fontSize;
+        boolean hasTabStops;
 
         StyleContext(String fillColor, Double tracking, String fontFamily, Double fontSize) {
             this.fillColor = fillColor;
@@ -274,13 +275,13 @@ public final class StoryConverter {
                 }
                 // 탭 스톱
                 if (rp.hasTabStops()) {
-                    // HWPX 탭은 leftMargin 기준 상대 위치
-                    double leftPt = (rp.leftIndent() != null ? rp.leftIndent() : 0) * ctx.scaleFactor;
+                    // normalizeToPoints() 후 tabStop position과 leftIndent는 이미 pt 단위
+                    // (applyScale에서 scaleFactor가 적용됨). 다시 scaleFactor를 곱하면 이중 적용.
+                    double leftPt = (rp.leftIndent() != null ? rp.leftIndent() : 0);
                     for (ResolvedTabStop rts : rp.tabStops()) {
                         if (rts.position() != null && rts.position() > 0) {
-                            // resolved tabStop position은 mm(절대) → leftMargin 빼서 상대 → pt → hwpunit
-                            double posPt = rts.position() * ctx.scaleFactor - leftPt;
-                            if (posPt < 0) posPt = 0; // 음수는 0으로
+                            double posPt = rts.position() - leftPt;
+                            if (posPt < 0) posPt = 0;
                             String align = "left";
                             if (rts.alignment() != null) {
                                 String a = rts.alignment().toLowerCase();
@@ -317,6 +318,8 @@ public final class StoryConverter {
                     getStyleTracking(ctx, ip.appliedParagraphStyle()),
                     getStyleFontFamily(ctx, ip.appliedParagraphStyle()),
                     getStyleFontSize(ctx, ip.appliedParagraphStyle()));
+            // tabStop이 있으면 \t 문자를 보존 (HwpxParagraphBuilder가 <hp:tab>으로 변환)
+            sc.hasTabStops = para.hasTabStops();
 
             // 런 변환: IDML CharacterRun → ASTTextRun + 수식 그룹화
             // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
@@ -599,12 +602,14 @@ public final class StoryConverter {
         // \u0008 = Indent to Here (ACE 7) — HWPX에 대응 없음
         // \n = Frame Break (ACE 3) — 같은 글상자 안에서 의미 없음
         // \t + \u0008 패턴: 인라인 아이콘 앞 탭+IndentToHere → 둘 다 제거
-        // 단독 \t: resolved에서 온 탭이지만 탭스톱 없으면 불필요한 간격 생성 → 공백으로 치환
+        // 단독 \t: tabStop이 있으면 유지 (HwpxParagraphBuilder가 <hp:tab>으로 변환), 없으면 공백 치환
         if (text != null) {
             text = text.replace("\t\u0008", ""); // \t + IndentToHere 조합 제거
             text = text.replace("\u0008", "");   // 단독 IndentToHere 제거
             text = text.replace("\n", "");       // Frame Break 제거
-            text = text.replace("\t", " ");      // 탭 → 공백 (탭스톱 없는 경우 간격 방지)
+            if (!sc.hasTabStops) {
+                text = text.replace("\t", " ");  // 탭 → 공백 (탭스톱 없는 경우 간격 방지)
+            }
             text = text.replace("\u2009", " ");   // Thin Space → 공백
             text = text.replace("\u2002", "");   // En Space 제거
             text = text.replace("\u2003", "");   // Em Space 제거
@@ -1344,7 +1349,9 @@ public final class StoryConverter {
                         runText = runText.replace("\t\u0008", "");
                         runText = runText.replace("\u0008", "");
                         runText = runText.replace("\n", "");
-                        runText = runText.replace("\t", " ");
+                        if (!para.hasTabStops()) {
+                            runText = runText.replace("\t", " ");
+                        }
                     }
                     textRun.text(runText);
                     textRun.fontFamily(run.fontFamily());

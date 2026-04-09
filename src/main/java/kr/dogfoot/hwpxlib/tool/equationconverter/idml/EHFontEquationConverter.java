@@ -127,6 +127,7 @@ public class EHFontEquationConverter {
         switch (c) {
             case '\u00B1': return "+-";         // ±
             case '\u00D7': return "TIMES";       // ×
+            case '_': return "TIMES";             // EH상부자 _ → × (곱셈 기호)
             case '\u00F7': return "div";         // ÷
             case '\u2103': return "DEG C";       // ℃
             case '\u00B0': return "DEG";         // °
