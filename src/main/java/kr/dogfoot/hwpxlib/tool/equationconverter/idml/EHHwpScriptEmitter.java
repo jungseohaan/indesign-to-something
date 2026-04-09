@@ -96,6 +96,14 @@ public class EHHwpScriptEmitter {
         result = result.replaceAll("(?<=[\\w}])div(?=[\\w{(])", " div ");
         result = result.replaceAll("(?<=[\\w}])div$", " div");
         result = result.replaceAll("^div(?=[\\w{(])", "div ");
+        // lbrace/rbrace: 앞뒤 공백 보장
+        result = result.replaceAll("lbrace(?=[^ ])", "lbrace ");
+        result = result.replaceAll("(?<=[^ ])rbrace", " rbrace");
+
+        // 괄호 안에 over(분수)나 sqrt(루트)가 포함되면 left/right로 확대
+        // ( ... over ... ) → left( ... over ... right)
+        // lbrace ... over ... rbrace → left lbrace ... over ... right rbrace
+        result = enlargeBracketsContainingFraction(result);
 
         // 빈 sqrt{} 제거 (단독 sqrt{ }는 유지)
         while (result.contains("sqrt{}")) {
@@ -125,5 +133,66 @@ public class EHHwpScriptEmitter {
         if (!hasLetterOrDigit) return null;
 
         return result;
+    }
+
+    /**
+     * 괄호 안에 over(분수)나 sqrt(루트)가 포함되면 left/right로 확대.
+     * HWP 수식에서 left( right), left[ right], left lbrace right rbrace는
+     * 내용 높이에 맞게 괄호 크기를 자동 조절한다.
+     */
+    private static String enlargeBracketsContainingFraction(String s) {
+        // 소괄호: ( ... ) → left( ... right) (over 또는 sqrt 포함 시)
+        s = enlargePair(s, "(", ")", "left(", " right)");
+        // 중괄호: lbrace ... rbrace → left lbrace ... right rbrace
+        s = enlargePair(s, "lbrace ", " rbrace", "left lbrace ", " right rbrace");
+        return s;
+    }
+
+    private static String enlargePair(String s, String open, String close, String leftOpen, String rightClose) {
+        int searchFrom = 0;
+        StringBuilder sb = new StringBuilder();
+        while (searchFrom < s.length()) {
+            int openPos = s.indexOf(open, searchFrom);
+            if (openPos < 0) {
+                sb.append(s.substring(searchFrom));
+                break;
+            }
+            // 이미 left( 인지 확인 (중복 적용 방지)
+            if (openPos >= 4 && s.substring(openPos - 4, openPos).endsWith("left")) {
+                sb.append(s.substring(searchFrom, openPos + open.length()));
+                searchFrom = openPos + open.length();
+                continue;
+            }
+            // 매칭 닫기 괄호 찾기 (중첩 고려)
+            int depth = 1;
+            int closePos = -1;
+            int i = openPos + open.length();
+            while (i < s.length() && depth > 0) {
+                if (s.startsWith(open, i)) {
+                    depth++;
+                    i += open.length();
+                } else if (s.startsWith(close, i)) {
+                    depth--;
+                    if (depth == 0) { closePos = i; break; }
+                    i += close.length();
+                } else {
+                    i++;
+                }
+            }
+            if (closePos < 0) {
+                sb.append(s.substring(searchFrom));
+                break;
+            }
+            String inner = s.substring(openPos + open.length(), closePos);
+            // over 또는 sqrt가 포함되면 left/right로 확대
+            if (inner.contains(" over ") || inner.contains("sqrt{")) {
+                sb.append(s.substring(searchFrom, openPos));
+                sb.append(leftOpen).append(inner).append(rightClose);
+            } else {
+                sb.append(s.substring(searchFrom, closePos + close.length()));
+            }
+            searchFrom = closePos + close.length();
+        }
+        return sb.toString();
     }
 }

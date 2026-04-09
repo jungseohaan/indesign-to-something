@@ -170,6 +170,7 @@ public class EHIRBuilder {
                     || t.type() == EHToken.Type.SUP_BASE_TEXT
                     || t.type() == EHToken.Type.SUB_BASE_TEXT) {
                 String text = t.text();
+
                 int splitPos = findRadicandEnd(text);
 
                 if (splitPos == 0) {

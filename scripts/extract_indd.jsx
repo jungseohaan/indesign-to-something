@@ -3118,6 +3118,16 @@ function splitRunByStoryChars(story, rng, runData, para) {
             try { size = para.characters[absIdx].pointSize; } catch (e) {}
             try { font = para.characters[absIdx].appliedFont.fontFamily; } catch (e) {}
             try { style = para.characters[absIdx].fontStyle; } catch (e) {}
+            // GREP 스타일로 적용된 이탤릭 감지: fontStyle이 숫자(가변 폰트 웨이트)인데
+            // appliedCharacterStyle에 "이탤릭" 또는 "Italic"이 포함되면 fontStyle을 "Italic"으로 보정
+            if (style && /^\d+$/.test(style)) {
+                try {
+                    var csName = para.characters[absIdx].appliedCharacterStyle.name;
+                    if (csName && (csName.indexOf("이탤릭") >= 0 || csName.toLowerCase().indexOf("italic") >= 0)) {
+                        style = "Italic";
+                    }
+                } catch (e2) {}
+            }
             var p = { color: color, size: size, font: font, style: style };
             propsCache[absIdx] = p;
             return p;
@@ -3126,11 +3136,34 @@ function splitRunByStoryChars(story, rng, runData, para) {
             return a.color === b.color && a.size === b.size && a.font === b.font && a.style === b.style;
         }
 
-        // 빠른 체크: 첫/중간/마지막 비교 (A-B-A 패턴 대응)
+        // 빠른 체크: 여러 샘플 포인트 비교 (GREP 이탤릭 등 중간 구간 감지)
         var firstProps = getCharProps(rngStart);
         var lastProps = getCharProps(rngStart + rngLen - 1);
         var midProps = rngLen > 2 ? getCharProps(rngStart + Math.floor(rngLen / 2)) : firstProps;
-        if (propsEqual(firstProps, lastProps) && propsEqual(firstProps, midProps)) {
+        // 추가 샘플: 1/4, 3/4 지점 + 첫 번째 비공백 문자
+        var allSame = propsEqual(firstProps, lastProps) && propsEqual(firstProps, midProps);
+        if (allSame && rngLen > 4) {
+            var q1Props = getCharProps(rngStart + Math.floor(rngLen / 4));
+            var q3Props = getCharProps(rngStart + Math.floor(rngLen * 3 / 4));
+            if (!propsEqual(firstProps, q1Props) || !propsEqual(firstProps, q3Props)) {
+                allSame = false;
+            }
+        }
+        // 첫 번째 알파벳/숫자 문자도 샘플 (구분자⑴⑵/탭/공백이 아닌 실제 콘텐츠)
+        if (allSame && rngLen > 2) {
+            for (var si = 0; si < Math.min(rngLen, 10); si++) {
+                var ch;
+                try { ch = para.characters[rngStart + si].contents; } catch (e3) { continue; }
+                if (ch && /[a-zA-Z0-9()+\-]/.test(ch)) {
+                    var contentProps = getCharProps(rngStart + si);
+                    if (!propsEqual(firstProps, contentProps)) {
+                        allSame = false;
+                    }
+                    break;
+                }
+            }
+        }
+        if (allSame) {
             // SPEC-019: 호출 전 단계(줄 ~3329)에서 runData.fillColor가 rng 첫 비제어
             // 문자(예: 단락 시작 GREP "A_문항번호-자주"의 "4")의 색상으로 덮어써졌을 수
             // 있음. partRun 텍스트는 본문 위치(rngStart 보정 후)이므로 firstProps가

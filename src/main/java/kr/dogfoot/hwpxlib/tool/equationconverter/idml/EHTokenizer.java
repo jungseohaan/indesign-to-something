@@ -84,8 +84,11 @@ public class EHTokenizer {
                     }
                 } else {
                     // EH분수대문자의 { } 글리프는 큰 괄호 — SQRT_MARKER가 아님
+                    // ] 는 √ radical bar 끝 (장식) — SKIP
                     if (isEHBracketGlyph(text)) {
-                        String translated = text.replace('{', '(').replace('}', ')');
+                        // EH분수대문자: { } → 큰 소괄호, [ ] → 큰 중괄호
+                        String translated = text.replace('{', '(').replace('}', ')')
+                                .replace("[", "lbrace ").replace("]", " rbrace");
                         tokens.add(new EHToken(EHToken.Type.BASE_TEXT, translated));
                     } else {
                         tokens.add(new EHToken(EHToken.Type.SQRT_MARKER, text));
@@ -332,7 +335,7 @@ public class EHTokenizer {
         if (text == null || text.isEmpty()) return false;
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (c != '{' && c != '}') return false;
+            if (c != '{' && c != '}' && c != '[' && c != ']') return false;
         }
         return true;
     }
