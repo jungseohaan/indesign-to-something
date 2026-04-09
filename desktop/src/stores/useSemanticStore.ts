@@ -51,6 +51,7 @@ interface SemanticState {
   showSchemaEditor: boolean;
   showRuleSuggester: boolean;
   showReextractReview: boolean;
+  showPptExport: boolean;
   isProcessing: boolean;
   error: string | null;
 
@@ -78,6 +79,7 @@ interface SemanticState {
   setShowSchemaEditor: (show: boolean) => void;
   setShowRuleSuggester: (show: boolean) => void;
   setShowReextractReview: (show: boolean) => void;
+  setShowPptExport: (show: boolean) => void;
   reset: () => void;
 
   // ─── 선택된 노드 ──────────────────────────────
@@ -109,6 +111,7 @@ export const useSemanticStore = create<SemanticState>((set, get) => ({
   showSchemaEditor: false,
   showRuleSuggester: false,
   showReextractReview: false,
+  showPptExport: false,
   isProcessing: false,
   error: null,
 
@@ -352,6 +355,7 @@ export const useSemanticStore = create<SemanticState>((set, get) => ({
   setShowSchemaEditor: (show) => set({ showSchemaEditor: show }),
   setShowRuleSuggester: (show) => set({ showRuleSuggester: show }),
   setShowReextractReview: (show) => set({ showReextractReview: show }),
+  setShowPptExport: (show) => set({ showPptExport: show }),
 
   reset: () =>
     set({

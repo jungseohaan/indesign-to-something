@@ -11,47 +11,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .menu(|handle| create_menu(handle))
         .on_menu_event(|app, event| {
-            match event.id().as_ref() {
-                "open-idml" => {
-                    // IDML 파일 열기 이벤트
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.emit("menu-open-idml", ());
-                    }
-                }
-                "open-hwpx" => {
-                    // HWPX 파일 열기 이벤트 (HWPX → IDML 변환)
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.emit("menu-open-hwpx", ());
-                    }
-                }
-                "open-indd" => {
-                    // InDesign (.indd) 파일 열기 이벤트
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.emit("menu-open-indd", ());
-                    }
-                }
-                "open-indd-folder" => {
-                    // InDesign 폴더 일괄 변환 이벤트
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.emit("menu-open-indd-folder", ());
-                    }
-                }
-                "clear-extract-cache" => {
-                    // SPEC-011: 추출 캐시 비우기
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.emit("menu-clear-extract-cache", ());
-                    }
-                }
+            // SPEC-019 M1: 메뉴 ID → 프론트엔드 이벤트 단순 라우팅.
+            // 동일한 ID 패턴(menu-<id>)으로 emit하여 핸들러 중복 제거.
+            let id = event.id().as_ref().to_string();
+            match id.as_str() {
                 "quit" => {
                     app.exit(0);
                 }
-                "about" => {
-                    // 프론트엔드에 정보 이벤트 전달
+                _ => {
                     if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.emit("menu-about", ());
+                        let event_name = format!("menu-{}", id);
+                        let _ = window.emit(&event_name, ());
                     }
                 }
-                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -114,11 +86,26 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         )?
     };
 
-    // File 메뉴
+    // ────────────────────────────────────────────────────────────
+    // File 메뉴 (SPEC-019 M1)
+    // ────────────────────────────────────────────────────────────
+    // 단축키 정리: ⌘⇧I 충돌 회피 → InDesign Open은 ⌘⌥I로 이동
+    let open_indd = MenuItem::with_id(handle, "open-indd", "Open InDesign...", true, Some("CmdOrCtrl+Alt+I"))?;
+    let open_indd_folder = MenuItem::with_id(handle, "open-indd-folder", "Open InDesign Folder...", true, Some("CmdOrCtrl+Alt+F"))?;
     let open_idml = MenuItem::with_id(handle, "open-idml", "Open IDML...", true, Some("CmdOrCtrl+O"))?;
-    let open_indd = MenuItem::with_id(handle, "open-indd", "Open InDesign...", true, Some("CmdOrCtrl+Shift+I"))?;
-    let open_indd_folder = MenuItem::with_id(handle, "open-indd-folder", "Open InDesign Folder...", true, Some("CmdOrCtrl+Shift+F"))?;
     let open_hwpx = MenuItem::with_id(handle, "open-hwpx", "Open HWPX...", true, Some("CmdOrCtrl+Shift+O"))?;
+
+    // Export 서브메뉴
+    let export_hwpx = MenuItem::with_id(handle, "export-hwpx", "HWPX...", true, Some("CmdOrCtrl+E"))?;
+    let export_semantic_json = MenuItem::with_id(handle, "export-semantic-json", "Semantic JSON...", true, Some("CmdOrCtrl+Shift+E"))?;
+    let export_pptx = MenuItem::with_id(handle, "export-pptx", "PowerPoint (PPTX)...", true, None::<&str>)?;
+    let export_submenu = Submenu::with_items(
+        handle,
+        "Export",
+        true,
+        &[&export_hwpx, &export_semantic_json, &export_pptx],
+    )?;
+
     let clear_cache = MenuItem::with_id(handle, "clear-extract-cache", "Clear Extract Cache", true, None::<&str>)?;
 
     #[cfg(not(target_os = "macos"))]
@@ -130,10 +117,12 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         "File",
         true,
         &[
-            &open_idml,
             &open_indd,
             &open_indd_folder,
+            &open_idml,
             &open_hwpx,
+            &PredefinedMenuItem::separator(handle)?,
+            &export_submenu,
             &PredefinedMenuItem::separator(handle)?,
             &clear_cache,
             &PredefinedMenuItem::separator(handle)?,
@@ -147,14 +136,41 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         "File",
         true,
         &[
-            &open_idml,
             &open_indd,
             &open_indd_folder,
+            &open_idml,
             &open_hwpx,
+            &PredefinedMenuItem::separator(handle)?,
+            &export_submenu,
             &PredefinedMenuItem::separator(handle)?,
             &clear_cache,
             &PredefinedMenuItem::separator(handle)?,
             &quit,
+        ],
+    )?;
+
+    // ────────────────────────────────────────────────────────────
+    // Semantic 메뉴 (SPEC-019 M1, 신설)
+    // ────────────────────────────────────────────────────────────
+    let semantic_extract = MenuItem::with_id(handle, "semantic-extract", "Extract from AST", true, Some("CmdOrCtrl+R"))?;
+    let semantic_reclassify = MenuItem::with_id(handle, "semantic-reclassify", "Re-classify", true, Some("CmdOrCtrl+Shift+R"))?;
+    let semantic_schema_edit = MenuItem::with_id(handle, "semantic-schema-edit", "Edit Active Schema...", true, Some("CmdOrCtrl+Shift+M"))?;
+    let semantic_schema_generate = MenuItem::with_id(handle, "semantic-schema-generate", "Generate from AST", true, None::<&str>)?;
+    let schema_submenu = Submenu::with_items(
+        handle,
+        "Schema",
+        true,
+        &[&semantic_schema_edit, &semantic_schema_generate],
+    )?;
+    let semantic_menu = Submenu::with_items(
+        handle,
+        "Semantic",
+        true,
+        &[
+            &semantic_extract,
+            &semantic_reclassify,
+            &PredefinedMenuItem::separator(handle)?,
+            &schema_submenu,
         ],
     )?;
 
@@ -174,15 +190,24 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         ],
     )?;
 
-    // View 메뉴
+    // ────────────────────────────────────────────────────────────
+    // View 메뉴 (SPEC-019 M1)
+    // ────────────────────────────────────────────────────────────
+    let tab_converter = MenuItem::with_id(handle, "tab-converter", "HWPX Converter Tab", true, Some("CmdOrCtrl+1"))?;
+    let tab_semantic = MenuItem::with_id(handle, "tab-semantic", "Semantic Layer Tab", true, Some("CmdOrCtrl+2"))?;
+
     #[cfg(debug_assertions)]
     let view_menu = {
+        // ⌘⇧I → DevTools 단독 사용 (Open InDesign은 ⌘⌥I로 이동)
         let devtools = MenuItem::with_id(handle, "devtools", "Toggle DevTools", true, Some("CmdOrCtrl+Shift+I"))?;
         Submenu::with_items(
             handle,
             "View",
             true,
             &[
+                &tab_converter,
+                &tab_semantic,
+                &PredefinedMenuItem::separator(handle)?,
                 &PredefinedMenuItem::fullscreen(handle, Some("Toggle Fullscreen"))?,
                 &PredefinedMenuItem::separator(handle)?,
                 &devtools,
@@ -196,6 +221,9 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         "View",
         true,
         &[
+            &tab_converter,
+            &tab_semantic,
+            &PredefinedMenuItem::separator(handle)?,
             &PredefinedMenuItem::fullscreen(handle, Some("Toggle Fullscreen"))?,
         ],
     )?;
@@ -230,13 +258,13 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     #[cfg(target_os = "macos")]
     let menu = Menu::with_items(
         handle,
-        &[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu],
+        &[&app_menu, &file_menu, &edit_menu, &view_menu, &semantic_menu, &window_menu],
     )?;
 
     #[cfg(not(target_os = "macos"))]
     let menu = Menu::with_items(
         handle,
-        &[&file_menu, &edit_menu, &view_menu, &help_menu],
+        &[&file_menu, &edit_menu, &view_menu, &semantic_menu, &help_menu],
     )?;
 
     Ok(menu)

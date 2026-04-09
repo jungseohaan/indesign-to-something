@@ -56,7 +56,8 @@ export function SemanticPage() {
     generateSchemaFromAst(astDoc);
   };
 
-  const [showPptExport, setShowPptExport] = useState(false);
+  const showPptExport = useSemanticStore((s) => s.showPptExport);
+  const setShowPptExport = useSemanticStore((s) => s.setShowPptExport);
   const [previewMode, setPreviewMode] = useState<"visual" | "text">("visual");
   const schemaIds = schemaLoader.listIds();
 
