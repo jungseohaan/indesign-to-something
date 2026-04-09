@@ -111,25 +111,47 @@ public final class StoryConverter {
             // IDML-SHORT/PARA-MISMATCH 감지: resolved fallback 전환 조건
             // 1) IDML 텍스트가 resolved의 30% 미만 (불릿 전용 Story 등)
             // 2) IDML 단락 수가 resolved의 50% 미만 (강제 줄바꿈이 단락으로 처리되지 않는 경우)
+            // 단, EH/BT/NP 수식 폰트가 포함된 story는 fallback하지 않음 (IDML 수식 변환이 우수)
             if (useIdml) {
-                ResolvedStory rs = ctx.resolvedData.getStory(storyId);
-                if (rs != null) {
-                    int idmlLen = 0;
-                    for (ASTParagraph p : paragraphs)
-                        for (Object item : p.items())
-                            if (item instanceof ASTTextRun) idmlLen += ((ASTTextRun) item).text() != null ? ((ASTTextRun) item).text().length() : 0;
-                    int resolvedLen = 0;
-                    for (ResolvedParagraph rp : rs.paragraphs())
-                        if (rp.runs() != null)
-                            for (ResolvedRun r : rp.runs())
-                                resolvedLen += r.text() != null ? r.text().length() : 0;
-                    if (resolvedLen > 10 && idmlLen < resolvedLen * 0.3) {
-                        useIdml = false; // 텍스트 길이 부족 → resolved fallback
+                boolean hasEHMathFont = false;
+                for (ASTParagraph p : paragraphs) {
+                    for (Object item : p.items()) {
+                        if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) {
+                            hasEHMathFont = true;
+                            break;
+                        }
+                        if (item instanceof ASTTextRun) {
+                            String ff = ((ASTTextRun) item).fontFamily();
+                            if (ff != null && (EHFontGlyphMap.isEHFontFamily(ff)
+                                    || ff.contains("BT수식") || ff.contains("NP"))) {
+                                hasEHMathFont = true;
+                                break;
+                            }
+                        }
                     }
-                    // 단락 수 불일치: IDML 1~2개 단락인데 resolved 5개 이상이면 강제 줄바꿈 누락
-                    int resolvedParaCount = rs.paragraphs().size();
-                    if (paragraphs.size() <= 2 && resolvedParaCount >= 5) {
-                        useIdml = false; // 단락 구조 불일치 → resolved fallback
+                    if (hasEHMathFont) break;
+                }
+
+                if (!hasEHMathFont) {
+                    ResolvedStory rs = ctx.resolvedData.getStory(storyId);
+                    if (rs != null) {
+                        int idmlLen = 0;
+                        for (ASTParagraph p : paragraphs)
+                            for (Object item : p.items())
+                                if (item instanceof ASTTextRun) idmlLen += ((ASTTextRun) item).text() != null ? ((ASTTextRun) item).text().length() : 0;
+                        int resolvedLen = 0;
+                        for (ResolvedParagraph rp : rs.paragraphs())
+                            if (rp.runs() != null)
+                                for (ResolvedRun r : rp.runs())
+                                    resolvedLen += r.text() != null ? r.text().length() : 0;
+                        if (resolvedLen > 10 && idmlLen < resolvedLen * 0.3) {
+                            useIdml = false; // 텍스트 길이 부족 → resolved fallback
+                        }
+                        // 단락 수 불일치: IDML 1~2개 단락인데 resolved 5개 이상이면 강제 줄바꿈 누락
+                        int resolvedParaCount = rs.paragraphs().size();
+                        if (paragraphs.size() <= 2 && resolvedParaCount >= 5) {
+                            useIdml = false; // 단락 구조 불일치 → resolved fallback
+                        }
                     }
                 }
             }
@@ -1404,6 +1426,26 @@ public final class StoryConverter {
         List<ASTInlineItem> items = para.items();
         if (items == null || items.isEmpty()) return;
 
+        // IDML 경로에서 이미 ASTEquation으로 변환된 단락은 건너뜀 (중복 변환 방지)
+        boolean hasEquation = false;
+        boolean hasEHRun = false;
+        for (ASTInlineItem it : items) {
+            if (it instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) hasEquation = true;
+            if (it instanceof ASTTextRun) {
+                String ff = ((ASTTextRun) it).fontFamily();
+                if (ff != null && EHFontGlyphMap.isEHFontFamily(ff)) hasEHRun = true;
+            }
+        }
+        if (hasEquation) {
+            if (hasEHRun) {
+                // 수식과 EH TextRun이 공존: EH TextRun은 수식 변환 잔여물 → 제거
+                items.removeIf(it -> it instanceof ASTTextRun
+                        && ((ASTTextRun) it).fontFamily() != null
+                        && EHFontGlyphMap.isEHFontFamily(((ASTTextRun) it).fontFamily()));
+            }
+            return;
+        }
+
         List<ASTInlineItem> newItems = new ArrayList<>();
         List<IDMLCharacterRun> mathGroup = new ArrayList<>();
         String mathType = null; // "EH", "BT", "NP"
@@ -1444,27 +1486,50 @@ public final class StoryConverter {
                     mathGroup.add(cr);
                 }
             } else {
-                // EH 그룹이 열려있고 마지막이 EH분수대문자(√)이면,
-                // 비EH 런이라도 라틴/숫자로 시작하면 루트 내용으로 포함
+                // EH 그룹이 열려있으면 비EH 런의 bridge 가능성 확인
+                // 짧은 특수 공백(thin/four-per-em space) 또는 연산자 1문자만 bridge 허용
+                boolean bridge = false;
                 if ("EH".equals(mathType) && !mathGroup.isEmpty()) {
-                    IDMLCharacterRun lastEH = mathGroup.get(mathGroup.size() - 1);
                     String text = tr.text();
-                    if (EHFontGlyphMap.isFractionNumeratorFont(lastEH.fontFamily())
-                            && text != null && !text.isEmpty()
-                            && Character.isLetterOrDigit(text.charAt(0))
-                            && !(text.charAt(0) >= 0xAC00 && text.charAt(0) <= 0xD7AF)) {
-                        // 루트 내용으로 EH상부자처럼 포함
-                        IDMLCharacterRun cr = new IDMLCharacterRun();
-                        cr.content(text);
-                        cr.fontFamily("EH상부자"); // 상부자로 간주
-                        mathGroup.add(cr);
-                        continue;
+                    if (text != null && text.length() <= 2) {
+                        boolean allBridgeable = true;
+                        for (int ci = 0; ci < text.length(); ci++) {
+                            char c = text.charAt(ci);
+                            // 특수 공백, 연산 기호만 bridge
+                            if (c != '\u2005' && c != '\u2009' && c != '\u2003' && c != ' '
+                                    && c != '+' && c != '-' && c != '=' && c != '\u00D7'
+                                    && c != '\u00F7') {
+                                allBridgeable = false;
+                                break;
+                            }
+                        }
+                        if (allBridgeable) {
+                            // 뒤에 EH 폰트 런이 있는지 확인
+                            for (int ni = i + 1; ni < items.size(); ni++) {
+                                ASTInlineItem next = items.get(ni);
+                                if (next instanceof ASTTextRun) {
+                                    String nff = ((ASTTextRun) next).fontFamily();
+                                    if (nff != null && EHFontGlyphMap.isEHFontFamily(nff)) {
+                                        bridge = true;
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                        }
                     }
                 }
-                flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
-                mathGroup.clear();
-                mathType = null;
-                newItems.add(item);
+                if (bridge) {
+                    IDMLCharacterRun cr = new IDMLCharacterRun();
+                    cr.content(tr.text());
+                    cr.fontFamily(tr.fontFamily() != null ? tr.fontFamily() : "");
+                    mathGroup.add(cr);
+                } else {
+                    flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
+                    mathGroup.clear();
+                    mathType = null;
+                    newItems.add(item);
+                }
             }
         }
         flushResolvedMathGroup(ctx, mathGroup, mathType, newItems, para);
