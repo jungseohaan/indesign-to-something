@@ -367,7 +367,8 @@ public class EHIRBuilder {
             // \u2005 (FOUR-PER-EM SPACE)는 InDesign에서 × (곱셈) 표현에 사용됨
             if (ch == '\u2009' || ch == '\u2005' || ch == '\r' || ch == '\n' || ch == '\t') return i;
             // 무조건 종료 연산자
-            if (ch == '=' || ch == ',' || ch == '<' || ch == '>' || ch == '\u00F7') return i;
+            if (ch == '=' || ch == ',' || ch == '<' || ch == '>'
+                    || ch == '\u00F7' || ch == '\u00D6') return i; // ÷(decoded) 및 Ö(raw EH상부자)
             // _ = × (EH상부자 곱셈 기호) → radicand 분리
             if (ch == '_' && i > 0) return i;
             // 이항 연산자: 첫 문자가 아닐 때만 종료 (단항 -, + 허용)

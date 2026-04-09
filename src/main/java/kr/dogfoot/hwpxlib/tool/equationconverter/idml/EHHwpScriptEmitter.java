@@ -83,10 +83,19 @@ public class EHHwpScriptEmitter {
         String result = raw.trim();
         if (result.isEmpty()) return null;
 
-        // HWP 수식 키워드 앞뒤 공백 보장 (TIMES, div 등이 인접 토큰에 붙는 것 방지)
+        // HWP 수식 키워드 앞뒤 공백 보장 (인접 토큰에 붙는 것 방지)
+        for (String kw : new String[]{"TIMES", " div "}) {
+            if (!result.contains(kw)) continue;
+            // 이미 공백이 있으면 skip
+        }
+        // TIMES: 앞뒤 공백 보장
         result = result.replaceAll("(?<=[^ ])TIMES(?=[^ ])", " TIMES ");
         result = result.replaceAll("(?<=[^ ])TIMES$", " TIMES");
         result = result.replaceAll("^TIMES(?=[^ ])", "TIMES ");
+        // div: 단어 경계 기준 (숫자/문자에 붙은 경우만)
+        result = result.replaceAll("(?<=[\\w}])div(?=[\\w{(])", " div ");
+        result = result.replaceAll("(?<=[\\w}])div$", " div");
+        result = result.replaceAll("^div(?=[\\w{(])", "div ");
 
         // 빈 sqrt{} 제거 (단독 sqrt{ }는 유지)
         while (result.contains("sqrt{}")) {
