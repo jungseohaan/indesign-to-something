@@ -350,7 +350,7 @@ public class ResolvedDataReader {
 
     private static ResolvedRun parseRun(JsonObject o) {
         ResolvedRun run = new ResolvedRun();
-        run.text(getString(o, "text"));
+        run.text(replaceInDesignSpecialCharCodes(getString(o, "text")));
         run.fontFamily(getString(o, "fontFamily"));
         run.fontSize(getBoxedDouble(o, "fontSize"));
         run.fontStyle(getString(o, "fontStyle"));
@@ -552,5 +552,30 @@ public class ResolvedDataReader {
             result[i] = (el == null || el.isJsonNull()) ? 0 : el.getAsDouble();
         }
         return result;
+    }
+
+    /**
+     * InDesign ExtendScript가 특수 문자(SpecialCharacters)를 4바이트 ASCII 코드의
+     * 10진수 표현으로 직렬화하는 문제를 보정.
+     * 예: THIN_SPACE → "STnS" → 1398042195 → 텍스트에 숫자로 삽입됨.
+     * 이 메서드는 알려진 코드를 해당 유니코드 문자로 치환한다.
+     */
+    private static String replaceInDesignSpecialCharCodes(String text) {
+        if (text == null) return null;
+        // InDesign SpecialCharacter 4-byte ASCII → decimal 매핑
+        // STnS=1398042195(THIN_SPACE), SEnS=1397059155(EN_SPACE), SEmS=1397058899(EM_SPACE)
+        // SHrS=1397256787(HAIR_SPACE), SFgS=1397122899(FIGURE_SPACE), SNbS=1397645907(NBSP)
+        text = text.replace("1398042195", "\u2009"); // THIN_SPACE
+        text = text.replace("1397059155", "\u2002"); // EN_SPACE
+        text = text.replace("1397058899", "\u2003"); // EM_SPACE
+        text = text.replace("1397256787", "\u200A"); // HAIR_SPACE
+        text = text.replace("1397122899", "\u2007"); // FIGURE_SPACE
+        text = text.replace("1397645907", "\u00A0"); // NONBREAKING_SPACE
+        text = text.replace("1397780051", "\u2008"); // PUNCTUATION_SPACE
+        text = text.replace("1397847123", "\u2005"); // QUARTER_SPACE (≈ FOUR-PER-EM)
+        text = text.replace("1398040659", "\u2004"); // THIRD_SPACE (≈ THREE-PER-EM)
+        text = text.replace("1397979219", "\u2006"); // SIXTH_SPACE (≈ SIX-PER-EM)
+        text = text.replace("1397124179", "");        // FLUSH_SPACE → 제거
+        return text;
     }
 }
