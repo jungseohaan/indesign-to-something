@@ -595,6 +595,9 @@ public final class StoryConverter {
             // overline 마커(\uE000...\uE001)가 포함된 TextRun을 ASTEquation으로 분리
             splitOverlineRuns(para);
 
+            // 이탤릭 런에서 괄호/연산자를 비이탤릭으로 분리
+            splitItalicBrackets(para);
+
             // 불릿 단락이면 불릿 이후 런 색상을 검정으로 리셋
             resetBulletParagraphColors(ctx, para);
 
@@ -2314,6 +2317,94 @@ public final class StoryConverter {
         }
         items.clear();
         items.addAll(newItems);
+    }
+
+    /**
+     * 이탤릭 TextRun에서 괄호/연산자/숫자를 비이탤릭 런으로 분리.
+     * 수학 관례: 변수(a-z)는 이탤릭, 괄호/연산자/숫자는 정체(upright).
+     */
+    private static void splitItalicBrackets(ASTParagraph para) {
+        List<ASTInlineItem> items = para.items();
+        if (items == null || items.isEmpty()) return;
+
+        boolean needsSplit = false;
+        for (ASTInlineItem it : items) {
+            if (it instanceof ASTTextRun) {
+                ASTTextRun tr = (ASTTextRun) it;
+                String fs = tr.fontStyle();
+                if (fs != null && fs.toLowerCase().contains("italic")) {
+                    String text = tr.text();
+                    if (text != null && text.length() > 1) {
+                        for (int i = 0; i < text.length(); i++) {
+                            char c = text.charAt(i);
+                            if (c == '(' || c == ')' || c == '+' || c == '-' || c == '='
+                                    || c == ',' || c == ' ' || (c >= '0' && c <= '9')) {
+                                needsSplit = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (needsSplit) break;
+        }
+        if (!needsSplit) return;
+
+        List<ASTInlineItem> newItems = new ArrayList<>();
+        for (ASTInlineItem item : items) {
+            if (!(item instanceof ASTTextRun)) {
+                newItems.add(item);
+                continue;
+            }
+            ASTTextRun run = (ASTTextRun) item;
+            String fs = run.fontStyle();
+            String text = run.text();
+            if (fs == null || !fs.toLowerCase().contains("italic")
+                    || text == null || text.length() <= 1) {
+                newItems.add(item);
+                continue;
+            }
+
+            // 문자 분류: 변수(a-zA-Z) → 이탤릭, 나머지 → 비이탤릭
+            StringBuilder buf = new StringBuilder();
+            boolean curItalic = isItalicChar(text.charAt(0));
+            for (int i = 0; i < text.length(); i++) {
+                char c = text.charAt(i);
+                boolean charItalic = isItalicChar(c);
+                if (charItalic != curItalic) {
+                    // 버퍼 flush
+                    ASTTextRun tr = new ASTTextRun();
+                    tr.text(buf.toString());
+                    tr.fontFamily(run.fontFamily());
+                    tr.fontSizeHwpunits(run.fontSizeHwpunits());
+                    tr.textColor(run.textColor());
+                    tr.letterSpacing(run.letterSpacing());
+                    if (curItalic) tr.fontStyle(run.fontStyle());
+                    // 비이탤릭은 fontStyle 미설정 (정체)
+                    newItems.add(tr);
+                    buf.setLength(0);
+                    curItalic = charItalic;
+                }
+                buf.append(c);
+            }
+            if (buf.length() > 0) {
+                ASTTextRun tr = new ASTTextRun();
+                tr.text(buf.toString());
+                tr.fontFamily(run.fontFamily());
+                tr.fontSizeHwpunits(run.fontSizeHwpunits());
+                tr.textColor(run.textColor());
+                tr.letterSpacing(run.letterSpacing());
+                if (curItalic) tr.fontStyle(run.fontStyle());
+                newItems.add(tr);
+            }
+        }
+        items.clear();
+        items.addAll(newItems);
+    }
+
+    /** 수학 변수 문자(이탤릭 대상): 알파벳만. 괄호/연산자/숫자/공백은 정체. */
+    private static boolean isItalicChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
     }
 
 }
