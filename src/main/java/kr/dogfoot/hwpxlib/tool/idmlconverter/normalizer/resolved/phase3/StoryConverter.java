@@ -595,8 +595,9 @@ public final class StoryConverter {
             // overline 마커(\uE000...\uE001)가 포함된 TextRun을 ASTEquation으로 분리
             splitOverlineRuns(para);
 
-            // 이탤릭 런에서 괄호/연산자를 비이탤릭으로 분리
-            splitItalicBrackets(para);
+            // 이탤릭 EH상부자 런 → 인라인 수식(ASTEquation)으로 변환
+            // 한컴 수식 에디터가 변수=이탤릭, 괄호/연산자=정체를 자동 처리
+            convertItalicRunsToEquations(para);
 
             // 불릿 단락이면 불릿 이후 런 색상을 검정으로 리셋
             resetBulletParagraphColors(ctx, para);
@@ -2320,91 +2321,53 @@ public final class StoryConverter {
     }
 
     /**
-     * 이탤릭 TextRun에서 괄호/연산자/숫자를 비이탤릭 런으로 분리.
-     * 수학 관례: 변수(a-z)는 이탤릭, 괄호/연산자/숫자는 정체(upright).
+     * 이탤릭 TextRun을 인라인 수식(ASTEquation)으로 변환.
+     * 한컴 수식 에디터가 변수=이탤릭, 괄호/연산자=정체를 자동 처리.
+     * 대상: fontStyle이 Italic이고, 라틴 알파벳+수학 기호로만 구성된 런.
      */
-    private static void splitItalicBrackets(ASTParagraph para) {
+    private static void convertItalicRunsToEquations(ASTParagraph para) {
         List<ASTInlineItem> items = para.items();
         if (items == null || items.isEmpty()) return;
 
-        boolean needsSplit = false;
+        boolean hasTarget = false;
         for (ASTInlineItem it : items) {
-            if (it instanceof ASTTextRun) {
-                ASTTextRun tr = (ASTTextRun) it;
-                String fs = tr.fontStyle();
-                if (fs != null && fs.toLowerCase().contains("italic")) {
-                    String text = tr.text();
-                    if (text != null && text.length() > 1) {
-                        for (int i = 0; i < text.length(); i++) {
-                            char c = text.charAt(i);
-                            if (c == '(' || c == ')' || c == '+' || c == '-' || c == '='
-                                    || c == ',' || c == ' ' || (c >= '0' && c <= '9')) {
-                                needsSplit = true;
-                                break;
-                            }
-                        }
-                    }
-                }
+            if (it instanceof ASTTextRun && isItalicMathRun((ASTTextRun) it)) {
+                hasTarget = true;
+                break;
             }
-            if (needsSplit) break;
         }
-        if (!needsSplit) return;
+        if (!hasTarget) return;
 
         List<ASTInlineItem> newItems = new ArrayList<>();
         for (ASTInlineItem item : items) {
-            if (!(item instanceof ASTTextRun)) {
+            if (item instanceof ASTTextRun && isItalicMathRun((ASTTextRun) item)) {
+                ASTTextRun run = (ASTTextRun) item;
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
+                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(
+                                run.text(), "EH_FONT");
+                newItems.add(eq);
+            } else {
                 newItems.add(item);
-                continue;
-            }
-            ASTTextRun run = (ASTTextRun) item;
-            String fs = run.fontStyle();
-            String text = run.text();
-            if (fs == null || !fs.toLowerCase().contains("italic")
-                    || text == null || text.length() <= 1) {
-                newItems.add(item);
-                continue;
-            }
-
-            // 문자 분류: 변수(a-zA-Z) → 이탤릭, 나머지 → 비이탤릭
-            StringBuilder buf = new StringBuilder();
-            boolean curItalic = isItalicChar(text.charAt(0));
-            for (int i = 0; i < text.length(); i++) {
-                char c = text.charAt(i);
-                boolean charItalic = isItalicChar(c);
-                if (charItalic != curItalic) {
-                    // 버퍼 flush
-                    ASTTextRun tr = new ASTTextRun();
-                    tr.text(buf.toString());
-                    tr.fontFamily(run.fontFamily());
-                    tr.fontSizeHwpunits(run.fontSizeHwpunits());
-                    tr.textColor(run.textColor());
-                    tr.letterSpacing(run.letterSpacing());
-                    if (curItalic) tr.fontStyle(run.fontStyle());
-                    // 비이탤릭은 fontStyle 미설정 (정체)
-                    newItems.add(tr);
-                    buf.setLength(0);
-                    curItalic = charItalic;
-                }
-                buf.append(c);
-            }
-            if (buf.length() > 0) {
-                ASTTextRun tr = new ASTTextRun();
-                tr.text(buf.toString());
-                tr.fontFamily(run.fontFamily());
-                tr.fontSizeHwpunits(run.fontSizeHwpunits());
-                tr.textColor(run.textColor());
-                tr.letterSpacing(run.letterSpacing());
-                if (curItalic) tr.fontStyle(run.fontStyle());
-                newItems.add(tr);
             }
         }
         items.clear();
         items.addAll(newItems);
     }
 
-    /** 수학 변수 문자(이탤릭 대상): 알파벳만. 괄호/연산자/숫자/공백은 정체. */
-    private static boolean isItalicChar(char c) {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    /** 이탤릭 수학 런 판별: Italic + 라틴 알파벳/숫자/수학 기호만 포함 */
+    private static boolean isItalicMathRun(ASTTextRun tr) {
+        String fs = tr.fontStyle();
+        if (fs == null || !fs.toLowerCase().contains("italic")) return false;
+        String text = tr.text();
+        if (text == null || text.length() < 2) return false;
+        // 한국어가 포함되면 수식이 아님
+        boolean hasLatin = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c >= 0xAC00 && c <= 0xD7AF) return false; // 한국어
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) hasLatin = true;
+        }
+        return hasLatin;
     }
 
 }
