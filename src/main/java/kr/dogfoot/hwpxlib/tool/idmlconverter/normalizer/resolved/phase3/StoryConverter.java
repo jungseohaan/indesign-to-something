@@ -2410,11 +2410,17 @@ public final class StoryConverter {
 
         List<ASTInlineItem> newItems = new ArrayList<>();
         StringBuilder mathBuf = new StringBuilder();
+        List<IDMLCharacterRun> mathRuns = new ArrayList<>();
 
         for (int i = 0; i < items.size(); i++) {
             ASTInlineItem item = items.get(i);
             if (item instanceof ASTTextRun && isItalicMathRun((ASTTextRun) item)) {
-                mathBuf.append(((ASTTextRun) item).text());
+                ASTTextRun tr = (ASTTextRun) item;
+                mathBuf.append(tr.text());
+                IDMLCharacterRun cr = new IDMLCharacterRun();
+                cr.content(tr.text());
+                cr.fontFamily(tr.fontFamily());
+                mathRuns.add(cr);
             } else if (item instanceof ASTTextRun && mathBuf.length() > 0) {
                 // 수식 버퍼가 열려있을 때 backtick/thin space 등 짧은 비수식 런은 흡수
                 String t = ((ASTTextRun) item).text();
@@ -2429,31 +2435,56 @@ public final class StoryConverter {
                     if (allSkippable) continue; // backtick/space 스킵
                 }
                 // 수학 버퍼 flush + 일반 텍스트 추가
-                String script = mathBuf.toString().replace("`", "");
-                newItems.add(new ASTEquation(script, "EH_FONT"));
-                mathBuf.setLength(0);
+                flushItalicMathBuf(mathBuf, mathRuns, newItems);
                 newItems.add(item);
             } else if (item instanceof ASTEquation) {
                 // 기존 수식도 연속 이탤릭 버퍼에 합침
                 mathBuf.append(((ASTEquation) item).hwpScript());
             } else {
                 // 수학 버퍼 flush
-                if (mathBuf.length() > 0) {
-                    String script = mathBuf.toString().replace("`", "");
-                    newItems.add(new ASTEquation(script, "EH_FONT"));
-                    mathBuf.setLength(0);
-                }
+                flushItalicMathBuf(mathBuf, mathRuns, newItems);
                 newItems.add(item);
             }
         }
         // 마지막 버퍼 flush
-        if (mathBuf.length() > 0) {
-            String script = mathBuf.toString().replace("`", "");
-            newItems.add(new ASTEquation(script, "EH_FONT"));
-        }
+        flushItalicMathBuf(mathBuf, mathRuns, newItems);
 
         items.clear();
         items.addAll(newItems);
+    }
+
+    /**
+     * 이탤릭 수학 버퍼를 ASTEquation으로 변환.
+     * EH 폰트 런이 있으면 EHFontEquationConverter로 파이프라인 처리,
+     * 없으면 raw 텍스트에서 backtick 제거 후 수식으로 사용.
+     */
+    private static void flushItalicMathBuf(StringBuilder mathBuf, List<IDMLCharacterRun> mathRuns,
+                                            List<ASTInlineItem> out) {
+        if (mathBuf.length() == 0) return;
+
+        // EH 폰트 런이 있으면 EH 변환 파이프라인 사용
+        boolean hasEH = false;
+        for (IDMLCharacterRun cr : mathRuns) {
+            if (cr.fontFamily() != null && EHFontGlyphMap.isEHFontFamily(cr.fontFamily())) {
+                hasEH = true;
+                break;
+            }
+        }
+        String script;
+        if (hasEH && mathRuns.size() > 0) {
+            script = EHFontEquationConverter.convert(mathRuns);
+        } else {
+            script = null;
+        }
+        if (script == null || script.isEmpty()) {
+            // EH 변환 실패 → raw 텍스트에서 backtick 제거
+            script = mathBuf.toString().replace("`", "");
+        }
+        if (!script.isEmpty()) {
+            out.add(new ASTEquation(script, "EH_FONT"));
+        }
+        mathBuf.setLength(0);
+        mathRuns.clear();
     }
 
     /** 이탤릭 수학 런 판별: Italic 또는 EH수식 폰트 + 라틴 알파벳/숫자/수학 기호만 포함 */
