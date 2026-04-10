@@ -12,6 +12,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHGrepFractionConverter;
+import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
@@ -540,15 +541,20 @@ public final class StoryConverter {
                                         anchorIdx++;
                                         continue;
                                     }
-                                    // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
-                                    // (rendered badge는 tryInlineTextFrameAsRun에서 건너뛰고 loadInlineObject로 PNG 로드)
-                                    ASTTextRun textRun = tryInlineTextFrameAsRun(ctx, domId);
-                                    if (textRun != null) {
-                                        para.addItem(textRun);
+                                    // 분수 구조 인라인 TextFrame(2단락) → 수식으로 변환
+                                    ASTEquation fracEq = tryInlineFractionAsEquation(ctx, domId);
+                                    if (fracEq != null) {
+                                        para.addItem(fracEq);
                                     } else {
-                                        ASTInlineObject inlineObj = loadInlineObject(ctx, domId);
-                                        if (inlineObj != null) {
-                                            para.addItem(inlineObj);
+                                        // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환
+                                        ASTTextRun textRun = tryInlineTextFrameAsRun(ctx, domId);
+                                        if (textRun != null) {
+                                            para.addItem(textRun);
+                                        } else {
+                                            ASTInlineObject inlineObj = loadInlineObject(ctx, domId);
+                                            if (inlineObj != null) {
+                                                para.addItem(inlineObj);
+                                            }
                                         }
                                     }
                                 } catch (Exception e) { /* skip */ }
@@ -1931,6 +1937,70 @@ public final class StoryConverter {
      * PNG 이미지 대신 ASTTextRun으로 변환 (줄간격 영향 없음, 폰트 매핑 가능).
      * @return ASTTextRun (텍스트로 변환됨) 또는 null (PNG 변환 필요)
      */
+    /**
+     * 인라인 TextFrame이 분수 구조(2 paragraphs = 분자/분모)이면 ASTEquation으로 변환.
+     * @return ASTEquation 또는 null (분수가 아님)
+     */
+    private static kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation tryInlineFractionAsEquation(
+            ResolvedBuildContext ctx, int anchoredObjectId) {
+        String domId = String.valueOf(anchoredObjectId);
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+        if (tf == null || !tf.isInline()) return null;
+        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
+
+        // 2개 단락 = 분수 구조 (frameParaTexts[0]=분자, [1]=분모)
+        ResolvedStory rs = (tf.storyId() != null) ? ctx.resolvedData.getStory(tf.storyId()) : null;
+        if (rs == null || rs.paragraphs().size() != 2) return null;
+
+        // 각 단락의 텍스트 수집 (EH 수식 폰트 포함)
+        String numerator = collectParagraphEquationText(rs.paragraphs().get(0));
+        String denominator = collectParagraphEquationText(rs.paragraphs().get(1));
+        if (numerator == null || denominator == null) return null;
+        numerator = numerator.trim();
+        denominator = denominator.trim();
+        if (numerator.isEmpty() || denominator.isEmpty()) return null;
+
+        // EH 수식 런이 포함되어 있으면 EH 변환 파이프라인으로 처리
+        String numScript = convertRunsToHwpScript(rs.paragraphs().get(0));
+        String denomScript = convertRunsToHwpScript(rs.paragraphs().get(1));
+        if (numScript == null) numScript = numerator;
+        if (denomScript == null) denomScript = denominator;
+
+        String hwpScript = "{" + numScript + "} over {" + denomScript + "}";
+        return new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(hwpScript, "EH_FONT");
+    }
+
+    private static String collectParagraphEquationText(ResolvedParagraph rp) {
+        if (rp.runs() == null || rp.runs().isEmpty()) return null;
+        StringBuilder sb = new StringBuilder();
+        for (ResolvedRun r : rp.runs()) {
+            if (r.text() != null) sb.append(r.text());
+        }
+        return sb.toString();
+    }
+
+    private static String convertRunsToHwpScript(ResolvedParagraph rp) {
+        if (rp.runs() == null || rp.runs().isEmpty()) return null;
+        boolean hasEH = false;
+        for (ResolvedRun r : rp.runs()) {
+            if (r.fontFamily() != null && EHFontGlyphMap.isEHFontFamily(r.fontFamily())) {
+                hasEH = true;
+                break;
+            }
+        }
+        if (!hasEH) return null;
+
+        // EH 런을 IDMLCharacterRun으로 변환하여 EHFontEquationConverter로 처리
+        List<IDMLCharacterRun> ehRuns = new ArrayList<>();
+        for (ResolvedRun r : rp.runs()) {
+            IDMLCharacterRun cr = new IDMLCharacterRun();
+            cr.content(r.text());
+            cr.fontFamily(r.fontFamily());
+            ehRuns.add(cr);
+        }
+        return EHFontEquationConverter.convert(ehRuns);
+    }
+
     private static ASTTextRun tryInlineTextFrameAsRun(ResolvedBuildContext ctx, int anchoredObjectId) {
         String domId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
@@ -2323,7 +2393,7 @@ public final class StoryConverter {
     /**
      * 이탤릭 TextRun을 인라인 수식(ASTEquation)으로 변환.
      * 한컴 수식 에디터가 변수=이탤릭, 괄호/연산자=정체를 자동 처리.
-     * 대상: fontStyle이 Italic이고, 라틴 알파벳+수학 기호로만 구성된 런.
+     * 연속된 이탤릭 수학 런은 하나의 수식으로 합쳐서 변환.
      */
     private static void convertItalicRunsToEquations(ASTParagraph para) {
         List<ASTInlineItem> items = para.items();
@@ -2339,35 +2409,76 @@ public final class StoryConverter {
         if (!hasTarget) return;
 
         List<ASTInlineItem> newItems = new ArrayList<>();
-        for (ASTInlineItem item : items) {
+        StringBuilder mathBuf = new StringBuilder();
+
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
             if (item instanceof ASTTextRun && isItalicMathRun((ASTTextRun) item)) {
-                ASTTextRun run = (ASTTextRun) item;
-                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation eq =
-                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation(
-                                run.text(), "EH_FONT");
-                newItems.add(eq);
+                mathBuf.append(((ASTTextRun) item).text());
+            } else if (item instanceof ASTTextRun && mathBuf.length() > 0) {
+                // 수식 버퍼가 열려있을 때 backtick/thin space 등 짧은 비수식 런은 흡수
+                String t = ((ASTTextRun) item).text();
+                if (t != null && t.length() <= 2 && !t.isEmpty()) {
+                    boolean allSkippable = true;
+                    for (int ci = 0; ci < t.length(); ci++) {
+                        char c = t.charAt(ci);
+                        if (c != '`' && c != ' ' && c != '\u2009' && c != '\u2005') {
+                            allSkippable = false; break;
+                        }
+                    }
+                    if (allSkippable) continue; // backtick/space 스킵
+                }
+                // 수학 버퍼 flush + 일반 텍스트 추가
+                String script = mathBuf.toString().replace("`", "");
+                newItems.add(new ASTEquation(script, "EH_FONT"));
+                mathBuf.setLength(0);
+                newItems.add(item);
+            } else if (item instanceof ASTEquation) {
+                // 기존 수식도 연속 이탤릭 버퍼에 합침
+                mathBuf.append(((ASTEquation) item).hwpScript());
             } else {
+                // 수학 버퍼 flush
+                if (mathBuf.length() > 0) {
+                    String script = mathBuf.toString().replace("`", "");
+                    newItems.add(new ASTEquation(script, "EH_FONT"));
+                    mathBuf.setLength(0);
+                }
                 newItems.add(item);
             }
         }
+        // 마지막 버퍼 flush
+        if (mathBuf.length() > 0) {
+            String script = mathBuf.toString().replace("`", "");
+            newItems.add(new ASTEquation(script, "EH_FONT"));
+        }
+
         items.clear();
         items.addAll(newItems);
     }
 
-    /** 이탤릭 수학 런 판별: Italic + 라틴 알파벳/숫자/수학 기호만 포함 */
+    /** 이탤릭 수학 런 판별: Italic 또는 EH수식 폰트 + 라틴 알파벳/숫자/수학 기호만 포함 */
     private static boolean isItalicMathRun(ASTTextRun tr) {
-        String fs = tr.fontStyle();
-        if (fs == null || !fs.toLowerCase().contains("italic")) return false;
         String text = tr.text();
-        if (text == null || text.length() < 2) return false;
+        if (text == null || text.isEmpty()) return false;
         // 한국어가 포함되면 수식이 아님
-        boolean hasLatin = false;
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (c >= 0xAC00 && c <= 0xD7AF) return false; // 한국어
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) hasLatin = true;
+            if (c >= 0xAC00 && c <= 0xD7AF) return false;
         }
-        return hasLatin;
+        // Italic fontStyle
+        String fs = tr.fontStyle();
+        boolean isItalic = fs != null && fs.toLowerCase().contains("italic");
+        // EH 수식 폰트 (이탤릭 여부와 무관하게 수식으로 변환)
+        String ff = tr.fontFamily();
+        boolean isEHFont = ff != null && EHFontGlyphMap.isEHFontFamily(ff);
+        if (!isItalic && !isEHFont) return false;
+        // EH 폰트 런은 길이와 무관하게 수식으로 간주 (backtick, 연산자 포함)
+        if (isEHFont) return true;
+        // 이탤릭 런: 2자 이상이면 수식으로 간주
+        if (text.length() >= 2) return true;
+        // 단일 문자: 알파벳이면 수식 변수
+        char c0 = text.charAt(0);
+        return (c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z');
     }
 
 }

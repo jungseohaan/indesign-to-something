@@ -90,6 +90,12 @@ public class EHTokenizer {
                         String translated = text.replace('{', '(').replace('}', ')')
                                 .replace("[", "lbrace ").replace("]", " rbrace");
                         tokens.add(new EHToken(EHToken.Type.BASE_TEXT, translated));
+                    } else if (EHFontGlyphMap.containsEHFractionPattern(text)) {
+                        // ;...; 분수 패턴 + 괄호 혼합 (예: ";2!;}" → 분수 + 닫기 괄호)
+                        // { } [ ] 를 괄호로 치환 후 분수 분리
+                        String translated = text.replace('{', '(').replace('}', ')')
+                                .replace("[", "lbrace ").replace("]", " rbrace");
+                        tokenizeGrepFractions(translated, tokens);
                     } else {
                         tokens.add(new EHToken(EHToken.Type.SQRT_MARKER, text));
                     }
