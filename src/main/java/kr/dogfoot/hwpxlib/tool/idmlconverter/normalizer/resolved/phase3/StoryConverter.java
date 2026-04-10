@@ -750,12 +750,28 @@ public final class StoryConverter {
                 }
             }
         }
-        // baselineShift: InDesign pt → HWPX % (fontSize 기준)
-        if (rr != null && rr.baselineShift() != null && rr.baselineShift() != 0) {
-            double bsPt = rr.baselineShift();
-            double fs = (rr.fontSize() != null && rr.fontSize() > 0) ? rr.fontSize() : 10.0;
-            short bsPct = (short) Math.round((bsPt / fs) * 100);
-            tr.baselineShift(bsPct);
+        // baselineShift: InDesign에서 작은 글자 + 양수 baselineShift = 위첨자,
+        // 작은 글자 + 음수 baselineShift = 아래첨자 패턴을 감지하여 sup/subscript로 변환
+        // resolved 우선, IDML CR fallback
+        Double bsVal = (rr != null && rr.baselineShift() != null && rr.baselineShift() != 0)
+                ? rr.baselineShift()
+                : (cr.baselineShift() != null && cr.baselineShift() != 0 ? cr.baselineShift() : null);
+        if (bsVal != null) {
+            double bsPt = bsVal;
+            // 인접 런의 fontSize 비교: 현재 런이 주변보다 작으면 첨자로 판별
+            double curFs = (rr != null && rr.fontSize() != null && rr.fontSize() > 0) ? rr.fontSize()
+                    : (cr.fontSize() != null && cr.fontSize() > 0) ? cr.fontSize() : 10.0;
+            double baseFs = (sc.fontSize != null && sc.fontSize > 0) ? sc.fontSize : 10.0;
+            boolean isSmallerFont = curFs < baseFs * 0.75; // 75% 이하면 첨자
+            if (isSmallerFont && bsPt > 0) {
+                tr.superscript(true); // 위첨자
+            } else if (isSmallerFont && bsPt < 0) {
+                tr.subscript(true); // 아래첨자
+            } else {
+                // 일반 기선 이동
+                short bsPct = (short) Math.round((bsPt / curFs) * 100);
+                tr.baselineShift(bsPct);
+            }
         }
         // resolved에서만 가져오는 보조 속성: fontStyle / horizontalScale / underline / strikeThrough
         // (fontFamily/fontSize/textColor는 위쪽에서 RunPropertyResolver로 이미 처리됨)
