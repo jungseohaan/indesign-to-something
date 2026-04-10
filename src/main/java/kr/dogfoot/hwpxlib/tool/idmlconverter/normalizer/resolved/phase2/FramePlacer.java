@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
@@ -31,10 +32,19 @@ public final class FramePlacer {
             if (tf.isInline()) {
                 if (!ctx.resolvedData.isEditableTextFrame(tf.id())) {
                     String vis = tf.frameVisibleText();
-                    boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 5;
+                    boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 1;
                     int domIdInt = -1;
                     try { domIdInt = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
+                    // badge_group_child는 badge PNG에 텍스트가 포함되지 않으므로 rendered 취급 안 함
                     boolean rendered = domIdInt >= 0 && ctx.resolvedData.isRenderedByOtherChannel(domIdInt);
+                    if (rendered && domIdInt >= 0) {
+                        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                            if (rg.id() == domIdInt && "badge_group_child".equals(rg.itemType())) {
+                                rendered = false;
+                                break;
+                            }
+                        }
+                    }
                     boolean sharedWithEditable = false;
                     if (tf.storyId() != null) {
                         for (ResolvedTextFrame other : frames) {
