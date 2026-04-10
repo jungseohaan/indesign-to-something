@@ -2897,6 +2897,19 @@ function collectParagraphStyles(doc) {
                     }
                 }
             } catch (e) {}
+            // GREP 스타일 수집
+            try {
+                var gs = ps.nestedGrepStyles;
+                if (gs && gs.length > 0) {
+                    data.grepStyles = [];
+                    for (var g = 0; g < gs.length; g++) {
+                        var gd = {};
+                        try { gd.pattern = gs[g].grepExpression; } catch (e) {}
+                        try { gd.charStyle = gs[g].appliedCharacterStyle.name; } catch (e) {}
+                        if (gd.pattern) data.grepStyles.push(gd);
+                    }
+                }
+            } catch (e) {}
             styles.push(data);
         } catch (e) {
             styles.push({ name: ps.name, error: e.message });
@@ -3136,31 +3149,89 @@ function splitRunByStoryChars(story, rng, runData, para) {
             return a.color === b.color && a.size === b.size && a.font === b.font && a.style === b.style;
         }
 
-        // 빠른 체크: 여러 샘플 포인트 비교 (GREP 이탤릭 등 중간 구간 감지)
+        // ParagraphStyle에 GREP 스타일이 있으면 빠른 체크 건너뛰고 바로 이진 탐색
+        var hasGrepStyles = false;
+        try {
+            var ngs = para.appliedParagraphStyle.nestedGrepStyles;
+            if (ngs && ngs.length > 0) hasGrepStyles = true;
+        } catch (e3) {}
+        // 디버그
+        if (runText.indexOf("2x-3y") >= 0) {
+            var dbgFile2 = File(Folder.temp + "/grep_dbg.txt");
+            dbgFile2.open("w");
+            dbgFile2.write("hasGrepStyles=" + hasGrepStyles + "\n");
+            try {
+                var ps2 = para.appliedParagraphStyle;
+                dbgFile2.write("styleName=" + ps2.name + "\n");
+                dbgFile2.write("nestedGrepStyles exists=" + (ps2.nestedGrepStyles != undefined) + "\n");
+                dbgFile2.write("nestedGrepStyles length=" + ps2.nestedGrepStyles.length + "\n");
+                for (var gi = 0; gi < Math.min(3, ps2.nestedGrepStyles.length); gi++) {
+                    dbgFile2.write("  grep[" + gi + "] pattern=" + ps2.nestedGrepStyles[gi].grepExpression + "\n");
+                }
+            } catch (e4) {
+                dbgFile2.write("error: " + e4.message + "\n");
+            }
+            dbgFile2.close();
+        }
+
         var firstProps = getCharProps(rngStart);
-        var lastProps = getCharProps(rngStart + rngLen - 1);
-        var midProps = rngLen > 2 ? getCharProps(rngStart + Math.floor(rngLen / 2)) : firstProps;
-        // 추가 샘플: 1/4, 3/4 지점 + 첫 번째 비공백 문자
-        var allSame = propsEqual(firstProps, lastProps) && propsEqual(firstProps, midProps);
-        if (allSame && rngLen > 4) {
-            var q1Props = getCharProps(rngStart + Math.floor(rngLen / 4));
-            var q3Props = getCharProps(rngStart + Math.floor(rngLen * 3 / 4));
-            if (!propsEqual(firstProps, q1Props) || !propsEqual(firstProps, q3Props)) {
-                allSame = false;
+        var allSame = false;
+        if (!hasGrepStyles) {
+            // GREP 없는 경우에만 빠른 체크 (3점 + 1/4, 3/4)
+            var lastProps = getCharProps(rngStart + rngLen - 1);
+            var midProps = rngLen > 2 ? getCharProps(rngStart + Math.floor(rngLen / 2)) : firstProps;
+            allSame = propsEqual(firstProps, lastProps) && propsEqual(firstProps, midProps);
+            if (allSame && rngLen > 4) {
+                var q1Props = getCharProps(rngStart + Math.floor(rngLen / 4));
+                var q3Props = getCharProps(rngStart + Math.floor(rngLen * 3 / 4));
+                if (!propsEqual(firstProps, q1Props) || !propsEqual(firstProps, q3Props)) {
+                    allSame = false;
+                }
             }
         }
-        // 첫 번째 알파벳/숫자 문자도 샘플 (구분자⑴⑵/탭/공백이 아닌 실제 콘텐츠)
-        if (allSame && rngLen > 2) {
-            for (var si = 0; si < Math.min(rngLen, 10); si++) {
-                var ch;
-                try { ch = para.characters[rngStart + si].contents; } catch (e3) { continue; }
-                if (ch && /[a-zA-Z0-9()+\-]/.test(ch)) {
-                    var contentProps = getCharProps(rngStart + si);
-                    if (!propsEqual(firstProps, contentProps)) {
-                        allSame = false;
-                    }
-                    break;
+        // GREP 있고 빠른 체크 실패 → 순차 스캔으로 경계 찾기
+        if (!allSame && hasGrepStyles && rngLen > 1) {
+            var grepBoundaries = [];
+            var prevProps = getCharProps(rngStart);
+            for (var gi = 1; gi < rngLen; gi++) {
+                var curProps = getCharProps(rngStart + gi);
+                if (!propsEqual(prevProps, curProps)) {
+                    grepBoundaries.push(gi);
                 }
+                prevProps = curProps;
+            }
+            if (grepBoundaries.length > 0) {
+                // 세그먼트별 런 생성
+                var fullText2 = runData.text || "";
+                var useSlice2 = (fullText2.length === rngLen);
+                var starts2 = [0];
+                for (var gb = 0; gb < grepBoundaries.length; gb++) starts2.push(grepBoundaries[gb]);
+                var ends2 = [];
+                for (var gb2 = 0; gb2 < grepBoundaries.length; gb2++) ends2.push(grepBoundaries[gb2]);
+                ends2.push(rngLen);
+
+                var result2 = [];
+                for (var gs2 = 0; gs2 < starts2.length; gs2++) {
+                    var gS = starts2[gs2], gE = ends2[gs2];
+                    var gProps = getCharProps(rngStart + gS);
+                    var gText = useSlice2 ? fullText2.substring(gS, gE) : "";
+                    if (!useSlice2) {
+                        for (var gci = gS; gci < gE; gci++) {
+                            try { gText += para.characters[rngStart + gci].contents; } catch (e) {}
+                        }
+                    }
+                    if (gText.length > 0) {
+                        var gRun = {};
+                        for (var gk in runData) { if (runData.hasOwnProperty(gk)) gRun[gk] = runData[gk]; }
+                        gRun.text = gText;
+                        gRun.fillColor = gProps.color;
+                        if (gProps.size) gRun.fontSize = gProps.size;
+                        if (gProps.font) gRun.fontFamily = gProps.font;
+                        if (gProps.style) gRun.fontStyle = gProps.style;
+                        result2.push(gRun);
+                    }
+                }
+                return result2.length > 0 ? result2 : [runData];
             }
         }
         if (allSame) {

@@ -682,6 +682,20 @@ public final class StoryConverter {
         String resolvedFontFamily = RunPropertyResolver.resolveFontFamilyWithConfidence(
                 rr, cr, sc.fontFamily, text, confidence);
         if (resolvedFontFamily != null) {
+            // EH/BT/NP 수식 전용 폰트가 일반 텍스트(수식 그룹 밖)에 적용된 경우
+            // → 이탤릭이면 Times New Roman (수식 변수 스타일), 아니면 ParagraphStyle 기본 폰트
+            if (EHFontGlyphMap.isEHFontFamily(resolvedFontFamily)
+                    || resolvedFontFamily.contains("BT수식")
+                    || resolvedFontFamily.startsWith("NP_")) {
+                String rrStyle = (rr != null && rr.fontStyle() != null) ? rr.fontStyle().toLowerCase() : "";
+                if (rrStyle.contains("italic")) {
+                    // 수식 변수 이탤릭: ParagraphStyle 기본 폰트를 유지하되
+                    // fontStyle=Italic으로 이탤릭 적용 (charPr에서 처리)
+                    resolvedFontFamily = sc.fontFamily;
+                } else {
+                    resolvedFontFamily = sc.fontFamily;
+                }
+            }
             tr.fontFamily(resolvedFontFamily);
         }
         Integer resolvedFontSize = RunPropertyResolver.resolveFontSizeHwpunitsWithConfidence(
@@ -737,12 +751,13 @@ public final class StoryConverter {
         // (fontFamily/fontSize/textColor는 위쪽에서 RunPropertyResolver로 이미 처리됨)
         if (rr != null) {
             if (rr.fontStyle() != null) {
+                String rrStyle = rr.fontStyle().toLowerCase();
+                boolean isItalic = rrStyle.contains("italic") || rrStyle.contains("oblique");
                 boolean isEHorBT = rr.fontFamily() != null
                         && (EHFontGlyphMap.isEHFontFamily(rr.fontFamily()) || rr.fontFamily().contains("BT수식"));
-                boolean isSingleLatin = text != null && text.trim().length() == 1
-                        && Character.isLetter(text.trim().charAt(0));
-                if (!isEHorBT || isSingleLatin) {
-                    // resolved fontStyle 우선 (GREP/중첩 스타일 반영 — IDML은 미반영)
+                // EH/BT 수식 폰트라도 Italic이면 적용 (GREP 이탤릭 스타일)
+                // 숫자 전용 fontStyle(예: "30")은 무시
+                if (!isEHorBT || isItalic) {
                     tr.fontStyle(rr.fontStyle());
                 }
             }

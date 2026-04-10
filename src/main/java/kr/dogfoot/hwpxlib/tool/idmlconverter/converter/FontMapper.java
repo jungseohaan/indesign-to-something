@@ -400,9 +400,14 @@ public class FontMapper {
         if (keywordMatch != null) {
             // DEFAULT_SERIF/DEFAULT_SANS → config 기본 폰트로 교체
             String ko = keywordMatch;
-            if (DEFAULT_SERIF.equals(ko)) ko = configSerifKo;
+            boolean isSerif = DEFAULT_SERIF.equals(ko);
+            if (isSerif) ko = configSerifKo;
             else if (DEFAULT_SANS.equals(ko)) ko = configSansKo;
-            String en = isWestern ? DEFAULT_LATIN_SANS : ko;
+            // 영문 폰트: 세리프 → Times New Roman, 산세리프 → Arial, 서양 폰트 → 산세리프
+            String en;
+            if (isWestern) en = DEFAULT_LATIN_SANS;
+            else if (isSerif) en = configSerifEn;
+            else en = ko;
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" (style=" + fontStyle + ") → ko=\"" + ko + "\" en=\"" + en + "\" (키워드매핑)");
             return new MappingResult(ko, en, 0);
         }
