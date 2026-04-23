@@ -205,6 +205,17 @@ public class HwpxParagraphBuilder {
         // anchoredPosition이 있는 앵커 객체는 펼치지 않음
         String ap = obj.anchoredPosition();
         if (ap != null && !"InlinePosition".equals(ap)) return false;
+        // 공백만 있는 인라인 TextFrame(빈칸박스)은 단어 사이 간격을 확보해야 하므로
+        // 납작화하지 않음 — 실제 폭을 가진 인라인 박스로 렌더링해서
+        // 배경 PNG 위에 그려진 빈칸 밑줄과 위치를 맞춘다.
+        ASTParagraph innerParaW = obj.paragraphs().get(0);
+        boolean onlyWhitespace = !innerParaW.items().isEmpty();
+        for (ASTInlineItem item : innerParaW.items()) {
+            if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) { onlyWhitespace = false; break; }
+            String t = ((ASTTextRun) item).text();
+            if (t == null || !t.trim().isEmpty()) { onlyWhitespace = false; break; }
+        }
+        if (onlyWhitespace && obj.width() >= 800) return false; // 8pt 이상 공백 박스
         // 프레임 폭이 텍스트 내용 대비 과도하게 크면 펼치지 않음
         // (숫자 배지 등 시각적 간격을 제공하는 컨테이너)
         if (obj.width() > 1500) {

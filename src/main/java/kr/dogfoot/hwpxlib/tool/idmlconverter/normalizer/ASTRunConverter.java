@@ -196,6 +196,11 @@ public class ASTRunConverter {
             if (domId > 0) {
                 for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
                     if (rg.id() == domId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
+                        // 자손 TextFrame이 텍스트를 가지고 플로팅 텍스트박스로 배치되면
+                        // PNG 로드 시 이미지+글상자로 중복됨 → 스킵.
+                        if (inlineObjectContainsFloatingTextFrame(domId, resolvedData)) {
+                            return;
+                        }
                         ASTInlineObject inlineImg = loadRenderedGroupAsInlineImage(ig, rg, null, resolvedData);
                         if (inlineImg != null) {
                             para.addItem(inlineImg);
@@ -377,6 +382,45 @@ public class ASTRunConverter {
      * true이면 자손 deco가 orphan 주입에서 배치되므로 인라인 이미지 생성을 생략해야 함.
      * 자기 자신이 deco인 경우는 텍스트 흐름에 인라인으로 남아야 하므로 차단하지 않음.
      */
+    /**
+     * inline_object PNG 대상 ID의 자손 TextFrame 중에 텍스트를 가지면서
+     * FramePlacer에서 플로팅 텍스트박스로 배치될 것이 있는지 확인한다.
+     * true이면 inline_object PNG를 스킵해야 이미지+글상자 중복을 피할 수 있다.
+     */
+    private static boolean inlineObjectContainsFloatingTextFrame(int anchorDomId,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolvedData) {
+        String anchorStr = String.valueOf(anchorDomId);
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame childTf : resolvedData.textFrames()) {
+            // childTf가 anchor의 자손인지 확인
+            String curId = childTf.id();
+            boolean isDescendant = false;
+            for (int depth = 0; depth < 8 && curId != null; depth++) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem pi = resolvedData.getPageItem(curId);
+                if (pi == null) break;
+                String parentId = pi.parentId();
+                if (parentId == null) break;
+                if (anchorStr.equals(parentId)) { isDescendant = true; break; }
+                curId = parentId;
+            }
+            if (!isDescendant) continue;
+            String vt = childTf.frameVisibleText();
+            boolean hasText = vt != null
+                    && vt.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 1;
+            if (!hasText) continue;
+            // SPEC-020: 빈 컨테이너(fill=None, stroke=None)는 PNG 안의 시각적 배경 위에
+            // 텍스트를 오버레이하는 입력란이므로 PNG 폐기 대상이 아님.
+            String fc = childTf.fillColor();
+            String sc = childTf.strokeColor();
+            boolean emptyContainer = (fc == null || fc.isEmpty() || "None".equals(fc) || fc.contains("[None]"))
+                    && (sc == null || sc.isEmpty() || "None".equals(sc) || sc.contains("[None]"));
+            if (emptyContainer) continue;
+            if (resolvedData.isEditableTextFrame(childTf.id()) || childTf.isInline()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean hasRenderedGraphicDescendant(IDMLCharacterRun.InlineGraphic ig,
                                                          kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolvedData) {
         // 자기 자신은 체크하지 않음 — 자손만 확인
@@ -908,6 +952,11 @@ public class ASTRunConverter {
             // rendered bounds X 좌표 저장 (인라인 객체 정렬용)
             if (rg.bounds() != null && rg.bounds().length >= 4) {
                 obj.boundsX(rg.bounds()[1]);
+                // SPEC-020: 페이지 절대 좌표 기록 — 같은 셀에 여러 인라인이 있을 때
+                // cellX/cellY fallback 으로 겹치는 문제 방지.
+                double scale = resolvedData != null ? resolvedData.scaleFactor() : 1.0;
+                obj.resolvedPageX(CoordinateConverter.pointsToHwpunits(rg.bounds()[1] * scale));
+                obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(rg.bounds()[0] * scale));
             }
 
             obj.anchoredPosition(ig.anchoredPosition());

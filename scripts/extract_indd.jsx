@@ -294,6 +294,12 @@ function main(args) {
         }
         doc = app.open(inddFile, false);
 
+        // 눈금자 원점을 SPREAD로 고정 (geometricBounds가 스프레드 전역 좌표가 되도록).
+        // 문서별로 PAGE_ORIGIN/SPREAD_ORIGIN이 달라 pageRelativeBounds 계산이 음수가 되는 현상 방지.
+        try {
+            doc.viewPreferences.rulerOrigin = RulerOrigin.SPREAD_ORIGIN;
+        } catch (eRuler) {}
+
         // 1.5. 링크 업데이트 (페이지 렌더링 전에 원본 이미지 연결)
         try {
             var inddParent = File(inddPath).parent;
@@ -744,11 +750,14 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                 bounds[3] -= pageBounds[1];
             }
 
+            // InDesign allPageItems 순서: index 0 = 맨 앞. 큰 값일수록 뒤.
+            // HWPX zOrder와 방향이 반대이므로 Phase7에서 역매핑.
             var entry = {
                 id: domId,
                 file: "rendered_frames/" + fileName,
                 bounds: bounds,
-                pageIndex: parentPage.documentOffset
+                pageIndex: parentPage.documentOffset,
+                zOrder: i
             };
             renderedFrames.push(entry);
             renderedIds[domId] = entry;
@@ -758,7 +767,8 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                     id: item.id,
                     file: "rendered_frames/" + fileName,
                     bounds: bounds,
-                    pageIndex: parentPage.documentOffset
+                    pageIndex: parentPage.documentOffset,
+                    zOrder: i
                 });
             }
         } catch (e) {}
@@ -2494,7 +2504,16 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                 var noneSwatch = null;
                 try { noneSwatch = doc.swatches.itemByName("None"); } catch (eNone) {}
                 try {
-                    if (inItem.constructor.name === "Group" && noneSwatch && noneSwatch.isValid) {
+                    // SPEC-020: Group 뿐 아니라 Rectangle/Polygon/Oval 컨테이너 안의
+                    // TextFrame 텍스트도 PNG 렌더링 시 숨김 — 텍스트는 변환 결과에서
+                    // 별도 오버레이되므로 PNG에 같이 그려지면 이중 렌더링이 발생한다.
+                    var containerType = inItem.constructor.name;
+                    var shouldHideText = (containerType === "Group"
+                            || containerType === "Rectangle"
+                            || containerType === "Polygon"
+                            || containerType === "Oval")
+                            && noneSwatch && noneSwatch.isValid;
+                    if (shouldHideText) {
                         var groupItems = inItem.allPageItems;
                         for (var gki = 0; gki < groupItems.length; gki++) {
                             var gki_it = groupItems[gki];
@@ -2579,6 +2598,8 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
     } catch (ePdfPref) {}
 
     // renderable TF와 부모 객체도 배경에서 숨김 대상에 추가
+    // 단, 부모가 Group이고 여러 형제가 있으면 Group 전체를 숨기면 배경 도형이 사라지므로
+    // 작은 래퍼 도형(Rectangle/Polygon/Oval)에 한해 부모 숨김을 수행한다.
     var renderableItems = [];
     for (var ri2 = 0; ri2 < allItems.length; ri2++) {
         try {
@@ -2586,13 +2607,14 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                 var cls2 = classifyTextFrame(allItems[ri2]);
                 if (cls2 === "renderable") {
                     renderableItems.push(allItems[ri2]);
-                    // 부모 객체(배경 도형)도 숨김
                     try {
                         var rParent = allItems[ri2].parent;
-                        if (rParent && rParent.constructor.name !== "Story"
-                            && rParent.constructor.name !== "Spread"
-                            && rParent.constructor.name !== "Page") {
-                            renderableItems.push(rParent);
+                        if (rParent) {
+                            var rParentName = rParent.constructor.name;
+                            if (rParentName === "Rectangle" || rParentName === "Polygon"
+                                || rParentName === "Oval" || rParentName === "GraphicLine") {
+                                renderableItems.push(rParent);
+                            }
                         }
                     } catch (e) {}
                 }
@@ -2619,6 +2641,16 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                 && allItems[ai].parentStory
                 && editableStoryIds[allItems[ai].parentStory.id]) {
                 framesToHide.push(allItems[ai]);
+            }
+        } catch (e) {}
+    }
+    // 배지 그룹은 별도 PNG로 렌더링되어 위에 덮어씌워지므로 배경에서 숨김
+    // (숨기지 않으면 배지가 배경에도 남고 덮어씌운 배지가 중복 표시됨)
+    for (var bi = 0; bi < allItems.length; bi++) {
+        try {
+            var bItem = allItems[bi];
+            if (bItem.constructor.name === "Group" && isBadgeGroup(bItem)) {
+                framesToHide.push(bItem);
             }
         } catch (e) {}
     }
@@ -3453,12 +3485,43 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
             } catch (e) {}
 
             // textStyleRanges 사용 (성능 최적화 — architecture.md 섹션 10)
+            //
+            // 주의: 하나의 CharacterStyleRange가 여러 단락(<Br/>)에 걸쳐 있는 경우,
+            // `rng.contents`는 전체 범위의 텍스트를 반환한다(현재 단락 이후 텍스트까지 포함).
+            // → 단락 경계로 범위를 자른 뒤 `contents`도 잘라서 사용한다.
+            var paraStartIdx = -1, paraEndIdx = -1;
+            try {
+                var paraChars = para.characters;
+                if (paraChars.length > 0) {
+                    paraStartIdx = paraChars[0].index;
+                    paraEndIdx = paraStartIdx + paraChars.length; // exclusive
+                }
+            } catch (e) {}
             try {
                 var ranges = para.textStyleRanges.everyItem().getElements();
                 for (var r = 0; r < ranges.length; r++) {
                     var rng = ranges[r];
+                    // 단락 경계 안에서만 텍스트 사용
+                    var rngText = rng.contents;
+                    try {
+                        if (paraStartIdx >= 0) {
+                            var rngChars0 = rng.characters;
+                            if (rngChars0.length > 0) {
+                                var rngStartIdx = rngChars0[0].index;
+                                var rngEndIdx = rngStartIdx + rngChars0.length;
+                                var ovStart = Math.max(paraStartIdx, rngStartIdx);
+                                var ovEnd = Math.min(paraEndIdx, rngEndIdx);
+                                if (ovStart >= ovEnd) { continue; }
+                                if (ovStart > rngStartIdx || ovEnd < rngEndIdx) {
+                                    var sliceFrom = ovStart - rngStartIdx;
+                                    var sliceLen = ovEnd - ovStart;
+                                    rngText = rngText.substring(sliceFrom, sliceFrom + sliceLen);
+                                }
+                            }
+                        }
+                    } catch (eClip) {}
                     var runData = {
-                        text: rng.contents,
+                        text: rngText,
                         fontFamily: null,
                         fontSize: null,
                         fontStyle: null,
@@ -3503,17 +3566,18 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     try { runData.underline = rng.underline; } catch (e) {}
                     try { runData.strikeThru = rng.strikeThru; } catch (e) {}
 
-                    // U+FFFC(인라인 객체 마커) 분리
+                    // U+FFFC(인라인 마커) + U+0016(블록 앵커 마커) 분리
+                    // SPEC-020: InDesign이 사용자 정의 위치/Above-Line 앵커에는 \x16 을 쓰는데
+                    // 기존 로직은 \uFFFC 만 인식해서 모든 \x16 앵커가 누락됐다.
                     var runText = runData.text || "";
-                    if (runText.indexOf("\uFFFC") >= 0) {
-                        // U+FFFC를 기준으로 텍스트 분할, 마커 위치에 inline_anchor 삽입
-                        var parts = runText.split("\uFFFC");
-                        // 인라인 객체 찾기: 이 range 내의 anchored objects
+                    if (runText.indexOf("\uFFFC") >= 0 || runText.indexOf("\u0016") >= 0) {
+                        var parts = runText.split(/[\uFFFC\u0016]/);
                         var anchoredIds = [];
                         try {
                             var rngChars = rng.characters.everyItem().getElements();
                             for (var rc = 0; rc < rngChars.length; rc++) {
-                                if (rngChars[rc].contents === "\uFFFC") {
+                                var rcContent = rngChars[rc].contents;
+                                if (rcContent === "\uFFFC" || rcContent === "\u0016") {
                                     try {
                                         var anchItems = rngChars[rc].allPageItems;
                                         if (anchItems.length > 0) {
@@ -3532,13 +3596,11 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                                 var partRun = {};
                                 for (var rk in runData) { partRun[rk] = runData[rk]; }
                                 partRun.text = parts[pi2];
-                                // GREP 스타일 보정: FFFC 분할된 텍스트 부분도 문자별 속성 확인
                                 var partSplits = splitRunByStoryChars(story, rng, partRun, para);
                                 for (var ps = 0; ps < partSplits.length; ps++) {
                                     paraData.runs.push(partSplits[ps]);
                                 }
                             }
-                            // U+FFFC 마커 (마지막 part 뒤에는 없음)
                             if (pi2 < parts.length - 1) {
                                 paraData.runs.push({
                                     type: "inline_anchor",
@@ -3653,12 +3715,93 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                                                 runData.fillColor = cellRng.fillColor.name;
                                             }
                                         } catch (er) {}
-                                        cpData.runs.push(runData);
+                                        // SPEC-020: 셀 런도 inline anchor 마커(\uFFFC/\u0016) 분리
+                                        var cellRunText = runData.text || "";
+                                        if (cellRunText.indexOf("\uFFFC") >= 0 || cellRunText.indexOf("\u0016") >= 0) {
+                                            var cellParts = cellRunText.split(/[\uFFFC\u0016]/);
+                                            var cellAnchoredIds = [];
+                                            try {
+                                                var cellRngChars = cellRng.characters.everyItem().getElements();
+                                                for (var crc = 0; crc < cellRngChars.length; crc++) {
+                                                    var crcContent = cellRngChars[crc].contents;
+                                                    if (crcContent === "\uFFFC" || crcContent === "\u0016") {
+                                                        try {
+                                                            var crcAnch = cellRngChars[crc].allPageItems;
+                                                            cellAnchoredIds.push(crcAnch.length > 0 ? crcAnch[0].id : null);
+                                                        } catch (eca) { cellAnchoredIds.push(null); }
+                                                    }
+                                                }
+                                            } catch (eca2) {}
+                                            var cellAnchorIdx = 0;
+                                            for (var cpi = 0; cpi < cellParts.length; cpi++) {
+                                                if (cellParts[cpi].length > 0) {
+                                                    var cellPartRun = {};
+                                                    for (var ck in runData) { cellPartRun[ck] = runData[ck]; }
+                                                    cellPartRun.text = cellParts[cpi];
+                                                    cpData.runs.push(cellPartRun);
+                                                }
+                                                if (cpi < cellParts.length - 1) {
+                                                    cpData.runs.push({
+                                                        type: "inline_anchor",
+                                                        anchoredObjectId: cellAnchorIdx < cellAnchoredIds.length ? cellAnchoredIds[cellAnchorIdx] : null
+                                                    });
+                                                    cellAnchorIdx++;
+                                                }
+                                            }
+                                        } else {
+                                            cpData.runs.push(runData);
+                                        }
                                     }
                                 } catch (ec2) {}
                                 cellData.paragraphs.push(cpData);
                             }
                         } catch (ec3) {}
+                        // SPEC-020: 셀 텍스트에 anchor 마커가 없어도 (IDML에 <Content>가 없고
+                        // Group이 CharacterStyleRange에 직접 임베드된 경우) cell.allPageItems
+                        // 로 fallback. 이미 paragraphs 에서 잡힌 anchor ID는 건너뛴다.
+                        try {
+                            var capturedIds = {};
+                            for (var pp = 0; pp < cellData.paragraphs.length; pp++) {
+                                var rr = cellData.paragraphs[pp].runs;
+                                for (var rr2 = 0; rr2 < rr.length; rr2++) {
+                                    if (rr[rr2].type === "inline_anchor" && rr[rr2].anchoredObjectId != null) {
+                                        capturedIds[rr[rr2].anchoredObjectId] = true;
+                                    }
+                                }
+                            }
+                            // 셀에 직접 앵커된 객체만 수집: cell.characters 를 순회하며
+                            // 각 문자의 allPageItems 에서 직접 앵커 조회. allPageItems 를
+                            // 재귀적으로 쓰면 중첩 TextFrame 내부 앵커(예: 18083)까지 끌려온다.
+                            var missedAnchors = [];
+                            try {
+                                var cellChars = cell.characters.everyItem().getElements();
+                                for (var cchi = 0; cchi < cellChars.length; cchi++) {
+                                    try {
+                                        var directAnch = cellChars[cchi].pageItems;
+                                        for (var dai = 0; dai < directAnch.length; dai++) {
+                                            var daId = directAnch[dai].id;
+                                            if (!capturedIds[daId]) {
+                                                missedAnchors.push(daId);
+                                                capturedIds[daId] = true;
+                                            }
+                                        }
+                                    } catch (edc) {}
+                                }
+                            } catch (ecc) {}
+                            if (missedAnchors.length > 0) {
+                                // 빈 단락이 없으면 하나 추가
+                                if (cellData.paragraphs.length === 0) {
+                                    cellData.paragraphs.push({ runs: [] });
+                                }
+                                var lastP = cellData.paragraphs[cellData.paragraphs.length - 1];
+                                for (var ma = 0; ma < missedAnchors.length; ma++) {
+                                    lastP.runs.push({
+                                        type: "inline_anchor",
+                                        anchoredObjectId: missedAnchors[ma]
+                                    });
+                                }
+                            }
+                        } catch (efb) {}
                         tblData.cells.push(cellData);
                     }
                 } catch (e) {}

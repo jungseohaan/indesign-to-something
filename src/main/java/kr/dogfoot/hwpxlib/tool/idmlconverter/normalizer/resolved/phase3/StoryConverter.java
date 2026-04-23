@@ -646,9 +646,9 @@ public final class StoryConverter {
                 text = text.replace("\t", " ");  // 탭 → 공백 (탭스톱 없는 경우 간격 방지)
             }
             text = text.replace("\u2009", " ");   // Thin Space → 공백
-            text = text.replace("\u2002", "");   // En Space 제거
-            text = text.replace("\u2003", "");   // Em Space 제거
-            text = text.replace("\u200A", "");   // Hair Space 제거
+            text = text.replace("\u2002", " ");  // En Space → 공백 (단어 구분자 보존)
+            text = text.replace("\u2003", " ");  // Em Space → 공백 (단어 구분자 보존)
+            text = text.replace("\u200A", "");   // Hair Space 제거 (타이포 조정용, 시각상 무의미)
             text = text.replace("\uFFE3", "~");  // Fullwidth Macron → 물결 (한글 호환)
             // EH상부자 overline marker: Ó(0xD3) → \uE000{letters}\uE001 마커로 치환
             // 단락 후처리(splitOverlineRuns)에서 ASTEquation overline{AB}로 변환
@@ -788,19 +788,11 @@ public final class StoryConverter {
                 }
             }
             // horizontalScale: IDML에 없으면 resolved에서 보강
+            // hs == vs인 비례 확대라도 fontSize를 키우면 baseline이 어긋나 보이므로
+            // ratio에만 반영한다. (예: `+` 글자만 115% 확대인 경우 위첨자처럼 보이는 현상 방지)
             if (tr.horizontalScale() == null && rr.horizontalScale() != null
                     && rr.horizontalScale() != 0 && rr.horizontalScale() != 100) {
-                // horizontalScale == verticalScale인 경우: 비례 확대 → fontSize에 반영, ratio는 100 유지
-                Double vs = rr.verticalScale();
-                if (vs != null && Math.abs(rr.horizontalScale() - vs) < 1.0) {
-                    // 비례 확대: fontSize를 스케일 비율만큼 키움
-                    if (tr.fontSizeHwpunits() != null) {
-                        tr.fontSizeHwpunits((int) Math.round(tr.fontSizeHwpunits() * rr.horizontalScale() / 100.0));
-                    }
-                    // horizontalScale, verticalScale 모두 적용하지 않음
-                } else {
-                    tr.horizontalScale((short) rr.horizontalScale().doubleValue());
-                }
+                tr.horizontalScale((short) rr.horizontalScale().doubleValue());
             }
             // underline / strikeThrough
             if (rr.underline() != null && rr.underline()) {
@@ -1331,10 +1323,22 @@ public final class StoryConverter {
         String prevParaText = "";
         for (ResolvedParagraph rp : story.paragraphs()) {
             // 현재 단락 텍스트 추출
+            // ExtendScript에서 paragraph.textStyleRanges[k].contents가 단락 경계를
+            // 넘어 다음 단락 내용까지 포함한 경우를 대비: \r 이후 내용은 다음 단락 소속이므로 잘라냄
             StringBuilder sb = new StringBuilder();
+            boolean truncated = false;
             if (rp.runs() != null) {
                 for (ResolvedRun r : rp.runs()) {
-                    if (r.text() != null) sb.append(r.text());
+                    if (r.text() != null) {
+                        String t = r.text();
+                        int crIdx = t.indexOf('\r');
+                        if (crIdx >= 0) {
+                            sb.append(t, 0, crIdx);
+                            truncated = true;
+                            break;
+                        }
+                        sb.append(t);
+                    }
                 }
             }
             String curText = sb.toString().trim();
@@ -1347,6 +1351,8 @@ public final class StoryConverter {
                 }
             }
             prevParaText = curText;
+            // truncated=true이면 이후 run 처리에서도 \r에서 잘라서 현재 단락 경계에 맞춤
+            boolean truncateAtCR = truncated;
             ASTParagraph para = new ASTParagraph();
 
             // 단락 스타일
@@ -1382,8 +1388,10 @@ public final class StoryConverter {
             }
 
             // 런 변환 (ResolvedParagraph → runs 직접)
+            boolean stopAfterThisRun = false;
             if (rp.runs() != null) {
                 for (ResolvedRun run : rp.runs()) {
+                    if (stopAfterThisRun) break;
                     // inline_anchor: 인라인 그래픽 → ASTInlineObject로 변환
                     if (run.isInlineAnchor()) {
                         Integer anchoredId = run.anchoredObjectId();
@@ -1415,11 +1423,20 @@ public final class StoryConverter {
 
                     ASTTextRun textRun = new ASTTextRun();
                     String runText = run.text();
+                    // 단락 경계 넘김 방지: \r 이후는 다음 단락 내용 → 잘라내고 루프 종료
+                    if (truncateAtCR && runText != null) {
+                        int crIdx = runText.indexOf('\r');
+                        if (crIdx >= 0) {
+                            runText = runText.substring(0, crIdx);
+                            stopAfterThisRun = true;
+                        }
+                    }
                     // 특수 제어 문자 제거 (IDML 경로와 동일)
                     if (runText != null) {
                         runText = runText.replace("\t\u0008", "");
                         runText = runText.replace("\u0008", "");
                         runText = runText.replace("\n", "");
+                        runText = runText.replace("\r", "");
                         // overline marker: Ó(0xD3) → \uE000{letters}\uE001 마커로 치환
                         if (runText.indexOf('\u00D3') >= 0) {
                             runText = markOverlineSegments(runText);
@@ -2207,10 +2224,35 @@ public final class StoryConverter {
      * 교과서 빈칸 채우기 문제의 ( ) 안 공백 등.
      */
     private static ASTTextRun createSpaceRunForEmptyAnchor(ResolvedBuildContext ctx, int anchoredObjectId) {
-        // 빈칸 그래픽의 기본 공백: 6칸 (약 20pt 폭)
+        // SPEC-020: 빈칸박스 TextFrame(공백 내용)은 실제 bounds 폭에 맞춰 공백 수 계산
+        // + 밑줄 적용 — 배경 PNG의 "빈칸 밑줄"과 위치/길이 동조.
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredObjectId));
+        double widthPt = 20.0;
+        if (tf != null && tf.geometricBounds() != null && tf.geometricBounds().length >= 4) {
+            double[] gb = tf.geometricBounds();
+            widthPt = Math.max(0, gb[3] - gb[1]);
+        }
+        // 공백 1칸 ≈ 3pt (10.5pt 폰트 기준). 최소 4칸.
+        int spaces = Math.max(4, (int) Math.round(widthPt / 3.0));
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < spaces; i++) sb.append(' ');
         ASTTextRun run = new ASTTextRun();
-        run.text("      "); // 6 spaces
+        run.text(sb.toString());
+        run.underline(true);
         return run;
+    }
+
+    private static boolean isNoneColor(String c) {
+        return c == null || c.isEmpty() || "None".equals(c) || c.contains("[None]");
+    }
+
+    /**
+     * SPEC-020: 빈 컨테이너 = fill/stroke 모두 None 인 inline TextFrame.
+     * 이런 프레임은 PNG 안에 그려진 일러스트/외곽선의 텍스트 입력란이므로
+     * inline_object PNG 로드 결정에서 "텍스트 중복" 폐기 사유로 보지 않는다.
+     */
+    private static boolean isEmptyContainer(ResolvedTextFrame tf) {
+        return isNoneColor(tf.fillColor()) && isNoneColor(tf.strokeColor());
     }
 
     /**
@@ -2219,9 +2261,52 @@ public final class StoryConverter {
     private static ASTInlineObject loadInlineObject(ResolvedBuildContext ctx, int anchoredObjectId) {
         if (ctx.basePath == null) return null;
 
-        // renderedFloatingItems에서 해당 ID의 inline_object 찾기
+        // 자식/자손 TextFrame이 플로팅 텍스트박스로 배치될 예정이면
+        // inline_object PNG를 로드하지 않는다 (이미지 + 글상자 중복 방지).
+        // Rectangle은 childIds가 비어있고 자식이 parentId로만 참조하므로 textFrames를 훑는다.
+        String anchorIdStr = String.valueOf(anchoredObjectId);
+        for (ResolvedTextFrame childTf : ctx.resolvedData.textFrames()) {
+            // childTf의 조상 중에 anchorId가 있는지 확인
+            boolean isDescendant = false;
+            String curId = childTf.id();
+            int depth = 0;
+            while (curId != null && depth < 8) {
+                ResolvedPageItem pi = ctx.resolvedData.getPageItem(curId);
+                if (pi == null) break;
+                String pid = pi.parentId();
+                if (pid == null) break;
+                if (anchorIdStr.equals(pid)) { isDescendant = true; break; }
+                curId = pid;
+                depth++;
+            }
+            if (!isDescendant) continue;
+            String vt = childTf.frameVisibleText();
+            boolean hasText = vt != null && vt.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 1;
+            if (!hasText) continue;
+            // SPEC-020: 빈 컨테이너(fill=None, stroke=None)는 텍스트 입력란이며,
+            // PNG는 그 입력란을 둘러싼 시각적 배경(일러스트/라운드 외곽선)만 담는다.
+            // 텍스트는 별도 오버레이되므로 PNG를 폐기하면 안 됨.
+            if (isEmptyContainer(childTf)) continue;
+            if (ctx.resolvedData.isEditableTextFrame(childTf.id())
+                    || childTf.isInline()) {
+                return null;
+            }
+        }
+
+        // 같은 ID가 badge_group으로도 등록되어 있으면 badge PNG를 우선 사용.
+        // (inline_object PNG는 자식 텍스트를 누락하는 경우가 있음)
+        RenderedGroup badgeGroup = null;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg.id() == anchoredObjectId && "badge_group".equals(rg.itemType())) {
+                badgeGroup = rg;
+                break;
+            }
+        }
+
+        // renderedFloatingItems에서 해당 ID의 inline_object 찾기 (badge_group이 있으면 그것으로 교체)
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType())) {
+                if (badgeGroup != null) rg = badgeGroup;
                 if (rg.file() == null) return null;
                 File pngFile = new File(ctx.basePath, rg.file());
                 if (!pngFile.exists()) return null;
@@ -2244,6 +2329,12 @@ public final class StoryConverter {
                     double[] bounds = rg.bounds();
                     if (bounds != null && bounds.length >= 4) {
                         obj.boundsX(bounds[1]); // rendered X 좌표 (인라인 정렬용)
+                        // SPEC-020: 페이지 절대 좌표 기록 — 같은 셀에 여러 인라인이 있을 때
+                        // cellX/cellY fallback 으로 겹치는 문제를 막는다.
+                        double pxPt = bounds[1] * ctx.scaleFactor;
+                        double pyPt = bounds[0] * ctx.scaleFactor;
+                        obj.resolvedPageX(CoordinateConverter.pointsToHwpunits(pxPt));
+                        obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(pyPt));
                         double bw = Math.abs(bounds[3] - bounds[1]) * ctx.scaleFactor; // right - left
                         double bh = Math.abs(bounds[2] - bounds[0]) * ctx.scaleFactor; // bottom - top
                         // PNG 비율로 보정 (bounds가 부정확한 경우)

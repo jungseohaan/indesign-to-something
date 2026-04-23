@@ -501,6 +501,8 @@ public class ResolvedDataReader {
         // PDF 배경 필드
         group.pdfFile(getString(o, "pdfFile"));
         group.pdfPageIndex(getInt(o, "pdfPageIndex", -1));
+        // z-order (InDesign allPageItems 인덱스: 0=앞, 큰 값=뒤)
+        group.zOrder(getInt(o, "zOrder", 0));
         return group;
     }
 

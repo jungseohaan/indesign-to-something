@@ -35,12 +35,19 @@ public final class FramePlacer {
                     boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 1;
                     int domIdInt = -1;
                     try { domIdInt = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
-                    // badge_group_child는 badge PNG에 텍스트가 포함되지 않으므로 rendered 취급 안 함
                     boolean rendered = domIdInt >= 0 && ctx.resolvedData.isRenderedByOtherChannel(domIdInt);
-                    if (rendered && domIdInt >= 0) {
+                    // badge_group_child의 부모 badge_group이 inline_object로도 배치되면
+                    // 해당 PNG에 텍스트가 포함되어 있으므로 플로팅 텍스트 배치 건너뜀 (중복 방지)
+                    if (!rendered && domIdInt >= 0) {
                         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
                             if (rg.id() == domIdInt && "badge_group_child".equals(rg.itemType())) {
-                                rendered = false;
+                                int parentBadgeId = rg.badgeGroupId();
+                                for (RenderedGroup prg : ctx.resolvedData.allRenderedFloatingItems()) {
+                                    if (prg.id() == parentBadgeId && "inline_object".equals(prg.itemType())) {
+                                        rendered = true;
+                                        break;
+                                    }
+                                }
                                 break;
                             }
                         }
@@ -85,6 +92,21 @@ public final class FramePlacer {
                 }
                 if (!sharedWithEditable) continue;
             }
+            // badge_group_child는 부모 badge PNG에 텍스트가 이미 포함되어 있으므로 글상자 배치 건너뜀 (중복 방지)
+            boolean skipAsBadgeChild = false;
+            {
+                int domIdInt2 = -1;
+                try { domIdInt2 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
+                if (domIdInt2 >= 0) {
+                    for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                        if (rg.id() == domIdInt2 && "badge_group_child".equals(rg.itemType())) {
+                            skipAsBadgeChild = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (skipAsBadgeChild) continue;
 
             // 연결 글상자 체인: 후속 프레임은 건너뜀 (첫 프레임에서 병합 처리)
             // 단, 체인의 프레임들이 Y 방향으로 떨어져 있으면 병합하지 않음 (각각 배치)
@@ -175,7 +197,32 @@ public final class FramePlacer {
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
             block.height(CoordinateConverter.pointsToHwpunits(h));
-            block.zOrder(tf.zOrder());
+            // 부모 Group이 Phase7 렌더 PNG로 배치되면 그 위에 올라가야 함.
+            // Phase7은 zOrder=10000-pageItemIdx 로 역매핑하므로 동일한 방식으로 계산하여
+            // 부모 PNG 바로 위에 배치한다.
+            int tfZ = tf.zOrder();
+            try {
+                ResolvedPageItem tfPi = ctx.resolvedData.getPageItem(tf.id());
+                String parentId = (tfPi != null) ? tfPi.parentId() : null;
+                if (parentId != null) {
+                    ResolvedPageItem parentPi = ctx.resolvedData.getPageItem(parentId);
+                    if (parentPi != null && "Group".equals(parentPi.type())) {
+                        boolean parentRenderedAsFrame = false;
+                        for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
+                            if (String.valueOf(rg.id()).equals(parentId) && !rg.isBadgeGroup()) {
+                                parentRenderedAsFrame = true;
+                                break;
+                            }
+                        }
+                        if (parentRenderedAsFrame) {
+                            int parentHwpxZ = (parentPi.zOrder() > 0)
+                                    ? Math.max(10000 - parentPi.zOrder(), 10) : 10;
+                            tfZ = parentHwpxZ + 1; // 부모 PNG 바로 위
+                        }
+                    }
+                }
+            } catch (Exception e) {}
+            block.zOrder(tfZ);
             block.columnCount(tf.columnCount() > 0 ? tf.columnCount() : 1);
             block.columnGutter(CoordinateConverter.pointsToHwpunits(tf.columnGutter() * ctx.scaleFactor));
 

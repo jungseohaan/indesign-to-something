@@ -29,8 +29,18 @@ public final class RenderableFramePlacer {
         int count = 0;
         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
             if (rt.file() == null) continue;
-            // badge_group은 이미 인라인으로 처리됨 → 건너뜀
-            if (rt.isBadgeGroup()) continue;
+            // badge_group은 인라인 앵커(inline_object)로 배치된 경우에만 건너뜀.
+            // 인라인 참조가 없는 독립 badge는 여기서 플로팅으로 배치해야 함.
+            if (rt.isBadgeGroup()) {
+                boolean alsoInline = false;
+                for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                    if (rg.id() == rt.id() && "inline_object".equals(rg.itemType())) {
+                        alsoInline = true;
+                        break;
+                    }
+                }
+                if (alsoInline) continue;
+            }
 
             File pngFile = new File(ctx.basePath, rt.file());
             if (!pngFile.exists()) continue;
@@ -71,7 +81,11 @@ public final class RenderableFramePlacer {
                 fig.imageFormat("png");
                 fig.pixelWidth(img.getWidth());
                 fig.pixelHeight(img.getHeight());
-                fig.zOrder(Math.max(rt.zOrder(), 10)); // 배경(0) 위에 배치
+                // InDesign allPageItems: index 0 = 맨 앞, 큰 값 = 뒤.
+                // HWPX zOrder: 큰 값 = 앞. → 역매핑하여 겹침 순서 보존.
+                int indesignIdx = rt.zOrder();
+                int hwpxZ = (indesignIdx > 0) ? Math.max(10000 - indesignIdx, 10) : 10;
+                fig.zOrder(hwpxZ);
                 fig.fromGroup(true); // IN_FRONT_OF_TEXT
                 sections.get(pageIdx).addBlock(fig);
                 count++;
