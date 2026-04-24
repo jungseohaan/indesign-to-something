@@ -2657,6 +2657,31 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
             }
         } catch (e) {}
     }
+    // TextPath(곡선 텍스트)가 Pass 2에서 frame_NNNN.png로 별도 렌더링되므로
+    // 해당 부모 Group/Path는 배경에서 숨겨 중복 표시 방지.
+    for (var tpi = 0; tpi < allItems.length; tpi++) {
+        try {
+            var tpItem = allItems[tpi];
+            var tpHas = false;
+            try { tpHas = tpItem.textPaths && tpItem.textPaths.length > 0; } catch (e) {}
+            if (!tpHas) continue;
+            // Pass 2 의 renderTarget 로직과 동일: 부모가 Group이면 Group 전체를 숨김
+            var tpTarget = tpItem;
+            try {
+                var tpParent = tpItem.parent;
+                if (tpParent && tpParent.constructor
+                    && (tpParent.constructor.name === "Group"
+                        || tpParent.constructor.name === "Rectangle"
+                        || tpParent.constructor.name === "Polygon"
+                        || tpParent.constructor.name === "Oval"
+                        || tpParent.constructor.name === "GraphicLine")
+                    && tpParent.id) {
+                    tpTarget = tpParent;
+                }
+            } catch (e) {}
+            framesToHide.push(tpTarget);
+        } catch (e) {}
+    }
 
     // 페이지별 프레임 인덱스 미리 빌드 (O(pages × frames) → O(frames) + O(pages))
     var framesByPage = {};  // pageOffset → [frame, ...]

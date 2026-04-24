@@ -27,8 +27,12 @@ public final class RenderableFramePlacer {
         if (ctx.basePath == null) return;
         if (ctx.resolvedData == null) return;
         int count = 0;
+        // 같은 PNG 파일을 여러 ID로 등록한 경우 중복 배치 방지 (페이지+파일 단위)
+        java.util.Set<String> placedKeys = new java.util.HashSet<>();
         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
             if (rt.file() == null) continue;
+            String dedupKey = rt.pageIndex() + "|" + rt.file();
+            if (!placedKeys.add(dedupKey)) continue; // 이미 배치된 동일 파일/페이지
             // badge_group은 인라인 앵커(inline_object)로 배치된 경우에만 건너뜀.
             // 인라인 참조가 없는 독립 badge는 여기서 플로팅으로 배치해야 함.
             if (rt.isBadgeGroup()) {
