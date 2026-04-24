@@ -109,18 +109,26 @@ public final class FramePlacer {
             if (skipAsBadgeChild) continue;
 
             // 연결 글상자 체인: 후속 프레임은 건너뜀 (첫 프레임에서 병합 처리)
-            // 단, 체인의 프레임들이 Y 방향으로 떨어져 있으면 병합하지 않음 (각각 배치)
+            // 단, 체인의 프레임들이 Y 방향으로 떨어져 있거나 다른 컬럼이면 병합하지 않음 (각각 배치)
             if (tf.previousFrameId() != null) {
                 ResolvedTextFrame prevTf = ctx.resolvedData.getTextFrame(tf.previousFrameId());
                 if (prevTf != null && prevTf.geometricBounds() != null && tf.geometricBounds() != null) {
-                    // 다른 페이지에 있으면 독립 배치
+                    double[] pgb = prevTf.geometricBounds();
+                    double[] cgb = tf.geometricBounds();
                     boolean diffPage = prevTf.pageIndex() != tf.pageIndex();
-                    double prevBottom = prevTf.geometricBounds()[2];
-                    double curTop = tf.geometricBounds()[0];
+                    double prevBottom = pgb[2];
+                    double curTop = cgb[0];
                     double gap = curTop - prevBottom;
-                    double lineH = tf.geometricBounds()[2] - tf.geometricBounds()[0];
-                    // gap이 한 줄 높이 이상이거나 다른 페이지이면 독립 배치
-                    if (diffPage || gap > lineH * 0.5) {
+                    double lineH = cgb[2] - cgb[0];
+                    // X 범위 겹침 비율: 컬럼이 다르면 병합 안 함
+                    double xOvStart = Math.max(pgb[1], cgb[1]);
+                    double xOvEnd = Math.min(pgb[3], cgb[3]);
+                    double prevW = pgb[3] - pgb[1];
+                    double curW = cgb[3] - cgb[1];
+                    double xOverlapRatio = (xOvEnd > xOvStart && prevW > 0 && curW > 0)
+                            ? (xOvEnd - xOvStart) / Math.min(prevW, curW) : 0;
+                    // gap<0 (역방향) 또는 gap>lineH*0.5 또는 다른 컬럼(X 겹침 <50%)이면 독립 배치
+                    if (diffPage || gap < 0 || gap > lineH * 0.5 || xOverlapRatio < 0.5) {
                         // 병합하지 않고 독립 배치 → continue하지 않음
                     } else {
                         continue; // 인접 → 병합 (첫 프레임에서 처리)
@@ -156,7 +164,15 @@ public final class FramePlacer {
                     if (next.pageIndex() != tf.pageIndex()) break;
                     double gap = ngb[0] - gb[2];
                     double lineH = ngb[2] - ngb[0];
-                    if (gap > lineH * 0.5) break;
+                    // X 범위 겹침 확인: 다른 컬럼이면 병합 중단
+                    double xOvStart = Math.max(gb[1], ngb[1]);
+                    double xOvEnd = Math.min(gb[3], ngb[3]);
+                    double curW = gb[3] - gb[1];
+                    double nextW = ngb[3] - ngb[1];
+                    double xOverlapRatio = (xOvEnd > xOvStart && curW > 0 && nextW > 0)
+                            ? (xOvEnd - xOvStart) / Math.min(curW, nextW) : 0;
+                    // gap<0 (역방향) 또는 gap>lineH*0.5 또는 다른 컬럼이면 병합 중단
+                    if (gap < 0 || gap > lineH * 0.5 || xOverlapRatio < 0.5) break;
                     if (ngb[0] < gb[0]) gb[0] = ngb[0];
                     if (ngb[1] < gb[1]) gb[1] = ngb[1];
                     if (ngb[2] > gb[2]) gb[2] = ngb[2];

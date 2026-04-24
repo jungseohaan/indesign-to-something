@@ -1858,7 +1858,10 @@ function isBadgeGroup(group) {
             // parentPage가 null(인라인 그룹) → 기본 스케일 사용
         }
         var minDim = Math.min(gw, gh) * scale;
+        var maxDim = Math.max(gw, gh) * scale;
         if (minDim > cfg.maxSize) return false;
+        // 종횡비 체크: 길이:짧이 > 3 이면 배너(Lesson 타이틀 등) 이므로 배지 아님
+        if (minDim > 0 && maxDim / minDim > 3.0) return false;
     } catch (e) {
         return false;
     }
