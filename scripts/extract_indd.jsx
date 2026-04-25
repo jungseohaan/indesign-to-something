@@ -124,7 +124,7 @@ function loadConversionConfig(configPath) {
     var defaults = {
         rendering: {
             textFrame: { maxTextLength: 30, decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 }, decorativeStyledText: { enabled: true, maxTextLength: 10, excludeBlack: true, blackThreshold: 0.90, requireObjectStyle: true } },
-            badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600 },
+            badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600, maxAspectRatio: 4.5, nestedEnabled: true, nestedMaxTextLength: 3, decorationMergeEnabled: true, decorationMergeMinOverlap: 0.5, decorationMergeAdjacency: 20 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
             rotation: { minAngle: 0.1 },
             pngExportResolution: 220
@@ -169,6 +169,12 @@ function loadConversionConfig(configPath) {
                 if (b.requireShape !== undefined) defaults.rendering.badge.requireShape = b.requireShape;
                 if (b.allowImage !== undefined) defaults.rendering.badge.allowImage = b.allowImage;
                 if (b.badgeDpi !== undefined) defaults.rendering.badge.badgeDpi = b.badgeDpi;
+                if (b.maxAspectRatio !== undefined) defaults.rendering.badge.maxAspectRatio = b.maxAspectRatio;
+                if (b.nestedEnabled !== undefined) defaults.rendering.badge.nestedEnabled = b.nestedEnabled;
+                if (b.nestedMaxTextLength !== undefined) defaults.rendering.badge.nestedMaxTextLength = b.nestedMaxTextLength;
+                if (b.decorationMergeEnabled !== undefined) defaults.rendering.badge.decorationMergeEnabled = b.decorationMergeEnabled;
+                if (b.decorationMergeMinOverlap !== undefined) defaults.rendering.badge.decorationMergeMinOverlap = b.decorationMergeMinOverlap;
+                if (b.decorationMergeAdjacency !== undefined) defaults.rendering.badge.decorationMergeAdjacency = b.decorationMergeAdjacency;
             }
             if (parsed.rendering.transparency) {
                 var t = parsed.rendering.transparency;
@@ -542,6 +548,8 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
     var badgeGroupChildIds = {};
     if (!editableFrameIds) editableFrameIds = {};
 
+
+
     app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 220;
     app.pngExportPreferences.antiAlias = true;
     app.pngExportPreferences.transparentBackground = true;
@@ -599,11 +607,79 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         var grpFileName = "badge_" + grpDomId + ".png";
         var grpOutFile = File(renderDir + "/" + grpFileName);
 
-        try {
-            grp.exportFile(ExportFormat.PNG_FORMAT, grpOutFile);
+        // SPEC-022: 뱃지와 시각적으로 한 덩어리지만 별개 그룹인 외곽선 데코 (예: outlined "Step 1")
+        // 를 찾아서 합성 PNG 로 export
+        var overlappingDecos = findOverlappingDecorations(grp, allItems);
 
-            var grpBounds = null;
-            try { grpBounds = arrCopy(grp.visibleBounds); } catch (e) {}
+        // 합성 bounds — 뱃지 + 데코의 union
+        var combinedVB = null;
+        try { combinedVB = arrCopy(grp.visibleBounds); } catch (e) {}
+        if (!combinedVB) {
+            try { combinedVB = arrCopy(grp.geometricBounds); } catch (e) {}
+        }
+        for (var di = 0; di < overlappingDecos.length; di++) {
+            try {
+                var dvb = overlappingDecos[di].visibleBounds;
+                if (combinedVB) {
+                    combinedVB[0] = Math.min(combinedVB[0], dvb[0]);
+                    combinedVB[1] = Math.min(combinedVB[1], dvb[1]);
+                    combinedVB[2] = Math.max(combinedVB[2], dvb[2]);
+                    combinedVB[3] = Math.max(combinedVB[3], dvb[3]);
+                }
+            } catch (e) {}
+        }
+
+        // 데코를 badgeGroupChildIds 에 미리 등록 → page_bg 에서 숨김
+        for (var di2 = 0; di2 < overlappingDecos.length; di2++) {
+            var deco = overlappingDecos[di2];
+            childIds.push(deco.id);
+            badgeGroupChildIds[deco.id] = true;
+            // 데코가 Group이면 자손도 포함
+            if (deco.constructor.name === "Group") {
+                try {
+                    var decoChildren = deco.allPageItems;
+                    for (var dci = 0; dci < decoChildren.length; dci++) {
+                        badgeGroupChildIds[decoChildren[dci].id] = true;
+                    }
+                } catch (e) {}
+            }
+        }
+
+        try {
+            if (overlappingDecos.length === 0) {
+                // 데코 없음 — 기존 단일 그룹 export
+                grp.exportFile(ExportFormat.PNG_FORMAT, grpOutFile);
+            } else {
+                // SPEC-022: duplicate → 임시 그룹 → export → 제거 (SPEC-021 패턴 재사용)
+                var dups = [];
+                var grpDup = null;
+                try {
+                    grpDup = grp.duplicate();
+                    dups.push(grpDup);
+                    for (var di3 = 0; di3 < overlappingDecos.length; di3++) {
+                        dups.push(overlappingDecos[di3].duplicate());
+                    }
+                    var tempCombined = doc.groups.add(dups);
+                    try {
+                        tempCombined.exportFile(ExportFormat.PNG_FORMAT, grpOutFile);
+                    } finally {
+                        try { tempCombined.remove(); } catch (er) {}
+                    }
+                } catch (eDup) {
+                    // 합성 실패 시 fallback: 원본 그룹만 export
+                    for (var dx = 0; dx < dups.length; dx++) {
+                        try { dups[dx].remove(); } catch (er) {}
+                    }
+                    grp.exportFile(ExportFormat.PNG_FORMAT, grpOutFile);
+                    combinedVB = null;
+                    try { combinedVB = arrCopy(grp.visibleBounds); } catch (e) {}
+                }
+            }
+
+            var grpBounds = combinedVB;
+            if (!grpBounds) {
+                try { grpBounds = arrCopy(grp.visibleBounds); } catch (e) {}
+            }
             if (!grpBounds) {
                 try { grpBounds = arrCopy(grp.geometricBounds); } catch (e) {}
             }
@@ -642,6 +718,116 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
             }
         } catch (e) {}
     }
+
+    // Pass 1.5: 중첩 뱃지 패턴 감지 및 렌더링 (SPEC-021)
+    // 그룹 전체가 isBadgeGroup 을 통과하지 못했지만 내부에 (도형+짧은 숫자 TF) 페어가
+    // 있는 경우 (예: Q2~Q6 번호 뱃지). 페어만 duplicate 후 임시 그룹으로 묶어 exportFile.
+    var nbMatched = 0;
+    for (var ngi = 0; ngi < allItems.length; ngi++) {
+        var nGrp = allItems[ngi];
+        if (nGrp.constructor.name !== "Group") continue;
+        if (isOnHiddenLayer(nGrp)) continue;
+        if (renderedIds[nGrp.id]) continue;           // 이미 isBadgeGroup 통과
+        if (badgeGroupChildIds[nGrp.id]) continue;    // 상위 뱃지의 자식
+
+        var pattern = findNestedBadgePattern(nGrp);
+        if (!pattern) continue;
+
+        var nBadgeShape = pattern.shape;
+        var nBadgeTf = pattern.textFrame;
+
+        // 페이지 결정
+        var nGrpPage = null;
+        try { nGrpPage = nGrp.parentPage; } catch (e) {}
+        if (!nGrpPage) {
+            try {
+                var nVb = nGrp.visibleBounds;
+                var nCy = (nVb[0] + nVb[2]) / 2;
+                var nCx = (nVb[1] + nVb[3]) / 2;
+                for (var npi = 0; npi < doc.pages.length; npi++) {
+                    var nPg = doc.pages[npi];
+                    var nPb = nPg.bounds;
+                    if (nCy >= nPb[0] && nCy <= nPb[2] && nCx >= nPb[1] && nCx <= nPb[3]) {
+                        nGrpPage = nPg; break;
+                    }
+                }
+            } catch (e) {}
+        }
+        if (!nGrpPage) continue;
+        var nPgIdx = nGrpPage.documentOffset + 1;
+        if (nPgIdx < startPage || nPgIdx > endPage) continue;
+
+        var nGrpId = nGrp.id;
+        var nFileName = "badge_" + nGrpId + ".png";
+        var nOutFile = File(renderDir + "/" + nFileName);
+
+        // 원본 페어를 duplicate → 새 임시 그룹으로 묶고 export → 임시 그룹 삭제.
+        // duplicate 는 원본과 겹쳐 생성되므로 페어 크기만큼의 PNG를 얻을 수 있음.
+        // (직접 groups.add(원본페어) 는 "매개변수 잘못됨" 에러 발생 — 이미 다른 그룹 소속이기 때문)
+        var nDupShape = null, nDupTf = null, nTempGrp = null;
+        var nRealBounds = null;
+        try {
+            var origShapeB = nBadgeShape.visibleBounds || nBadgeShape.geometricBounds;
+            var origTfB = nBadgeTf.visibleBounds || nBadgeTf.geometricBounds;
+            nRealBounds = [
+                Math.min(origShapeB[0], origTfB[0]),
+                Math.min(origShapeB[1], origTfB[1]),
+                Math.max(origShapeB[2], origTfB[2]),
+                Math.max(origShapeB[3], origTfB[3])
+            ];
+            nDupShape = nBadgeShape.duplicate();
+            nDupTf = nBadgeTf.duplicate();
+            nTempGrp = doc.groups.add([nDupShape, nDupTf]);
+        } catch (eGrp) {
+            try { if (nDupShape) nDupShape.remove(); } catch (e) {}
+            try { if (nDupTf) nDupTf.remove(); } catch (e) {}
+            continue;
+        }
+
+        try {
+            nTempGrp.exportFile(ExportFormat.PNG_FORMAT, nOutFile);
+
+            var nBounds = nRealBounds;
+            if (nBounds) {
+                var nPageB = nGrpPage.bounds;
+                nBounds = [
+                    nBounds[0] - nPageB[0],
+                    nBounds[1] - nPageB[1],
+                    nBounds[2] - nPageB[0],
+                    nBounds[3] - nPageB[1]
+                ];
+            }
+
+            var nEntry = {
+                id: nGrpId,
+                file: "rendered_frames/" + nFileName,
+                bounds: nBounds,
+                pageIndex: nGrpPage.documentOffset,
+                type: "badge_group",
+                childIds: [nBadgeShape.id, nBadgeTf.id],
+                childTextFrameIds: [nBadgeTf.id]
+            };
+            renderedFrames.push(nEntry);
+            renderedIds[nGrpId] = nEntry;
+            badgeGroupChildIds[nBadgeShape.id] = true;
+            badgeGroupChildIds[nBadgeTf.id] = true;
+
+            renderedFrames.push({
+                id: nBadgeTf.id,
+                file: "rendered_frames/" + nFileName,
+                bounds: nBounds,
+                pageIndex: nGrpPage.documentOffset,
+                type: "badge_group_child",
+                badgeGroupId: nGrpId
+            });
+            renderedIds[nBadgeTf.id] = nEntry;
+            nbMatched++;
+        } catch (eExp) {}
+
+        // 임시 그룹 및 duplicated 페어 삭제 → 원본은 보존됨
+        try { nTempGrp.remove(); } catch (eR) {}
+    }
+    $.writeln("[SPEC-021] nested badge pass: matched=" + nbMatched);
 
     // Pass 2: 개별 TextFrame / TextPath 렌더링
     for (var i = 0; i < allItems.length; i++) {
@@ -1838,6 +2024,7 @@ function isBadgeGroup(group) {
         return false;
     }
 
+
     // 조건 1: 이미지 허용 여부
     if (hasImage && !cfg.allowImage) return false;
     // 조건 2: 도형 필수 여부
@@ -1860,13 +2047,247 @@ function isBadgeGroup(group) {
         var minDim = Math.min(gw, gh) * scale;
         var maxDim = Math.max(gw, gh) * scale;
         if (minDim > cfg.maxSize) return false;
-        // 종횡비 체크: 길이:짧이 > 3 이면 배너(Lesson 타이틀 등) 이므로 배지 아님
-        if (minDim > 0 && maxDim / minDim > 3.0) return false;
+        // 종횡비 체크: 길이:짧이 > cfg.maxAspectRatio 이면 배너(Lesson 타이틀 등) 이므로 배지 아님
+        var aspectLimit = (cfg.maxAspectRatio !== undefined) ? cfg.maxAspectRatio : 4.5;
+        if (minDim > 0 && maxDim / minDim > aspectLimit) return false;
     } catch (e) {
         return false;
     }
 
     return true;
+}
+
+/**
+ * 그룹 전체는 뱃지 조건에 안 맞지만 내부에 뱃지 패턴(도형 + 짧은 숫자 TF)이
+ * 있는 경우를 찾는다. 예: 질문 그룹 = {Oval + "2" TF + 긴 질문 TF}.
+ *
+ * 감지되면 (badgeShape, badgeTextFrame) 페어를 반환. 없으면 null.
+ * 렌더링 단계에서 페어 외 형제를 임시 숨긴 뒤 부모 그룹을 exportFile 한다.
+ */
+function findNestedBadgePattern(group) {
+    var cfg = CONFIG.rendering.badge;
+    if (!cfg.enabled || !cfg.nestedEnabled) return null;
+
+    var maxLen = (cfg.nestedMaxTextLength !== undefined) ? cfg.nestedMaxTextLength : 3;
+    var aspectLimit = (cfg.maxAspectRatio !== undefined) ? cfg.maxAspectRatio : 4.5;
+
+    // 직속 자식만 검사 (allPageItems는 재귀 → 오판 위험)
+    var shapes = [];
+    var textFrames = [];
+    try {
+        var rects = group.rectangles;
+        for (var i = 0; i < rects.length; i++) {
+            try { if (rects[i].parent === group) shapes.push(rects[i]); } catch (e) {}
+        }
+        var ovals = group.ovals;
+        for (var i = 0; i < ovals.length; i++) {
+            try { if (ovals[i].parent === group) shapes.push(ovals[i]); } catch (e) {}
+        }
+        var polys = group.polygons;
+        for (var i = 0; i < polys.length; i++) {
+            try { if (polys[i].parent === group) shapes.push(polys[i]); } catch (e) {}
+        }
+        var tfs = group.textFrames;
+        for (var i = 0; i < tfs.length; i++) {
+            try { if (tfs[i].parent === group) textFrames.push(tfs[i]); } catch (e) {}
+        }
+    } catch (e) {
+        return null;
+    }
+
+    if (shapes.length === 0 || textFrames.length === 0) return null;
+
+    var scale = 72 / 25.4; // mm → pt
+    try {
+        var pageW = group.parentPage ? (group.parentPage.bounds[3] - group.parentPage.bounds[1]) : 0;
+        if (pageW > 0 && pageW < 30) scale = 72;
+    } catch (e) {}
+
+    // 각 도형에 대해 내부에 완전 포함된 짧은 TF를 찾는다
+    for (var si = 0; si < shapes.length; si++) {
+        var shape = shapes[si];
+        var sb = null;
+        try { sb = shape.geometricBounds; } catch (e) { continue; } // [t, l, b, r]
+        if (!sb) continue;
+
+        // 이미지/EPS/PDF 포함한 도형은 스킵 (컨텐츠 이미지)
+        try {
+            if (shape.images && shape.images.length > 0) continue;
+            if (shape.epss && shape.epss.length > 0) continue;
+            if (shape.pdfs && shape.pdfs.length > 0) continue;
+        } catch (e) {}
+
+        var sh = sb[2] - sb[0], sw = sb[3] - sb[1];
+        var minD = Math.min(sw, sh) * scale;
+        var maxD = Math.max(sw, sh) * scale;
+        if (minD <= 0) continue;
+        if (minD > cfg.maxSize) continue;
+        if (maxD / minD > aspectLimit) continue;
+
+        // 내부에 완전 포함된 짧은 TF 찾기
+        for (var ti = 0; ti < textFrames.length; ti++) {
+            var tf = textFrames[ti];
+            var tb = null;
+            try { tb = tf.geometricBounds; } catch (e) { continue; }
+            if (!tb) continue;
+            var ovT = Math.max(sb[0], tb[0]);
+            var ovL = Math.max(sb[1], tb[1]);
+            var ovB = Math.min(sb[2], tb[2]);
+            var ovR = Math.min(sb[3], tb[3]);
+            if (ovB <= ovT || ovR <= ovL) continue;
+            var ovA = (ovB - ovT) * (ovR - ovL);
+            var tfA = (tb[2] - tb[0]) * (tb[3] - tb[1]);
+            if (tfA <= 0) continue;
+            if (ovA / tfA < 0.9) continue;  // TF 가 도형 안에 90% 이상 포함
+
+            var txt = "";
+            try { txt = tf.contents.replace(/\s/g, ""); } catch (e) { continue; }
+            if (txt.length === 0 || txt.length > maxLen) continue;
+
+            return { shape: shape, textFrame: tf };
+        }
+    }
+    return null;
+}
+
+/**
+ * 매칭된 뱃지 그룹과 시각적으로 한 덩어리를 이루지만 구조적으로는 별개인 외곽선 데코
+ * (주로 폰트가 폴리곤으로 변환된 라벨 — 예: "Step 1") 를 찾는다 (SPEC-022).
+ *
+ * 조건:
+ *  - 직속 부모가 Spread 또는 Page 인 최상위 아이템
+ *  - Polygon 또는 Polygon만 들어있는 Group
+ *  - visibleBounds 가 뱃지 visibleBounds 와 50% 이상 겹치거나, 위/아래로 5pt 이내 인접
+ *  - 짧은 변(minDim) ≤ 뱃지 maxDim × 1.5 (너무 큰 데코는 제외)
+ *
+ * 반환: 합쳐야 할 PageItem 배열 (없으면 빈 배열).
+ */
+function findOverlappingDecorations(badgeGroup, allItems) {
+    var cfg = CONFIG.rendering.badge;
+    if (!cfg.decorationMergeEnabled) return [];
+
+    var minOverlap = (cfg.decorationMergeMinOverlap !== undefined) ? cfg.decorationMergeMinOverlap : 0.5;
+    var adjacency = (cfg.decorationMergeAdjacency !== undefined) ? cfg.decorationMergeAdjacency : 20;
+
+    var bb = null;
+    try { bb = badgeGroup.visibleBounds; } catch (e) { return []; }
+    if (!bb) return [];
+    var bT = bb[0], bL = bb[1], bB = bb[2], bR = bb[3];
+    var bH = bB - bT, bW = bR - bL;
+    if (bH <= 0 || bW <= 0) return [];
+    var bMaxDim = Math.max(bH, bW);
+
+    // adjacency 는 pt 단위 — 문서 단위가 mm 인 경우 pt→mm 변환
+    var adjUnit = adjacency * 25.4 / 72;
+
+    // 뱃지 자신과 자식 ID 집합 (재포함 방지)
+    var badgeDescendants = {};
+    try {
+        var bd = badgeGroup.allPageItems;
+        for (var i = 0; i < bd.length; i++) badgeDescendants[bd[i].id] = true;
+    } catch (e) {}
+    badgeDescendants[badgeGroup.id] = true;
+
+    // 같은 page 만 고려 (다른 페이지의 우연한 좌표 겹침 방지).
+    // parentPage 는 인라인이거나 spread-spanning 인 경우 null 일 수 있음.
+    var badgePageId = null;
+    try {
+        if (badgeGroup.parentPage && badgeGroup.parentPage.isValid) {
+            badgePageId = badgeGroup.parentPage.id;
+        }
+    } catch (e) {}
+
+    // 뱃지의 조상 체인(부모, 조부모 …)을 모두 허용 부모로 등록 →
+    // 뱃지가 다중 컴포지트 그룹 안에 있을 때(부모/조부모 등) 형제·사촌 데코까지 검출.
+    var badgeAncestorIds = {};
+    try {
+        var bp = badgeGroup.parent;
+        var hops = 0;
+        while (bp && hops < 6) {
+            badgeAncestorIds[bp.id] = true;
+            var bpName = bp.constructor.name;
+            if (bpName === "Spread" || bpName === "Page" || bpName === "MasterSpread") break;
+            try { bp = bp.parent; } catch (e) { break; }
+            hops++;
+        }
+    } catch (e) {}
+
+    var matches = [];
+
+    for (var ai = 0; ai < allItems.length; ai++) {
+        var item = allItems[ai];
+        if (!item || badgeDescendants[item.id]) continue;
+        if (isOnHiddenLayer(item)) continue;
+        var cn = item.constructor.name;
+        // Polygon 또는 Polygon-only Group 만 허용 (outlined text)
+        if (cn !== "Polygon" && cn !== "Group") continue;
+        if (cn === "Group") {
+            // 직속/재귀 자식이 모두 Polygon 인지 검사
+            var onlyPoly = true;
+            try {
+                var gd = item.allPageItems;
+                if (gd.length === 0) onlyPoly = false;
+                for (var gi = 0; gi < gd.length; gi++) {
+                    var gn = gd[gi].constructor.name;
+                    if (gn !== "Polygon" && gn !== "Group") { onlyPoly = false; break; }
+                }
+            } catch (e) { onlyPoly = false; }
+            if (!onlyPoly) continue;
+        }
+
+        // 후보 자격: parent 가 Spread/Page/MasterSpread 이거나 뱃지의 조상 체인 중 한 그룹과 일치
+        var parName = "";
+        var parId = null;
+        try {
+            var par = item.parent;
+            if (par) { parName = par.constructor.name; parId = par.id; }
+        } catch (e) { continue; }
+        var topLevel = (parName === "Spread" || parName === "Page" || parName === "MasterSpread");
+        var sharedAncestor = (parId !== null && badgeAncestorIds[parId]);
+        if (!topLevel && !sharedAncestor) continue;
+
+        // 같은 page 인지 확인 (parentPage 기준)
+        if (badgePageId !== null) {
+            var itemPageId = null;
+            try {
+                if (item.parentPage && item.parentPage.isValid) itemPageId = item.parentPage.id;
+            } catch (e) {}
+            if (itemPageId !== badgePageId) continue;
+        }
+
+        var ib = null;
+        try { ib = item.visibleBounds; } catch (e) { continue; }
+        if (!ib) continue;
+        var iT = ib[0], iL = ib[1], iB = ib[2], iR = ib[3];
+        var iH = iB - iT, iW = iR - iL;
+        if (iH <= 0 || iW <= 0) continue;
+
+        // 크기 필터
+        var iMinDim = Math.min(iH, iW);
+        if (iMinDim > bMaxDim * 1.5) continue;
+
+        // 겹침 또는 인접 검사
+        var ovT = Math.max(bT, iT), ovL = Math.max(bL, iL);
+        var ovB = Math.min(bB, iB), ovR = Math.min(bR, iR);
+        var hasOverlap = (ovB > ovT && ovR > ovL);
+        var matched = false;
+
+        if (hasOverlap) {
+            var ovA = (ovB - ovT) * (ovR - ovL);
+            var iA = iH * iW;
+            if (iA > 0 && ovA / iA >= minOverlap) matched = true;
+        } else {
+            var horizOv = Math.min(bR, iR) - Math.max(bL, iL);
+            if (horizOv > 0 && horizOv / Math.min(bW, iW) >= 0.5) {
+                var vertGap = Math.min(Math.abs(iB - bT), Math.abs(bB - iT));
+                if (vertGap <= adjUnit) matched = true;
+            }
+        }
+
+        if (matched) matches.push(item);
+    }
+
+    return matches;
 }
 
 /**
@@ -2654,6 +3075,26 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
             var bItem = allItems[bi];
             if (bItem.constructor.name === "Group" && isBadgeGroup(bItem)) {
                 framesToHide.push(bItem);
+                // SPEC-022: 뱃지와 시각적으로 합쳐 렌더되는 외곽선 데코도 배경에서 숨김
+                var ovDecos = findOverlappingDecorations(bItem, allItems);
+                for (var ovi = 0; ovi < ovDecos.length; ovi++) {
+                    framesToHide.push(ovDecos[ovi]);
+                }
+            }
+        } catch (e) {}
+    }
+    // SPEC-021: 중첩 뱃지 페어 (도형+짧은 숫자 TF) 만 배경에서 숨김
+    // 그룹 자체는 본문 질문 텍스트 등을 포함하므로 숨기면 안됨
+    for (var nbi = 0; nbi < allItems.length; nbi++) {
+        try {
+            var nbItem = allItems[nbi];
+            if (nbItem.constructor.name !== "Group") continue;
+            // 이미 isBadgeGroup 통과한 그룹은 위에서 숨겨짐
+            if (isBadgeGroup(nbItem)) continue;
+            var nbPat = findNestedBadgePattern(nbItem);
+            if (nbPat) {
+                framesToHide.push(nbPat.shape);
+                framesToHide.push(nbPat.textFrame);
             }
         } catch (e) {}
     }

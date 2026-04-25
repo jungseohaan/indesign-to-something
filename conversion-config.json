@@ -39,7 +39,19 @@
       "allowImage": false,
       "_comment_allowImage": "이미지 포함 시 배지로 인정할지",
       "badgeDpi": 600,
-      "_comment_badgeDpi": "배지 렌더 해상도. 텍스트 선명도 확보용"
+      "_comment_badgeDpi": "배지 렌더 해상도. 텍스트 선명도 확보용",
+      "maxAspectRatio": 4.5,
+      "_comment_maxAspectRatio": "배지 종횡비 상한 (길이/짧이). 이보다 크면 배너로 간주. 말풍선 태그 수용을 위해 4.5",
+      "nestedEnabled": true,
+      "_comment_nestedEnabled": "그룹 전체가 배지 조건에 안 맞아도 내부에 (도형+짧은 번호 TF) 패턴이 있으면 페어만 별도 PNG 추출 (SPEC-021)",
+      "nestedMaxTextLength": 3,
+      "_comment_nestedMaxTextLength": "중첩 뱃지 TF 최대 글자 수 (번호/짧은 라벨 한정)",
+      "decorationMergeEnabled": true,
+      "_comment_decorationMergeEnabled": "뱃지와 시각적으로 한 덩어리지만 별개 그룹인 외곽선 데코(폰트→폴리곤 변환된 라벨)를 합성 PNG로 추출 (SPEC-022)",
+      "decorationMergeMinOverlap": 0.5,
+      "_comment_decorationMergeMinOverlap": "데코가 뱃지와 겹쳐야 할 최소 비율 (데코 면적 기준)",
+      "decorationMergeAdjacency": 20,
+      "_comment_decorationMergeAdjacency": "위/아래 인접 데코 허용 거리 (pt). 가로 50% 이상 겹쳐야 함. 'Step 1' 같은 외부 라벨까지 잡으려면 ~20pt(7mm) 권장"
     },
     "transparency": {
       "_comment": "투명도 기반 렌더링 대상 판별 (미사용 — 향후 구현 예정)",
