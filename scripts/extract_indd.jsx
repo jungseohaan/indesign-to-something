@@ -2263,8 +2263,13 @@ function findOverlappingDecorations(badgeGroup, allItems) {
         if (iH <= 0 || iW <= 0) continue;
 
         // 크기 필터
+        // - minDim: 짧은 변이 뱃지 maxDim × 1.5 초과면 제외 (큰 데코)
+        // - maxDim: 긴 변도 뱃지 maxDim × 1.5 초과면 제외 (가로/세로로 길게 뻗은 도로/패스 등이
+        //   adjacency 만족으로 잘못 매칭되어 거대한 그림자가 PNG에 합쳐지는 것 방지)
         var iMinDim = Math.min(iH, iW);
+        var iMaxDim = Math.max(iH, iW);
         if (iMinDim > bMaxDim * 1.5) continue;
+        if (iMaxDim > bMaxDim * 1.5) continue;
 
         // 겹침 또는 인접 검사
         var ovT = Math.max(bT, iT), ovL = Math.max(bL, iL);
