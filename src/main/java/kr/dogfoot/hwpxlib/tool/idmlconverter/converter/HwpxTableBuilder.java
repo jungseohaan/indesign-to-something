@@ -228,9 +228,14 @@ public class HwpxTableBuilder {
                 tc.cellSpan().colSpanAnd((short) colSpan)
                         .rowSpanAnd((short) rowSpan);
 
-                // 셀 크기 — 높이 0: 콘텐츠에 맞게 자동 확장
+                // 셀 크기 — 콘텐츠가 있으면 높이 0(자동 확장), 인라인 추출 후 비워졌더라도
+                // astCell.height() 가 양수면 그 값을 유지하여 셀 붕괴 방지
+                // (예: 빈칸 채우기 표에서 스마트워치 그룹이 floating 추출된 뒤 빈 셀이 0 높이로
+                //  무너져 다음 행이 prompt 바로 아래로 올라가는 문제 방지)
                 tc.createCellSz();
-                tc.cellSz().widthAnd(astCell.width()).heightAnd(0L);
+                long preservedHeight = isCellTrulyEmpty(astCell) && astCell.height() > 0
+                        ? astCell.height() : 0L;
+                tc.cellSz().widthAnd(astCell.width()).heightAnd(preservedHeight);
 
                 // 셀 여백
                 tc.createCellMargin();
@@ -364,5 +369,22 @@ public class HwpxTableBuilder {
         String color = cellBorder.color();
         if (color == null || color.isEmpty() || !color.startsWith("#")) color = "#000000";
         hwpxBorder.color(color);
+    }
+
+    /** 셀이 텍스트와 인라인 객체 모두 비어있는지 (TableBuilder의 인라인 추출 후 상태 검사용). */
+    private static boolean isCellTrulyEmpty(ASTTableCell cell) {
+        if (cell.paragraphs() == null || cell.paragraphs().isEmpty()) return true;
+        for (ASTParagraph p : cell.paragraphs()) {
+            if (p.items() == null || p.items().isEmpty()) continue;
+            for (ASTInlineItem item : p.items()) {
+                if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                    ASTTextRun run = (ASTTextRun) item;
+                    if (run.text() != null && !run.text().trim().isEmpty()) return false;
+                } else {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 }
