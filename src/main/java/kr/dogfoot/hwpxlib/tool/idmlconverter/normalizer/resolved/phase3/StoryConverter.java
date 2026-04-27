@@ -2062,7 +2062,63 @@ public final class StoryConverter {
                 }
             }
         }
-        if (visText == null || visText.isEmpty()) return null;
+        if (visText == null || visText.isEmpty()) {
+            // 빈 답안 박스(빈칸)에 RuleBelow 가 있으면 밑줄 + 공백으로 변환 (예: page 23 "If you lose 5 ___, reset")
+            if (tf.storyId() != null) {
+                IDMLStory idmlStoryRule = ctx.loadIDMLStory.apply(tf.storyId());
+                if (idmlStoryRule != null && !idmlStoryRule.paragraphs().isEmpty()) {
+                    boolean hasRuleBelow = false;
+                    if (ctx.ensureIdmlInfra != null) ctx.ensureIdmlInfra.run();
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDoc =
+                            ctx.idmlDocumentSupplier != null ? ctx.idmlDocumentSupplier.get() : null;
+                    for (IDMLParagraph p : idmlStoryRule.paragraphs()) {
+                        if (p.ruleBelowOn()) { hasRuleBelow = true; break; }
+                        String psRef = p.appliedParagraphStyle();
+                        if (psRef != null && idmlDoc != null) {
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef sd = idmlDoc.getParagraphStyle(psRef);
+                            if (sd != null && Boolean.TRUE.equals(sd.ruleBelowOn())) { hasRuleBelow = true; break; }
+                        }
+                    }
+                    if (hasRuleBelow) {
+                        double[] gb0 = tf.geometricBounds();
+                        double w0pt = (gb0 != null && gb0.length >= 4) ? (gb0[3] - gb0[1]) : 56.0;
+                        // SPEC-024: 부모 컨테이너가 이미 PNG로 렌더링되어 밑줄을 포함하면
+                        // 라이브 텍스트에 다시 밑줄을 그리지 않는다 (이중 밑줄 방지).
+                        // 빈칸 bounds를 포함하는 inline_object PNG가 있는지 확인.
+                        // 단위: TextFrame.geometricBounds()는 pt 단위, RenderedGroup.bounds()는 mm 원본 → scaleFactor 적용 필요.
+                        boolean parentRenderedWithRule = false;
+                        if (gb0 != null && gb0.length >= 4) {
+                            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                                    : ctx.resolvedData.allRenderedFloatingItems()) {
+                                if (!"inline_object".equals(rg.itemType())) continue;
+                                if (rg.id() == anchoredObjectId) continue; // 자기 자신은 제외
+                                double[] rb = rg.bounds();
+                                if (rb == null || rb.length < 4) continue;
+                                double rb0 = rb[0] * ctx.scaleFactor;
+                                double rb1 = rb[1] * ctx.scaleFactor;
+                                double rb2 = rb[2] * ctx.scaleFactor;
+                                double rb3 = rb[3] * ctx.scaleFactor;
+                                if (rb0 <= gb0[0] + 0.5 && rb1 <= gb0[1] + 0.5
+                                        && rb2 >= gb0[2] - 0.5 && rb3 >= gb0[3] - 0.5) {
+                                    parentRenderedWithRule = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!parentRenderedWithRule) {
+                            // 10pt 기준 underscore 폭 ≈ 5pt → count = width / 5 (안전 마진)
+                            int charCount = Math.max(3, (int) (w0pt / 5.5));
+                            StringBuilder sb = new StringBuilder(charCount);
+                            for (int si = 0; si < charCount; si++) sb.append('_');
+                            ASTTextRun ulRun = new ASTTextRun();
+                            ulRun.text(sb.toString());
+                            return ulRun;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
 
         // 장식 번호 인라인(≤3자 + 큰 폰트 또는 정사각형 프레임) → 텍스트 런 변환하지 않음 (PNG 유지)
         if (visText.length() <= 3) {
