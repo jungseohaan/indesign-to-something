@@ -555,6 +555,34 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
     app.pngExportPreferences.transparentBackground = true;
     app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
 
+    // SPEC-022 데코 후보 사전 필터 (큰 문서 O(N²) 회피)
+    var decoCandidatesPass1 = [];
+    if (CONFIG.rendering.badge.decorationMergeEnabled) {
+        for (var dcp1 = 0; dcp1 < allItems.length; dcp1++) {
+            try {
+                var dcIt = allItems[dcp1];
+                var dcCn = dcIt.constructor.name;
+                if (dcCn === "Polygon" || dcCn === "Group") decoCandidatesPass1.push(dcIt);
+            } catch (e) {}
+        }
+    }
+
+    // SPEC-023 배경 후보 사전 필터: fill 있는 Rectangle/Polygon/Oval
+    var bgCandidatesPass2 = [];
+    for (var bcp2 = 0; bcp2 < allItems.length; bcp2++) {
+        try {
+            var bcIt = allItems[bcp2];
+            var bcCn = bcIt.constructor.name;
+            if (bcCn !== "Rectangle" && bcCn !== "Polygon" && bcCn !== "Oval") continue;
+            var bcFc = null;
+            try { bcFc = bcIt.fillColor; } catch (e) {}
+            var bcFcName = "";
+            try { if (bcFc) bcFcName = bcFc.name; } catch (e) {}
+            if (!bcFcName || bcFcName === "None" || bcFcName === "[None]") continue;
+            bgCandidatesPass2.push(bcIt);
+        } catch (e) {}
+    }
+
     // Pass 1: 배지 그룹 감지 및 렌더링
     // 부모 그룹이 이미 렌더된 경우, 자식 그룹은 건너뜀 (중복 방지)
     for (var gi = 0; gi < allItems.length; gi++) {
@@ -609,7 +637,9 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
 
         // SPEC-022: 뱃지와 시각적으로 한 덩어리지만 별개 그룹인 외곽선 데코 (예: outlined "Step 1")
         // 를 찾아서 합성 PNG 로 export
-        var overlappingDecos = findOverlappingDecorations(grp, allItems);
+        var overlappingDecos = decoCandidatesPass1.length > 0
+                ? findOverlappingDecorations(grp, decoCandidatesPass1)
+                : [];
 
         // 합성 bounds — 뱃지 + 데코의 union
         var combinedVB = null;
@@ -899,6 +929,13 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         var fileName = "frame_" + domId + ".png";
         var outFile = File(renderDir + "/" + fileName);
 
+        // SPEC-023: renderable TextFrame 의 배경 도형 검색
+        // (renderTarget 이 이미 부모 컨테이너로 바뀐 경우는 건너뜀 — 컨테이너에 이미 배경이 포함됨)
+        var bgItem = null;
+        if (isTextFrame && renderTarget === item) {
+            bgItem = findRenderableTextBackground(item, bgCandidatesPass2);
+        }
+
         // renderTarget이 컨테이너(부모)이면 그 안의 editable TextFrame을
         // 임시로 숨겨서 PNG에 본문 텍스트가 중복 캡처되는 것을 방지.
         var hiddenEditable = [];
@@ -920,6 +957,45 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         }
 
         try {
+            // SPEC-023: 배경 도형이 있으면 별도 PNG 로 추가 render
+            // (TF 와 bg 를 한 PNG 로 합치는 방식은 Read 같은 케이스에서 텍스트가 누락되어 비신뢰)
+            // → 두 개의 floating 이미지로 등록, z-order 로 자연스럽게 겹침.
+            if (bgItem) {
+                var bgFileName = "frame_" + bgItem.id + ".png";
+                var bgOutFile = File(renderDir + "/" + bgFileName);
+                if (!renderedIds[bgItem.id]) {
+                    try {
+                        bgItem.exportFile(ExportFormat.PNG_FORMAT, bgOutFile);
+                        var bgVbBounds = null;
+                        try { bgVbBounds = arrCopy(bgItem.visibleBounds); } catch (e) {}
+                        if (!bgVbBounds) { try { bgVbBounds = arrCopy(bgItem.geometricBounds); } catch (e) {} }
+                        if (bgVbBounds) {
+                            var bpb = parentPage.bounds;
+                            bgVbBounds[0] -= bpb[0];
+                            bgVbBounds[1] -= bpb[1];
+                            bgVbBounds[2] -= bpb[0];
+                            bgVbBounds[3] -= bpb[1];
+                        }
+                        // bg 의 실제 allItems index 를 찾아 정확한 z-order 할당
+                        var bgIndex = i + 100;
+                        for (var bii = i + 1; bii < allItems.length; bii++) {
+                            if (allItems[bii] && allItems[bii].id === bgItem.id) { bgIndex = bii; break; }
+                        }
+                        var bgEntry = {
+                            id: bgItem.id,
+                            file: "rendered_frames/" + bgFileName,
+                            bounds: bgVbBounds,
+                            pageIndex: parentPage.documentOffset,
+                            zOrder: bgIndex
+                        };
+                        renderedFrames.push(bgEntry);
+                        renderedIds[bgItem.id] = bgEntry;
+                    } catch (eBgEx) {}
+                }
+                // page_bg 에서 bg 도형 숨김
+                badgeGroupChildIds[bgItem.id] = true;
+            }
+
             renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
 
             var bounds = null;
@@ -2217,17 +2293,18 @@ function findOverlappingDecorations(badgeGroup, allItems) {
     for (var ai = 0; ai < allItems.length; ai++) {
         var item = allItems[ai];
         if (!item || badgeDescendants[item.id]) continue;
-        if (isOnHiddenLayer(item)) continue;
-        var cn = item.constructor.name;
-        // Polygon 또는 Polygon-only Group 만 허용 (outlined text)
+        var cn;
+        try { cn = item.constructor.name; } catch (e) { continue; }
+        // 빠른 타입 필터: Polygon 또는 Group 만 통과 (DOM 깊은 검사 전에 컷)
         if (cn !== "Polygon" && cn !== "Group") continue;
+        if (isOnHiddenLayer(item)) continue;
         if (cn === "Group") {
-            // 직속/재귀 자식이 모두 Polygon 인지 검사
+            // 직속/재귀 자식이 모두 Polygon 인지 검사 — 큰 그룹은 스킵 (성능/정확성)
             var onlyPoly = true;
             try {
                 var gd = item.allPageItems;
-                if (gd.length === 0) onlyPoly = false;
-                for (var gi = 0; gi < gd.length; gi++) {
+                if (gd.length === 0 || gd.length > 50) onlyPoly = false;
+                for (var gi = 0; onlyPoly && gi < gd.length; gi++) {
                     var gn = gd[gi].constructor.name;
                     if (gn !== "Polygon" && gn !== "Group") { onlyPoly = false; break; }
                 }
@@ -2296,6 +2373,110 @@ function findOverlappingDecorations(badgeGroup, allItems) {
 }
 
 /**
+ * SPEC-023: renderable TextFrame 의 라운드 사각형 배경 도형 검색.
+ * Pass 2 에서 외곽선 텍스트 배지(예: "Read", "Write On") 가 별개 PageItem 으로 존재하는
+ * 배경 도형 위에 놓여 있을 때, 배경을 함께 export 대상에 포함하기 위해 호출한다.
+ *
+ * @param {TextFrame} tf - renderable TextFrame
+ * @param {Array} candidates - 후보 PageItem 배열 (사전 필터된 Rectangle/Polygon/Oval)
+ * @return {PageItem|null} 매칭된 배경 도형 또는 null
+ */
+function findRenderableTextBackground(tf, candidates) {
+    var tfBounds = null;
+    try { tfBounds = tf.visibleBounds; } catch (e) { return null; }
+    if (!tfBounds) return null;
+    var tT = tfBounds[0], tL = tfBounds[1], tB = tfBounds[2], tR = tfBounds[3];
+    var tH = tB - tT, tW = tR - tL;
+    if (tH <= 0 || tW <= 0) return null;
+    var tArea = tH * tW;
+
+    var tfPageId = null;
+    try {
+        if (tf.parentPage && tf.parentPage.isValid) tfPageId = tf.parentPage.id;
+    } catch (e) {}
+
+    // 부모 체인(최대 6 hop)
+    var tfAncestors = {};
+    try {
+        var tp = tf.parent;
+        var hops = 0;
+        while (tp && hops < 6) {
+            tfAncestors[tp.id] = true;
+            var tpName = tp.constructor.name;
+            if (tpName === "Spread" || tpName === "Page" || tpName === "MasterSpread") break;
+            try { tp = tp.parent; } catch (e) { break; }
+            hops++;
+        }
+    } catch (e) {}
+
+    var best = null;
+    var bestArea = Infinity;
+
+    for (var ai = 0; ai < candidates.length; ai++) {
+        var item = candidates[ai];
+        if (!item || item.id === tf.id) continue;
+        var cn;
+        try { cn = item.constructor.name; } catch (e) { continue; }
+        if (cn !== "Rectangle" && cn !== "Polygon" && cn !== "Oval") continue;
+        if (isOnHiddenLayer(item)) continue;
+
+        // fill 검사
+        var fc = null;
+        try { fc = item.fillColor; } catch (e) {}
+        var fcName = "";
+        try { if (fc) fcName = fc.name; } catch (e) {}
+        if (!fcName || fcName === "None" || fcName === "[None]") continue;
+
+        // 같은 page
+        if (tfPageId !== null) {
+            var ipid = null;
+            try { if (item.parentPage && item.parentPage.isValid) ipid = item.parentPage.id; } catch (e) {}
+            if (ipid !== tfPageId) continue;
+        }
+
+        // 부모 자격
+        var parName = "", parId = null;
+        try {
+            var par = item.parent;
+            if (par) { parName = par.constructor.name; parId = par.id; }
+        } catch (e) { continue; }
+        var topLevel = (parName === "Spread" || parName === "Page" || parName === "MasterSpread");
+        var sharedAncestor = (parId !== null && tfAncestors[parId]);
+        if (!topLevel && !sharedAncestor) continue;
+
+        var ib = null;
+        try { ib = item.visibleBounds; } catch (e) { continue; }
+        if (!ib) continue;
+        var iT = ib[0], iL = ib[1], iB = ib[2], iR = ib[3];
+        var iH = iB - iT, iW = iR - iL;
+        if (iH <= 0 || iW <= 0) continue;
+        var iArea = iH * iW;
+
+        // 페이지 전면 배경 제외 — 높이는 TF 와 비슷해야(pill 형태), 너비는 자유
+        // (예: 긴 pill 안에 짧은 라벨)
+        // 임계값 × 3 은 page28 의 "Up" outlined letter (tH≈13mm) 가 그 위 거대한
+        // Rectangle (iH=40mm) 을 bg 로 잘못 매칭하던 케이스가 있어 × 2 로 강화.
+        // SPEC-023 의 pill 배경 (tH ≈ iH) 은 비율 1× 근방이라 영향 없음.
+        if (iH > tH * 2) continue;
+        if (iArea > 50000) continue; // 절대 상한 (≈ 페이지 절반)
+
+        // contains: TF 가 배경 안에 80% 이상 들어있어야 함
+        var ovT = Math.max(tT, iT), ovL = Math.max(tL, iL);
+        var ovB = Math.min(tB, iB), ovR = Math.min(tR, iR);
+        if (ovB <= ovT || ovR <= ovL) continue;
+        var ovA = (ovB - ovT) * (ovR - ovL);
+        if (ovA / tArea < 0.8) continue;
+
+        if (iArea < bestArea) {
+            best = item;
+            bestArea = iArea;
+        }
+    }
+
+    return best;
+}
+
+/**
  * TextFrame을 분류한다.
  * @param {PageItem} item - allPageItems 항목
  * @return {string|null}
@@ -2307,6 +2488,25 @@ function findOverlappingDecorations(badgeGroup, allItems) {
 function classifyTextFrame(item) {
     // 1. TextFrame만 처리
     if (item.constructor.name !== "TextFrame") return null;
+
+    // 1.5. 비균일/축소 변환된 TextFrame → background
+    // (예: 부록 181p 의 0.184x 축소 TextFrame — HWPX 는 ItemTransform 의 스케일을
+    //  글상자 크기/폰트에 그대로 반영하지 못해 글자가 너무 크게 출력됨.
+    //  배경 PDF 에 이미 시각적으로 렌더되어 있으므로 background 로 처리.)
+    try {
+        var sx15 = 1, sy15 = 1;
+        try {
+            var ahs = item.absoluteHorizontalScale;
+            var avs = item.absoluteVerticalScale;
+            if (typeof ahs === "number" && ahs > 0) sx15 = ahs / 100;
+            if (typeof avs === "number" && avs > 0) sy15 = avs / 100;
+        } catch (e) {}
+        if ((sx15 > 0 && (sx15 < 0.6 || sx15 > 1.6))
+            || (sy15 > 0 && (sy15 < 0.6 || sy15 > 1.6))) {
+            return "background";
+        }
+    } catch (e) {}
+
     // 2. 숨겨진 레이어
     if (isOnHiddenLayer(item)) return "background";
     // 3. 비인쇄
@@ -2335,11 +2535,33 @@ function classifyTextFrame(item) {
                 hasTable6 = (item.parentStory && item.parentStory.tables.length > 0)
                     || (item.contents.indexOf("\u0016") >= 0);
             } catch (e5) {}
-            if (trimmed6.length <= 15 && inMarginArea && !hasTable6) return "background";
+            // 글자 수 대신 단락 스타일명 패턴으로 하시라/페이지번호 식별.
+            var hashiraStyle6 = false;
+            try {
+                var ps6 = null;
+                try { ps6 = item.parentStory.paragraphs[0].appliedParagraphStyle; } catch (e) {}
+                var styleName6 = "";
+                try { styleName6 = ps6 ? (ps6.name || "") : ""; } catch (e) {}
+                var nameLower6 = styleName6.toLowerCase();
+                hashiraStyle6 = (
+                    styleName6.indexOf("하시라") >= 0
+                    || styleName6.indexOf("페이지번호") >= 0
+                    || styleName6.indexOf("쪽수") >= 0
+                    || styleName6.indexOf("기둥") >= 0
+                    || nameLower6.indexOf("page number") >= 0
+                    || nameLower6.indexOf("running head") >= 0
+                    || nameLower6.indexOf("folio") >= 0
+                );
+            } catch (e) {}
+            if (hashiraStyle6 && inMarginArea && !hasTable6) {
+                return "background";
+            }
         }
     } catch (e) {}
     // 7. 인라인 객체는 부모가 관리
-    if (isInlineItem(item)) return "background";
+    if (isInlineItem(item)) {
+        return "background";
+    }
     // 8. Group 안의 짧은 장식 TextFrame (10자 이하 + 비검정색)
     try {
         var parentType8 = item.parent.constructor.name;
@@ -2353,7 +2575,16 @@ function classifyTextFrame(item) {
                     var fc8 = item.parentStory.characters[0].fillColor;
                     if (fc8 && fc8.name && fc8.name !== "Black" && fc8.name !== "[Black]") isDeco8 = true;
                 } catch (e2) { isDeco8 = true; }
-                if (isDeco8) return "background";
+                var hasStroke8 = false;
+                try {
+                    var ch8 = item.parentStory.characters[0];
+                    var sc8 = ch8.strokeColor;
+                    var sw8 = ch8.strokeWeight;
+                    if (sc8 && sc8.name && sc8.name !== "None" && sc8.name !== "[None]" && sw8 && sw8 > 0) {
+                        hasStroke8 = true;
+                    }
+                } catch (e3) {}
+                if (isDeco8 && !hasStroke8) return "background";
             }
         }
     } catch (e) {}
@@ -2371,8 +2602,50 @@ function classifyTextFrame(item) {
             }
         }
     } catch (e) {}
+    // 8.7. 같은 Group 안의 멀티레이어 텍스트 컴포지트 → background (개별 frame 추출 안 함)
+    // 예: 부록 도비라 "Appendix" 의 그림자 효과 (검정 ppendix + 흰 ppendix 가 같은 Group 안)
+    // — 같은 Group 의 TextFrame 형제들 중 하나라도 같은 텍스트 내용을 가지면 컴포지트로 간주.
+    // 성능: 형제가 너무 많으면(예: 수식 그룹) O(N²) 회피를 위해 건너뜀.
+    try {
+        var par87 = item.parent;
+        if (par87 && par87.constructor.name === "Group" && par87.textFrames
+                && par87.textFrames.length >= 2 && par87.textFrames.length <= 10) {
+            var myText87 = "";
+            try { myText87 = (item.contents + "").replace(/\s/g, ""); } catch (e) {}
+            if (myText87.length > 0 && myText87.length <= 30) {
+                for (var st87 = 0; st87 < par87.textFrames.length; st87++) {
+                    var sib87 = par87.textFrames[st87];
+                    if (sib87.id === item.id) continue;
+                    var sibText87 = "";
+                    try { sibText87 = (sib87.contents + "").replace(/\s/g, ""); } catch (e) {}
+                    if (sibText87 === myText87) {
+                        return "background";
+                    }
+                }
+            }
+        }
+    } catch (e) {
+    }
     // 9. 회전/효과/특수 스타일 → 별도 PNG 렌더링
-    if (isRenderableTextFrame(item)) return "renderable";
+    if (isRenderableTextFrame(item)) {
+        return "renderable";
+    }
+    // 9.5. 박스 라벨 패턴 (테두리 + 짧은 텍스트) → renderable
+    // 예: "QR 54", "QR 55", "QR 56" 보더 박스 라벨. 위치(마진/본문)와 무관하게 적용.
+    // (둥근 모서리 여부는 무관 — strokeColor 와 strokeWeight 만으로 판단)
+    try {
+        var trimmed95 = "";
+        try { trimmed95 = item.contents.replace(/[\r\n\s]/g, ""); } catch (e) {}
+        if (trimmed95.length > 0 && trimmed95.length <= 10) {
+            var sc95 = "None", sw95 = 0;
+            try { sc95 = item.strokeColor ? item.strokeColor.name : "None"; } catch (e) {}
+            try { sw95 = item.strokeWeight || 0; } catch (e) {}
+            var hasStroke95 = (sc95 !== "None" && sc95 !== "[None]") && sw95 > 0;
+            if (hasStroke95) {
+                return "renderable";
+            }
+        }
+    } catch (e) {}
     // 10. 빈 TextFrame + fill/stroke → 배경에 포함
     try {
         var trimmed10 = item.contents.replace(/[\r\n\s\uFFFC]/g, "");
@@ -2942,11 +3215,49 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                             || containerType === "Polygon"
                             || containerType === "Oval")
                             && noneSwatch && noneSwatch.isValid;
+                    var inlineConsumedChildIds = [];
                     if (shouldHideText) {
+                        // 컨테이너에 채움/테두리 색이 있는 "버튼/배지" 형태일 때만 라벨 보존 적용.
+                        // (수식 그룹 처럼 투명한 컨테이너 안의 짧은 텍스트는 일반 글상자로 처리해야 함)
+                        var isButtonContainer = false;
+                        try {
+                            var bcFill = inItem.fillColor ? inItem.fillColor.name : "None";
+                            var bcStroke = inItem.strokeColor ? inItem.strokeColor.name : "None";
+                            var bcSW = inItem.strokeWeight || 0;
+                            isButtonContainer = (bcFill !== "None" && bcFill !== "[None]")
+                                || ((bcStroke !== "None" && bcStroke !== "[None]") && bcSW > 0);
+                        } catch (e) {}
+                        if (!isButtonContainer && containerType === "Group") {
+                            try {
+                                var gpItems = inItem.pageItems;
+                                for (var gpi = 0; gpi < gpItems.length; gpi++) {
+                                    var gpIt = gpItems[gpi];
+                                    var gpCn = gpIt.constructor.name;
+                                    if (gpCn !== "Rectangle" && gpCn !== "Polygon" && gpCn !== "Oval") continue;
+                                    var gpFill = "None", gpStroke = "None", gpSW = 0;
+                                    try { gpFill = gpIt.fillColor ? gpIt.fillColor.name : "None"; } catch (e) {}
+                                    try { gpStroke = gpIt.strokeColor ? gpIt.strokeColor.name : "None"; } catch (e) {}
+                                    try { gpSW = gpIt.strokeWeight || 0; } catch (e) {}
+                                    if ((gpFill !== "None" && gpFill !== "[None]")
+                                        || ((gpStroke !== "None" && gpStroke !== "[None]") && gpSW > 0)) {
+                                        isButtonContainer = true;
+                                        break;
+                                    }
+                                }
+                            } catch (e) {}
+                        }
                         var groupItems = inItem.allPageItems;
                         for (var gki = 0; gki < groupItems.length; gki++) {
                             var gki_it = groupItems[gki];
                             if (gki_it.constructor.name === "TextFrame") {
+                                // 짧은 라벨(예: "After You Read", "Click Me" 등 ≤ 20자) 은
+                                // 컨테이너의 시각적 일부 → PNG 에 포함시킴 (텍스트 위치가 버튼/배지 디자인의 핵심).
+                                var labelTxt = "";
+                                try { labelTxt = (gki_it.contents + "").replace(/[\s﻿\r\n￼]/g, ""); } catch (e) {}
+                                if (isButtonContainer && labelTxt.length > 0 && labelTxt.length <= 20) {
+                                    inlineConsumedChildIds.push(gki_it.id);
+                                    continue;  // hide 하지 않음
+                                }
                                 try {
                                     var st = gki_it.parentStory;
                                     if (st && st.texts.length > 0) {
@@ -2998,7 +3309,8 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                             parentStoryId: eStory.id.toString(),
                             bounds: inBounds,
                             pageIndex: inPageIdx,
-                            type: "inline_object"
+                            type: "inline_object",
+                            childIds: inlineConsumedChildIds
                         });
                     }
                 } catch (eRender) {}
@@ -3075,15 +3387,30 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
     }
     // 배지 그룹은 별도 PNG로 렌더링되어 위에 덮어씌워지므로 배경에서 숨김
     // (숨기지 않으면 배지가 배경에도 남고 덮어씌운 배지가 중복 표시됨)
+    // 성능: SPEC-022 데코 검색은 Polygon/polygon-only Group 만 후보이므로
+    // 미리 한 번 필터링한 슬림 배열을 사용 (큰 문서에서 O(N²) 회피).
+    var decoCandidates = [];
+    if (CONFIG.rendering.badge.decorationMergeEnabled) {
+        for (var dci = 0; dci < allItems.length; dci++) {
+            try {
+                var dcItem = allItems[dci];
+                var dcCn = dcItem.constructor.name;
+                if (dcCn !== "Polygon" && dcCn !== "Group") continue;
+                decoCandidates.push(dcItem);
+            } catch (e) {}
+        }
+    }
     for (var bi = 0; bi < allItems.length; bi++) {
         try {
             var bItem = allItems[bi];
             if (bItem.constructor.name === "Group" && isBadgeGroup(bItem)) {
                 framesToHide.push(bItem);
                 // SPEC-022: 뱃지와 시각적으로 합쳐 렌더되는 외곽선 데코도 배경에서 숨김
-                var ovDecos = findOverlappingDecorations(bItem, allItems);
-                for (var ovi = 0; ovi < ovDecos.length; ovi++) {
-                    framesToHide.push(ovDecos[ovi]);
+                if (decoCandidates.length > 0) {
+                    var ovDecos = findOverlappingDecorations(bItem, decoCandidates);
+                    for (var ovi = 0; ovi < ovDecos.length; ovi++) {
+                        framesToHide.push(ovDecos[ovi]);
+                    }
                 }
             }
         } catch (e) {}
@@ -3126,6 +3453,31 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
                 }
             } catch (e) {}
             framesToHide.push(tpTarget);
+        } catch (e) {}
+    }
+
+    // SPEC-023: renderable TF 의 라운드 사각형 배경 도형도 배경에서 숨김 (별도 PNG 로 추출되므로 중복 방지)
+    var bgCandidatesPb = [];
+    for (var bcpb = 0; bcpb < allItems.length; bcpb++) {
+        try {
+            var bcpbIt = allItems[bcpb];
+            var bcpbCn = bcpbIt.constructor.name;
+            if (bcpbCn !== "Rectangle" && bcpbCn !== "Polygon" && bcpbCn !== "Oval") continue;
+            var bcpbFc = null;
+            try { bcpbFc = bcpbIt.fillColor; } catch (e) {}
+            var bcpbFcName = "";
+            try { if (bcpbFc) bcpbFcName = bcpbFc.name; } catch (e) {}
+            if (!bcpbFcName || bcpbFcName === "None" || bcpbFcName === "[None]") continue;
+            bgCandidatesPb.push(bcpbIt);
+        } catch (e) {}
+    }
+    for (var rti = 0; rti < allItems.length; rti++) {
+        try {
+            var rtItem = allItems[rti];
+            if (rtItem.constructor.name !== "TextFrame") continue;
+            if (classifyTextFrame(rtItem) !== "renderable") continue;
+            var rtBg = findRenderableTextBackground(rtItem, bgCandidatesPb);
+            if (rtBg) framesToHide.push(rtBg);
         } catch (e) {}
     }
 
