@@ -5,7 +5,7 @@ import kr.dogfoot.hwpxlib.writer.HWPXWriter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedDataReader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
@@ -152,7 +152,7 @@ public class IDMLToHwpxConverter {
             java.util.Set<String> inlineReplacedTexts = java.util.Collections.emptySet();
             if (!isNewPipeline) {
                 // Phase 2.7: 플로팅 이미지 → 인라인 머지 (textWrap 자리차지)
-                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FloatingImageMerger.merge(astDoc);
+                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy.FloatingImageMerger.merge(astDoc);
 
                 // Phase 2.8: 인라인 앵커 텍스트 프레임 → 렌더 이미지 교체
                 if (resolvedData != null && resolvedData.renderedTextFrameCount() > 0) {
@@ -192,16 +192,30 @@ public class IDMLToHwpxConverter {
                                 + tfCount + " 텍스트프레임, " + imgCount + " 이미지, " + tblCount + " 테이블");
             }
 
-            // Phase 2.8: 3계층 폰트 매퍼 초기화 (선택적)
+            // Phase 2.8: 3계층 폰트 매퍼 초기화
+            // --font-map 가 명시되지 않아도 jar/CWD 인근의 기본 font-mapping.json 을 자동 로드 →
+            // FontStyle("30" 등 가변폰트 weight) 가 정적 fallback 에서 무시되는 문제 회피.
             FontMapper fontMapper = null;
             ConversionConfig config = options.config();
-            if (options.fontMapPath() != null || !config.fontMappings().isEmpty()) {
+            String autoFontMapPath = options.fontMapPath();
+            if (autoFontMapPath == null) {
+                String[] candidates = {
+                        System.getProperty("user.dir") + "/font-mapping.json",
+                        new java.io.File(IDMLToHwpxConverter.class.getProtectionDomain()
+                                .getCodeSource().getLocation().getPath()).getParent()
+                                + "/../font-mapping.json"
+                };
+                for (String p : candidates) {
+                    if (new java.io.File(p).exists()) { autoFontMapPath = p; break; }
+                }
+            }
+            if (autoFontMapPath != null || !config.fontMappings().isEmpty()) {
                 fontMapper = new FontMapper();
                 // config 기반 초기화 (기본 폰트, 매핑, 메트릭)
                 fontMapper.loadFromConfig(config);
-                // font-mapping.json이 별도로 있으면 추가 로드 (오버라이드)
-                if (options.fontMapPath() != null) {
-                    fontMapper.loadFontMapping(options.fontMapPath());
+                // font-mapping.json 로드 (명시 또는 자동 발견)
+                if (autoFontMapPath != null) {
+                    fontMapper.loadFontMapping(autoFontMapPath);
                 }
                 if (resolvedData != null) {
                     fontMapper.setIdmlMetrics(resolvedData.fontMetrics(), resolvedData.scaleFactor());

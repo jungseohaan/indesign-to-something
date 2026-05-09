@@ -52,6 +52,18 @@ public final class FramePlacer {
                             }
                         }
                     }
+                    // inline_object의 childIds 에 포함된 TextFrame 은 부모 PNG 에 시각적으로
+                    // 이미 텍스트가 포함됨 → 플로팅 텍스트 배치 건너뜀 (예: "After You Read" 버튼).
+                    if (!rendered && domIdInt >= 0) {
+                        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                            if ("inline_object".equals(rg.itemType()) && rg.childIds() != null) {
+                                for (int cid : rg.childIds()) {
+                                    if (cid == domIdInt) { rendered = true; break; }
+                                }
+                                if (rendered) break;
+                            }
+                        }
+                    }
                     boolean sharedWithEditable = false;
                     if (tf.storyId() != null) {
                         for (ResolvedTextFrame other : frames) {
@@ -196,6 +208,187 @@ public final class FramePlacer {
             if (y < 0) { h += y; y = 0; }
             if (w <= 0 || h <= 0) continue;
 
+            // 타이틀 오버레이 패턴 사전 검사: 본문 TF 의 단락이 별도 타이틀 TF 로 덮여 있으면
+            // 해당 단락을 제외 후보로 수집 (paraIdx=0 이면 y/h 도 둘째 줄 기준으로 보정).
+            int preDetectedSkipParas = 0;
+            java.util.Set<Integer> excludedParaIndices = null;
+            try {
+                java.util.List<ResolvedTextFrame.ComposedLine> _cls = tf.composedLines();
+                if (_cls != null && !_cls.isEmpty() && tf.paragraphEnd() >= tf.paragraphStart()) {
+                    // 단락별로 line bounds 를 union 해서 단락 영역 계산
+                    java.util.Map<Integer, double[]> paraBounds = new java.util.HashMap<>();
+                    java.util.Map<Integer, StringBuilder> paraTexts = new java.util.HashMap<>();
+                    for (ResolvedTextFrame.ComposedLine cl : _cls) {
+                        if (cl == null || cl.bounds() == null) continue;
+                        int pi = cl.paraIndex();
+                        double[] b = cl.bounds();
+                        double[] cur = paraBounds.get(pi);
+                        if (cur == null) {
+                            paraBounds.put(pi, new double[]{b[0], b[1], b[2], b[3]});
+                        } else {
+                            if (b[0] < cur[0]) cur[0] = b[0];
+                            if (b[1] < cur[1]) cur[1] = b[1];
+                            if (b[2] > cur[2]) cur[2] = b[2];
+                            if (b[3] > cur[3]) cur[3] = b[3];
+                        }
+                        StringBuilder sb = paraTexts.get(pi);
+                        if (sb == null) { sb = new StringBuilder(); paraTexts.put(pi, sb); }
+                        if (cl.text() != null) sb.append(cl.text());
+                    }
+
+                    for (java.util.Map.Entry<Integer, double[]> e : paraBounds.entrySet()) {
+                        int pi = e.getKey();
+                        double[] pb = e.getValue();
+                        double pT = pb[0], pL = pb[1], pB = pb[2], pR = pb[3];
+                        StringBuilder sb = paraTexts.get(pi);
+                        if (sb == null) continue;
+                        String paraText = sb.toString().replace("\r", "").replace("\n", "").trim();
+                        if (paraText.length() < 3) continue;
+                        for (ResolvedTextFrame _other : ctx.resolvedData.textFrames()) {
+                            if (_other == null || _other == tf) continue;
+                            if (_other.pageIndex() != tf.pageIndex()) continue;
+                            if (_other.id() == null || _other.id().equals(tf.id())) continue;
+                            double[] _ogb = _other.geometricBounds();
+                            if (_ogb == null || _ogb.length < 4) continue;
+                            double _oT = _ogb[0], _oL = _ogb[1], _oB = _ogb[2], _oR = _ogb[3];
+                            double _ovStart = Math.max(pT, _oT);
+                            double _ovEnd = Math.min(pB, _oB);
+                            double _ov = _ovEnd - _ovStart;
+                            if (_ov <= 0) continue;
+                            double pH = pB - pT;
+                            double _otherH = _oB - _oT;
+                            if (pH <= 0 || _otherH <= 0) continue;
+                            if (_ov / Math.min(pH, _otherH) < 0.5) continue;
+                            // X 겹침: 다른 TF 가 이 단락 영역 내에 위치해야 오버레이로 간주
+                            double _xOvStart = Math.max(pL, _oL);
+                            double _xOvEnd = Math.min(pR, _oR);
+                            double _xOv = _xOvEnd - _xOvStart;
+                            if (_xOv <= 0) continue;
+                            double _otherW = _oR - _oL;
+                            if (_otherW <= 0) continue;
+                            // 다른 TF 의 너비 80% 이상이 이 단락 영역 안에 들어와야 함
+                            if (_xOv / _otherW < 0.8) continue;
+                            String _otherText = _other.frameVisibleText();
+                            if (_otherText == null || _otherText.isEmpty()) continue;
+                            String _otherClean = _otherText.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+                            if (_otherClean.length() < 3) continue;
+                            if (paraText.contains(_otherClean)) {
+                                if (excludedParaIndices == null) excludedParaIndices = new java.util.HashSet<>();
+                                excludedParaIndices.add(pi + tf.paragraphStart());
+                                break;
+                            }
+                        }
+                    }
+
+                    // paraIdx=0 이 제외되면 y/h 를 첫 비제외 단락 시작으로 이동
+                    if (excludedParaIndices != null && excludedParaIndices.contains(tf.paragraphStart())) {
+                        Integer firstKept = null;
+                        java.util.List<Integer> sortedKeys = new java.util.ArrayList<>(paraBounds.keySet());
+                        java.util.Collections.sort(sortedKeys);
+                        for (int pi : sortedKeys) {
+                            int absPi = pi + tf.paragraphStart();
+                            if (!excludedParaIndices.contains(absPi)) { firstKept = pi; break; }
+                        }
+                        if (firstKept != null) {
+                            double[] kb = paraBounds.get(firstKept);
+                            double newYTop = kb[0] - pageTop;
+                            double dy = newYTop - y;
+                            if (dy > 0 && dy < h) {
+                                y = newYTop;
+                                h -= dy;
+                                preDetectedSkipParas = firstKept;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception eTOPre) {}
+
+            // 배지 그룹과 같은 baseline에서 X 좌표가 겹치면 배지 우측으로 이동.
+            // InDesign은 zOrder/textWrap 으로 배지 위로 텍스트가 흐르지 않게 처리하지만,
+            // HWPX 글상자는 절대좌표 배치라 시각적 충돌 → 텍스트 좌측을 배지 우측+여백으로 보정.
+            for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
+                if (!rg.isBadgeGroup()) continue;
+                if (rg.pageIndex() != tf.pageIndex()) continue;
+                double[] bb = rg.bounds();
+                if (bb == null || bb.length < 4) continue;
+                // 배지 자식은 자기 자신이 배지이므로 제외
+                int[] childIds = rg.childTextFrameIds();
+                boolean selfChild = false;
+                if (childIds != null) {
+                    int tfIdInt;
+                    try { tfIdInt = Integer.parseInt(tf.id()); } catch (NumberFormatException e) { tfIdInt = -1; }
+                    for (int cid : childIds) { if (cid == tfIdInt) { selfChild = true; break; } }
+                }
+                if (selfChild) continue;
+                // 배지 bounds 를 page-relative 로 변환 (RenderedGroup.bounds 는 이미 page-relative pt)
+                double bT = bb[0], bL = bb[1], bB = bb[2], bR = bb[3];
+                // Y 겹침 비율
+                double yOvStart = Math.max(y, bT);
+                double yOvEnd = Math.min(y + h, bB);
+                double yOv = yOvEnd - yOvStart;
+                if (yOv <= 0) continue;
+                double tfYExtent = h;
+                double badgeYExtent = bB - bT;
+                double yOvRatio = yOv / Math.min(tfYExtent, badgeYExtent);
+                if (yOvRatio < 0.5) continue;
+                // X 겹침: 배지 우측이 TF 좌측보다 오른쪽에 있고, TF 좌측이 배지 영역에 포함되면 보정
+                // 보정 후 너비가 너무 작아지면 스킵
+                if (bR > x && bL < x + w * 0.5 && bR < x + w) {
+                    double margin = 4.0; // pt
+                    double newX = bR + margin;
+                    double delta = newX - x;
+                    double remainW = w - delta;
+                    if (delta > 0 && remainW > w * 0.2 && remainW > 20.0) {
+                        x = newX;
+                        w = remainW;
+                    }
+                }
+            }
+
+            // 같은 부모 Group 안의 형제 도형(fill 있는 Rectangle/Polygon/Oval) 과
+            // 동일 baseline 에 있을 때 형제 우측으로 이동. (예: page 17 Theme 라벨 + 한국어 TF)
+            try {
+                ResolvedPageItem tfPi = ctx.resolvedData.getPageItem(tf.id());
+                String tfParentId = (tfPi != null) ? tfPi.parentId() : null;
+                if (tfParentId != null) {
+                    for (ResolvedPageItem sib : ctx.resolvedData.pageItems()) {
+                        if (sib == null) continue;
+                        if (sib.id() == null || sib.id().equals(tf.id())) continue;
+                        if (!tfParentId.equals(sib.parentId())) continue;
+                        String st = sib.type();
+                        if (!"Rectangle".equals(st) && !"Polygon".equals(st) && !"Oval".equals(st)) continue;
+                        String fcn = sib.fillColorName();
+                        if (fcn == null || "None".equals(fcn) || "[None]".equals(fcn)) continue;
+                        double[] sgb = sib.geometricBounds();
+                        if (sgb == null || sgb.length < 4) continue;
+                        double sbT = sgb[0] - pageTop, sbB = sgb[2] - pageTop;
+                        double sbL = sgb[1] - pageLeft, sbR = sgb[3] - pageLeft;
+                        // Y 겹침 50% 이상
+                        double yOvStart2 = Math.max(y, sbT);
+                        double yOvEnd2 = Math.min(y + h, sbB);
+                        double yOv2 = yOvEnd2 - yOvStart2;
+                        if (yOv2 <= 0) continue;
+                        double sibYExt = sbB - sbT;
+                        double yOvRatio2 = yOv2 / Math.min(h, sibYExt);
+                        if (yOvRatio2 < 0.5) continue;
+                        // X 보정 — 형제가 TF 좌측을 가리고 우측 절반 안 침범
+                        // 보정 후 너비가 너무 작아지면 스킵 (사실상 TF 전체가 형제로 덮인 케이스)
+                        if (sbR > x && sbL < x + w * 0.5 && sbR < x + w) {
+                            double margin = 4.0;
+                            double newX = sbR + margin;
+                            double delta = newX - x;
+                            double remainW = w - delta;
+                            if (delta > 0 && remainW > w * 0.2 && remainW > 20.0) {
+                                x = newX;
+                                w = remainW;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {}
+
+            if (w <= 0) continue;
+
             // composedLines 기반 글상자 분할
             if (tf.composedLines() != null && tf.composedLines().size() > 1) {
                 // 1) wrap indent 기반 분할 (텍스트가 이미지를 비껴가는 경우)
@@ -260,8 +453,26 @@ public final class FramePlacer {
                 block.rotationAngle(tf.rotationAngle());
             }
 
-            // 시각 속성: 배경색은 배경 PNG에 포함됨 (텍스트만 비우고 프레임은 유지)
-            // HWPX 글상자에는 fillColor를 적용하지 않음 (이중 표시 방지)
+            // 시각 속성: TF 의 fillColor / cornerRadius 를 글상자에 적용.
+            // (배경 PNG 에 같은 색이 있으면 같은 색으로 덧칠되므로 시각 차이 없음.
+            //  배경 PNG 에 없는 경우 — 예: page 23 cutter/stopper 같은 단어 박스 — 글상자 fill 로 표시.)
+            try {
+                String fillName = tf.fillColor();
+                if (fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
+                    String fillHex = ctx.resolvedData.resolveColorHex(fillName);
+                    if (fillHex != null) {
+                        block.fillColor(fillHex);
+                        if (tf.fillTint() > 0 && tf.fillTint() <= 100) {
+                            block.fillTint((int) tf.fillTint());
+                        } else {
+                            block.fillTint(100);
+                        }
+                    }
+                }
+                if (tf.cornerRadius() > 0) {
+                    block.cornerRadius(tf.cornerRadius() * ctx.scaleFactor);
+                }
+            } catch (Exception eFill) {}
 
             // overflow 감지용 텍스트 길이 저장
             String visText = tf.frameVisibleText();
@@ -269,6 +480,16 @@ public final class FramePlacer {
                 block.frameVisibleTextLength(visText.replace("\uFFFC", "").replace("\n", "").replace("\r", "").length());
             }
             // storyTotalTextLength는 convertStories()에서 설정
+
+            // 타이틀 오버레이로 첫 N 단락 숨김 + 본문 중간의 제외 인덱스 적용
+            if (preDetectedSkipParas > 0) {
+                block.skipParagraphs(preDetectedSkipParas);
+            }
+            if (excludedParaIndices != null) {
+                for (Integer ex : excludedParaIndices) {
+                    block.addExcludedParagraphIndex(ex);
+                }
+            }
 
             section.addBlock(block);
         }

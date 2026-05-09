@@ -108,11 +108,19 @@ public class HwpxParagraphBuilder {
                 .columnBreakAnd(false)
                 .merged(false);
 
+        // 행잉 인덴트 단락은 "A:[tab]Is..." 패턴을 IDML 처럼 "A:_Is..." (단일 공백)로 표시.
+        // (Hancom 의 탭 디폴트 간격이 IDML 의 시각적 의도보다 넓게 렌더링되는 케이스 보정.)
+        boolean replaceTabsInRuns = isHangingIndentParagraph(astPara);
+
         // 인라인 항목 변환
         for (ASTInlineItem item : astPara.items()) {
             switch (item.itemType()) {
                 case TEXT_RUN:
-                    addTextRun(para, (ASTTextRun) item, paraCharPrId, astPara.indentToHerePosition());
+                    ASTTextRun tr = (ASTTextRun) item;
+                    if (replaceTabsInRuns && tr.text() != null && tr.text().indexOf('\t') >= 0) {
+                        tr.text(tr.text().replace('\t', ' '));
+                    }
+                    addTextRun(para, tr, paraCharPrId, astPara.indentToHerePosition());
                     break;
                 case INLINE_OBJECT:
                     addInlineObject(para, (ASTInlineObject) item);
@@ -205,11 +213,11 @@ public class HwpxParagraphBuilder {
         // anchoredPosition이 있는 앵커 객체는 펼치지 않음
         String ap = obj.anchoredPosition();
         if (ap != null && !"InlinePosition".equals(ap)) return false;
-        // 공백만 있는 인라인 TextFrame(빈칸박스)은 단어 사이 간격을 확보해야 하므로
+        // 공백만 있거나 비어있는 인라인 TextFrame(빈칸박스)은 단어 사이 간격을 확보해야 하므로
         // 납작화하지 않음 — 실제 폭을 가진 인라인 박스로 렌더링해서
         // 배경 PNG 위에 그려진 빈칸 밑줄과 위치를 맞춘다.
         ASTParagraph innerParaW = obj.paragraphs().get(0);
-        boolean onlyWhitespace = !innerParaW.items().isEmpty();
+        boolean onlyWhitespace = true;  // 비어있어도 빈칸으로 간주
         for (ASTInlineItem item : innerParaW.items()) {
             if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) { onlyWhitespace = false; break; }
             String t = ((ASTTextRun) item).text();
@@ -645,6 +653,31 @@ public class HwpxParagraphBuilder {
 
     // ── 텍스트 런 변환 ──
 
+    /**
+     * 단락이 행잉 인덴트(LeftIndent > 0, FirstLineIndent < 0) 인지 판별한다.
+     * 단락 자체 오버라이드 또는 적용된 paragraph style 의 값을 검사.
+     */
+    boolean isHangingIndentParagraph(ASTParagraph astPara) {
+        Long left = astPara.leftMargin();
+        Long indent = astPara.firstLineIndent();
+        if (left == null || indent == null) {
+            String ref = astPara.paragraphStyleRef();
+            if (ref != null) {
+                String resolved = HwpxUtil.resolveStyleRef(ref, ctx.styleRegistry);
+                if (ctx.paragraphStyles != null) {
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTStyleDef sd : ctx.paragraphStyles) {
+                        if (sd != null && resolved.equals(sd.styleId())) {
+                            if (left == null) left = sd.leftMargin();
+                            if (indent == null) indent = sd.firstLineIndent();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        return left != null && indent != null && left > 0 && indent < 0;
+    }
+
     void addTextRun(Para para, ASTTextRun textRun, String defaultCharPrId) {
         addTextRun(para, textRun, defaultCharPrId, 0);
     }
@@ -745,7 +778,7 @@ public class HwpxParagraphBuilder {
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
                 textRun.letterSpacing(),
-                isBoldStyle(fontStyleStr),
+                effectiveBoldStyle(fontStyleStr, textRun.fontFamily()),
                 isItalicStyle(fontStyleStr),
                 textRun.superscript(), textRun.subscript(),
                 textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
@@ -851,7 +884,7 @@ public class HwpxParagraphBuilder {
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
                 textRun.letterSpacing(),
-                isBoldStyle(fontStyle),
+                effectiveBoldStyle(fontStyle, textRun.fontFamily()),
                 isItalicStyle(fontStyle),
                 textRun.superscript(), textRun.subscript(),
                 textRun.underline() ? UnderlineType.BOTTOM : UnderlineType.NONE,
@@ -866,6 +899,23 @@ public class HwpxParagraphBuilder {
 
         ctx.charPrCache.put(cacheKey, newId);
         return newId;
+    }
+
+    /**
+     * IDML CharStyle 에서 fontStyle="Bold" 라고 지정해도, AppliedFont 가 실제로 Bold 변종이 없는 경우
+     * InDesign 은 Medium/Regular 로 대체 렌더한다 (예: "DIN Next LT Pro (TT)" + Bold → Medium).
+     * resolved.json fontMetrics 의 실제 weight 가 600 미만이면 Bold 로 강조 표시하지 않는다.
+     */
+    boolean effectiveBoldStyle(String fontStyle, String fontFamily) {
+        if (!isBoldStyle(fontStyle)) return false;
+        try {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper fm = ctx.fontRegistry.fontMapper();
+            if (fm != null && fontFamily != null) {
+                int actual = fm.resolvedWeightFor(fontFamily);
+                if (actual > 0 && actual < 600) return false;  // Bold 변종 미존재 → 시각적 Bold 아님
+            }
+        } catch (Exception e) {}
+        return true;
     }
 
     /**
@@ -885,11 +935,14 @@ public class HwpxParagraphBuilder {
                 if (num >= 65) return true;
             } catch (NumberFormatException ignored) {}
         }
-        // 가변폰트 숫자 weight: "40", "50" 등 — 30 이상이면 볼드 (기본 weight "20" 대비)
+        // 가변폰트 숫자 weight (Yoon 시리즈 등):
+        //   10=Thin, 20=ExtraLight, 30=Light, 40=Regular, 50=Medium,
+        //   60=Semibold, 70=Bold, 80=ExtraBold, 90=Heavy
+        // → 70 이상부터 Bold 로 표시. (기존 ≥30 임계는 Light/Regular 까지 잘못 Bold 처리됨)
         if (lower.matches("^\\d+$")) {
             try {
                 int weight = Integer.parseInt(lower);
-                if (weight >= 30) return true;
+                if (weight >= 70) return true;
             } catch (NumberFormatException ignored) {}
         }
         return false;
@@ -929,7 +982,7 @@ public class HwpxParagraphBuilder {
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
                 textRun.letterSpacing(),
-                isBoldStyle(fontStyle),
+                effectiveBoldStyle(fontStyle, textRun.fontFamily()),
                 isItalicStyle(fontStyle),
                 textRun.superscript(), textRun.subscript(),
                 UnderlineType.NONE, textColor,
@@ -954,6 +1007,22 @@ public class HwpxParagraphBuilder {
      * ASTEquation → HWPX Equation (인라인 수식).
      */
     void addEquationRun(Para para, ASTEquation eq) {
+        // 다행 수식 (예: 분배법칙 전개)에 포함된 U+2028(LINE SEPARATOR) 또는 \n 을
+        // HwpScript 의 줄바꿈 토큰 '#' 으로 변환. (탭은 공백으로 정규화)
+        String rawScript = eq.hwpScript();
+        if (rawScript != null && (rawScript.indexOf(' ') >= 0 || rawScript.indexOf('\n') >= 0)) {
+            String normalized = rawScript
+                    .replace("\t", " ")
+                    .replace(" ", " # ")
+                    .replace("\n", " # ")
+                    .replaceAll(" +", " ")
+                    .trim();
+            // # 가 양쪽에 빈 항이 되지 않도록 정리
+            normalized = normalized.replaceAll("^#\\s*", "")
+                    .replaceAll("\\s*#$", "")
+                    .replaceAll("#\\s*#", "#");
+            eq.hwpScript(normalized);
+        }
         Run run = para.addNewRun();
         run.charPrIDRef("0");
         try {

@@ -164,6 +164,24 @@ public class FontMapper {
         setIdmlMetrics(metrics, 2.8346);
     }
 
+    /**
+     * resolved.json fontMetrics 에 등록된 (실제 InDesign 이 렌더에 사용한) 폰트의 weight 를 반환한다.
+     * 없으면 -1.
+     * (TT) / (TTF) 등 InDesign 표시용 접미사는 제거하여 매칭한다.
+     */
+    public int resolvedWeightFor(String idmlFontFamily) {
+        if (idmlFontFamily == null) return -1;
+        FontMetricEntry m = idmlMetrics.get(idmlFontFamily);
+        if (m == null) {
+            // (TT) / (TT1) / (TTC) 등 접미사 제거 후 재시도
+            String stripped = idmlFontFamily.replaceAll("\\s*\\([^)]*\\)\\s*$", "").trim();
+            if (!stripped.equals(idmlFontFamily)) {
+                m = idmlMetrics.get(stripped);
+            }
+        }
+        return m != null ? m.weight() : -1;
+    }
+
     public void setIdmlMetrics(List<FontMetricEntry> metrics, double scale) {
         if (metrics == null) return;
         this.scaleFactor = scale;

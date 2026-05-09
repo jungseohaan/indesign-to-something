@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
  * 페이지별 AST 섹션 빌드 로직.
  * Stage4_BuildAST에서 분리됨 — 텍스트 프레임, 이미지, 벡터, 마스터 콘텐츠, 푸터 처리.
  */
-class ASTPageProcessor {
+public class ASTPageProcessor {
 
     /**
      * 단일 페이지를 처리하여 ASTSection을 생성.
@@ -30,7 +30,7 @@ class ASTPageProcessor {
      * @param processedStories 이미 처리된 스토리 ID 집합 (페이지 간 공유, 변경됨)
      * @param doc              ASTDocument (스토리 메타데이터 추가용)
      */
-    static ASTSection processPage(IDMLSpread spread, IDMLPage page,
+    public static ASTSection processPage(IDMLSpread spread, IDMLPage page,
                                    FlattenedObjectPool pool, IDMLDocument idmlDoc,
                                    ColorResolver colorResolver, ASTImageLoader imageLoader,
                                    ResolvedData resolvedData,
@@ -110,7 +110,7 @@ class ASTPageProcessor {
      * 스프레드 전체를 하나의 ASTSection으로 처리.
      * 각 페이지를 독립 처리한 뒤, 두 번째 페이지부터 X 오프셋을 적용하여 병합한다.
      */
-    static ASTSection processSpread(IDMLSpread spread,
+    public static ASTSection processSpread(IDMLSpread spread,
                                      FlattenedObjectPool pool, IDMLDocument idmlDoc,
                                      ColorResolver colorResolver, ASTImageLoader imageLoader,
                                      ResolvedData resolvedData,

@@ -1779,7 +1779,13 @@ public final class StoryConverter {
                 // Story가 20자 이상인데 프레임에 보이는 텍스트가 0~1자 → 오버플로우/미표시 프레임
                 return;
             }
+            int skip1 = Math.max(0, block.skipParagraphs());
+            java.util.Set<Integer> excl1 = block.excludedParagraphIndices();
+            int idx1 = 0;
             for (ASTParagraph p : paragraphs) {
+                int curIdx = idx1++;
+                if (curIdx < skip1) continue;
+                if (excl1 != null && excl1.contains(curIdx)) continue;
                 block.addParagraph(p);
             }
             return;
@@ -1875,7 +1881,10 @@ public final class StoryConverter {
             if (frameTexts == null || frameTexts.isEmpty()) {
                 int start = (rtf != null) ? Math.max(0, rtf.paragraphStart()) : 0;
                 int end = (rtf != null && rtf.paragraphEnd() >= 0) ? rtf.paragraphEnd() : paragraphs.size() - 1;
+                start += Math.max(0, block.skipParagraphs());
+                java.util.Set<Integer> excl2 = block.excludedParagraphIndices();
                 for (int i = start; i <= end && i < paragraphs.size(); i++) {
+                    if (excl2 != null && excl2.contains(i)) continue;
                     block.addParagraph(paragraphs.get(i));
                 }
                 continue;
@@ -1909,6 +1918,14 @@ public final class StoryConverter {
                     if (continuation != null) {
                         block.addParagraph(continuation);
                     }
+                }
+            }
+            // 타이틀 오버레이로 첫 N 단락 숨기기
+            int sk = block.skipParagraphs();
+            if (sk > 0 && !block.paragraphs().isEmpty()) {
+                int rem = Math.min(sk, block.paragraphs().size());
+                for (int s = 0; s < rem; s++) {
+                    block.paragraphs().remove(0);
                 }
             }
         }

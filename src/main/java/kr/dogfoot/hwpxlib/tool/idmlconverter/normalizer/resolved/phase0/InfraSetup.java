@@ -99,6 +99,55 @@ public final class InfraSetup {
                     if (justification != null && !justification.isEmpty()) {
                         sd.alignment(justification);
                     }
+                    // 들여쓰기 (LeftIndent / FirstLineIndent / RightIndent) — pt → HWPUNIT
+                    String leftIndentStr = ps.getAttribute("LeftIndent");
+                    if (leftIndentStr != null && !leftIndentStr.isEmpty()) {
+                        try { sd.leftMargin(CoordinateConverter.pointsToHwpunits(Double.parseDouble(leftIndentStr))); } catch (NumberFormatException e) {}
+                    }
+                    String firstLineStr = ps.getAttribute("FirstLineIndent");
+                    if (firstLineStr != null && !firstLineStr.isEmpty()) {
+                        try { sd.firstLineIndent(CoordinateConverter.pointsToHwpunits(Double.parseDouble(firstLineStr))); } catch (NumberFormatException e) {}
+                    }
+                    String rightIndentStr = ps.getAttribute("RightIndent");
+                    if (rightIndentStr != null && !rightIndentStr.isEmpty()) {
+                        try { sd.rightMargin(CoordinateConverter.pointsToHwpunits(Double.parseDouble(rightIndentStr))); } catch (NumberFormatException e) {}
+                    }
+                    // 탭 정지점 (TabList) — Properties/TabList 안의 ListItem들
+                    org.w3c.dom.NodeList tabLists = ps.getElementsByTagName("TabList");
+                    if (tabLists.getLength() > 0) {
+                        org.w3c.dom.Element tabList = (org.w3c.dom.Element) tabLists.item(0);
+                        org.w3c.dom.NodeList tabItems = tabList.getElementsByTagName("ListItem");
+                        java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop> tabStops = new java.util.ArrayList<>();
+                        for (int ti = 0; ti < tabItems.getLength(); ti++) {
+                            org.w3c.dom.Element tabItem = (org.w3c.dom.Element) tabItems.item(ti);
+                            String posStr = null;
+                            String alignStr = "LeftAlign";
+                            String leaderStr = null;
+                            org.w3c.dom.NodeList children = tabItem.getChildNodes();
+                            for (int ci = 0; ci < children.getLength(); ci++) {
+                                if (children.item(ci).getNodeType() != org.w3c.dom.Node.ELEMENT_NODE) continue;
+                                org.w3c.dom.Element ch = (org.w3c.dom.Element) children.item(ci);
+                                String tag = ch.getNodeName();
+                                if ("Position".equals(tag)) posStr = ch.getTextContent();
+                                else if ("Alignment".equals(tag)) alignStr = ch.getTextContent();
+                                else if ("Leader".equals(tag)) leaderStr = ch.getTextContent();
+                            }
+                            if (posStr != null) {
+                                try {
+                                    long posHwpunits = CoordinateConverter.pointsToHwpunits(Double.parseDouble(posStr));
+                                    // IDML Alignment → HWPX 탭 정렬 (LeftAlign/CenterAlign/RightAlign/CharacterAlign)
+                                    String mappedAlign = "left";
+                                    if (alignStr != null) {
+                                        if (alignStr.contains("Right")) mappedAlign = "right";
+                                        else if (alignStr.contains("Center")) mappedAlign = "center";
+                                        else if (alignStr.contains("Character")) mappedAlign = "decimal";
+                                    }
+                                    tabStops.add(new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop(posHwpunits, mappedAlign, leaderStr));
+                                } catch (NumberFormatException e) {}
+                            }
+                        }
+                        if (!tabStops.isEmpty()) sd.tabStops(tabStops);
+                    }
                     doc.addParagraphStyle(sd);
                 }
             }

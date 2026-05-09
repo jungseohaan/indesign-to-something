@@ -10,7 +10,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSerializer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IDMLPageRenderer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.IDMLTemplateCreator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.IDMLValidator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.IDMLSchemaExtractor;

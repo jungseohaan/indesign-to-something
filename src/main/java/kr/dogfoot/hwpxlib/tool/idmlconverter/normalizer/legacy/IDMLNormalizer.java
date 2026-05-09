@@ -1,10 +1,12 @@
-package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
+package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ProgressReporter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FlatObject;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FlattenedObjectPool;
 
 /**
  * IDML 정규화 진입점 — 3단계 파이프라인 오케스트레이션.
@@ -45,7 +47,7 @@ public class IDMLNormalizer {
 
         // Stage 3: 스토리 우선 AST 구축 (resolved 좌표 활용, 페이지별 진행률)
         reporter.reportProgress(6, 100, "IDML 정규화 중... (3/3 AST 구축)");
-        ASTDocument ast = Stage4_BuildAST.build(pool, idmlDoc, options, sourceFileName, resolvedData, reporter);
+        ASTDocument ast = Stage3_BuildAST.build(pool, idmlDoc, options, sourceFileName, resolvedData, reporter);
 
         // orphan injection 제외 ID 수집 — 클리핑 도형의 자식 (재귀)
         for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread spread : idmlDoc.spreads()) {

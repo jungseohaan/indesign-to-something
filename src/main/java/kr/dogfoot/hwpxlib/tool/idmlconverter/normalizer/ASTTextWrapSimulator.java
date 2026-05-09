@@ -20,7 +20,7 @@ import java.util.List;
  * Cross-frame 텍스트 감싸기 시뮬레이션 + 여백 가이드라인.
  * Stage4_BuildAST에서 분리됨.
  */
-class ASTTextWrapSimulator {
+public class ASTTextWrapSimulator {
 
     /**
      * 텍스트 감싸기 존 — 페이지 상의 특정 영역에서 다른 텍스트 프레임의 콘텐츠를 밀어내는 영역.

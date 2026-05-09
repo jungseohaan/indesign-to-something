@@ -1,4 +1,4 @@
-package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
+package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLFontDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTStoryConverter;
 
 import java.util.ArrayList;
 import java.util.List;

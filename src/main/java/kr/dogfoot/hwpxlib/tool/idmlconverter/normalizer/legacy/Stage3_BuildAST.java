@@ -1,4 +1,4 @@
-package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
+package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ProgressReporter;
@@ -7,6 +7,10 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTPageProcessor;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTextWrapSimulator;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FlattenedObjectPool;
 
 import java.util.*;
 
@@ -22,7 +26,7 @@ import java.util.*;
  * - {@link ASTMathGrouper}: BT 수식 폰트 런 그룹핑
  * - {@link ASTInlineObjectBuilder}: 인라인 그래픽, 이미지, 벡터, 테이블
  */
-public class Stage4_BuildAST {
+public class Stage3_BuildAST {
 
     public static ASTDocument build(FlattenedObjectPool pool, IDMLDocument idmlDoc,
                                      ConvertOptions options, String sourceFileName,
@@ -33,7 +37,7 @@ public class Stage4_BuildAST {
     public static ASTDocument build(FlattenedObjectPool pool, IDMLDocument idmlDoc,
                                      ConvertOptions options, String sourceFileName,
                                      ResolvedData resolvedData, ProgressReporter reporter) {
-        System.err.println("[Stage4_BuildAST] Building AST from stories...");
+        System.err.println("[Stage3_BuildAST] Building AST from stories...");
 
         ASTDocument doc = new ASTDocument();
         doc.sourceFile(sourceFileName);
@@ -93,7 +97,7 @@ public class Stage4_BuildAST {
             }
         }
 
-        System.err.println("[Stage4_BuildAST] Built " + doc.sections().size() + " sections.");
+        System.err.println("[Stage3_BuildAST] Built " + doc.sections().size() + " sections.");
         return doc;
     }
 }

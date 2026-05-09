@@ -1,8 +1,9 @@
-package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
+package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FlatObject;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.FlattenedObjectPool;
 
-import java.util.List;
 import java.util.Map;
 
 /**

@@ -1,4 +1,4 @@
-package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
+package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 

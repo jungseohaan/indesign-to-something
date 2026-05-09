@@ -23,41 +23,67 @@ cd desktop && npm run tauri dev
 
 ## 아키텍처
 
-### 변환 파이프라인
+### 변환 파이프라인 (이중 분기)
+
+`IDMLToHwpxConverter.convert()`가 `resolvedData.allRenderedFloatingItems()` 유무로 분기. 데스크탑 앱이 만든 추출은 항상 새 파이프라인.
 
 ```
-.indd → [ExtendScript] → .idml + resolved.json
-                              ↓
-                         IDMLLoader
-                              ↓
-                    IDMLNormalizer (4단계)
-                     ├─ Stage1_Flatten      → FlattenedObjectPool
-                     ├─ Stage2_InlineDetect → 인라인/플로팅 분류
-                     ├─ Stage3_CollapseInlines → 인라인 트리 정리
-                     └─ Stage4_BuildAST     → ASTDocument
-                              ↓
-                  [Resolved 보강 — 선택적]
-                     ├─ ResolvedMerger.enrich()    → 스타일/색상 보강
-                     └─ ResolvedFrameDistributor   → 프레임별 문단 재배치
-                              ↓
-                    ASTToHwpxConverter
-                     ├─ HwpxParagraphBuilder
-                     ├─ HwpxTextBoxBuilder
-                     ├─ HwpxTableBuilder
-                     └─ HwpxImageBuilder
-                              ↓
-                          .hwpx 출력
+.indd → [ExtendScript: extract_indd.jsx]
+        ├─ output.idml
+        ├─ resolved.json
+        ├─ pageBackgrounds/
+        └─ renderedFloating/
+               ↓
+         IDMLLoader + ResolvedDataReader
+               ↓
+   resolvedData.normalizeToPoints()  ← 단위 정규화 (mm/pt)
+               ↓
+         ┌─────┴─────┐
+         │ 분기      │
+         └─────┬─────┘
+               │
+     renderedFloatingItems 있음 ──── YES ───┐
+               │ NO                         │
+               ▼                            ▼
+   ┌─ 레거시 파이프라인 ─┐    ┌─ 신 파이프라인 (IDML-Free) ─┐
+   │ legacy/             │    │ ResolvedToASTBuilder        │
+   │  IDMLNormalizer    │    │  Phase 0 InfraSetup         │
+   │  Stage1_Flatten    │    │  Phase 1 PageLayoutBuilder  │
+   │  Stage2_InlineDetect│   │  Phase 2 FramePlacer        │
+   │  Stage3_BuildAST   │    │  Phase 3 StoryConverter     │
+   │  ResolvedMerger    │    │  Phase 4 TableBuilder       │
+   │  FrameDistributor  │    │  Phase 4.5 BulletInserter   │
+   │  OverlayEnricher   │    │  Phase 5 WrapPhase5         │
+   │  FloatingImage…    │    │  Phase 6 BackgroundInjector │
+   │  …등                │    │  Phase 7 RenderableFrame…   │
+   └────────┬───────────┘    └────────┬─────────────────────┘
+            └──────┬─────────────────┘
+                   ▼
+              ASTDocument
+                   ▼
+           ASTToHwpxConverter
+            ├─ HwpxParagraphBuilder
+            ├─ HwpxTextBoxBuilder
+            ├─ HwpxTableBuilder
+            └─ HwpxImageBuilder
+                   ▼
+                .hwpx 출력
 ```
+
+> 레거시는 **3단계**: Stage1 → Stage2 → Stage3_BuildAST. (구 `Stage4_BuildAST`는 W2-1에서 `Stage3_BuildAST`로 rename + `legacy/`로 이동.)
 
 ### 핵심 모듈
 
 | 모듈 | 위치 | 역할 |
 |------|------|------|
 | IDML 파서 | `idml/` | IDML ZIP 로딩, XML 파싱 |
-| 정규화 | `normalizer/` | 4단계 파이프라인 (Stage1~4) |
+| 신 파이프라인 | `normalizer/ResolvedToASTBuilder.java` + `normalizer/resolved/phase0~7/` | resolved.json 우선 빌드 (Phase 0~7) |
+| 레거시 파이프라인 | `normalizer/legacy/IDMLNormalizer.java` + `Stage1/2/3_*.java` | IDML 우선 3단계 빌드 + 후처리 7단계 |
 | AST | `ast/` | 중간 표현 (ASTDocument, ASTSection, ASTBlock...) |
-| Resolved | `resolved/` | InDesign DOM 데이터 보강 (색상, 스타일, 프레임 배치) |
+| Resolved | `resolved/` | resolved.json 데이터 모델 + 레거시 후처리 |
 | 변환기 | `converter/` | AST → HWPX 변환, Builder 패턴 |
+| 수식 변환 | `equationconverter/` | BT/EH/NP 폰트 글리프 → HWP 수식 |
+| 시멘틱 (SPEC-018) | `semantic/` | AST → 시멘틱 노드/관계 추출 (M3 진행 중) |
 | CLI | `ConverterCLI.java` | 명령행 인터페이스 |
 
 ### Desktop 앱 구조
@@ -74,45 +100,100 @@ cd desktop && npm run tauri dev
 ```
 src/main/java/kr/dogfoot/hwpxlib/tool/idmlconverter/
 ├── ConverterCLI.java              # CLI 엔트리포인트
-├── IDMLToHwpxConverter.java       # 변환 파사드
-├── ConvertOptions.java            # 변환 옵션
+├── IDMLToHwpxConverter.java       # 변환 파사드 (파이프라인 분기)
+├── ConvertOptions.java            # 호출별 옵션
+├── ConversionConfig.java          # 글로벌 설정 (conversion-config.json)
 ├── ast/
 │   ├── ASTDocument.java           # AST 루트
-│   ├── ASTSection.java            # 페이지 단위 섹션
-│   ├── ASTTextFrameBlock.java     # 텍스트 프레임 블록
-│   ├── ASTParagraph.java          # 문단
+│   ├── ASTSection.java            # 페이지 섹션
+│   ├── ASTTextFrameBlock.java     # 글상자
+│   ├── ASTParagraph.java          # 단락
 │   ├── ASTTextRun.java            # 텍스트 런
+│   ├── ASTInlineObject.java       # 인라인 객체 (이미지/도형)
+│   ├── ASTTable.java              # 표
+│   ├── ASTFigure.java             # 플로팅 이미지
+│   ├── ASTEquation.java           # 수식
+│   ├── ASTPageBackground.java     # 페이지 배경 PNG
 │   ├── ASTSerializer.java         # AST → JSON
 │   └── ASTDeserializer.java       # JSON → AST
 ├── normalizer/
-│   ├── IDMLNormalizer.java        # 정규화 오케스트레이터
-│   ├── Stage1_Flatten.java        # 객체 평탄화
-│   ├── Stage2_InlineDetect.java   # 인라인 감지
-│   ├── Stage3_CollapseInlines.java # 인라인 정리
-│   └── Stage4_BuildAST.java       # AST 빌드
+│   ├── ResolvedToASTBuilder.java  # ★ 신 파이프라인 진입점 (오케스트레이터)
+│   ├── StylePropertyResolver.java # 스타일 BasedOn 체인 resolve
+│   ├── RunPropertyResolver.java   # 런 속성 우선순위 (SPEC-012)
+│   ├── ASTRunConverter.java       # 런 변환 헬퍼 (신/구 공유)
+│   ├── ASTMathGrouper.java        # 수식 폰트 그룹핑 (신/구 공유)
+│   ├── ASTTableConverter.java     # 표 변환 헬퍼 (신/구 공유)
+│   ├── ASTPageProcessor.java      # 페이지 프로세싱 헬퍼 (신/구 공유)
+│   ├── MatchConfidence.java       # 매칭 신뢰도 enum (SPEC-016)
+│   ├── legacy/                    # 레거시 3단계 파이프라인
+│   │   ├── IDMLNormalizer.java    # 레거시 진입점
+│   │   ├── Stage1_Flatten.java    # 객체 평탄화
+│   │   ├── Stage2_InlineDetect.java # 인라인 감지
+│   │   ├── Stage3_BuildAST.java   # AST 빌드 (구 Stage4_BuildAST)
+│   │   ├── ASTMetadataBuilder.java # 폰트/스타일/색상 메타
+│   │   └── FloatingImageMerger.java # 플로팅 이미지 후처리
+│   └── resolved/                  # 신 파이프라인 phase 디렉토리
+│       ├── ResolvedBuildContext.java       # phase 간 공유 컨텍스트
+│       ├── phase0/InfraSetup.java          # IDML 정의 복사 + 스타일 보강
+│       ├── phase1/PageLayoutBuilder.java   # 페이지/섹션 빌드
+│       ├── phase2/FramePlacer.java         # TextFrame 분류/배치
+│       ├── phase3/StoryConverter.java      # ★ 단락/런/수식 변환 (2695 LOC)
+│       ├── phase4/TableBuilder.java        # 테이블 변환
+│       ├── phase4_5/BulletInserter.java    # 불릿 자동 삽입
+│       ├── phase5/WrapPhase5.java          # textwrap 글상자 분할
+│       ├── phase6/BackgroundInjector.java  # 페이지 배경 PNG 주입
+│       ├── phase7/RenderableFramePlacer.java # 배지 플로팅 배치
+│       └── shared/ParagraphTextHelpers.java # phase 공유 헬퍼
 ├── converter/
 │   ├── ASTToHwpxConverter.java    # HWPX 변환 메인
+│   ├── HwpxConverterContext.java  # 변환 공유 상태
+│   ├── HwpxParagraphBuilder.java  # 단락 빌더
 │   ├── HwpxTextBoxBuilder.java    # 글상자 빌더
-│   ├── HwpxParagraphBuilder.java  # 문단 빌더
 │   ├── HwpxTableBuilder.java      # 표 빌더
-│   └── HwpxImageBuilder.java      # 이미지 빌더
+│   ├── HwpxImageBuilder.java      # 이미지 빌더
+│   ├── FontMapper.java            # 3계층 폰트 매핑
+│   ├── CoordinateConverter.java   # pt ↔ HWPUNIT
+│   ├── TextFrameGridMerger.java   # Grid TextFrame → ASTTable
+│   └── registry/
+│       ├── FontRegistry.java
+│       └── StyleRegistry.java
 ├── resolved/
-│   ├── ResolvedData.java          # resolved 데이터 컨테이너
+│   ├── ResolvedData.java          # 최상위 컨테이너 + normalizeToPoints()
 │   ├── ResolvedDataReader.java    # JSON 파서 (Gson lenient)
-│   ├── ResolvedMerger.java        # AST 보강
-│   └── ResolvedFrameDistributor.java # 프레임 문단 재배치
+│   ├── ResolvedStory.java         # 스토리 모델
+│   ├── ResolvedTextFrame.java     # 프레임 모델 (composedLines, nextFrameId)
+│   ├── ResolvedMerger.java        # (레거시) AST 보강
+│   ├── ResolvedFrameDistributor.java # (레거시) 연결 글상자 재배치
+│   └── ResolvedOverlayEnricher.java  # (레거시) 오버레이 좌표 보강
+├── equationconverter/idml/        # BT/EH/NP 수식 변환
+├── semantic/                      # SPEC-018 시멘틱 추출 (M3 진행 중)
+├── font/FontCandidateMatcher.java # SPEC-014 폰트 자동 매핑
 └── idml/
     ├── IDMLLoader.java            # IDML ZIP 로더
-    └── IDMLDocument.java          # IDML 문서 모델
+    ├── IDMLDocument.java          # IDML 문서 모델
+    └── IDMLStoryParser.java       # Story XML 파서
+
+scripts/
+├── extract_indd.jsx               # ★ ExtendScript 추출기 (메인)
+├── export_pdf_bg.jsx              # PDF 배경 내보내기
+├── analyze_eh_fonts.py            # EH 폰트 분석 (개발 도구)
+└── measure_indesign_fonts.py      # 폰트 메트릭 측정
 
 desktop/src-tauri/src/
-├── commands.rs                    # Tauri 커맨드 핸들러
-├── indesign.rs                    # InDesign ExtendScript 호출
-└── lib.rs                         # Tauri 앱 설정
+├── main.rs / lib.rs               # Tauri 앱 부트
+├── commands/                      # Tauri 커맨드 핸들러 (디렉토리)
+├── indesign.rs                    # osascript + ExtendScript 호출
+└── extract_cache.rs               # SPEC-011 추출 캐시
 
-desktop/src/stores/
-├── useAppStore.ts                 # 앱 상태 (파일, 변환, INDD)
-└── useAstStore.ts                 # AST 뷰어 상태
+desktop/src/
+├── stores/
+│   ├── useAppStore.ts             # 앱 상태 (파일/변환/INDD/배치)
+│   ├── useAstStore.ts             # AST 뷰어 상태
+│   └── useSemanticStore.ts        # 시멘틱 레이어 상태 (SPEC-018)
+├── components/
+└── App.tsx
+
+packages/semantic-schemas/schemas/ # SPEC-018 SSOT (Maven 리소스로 포함)
 ```
 
 ## 코딩 컨벤션
@@ -160,7 +241,38 @@ desktop/src/stores/
 
 ## 알려진 이슈 & 주의사항
 
+### 데이터 파이프라인
 - **ExtendScript JSON**: 제어 문자를 이스케이프하지 못함 → Gson lenient 모드 필수
+- **resolved 좌표 단위 불일치**: InDesign DOM은 문서 측정 단위(mm/in/pt)로 반환, IDML은 항상 pt → `ResolvedData.normalizeToPoints(idmlPageWidthPt)`로 scaleFactor 자동 계산. ExtendScript `viewPreferences` 변경은 효과 없음
+- **resolved Group bounds 과대**: DOM의 Group `geometricBounds`는 비가시 자식까지 포함 → 벡터 그룹은 IDML 폴백, 개별 도형만 resolved 사용
 - **문단 인덱스 불일치**: IDML(AST)과 InDesign DOM(resolved)의 문단 수가 다름 → 텍스트 기반 매핑 사용
-- **HWPX 연결 글상자**: 한글은 연결 글상자 체인에서 후속 프레임의 명시적 콘텐츠를 무시 → distributed 프레임은 linkListIDRef=0으로 해제
-- **Java 경로**: macOS에서 `/opt/homebrew/opt/openjdk/bin/java` (Homebrew)
+- **HWPX 연결 글상자**: 한글은 연결 글상자 체인에서 후속 프레임의 명시적 콘텐츠를 무시 → distributed 프레임은 `linkListIDRef=0`으로 해제
+
+### 신 파이프라인 (Phase 0~7) 구현 트랩
+- **lazy IDMLDocument 초기화 순서**: `ctx.idmlDocumentSupplier.get()` 호출 전 반드시 `ctx.ensureIdmlInfra.run()` 먼저 (idempotent). 누락 시 `IDMLDocument=null` → ParagraphStyle/CharacterStyle 정의 조회 실패 (SPEC-024 회귀 사례)
+- **hex/decimal ID 변환**: IDML `u` + hex (`u1735`), InDesign DOM decimal (`5941`), 변환은 `parseInt("1735", 16) = 5941`
+- **Phase 3 텍스트 매칭**: `lastMatchResult[0]` 인덱스 캐시로 O(n) 가속. 인라인 수식으로 텍스트 길이 차이 시 next() 재탐색 → O(n²) 위험
+- **수식 폰트 한국어 오적용 방지**: BT/EH/NP 폰트 필터가 한국어 텍스트 보호. 단, 단일 라틴 문자는 통과 → 혼합 텍스트 경계 케이스 잔존
+
+### 환경
+- **Java 경로**: macOS Homebrew `/opt/homebrew/opt/openjdk/bin/java`
+- **데스크탑 추출 경로**: `/var/folders/.../T/indd-extract-{timestamp}/`
+- **추출 캐시 (SPEC-011)**: `~/Library/Caches/idml-to-hwpx/extracts/<sha256>/`
+
+## CLI 변환 테스트 가이드
+
+```bash
+# 풀 변환 (resolved.json + Links 권장)
+java -jar target/idml-to-something-1.0.9-cli.jar \
+     --convert input.idml output.hwpx \
+     --resolved resolved.json \
+     --links-directory /path/to/Links
+
+# 진행률 JSON lines 출력
+java -jar ... --convert ... --progress
+
+# 디버그 모드 (각 블록에 createdAt phase 메타)
+java -jar ... --convert ... --debug-ast
+```
+
+데스크탑 앱 추출 결과로 테스트 시: 최신 `indd-extract-*/` 디렉토리에서 `output.idml` + `resolved.json` + 원본 INDD 옆 `Links/` 사용.

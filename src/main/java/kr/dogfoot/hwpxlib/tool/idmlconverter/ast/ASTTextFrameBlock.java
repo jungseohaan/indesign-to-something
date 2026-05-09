@@ -55,6 +55,14 @@ public class ASTTextFrameBlock extends ASTBlock {
     private int composedCharStart = -1;
     private int composedCharEnd = -1;
 
+    // 첫 N개 단락을 출력에서 제외 (예: 타이틀 오버레이 패턴 — 본문 TF의 첫 단락이
+    // 별도 타이틀 TF로 위에 덮여 있어 본문에서는 숨겨야 하는 경우).
+    private int skipParagraphs = 0;
+
+    // 특정 절대 단락 인덱스(스토리 기준)를 출력에서 제외.
+    // 본문 중간에 있는 타이틀이 별도 TF 로 덮인 케이스 (예: page 18 "Ava's Story: Keeping a Time Diary").
+    private java.util.Set<Integer> excludedParagraphIndices;
+
     // 폴리곤 경로 (비사각형 프레임용, 페이지 상대 HWPUNIT 좌표)
     private long[] pathPointsX; // null이면 사각형
     private long[] pathPointsY;
@@ -158,6 +166,15 @@ public class ASTTextFrameBlock extends ASTBlock {
     public void composedCharStart(int v) { this.composedCharStart = v; }
     public int composedCharEnd() { return composedCharEnd; }
     public void composedCharEnd(int v) { this.composedCharEnd = v; }
+
+    public int skipParagraphs() { return skipParagraphs; }
+    public void skipParagraphs(int v) { this.skipParagraphs = v; }
+
+    public java.util.Set<Integer> excludedParagraphIndices() { return excludedParagraphIndices; }
+    public void addExcludedParagraphIndex(int idx) {
+        if (excludedParagraphIndices == null) excludedParagraphIndices = new java.util.HashSet<>();
+        excludedParagraphIndices.add(idx);
+    }
 
     /** 실제 렌더링에 사용할 폭. narrowedWidth가 설정되면 그 값, 아니면 원래 width. */
     public long effectiveWidth() {

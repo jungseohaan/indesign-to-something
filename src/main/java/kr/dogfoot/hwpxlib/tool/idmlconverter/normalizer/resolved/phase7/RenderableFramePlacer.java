@@ -65,15 +65,19 @@ public final class RenderableFramePlacer {
                 double bh = Math.abs(bounds[2] - bounds[0]);
                 if (bw <= 0 || bh <= 0) continue;
 
-                // PNG 비율 보정
+                // PNG 비율 보정 — 보정 후 원본 bounds 의 중심을 유지하도록 x/y 재계산
+                double bwOrig = bw, bhOrig = bh;
                 double pngRatio = (double) img.getWidth() / img.getHeight();
                 double boundsRatio = bw / bh;
                 if (Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
                     if (pngRatio < 1.0) { bw = bh * pngRatio; } else { bh = bw / pngRatio; }
                 }
 
-                double x = bounds[1];
-                double y = bounds[0];
+                // 원본 중심을 유지하면서 좌상단(x,y) 재산출
+                double centerX = bounds[1] + bwOrig / 2.0;
+                double centerY = bounds[0] + bhOrig / 2.0;
+                double x = centerX - bw / 2.0;
+                double y = centerY - bh / 2.0;
 
                 ASTFigure fig = new ASTFigure();
                 fig.sourceId("renderable_" + rt.id());

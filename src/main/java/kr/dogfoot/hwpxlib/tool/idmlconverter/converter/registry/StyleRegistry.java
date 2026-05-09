@@ -244,12 +244,33 @@ public class StyleRegistry {
         // InDesign 탭 위치는 프레임 기준(절대) — HWPX에서도 동일하게 사용
         boolean hangingIndent = indent < 0 && left > 0;
 
-        // 스타일 내 탭 정지점 → TabPr 생성
-        // 행잉 인덴트 패턴일 때만 커스텀 탭 생성.
-        // 일반 스타일 탭은 한글에서 텍스트 너비가 탭 위치에 근접할 때 무시되므로
-        // 기본 탭 동작(tabPrIDRef="0")에 위임.
-        String tabPrId = "0";
+        // 행잉 인덴트 들여쓰기 폭 결정
+        // 1) IDML TabList Position 이 정의되어 있으면 그것을 사용 (디자인 의도)
+        // 2) 없으면 |FirstLineIndent| 사용
+        long hangPos = -indent;  // 기본값
         if (hangingIndent && styleDef.hasTabStops()) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop ts : styleDef.tabStops()) {
+                if (ts.position() > 0) { hangPos = ts.position(); break; }
+            }
+        }
+
+        // 행잉 인덴트에서 첫줄 offset(left + indent) 이 양수이면 첫줄을 셀/프레임 가장자리에 붙이고
+        // 들여쓰기 폭은 hangPos 만큼만 유지하도록 정규화.
+        if (hangingIndent && (left + indent) > 0) {
+            left = (int) hangPos;
+            indent = -(int) hangPos;
+        }
+
+        // 스타일 내 탭 정지점 → TabPr 생성
+        String tabPrId = "0";
+        if (hangingIndent) {
+            // 행잉 인덴트의 자연스러운 탭 정지점 = 감싸진 줄이 시작하는 위치 = LeftIndent (hangPos)
+            java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop> tabs =
+                    new java.util.ArrayList<>();
+            tabs.add(new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop(hangPos, "left", null));
+            tabPrId = createInlineTabPr(tabs);
+        } else if (styleDef.hasTabStops()) {
+            // 인덴트가 없는 일반 스타일이라도 IDML TabList 가 있으면 그대로 보존.
             tabPrId = createInlineTabPr(styleDef.tabStops());
         }
 

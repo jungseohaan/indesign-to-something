@@ -8,7 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSerializer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.IDMLNormalizer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.writer.HWPXWriter;
 import org.junit.Assert;
 import org.junit.Assume;

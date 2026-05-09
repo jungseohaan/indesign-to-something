@@ -853,7 +853,8 @@ public class HwpxTextBoxBuilder {
         rect.createOrgSz();
         rect.orgSz().set(w, h);
         rect.createCurSz();
-        rect.curSz().set(w, 0L);
+        // 라운드 모서리(stadium 등)가 정확히 그려지도록 실제 높이 사용 (height=0 auto 일 때 일부 렌더러가 ratio 무시)
+        rect.curSz().set(w, h);
         rect.createFlip();
         rect.flip().horizontalAnd(false).verticalAnd(false);
         rect.createRotationInfo();
@@ -1939,11 +1940,14 @@ public class HwpxTextBoxBuilder {
         long maxSide = Math.max(widthHwp, heightHwp);
         if (minSide <= 0) return 0;
         long cornerHwp = Math.round(cornerRadiusPts * 100); // 1pt = 100 HWPUNIT
+
+        // stadium (완전 라운드 양 끝): cornerRadius >= minSide/2 → ratio=50 고정
+        // (장축 기준 보정으로 변경하면 stadium 의도가 깨짐 — 예: page 23 cut/cutter 단어 박스)
+        if (cornerHwp >= minSide / 2) return 50;
+
         short ratio = (short) Math.min(50, Math.round(cornerHwp * 100.0 / minSide));
 
         // HWPX에서 ratio≈50이면 타원이 되므로, 비정사각형 도형에서 과도한 둥글기를 방지.
-        // InDesign은 절대 반지름으로 직선 변이 보존되지만,
-        // HWPX는 높은 ratio에서 형상이 타원에 수렴한다.
         // ratio > 25이고 세로/가로 비율이 1.5:1 이상이면 장축 기준으로 전환.
         if (ratio > 25 && maxSide > minSide * 3 / 2) {
             ratio = (short) Math.max(1, Math.round(cornerHwp * 100.0 / maxSide));

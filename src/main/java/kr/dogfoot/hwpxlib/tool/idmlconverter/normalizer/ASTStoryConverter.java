@@ -16,7 +16,7 @@ import java.util.*;
  * 스토리 내 단락/런 변환 로직.
  * Stage4_BuildAST에서 분리됨.
  */
-class ASTStoryConverter {
+public class ASTStoryConverter {
 
     /** 이 높이(HWPUNIT)를 넘는 인라인 이미지는 별도 단락으로 분리 (~30pt ≈ 1cm) */
     static final long IMAGE_SPLIT_THRESHOLD = 3000;
@@ -362,7 +362,7 @@ class ASTStoryConverter {
     /**
      * IDML 탭 정렬 문자열을 HWPX 탭 타입으로 매핑.
      */
-    static String mapTabAlignment(String idmlAlignment) {
+    public static String mapTabAlignment(String idmlAlignment) {
         if (idmlAlignment == null) return "left";
         switch (idmlAlignment) {
             case "CenterAlign": return "center";

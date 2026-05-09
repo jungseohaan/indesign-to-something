@@ -78,8 +78,13 @@ public class HwpxImageBuilder {
 
         long displayW = obj.width() > 0 ? obj.width() : DEFAULT_IMAGE_DIMENSION;
         long displayH = obj.height() > 0 ? obj.height() : DEFAULT_IMAGE_DIMENSION;
-        if (obj.width() <= 0 || obj.height() <= 0) {
-            System.err.println("[HwpxImageBuilder] 이미지 크기 0 → 기본값 사용: w=" + obj.width() + " h=" + obj.height());
+        // 한 차원이 0 이고 PNG 픽셀 크기가 있으면 PNG 비율로 누락 차원 계산
+        if (obj.height() <= 0 && obj.width() > 0
+                && obj.pixelWidth() > 0 && obj.pixelHeight() > 0) {
+            displayH = Math.max(1, Math.round((double) obj.width() * obj.pixelHeight() / obj.pixelWidth()));
+        } else if (obj.width() <= 0 && obj.height() > 0
+                && obj.pixelWidth() > 0 && obj.pixelHeight() > 0) {
+            displayW = Math.max(1, Math.round((double) obj.height() * obj.pixelWidth() / obj.pixelHeight()));
         }
         // IDML 속성 기반 래핑 모드 결정
         boolean isAnchored = "Anchored".equals(obj.anchoredPosition());
