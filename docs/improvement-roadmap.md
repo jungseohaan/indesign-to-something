@@ -176,12 +176,18 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
 > 초기 가설일 뿐. **W3-1 결과에 따라 조정**. 실제 분리 단위는 책임 식별 후 결정.
 
 #### W3-3: 단계별 추출
-하나씩 추출하고 각 단계 후 골든 diff:
-- [ ] **Step A**: `StoryLoader` 추출 (가장 독립적, 외부 의존 적음)
-- [ ] **Step B**: `MathProcessor` 추출 (수식 변환은 결합도 낮음)
-- [ ] **Step C**: `RunBuilder` 추출
-- [ ] **Step D**: `ParagraphMatcher` 추출
-- [ ] **Step E**: 잔여 정리
+하나씩 추출하고 각 단계 후 골든 diff. 실제 분리 순서는 [W3 plan](w3-storyconverter-plan.md) 참조 (W3-1 분석 결과).
+
+- [x] **Step A**: `RunPostProcessor` 추출 (Group 9) ✓ 완료 (2026-05-09)
+  - StoryConverter 2695 → 2478 LOC (-217), RunPostProcessor 241 LOC
+  - HEAD baseline과 byte-identical 변환 확정 무손실
+  - Group 8(스타일 헬퍼)은 ctx 결합 때문에 보류 → 다른 sub-module 추출 시 함께 처리
+- [ ] **Step B**: `MathProcessor` 추출 (Group 5)
+- [ ] **Step C**: `StoryLoader` 추출 (Group 1 분기 부분)
+- [ ] **Step D**: `ParagraphDistributor` 추출 (Group 2 + 6)
+- [ ] **Step E**: `InlineFrameHandler` 추출 (Group 7) — 가장 큰 그룹
+- [ ] **Step F**: `RunBuilder` 추출 (Group 3 + 4) — 핵심 로직
+- [ ] **Step G**: 잔여 정리 + Group 8 처리
 
 각 step은 별도 커밋. 문제 발생 시 step 단위 롤백.
 
