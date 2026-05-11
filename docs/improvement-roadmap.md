@@ -206,14 +206,25 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
 
 3주차에서 시간이 남거나 Builder 작업까지 욕심내는 경우. 우선순위 낮음.
 
-#### W4-1: HwpxTextBoxBuilder 분리 (1619 LOC)
-책임 그룹:
-- 글상자 기본 변환 (Rectangle/DrawText/ShapeObject)
-- 인라인 객체 처리 (`addInlineTextFrame`)
-- 폴리곤/비-사각 배경 (`convertNonRectBackground`)
-- 오버레이 처리 (`addPageLevelOverlay`)
+#### W4-1: HwpxTextBoxBuilder 분리 ✓ 완료 (2026-05-10)
 
-분리안: 메인 `HwpxTextBoxBuilder` + `InlineFrameBuilder` + `NonRectBackgroundBuilder` + `OverlayBuilder`.
+실제 시작 시점 LOC: **1980** (당초 계획 1619에서 사용자 SPEC 작업으로 증가). 상세 분석은 [docs/w4-textboxbuilder-plan.md](w4-textboxbuilder-plan.md).
+
+- [x] **Step A**: `TextBoxLayoutHelpers` 추출 (196 LOC) — 단락 높이/열 분배 정적 헬퍼 6개
+- [x] **Step B**: `PageOverlayBuilder` 추출 (202 LOC) — `addPageLevelOverlay` + `createOverlayBorderFill`
+- [x] **Step C**: `InlineFrameBuilder` 추출 (276 LOC) — `addInlineTextFrame` 인라인 텍스트프레임
+- [x] **Step D**: `SingleColumnTableConverter` 추출 (240 LOC) — 단일 컬럼 1×1 테이블 변환
+- [x] **Step E**: `FrameTransformations` 추출 (284 LOC) — 회전/라운드 변형 분기
+- [x] HEAD baseline byte-identical 검증 (5개 step 모두 무손실)
+- [x] 빌드/테스트 baseline 유지 (291/18/43)
+
+**결과**: HwpxTextBoxBuilder **1980 → 984 LOC (-50%)**. 잔존 클래스에 메인 변환 + 다단/래퍼/`createTextFrameBorderFill`/`addSpacerRect` 포함.
+
+**계획 수정**: 당초 `NonRectBackgroundBuilder`는 W4 plan의 잘못된 가설 — `convertNonRectBackground`는 `HwpxImageBuilder`에 있어 본 작업과 무관.
+
+**발견 사항**:
+- `convertSingleColumnTable(7-arg)` overload은 dead overload (8-arg에 위임만, 외부 호출 없음). 정리 가능하지만 별도 SPEC
+- `ASTPageProcessor`/`ASTStoryConverter`/`ASTTextWrapSimulator` 등의 visibility를 W2-1 작업에서 이미 노출시킨 패턴을 동일하게 사용 (잔존 헬퍼들을 package-private으로)
 
 #### W4-2: HwpxParagraphBuilder 분리 (1093 LOC)
 책임 그룹:
