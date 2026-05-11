@@ -226,14 +226,19 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
 - `convertSingleColumnTable(7-arg)` overload은 dead overload (8-arg에 위임만, 외부 호출 없음). 정리 가능하지만 별도 SPEC
 - `ASTPageProcessor`/`ASTStoryConverter`/`ASTTextWrapSimulator` 등의 visibility를 W2-1 작업에서 이미 노출시킨 패턴을 동일하게 사용 (잔존 헬퍼들을 package-private으로)
 
-#### W4-2: HwpxParagraphBuilder 분리 (1093 LOC)
-책임 그룹:
-- 단락 변환
-- 인라인 항목 분기 (TextRun/InlineObject/Equation/Break)
-- 줄간격 자동 확장 (혼합 폰트 / 분수 수식)
-- 스타일 오버라이드 (lineSpacing, indent, spacing)
+#### W4-2: HwpxParagraphBuilder 분리 ✓ 완료 (2026-05-11)
 
-분리안: 메인 + `InlineItemDispatcher` + `LineSpacingResolver`.
+실제 시작 시점 LOC: **1206** (당초 계획 1093에서 사용자 SPEC 작업으로 증가). 상세 분석은 [docs/w4-paragraphbuilder-plan.md](w4-paragraphbuilder-plan.md).
+
+- [x] **Step A**: `LineSpacingResolver` 추출 (177 LOC) — 단락 높이 추정 + 줄간격 보정 (Group 2+4). dead `clampLineSpacingForMixedFontSizes` 식별
+- [x] **Step B**: `ParaPrFactory` 추출 (259 LOC) — ParaPr 생성/override + 단락 속성 (Group 5). 6개 delegate 메서드 유지 (외부 호출자 5+개)
+- [x] **Step C**: `CharPrFactory` 추출 (346 LOC) — TextRun/CharPr + 공백 분리 + 폰트 스타일 (Group 6+7). 6개 delegate 메서드 유지
+- [x] **Step D**: `InlineItemDispatcher` 추출 (242 LOC) — 인라인 객체 dispatch + Break + Equation (Group 3+8). 4중 Builder 의존 해결: builder 필드를 package-private으로 노출 → `paragraphBuilder.textBoxBuilder.X()` 늦은 바인딩
+- [x] **Step E**: 잔여 정리 — dead `clampLineSpacingForMixedFontSizes` 제거, 미사용 import 6개 제거, 가드 코멘트 추가
+- [x] HEAD baseline byte-identical 검증 (5개 step 모두 무손실)
+- [x] 빌드/테스트 baseline 유지 (291/18/43)
+
+**결과**: HwpxParagraphBuilder **1206 → 327 LOC (-73%)**. 목표 -67% 초과 달성. 잔존 클래스에 메인 진입점 + delegate + Tiny 헬퍼 + LineSeg 유틸 포함.
 
 #### W4-3: 최종 청소
 - [ ] dead code 제거 (Week 1 인벤토리 결과)
