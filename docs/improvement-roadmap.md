@@ -191,9 +191,16 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
   - Group 4 매칭, Group 7 인라인, Group 8 스타일 헬퍼 모두 사용
   - 추출 시 모든 의존성을 package-private 노출해야 — 비용 > 이익
   - **권고**: Step F(RunBuilder) 또는 Step E(InlineFrameHandler) 먼저 추출 후 의존성 줄여 재시도
-- [ ] **Step D**: `ParagraphDistributor` 추출 (Group 2 + 6)
+- [x] **Step D**: `ParagraphDistributor` 추출 (Group 6만) ✓ 완료 (2026-05-11)
+  - StoryConverter 2279 → 2037 LOC (-242), ParagraphDistributor 263 LOC
+  - HEAD baseline byte-identical (무손실 확정)
+  - distributeByComposedCharRange + distributeParagraphs. orderByThreadChain visibility 노출
+  - Group 2 (convertStoryParagraphs)는 Step C와 유사한 차단 — 분리 보류
 - [ ] **Step E**: `InlineFrameHandler` 추출 (Group 7) — 가장 큰 그룹
-- [ ] **Step F**: `RunBuilder` 추출 (Group 3 + 4) — 핵심 로직 (Step C 차단 우회 후보)
+- [ ] **Step F**: `RunBuilder` 추출 (Group 3 + 4) — **보류 (2026-05-11)**
+  - Group 4 단독: 4개 메서드 ~40 LOC, 효과 미미
+  - Group 3+4 큰 단위: createRunFromIDML 본문 240 LOC + 잔존 헬퍼 의존 다수 → 추출 위험 매우 큼
+  - StoryConverter 분리는 W3 plan 가설보다 응집도가 매우 높아 의미 있는 추출이 제한적
 - [ ] **Step G**: 잔여 정리 + Group 8 처리
 
 각 step은 별도 커밋. 문제 발생 시 step 단위 롤백.
