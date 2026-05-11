@@ -196,7 +196,11 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
   - HEAD baseline byte-identical (무손실 확정)
   - distributeByComposedCharRange + distributeParagraphs. orderByThreadChain visibility 노출
   - Group 2 (convertStoryParagraphs)는 Step C와 유사한 차단 — 분리 보류
-- [ ] **Step E**: `InlineFrameHandler` 추출 (Group 7) — 가장 큰 그룹
+- [x] **Step E**: `InlineFrameHandler` 추출 (Group 7) ✓ 완료 (2026-05-11)
+  - StoryConverter 2037 → 1505 LOC (-532), InlineFrameHandler 578 LOC
+  - HEAD baseline byte-identical (무손실 확정)
+  - 11개 메서드: orderByThreadChain, tryInlineFractionAsEquation, collectParagraphEquationText, convertRunsToHwpScript, tryInlineTextFrameAsRun, createSpaceRunForEmptyAnchor, isEmptyContainer, isAnchoredOutsideParent(+ByTextFrame), isOutsideParentBounds, loadInlineObject, isNoneColor
+  - resolveColorToHex visibility 노출, ParagraphDistributor 호출 갱신
 - [ ] **Step F**: `RunBuilder` 추출 (Group 3 + 4) — **보류 (2026-05-11)**
   - Group 4 단독: 4개 메서드 ~40 LOC, 효과 미미
   - Group 3+4 큰 단위: createRunFromIDML 본문 240 LOC + 잔존 헬퍼 의존 다수 → 추출 위험 매우 큼

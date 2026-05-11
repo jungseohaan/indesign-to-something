@@ -122,7 +122,7 @@ class ParagraphDistributor {
         }
 
         // 다중 프레임: frameVisibleText 기반 분배
-        List<ASTTextFrameBlock> ordered = StoryConverter.orderByThreadChain(ctx, blocks);
+        List<ASTTextFrameBlock> ordered = InlineFrameHandler.orderByThreadChain(ctx, blocks);
 
         // 전체 IDML 단락 텍스트를 하나의 연속 문자열로 합침
         StringBuilder storyTextBuilder = new StringBuilder();
