@@ -182,11 +182,18 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
   - StoryConverter 2695 → 2478 LOC (-217), RunPostProcessor 241 LOC
   - HEAD baseline과 byte-identical 변환 확정 무손실
   - Group 8(스타일 헬퍼)은 ctx 결합 때문에 보류 → 다른 sub-module 추출 시 함께 처리
-- [ ] **Step B**: `MathProcessor` 추출 (Group 5)
-- [ ] **Step C**: `StoryLoader` 추출 (Group 1 분기 부분)
+- [x] **Step B**: `MathProcessor` 추출 (Group 5) ✓ 완료 (2026-05-11)
+  - StoryConverter 2478 → 2279 LOC (-199), MathProcessor 227 LOC
+  - HEAD baseline byte-identical (무손실 확정)
+  - convertMathRunsInParagraph + flushResolvedMathGroup + flushMathGroups + splitFractionPatternInText + isEHSqrtContent
+- [ ] **Step C**: `StoryLoader` 추출 — **보류 (2026-05-11 차단 발견)**
+  - `convertStoryFromIDML` (421 LOC 단일 메서드)이 잔존 헬퍼 20+개에 깊이 의존
+  - Group 4 매칭, Group 7 인라인, Group 8 스타일 헬퍼 모두 사용
+  - 추출 시 모든 의존성을 package-private 노출해야 — 비용 > 이익
+  - **권고**: Step F(RunBuilder) 또는 Step E(InlineFrameHandler) 먼저 추출 후 의존성 줄여 재시도
 - [ ] **Step D**: `ParagraphDistributor` 추출 (Group 2 + 6)
 - [ ] **Step E**: `InlineFrameHandler` 추출 (Group 7) — 가장 큰 그룹
-- [ ] **Step F**: `RunBuilder` 추출 (Group 3 + 4) — 핵심 로직
+- [ ] **Step F**: `RunBuilder` 추출 (Group 3 + 4) — 핵심 로직 (Step C 차단 우회 후보)
 - [ ] **Step G**: 잔여 정리 + Group 8 처리
 
 각 step은 별도 커밋. 문제 발생 시 step 단위 롤백.
