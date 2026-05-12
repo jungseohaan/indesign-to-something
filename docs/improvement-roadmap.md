@@ -186,11 +186,12 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
   - StoryConverter 2478 → 2279 LOC (-199), MathProcessor 227 LOC
   - HEAD baseline byte-identical (무손실 확정)
   - convertMathRunsInParagraph + flushResolvedMathGroup + flushMathGroups + splitFractionPatternInText + isEHSqrtContent
-- [ ] **Step C**: `StoryLoader` 추출 — **보류 (2026-05-11 차단 발견)**
-  - `convertStoryFromIDML` (421 LOC 단일 메서드)이 잔존 헬퍼 20+개에 깊이 의존
-  - Group 4 매칭, Group 7 인라인, Group 8 스타일 헬퍼 모두 사용
-  - 추출 시 모든 의존성을 package-private 노출해야 — 비용 > 이익
-  - **권고**: Step F(RunBuilder) 또는 Step E(InlineFrameHandler) 먼저 추출 후 의존성 줄여 재시도
+- [x] **Step C**: `StoryLoader` 추출 ✓ 완료 (2026-05-11, 재시도 성공)
+  - StoryConverter 813 → 386 LOC (-427), StoryLoader 465 LOC
+  - HEAD baseline byte-identical (무손실 확정)
+  - Step E + F 추출로 의존성 (Group 4/7/8 헬퍼 다수)이 다른 sub-module로 이동 → 재시도 가능해짐
+  - convertStoryFromIDML (421 LOC 거대 메서드) 추출
+  - resolveStyleAlignment visibility 노출
 - [x] **Step D**: `ParagraphDistributor` 추출 (Group 6만) ✓ 완료 (2026-05-11)
   - StoryConverter 2279 → 2037 LOC (-242), ParagraphDistributor 263 LOC
   - HEAD baseline byte-identical (무손실 확정)
