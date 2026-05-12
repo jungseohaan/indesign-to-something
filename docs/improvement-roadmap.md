@@ -111,7 +111,7 @@
   - 결과: ctx 인스턴스 11회 → 1회. 빌드/테스트 baseline 유지 (291/18/43 동일)
 
 #### W1-3: 레거시 클래스 인벤토리 ✓ 완료 (2026-05-02)
-- [x] **사용처 매트릭스 생성** → [docs/refactor-inventory.md](refactor-inventory.md)
+- [x] **사용처 매트릭스 생성** → [docs/refactor-inventory.md](archive/refactor-inventory.md)
   - 23개 normalizer/ 루트 클래스를 A(SHARED 직접) / B(SHARED 간접) / C(LEGACY-only) / D(DEAD)로 분류
   - **핵심 발견**: SHARED 클래스(`ASTRunConverter`, `ASTMathGrouper` 등)가 LEGACY 헬퍼에 깊이 의존 → 단순 패키지 이동 불가. W2-1 권고안 4-tier로 수정
 - [x] **순수 dead code 제거**: `NormalizerContext.java` 삭제 (30 LOC, 어디에서도 사용 안 됨)
@@ -176,7 +176,7 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
 > 초기 가설일 뿐. **W3-1 결과에 따라 조정**. 실제 분리 단위는 책임 식별 후 결정.
 
 #### W3-3: 단계별 추출
-하나씩 추출하고 각 단계 후 골든 diff. 실제 분리 순서는 [W3 plan](w3-storyconverter-plan.md) 참조 (W3-1 분석 결과).
+하나씩 추출하고 각 단계 후 골든 diff. 실제 분리 순서는 [W3 plan](archive/w3-storyconverter-plan.md) 참조 (W3-1 분석 결과).
 
 - [x] **Step A**: `RunPostProcessor` 추출 (Group 9) ✓ 완료 (2026-05-09)
   - StoryConverter 2695 → 2478 LOC (-217), RunPostProcessor 241 LOC
@@ -229,7 +229,7 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
 
 #### W4-1: HwpxTextBoxBuilder 분리 ✓ 완료 (2026-05-10)
 
-실제 시작 시점 LOC: **1980** (당초 계획 1619에서 사용자 SPEC 작업으로 증가). 상세 분석은 [docs/w4-textboxbuilder-plan.md](w4-textboxbuilder-plan.md).
+실제 시작 시점 LOC: **1980** (당초 계획 1619에서 사용자 SPEC 작업으로 증가). 상세 분석은 [docs/w4-textboxbuilder-plan.md](archive/w4-textboxbuilder-plan.md).
 
 - [x] **Step A**: `TextBoxLayoutHelpers` 추출 (196 LOC) — 단락 높이/열 분배 정적 헬퍼 6개
 - [x] **Step B**: `PageOverlayBuilder` 추출 (202 LOC) — `addPageLevelOverlay` + `createOverlayBorderFill`
@@ -249,7 +249,7 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
 
 #### W4-2: HwpxParagraphBuilder 분리 ✓ 완료 (2026-05-11)
 
-실제 시작 시점 LOC: **1206** (당초 계획 1093에서 사용자 SPEC 작업으로 증가). 상세 분석은 [docs/w4-paragraphbuilder-plan.md](w4-paragraphbuilder-plan.md).
+실제 시작 시점 LOC: **1206** (당초 계획 1093에서 사용자 SPEC 작업으로 증가). 상세 분석은 [docs/w4-paragraphbuilder-plan.md](archive/w4-paragraphbuilder-plan.md).
 
 - [x] **Step A**: `LineSpacingResolver` 추출 (177 LOC) — 단락 높이 추정 + 줄간격 보정 (Group 2+4). dead `clampLineSpacingForMixedFontSizes` 식별
 - [x] **Step B**: `ParaPrFactory` 추출 (259 LOC) — ParaPr 생성/override + 단락 속성 (Group 5). 6개 delegate 메서드 유지 (외부 호출자 5+개)
@@ -388,11 +388,9 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
 - 통합 테스트 프레임워크 정식화 (golden_diff.sh 자동화)
 - CI/CD (GitHub Actions로 mvn build + golden diff 자동화)
 
-### 임시 산출물 처리
-다음 plan 문서들은 작업 완료 후 보존 가치 낮음. archive 또는 삭제 권고:
-- `docs/refactor-inventory.md` (W1-3 매트릭스)
-- `docs/w3-storyconverter-plan.md` (W3-1 책임 식별)
-- `docs/w4-textboxbuilder-plan.md` (W4-1 분리안)
-- `docs/w4-paragraphbuilder-plan.md` (W4-2 분리안)
-
-`docs/archive/` 폴더 이동 또는 삭제 결정은 별도.
+### 임시 산출물 처리 ✓ 완료 (2026-05-11)
+다음 plan 문서들을 `docs/archive/`로 이동 (히스토리 보존 위해 git mv):
+- [docs/archive/refactor-inventory.md](archive/refactor-inventory.md) (W1-3 매트릭스)
+- [docs/archive/w3-storyconverter-plan.md](archive/w3-storyconverter-plan.md) (W3-1 책임 식별)
+- [docs/archive/w4-textboxbuilder-plan.md](archive/w4-textboxbuilder-plan.md) (W4-1 분리안)
+- [docs/archive/w4-paragraphbuilder-plan.md](archive/w4-paragraphbuilder-plan.md) (W4-2 분리안)
