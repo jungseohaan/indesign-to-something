@@ -201,11 +201,13 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
   - HEAD baseline byte-identical (무손실 확정)
   - 11개 메서드: orderByThreadChain, tryInlineFractionAsEquation, collectParagraphEquationText, convertRunsToHwpScript, tryInlineTextFrameAsRun, createSpaceRunForEmptyAnchor, isEmptyContainer, isAnchoredOutsideParent(+ByTextFrame), isOutsideParentBounds, loadInlineObject, isNoneColor
   - resolveColorToHex visibility 노출, ParagraphDistributor 호출 갱신
-- [ ] **Step F**: `RunBuilder` 추출 (Group 3 + 4) — **보류 (2026-05-11)**
-  - Group 4 단독: 4개 메서드 ~40 LOC, 효과 미미
-  - Group 3+4 큰 단위: createRunFromIDML 본문 240 LOC + 잔존 헬퍼 의존 다수 → 추출 위험 매우 큼
-  - StoryConverter 분리는 W3 plan 가설보다 응집도가 매우 높아 의미 있는 추출이 제한적
-- [ ] **Step G**: 잔여 정리 + Group 8 처리
+- [x] **Step F**: `RunBuilder` 추출 (Group 3 + 4 + 8 일부) ✓ 완료 (2026-05-11, 재시도 성공)
+  - StoryConverter 1505 → 813 LOC (-692), RunBuilder 715 LOC
+  - HEAD baseline byte-identical (무손실 확정)
+  - Step E 후 의존성 변화 (loadInlineObject 등 InlineFrameHandler로 이동)로 재시도 가능해짐
+  - 19개 메서드: createRunFromIDML(×2), splitBulletRun, resetBulletParagraphColors, splitLatinVarsInMixedText, cloneRunWithText, containsLongLatinWord, splitIdmlRunByResolvedRuns, hasStyleVariation, findDefaultResolvedRun, findResolvedRun, normalizeSpaces, findOriginalLength, isKoreanFontName, getStyleLeading/Tracking/FillColor/FontFamily/FontSize, resolveColorToHex + Segment 내부 클래스
+  - BULLET_CHARS, SPEC016_DEBUG_TEXT, StyleContext (nested) visibility 노출
+- [ ] **Step G**: 잔여 정리 + Step C 재시도 (convertStoryFromIDML 의존성 줄어들었을 가능성)
 
 각 step은 별도 커밋. 문제 발생 시 step 단위 롤백.
 

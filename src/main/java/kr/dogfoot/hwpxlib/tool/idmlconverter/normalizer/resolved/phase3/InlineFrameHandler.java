@@ -291,7 +291,7 @@ class InlineFrameHandler {
                 if (rr.fontSize() != null && rr.fontSize() > 0) {
                     run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
                 }
-                if (rr.fillColor() != null) run.textColor(StoryConverter.resolveColorToHex(ctx, rr.fillColor()));
+                if (rr.fillColor() != null) run.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
                 if (rr.underline() != null && rr.underline()) run.underline(true);
                 if (rr.strikeThru() != null && rr.strikeThru()) run.strikeThrough(true);
             }
