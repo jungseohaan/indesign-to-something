@@ -278,7 +278,13 @@ if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) 
 | 0 | `normalizer/resolved/phase0/InfraSetup.java` | 211 | IDML 정의 복사 + 스타일 정렬 보강 |
 | 1 | `normalizer/resolved/phase1/PageLayoutBuilder.java` | 66 | 페이지/섹션 |
 | 2 | `normalizer/resolved/phase2/FramePlacer.java` | 679 | TextFrame 분류/배치 |
-| 3 | `normalizer/resolved/phase3/StoryConverter.java` | 2695 | 단락/런/수식 변환 |
+| 3 | `normalizer/resolved/phase3/StoryConverter.java` | 386 | 메인 오케스트레이터 (W3로 분해, 구 2695) |
+| 3a | `normalizer/resolved/phase3/StoryLoader.java` | 465 | IDML Story XML 로딩 + 단락 변환 |
+| 3b | `normalizer/resolved/phase3/RunBuilder.java` | 715 | 런 빌드 + 매칭 + 스타일 헬퍼 |
+| 3c | `normalizer/resolved/phase3/InlineFrameHandler.java` | 578 | 인라인 객체 + 체인 + 외부 위치 검사 |
+| 3d | `normalizer/resolved/phase3/ParagraphDistributor.java` | 263 | 단락 분배 (연결 글상자 체인) |
+| 3e | `normalizer/resolved/phase3/MathProcessor.java` | 227 | BT/EH/NP 수식 변환 |
+| 3f | `normalizer/resolved/phase3/RunPostProcessor.java` | 241 | overline/italic 후처리 |
 | 4 | `normalizer/resolved/phase4/TableBuilder.java` | 525 | 테이블 |
 | 4.5 | `normalizer/resolved/phase4_5/BulletInserter.java` | 99 | 불릿 |
 | 5 | `normalizer/resolved/phase5/WrapPhase5.java` | 391 | textwrap 분할 |
@@ -373,14 +379,24 @@ IDML
 
 ### 6.2 Builder 패턴
 
-| Builder | 역할 | 진입점 |
-|---------|------|--------|
-| `HwpxParagraphBuilder` | 단락/런 → Para/Run | (필드 주입) |
-| `HwpxTextBoxBuilder` | 글상자 변환 | `convertTextFrameBlock(framePara, block)` |
-| `HwpxTableBuilder` | 표 변환 | `convertTable(framePara, astTable)` |
-| `HwpxImageBuilder` | 이미지/배경 변환 | `convertFigure(...)`, `addBackgroundImage(...)` |
+| Builder | 역할 | 진입점 | LOC |
+|---------|------|--------|----:|
+| `HwpxParagraphBuilder` | 단락/런 → Para/Run (메인) | (필드 주입) | 327 |
+| ↳ `LineSpacingResolver` | 단락 높이 + 줄간격 자동 보정 | (W4-2 Step A) | 177 |
+| ↳ `ParaPrFactory` | ParaPr 생성 + override | (W4-2 Step B) | 259 |
+| ↳ `CharPrFactory` | TextRun/CharPr + 공백 분리 + 폰트 스타일 | (W4-2 Step C) | 346 |
+| ↳ `InlineItemDispatcher` | 인라인 객체 dispatch + Break + Equation | (W4-2 Step D) | 242 |
+| `HwpxTextBoxBuilder` | 글상자 변환 (메인) | `convertTextFrameBlock` | 984 |
+| ↳ `TextBoxLayoutHelpers` | 단락/열 분배 정적 헬퍼 | (W4 Step A) | 196 |
+| ↳ `PageOverlayBuilder` | 페이지 오버레이 1×1 테이블 | (W4 Step B) | 202 |
+| ↳ `InlineFrameBuilder` | 인라인 텍스트프레임 | (W4 Step C) | 276 |
+| ↳ `SingleColumnTableConverter` | 단일 컬럼 1×1 테이블 | (W4 Step D) | 240 |
+| ↳ `FrameTransformations` | 회전/라운드 변형 분기 | (W4 Step E) | 284 |
+| `HwpxTableBuilder` | 표 변환 | `convertTable(framePara, astTable)` | — |
+| `HwpxImageBuilder` | 이미지/배경 변환 | `convertFigure(...)`, `addBackgroundImage(...)` | — |
 
 상호 의존: `ASTToHwpxConverter`가 `ParagraphBuilder`를 만들고, 나머지 3개 Builder에 주입한다.
+`HwpxParagraphBuilder`와 `HwpxTextBoxBuilder`는 W4 작업으로 각각 4개/5개 sub-module로 분해됨.
 
 ### 6.3 지원 모듈
 

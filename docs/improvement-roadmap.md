@@ -346,3 +346,53 @@ StoryConverter 내부 그룹(메서드 시그니처 기반 추정):
 ---
 
 **문서 갱신 규칙**: 각 작업 완료 시 §4의 체크박스 갱신. 작업 도중 가설이 빗나가면 §5에 기록. 4주 종료 시 회고를 마지막에 추가하고 본 문서를 `docs/archive/`로 이동.
+
+---
+
+## 10. 회고 (2026-05-11)
+
+### 누적 결과
+- **9개 리팩토링 커밋, 16개 sub-module 신설**
+- 4개 거대 클래스 슬림화 완료:
+
+| 대상 | 시작 | 현재 | 감소 | sub-module |
+|------|----:|----:|:--:|:--:|
+| ResolvedToASTBuilder | 430 | 247 | -43% | (build() 슬림화) |
+| **StoryConverter** | **2695** | **386** | **-86%** | **6** |
+| HwpxTextBoxBuilder | 1980 | 984 | -50% | 5 |
+| HwpxParagraphBuilder | 1206 | 327 | -73% | 4 |
+
+### 패턴 발견
+1. **HEAD baseline byte-identical 검증**: 모든 step에서 동일 — 무손실 추출 패턴 확립. md5 비교가 매우 강력한 회귀 감지
+2. **sed로 byte-precise 추출**: Write 도구의 JSON escape 문제 우회. 원본 escape sequence (`Ó` 등) 보존
+3. **delegate 메서드 패턴**: 외부 호출자 호환을 위해 잔존 클래스에 짧은 위임 메서드 유지. visibility 노출보다 안전
+4. **재시도 패턴**: 차단된 추출(Step C)이 다른 모듈 추출(Step E, F) 후 의존성 재배열로 가능해짐. 점진적 분해가 의존성 그래프를 단순화
+
+### 가설 vs 실제
+| 작업 | 가설 LOC | 실제 LOC | 비교 |
+|------|:--:|:--:|------|
+| W3 잔존 StoryConverter | ~150 | 386 | 가설보다 큼 (convertStoryParagraphs 등 잔존) |
+| W4 잔존 HwpxTextBoxBuilder | ~440 | 984 | 가설보다 큼 (메인 + addTextBox 잔존) |
+| W4-2 잔존 HwpxParagraphBuilder | ~400 | 327 | 가설보다 작음 (-67% 목표 초과 달성) |
+
+### 학습
+- W3 plan의 ~150 LOC 가설은 W3 Step G(convertStoryParagraphs 추출)가 가능했어야 달성. Group 2는 미시도 보류
+- 거대 메서드(convertStoryFromIDML 421 LOC)는 단일 추출로 충분 — 더 작은 분해 불필요
+- Step별 골든 byte-identical 검증이 추출 신뢰도의 핵심
+- W3-1 책임 식별 시 LOC 추정은 실제와 차이 있을 수 있으나 sub-module 구분은 정확
+
+### 보류된 작업 (별도 SPEC 후보)
+- W3 Step G: convertStoryParagraphs (Group 2) — 약 180 LOC, 시도 시 또 차단 가능성
+- W2-1 Tier 3: ASTPageProcessor 정적 헬퍼 추출
+- W2-1 Tier 4: SHARED 클래스(ASTRunConverter 등)의 LEGACY 의존 정리
+- 통합 테스트 프레임워크 정식화 (golden_diff.sh 자동화)
+- CI/CD (GitHub Actions로 mvn build + golden diff 자동화)
+
+### 임시 산출물 처리
+다음 plan 문서들은 작업 완료 후 보존 가치 낮음. archive 또는 삭제 권고:
+- `docs/refactor-inventory.md` (W1-3 매트릭스)
+- `docs/w3-storyconverter-plan.md` (W3-1 책임 식별)
+- `docs/w4-textboxbuilder-plan.md` (W4-1 분리안)
+- `docs/w4-paragraphbuilder-plan.md` (W4-2 분리안)
+
+`docs/archive/` 폴더 이동 또는 삭제 결정은 별도.

@@ -137,18 +137,36 @@ src/main/java/kr/dogfoot/hwpxlib/tool/idmlconverter/
 │       ├── phase0/InfraSetup.java          # IDML 정의 복사 + 스타일 보강
 │       ├── phase1/PageLayoutBuilder.java   # 페이지/섹션 빌드
 │       ├── phase2/FramePlacer.java         # TextFrame 분류/배치
-│       ├── phase3/StoryConverter.java      # ★ 단락/런/수식 변환 (2695 LOC)
+│       ├── phase3/                       # Phase 3: Story 변환 (W3로 6개 모듈 분리)
+│       │   ├── StoryConverter.java       # ★ 메인 오케스트레이터 (386 LOC, 구 2695)
+│       │   ├── StoryLoader.java          # IDML Story XML 로딩 + 단락 변환
+│       │   ├── RunBuilder.java           # 런 빌드 + 매칭 + 스타일 헬퍼
+│       │   ├── InlineFrameHandler.java   # 인라인 객체/체인/외부 위치 검사
+│       │   ├── ParagraphDistributor.java # 단락 분배 (연결 글상자 체인)
+│       │   ├── MathProcessor.java        # BT/EH/NP 수식 변환
+│       │   └── RunPostProcessor.java     # overline/italic 후처리
 │       ├── phase4/TableBuilder.java        # 테이블 변환
 │       ├── phase4_5/BulletInserter.java    # 불릿 자동 삽입
 │       ├── phase5/WrapPhase5.java          # textwrap 글상자 분할
 │       ├── phase6/BackgroundInjector.java  # 페이지 배경 PNG 주입
 │       ├── phase7/RenderableFramePlacer.java # 배지 플로팅 배치
 │       └── shared/ParagraphTextHelpers.java # phase 공유 헬퍼
-├── converter/
+├── converter/                     # HWPX 출력 (W4로 9개 모듈 분리)
 │   ├── ASTToHwpxConverter.java    # HWPX 변환 메인
 │   ├── HwpxConverterContext.java  # 변환 공유 상태
-│   ├── HwpxParagraphBuilder.java  # 단락 빌더
-│   ├── HwpxTextBoxBuilder.java    # 글상자 빌더
+│   ├── HwpxParagraphBuilder.java  # 단락 빌더 메인 (327 LOC, 구 1206)
+│   │   # ↳ W4-2로 분리: LineSpacingResolver, ParaPrFactory, CharPrFactory, InlineItemDispatcher
+│   ├── LineSpacingResolver.java   # 단락 높이 + 줄간격 보정 (W4-2 Step A)
+│   ├── ParaPrFactory.java         # ParaPr 생성/override (W4-2 Step B)
+│   ├── CharPrFactory.java         # TextRun/CharPr + 공백/폰트 (W4-2 Step C)
+│   ├── InlineItemDispatcher.java  # 인라인 객체 + Break + Equation (W4-2 Step D)
+│   ├── HwpxTextBoxBuilder.java    # 글상자 빌더 메인 (984 LOC, 구 1980)
+│   │   # ↳ W4로 분리: TextBoxLayoutHelpers, PageOverlayBuilder, InlineFrameBuilder, SingleColumnTableConverter, FrameTransformations
+│   ├── TextBoxLayoutHelpers.java  # 단락/열 분배 정적 헬퍼 (W4 Step A)
+│   ├── PageOverlayBuilder.java    # 페이지 오버레이 1×1 테이블 (W4 Step B)
+│   ├── InlineFrameBuilder.java    # 인라인 텍스트프레임 (W4 Step C)
+│   ├── SingleColumnTableConverter.java # 단일 컬럼 1×1 테이블 (W4 Step D)
+│   ├── FrameTransformations.java  # 회전/라운드 변형 분기 (W4 Step E)
 │   ├── HwpxTableBuilder.java      # 표 빌더
 │   ├── HwpxImageBuilder.java      # 이미지 빌더
 │   ├── FontMapper.java            # 3계층 폰트 매핑
