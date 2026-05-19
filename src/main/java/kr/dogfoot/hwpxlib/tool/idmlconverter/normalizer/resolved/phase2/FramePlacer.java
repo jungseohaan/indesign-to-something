@@ -88,7 +88,9 @@ public final class FramePlacer {
             }
 
             // 다른 TextFrame 안에 중첩된 프레임은 건너뜀 (부모가 배경에 포함)
-            if (!inlineToFloating && isNestedInTextFrame(ctx, tf)) continue;
+            if (!inlineToFloating && isNestedInTextFrame(ctx, tf)) {
+                continue;
+            }
 
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             // 단, 같은 story를 editable TF와 공유하는 non-editable TF는 배치
@@ -102,7 +104,9 @@ public final class FramePlacer {
                         }
                     }
                 }
-                if (!sharedWithEditable) continue;
+                if (!sharedWithEditable) {
+                    continue;
+                }
             }
             // badge_group_child는 부모 badge PNG에 텍스트가 이미 포함되어 있으므로 글상자 배치 건너뜀 (중복 방지)
             boolean skipAsBadgeChild = false;
@@ -118,7 +122,9 @@ public final class FramePlacer {
                     }
                 }
             }
-            if (skipAsBadgeChild) continue;
+            if (skipAsBadgeChild) {
+                continue;
+            }
 
             // 연결 글상자 체인: 후속 프레임은 건너뜀 (첫 프레임에서 병합 처리)
             // 단, 체인의 프레임들이 Y 방향으로 떨어져 있거나 다른 컬럼이면 병합하지 않음 (각각 배치)
@@ -152,12 +158,16 @@ public final class FramePlacer {
 
             // 페이지 인덱스 결정 (document offset → section index 매핑)
             int pageIdx = ctx.toSectionIndex.applyAsInt(tf.pageIndex());
-            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+            if (pageIdx < 0 || pageIdx >= sections.size()) {
+                continue;
+            }
 
             // 좌표 계산: geometricBounds는 spread 좌표 (applyScale 후 pt)
             // → page bounds를 빼서 page-relative로 변환
             double[] gb = tf.geometricBounds();
-            if (gb == null || gb.length < 4) continue;
+            if (gb == null || gb.length < 4) {
+                continue;
+            }
 
             ResolvedPage rPage = (pageIdx < ctx.resolvedData.pages().size())
                     ? ctx.resolvedData.pages().get(pageIdx) : null;
@@ -206,7 +216,9 @@ public final class FramePlacer {
             // 음수 좌표 클램핑
             if (x < 0) { w += x; x = 0; }
             if (y < 0) { h += y; y = 0; }
-            if (w <= 0 || h <= 0) continue;
+            if (w <= 0 || h <= 0) {
+                continue;
+            }
 
             // 타이틀 오버레이 패턴 사전 검사: 본문 TF 의 단락이 별도 타이틀 TF 로 덮여 있으면
             // 해당 단락을 제외 후보로 수집 (paraIdx=0 이면 y/h 도 둘째 줄 기준으로 보정).
@@ -401,7 +413,14 @@ public final class FramePlacer {
             }
 
             ASTTextFrameBlock block = new ASTTextFrameBlock();
-            block.sourceId("u" + Integer.toHexString(Integer.parseInt(tf.id())));
+            // SPEC-025: master instance clones use synthetic ids like "2453_pi20" — not pure numeric.
+            String _srcId;
+            try {
+                _srcId = "u" + Integer.toHexString(Integer.parseInt(tf.id()));
+            } catch (NumberFormatException nfe) {
+                _srcId = "u" + tf.id();  // 그대로 prefix 만 붙임 (Phase 3 가 sourceId parse 시 분기 처리)
+            }
+            block.sourceId(_srcId);
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
@@ -562,7 +581,12 @@ public final class FramePlacer {
         }
         groups.add(lines.subList(from, lines.size()));
 
-        String sourceIdBase = "u" + Integer.toHexString(Integer.parseInt(tf.id()));
+        String sourceIdBase;
+        try {
+            sourceIdBase = "u" + Integer.toHexString(Integer.parseInt(tf.id()));
+        } catch (NumberFormatException nfe) {
+            sourceIdBase = "u" + tf.id();
+        }
         int charOffset = 0;
         List<ASTTextFrameBlock> createdBlocks = new ArrayList<>();
 

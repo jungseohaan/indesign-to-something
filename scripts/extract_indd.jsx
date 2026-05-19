@@ -123,7 +123,16 @@ var CONFIG = null;
 function loadConversionConfig(configPath) {
     var defaults = {
         rendering: {
-            textFrame: { maxTextLength: 30, decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 }, decorativeStyledText: { enabled: true, maxTextLength: 10, excludeBlack: true, blackThreshold: 0.90, requireObjectStyle: true } },
+            // SPEC-025: 텍스트 이미지 렌더링 제거 (Tier A/B). false면 기존 동작.
+            // - masterPageEditable: 조건 5 (item.masterPageItem 오버라이드) → editable
+            // - hashiraEditable: 조건 6 (margin + 하시라 paragraph/character style) → editable
+            // - rotationEditable: 회전 텍스트 (조건 8.5 / isRenderableTextFrame) → editable + HWPX rotation
+            // - nonprintingEditable: 조건 3 (item.nonprinting) → editable. 마스터 헤더 케이스 (frame 3854 등)
+            textFrame: { maxTextLength: 30,
+                decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 },
+                decorativeStyledText: { enabled: true, maxTextLength: 10, excludeBlack: true, blackThreshold: 0.90, requireObjectStyle: true },
+                spec025: { masterPageEditable: true, hashiraEditable: true, rotationEditable: true, nonprintingEditable: true }
+            },
             badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600, maxAspectRatio: 4.5, nestedEnabled: true, nestedMaxTextLength: 3, decorationMergeEnabled: true, decorationMergeMinOverlap: 0.5, decorationMergeAdjacency: 20 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
             rotation: { minAngle: 0.1 },
@@ -187,6 +196,18 @@ function loadConversionConfig(configPath) {
             }
             if (parsed.rendering.pngExportResolution !== undefined)
                 defaults.rendering.pngExportResolution = parsed.rendering.pngExportResolution;
+            // SPEC-025 플래그
+            if (parsed.rendering.textFrame && parsed.rendering.textFrame.spec025) {
+                var s25 = parsed.rendering.textFrame.spec025;
+                if (s25.masterPageEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.masterPageEditable = s25.masterPageEditable;
+                if (s25.hashiraEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.hashiraEditable = s25.hashiraEditable;
+                if (s25.rotationEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.rotationEditable = s25.rotationEditable;
+                if (s25.nonprintingEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.nonprintingEditable = s25.nonprintingEditable;
+            }
         }
         $.writeln("[Config] conversion-config.json loaded: " + configPath);
         return defaults;
@@ -259,6 +280,8 @@ function main(args) {
         cfgLog.open("w");
         cfgLog.writeln("configPath=" + configPath);
         cfgLog.writeln("pngExportResolution=" + CONFIG.rendering.pngExportResolution);
+        var _s25 = CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+        cfgLog.writeln("spec025=" + (_s25 ? ("masterPageEditable=" + _s25.masterPageEditable + " hashiraEditable=" + _s25.hashiraEditable + " rotationEditable=" + _s25.rotationEditable + " nonprintingEditable=" + _s25.nonprintingEditable) : "MISSING"));
         cfgLog.close();
     } catch(e) {}
 
@@ -423,7 +446,12 @@ function main(args) {
             // 편집 가능 TextFrame ID 목록 (배경에서 숨겨진 프레임 = 글상자로 배치할 대상)
             var editableIdList = [];
             for (var eid in editableFrameIds) {
-                editableIdList.push(parseInt(eid, 10));
+                // SPEC-025: synthetic master instance IDs (예: "2453_pi20") 는 문자열로 유지
+                if (/^[0-9]+$/.test(eid)) {
+                    editableIdList.push(parseInt(eid, 10));
+                } else {
+                    editableIdList.push(eid);
+                }
             }
             resolved.editableTextFrameIds = editableIdList;
 
@@ -2507,16 +2535,57 @@ function classifyTextFrame(item) {
         }
     } catch (e) {}
 
+    // SPEC-025 Tier B: 회전된 TextFrame 은 모든 renderable 분기보다 먼저 editable 로 직행.
+    // (조건 8/8.5/9/9.5 등이 renderable/background 로 분기하기 전 차단)
+    // 회전이 부모 Group 에 걸려 있을 수 있어 absoluteRotationAngle 사용.
+    // 본인이 background-쪽 (hidden/nonprinting 등) 인 경우는 아래 검사가 처리.
+    var __spec025RotBypass = false;
+    try {
+        var __s25rotTop = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+        if (__s25rotTop && __s25rotTop.rotationEditable) {
+            var __rotTop = 0;
+            try { __rotTop = item.absoluteRotationAngle; } catch (e) {}
+            if (!__rotTop) { try { __rotTop = item.rotationAngle; } catch (e) {} }
+            // 부모 Group 회전도 합산
+            if (!__rotTop) {
+                try {
+                    var __par = item.parent;
+                    while (__par && __par.constructor && __par.constructor.name === "Group") {
+                        var __pRot = 0;
+                        try { __pRot = __par.absoluteRotationAngle; } catch (e) {}
+                        if (!__pRot) { try { __pRot = __par.rotationAngle; } catch (e) {} }
+                        if (__pRot) { __rotTop = __pRot; break; }
+                        __par = __par.parent;
+                    }
+                } catch (e) {}
+            }
+            if (Math.abs(__rotTop) > 3.0) __spec025RotBypass = true;
+        }
+    } catch (e) {}
+
     // 2. 숨겨진 레이어
     if (isOnHiddenLayer(item)) return "background";
     // 3. 비인쇄
-    try { if (item.nonprinting) return "background"; } catch (e) {}
+    // SPEC-025 Tier A: spec025.nonprintingEditable=true이면 editable로 변환.
+    // 마스터 스프레드의 단원명 머리말 등이 nonprinting=true 인 경우가 많아 보통 검색 가능 텍스트로 살리는 게 좋음.
+    try {
+        if (item.nonprinting) {
+            var s25np = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+            if (!(s25np && s25np.nonprintingEditable)) return "background";
+        }
+    } catch (e) {}
     // 4. 자동 페이지 번호 마커
     try {
         if (item.parentStory.contents.indexOf("\u0018") >= 0) return "background";
     } catch (e) {}
     // 5. 마스터 페이지 오버라이드
-    try { if (item.masterPageItem) return "background"; } catch (e) {}
+    // SPEC-025 Tier A: spec025.masterPageEditable=true이면 editable로 변환 (검색 가능 텍스트)
+    try {
+        if (item.masterPageItem) {
+            var s25mp = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+            if (!(s25mp && s25mp.masterPageEditable)) return "background";
+        }
+    } catch (e) {}
     // 6. 마진 영역의 짧은 텍스트 (페이지 번호, 하시라 등)
     try {
         var ppg = item.parentPage;
@@ -2535,26 +2604,46 @@ function classifyTextFrame(item) {
                 hasTable6 = (item.parentStory && item.parentStory.tables.length > 0)
                     || (item.contents.indexOf("\u0016") >= 0);
             } catch (e5) {}
-            // 글자 수 대신 단락 스타일명 패턴으로 하시라/페이지번호 식별.
+            // 글자 수 대신 단락 + 캐릭터 스타일명 패턴으로 하시라/페이지번호 식별.
+            // SPEC-025: 일부 문서는 paragraphStyle 이 "[단락 스타일 없음]" 이고 characterStyle 에 "**하시라_소단원" 같은
+            // 식별자만 둠 → 캐릭터 스타일도 함께 검사한다.
             var hashiraStyle6 = false;
+            function _isHashiraName6(n) {
+                if (!n) return false;
+                var nl = n.toLowerCase();
+                return n.indexOf("하시라") >= 0
+                    || n.indexOf("페이지번호") >= 0
+                    || n.indexOf("쪽수") >= 0
+                    || n.indexOf("기둥") >= 0
+                    || nl.indexOf("page number") >= 0
+                    || nl.indexOf("running head") >= 0
+                    || nl.indexOf("folio") >= 0;
+            }
             try {
+                // 단락 스타일 검사
                 var ps6 = null;
                 try { ps6 = item.parentStory.paragraphs[0].appliedParagraphStyle; } catch (e) {}
                 var styleName6 = "";
                 try { styleName6 = ps6 ? (ps6.name || "") : ""; } catch (e) {}
-                var nameLower6 = styleName6.toLowerCase();
-                hashiraStyle6 = (
-                    styleName6.indexOf("하시라") >= 0
-                    || styleName6.indexOf("페이지번호") >= 0
-                    || styleName6.indexOf("쪽수") >= 0
-                    || styleName6.indexOf("기둥") >= 0
-                    || nameLower6.indexOf("page number") >= 0
-                    || nameLower6.indexOf("running head") >= 0
-                    || nameLower6.indexOf("folio") >= 0
-                );
+                if (_isHashiraName6(styleName6)) hashiraStyle6 = true;
+                // 캐릭터 스타일 검사 (story 내 모든 텍스트 런 — 보통 1~3개)
+                if (!hashiraStyle6) {
+                    try {
+                        var trs6 = item.parentStory.textStyleRanges;
+                        for (var ti6 = 0; ti6 < trs6.length; ti6++) {
+                            var cs6 = null;
+                            try { cs6 = trs6[ti6].appliedCharacterStyle; } catch (e) {}
+                            var csName6 = "";
+                            try { csName6 = cs6 ? (cs6.name || "") : ""; } catch (e) {}
+                            if (_isHashiraName6(csName6)) { hashiraStyle6 = true; break; }
+                        }
+                    } catch (e) {}
+                }
             } catch (e) {}
             if (hashiraStyle6 && inMarginArea && !hasTable6) {
-                return "background";
+                // SPEC-025 Tier A: spec025.hashiraEditable=true이면 editable로 변환 (단원명/하시라 검색 가능)
+                var s25h = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+                if (!(s25h && s25h.hashiraEditable)) return "background";
             }
         }
     } catch (e) {}
@@ -2584,7 +2673,8 @@ function classifyTextFrame(item) {
                         hasStroke8 = true;
                     }
                 } catch (e3) {}
-                if (isDeco8 && !hasStroke8) return "background";
+                // SPEC-025 Tier B: 회전 bypass 이면 background 분류 건너뛰고 editable 로 보냄
+                if (isDeco8 && !hasStroke8 && !__spec025RotBypass) return "background";
             }
         }
     } catch (e) {}
@@ -2597,7 +2687,8 @@ function classifyTextFrame(item) {
                 var pFill85 = "None";
                 try { pFill85 = parent85.fillColor ? parent85.fillColor.name : "None"; } catch (e) {}
                 if (pFill85 !== "None" && pFill85 !== "[None]") {
-                    return "renderable";
+                    // SPEC-025 Tier B: 상단에서 계산된 회전 bypass 사용
+                    if (!__spec025RotBypass) return "renderable";
                 }
             }
         }
@@ -2627,7 +2718,8 @@ function classifyTextFrame(item) {
     } catch (e) {
     }
     // 9. 회전/효과/특수 스타일 → 별도 PNG 렌더링
-    if (isRenderableTextFrame(item)) {
+    // SPEC-025 Tier B: 회전 bypass 이면 isRenderableTextFrame 결과 무시 (rotation 자체는 HWPX 가 처리)
+    if (!__spec025RotBypass && isRenderableTextFrame(item)) {
         return "renderable";
     }
     // 9.5. 박스 라벨 패턴 (테두리 + 짧은 텍스트) → renderable
@@ -2641,7 +2733,8 @@ function classifyTextFrame(item) {
             try { sc95 = item.strokeColor ? item.strokeColor.name : "None"; } catch (e) {}
             try { sw95 = item.strokeWeight || 0; } catch (e) {}
             var hasStroke95 = (sc95 !== "None" && sc95 !== "[None]") && sw95 > 0;
-            if (hasStroke95) {
+            // SPEC-025 Tier B: 회전 bypass 이면 box label renderable 분기도 건너뜀
+            if (hasStroke95 && !__spec025RotBypass) {
                 return "renderable";
             }
         }
@@ -2668,7 +2761,8 @@ function classifyTextFrame(item) {
         if (storyText11.length <= 1) {
             var hasTables11 = false;
             try { hasTables11 = item.parentStory.tables.length > 0; } catch (e2) {}
-            if (!hasTables11) return "background";
+            // SPEC-025 Tier B: 회전된 짧은 라벨 ("1", "2", ...) 은 background 분류 건너뛰고 editable 유지
+            if (!hasTables11 && !__spec025RotBypass) return "background";
         }
     } catch (e) {}
     // 나머지 = 편집 가능 본문 텍스트
@@ -2705,9 +2799,18 @@ function isRenderableTextFrame(tf) {
     var trimmed = text.replace(/[\s\uFEFF]/g, "");
     if (trimmed.length === 0) return false;
 
-    // 회전된 프레임 → 항상 렌더링 (HWPX에서 회전 텍스트 재현 불가)
+    // 회전된 프레임 → 기본은 PNG 렌더링.
+    // SPEC-025 Tier B: spec025.rotationEditable=true이면 HWPX TextBox rotationInfo로 변환
+    // (FrameTransformations.convertRotatedFloatingBlock 경로). 텍스트 검색 가능.
+    // 회전이 부모 Group 에 걸려 있을 수 있으므로 absoluteRotationAngle 우선 사용.
     try {
-        if (Math.abs(tf.rotationAngle) > 3.0) return true; // 3도 이상만 회전으로 판정
+        var rotR = 0;
+        try { rotR = tf.absoluteRotationAngle; } catch (e) {}
+        if (!rotR) { try { rotR = tf.rotationAngle; } catch (e) {} }
+        if (Math.abs(rotR) > 3.0) {
+            var s25rot = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+            if (!(s25rot && s25rot.rotationEditable)) return true;
+        }
     } catch (e) {}
 
     // 텍스트에 효과가 적용된 경우 → 렌더링 (HWPX에서 재현 불가)
@@ -2956,11 +3059,41 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
         }
     } catch (e) {}
 
+    // SPEC-025: 마스터 스프레드의 TextFrame 스토리도 rangeStoryIds 에 추가 (Phase 5 master instancing 용)
+    // 적용된 마스터에 한해 수집 → 미적용 마스터는 무시.
+    try {
+        var _appliedMasterIds = {};
+        for (var pp25 = 0; pp25 < doc.pages.length; pp25++) {
+            try {
+                var pgIdx25 = pp25 + 1;
+                if (pgIdx25 < startPage || pgIdx25 > endPage) continue;
+                var am25 = doc.pages[pp25].appliedMaster;
+                if (am25) _appliedMasterIds[am25.id.toString()] = true;
+            } catch (e) {}
+        }
+        var _msAll = doc.masterSpreads.everyItem().getElements();
+        for (var msi25 = 0; msi25 < _msAll.length; msi25++) {
+            var _ms25 = _msAll[msi25];
+            if (!_appliedMasterIds[_ms25.id.toString()]) continue;
+            var _msItems25 = _ms25.allPageItems;
+            for (var mi25 = 0; mi25 < _msItems25.length; mi25++) {
+                try {
+                    if (_msItems25[mi25].constructor.name === "TextFrame") {
+                        rangeStoryIds[_msItems25[mi25].parentStory.id.toString()] = true;
+                    }
+                } catch (e) {}
+            }
+        }
+    } catch (e) {}
+
     writeProgress(outputDir, "resolved_stories", 0, rangePageCount);
     var stories = collectStories(doc, outputDir, rangePageCount, rangeStoryIds);
 
     writeProgress(outputDir, "resolved_frames", 0, rangePageCount);
     var textFrames = collectTextFrames(doc, startPage, endPage, editableIds);
+
+    // SPEC-025 Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화 (frame + story clone)
+    try { instanceMasterFrames(doc, startPage, endPage, textFrames, stories, editableIds); } catch (ePhase5) { $.writeln("[SPEC-025 Phase 5 error] " + ePhase5); }
 
     writeProgress(outputDir, "resolved_items", 0, rangePageCount);
     var pages = collectPages(doc, startPage, endPage);
@@ -3484,11 +3617,19 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
     // 페이지별 프레임 인덱스 미리 빌드 (O(pages × frames) → O(frames) + O(pages))
     var framesByPage = {};  // pageOffset → [frame, ...]
     var spreadFrames = [];  // parentPage 없는 프레임 (Spread 직속)
+    var globalHide = [];    // SPEC-025: 마스터 스프레드 아이템 (모든 페이지 export 동안 숨김)
     for (var fi = 0; fi < framesToHide.length; fi++) {
         var efr = framesToHide[fi];
         try {
             var efPage = efr.parentPage;
             if (efPage) {
+                // SPEC-025: 마스터 스프레드의 page → globalHide
+                var efParent = null;
+                try { efParent = efPage.parent; } catch (e2) {}
+                if (efParent && efParent.constructor && efParent.constructor.name === "MasterSpread") {
+                    globalHide.push(efr);
+                    continue;
+                }
                 var efPgOff = efPage.documentOffset;
                 if (!framesByPage[efPgOff]) framesByPage[efPgOff] = [];
                 framesByPage[efPgOff].push(efr);
@@ -3498,6 +3639,16 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         } catch (e) {
             spreadFrames.push(efr);
         }
+    }
+    // SPEC-025: 마스터 스프레드 아이템을 PDF/PNG export 전 일괄 숨김
+    var globalHidden = [];
+    for (var ghi = 0; ghi < globalHide.length; ghi++) {
+        try {
+            if (globalHide[ghi].visible) {
+                globalHide[ghi].visible = false;
+                globalHidden.push(globalHide[ghi]);
+            }
+        } catch (e) {}
     }
 
     for (var pi = 0; pi < doc.pages.length; pi++) {
@@ -3570,6 +3721,11 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         results.push(entry);
 
         writeProgress(outputDir, "rendered_frames", pi + 1, doc.pages.length);
+    }
+
+    // SPEC-025: 마스터 스프레드 아이템 visibility 복원
+    for (var ghr = 0; ghr < globalHidden.length; ghr++) {
+        try { globalHidden[ghr].visible = true; } catch (e) {}
     }
 
     // localDisplaySetting 복원
@@ -4777,6 +4933,37 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
             try { fData.opacity = tf.transparencySettings.blendingSettings.opacity; } catch (e) {}
             try { fData.cornerRadius = tf.topLeftCornerRadius; } catch (e) {}
 
+            // SPEC-025: 진단/분류 정보 (텍스트 이미지 렌더링 제거 작업용)
+            try { fData.classification = classifyTextFrame(tf); } catch (e) { fData.classification = null; }
+            try { fData.isMasterPageItem = !!tf.masterPageItem; } catch (e) { fData.isMasterPageItem = false; }
+            try { fData.nonprinting = !!tf.nonprinting; } catch (e) { fData.nonprinting = false; }
+            try { fData.onHiddenLayer = isOnHiddenLayer(tf); } catch (e) { fData.onHiddenLayer = false; }
+            try {
+                var charStyles = [];
+                var paraStyles = [];
+                var seenCs = {}, seenPs = {};
+                var firstStory = tf.parentStory;
+                if (firstStory) {
+                    var paras = firstStory.paragraphs.everyItem().getElements();
+                    for (var psi = 0; psi < paras.length && psi < 20; psi++) {
+                        try {
+                            var ps = paras[psi].appliedParagraphStyle;
+                            if (ps && ps.name && !seenPs[ps.name]) { seenPs[ps.name] = true; paraStyles.push(ps.name); }
+                        } catch (e1) {}
+                    }
+                    var chars = firstStory.characters.everyItem().getElements();
+                    var sampled = Math.min(chars.length, 30);
+                    for (var csi = 0; csi < sampled; csi++) {
+                        try {
+                            var cs = chars[csi].appliedCharacterStyle;
+                            if (cs && cs.name && !seenCs[cs.name]) { seenCs[cs.name] = true; charStyles.push(cs.name); }
+                        } catch (e1) {}
+                    }
+                }
+                fData.paragraphStyles = paraStyles;
+                fData.characterStyles = charStyles;
+            } catch (e) {}
+
             // NEW: page-relative bounds (페이지 bounds 차감)
             try {
                 var tfPage = tf.parentPage;
@@ -4861,10 +5048,179 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
                 frames.push(fData2);
             }
         }
+
     } catch (e) {
         // 텍스트 프레임 접근 실패 시 무시
     }
     return frames;
+}
+
+/**
+ * SPEC-025 Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화한다.
+ *
+ * 각 master TextFrame 에 대해:
+ * 1. 적용된 doc page 마다 clone TextFrame entry 추가 (synthetic id+storyId)
+ * 2. storyId 가 unique 하도록 새 story entry 도 추가 (원본 story paragraphs deep copy)
+ *
+ * 이 방식으로 Java Phase 3 StoryConverter 는 각 clone 을 독립 single-frame 스토리로 처리 →
+ * 동일 본문이 페이지마다 중복 표시됨 (단원명/하시라 머리말 케이스).
+ *
+ * editableIds 에도 clone id 등록.
+ */
+function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, editableIds) {
+    if (!editableIds) editableIds = {};
+    var s25 = null;
+    try { s25 = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025; } catch (e) {}
+    if (!s25 || !(s25.masterPageEditable || s25.nonprintingEditable || s25.hashiraEditable)) return;
+
+    // 1) 페이지 → 적용된 마스터 매핑
+    var masterToPages = {};  // masterSpreadId → [docPageIdx, ...]
+    try {
+        for (var pp = 0; pp < doc.pages.length; pp++) {
+            try {
+                var pgIdx = pp + 1;
+                if (pgIdx < startPage || pgIdx > endPage) continue;
+                var am = doc.pages[pp].appliedMaster;
+                if (!am) continue;
+                var mid = am.id.toString();
+                if (!masterToPages[mid]) masterToPages[mid] = [];
+                masterToPages[mid].push(pp);
+            } catch (e) {}
+        }
+    } catch (e) {}
+
+    // 2) storyId → story 인덱스 매핑 (deep clone 용)
+    var storyById = {};
+    for (var si = 0; si < stories.length; si++) {
+        storyById[stories[si].id] = stories[si];
+    }
+
+    // 3) 마스터 스프레드 순회 → 각 TextFrame 인스턴스화
+    var msArr = [];
+    try { msArr = doc.masterSpreads.everyItem().getElements(); } catch (e) {}
+    var frameClones = 0, storyClones = 0;
+    for (var ms = 0; ms < msArr.length; ms++) {
+        var mspread = msArr[ms];
+        var msId = "";
+        try { msId = mspread.id.toString(); } catch (e) { continue; }
+        var appliedPages = masterToPages[msId] || [];
+        if (appliedPages.length === 0) continue;
+        var msItems = [];
+        try { msItems = mspread.allPageItems; } catch (e) {}
+        for (var mi = 0; mi < msItems.length; mi++) {
+            var mtf = msItems[mi];
+            try { if (mtf.constructor.name !== "TextFrame") continue; } catch (e) { continue; }
+            // editable 분류만 인스턴스화 (background/renderable 은 PNG 처리)
+            var cls = null;
+            try { cls = classifyTextFrame(mtf); } catch (e) {}
+            if (cls !== "editable") continue;
+            var baseId = ""; try { baseId = mtf.id.toString(); } catch (e) { continue; }
+            var origStoryId = null;
+            try { origStoryId = mtf.parentStory.id.toString(); } catch (e) {}
+            // 마스터 TextFrame 의 공통 메타데이터
+            var commonGb = null;
+            try { var gb = mtf.geometricBounds; commonGb = [gb[0], gb[1], gb[2], gb[3]]; } catch (e) {}
+            var commonRot = 0;       try { commonRot = mtf.absoluteRotationAngle; } catch (e) {}
+            var commonCols = 1;      try { commonCols = mtf.textFramePreferences.textColumnCount; } catch (e) {}
+            var commonGutter = 0;    try { commonGutter = mtf.textFramePreferences.textColumnGutter; } catch (e) {}
+            var commonInset = null;  try { var ins = mtf.textFramePreferences.insetSpacing; commonInset = [ins[0], ins[1], ins[2], ins[3]]; } catch (e) {}
+            var commonVAlign = null; try { commonVAlign = mtf.textFramePreferences.verticalJustification.toString(); } catch (e) {}
+            var commonFill = null;   try { commonFill = mtf.fillColor.name; } catch (e) {}
+            var commonFillTint;      try { commonFillTint = mtf.fillTint; } catch (e) {}
+            var commonStroke = null; try { commonStroke = mtf.strokeColor.name; } catch (e) {}
+            var commonStrokeW;       try { commonStrokeW = mtf.strokeWeight; } catch (e) {}
+            var commonOpacity;       try { commonOpacity = mtf.transparencySettings.blendingSettings.opacity; } catch (e) {}
+            var commonCorner;        try { commonCorner = mtf.topLeftCornerRadius; } catch (e) {}
+            var commonNonprint;      try { commonNonprint = !!mtf.nonprinting; } catch (e) { commonNonprint = false; }
+            var commonHidden;        try { commonHidden = isOnHiddenLayer(mtf); } catch (e) { commonHidden = false; }
+            var commonVisibleText = "";
+            try {
+                commonVisibleText = mtf.contents;
+                if (typeof commonVisibleText === "string") commonVisibleText = commonVisibleText.replace(/\r/g, "\n");
+            } catch (e) {}
+            // 단락 인덱스 / Y 오프셋 / paraTexts (원본 master story 안에서 frame 영역)
+            var commonParaStart = -1, commonParaEnd = -1, commonParaY = null, commonParaTexts = null;
+            try {
+                var mfp = mtf.paragraphs.everyItem().getElements();
+                if (mfp.length > 0) {
+                    var msp = mtf.parentStory.paragraphs.everyItem().getElements();
+                    var mfiIdx = mfp[0].index;
+                    var mliIdx = mfp[mfp.length - 1].index;
+                    for (var msk = 0; msk < msp.length; msk++) {
+                        if (msp[msk].index === mfiIdx) commonParaStart = msk;
+                        if (msp[msk].index === mliIdx) commonParaEnd = msk;
+                    }
+                }
+            } catch (e) {}
+            // 적용 페이지마다 frame + story clone 추가
+            for (var ap = 0; ap < appliedPages.length; ap++) {
+                var docPgIdx = appliedPages[ap];
+                var cloneFrameId = baseId + "_pi" + docPgIdx;
+                var cloneStoryId = origStoryId ? (origStoryId + "_pi" + docPgIdx) : null;
+                var clone = {
+                    id: cloneFrameId,
+                    masterSourceId: baseId,
+                    isMasterInstance: true,
+                    pageIndex: docPgIdx,
+                    storyId: cloneStoryId,
+                    overflows: false,
+                    lineCount: 0,
+                    paragraphStart: commonParaStart,
+                    paragraphEnd: commonParaEnd,
+                    geometricBounds: commonGb,
+                    columnCount: commonCols,
+                    columnGutter: commonGutter,
+                    insetSpacing: commonInset,
+                    verticalJustification: commonVAlign,
+                    rotationAngle: commonRot,
+                    fillColor: commonFill,
+                    strokeColor: commonStroke,
+                    classification: cls,
+                    isMasterPageItem: false,  // 본인이 master 라서 override 아님
+                    nonprinting: commonNonprint,
+                    onHiddenLayer: commonHidden,
+                    isInline: false,
+                    frameVisibleText: commonVisibleText
+                };
+                if (typeof commonFillTint !== "undefined") clone.fillTint = commonFillTint;
+                if (typeof commonStrokeW !== "undefined") clone.strokeWeight = commonStrokeW;
+                if (typeof commonOpacity !== "undefined") clone.opacity = commonOpacity;
+                if (typeof commonCorner !== "undefined") clone.cornerRadius = commonCorner;
+                // pageRelativeBounds = master 좌표 그대로 (master/doc page 같은 page-origin)
+                try {
+                    if (commonGb) {
+                        var dpb = doc.pages[docPgIdx].bounds;
+                        clone.pageRelativeBounds = [
+                            commonGb[0] - dpb[0],
+                            commonGb[1] - dpb[1],
+                            commonGb[2] - dpb[0],
+                            commonGb[3] - dpb[1]
+                        ];
+                    }
+                } catch (e) {}
+                editableIds[cloneFrameId] = true;
+                textFrames.push(clone);
+                frameClones++;
+                // 스토리도 clone (synthetic id) — Java StoryConverter 가 독립 처리.
+                // ExtendScript JSON.stringify 가 일부 객체에서 실패하는 경우가 있어 shallow clone (paragraphs 등 reference 공유).
+                if (origStoryId && storyById[origStoryId] && cloneStoryId) {
+                    var origSt = storyById[origStoryId];
+                    var stClone = {
+                        id: cloneStoryId,
+                        length: origSt.length,
+                        paragraphCount: origSt.paragraphCount,
+                        paragraphs: origSt.paragraphs,
+                        tables: origSt.tables
+                    };
+                    stories.push(stClone);
+                    storyClones++;
+                }
+            }
+        }
+    }
+    if (frameClones > 0 || storyClones > 0) {
+        $.writeln("[SPEC-025 Phase 5] cloned " + frameClones + " master frame instances, " + storyClones + " story copies");
+    }
 }
 
 // --- 페이지 수집 ---

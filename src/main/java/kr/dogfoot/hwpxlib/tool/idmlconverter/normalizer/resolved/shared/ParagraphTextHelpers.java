@@ -15,6 +15,35 @@ public final class ParagraphTextHelpers {
 
     private ParagraphTextHelpers() {}
 
+    /**
+     * Block sourceId 에서 ResolvedTextFrame lookup key 추출.
+     *
+     * <p>형식:
+     * <ul>
+     *   <li>{@code "u" + hex(domId)} → decimal domId (정상 케이스)</li>
+     *   <li>{@code "u" + hex(domId) + "_g\d+"} → decimal domId (wrap-split 그룹은 같은 origin TF 공유)</li>
+     *   <li>{@code "u" + originalDomId + "_pi" + pageIdx} → 그대로 (SPEC-025 master instance clone; 별도 entry)</li>
+     *   <li>{@code "u" + raw} → raw (NumberFormatException fallback)</li>
+     * </ul>
+     */
+    public static String domIdFromSourceId(String sourceId) {
+        if (sourceId == null) return null;
+        String s = sourceId.startsWith("u") ? sourceId.substring(1) : sourceId;
+        int us = s.indexOf('_');
+        if (us >= 0) {
+            // SPEC-025 master instance: "_pi" 접미사는 stripping 하지 않음 (별도 frame entry)
+            if (us + 3 <= s.length() && "_pi".equals(s.substring(us, us + 3))) {
+                return s; // 그대로 사용 ("originalDomId_pi<pageIdx>")
+            }
+            s = s.substring(0, us);
+        }
+        try {
+            return String.valueOf(Integer.parseInt(s, 16));
+        } catch (NumberFormatException e) {
+            return s;
+        }
+    }
+
     /** ASTParagraph의 전체 plain text를 반환. */
     public static String getParaPlainText(ASTParagraph para) {
         StringBuilder sb = new StringBuilder();

@@ -142,11 +142,8 @@ class ParagraphDistributor {
         for (int fi = 0; fi < ordered.size(); fi++) {
             ASTTextFrameBlock block = ordered.get(fi);
             String sid2 = block.sourceId();
-            String hex2 = sid2 != null && sid2.startsWith("u") ? sid2.substring(1) : sid2;
-            if (hex2 != null && hex2.contains("_")) hex2 = hex2.substring(0, hex2.indexOf('_'));
-            String domId;
-            try { domId = String.valueOf(Integer.parseInt(hex2, 16)); }
-            catch (NumberFormatException e) { domId = sid2; }
+            String domId = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers.domIdFromSourceId(sid2);
+            if (domId == null) domId = sid2;
             ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
             // wrap 분할 블록은 블록 자체의 frameVisibleText 우선
             String visibleText = block.frameVisibleText();
@@ -200,11 +197,8 @@ class ParagraphDistributor {
             int frameStart = frameRanges[fi][0];
             int frameEnd = frameRanges[fi][1];
             String sid3 = block.sourceId();
-            String hex3 = sid3 != null && sid3.startsWith("u") ? sid3.substring(1) : sid3;
-            if (hex3 != null && hex3.contains("_")) hex3 = hex3.substring(0, hex3.indexOf('_'));
-            String domId3;
-            try { domId3 = String.valueOf(Integer.parseInt(hex3, 16)); }
-            catch (NumberFormatException e) { domId3 = sid3; }
+            String domId3 = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers.domIdFromSourceId(sid3);
+            if (domId3 == null) domId3 = sid3;
             ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId3);
             java.util.List<String> frameTexts = (rtf != null) ? rtf.frameParaTexts() : null;
 

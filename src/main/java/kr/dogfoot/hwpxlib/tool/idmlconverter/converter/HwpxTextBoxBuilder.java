@@ -262,7 +262,9 @@ public class HwpxTextBoxBuilder {
         long w = block.effectiveWidth();
         long h = block.height();
         // 음수 또는 0 크기 블록 건너뜀 (페이지 밖 객체)
-        if (w <= 0 || h <= 0) return;
+        if (w <= 0 || h <= 0) {
+            return;
+        }
 
         // 회전이 있는 블록은 Table 대신 Rectangle(DrawTextBox)로 변환
         short rotAngle = (short) Math.round(block.rotationAngle());

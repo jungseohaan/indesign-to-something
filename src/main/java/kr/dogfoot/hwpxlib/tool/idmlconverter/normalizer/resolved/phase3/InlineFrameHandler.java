@@ -57,11 +57,8 @@ class InlineFrameHandler {
         for (ASTTextFrameBlock b : blocks) {
             String sid = b.sourceId();
             if (sid == null) continue;
-            String hexPart = sid.startsWith("u") ? sid.substring(1) : sid;
-            if (hexPart.contains("_")) hexPart = hexPart.substring(0, hexPart.indexOf('_'));
-            String domId;
-            try { domId = String.valueOf(Integer.parseInt(hexPart, 16)); }
-            catch (NumberFormatException e) { domId = sid; }
+            String domId = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers.domIdFromSourceId(sid);
+            if (domId == null) domId = sid;
             byDomId.put(domId, b);
         }
 

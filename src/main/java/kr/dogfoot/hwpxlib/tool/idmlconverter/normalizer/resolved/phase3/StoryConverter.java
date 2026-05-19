@@ -78,14 +78,9 @@ public final class StoryConverter {
                     String sourceId = tfb.sourceId();
                     if (sourceId == null) continue;
                     // sourceId → DOM decimal → textFrame → storyId
-                    String hexPart = sourceId.startsWith("u") ? sourceId.substring(1) : sourceId;
-                    if (hexPart.contains("_")) hexPart = hexPart.substring(0, hexPart.indexOf('_'));
-                    String domId;
-                    try {
-                        domId = String.valueOf(Integer.parseInt(hexPart, 16));
-                    } catch (NumberFormatException e) {
-                        continue;
-                    }
+                    // SPEC-025: master instance ("_pi" 접미사) 도 처리
+                    String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
+                    if (domId == null) continue;
                     ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
                     if (rtf != null && rtf.storyId() != null) {
                         storyToBlocks.computeIfAbsent(rtf.storyId(), k -> new ArrayList<>()).add(tfb);
@@ -184,7 +179,9 @@ public final class StoryConverter {
                 for (ASTTextFrameBlock b : blocks) {
                     if (b.frameVisibleTextLength() > 1) { allBlocksEmpty = false; break; }
                 }
-                if (allBlocksEmpty) continue;
+                if (allBlocksEmpty) {
+                    continue;
+                }
             }
 
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
