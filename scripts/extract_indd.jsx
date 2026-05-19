@@ -131,7 +131,12 @@ function loadConversionConfig(configPath) {
             textFrame: { maxTextLength: 30,
                 decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 },
                 decorativeStyledText: { enabled: true, maxTextLength: 10, excludeBlack: true, blackThreshold: 0.90, requireObjectStyle: true },
-                spec025: { masterPageEditable: true, hashiraEditable: true, rotationEditable: true, nonprintingEditable: true }
+                // SPEC-025 추가 플래그
+                // - inlineTextEditable: 조건 7 (isInlineItem) 에서 텍스트 콘텐츠가 있으면 editable 로
+                // - groupShortTextEditable: 조건 8 (Group 안 짧은 장식) 도 editable 로 (콘텐츠 텍스트 보존)
+                // - oneCharEditable: 조건 11 (≤1자 빈 프레임) 에서 실제 1자가 있으면 editable 로
+                spec025: { masterPageEditable: true, hashiraEditable: true, rotationEditable: true,
+                    nonprintingEditable: true, inlineTextEditable: true, groupShortTextEditable: true, oneCharEditable: true }
             },
             badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600, maxAspectRatio: 4.5, nestedEnabled: true, nestedMaxTextLength: 3, decorationMergeEnabled: true, decorationMergeMinOverlap: 0.5, decorationMergeAdjacency: 20 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
@@ -207,6 +212,12 @@ function loadConversionConfig(configPath) {
                     defaults.rendering.textFrame.spec025.rotationEditable = s25.rotationEditable;
                 if (s25.nonprintingEditable !== undefined)
                     defaults.rendering.textFrame.spec025.nonprintingEditable = s25.nonprintingEditable;
+                if (s25.inlineTextEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.inlineTextEditable = s25.inlineTextEditable;
+                if (s25.groupShortTextEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.groupShortTextEditable = s25.groupShortTextEditable;
+                if (s25.oneCharEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.oneCharEditable = s25.oneCharEditable;
             }
         }
         $.writeln("[Config] conversion-config.json loaded: " + configPath);
@@ -2648,8 +2659,22 @@ function classifyTextFrame(item) {
         }
     } catch (e) {}
     // 7. 인라인 객체는 부모가 관리
+    // SPEC-025: inlineTextEditable=true 면 텍스트 콘텐츠가 있는 인라인 TextFrame 은 editable 로
+    // (인라인 그래픽 객체는 contents 가 비어 있어 그대로 background)
     if (isInlineItem(item)) {
-        return "background";
+        var inlineBypass = false;
+        try {
+            var s25in = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+            if (s25in && s25in.inlineTextEditable) {
+                // item.contents 는 InDesign DOM 게터로 호출마다 다른 값을 반환할 수 있어 한 번만 캐싱.
+                // 정규식 source 는 ASCII \u 이스케이프만 사용 — ExtendScript 가 raw 제어바이트(0x16/0x18)가 들어간 character class 를 잘못 파싱해서 모든 문자를 매칭하는 버그가 있음.
+                var __cached7 = ""; try { __cached7 = String(item.contents); } catch (e) {}
+                var trimmed7 = "";
+                try { trimmed7 = __cached7.replace(/[\s\u0016\u0018\uFEFF\uFFFC]/g, ""); } catch (e) {}
+                if (trimmed7.length > 0) inlineBypass = true;
+            }
+        } catch (e) {}
+        if (!inlineBypass) return "background";
     }
     // 8. Group 안의 짧은 장식 TextFrame (10자 이하 + 비검정색)
     try {
@@ -2674,7 +2699,13 @@ function classifyTextFrame(item) {
                     }
                 } catch (e3) {}
                 // SPEC-025 Tier B: 회전 bypass 이면 background 분류 건너뛰고 editable 로 보냄
-                if (isDeco8 && !hasStroke8 && !__spec025RotBypass) return "background";
+                // SPEC-025: groupShortTextEditable=true 면 Group 안 짧은 텍스트도 editable 유지 (콘텐츠 보존)
+                var groupShortBypass = false;
+                try {
+                    var s25g8 = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+                    if (s25g8 && s25g8.groupShortTextEditable) groupShortBypass = true;
+                } catch (e) {}
+                if (isDeco8 && !hasStroke8 && !__spec025RotBypass && !groupShortBypass) return "background";
             }
         }
     } catch (e) {}
@@ -2762,7 +2793,13 @@ function classifyTextFrame(item) {
             var hasTables11 = false;
             try { hasTables11 = item.parentStory.tables.length > 0; } catch (e2) {}
             // SPEC-025 Tier B: 회전된 짧은 라벨 ("1", "2", ...) 은 background 분류 건너뛰고 editable 유지
-            if (!hasTables11 && !__spec025RotBypass) return "background";
+            // SPEC-025: oneCharEditable=true 면 실제 1자가 있는 프레임도 editable (예: "예", "I" 같은 식별자)
+            var oneCharBypass = false;
+            try {
+                var s25oc = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+                if (s25oc && s25oc.oneCharEditable && storyText11.length >= 1) oneCharBypass = true;
+            } catch (e) {}
+            if (!hasTables11 && !__spec025RotBypass && !oneCharBypass) return "background";
         }
     } catch (e) {}
     // 나머지 = 편집 가능 본문 텍스트
