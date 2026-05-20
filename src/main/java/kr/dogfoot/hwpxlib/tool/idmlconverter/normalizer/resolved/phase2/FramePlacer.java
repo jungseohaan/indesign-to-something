@@ -83,36 +83,39 @@ public final class FramePlacer {
                         continue;
                     }
                 } else {
-                    // SPEC-025: inline + editable (예: inlineTextEditable 로 승격된 케이스).
-                    // 일반적으로 Phase 3 extractTextRecursive 가 부모 story 에 inline 텍스트를 임베드한다.
-                    // 그러나 단일 인라인 anchor (예: "예", "보기") 는 Phase 3 가 단일 ORC 위치에 임베드해도
-                    // 시각적 박스 표시가 사라지므로 플로팅으로도 배치한다 (위치가 inline 과 겹쳐 시각 중복 없음).
-                    // 반면 멀티 child 배지 (예: jamo 분해 ㅅㄴ) 는 children 마다 별도 ORC 가 아니라 badge 한 번에
-                    // 임베드되므로 children 을 각각 플로팅하면 inline 임베드와 중복된다 → 스킵.
+                    // SPEC-025: inline + editable. Phase 3 처리 분기:
+                    // - 자기 텍스트 ≥ 2 자: Phase 3 가 인라인 텍스트 런으로 임베드 → 플로팅 스킵
+                    // - 멀티 child 배지 (Phase 3 가 자손 텍스트 결합 ≥ 2자): Phase 3 가 결합 인라인 임베드 → 플로팅 스킵
+                    // - 단일 1자 라벨 (예: "1", "예"): Phase 3 가 PNG 임베드 (텍스트 누락) → 플로팅으로 검색 가능 텍스트 보강
                     int domIdInlineEd = -1;
                     try { domIdInlineEd = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
+                    boolean inAnyBadge = false;
                     boolean inMultiChildBadge = false;
                     if (domIdInlineEd >= 0) {
                         for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
                             if (!rg.isBadgeGroup()) continue;
                             int[] cTfIds = rg.childTextFrameIds();
-                            if (cTfIds == null || cTfIds.length < 2) continue;
-                            int editableSiblingCount = 0;
-                            boolean self = false;
+                            if (cTfIds == null) continue;
+                            boolean isChild = false;
+                            int editableSiblings = 0;
                             for (int cid : cTfIds) {
-                                if (cid == domIdInlineEd) self = true;
-                                if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
-                                    editableSiblingCount++;
-                                }
+                                if (cid == domIdInlineEd) isChild = true;
+                                if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) editableSiblings++;
                             }
-                            if (self && editableSiblingCount >= 2) {
-                                inMultiChildBadge = true;
+                            if (isChild) {
+                                inAnyBadge = true;
+                                if (editableSiblings >= 2) inMultiChildBadge = true;
                                 break;
                             }
                         }
                     }
-                    if (inMultiChildBadge) {
-                        continue; // Phase 3 가 badge 한 단위로 inline 임베드 처리
+                    if (inAnyBadge) {
+                        String vt0 = tf.frameVisibleText();
+                        String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+                        // 자기 텍스트가 ≥2자 또는 멀티 child 배지 → Phase 3 가 결합 텍스트로 임베드 → 플로팅 스킵.
+                        if (cleaned0.length() >= 2 || inMultiChildBadge) {
+                            continue;
+                        }
                     }
                     inlineToFloating = true;
                 }
@@ -155,6 +158,12 @@ public final class FramePlacer {
                 }
             }
             if (skipAsBadgeChild) continue;
+
+            // SPEC-025 occlusion: editable 로 승격됐지만 앞쪽(zOrder 작은) 불투명 도형에 가려져
+            // PDF 에 안 보이는 TextFrame 은 HWPX 에도 배치하지 않음 (시각 중복 방지).
+            if (ctx.resolvedData.isEditableTextFrame(tf.id()) && isOccludedByOpaqueShape(ctx, tf)) {
+                continue;
+            }
 
             // 연결 글상자 체인: 후속 프레임은 건너뜀 (첫 프레임에서 병합 처리)
             // 단, 체인의 프레임들이 Y 방향으로 떨어져 있거나 다른 컬럼이면 병합하지 않음 (각각 배치)
@@ -373,9 +382,10 @@ public final class FramePlacer {
                 double badgeYExtent = bB - bT;
                 double yOvRatio = yOv / Math.min(tfYExtent, badgeYExtent);
                 if (yOvRatio < 0.5) continue;
-                // X 겹침: 배지 우측이 TF 좌측보다 오른쪽에 있고, TF 좌측이 배지 영역에 포함되면 보정
+                // X 겹침: 배지가 TF 의 좌측 끝(첫 20%) 영역과 겹칠 때만 shift
+                // (배지가 TF 안쪽 깊숙이 있는 경우 — 예: 줄 끝 inline 배지 — 는 shift 금지)
                 // 보정 후 너비가 너무 작아지면 스킵
-                if (bR > x && bL < x + w * 0.5 && bR < x + w) {
+                if (bR > x && bL < x + w * 0.2 && bR < x + w) {
                     // SPEC-025: 인라인 앵커된 작은 배지는 frame 안에 임베드되므로 shift 하지 않음.
                     // 배지가 frame 의 텍스트 흐름 내부에 anchor 되어 있는지 확인.
                     boolean badgeIsInlineAnchored = false;
@@ -469,6 +479,7 @@ public final class FramePlacer {
             // → 부모 badge_group 의 childTextFrameIds 에 우리 frame.id 가 있는지 확인
             String _badgeFill = null, _badgeStroke = null;
             double _badgeStrokeW = 0, _badgeCorner = 0;
+            boolean _isBadgeChild = false;
             try {
                 int domIdInt5 = -1;
                 try { domIdInt5 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
@@ -483,12 +494,14 @@ public final class FramePlacer {
                         if (isChild) { parentBadge = rg; break; }
                     }
                     if (parentBadge != null && parentBadge.bounds() != null && parentBadge.bounds().length >= 4) {
-                        // parentBadge bounds 는 normalizeToPoints 후 이미 pt — scaleFactor 재적용 금지
+                        _isBadgeChild = true;
+                        // parentBadge bounds 는 normalizeToPoints 후 이미 pt 이며 extract_indd.jsx 가 이미 page-relative 로
+                        // 변환했음 (line 773-779). pageTop/pageLeft 재차감 금지.
                         double[] pb = parentBadge.bounds();
-                        double pbT = pb[0] - pageTop;
-                        double pbL = pb[1] - pageLeft;
-                        double pbB = pb[2] - pageTop;
-                        double pbR = pb[3] - pageLeft;
+                        double pbT = pb[0];
+                        double pbL = pb[1];
+                        double pbB = pb[2];
+                        double pbR = pb[3];
                         double groupArea = (pbB > pbT && pbR > pbL) ? (pbR - pbL) * (pbB - pbT) : 0;
                         // 배지 내 모든 editable child TF 의 총 면적 합산.
                         // - 합산 > 50%: "simple" 배지 — PNG 를 흰 텍스트박스 로 대체 (1자/jamo 다중 등 포함)
@@ -508,6 +521,36 @@ public final class FramePlacer {
                             }
                         }
                         boolean isSimpleBadge = (groupArea > 0 && sumEditableChildArea / groupArea > 0.5);
+                        // SPEC-025: extract_indd.jsx 가 PNG export 시 editable TF 를 숨기므로,
+                        // illustrated 배지 (예: 선인장, QR, "1" 인라인 등) 자식 텍스트도 Phase 2 가 floating 으로 배치해야 검색 가능.
+                        // (이전 PNG 가 텍스트 포함 시 _skipIllustratedBadgeChild 가 중복 방지 → 이제 불필요.)
+                        // 배지 구조 검사: 모든 자손 도형(non-TF) 의 수 ≥ 2 면 데코 보존이 필요한 "decorative" 배지.
+                        // (예: 단어 이해하기 — Polygon stroke + Rectangle fill 별도, 말하는 이의 소망 — 이중 Oval)
+                        // → PNG 유지 + 텍스트만 투명 오버레이.
+                        String _badgeGroupIdStr = String.valueOf(parentBadge.id());
+                        int totalShapeDescendantCount = 0;
+                        for (ResolvedPageItem cpi2 : ctx.resolvedData.pageItems()) {
+                            if (cpi2 == null || cpi2.id() == null) continue;
+                            String t = cpi2.type();
+                            if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t) && !"GraphicLine".equals(t)) continue;
+                            // 조상 chain 확인
+                            String pid2 = cpi2.parentId();
+                            int hops2 = 0;
+                            while (pid2 != null && hops2 < 5) {
+                                if (_badgeGroupIdStr.equals(pid2)) { totalShapeDescendantCount++; break; }
+                                ResolvedPageItem parent2 = ctx.resolvedData.getPageItem(pid2);
+                                if (parent2 == null) break;
+                                pid2 = parent2.parentId();
+                                hops2++;
+                            }
+                        }
+                        boolean isDecorativeBadge = isSimpleBadge && totalShapeDescendantCount >= 2;
+                        // (이전: illustrated 배지 _skipIllustratedBadgeChild → 제거됨. PNG 가 텍스트를 더 이상 베이크하지 않음.)
+                        if (isDecorativeBadge) {
+                            // PNG 유지 (Phase 7 가 배치) + 텍스트만 투명 오버레이 (검색 가능 + 시각 데코 보존).
+                            // simpleBadgeChild 표시 안 함 → Phase 7 가 PNG 를 건너뛰지 않음.
+                            isSimpleBadge = false;
+                        }
                         // 단일 child 가 그룹을 거의 채우면 bounds 를 그룹 전체로 확장 (스크리블 배지 visual 흡수).
                         // 다중 child 는 각자 자기 bounds 유지 (확장하면 서로 겹침).
                         boolean expandToGroup = isSimpleBadge && editableChildCount == 1
@@ -526,12 +569,19 @@ public final class FramePlacer {
                                 }
                             }
                         }
-                        // 흰 배경: 단순/일러스트 공통 — 라벨 영역 PNG 텍스트를 가려 검색용 텍스트와 중복되지 않게.
-                        _badgeFill = "Paper";
+                        // 흰 배경: simple 배지만 적용 (PNG visual 을 텍스트박스가 완전히 대체).
+                        // illustrated 배지는 PNG 가 유지되므로 흰 박스가 PNG 텍스트와 시각 충돌 → 투명 유지하고
+                        // editable 텍스트만 PNG 의 글자 위에 오버레이 (검색 가능).
                         if (isSimpleBadge) {
-                            // 단순 배지만 stroke/corner 도 복원 (전체 배지 visual 을 텍스트박스로 흡수).
+                            _badgeFill = "Paper";
+                        }
+                        if (isSimpleBadge) {
+                            // 단순 배지: fill / stroke / cornerRadius 를 각각 가장 적합한 sibling 도형에서 추출.
+                            // - fill: fill 을 가진 가장 큰 도형
+                            // - stroke: stroke 를 가진 가장 큰 도형 (별도 추적)
+                            // - cornerRadius: fill 또는 stroke 도형 중 가장 큰 것
                             String parentBadgeIdStr = String.valueOf(parentBadge.id());
-                            double bestArea = 0;
+                            double bestFillArea = 0, bestStrokeArea = 0, bestAnyArea = 0;
                             for (ResolvedPageItem cpi : ctx.resolvedData.pageItems()) {
                                 if (cpi == null || cpi.id() == null) continue;
                                 String pid = cpi.parentId();
@@ -548,16 +598,25 @@ public final class FramePlacer {
                                 if (cpi.id().equals(tf.id())) continue;
                                 String ctype = cpi.type();
                                 if (!"Rectangle".equals(ctype) && !"Polygon".equals(ctype) && !"Oval".equals(ctype) && !"TextFrame".equals(ctype)) continue;
+                                String fcn = cpi.fillColorName();
                                 String scn = cpi.strokeColorName();
+                                boolean hasFill = fcn != null && !"None".equals(fcn) && !"[None]".equals(fcn);
                                 boolean hasStroke = scn != null && !"None".equals(scn) && !"[None]".equals(scn) && cpi.strokeWeight() > 0;
-                                if (!hasStroke) continue;
+                                if (!hasFill && !hasStroke) continue;
                                 double[] cgb = cpi.geometricBounds();
                                 if (cgb == null || cgb.length < 4) continue;
                                 double carea = Math.abs((cgb[3] - cgb[1]) * (cgb[2] - cgb[0]));
-                                if (carea > bestArea) {
-                                    bestArea = carea;
+                                if (hasFill && carea > bestFillArea) {
+                                    bestFillArea = carea;
+                                    _badgeFill = fcn;
+                                }
+                                if (hasStroke && carea > bestStrokeArea) {
+                                    bestStrokeArea = carea;
                                     _badgeStroke = scn;
                                     _badgeStrokeW = cpi.strokeWeight();
+                                }
+                                if (carea > bestAnyArea) {
+                                    bestAnyArea = carea;
                                     _badgeCorner = cpi.cornerRadius();
                                 }
                             }
@@ -631,6 +690,11 @@ public final class FramePlacer {
             if (tf.verticalJustification() != null) {
                 block.verticalJustification(tf.verticalJustification());
             }
+            // SPEC-025: 배지 자식 (badge_group child) 텍스트는 HWPX cell-height vs fontSize 의 좁은 여유 때문에
+            // BOTTOM_ALIGN 적용 시 텍스트가 셀 밖으로 밀려나는 현상 발생 → CENTER_ALIGN 으로 강제하여 안정 배치.
+            if (_isBadgeChild) {
+                block.verticalJustification("CENTER_ALIGN");
+            }
 
             if (tf.rotationAngle() != 0) {
                 block.rotationAngle(tf.rotationAngle());
@@ -661,6 +725,11 @@ public final class FramePlacer {
                     if (fh != null) {
                         block.fillColor(fh);
                         block.fillTint(100);
+                    }
+                    // _badgeFill 이 "Paper" 일 때만 cornerRadius=0 (illustrated 배지 흰 오버레이 — pill 방지).
+                    // sibling 도형에서 색 fill 을 가져온 경우 (simple 배지 컬러 pill) 는 tf.cornerRadius 유지.
+                    if ("Paper".equals(_badgeFill)) {
+                        block.cornerRadius(0);
                     }
                 }
                 if (_badgeStroke != null && _badgeStrokeW > 0) {
@@ -694,6 +763,61 @@ public final class FramePlacer {
 
             section.addBlock(block);
         }
+    }
+
+    /**
+     * SPEC-025 occlusion 감지: editable 로 승격됐지만 앞쪽(InDesign zOrder 작은) 불투명 도형에
+     * 텍스트 영역이 완전히 가려진 TextFrame 은 PDF 에 보이지 않는다 — HWPX 에도 배치하지 않음.
+     * 같은 페이지의 zOrder 작은 도형들 중 fill 이 있고 bounds 가 텍스트 라인 bounds 를 포함하는지 확인.
+     */
+    private static boolean isOccludedByOpaqueShape(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        // 텍스트 위치: composedLines 가 있으면 line bounds union, 없으면 frame bounds
+        double textTop, textLeft, textBottom, textRight;
+        if (tf.composedLines() != null && !tf.composedLines().isEmpty()) {
+            textTop = Double.MAX_VALUE; textLeft = Double.MAX_VALUE;
+            textBottom = -Double.MAX_VALUE; textRight = -Double.MAX_VALUE;
+            for (ResolvedTextFrame.ComposedLine cl : tf.composedLines()) {
+                double[] b = cl.bounds();
+                if (b == null || b.length < 4) continue;
+                if (b[0] < textTop) textTop = b[0];
+                if (b[1] < textLeft) textLeft = b[1];
+                if (b[2] > textBottom) textBottom = b[2];
+                if (b[3] > textRight) textRight = b[3];
+            }
+            if (textTop == Double.MAX_VALUE) return false;
+        } else {
+            double[] b = tf.geometricBounds();
+            if (b == null || b.length < 4) return false;
+            textTop = b[0]; textLeft = b[1]; textBottom = b[2]; textRight = b[3];
+        }
+        // 본인 zOrder 조회
+        ResolvedPageItem selfPi = ctx.resolvedData.getPageItem(tf.id());
+        if (selfPi == null) return false;
+        int selfZ = selfPi.zOrder();
+        int selfPage = tf.pageIndex();
+        List<ResolvedPageItem> items = ctx.resolvedData.pageItems();
+        if (items == null) return false;
+        for (ResolvedPageItem pi : items) {
+            if (pi == null) continue;
+            if (pi.pageIndex() != selfPage) continue;
+            if (pi.zOrder() >= selfZ) continue;  // 같거나 뒤쪽 도형은 가릴 수 없음 (InDesign: 작은 zOrder = 앞)
+            String t = pi.type();
+            // 불투명 도형: Rectangle/Polygon/Oval + fillColor 가 None 이 아님
+            if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t)) continue;
+            String fc = pi.fillColorName();
+            if (fc == null || "None".equals(fc) || "[None]".equals(fc)) continue;
+            // opacity 가 50 미만이면 반투명 → 텍스트 보임
+            if (pi.opacity() < 50) continue;
+            double[] sb = pi.geometricBounds();
+            if (sb == null || sb.length < 4) continue;
+            // bounds 가 텍스트 영역을 포함하는지 확인 (1pt 여유)
+            if (sb[0] <= textTop + 1 && sb[1] <= textLeft + 1
+                    && sb[2] >= textBottom - 1 && sb[3] >= textRight - 1) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isNestedInTextFrame(ResolvedBuildContext ctx, ResolvedTextFrame tf) {

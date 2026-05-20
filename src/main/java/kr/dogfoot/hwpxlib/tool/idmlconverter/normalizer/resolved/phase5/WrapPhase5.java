@@ -245,6 +245,12 @@ public final class WrapPhase5 {
                                 if (cl.wrapIndentLeft() > adjIndL) adjIndL = cl.wrapIndentLeft();
                             }
                         }
+                        // 좁은 frame (예: 9mm 폭 라인넘버 column) 에 우측/중앙 정렬된 텍스트는
+                        // wrapIndentLeft 가 frame width 에 가까운 값 → 실제 wrap 이 아니라 alignment 임.
+                        // shrink 적용 시 frame 의 50% 이상 보존되어야 의미가 있음.
+                        double maxShrink = frameW0 * 0.5;
+                        if (adjIndR > maxShrink) adjIndR = 0;
+                        if (adjIndL > maxShrink) adjIndL = 0;
                         if (adjIndR > 0) {
                             tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(adjIndR));
                         }
