@@ -171,24 +171,24 @@ class InlineFrameHandler {
         // rendered된 TF(badge_group 등)는 PNG로 이미 배치됨 → 텍스트 런 변환 안 함
         if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
 
-        // frameVisibleText 또는 IDML Story에서 텍스트 가져오기
-        String visText = tf.frameVisibleText();
-        if (visText != null) {
-            visText = visText.replace("\uFFFC", "").replace("\n", "").replace("\r", "").trim();
-        }
-        if (visText == null || visText.isEmpty()) {
-            // IDML Story에서 폴백
-            if (tf.storyId() != null) {
-                IDMLStory idmlStory = ctx.loadIDMLStory.apply(tf.storyId());
-                if (idmlStory != null) {
-                    StringBuilder sb = new StringBuilder();
-                    for (IDMLParagraph p : idmlStory.paragraphs()) {
-                        for (IDMLCharacterRun r : p.characterRuns()) {
-                            if (r.content() != null) sb.append(r.content());
-                        }
-                    }
-                    visText = sb.toString().replace("\uFFFC", "").trim();
+        // SPEC-025: IDML Story 우선 + 중첩 인라인 앵커 재귀 처리
+        // (예: 페이지 10 frame 15359 의 anchored Group 안에 frame 15568 "예" 가 있음 →
+        //  Java 가 ORC 를 만나면 anchored 객체의 텍스트를 재귀로 가져와 inline 위치에 임베드)
+        String visText = null;
+        if (tf.storyId() != null) {
+            IDMLStory idmlStoryRec = ctx.loadIDMLStory.apply(tf.storyId());
+            if (idmlStoryRec != null) {
+                String extracted = extractTextRecursive(ctx, idmlStoryRec, 0);
+                if (extracted != null && !extracted.replace("\uFFFC", "").trim().isEmpty()) {
+                    visText = extracted.replace("\uFFFC", "").trim();
                 }
+            }
+        }
+        // IDML 에서 못 얻으면 frameVisibleText 폴백
+        if (visText == null || visText.isEmpty()) {
+            visText = tf.frameVisibleText();
+            if (visText != null) {
+                visText = visText.replace("\uFFFC", "").replace("\n", "").replace("\r", "").trim();
             }
         }
         if (visText == null || visText.isEmpty()) {
@@ -282,7 +282,18 @@ class InlineFrameHandler {
         if (story != null && !story.paragraphs().isEmpty()) {
             ResolvedParagraph rp = story.paragraphs().get(0);
             if (rp.runs() != null && !rp.runs().isEmpty()) {
-                ResolvedRun rr = rp.runs().get(0);
+                // SPEC-025: 첫 run 이 비어 있는 경우가 있어 (placeholder/empty),
+                // 실제 콘텐츠가 있는 첫 run 을 찾아 폰트/색상 추출
+                ResolvedRun rr = null;
+                for (ResolvedRun candidate : rp.runs()) {
+                    String c = candidate.text();
+                    if (c != null && c.length() > 0) {
+                        // 공백만 있는 run 도 스킵 — 실제 글자 가진 첫 run
+                        String trimmed = c.replace("￼", "").trim();
+                        if (!trimmed.isEmpty()) { rr = candidate; break; }
+                    }
+                }
+                if (rr == null) rr = rp.runs().get(0); // fallback
                 if (rr.fontFamily() != null) run.fontFamily(rr.fontFamily());
                 if (rr.fontStyle() != null) run.fontStyle(rr.fontStyle());
                 if (rr.fontSize() != null && rr.fontSize() > 0) {
@@ -306,6 +317,22 @@ class InlineFrameHandler {
                         run.underline(true);
                     }
                 }
+                // SPEC-025: IDML 단락에 RuleBelow="true" 가 있거나 paragraph style 에 ruleBelowOn=true 면
+                // 인라인 텍스트에 char-level underline 적용 (예: "소단원 도입 예(1103)" style)
+                IDMLParagraph ip0 = idmlStory.paragraphs().get(0);
+                boolean hasRuleBelow = ip0.ruleBelowOn();
+                if (!hasRuleBelow && ctx.idmlDocumentSupplier != null) {
+                    if (ctx.ensureIdmlInfra != null) ctx.ensureIdmlInfra.run();
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idoc = ctx.idmlDocumentSupplier.get();
+                    if (idoc != null) {
+                        String psRef = ip0.appliedParagraphStyle();
+                        if (psRef != null) {
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef sd = idoc.getParagraphStyle(psRef);
+                            if (sd != null && Boolean.TRUE.equals(sd.ruleBelowOn())) hasRuleBelow = true;
+                        }
+                    }
+                }
+                if (hasRuleBelow) run.underline(true);
             }
         }
 
@@ -571,5 +598,84 @@ class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    /**
+     * SPEC-025: IDML story 의 모든 텍스트를 재귀로 추출한다. ORC(￼) 위치에서
+     * inline 앵커된 TextFrame 또는 Group 내부 TextFrame 의 텍스트도 in-order 로 포함.
+     *
+     * <p>예: 박현숙 1단원 페이지 10 의 frame 15359 story 는
+     * {@code "[Group{Oval, TextFrame(예)}] 적절한 근거를..."} 구조라서, 이 함수는
+     * "예 적절한 근거를..." 식으로 재귀 임베드해 반환한다.</p>
+     *
+     * <p>{@code depth} 는 무한 재귀 방지용 (최대 4단계).</p>
+     */
+    private static String extractTextRecursive(ResolvedBuildContext ctx, IDMLStory idmlStory, int depth) {
+        if (idmlStory == null || depth >= 4) return "";
+        StringBuilder sb = new StringBuilder();
+        for (IDMLParagraph p : idmlStory.paragraphs()) {
+            for (IDMLCharacterRun r : p.characterRuns()) {
+                String content = r.content();
+                if (content == null) content = "";
+                String[] parts = content.split("￼", -1);
+                java.util.List<IDMLCharacterRun.InlineAnchor> anchors = r.inlineAnchors();
+                for (int pi = 0; pi < parts.length; pi++) {
+                    sb.append(parts[pi]);
+                    if (pi < parts.length - 1) {
+                        // ORC 위치 — inline 앵커 텍스트 재귀 추출
+                        if (anchors != null && pi < anchors.size()) {
+                            IDMLCharacterRun.InlineAnchor anc = anchors.get(pi);
+                            String inlineText = resolveAnchorText(ctx, r, anc, depth + 1);
+                            if (inlineText != null) sb.append(inlineText);
+                        }
+                    }
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /** anchor 가 가리키는 TextFrame/InlineGraphic 의 텍스트를 재귀로 가져온다. */
+    private static String resolveAnchorText(ResolvedBuildContext ctx, IDMLCharacterRun run,
+                                             IDMLCharacterRun.InlineAnchor anchor, int depth) {
+        if (depth >= 4) return "";
+        if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME) {
+            if (run.inlineFrames() == null || anchor.index() >= run.inlineFrames().size()) return "";
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame tf = run.inlineFrames().get(anchor.index());
+            if (tf == null || tf.parentStoryId() == null) return "";
+            IDMLStory childStory = ctx.loadIDMLStory.apply(tf.parentStoryId());
+            return extractTextRecursive(ctx, childStory, depth);
+        }
+        // InlineAnchorType.GRAPHIC: Group 내부 TextFrame 들의 텍스트 합치기
+        if (run.inlineGraphics() == null || anchor.index() >= run.inlineGraphics().size()) return "";
+        IDMLCharacterRun.InlineGraphic ig = run.inlineGraphics().get(anchor.index());
+        return extractGraphicText(ctx, ig, depth);
+    }
+
+    /** InlineGraphic(Group/Rectangle/Polygon) 내부의 모든 TextFrame 텍스트를 재귀로 합쳐 반환. */
+    private static String extractGraphicText(ResolvedBuildContext ctx, IDMLCharacterRun.InlineGraphic ig, int depth) {
+        if (ig == null || depth >= 4) return "";
+        StringBuilder sb = new StringBuilder();
+        // 그래픽 자체에 임베드된 텍스트
+        if (ig.embeddedText() != null && !ig.embeddedText().isEmpty()) {
+            sb.append(ig.embeddedText());
+        }
+        // Group 자식 TextFrame
+        if (ig.childTextFrames() != null) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame ctf : ig.childTextFrames()) {
+                if (ctf == null || ctf.parentStoryId() == null) continue;
+                IDMLStory cs = ctx.loadIDMLStory.apply(ctf.parentStoryId());
+                String t = extractTextRecursive(ctx, cs, depth + 1);
+                if (t != null && !t.isEmpty()) sb.append(t);
+            }
+        }
+        // Group 자식 그래픽 (재귀)
+        if (ig.childGraphics() != null) {
+            for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+                String t = extractGraphicText(ctx, child, depth + 1);
+                if (t != null && !t.isEmpty()) sb.append(t);
+            }
+        }
+        return sb.toString();
     }
 }

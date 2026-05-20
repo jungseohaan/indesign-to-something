@@ -83,7 +83,10 @@ public final class FramePlacer {
                         continue;
                     }
                 } else {
-                    continue;
+                    // SPEC-025: inline + editable (예: inlineTextEditable 로 승격된 케이스).
+                    // Phase 3 가 부모 flow 에 인라인 텍스트를 자동 임베드하지 못하므로,
+                    // 플로팅 블록으로 배치하여 HWPX 텍스트로 검색 가능하게 한다.
+                    inlineToFloating = true;
                 }
             }
 
@@ -109,8 +112,9 @@ public final class FramePlacer {
                 }
             }
             // badge_group_child는 부모 badge PNG에 텍스트가 이미 포함되어 있으므로 글상자 배치 건너뜀 (중복 방지)
+            // SPEC-025: editable 로 승격된 frame 은 page_bg 에서 숨겨지므로 PNG 중복 우려 없음 → 건너뛰지 않음
             boolean skipAsBadgeChild = false;
-            {
+            if (!ctx.resolvedData.isEditableTextFrame(tf.id())) {
                 int domIdInt2 = -1;
                 try { domIdInt2 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
                 if (domIdInt2 >= 0) {
@@ -122,9 +126,7 @@ public final class FramePlacer {
                     }
                 }
             }
-            if (skipAsBadgeChild) {
-                continue;
-            }
+            if (skipAsBadgeChild) continue;
 
             // 연결 글상자 체인: 후속 프레임은 건너뜀 (첫 프레임에서 병합 처리)
             // 단, 체인의 프레임들이 Y 방향으로 떨어져 있거나 다른 컬럼이면 병합하지 않음 (각각 배치)
@@ -346,6 +348,18 @@ public final class FramePlacer {
                 // X 겹침: 배지 우측이 TF 좌측보다 오른쪽에 있고, TF 좌측이 배지 영역에 포함되면 보정
                 // 보정 후 너비가 너무 작아지면 스킵
                 if (bR > x && bL < x + w * 0.5 && bR < x + w) {
+                    // SPEC-025: 인라인 앵커된 작은 배지는 frame 안에 임베드되므로 shift 하지 않음.
+                    // 배지가 frame 의 텍스트 흐름 내부에 anchor 되어 있는지 확인.
+                    boolean badgeIsInlineAnchored = false;
+                    if (childIds != null && tf.storyId() != null) {
+                        // 배지의 자식 TextFrame 의 parentStory 가 우리 frame 의 story 또는 그 자식 story 인지 확인
+                        for (int cid : childIds) {
+                            ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(String.valueOf(cid));
+                            if (childTf == null) continue;
+                            if (childTf.isInline()) { badgeIsInlineAnchored = true; break; }
+                        }
+                    }
+                    if (badgeIsInlineAnchored) continue;
                     double margin = 4.0; // pt
                     double newX = bR + margin;
                     double delta = newX - x;
@@ -421,6 +435,9 @@ public final class FramePlacer {
                 _srcId = "u" + tf.id();  // 그대로 prefix 만 붙임 (Phase 3 가 sourceId parse 시 분기 처리)
             }
             block.sourceId(_srcId);
+            // [DBG SPEC-025]
+            if ("15568".equals(tf.id()) || "15359".equals(tf.id()) || "3913".equals(tf.id())) {
+            }
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));

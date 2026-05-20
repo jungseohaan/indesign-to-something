@@ -136,7 +136,11 @@ function loadConversionConfig(configPath) {
                 // - groupShortTextEditable: 조건 8 (Group 안 짧은 장식) 도 editable 로 (콘텐츠 텍스트 보존)
                 // - oneCharEditable: 조건 11 (≤1자 빈 프레임) 에서 실제 1자가 있으면 editable 로
                 spec025: { masterPageEditable: true, hashiraEditable: true, rotationEditable: true,
-                    nonprintingEditable: true, inlineTextEditable: true, groupShortTextEditable: true, oneCharEditable: true }
+                    // inlineTextEditable: 인라인 앵커 TextFrame 을 editable 로 승격.
+                    // inlineTextMaxLen 이하 짧은 텍스트만 (배지/라벨 케이스). 긴 인라인은 부모 flow 의
+                    // ORC embedding 과 중복되므로 background 로 유지.
+                    nonprintingEditable: true, inlineTextEditable: true, inlineTextMaxLen: 3,
+                    groupShortTextEditable: true, oneCharEditable: true }
             },
             badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600, maxAspectRatio: 4.5, nestedEnabled: true, nestedMaxTextLength: 3, decorationMergeEnabled: true, decorationMergeMinOverlap: 0.5, decorationMergeAdjacency: 20 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
@@ -214,6 +218,8 @@ function loadConversionConfig(configPath) {
                     defaults.rendering.textFrame.spec025.nonprintingEditable = s25.nonprintingEditable;
                 if (s25.inlineTextEditable !== undefined)
                     defaults.rendering.textFrame.spec025.inlineTextEditable = s25.inlineTextEditable;
+                if (s25.inlineTextMaxLen !== undefined)
+                    defaults.rendering.textFrame.spec025.inlineTextMaxLen = s25.inlineTextMaxLen;
                 if (s25.groupShortTextEditable !== undefined)
                     defaults.rendering.textFrame.spec025.groupShortTextEditable = s25.groupShortTextEditable;
                 if (s25.oneCharEditable !== undefined)
@@ -2671,7 +2677,9 @@ function classifyTextFrame(item) {
                 var __cached7 = ""; try { __cached7 = String(item.contents); } catch (e) {}
                 var trimmed7 = "";
                 try { trimmed7 = __cached7.replace(/[\s\u0016\u0018\uFEFF\uFFFC]/g, ""); } catch (e) {}
-                if (trimmed7.length > 0) inlineBypass = true;
+                // 짧은 인라인 (배지/라벨) 만 editable 로. 긴 인라인은 부모 flow 의 ORC embedding 과 중복 위험.
+                var maxLen7 = (typeof s25in.inlineTextMaxLen === "number") ? s25in.inlineTextMaxLen : 3;
+                if (trimmed7.length > 0 && trimmed7.length <= maxLen7) inlineBypass = true;
             }
         } catch (e) {}
         if (!inlineBypass) return "background";
