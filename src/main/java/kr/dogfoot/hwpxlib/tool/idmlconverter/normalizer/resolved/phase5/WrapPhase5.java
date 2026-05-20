@@ -112,6 +112,26 @@ public final class WrapPhase5 {
                     // 대부분의 줄에 일관된 indent가 있으면 폭을 중앙값만큼 축소 (분할 대신 shrink)
                     // 안전 장치: 최소값 사용, 프레임 폭의 15% 이상 축소 안 함
                     if (lines.size() >= 3) {
+                        // SPEC-025: 행글 매달림 들여쓰기(bullet hanging indent) 감지.
+                        // 각 단락의 첫 줄 wrapIndentLeft=0 이고 연속 줄들이 wrapIndentLeft>0 이면
+                        // 의도된 hanging indent (bullet 구조) → obstacle wrap 으로 오인하지 말 것.
+                        // 비슷하게 단락 끝 줄의 wrapIndentRight 가 일관되면 inline 아이콘 (예: emoji)
+                        // 으로 인한 trailing indent → obstacle 아님.
+                        boolean isHangingPattern = true;
+                        int prevPi = -999;
+                        for (int li = 0; li < lines.size(); li++) {
+                            int curPi = lines.get(li).paraIndex();
+                            boolean isParaStart = (curPi != prevPi);
+                            double wL = lines.get(li).wrapIndentLeft();
+                            if (isParaStart && wL > 10) { isHangingPattern = false; break; }
+                            if (!isParaStart && wL <= 10) { isHangingPattern = false; break; }
+                            prevPi = curPi;
+                        }
+                        if (isHangingPattern) {
+                            // bullet/icon 구조 — shrink 적용 안 함
+                            newBlocks.add(blk);
+                            continue;
+                        }
                         double maxShrink = frameW0 * 0.15; // 최대 축소량
                         List<Double> indRs2 = new ArrayList<>(), indLs2 = new ArrayList<>();
                         for (ResolvedTextFrame.ComposedLine cl : lines) {

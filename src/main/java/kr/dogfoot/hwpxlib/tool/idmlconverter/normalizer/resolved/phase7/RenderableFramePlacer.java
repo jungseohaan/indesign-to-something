@@ -44,6 +44,18 @@ public final class RenderableFramePlacer {
                     }
                 }
                 if (alsoInline) continue;
+                // SPEC-025: 단순 scribble 배지는 editable TextFrame 으로 visual 전체를 흡수 → PNG 건너뜀.
+                // 일러스트 배지(예: 선인장 + 작은 라벨)는 PNG 유지하고 라벨에만 흰 텍스트박스를 오버레이.
+                boolean anySimpleChild = false;
+                if (rt.childTextFrameIds() != null) {
+                    for (int cid : rt.childTextFrameIds()) {
+                        if (ctx.resolvedData.isSimpleBadgeChild(String.valueOf(cid))) {
+                            anySimpleChild = true;
+                            break;
+                        }
+                    }
+                }
+                if (anySimpleChild) continue;
             }
 
             File pngFile = new File(ctx.basePath, rt.file());

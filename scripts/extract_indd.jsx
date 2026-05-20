@@ -140,7 +140,12 @@ function loadConversionConfig(configPath) {
                     // inlineTextMaxLen 이하 짧은 텍스트만 (배지/라벨 케이스). 긴 인라인은 부모 flow 의
                     // ORC embedding 과 중복되므로 background 로 유지.
                     nonprintingEditable: true, inlineTextEditable: true, inlineTextMaxLen: 3,
-                    groupShortTextEditable: true, oneCharEditable: true }
+                    groupShortTextEditable: true, oneCharEditable: true,
+                    // 장식 텍스트 (decorativeLargeText, decorativeStyledText) 도 editable 로 — 큰 단원 제목/장 제목이
+                    // PNG 가 아닌 검색 가능 텍스트로 변환됨. HWPX 가 큰 폰트/색상/장식 효과를 어느 정도 재현.
+                    decorativeLargeTextEditable: true, decorativeStyledTextEditable: true,
+                    // 9.5 박스 라벨 (테두리+짧은 텍스트 → renderable) 도 editable 로.
+                    boxLabelEditable: true }
             },
             badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600, maxAspectRatio: 4.5, nestedEnabled: true, nestedMaxTextLength: 3, decorationMergeEnabled: true, decorationMergeMinOverlap: 0.5, decorationMergeAdjacency: 20 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
@@ -224,6 +229,12 @@ function loadConversionConfig(configPath) {
                     defaults.rendering.textFrame.spec025.groupShortTextEditable = s25.groupShortTextEditable;
                 if (s25.oneCharEditable !== undefined)
                     defaults.rendering.textFrame.spec025.oneCharEditable = s25.oneCharEditable;
+                if (s25.decorativeLargeTextEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.decorativeLargeTextEditable = s25.decorativeLargeTextEditable;
+                if (s25.decorativeStyledTextEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.decorativeStyledTextEditable = s25.decorativeStyledTextEditable;
+                if (s25.boxLabelEditable !== undefined)
+                    defaults.rendering.textFrame.spec025.boxLabelEditable = s25.boxLabelEditable;
             }
         }
         $.writeln("[Config] conversion-config.json loaded: " + configPath);
@@ -2773,7 +2784,10 @@ function classifyTextFrame(item) {
             try { sw95 = item.strokeWeight || 0; } catch (e) {}
             var hasStroke95 = (sc95 !== "None" && sc95 !== "[None]") && sw95 > 0;
             // SPEC-025 Tier B: 회전 bypass 이면 box label renderable 분기도 건너뜀
-            if (hasStroke95 && !__spec025RotBypass) {
+            // SPEC-025: boxLabelEditable=true 면 박스 라벨 (테두리+짧은 텍스트) 도 editable 로
+            var s25box = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+            var skipBoxLabel = (s25box && s25box.boxLabelEditable);
+            if (hasStroke95 && !__spec025RotBypass && !skipBoxLabel) {
                 return "renderable";
             }
         }
@@ -2916,20 +2930,27 @@ function isRenderableTextFrame(tf) {
         } catch (e) {}
 
         // 장식 대형 컬러 텍스트: fontSize >= minFontSize AND 색상이 검정이 아님
+        // SPEC-025: decorativeLargeTextEditable=true 면 큰 단원 제목/장 제목도 editable 로 변환 (검색 가능)
         try {
-            var dltCfg = CONFIG.rendering.textFrame.decorativeLargeText;
-            if (dltCfg.enabled) {
-                var fontSize = firstChar.pointSize;
-                if (fontSize >= dltCfg.minFontSize) {
-                    if (!dltCfg.excludeBlack || !isBlackColor(firstChar, dltCfg.blackThreshold)) {
-                        return true;
+            var s25dlt = CONFIG.rendering.textFrame.spec025;
+            if (!(s25dlt && s25dlt.decorativeLargeTextEditable)) {
+                var dltCfg = CONFIG.rendering.textFrame.decorativeLargeText;
+                if (dltCfg.enabled) {
+                    var fontSize = firstChar.pointSize;
+                    if (fontSize >= dltCfg.minFontSize) {
+                        if (!dltCfg.excludeBlack || !isBlackColor(firstChar, dltCfg.blackThreshold)) {
+                            return true;
+                        }
                     }
                 }
             }
         } catch (e) {}
 
         // 장식 스타일 텍스트: 짧은 텍스트(≤10자) + 비검정 + Object Style(배경색/테두리/둥근모서리)
+        // SPEC-025: decorativeStyledTextEditable=true 면 장식 라벨/배지도 editable 로
         try {
+            var s25dst = CONFIG.rendering.textFrame.spec025;
+            if (s25dst && s25dst.decorativeStyledTextEditable) throw new Error("skip-by-spec025");
             var dstCfg = CONFIG.rendering.textFrame.decorativeStyledText;
             if (dstCfg.enabled && trimmed.length <= dstCfg.maxTextLength) {
                 var hasObjStyle = false;

@@ -84,8 +84,36 @@ public final class FramePlacer {
                     }
                 } else {
                     // SPEC-025: inline + editable (예: inlineTextEditable 로 승격된 케이스).
-                    // Phase 3 가 부모 flow 에 인라인 텍스트를 자동 임베드하지 못하므로,
-                    // 플로팅 블록으로 배치하여 HWPX 텍스트로 검색 가능하게 한다.
+                    // 일반적으로 Phase 3 extractTextRecursive 가 부모 story 에 inline 텍스트를 임베드한다.
+                    // 그러나 단일 인라인 anchor (예: "예", "보기") 는 Phase 3 가 단일 ORC 위치에 임베드해도
+                    // 시각적 박스 표시가 사라지므로 플로팅으로도 배치한다 (위치가 inline 과 겹쳐 시각 중복 없음).
+                    // 반면 멀티 child 배지 (예: jamo 분해 ㅅㄴ) 는 children 마다 별도 ORC 가 아니라 badge 한 번에
+                    // 임베드되므로 children 을 각각 플로팅하면 inline 임베드와 중복된다 → 스킵.
+                    int domIdInlineEd = -1;
+                    try { domIdInlineEd = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
+                    boolean inMultiChildBadge = false;
+                    if (domIdInlineEd >= 0) {
+                        for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
+                            if (!rg.isBadgeGroup()) continue;
+                            int[] cTfIds = rg.childTextFrameIds();
+                            if (cTfIds == null || cTfIds.length < 2) continue;
+                            int editableSiblingCount = 0;
+                            boolean self = false;
+                            for (int cid : cTfIds) {
+                                if (cid == domIdInlineEd) self = true;
+                                if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
+                                    editableSiblingCount++;
+                                }
+                            }
+                            if (self && editableSiblingCount >= 2) {
+                                inMultiChildBadge = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (inMultiChildBadge) {
+                        continue; // Phase 3 가 badge 한 단위로 inline 임베드 처리
+                    }
                     inlineToFloating = true;
                 }
             }
@@ -435,9 +463,108 @@ public final class FramePlacer {
                 _srcId = "u" + tf.id();  // 그대로 prefix 만 붙임 (Phase 3 가 sourceId parse 시 분기 처리)
             }
             block.sourceId(_srcId);
-            // [DBG SPEC-025]
-            if ("15568".equals(tf.id()) || "15359".equals(tf.id()) || "3913".equals(tf.id())) {
-            }
+            // SPEC-025: editable 로 승격된 badge_group_child 는 부모 배지 visual 영역으로 확장 +
+            // 배지 자식 도형의 fill/stroke/corner 를 frame 에 복사 (PNG 제거 후 시각 배지 재현).
+            // badge_group_child 는 ResolvedDataReader 가 filterOut 해서 allRenderedTextFrames 에 없음
+            // → 부모 badge_group 의 childTextFrameIds 에 우리 frame.id 가 있는지 확인
+            String _badgeFill = null, _badgeStroke = null;
+            double _badgeStrokeW = 0, _badgeCorner = 0;
+            try {
+                int domIdInt5 = -1;
+                try { domIdInt5 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
+                if (domIdInt5 >= 0) {
+                    RenderedGroup parentBadge = null;
+                    for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
+                        if (!rg.isBadgeGroup()) continue;
+                        int[] cTfIds = rg.childTextFrameIds();
+                        if (cTfIds == null) continue;
+                        boolean isChild = false;
+                        for (int cid : cTfIds) { if (cid == domIdInt5) { isChild = true; break; } }
+                        if (isChild) { parentBadge = rg; break; }
+                    }
+                    if (parentBadge != null && parentBadge.bounds() != null && parentBadge.bounds().length >= 4) {
+                        // parentBadge bounds 는 normalizeToPoints 후 이미 pt — scaleFactor 재적용 금지
+                        double[] pb = parentBadge.bounds();
+                        double pbT = pb[0] - pageTop;
+                        double pbL = pb[1] - pageLeft;
+                        double pbB = pb[2] - pageTop;
+                        double pbR = pb[3] - pageLeft;
+                        double groupArea = (pbB > pbT && pbR > pbL) ? (pbR - pbL) * (pbB - pbT) : 0;
+                        // 배지 내 모든 editable child TF 의 총 면적 합산.
+                        // - 합산 > 50%: "simple" 배지 — PNG 를 흰 텍스트박스 로 대체 (1자/jamo 다중 등 포함)
+                        // - 합산 < 50%: "illustrated" 배지 (예: 선인장 + 작은 라벨) — PNG 유지 + 라벨 위에 흰 박스 오버레이
+                        double sumEditableChildArea = 0;
+                        int editableChildCount = 0;
+                        int[] cTfIdsAll = parentBadge.childTextFrameIds();
+                        if (cTfIdsAll != null) {
+                            for (int cid : cTfIdsAll) {
+                                if (!ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) continue;
+                                ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(String.valueOf(cid));
+                                double[] cb = childTf == null ? null : childTf.geometricBounds();
+                                if (cb == null || cb.length < 4) continue;
+                                double carea = Math.abs((cb[3] - cb[1]) * (cb[2] - cb[0]));
+                                sumEditableChildArea += carea;
+                                editableChildCount++;
+                            }
+                        }
+                        boolean isSimpleBadge = (groupArea > 0 && sumEditableChildArea / groupArea > 0.5);
+                        // 단일 child 가 그룹을 거의 채우면 bounds 를 그룹 전체로 확장 (스크리블 배지 visual 흡수).
+                        // 다중 child 는 각자 자기 bounds 유지 (확장하면 서로 겹침).
+                        boolean expandToGroup = isSimpleBadge && editableChildCount == 1
+                                && pbB > pbT && pbR > pbL;
+                        if (expandToGroup) {
+                            x = pbL; y = pbT;
+                            w = pbR - pbL; h = pbB - pbT;
+                        }
+                        if (isSimpleBadge) {
+                            // 단순 배지의 모든 editable 자식을 simple 로 표시 → Phase 7 에서 PNG 한 번만 건너뜀.
+                            if (cTfIdsAll != null) {
+                                for (int cid : cTfIdsAll) {
+                                    if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
+                                        ctx.resolvedData.markSimpleBadgeChild(String.valueOf(cid));
+                                    }
+                                }
+                            }
+                        }
+                        // 흰 배경: 단순/일러스트 공통 — 라벨 영역 PNG 텍스트를 가려 검색용 텍스트와 중복되지 않게.
+                        _badgeFill = "Paper";
+                        if (isSimpleBadge) {
+                            // 단순 배지만 stroke/corner 도 복원 (전체 배지 visual 을 텍스트박스로 흡수).
+                            String parentBadgeIdStr = String.valueOf(parentBadge.id());
+                            double bestArea = 0;
+                            for (ResolvedPageItem cpi : ctx.resolvedData.pageItems()) {
+                                if (cpi == null || cpi.id() == null) continue;
+                                String pid = cpi.parentId();
+                                boolean isInBadge = false;
+                                int hops = 0;
+                                while (pid != null && hops < 5) {
+                                    if (parentBadgeIdStr.equals(pid)) { isInBadge = true; break; }
+                                    ResolvedPageItem parent = ctx.resolvedData.getPageItem(pid);
+                                    if (parent == null) break;
+                                    pid = parent.parentId();
+                                    hops++;
+                                }
+                                if (!isInBadge) continue;
+                                if (cpi.id().equals(tf.id())) continue;
+                                String ctype = cpi.type();
+                                if (!"Rectangle".equals(ctype) && !"Polygon".equals(ctype) && !"Oval".equals(ctype) && !"TextFrame".equals(ctype)) continue;
+                                String scn = cpi.strokeColorName();
+                                boolean hasStroke = scn != null && !"None".equals(scn) && !"[None]".equals(scn) && cpi.strokeWeight() > 0;
+                                if (!hasStroke) continue;
+                                double[] cgb = cpi.geometricBounds();
+                                if (cgb == null || cgb.length < 4) continue;
+                                double carea = Math.abs((cgb[3] - cgb[1]) * (cgb[2] - cgb[0]));
+                                if (carea > bestArea) {
+                                    bestArea = carea;
+                                    _badgeStroke = scn;
+                                    _badgeStrokeW = cpi.strokeWeight();
+                                    _badgeCorner = cpi.cornerRadius();
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception eBadge) {}
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
@@ -463,6 +590,26 @@ public final class FramePlacer {
                             int parentHwpxZ = (parentPi.zOrder() > 0)
                                     ? Math.max(10000 - parentPi.zOrder(), 10) : 10;
                             tfZ = parentHwpxZ + 1; // 부모 PNG 바로 위
+                        }
+                    }
+                }
+                // SPEC-025 일러스트 배지: PNG 가 유지되는 경우 그 위에 라벨 텍스트박스가 와야 함.
+                // simpleBadgeChild 가 아닌 editable badge_group 자식 → Phase 7 에서 PNG 배치 → 텍스트 z 를 PNG z + 1 로.
+                if (ctx.resolvedData.isEditableTextFrame(tf.id())
+                        && !ctx.resolvedData.isSimpleBadgeChild(tf.id())) {
+                    int domIdInt6 = -1;
+                    try { domIdInt6 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
+                    if (domIdInt6 >= 0) {
+                        for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
+                            if (!rg.isBadgeGroup()) continue;
+                            int[] cTfIds = rg.childTextFrameIds();
+                            if (cTfIds == null) continue;
+                            boolean isChild = false;
+                            for (int cid : cTfIds) { if (cid == domIdInt6) { isChild = true; break; } }
+                            if (!isChild) continue;
+                            int badgeHwpxZ = (rg.zOrder() > 0) ? Math.max(10000 - rg.zOrder(), 10) : 10;
+                            tfZ = badgeHwpxZ + 1;
+                            break;
                         }
                     }
                 }
@@ -507,6 +654,24 @@ public final class FramePlacer {
                 }
                 if (tf.cornerRadius() > 0) {
                     block.cornerRadius(tf.cornerRadius() * ctx.scaleFactor);
+                }
+                // SPEC-025: badge_group_child 의 styling 을 frame 에 복사 (PNG 제거 대신 styled box 로 렌더)
+                if (_badgeFill != null) {
+                    String fh = ctx.resolvedData.resolveColorHex(_badgeFill);
+                    if (fh != null) {
+                        block.fillColor(fh);
+                        block.fillTint(100);
+                    }
+                }
+                if (_badgeStroke != null && _badgeStrokeW > 0) {
+                    String sh = ctx.resolvedData.resolveColorHex(_badgeStroke);
+                    if (sh != null) {
+                        block.strokeColor(sh);
+                        block.strokeWeight(_badgeStrokeW);
+                    }
+                }
+                if (_badgeCorner > 0 && block.cornerRadius() == 0) {
+                    block.cornerRadius(_badgeCorner * ctx.scaleFactor);
                 }
             } catch (Exception eFill) {}
 

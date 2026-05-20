@@ -63,6 +63,12 @@ public class ResolvedData {
         return editableTextFrameIds != null && editableTextFrameIds.contains(domId);
     }
 
+    // SPEC-025: 배지 자식 TextFrame 중 "단순 scribble" 타입 — 텍스트가 그룹 영역을 거의 채우므로
+    // PNG 를 흰 배경 박스로 대체 가능. 일러스트 배지(예: 선인장 + 작은 라벨)는 여기 포함되지 않음.
+    private final Set<String> simpleBadgeChildIds = new HashSet<>();
+    public void markSimpleBadgeChild(String domId) { if (domId != null) simpleBadgeChildIds.add(domId); }
+    public boolean isSimpleBadgeChild(String domId) { return domId != null && simpleBadgeChildIds.contains(domId); }
+
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
     }
