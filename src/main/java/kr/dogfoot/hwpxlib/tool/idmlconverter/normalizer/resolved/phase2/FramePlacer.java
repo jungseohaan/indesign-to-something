@@ -814,6 +814,15 @@ public final class FramePlacer {
             // bounds 가 텍스트 영역을 포함하는지 확인 (1pt 여유)
             if (sb[0] <= textTop + 1 && sb[1] <= textLeft + 1
                     && sb[2] >= textBottom - 1 && sb[3] >= textRight - 1) {
+                // 같은 크기의 배경 도형(말풍선 등)은 occluder 가 아니라 텍스트의 배경 → 제외.
+                // shape 의 너비/높이가 텍스트 영역의 1.2 배 이상일 때만 진짜 occluder 로 간주.
+                double shapeW = sb[3] - sb[1];
+                double shapeH = sb[2] - sb[0];
+                double textW = textRight - textLeft;
+                double textH = textBottom - textTop;
+                if (textW > 0 && textH > 0 && shapeW < textW * 1.2 && shapeH < textH * 1.2) {
+                    continue;
+                }
                 return true;
             }
         }
