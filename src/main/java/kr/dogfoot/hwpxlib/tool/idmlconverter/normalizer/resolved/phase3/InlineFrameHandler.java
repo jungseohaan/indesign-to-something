@@ -766,8 +766,13 @@ class InlineFrameHandler {
         }
 
         // renderedFloatingItems에서 해당 ID의 inline_object 찾기 (badge_group이 있으면 그것으로 교체)
+        // SPEC-025: type 이 없는 renderable inline TF (예: "1" 번호 라벨) 도 같은 ID/file 로 매칭하여
+        // 본문 inline anchor 자리에 PNG 로 배치 (누락 시 후속 PIC 들의 X 위치가 어긋남).
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType())) {
+            boolean isInlineObject = "inline_object".equals(rg.itemType());
+            boolean isRenderableNoType = rg.id() == anchoredObjectId
+                    && rg.itemType() == null && rg.file() != null && !rg.file().isEmpty();
+            if (rg.id() == anchoredObjectId && (isInlineObject || isRenderableNoType)) {
                 if (badgeGroup != null) rg = badgeGroup;
                 if (rg.file() == null) return null;
                 File pngFile = new File(ctx.basePath, rg.file());

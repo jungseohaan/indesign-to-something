@@ -654,6 +654,8 @@ public final class FramePlacer {
                 }
                 // SPEC-025 일러스트 배지: PNG 가 유지되는 경우 그 위에 라벨 텍스트박스가 와야 함.
                 // simpleBadgeChild 가 아닌 editable badge_group 자식 → Phase 7 에서 PNG 배치 → 텍스트 z 를 PNG z + 1 로.
+                // 단, 인라인-앵커 배지 (inline_object 로도 등록된) 는 PNG 가 body TF 내부에 inline 으로 들어가므로
+                // 이 override 를 적용하면 body TF z(>10) 보다 작아져 가려짐 → 원래 tf.zOrder() 유지.
                 if (ctx.resolvedData.isEditableTextFrame(tf.id())
                         && !ctx.resolvedData.isSimpleBadgeChild(tf.id())) {
                     int domIdInt6 = -1;
@@ -666,6 +668,15 @@ public final class FramePlacer {
                             boolean isChild = false;
                             for (int cid : cTfIds) { if (cid == domIdInt6) { isChild = true; break; } }
                             if (!isChild) continue;
+                            // 인라인-앵커 배지 검사: 같은 ID 가 renderedFloatingItems 에 inline_object 로 등록?
+                            boolean badgeIsInlineAnchored = false;
+                            for (RenderedGroup rg2 : ctx.resolvedData.allRenderedFloatingItems()) {
+                                if (rg2.id() == rg.id() && "inline_object".equals(rg2.itemType())) {
+                                    badgeIsInlineAnchored = true;
+                                    break;
+                                }
+                            }
+                            if (badgeIsInlineAnchored) break; // tf.zOrder() 그대로 사용
                             int badgeHwpxZ = (rg.zOrder() > 0) ? Math.max(10000 - rg.zOrder(), 10) : 10;
                             tfZ = badgeHwpxZ + 1;
                             break;
@@ -796,12 +807,25 @@ public final class FramePlacer {
         if (selfPi == null) return false;
         int selfZ = selfPi.zOrder();
         int selfPage = tf.pageIndex();
+        // 본인의 ancestor 체인 수집 — ancestor 도형은 자식을 가릴 수 없음 (visual container 패턴)
+        java.util.Set<String> ancestorIds = new java.util.HashSet<>();
+        String pid = selfPi.parentId();
+        int hops = 0;
+        while (pid != null && hops < 10) {
+            ancestorIds.add(pid);
+            ResolvedPageItem par = ctx.resolvedData.getPageItem(pid);
+            if (par == null) break;
+            pid = par.parentId();
+            hops++;
+        }
         List<ResolvedPageItem> items = ctx.resolvedData.pageItems();
         if (items == null) return false;
         for (ResolvedPageItem pi : items) {
             if (pi == null) continue;
             if (pi.pageIndex() != selfPage) continue;
             if (pi.zOrder() >= selfZ) continue;  // 같거나 뒤쪽 도형은 가릴 수 없음 (InDesign: 작은 zOrder = 앞)
+            // ancestor 도형은 자식 TextFrame 의 컨테이너 — 가린다고 보지 않음
+            if (pi.id() != null && ancestorIds.contains(pi.id())) continue;
             String t = pi.type();
             // 불투명 도형: Rectangle/Polygon/Oval + fillColor 가 None 이 아님
             if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t)) continue;
