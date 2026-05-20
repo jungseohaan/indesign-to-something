@@ -643,6 +643,7 @@ public class HwpxTextBoxBuilder {
 
         // 모든 단락에 걸쳐 좁은 인라인 TextFrame을 수집
         // (InDesign에서 각 인라인 TF가 별도 단락에 배치되는 경우가 많음)
+        // 단, 작은 정사각형 박스 (자모 배지 등 ≤4000 hwpu) 는 다단 layout 이 아니라 데코 박스 → 제외
         java.util.List<ASTInlineObject> narrowFrames = new java.util.ArrayList<>();
         for (ASTParagraph para : paragraphs) {
             for (ASTInlineItem item : para.items()) {
@@ -650,7 +651,9 @@ public class HwpxTextBoxBuilder {
                     ASTInlineObject obj = (ASTInlineObject) item;
                     if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
                             && obj.width() < halfWidth
-                            && obj.height() >= ConverterConstants.MIN_TEXT_BOX_HEIGHT) {
+                            && obj.height() >= ConverterConstants.MIN_TEXT_BOX_HEIGHT
+                            // 데코 박스 (예: 자모 ㅍㅎㅂㅅ 배지) 는 작고 정사각형에 가까움 → 다단 후보 아님
+                            && !(obj.width() < 4000 && obj.height() < 4000)) {
                         narrowFrames.add(obj);
                     }
                 }

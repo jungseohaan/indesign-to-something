@@ -163,13 +163,258 @@ class InlineFrameHandler {
         return EHFontEquationConverter.convert(ehRuns);
     }
 
+    /**
+     * SPEC-025: Group 앵커가 다수의 시각적 박스(예: 자모 ㅍ ㅎ ㅂ ㅅ 배지)를 포함하면
+     * 각 자식 TextFrame 을 개별 INLINE_TEXT_FRAME (rounded box 스타일) 로 분해하여 검색 가능한
+     * 텍스트로 렌더링한다.
+     *
+     * 조건:
+     * - 앵커 ID 가 Group (TextFrame 아님)
+     * - Group 자식 중 inline + visible-text 인 TextFrame 이 2 개 이상
+     * - Group descendant 에 stroke 가 있는 Rectangle 도형이 존재 (박스 데코)
+     *
+     * 각 TF 를 박스 데코와 매칭 (bounds overlap) 후, Rectangle 의 stroke 색/굵기/cornerRadius
+     * 를 inline 박스에 복사한다.
+     */
+    static java.util.List<ASTInlineObject> tryInlineGroupAsBoxList(ResolvedBuildContext ctx, int anchoredObjectId) {
+        String anchorId = String.valueOf(anchoredObjectId);
+        ResolvedTextFrame anchorTf = ctx.resolvedData.getTextFrame(anchorId);
+        if (anchorTf != null) return null; // Group 이 아님
+
+        // 직속 자식 TF 수집 (inline + 텍스트 있음)
+        java.util.List<ResolvedTextFrame> childTfs = new java.util.ArrayList<>();
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
+            if (pi == null) continue;
+            if (!anchorId.equals(pi.parentId())) continue;
+            if (!tf.isInline()) continue;
+            String vt = tf.frameVisibleText();
+            if (vt == null) continue;
+            String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            if (cleaned.isEmpty()) continue;
+            childTfs.add(tf);
+        }
+        if (childTfs.size() < 2) return null;
+
+        // 읽기 순서 (Y → X) 정렬
+        childTfs.sort((a, b) -> {
+            double[] ab = a.geometricBounds();
+            double[] bb = b.geometricBounds();
+            if (ab == null || bb == null) return 0;
+            if (Math.abs(ab[0] - bb[0]) > 1.0) return Double.compare(ab[0], bb[0]);
+            return Double.compare(ab[1], bb[1]);
+        });
+
+        // Group 후손 중 stroke 가 있는 Rectangle 수집
+        java.util.List<ResolvedPageItem> rectangles = new java.util.ArrayList<>();
+        for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
+            if (pi == null) continue;
+            if (!"Rectangle".equals(pi.type()) && !"Polygon".equals(pi.type()) && !"Oval".equals(pi.type())) continue;
+            String scn = pi.strokeColorName();
+            boolean hasStroke = scn != null && !"None".equals(scn) && !"[None]".equals(scn) && pi.strokeWeight() > 0;
+            String fcn = pi.fillColorName();
+            boolean hasFill = fcn != null && !"None".equals(fcn) && !"[None]".equals(fcn);
+            if (!hasStroke && !hasFill) continue;
+            String curParent = pi.parentId();
+            int hops = 0;
+            boolean inGroup = false;
+            while (curParent != null && hops < 5) {
+                if (anchorId.equals(curParent)) { inGroup = true; break; }
+                ResolvedPageItem next = ctx.resolvedData.getPageItem(curParent);
+                if (next == null) break;
+                curParent = next.parentId();
+                hops++;
+            }
+            if (inGroup) rectangles.add(pi);
+        }
+        if (rectangles.isEmpty()) return null;
+
+        // 각 TF 를 가장 잘 겹치는 Rectangle 과 매칭하여 INLINE_TEXT_FRAME 생성
+        java.util.List<ASTInlineObject> result = new java.util.ArrayList<>();
+        for (ResolvedTextFrame childTf : childTfs) {
+            double[] tfBounds = childTf.geometricBounds();
+            if (tfBounds == null || tfBounds.length < 4) continue;
+            ResolvedPageItem matchedRect = null;
+            double bestOverlap = 0;
+            for (ResolvedPageItem rect : rectangles) {
+                double[] rb = rect.geometricBounds();
+                if (rb == null || rb.length < 4) continue;
+                double yOv = Math.min(tfBounds[2], rb[2]) - Math.max(tfBounds[0], rb[0]);
+                double xOv = Math.min(tfBounds[3], rb[3]) - Math.max(tfBounds[1], rb[1]);
+                if (yOv <= 0 || xOv <= 0) continue;
+                double overlap = yOv * xOv;
+                if (overlap > bestOverlap) {
+                    bestOverlap = overlap;
+                    matchedRect = rect;
+                }
+            }
+
+            double[] elBounds = matchedRect != null ? matchedRect.geometricBounds() : tfBounds;
+            double w = Math.abs(elBounds[3] - elBounds[1]);
+            double h = Math.abs(elBounds[2] - elBounds[0]);
+            if (w <= 0 || h <= 0) continue;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+            obj.width(CoordinateConverter.pointsToHwpunits(w));
+            obj.height(CoordinateConverter.pointsToHwpunits(h));
+            try {
+                obj.sourceId("u" + Integer.toHexString(Integer.parseInt(childTf.id())));
+            } catch (NumberFormatException nfe) {
+                obj.sourceId("u" + childTf.id());
+            }
+
+            if (matchedRect != null) {
+                String strokeName = matchedRect.strokeColorName();
+                if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)) {
+                    String hex = ctx.resolvedData.resolveColorHex(strokeName);
+                    if (hex != null) {
+                        obj.strokeColor(hex);
+                        // applyScale 이 strokeWeight 도 곱했으므로 시각 두께는 / scaleFactor 로 되돌림
+                        double sw = matchedRect.strokeWeight();
+                        if (ctx.scaleFactor > 0) sw = sw / ctx.scaleFactor;
+                        obj.strokeWeight(Math.max(sw, 0.6));
+                    }
+                }
+                String fillName = matchedRect.fillColorName();
+                if (fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
+                    String hex = ctx.resolvedData.resolveColorHex(fillName);
+                    if (hex != null) {
+                        obj.fillColor(hex);
+                        obj.fillTint(100);
+                    }
+                }
+                if (matchedRect.cornerRadius() > 0) {
+                    obj.cornerRadius(matchedRect.cornerRadius());
+                }
+            }
+
+            String jamoText = childTf.frameVisibleText().replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            ASTParagraph paraInner = new ASTParagraph();
+            ASTTextRun textRun = new ASTTextRun();
+            textRun.text(jamoText);
+            ResolvedStory story = childTf.storyId() != null ? ctx.resolvedData.getStory(childTf.storyId()) : null;
+            if (story != null && !story.paragraphs().isEmpty()) {
+                ResolvedParagraph rp = story.paragraphs().get(0);
+                if (rp.runs() != null && !rp.runs().isEmpty()) {
+                    ResolvedRun rr = rp.runs().get(0);
+                    if (rr.fontFamily() != null) textRun.fontFamily(rr.fontFamily());
+                    if (rr.fontStyle() != null) textRun.fontStyle(rr.fontStyle());
+                    if (rr.fontSize() != null && rr.fontSize() > 0) {
+                        textRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+                    }
+                    if (rr.fillColor() != null) textRun.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+                }
+            }
+            paraInner.addItem(textRun);
+            obj.addParagraph(paraInner);
+            // 박스 안 텍스트는 가운데 정렬
+            obj.verticalJustification("CenterAlign");
+
+            result.add(obj);
+        }
+
+        return result.size() >= 2 ? result : null;
+    }
+
+    /**
+     * SPEC-025: 인라인 앵커가 빈(텍스트 없음) TextFrame 이면서 fillColor 가 있는 데코 박스
+     * (예: 본문 빈칸 / 강조 박스) → INLINE_TEXT_FRAME 으로 변환.
+     *
+     * 조건:
+     * - 앵커 ID 가 TextFrame 이고 isInline=true
+     * - frameVisibleText 가 비어있음
+     * - fillColor 가 None 이 아님
+     * - 다른 채널로 렌더되지 않음
+     */
+    static ASTInlineObject tryInlineEmptyFilledBoxAsFrame(ResolvedBuildContext ctx, int anchoredObjectId) {
+        String domId = String.valueOf(anchoredObjectId);
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+        if (tf == null) return null;
+        if (!tf.isInline()) return null;
+        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
+        if (ctx.resolvedData.isSimpleBadgeChild(domId)) return null;
+
+        // 텍스트가 있으면 적용 안 함 (tryInlineTextFrameAsRun 이 처리)
+        String visText = tf.frameVisibleText();
+        if (visText != null) {
+            String cleaned = visText.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            if (!cleaned.isEmpty()) return null;
+        }
+
+        // fillColor 가 없으면 적용 안 함
+        String fillName = tf.fillColor();
+        if (fillName == null || "None".equals(fillName) || "[None]".equals(fillName)) return null;
+
+        double[] gb = tf.geometricBounds();
+        if (gb == null || gb.length < 4) return null;
+        double w = Math.abs(gb[3] - gb[1]);
+        double h = Math.abs(gb[2] - gb[0]);
+        if (w <= 0 || h <= 0) return null;
+
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        obj.width(CoordinateConverter.pointsToHwpunits(w));
+        obj.height(CoordinateConverter.pointsToHwpunits(h));
+        obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+
+        String fillHex = ctx.resolvedData.resolveColorHex(fillName);
+        if (fillHex != null) {
+            obj.fillColor(fillHex);
+            obj.fillTint(tf.fillTint() > 0 && tf.fillTint() <= 100 ? tf.fillTint() : 100);
+        }
+        String strokeName = tf.strokeColor();
+        if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName) && tf.strokeWeight() > 0) {
+            String strokeHex = ctx.resolvedData.resolveColorHex(strokeName);
+            if (strokeHex != null) {
+                obj.strokeColor(strokeHex);
+                double sw = tf.strokeWeight();
+                if (ctx.scaleFactor > 0) sw = sw / ctx.scaleFactor;
+                obj.strokeWeight(Math.max(sw, 0.6));
+            }
+        }
+        if (tf.cornerRadius() > 0) {
+            double cr = tf.cornerRadius();
+            if (ctx.scaleFactor > 0) cr = cr / ctx.scaleFactor;
+            obj.cornerRadius(cr);
+        }
+        // 빈 단락 1개로 — 텍스트 없는 컬러 박스
+        ASTParagraph emptyPara = new ASTParagraph();
+        obj.addParagraph(emptyPara);
+
+        return obj;
+    }
+
     static ASTTextRun tryInlineTextFrameAsRun(ResolvedBuildContext ctx, int anchoredObjectId) {
         String domId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
-        if (tf == null || !tf.isInline()) return null;
+        if (tf == null) {
+            // SPEC-025: anchoredId 가 Group (TextFrame 아님) 인 경우, 자손 중 inline+editable TF 텍스트를 합쳐 임베드.
+            // 단일 1자 (예: "1", "예") 는 시각 PNG 유지 우선 → 임베드 안 함.
+            // 그러나 다중 1자 자손 (예: jamo 배지 ㅍㅎ, ㅂㅅ) 은 결합 텍스트가 의미 있으므로 합쳐서 임베드.
+            java.util.List<ResolvedTextFrame> inlineDescs = findInlineEditableDescendants(ctx, domId);
+            if (!inlineDescs.isEmpty()) {
+                StringBuilder _sb = new StringBuilder();
+                for (ResolvedTextFrame d : inlineDescs) {
+                    String t = d.frameVisibleText();
+                    String c = t == null ? "" : t.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+                    if (!c.isEmpty()) _sb.append(c);
+                }
+                String combined = _sb.toString();
+                if (combined.length() >= 2) {
+                    ASTTextRun run = new ASTTextRun();
+                    run.text(combined);
+                    return run;
+                }
+            }
+            return null;
+        }
+        if (!tf.isInline()) return null;
 
         // rendered된 TF(badge_group 등)는 PNG로 이미 배치됨 → 텍스트 런 변환 안 함
         if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
+        // SPEC-025: 단순 배지 자식 (Phase 2 가 별도 글상자로 배치) → 인라인 임베드 중복 방지.
+        if (ctx.resolvedData.isSimpleBadgeChild(domId)) return null;
 
         // SPEC-025: IDML Story 우선 + 중첩 인라인 앵커 재귀 처리
         // (예: 페이지 10 frame 15359 의 anchored Group 안에 frame 15568 "예" 가 있음 →
@@ -499,6 +744,11 @@ class InlineFrameHandler {
             // PNG는 그 입력란을 둘러싼 시각적 배경(일러스트/라운드 외곽선)만 담는다.
             // 텍스트는 별도 오버레이되므로 PNG를 폐기하면 안 됨.
             if (isEmptyContainer(childTf)) continue;
+            // SPEC-025: inline+editable 배지 자식은 Phase 2 가 플로팅 배치 스킵 →
+            // PNG 가 유일한 시각 표현. loadInlineObject 가 PNG 폐기하면 배지 자체가 사라짐 → 통과시킴.
+            if (childTf.isInline() && ctx.resolvedData.isEditableTextFrame(childTf.id())) {
+                continue;
+            }
             if (ctx.resolvedData.isEditableTextFrame(childTf.id())
                     || childTf.isInline()) {
                 return null;
@@ -643,6 +893,10 @@ class InlineFrameHandler {
             if (run.inlineFrames() == null || anchor.index() >= run.inlineFrames().size()) return "";
             kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame tf = run.inlineFrames().get(anchor.index());
             if (tf == null || tf.parentStoryId() == null) return "";
+            // SPEC-025: 앵커 TF 가 별도 PNG 로 렌더되는 경우 (예: 번호 마커 "1") 인라인 임베드는 중복 → 스킵.
+            if (isRenderedAsImage(ctx, tf.selfId())) return "";
+            // SPEC-025: 앵커 TF 가 단순 배지 자식 (Phase 2 가 별도 글상자로 배치) 인 경우도 인라인 임베드 스킵 → 중복 방지.
+            if (isSimpleBadgeChild(ctx, tf.selfId())) return "";
             IDMLStory childStory = ctx.loadIDMLStory.apply(tf.parentStoryId());
             return extractTextRecursive(ctx, childStory, depth);
         }
@@ -650,6 +904,85 @@ class InlineFrameHandler {
         if (run.inlineGraphics() == null || anchor.index() >= run.inlineGraphics().size()) return "";
         IDMLCharacterRun.InlineGraphic ig = run.inlineGraphics().get(anchor.index());
         return extractGraphicText(ctx, ig, depth);
+    }
+
+    /** IDML selfId (hex, "uXXXX") 로 표기된 TextFrame 이 renderedFloatingItems 에 PNG 로 등록됐는지 확인. */
+    private static boolean isRenderedAsImage(ResolvedBuildContext ctx, String idmlSelfId) {
+        if (ctx == null || ctx.resolvedData == null || idmlSelfId == null) return false;
+        if (!idmlSelfId.startsWith("u")) return false;
+        int domId;
+        try { domId = Integer.parseInt(idmlSelfId.substring(1), 16); }
+        catch (NumberFormatException e) { return false; }
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg.id() == domId && rg.file() != null && !rg.file().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    /** 주어진 anchoredId 그룹의 자손 중 inline+editable TF 들을 모두 찾는다 (visual 순서대로 가능한 범위). */
+    private static java.util.List<ResolvedTextFrame> findInlineEditableDescendants(ResolvedBuildContext ctx, String anchorIdStr) {
+        java.util.List<ResolvedTextFrame> result = new java.util.ArrayList<>();
+        for (ResolvedTextFrame childTf : ctx.resolvedData.textFrames()) {
+            if (childTf == null || !childTf.isInline()) continue;
+            if (!ctx.resolvedData.isEditableTextFrame(childTf.id())) continue;
+            String vt = childTf.frameVisibleText();
+            if (vt == null || vt.replace("￼", "").trim().isEmpty()) continue;
+            String curId = childTf.id();
+            int depth = 0;
+            boolean isDesc = false;
+            while (curId != null && depth < 8) {
+                ResolvedPageItem pi = ctx.resolvedData.getPageItem(curId);
+                if (pi == null) break;
+                String pid = pi.parentId();
+                if (pid == null) break;
+                if (anchorIdStr.equals(pid)) { isDesc = true; break; }
+                curId = pid;
+                depth++;
+            }
+            if (isDesc) result.add(childTf);
+        }
+        // Order by Y then X (top-to-bottom, left-to-right reading order).
+        result.sort((a, b) -> {
+            double[] ab = a.geometricBounds();
+            double[] bb = b.geometricBounds();
+            if (ab == null || bb == null) return 0;
+            double ay = ab[0], by = bb[0];
+            if (Math.abs(ay - by) > 1.0) return Double.compare(ay, by);
+            return Double.compare(ab[1], bb[1]);
+        });
+        return result;
+    }
+
+    /** 주어진 anchoredId 그룹의 자손 중 첫 inline+editable TF (텍스트 길이 ≥ 1) 를 찾는다. */
+    private static ResolvedTextFrame findInlineEditableDescendant(ResolvedBuildContext ctx, String anchorIdStr) {
+        for (ResolvedTextFrame childTf : ctx.resolvedData.textFrames()) {
+            if (childTf == null || !childTf.isInline()) continue;
+            if (!ctx.resolvedData.isEditableTextFrame(childTf.id())) continue;
+            String vt = childTf.frameVisibleText();
+            if (vt == null || vt.replace("￼", "").trim().isEmpty()) continue;
+            String curId = childTf.id();
+            int depth = 0;
+            while (curId != null && depth < 8) {
+                ResolvedPageItem pi = ctx.resolvedData.getPageItem(curId);
+                if (pi == null) break;
+                String pid = pi.parentId();
+                if (pid == null) break;
+                if (anchorIdStr.equals(pid)) return childTf;
+                curId = pid;
+                depth++;
+            }
+        }
+        return null;
+    }
+
+    /** IDML selfId 의 TextFrame 이 단순 scribble 배지 자식 (Phase 2 가 글상자로 배치) 인지 확인. */
+    private static boolean isSimpleBadgeChild(ResolvedBuildContext ctx, String idmlSelfId) {
+        if (ctx == null || ctx.resolvedData == null || idmlSelfId == null) return false;
+        if (!idmlSelfId.startsWith("u")) return false;
+        int domId;
+        try { domId = Integer.parseInt(idmlSelfId.substring(1), 16); }
+        catch (NumberFormatException e) { return false; }
+        return ctx.resolvedData.isSimpleBadgeChild(String.valueOf(domId));
     }
 
     /** InlineGraphic(Group/Rectangle/Polygon) 내부의 모든 TextFrame 텍스트를 재귀로 합쳐 반환. */

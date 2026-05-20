@@ -384,19 +384,33 @@ class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
-                                    // 분수 구조 인라인 TextFrame(2단락) → 수식으로 변환
-                                    ASTEquation fracEq = InlineFrameHandler.tryInlineFractionAsEquation(ctx, domId);
-                                    if (fracEq != null) {
-                                        para.addItem(fracEq);
+                                    // SPEC-025: Group 앵커가 다수의 박스(예: 자모 배지 ㅍㅎㅂㅅ) 면 각 자식 TF 를
+                                    // 박스 스타일 inline TextFrame 으로 개별 분해 → 검색 가능 + 시각 박스 보존.
+                                    java.util.List<ASTInlineObject> boxList =
+                                            InlineFrameHandler.tryInlineGroupAsBoxList(ctx, domId);
+                                    if (boxList != null && !boxList.isEmpty()) {
+                                        for (ASTInlineObject box : boxList) para.addItem(box);
                                     } else {
-                                        // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환
-                                        ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, domId);
-                                        if (textRun != null) {
-                                            para.addItem(textRun);
+                                        // 분수 구조 인라인 TextFrame(2단락) → 수식으로 변환
+                                        ASTEquation fracEq = InlineFrameHandler.tryInlineFractionAsEquation(ctx, domId);
+                                        if (fracEq != null) {
+                                            para.addItem(fracEq);
                                         } else {
-                                            ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, domId);
-                                            if (inlineObj != null) {
-                                                para.addItem(inlineObj);
+                                            // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환
+                                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, domId);
+                                            if (textRun != null) {
+                                                para.addItem(textRun);
+                                            } else {
+                                                // SPEC-025: 빈 inline TextFrame 이지만 fillColor 가 있으면 데코 박스 (예: 본문 빈칸 강조 박스)
+                                                ASTInlineObject emptyBox = InlineFrameHandler.tryInlineEmptyFilledBoxAsFrame(ctx, domId);
+                                                if (emptyBox != null) {
+                                                    para.addItem(emptyBox);
+                                                } else {
+                                                    ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, domId);
+                                                    if (inlineObj != null) {
+                                                        para.addItem(inlineObj);
+                                                    }
+                                                }
                                             }
                                         }
                                     }
