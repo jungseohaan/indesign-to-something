@@ -178,6 +178,29 @@ class StoryLoader {
                 resolvedRuns = resolvedStory.paragraphs().get(i).runs();
             }
 
+            // SPEC-025: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 다음에  (BEL) 또는
+            //  (IDML 변환값) 이 나오면 첫 anchor TF 폭만큼 paragraph leftMargin 적용.
+            // (예: "1  가 같은 사건을..." 패턴에서 "가" 부터의 줄은 "1" 폭만큼 들여쓰기)
+            if (resolvedRuns != null && resolvedRuns.size() >= 2 && para.leftMargin() == null) {
+                ResolvedRun rA = resolvedRuns.get(0);
+                ResolvedRun rB = resolvedRuns.get(1);
+                if (rA.isInlineAnchor() && rA.anchoredObjectId() != null
+                        && rB.text() != null
+                        && (rB.text().indexOf('') >= 0 || rB.text().indexOf('') >= 0)) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame anchorTf
+                            = ctx.resolvedData.getTextFrame(String.valueOf(rA.anchoredObjectId()));
+                    if (anchorTf != null) {
+                        double[] gbA = anchorTf.geometricBounds();
+                        if (gbA != null && gbA.length >= 4) {
+                            double anchorW = Math.abs(gbA[3] - gbA[1]);
+                            if (anchorW > 0) {
+                                para.leftMargin(CoordinateConverter.pointsToHwpunits(anchorW));
+                            }
+                        }
+                    }
+                }
+            }
+
             // ParagraphStyle에서 FillColor/Tracking/FontFamily 미리 구해둠 (런에서 없을 때 사용)
             StoryConverter.StyleContext sc = new StoryConverter.StyleContext(
                     RunBuilder.getStyleFillColor(ctx, ip.appliedParagraphStyle()),
@@ -379,6 +402,12 @@ class StoryLoader {
                                 String inlineHexId = inlineIds.get(anchorIdx);
                                 try {
                                     int domId = Integer.parseInt(inlineHexId.substring(1), 16);
+                                    // AnchoredPosition="Anchored" + TextWrapMode="None" Group:
+                                    // 사전 스캔에서 등록됨 → 인라인 삽입 건너뛰고 Phase 3 후처리가 floating ASTFigure 로 배치.
+                                    if (ctx.deferredAnchoredFloatingIds.contains(domId)) {
+                                        anchorIdx++;
+                                        continue;
+                                    }
                                     // 커스텀 위치 앵커 객체 건너뛰기: resolved TextFrame의 중심X가 부모 범위 밖이면 인라인 삽입 안 함
                                     if (InlineFrameHandler.isAnchoredOutsideParentByTextFrame(ctx, domId, storyId)) {
                                         anchorIdx++;
@@ -406,9 +435,16 @@ class StoryLoader {
                                                 if (emptyBox != null) {
                                                     para.addItem(emptyBox);
                                                 } else {
-                                                    ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, domId);
-                                                    if (inlineObj != null) {
-                                                        para.addItem(inlineObj);
+                                                    // 배경 도형 + 단일 짧은 텍스트프레임 (예: 페이지 39 "가" / "나" 캡슐 배지)
+                                                    // → INLINE_TEXT_FRAME (한 몸 + 검색 가능)
+                                                    ASTInlineObject singleBadge = InlineFrameHandler.tryInlineGroupAsSingleBadge(ctx, domId);
+                                                    if (singleBadge != null) {
+                                                        para.addItem(singleBadge);
+                                                    } else {
+                                                        ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, domId);
+                                                        if (inlineObj != null) {
+                                                            para.addItem(inlineObj);
+                                                        }
                                                     }
                                                 }
                                             }

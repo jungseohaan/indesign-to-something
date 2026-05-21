@@ -66,6 +66,15 @@ public final class StoryConverter {
     // ═══════════════════════════════════════════════════
 
     public static void convertStories(ResolvedBuildContext ctx, List<ASTSection> sections) {
+        // PRE: IDML 의 AnchoredPosition="Anchored" + TextWrapMode="None" InlineGraphic 들을
+        // 미리 스캔해서 deferredAnchoredFloatingIds 에 등록. 두 경로(IDML/resolved) 모두
+        // 인라인 배치 시 이 ID 들을 건너뛰고, 후처리가 floating ASTFigure 로 배치한다.
+        prepopulateAnchoredFloatingIds(ctx);
+
+        // PRE: Spread XML 에서 TextPath 매핑 (TF id → TextPath storyId) 미리 추출.
+        // curved text 가 부모 TF 의 빈 콘텐츠를 채우도록 한다 (직선으로 그대로 표시).
+        java.util.Map<String, String> textPathStorySub = scanTextPathStorySubstitutions(ctx);
+
         // TextFrameBlock에 Story 텍스트 연결
         // storyId → TextFrameBlock 매핑
         Map<String, List<ASTTextFrameBlock>> storyToBlocks = new HashMap<>();
@@ -83,7 +92,16 @@ public final class StoryConverter {
                     if (domId == null) continue;
                     ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
                     if (rtf != null && rtf.storyId() != null) {
-                        storyToBlocks.computeIfAbsent(rtf.storyId(), k -> new ArrayList<>()).add(tfb);
+                        String storyId = rtf.storyId();
+                        // 빈 본문 스토리이고 TextPath 매핑이 있으면 TextPath 스토리로 대체.
+                        // frameVisibleTextLength 도 TextPath 스토리 길이로 보정하여 단락 분배 필터를 통과시킨다.
+                        String subStoryId = textPathStorySub.get(domId);
+                        if (subStoryId != null && isStoryEmpty(ctx, storyId)) {
+                            storyId = subStoryId;
+                            int subLen = storyTextLength(ctx, subStoryId);
+                            if (subLen > 0) tfb.frameVisibleTextLength(subLen);
+                        }
+                        storyToBlocks.computeIfAbsent(storyId, k -> new ArrayList<>()).add(tfb);
                     }
                 }
             }
@@ -188,6 +206,238 @@ public final class StoryConverter {
             ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, storyId);
         }
         System.err.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
+
+        // Phase 3 후처리: AnchoredPosition="Anchored" + TextWrapMode="None" Group 들을
+        // BEHIND_TEXT 위치-절대 ASTFigure 로 배치 (텍스트 겹침, 밀지 않음).
+        placeDeferredAnchoredFloating(ctx, sections);
+    }
+
+    /**
+     * Spread XML 들을 스캔해 TextPath 가 있는 TextFrame 에 대해 TF id → TextPath story id 매핑을 만든다.
+     * 부모 TF 의 본문이 비어있으면 TextPath 스토리로 대체하여 curved text 가 빠지지 않도록 한다.
+     * 반환 map: key=TF decimal id (string), value=TextPath story decimal id (string).
+     */
+    private static java.util.Map<String, String> scanTextPathStorySubstitutions(ResolvedBuildContext ctx) {
+        java.util.Map<String, String> map = new java.util.HashMap<>();
+        if (ctx.idmlDir == null) return map;
+        java.io.File spreadsDir = new java.io.File(ctx.idmlDir, "Spreads");
+        if (!spreadsDir.isDirectory()) return map;
+        java.util.regex.Pattern tfPattern = java.util.regex.Pattern.compile(
+                "<TextFrame\\s+Self=\"u([0-9a-f]+)\"");
+        java.util.regex.Pattern tpPattern = java.util.regex.Pattern.compile(
+                "<TextPath\\s+Self=\"[^\"]+\"\\s+ParentStory=\"u([0-9a-f]+)\"");
+        for (java.io.File f : spreadsDir.listFiles()) {
+            if (!f.getName().endsWith(".xml")) continue;
+            try {
+                String txt = new String(java.nio.file.Files.readAllBytes(f.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                // 각 <TextFrame Self="..."> 와 그 뒤 가장 가까운 <TextPath ParentStory="..."> 매칭.
+                // depth 추적 없이 위치 기반 단순 매칭 — 실제 IDML 에서 TextPath 는 TF 의 직속 자식이므로 안전.
+                java.util.regex.Matcher tfM = tfPattern.matcher(txt);
+                while (tfM.find()) {
+                    String tfHex = tfM.group(1);
+                    int tfEnd = tfM.end();
+                    // 다음 TextFrame 까지의 범위 안에서 첫 TextPath 검색
+                    int nextTfStart = txt.length();
+                    java.util.regex.Matcher nextTfM = tfPattern.matcher(txt);
+                    if (nextTfM.find(tfEnd)) nextTfStart = nextTfM.start();
+                    java.util.regex.Matcher tpM = tpPattern.matcher(txt.substring(tfEnd, nextTfStart));
+                    if (tpM.find()) {
+                        String tpHex = tpM.group(1);
+                        try {
+                            int tfDec = Integer.parseInt(tfHex, 16);
+                            int tpDec = Integer.parseInt(tpHex, 16);
+                            map.put(String.valueOf(tfDec), String.valueOf(tpDec));
+                        } catch (NumberFormatException e) { /* skip */ }
+                    }
+                }
+            } catch (Exception e) { /* skip file */ }
+        }
+        if (!map.isEmpty()) {
+            System.err.println("[ResolvedToASTBuilder] Phase 3 사전 스캔: "
+                    + map.size() + "개 TextPath story 매핑 (curved text → 부모 TF 본문)");
+        }
+        return map;
+    }
+
+    /** Story 의 총 문자 길이 (resolved 우선, 없으면 IDML XML 에서 fallback). */
+    private static int storyTextLength(ResolvedBuildContext ctx, String storyId) {
+        if (storyId == null) return 0;
+        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs = ctx.resolvedData.getStory(storyId);
+        if (rs != null && rs.paragraphs() != null) {
+            int total = 0;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph rp : rs.paragraphs()) {
+                if (rp.runs() == null) continue;
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun r : rp.runs()) {
+                    if (r.text() != null) total += r.text().length();
+                }
+            }
+            if (total > 0) return total;
+        }
+        // Fallback: IDML 스토리 (TextPath 스토리는 resolved 에 없음)
+        if (ctx.loadIDMLStory == null) return 0;
+        try {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory ids = ctx.loadIDMLStory.apply(storyId);
+            if (ids == null || ids.paragraphs() == null) return 0;
+            int total = 0;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph ip : ids.paragraphs()) {
+                if (ip.characterRuns() == null) continue;
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : ip.characterRuns()) {
+                    if (run.content() != null) total += run.content().length();
+                }
+            }
+            return total;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /** Story 가 비어있는지 (paragraphs 가 없거나 모든 텍스트가 공백) 확인. */
+    private static boolean isStoryEmpty(ResolvedBuildContext ctx, String storyId) {
+        if (storyId == null) return true;
+        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs = ctx.resolvedData.getStory(storyId);
+        if (rs == null || rs.paragraphs() == null || rs.paragraphs().isEmpty()) return true;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph rp : rs.paragraphs()) {
+            if (rp.runs() == null) continue;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun r : rp.runs()) {
+                String t = r.text();
+                if (t != null && !t.trim().isEmpty()) return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 모든 IDML Story 를 스캔해 AnchoredPosition="Anchored" + TextWrapMode="None" InlineGraphic 의
+     * Group ID 를 ctx.deferredAnchoredFloatingIds 에 미리 등록한다. 이 ID 들은 인라인 배치를
+     * 건너뛰고 후처리가 BEHIND_TEXT 로 절대 위치에 배치된다.
+     */
+    private static void prepopulateAnchoredFloatingIds(ResolvedBuildContext ctx) {
+        if (ctx.resolvedData == null || ctx.loadIDMLStory == null) return;
+        int found = 0;
+        int storiesScanned = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs : ctx.resolvedData.stories()) {
+            if (rs == null || rs.id() == null) continue;
+            storiesScanned++;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory ids;
+            try {
+                ids = ctx.loadIDMLStory.apply(rs.id());
+            } catch (Exception e) { continue; }
+            if (ids == null) continue;
+            // Story 본문 단락 + 테이블 셀 단락 모두 검사
+            java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph> allParas =
+                    new java.util.ArrayList<>();
+            if (ids.paragraphs() != null) allParas.addAll(ids.paragraphs());
+            if (ids.tables() != null) {
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable tbl : ids.tables()) {
+                    if (tbl.rows() == null) continue;
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row : tbl.rows()) {
+                        if (row.cells() == null) continue;
+                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell : row.cells()) {
+                            if (cell.paragraphs() != null) allParas.addAll(cell.paragraphs());
+                        }
+                    }
+                }
+            }
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph ip : allParas) {
+                if (ip.characterRuns() == null) continue;
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : ip.characterRuns()) {
+                    if (run.inlineGraphics() == null) continue;
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
+                        if (!"Anchored".equals(ig.anchoredPosition())) continue;
+                        if (!"None".equals(ig.textWrapMode())) continue;
+                        String selfId = ig.selfId();
+                        if (selfId == null || selfId.length() < 2) continue;
+                        try {
+                            int domId = Integer.parseInt(selfId.substring(1), 16);
+                            if (ctx.deferredAnchoredFloatingIds.add(domId)) found++;
+                        } catch (NumberFormatException e) { /* skip */ }
+                    }
+                }
+            }
+        }
+        if (found > 0) {
+            System.err.println("[ResolvedToASTBuilder] Phase 3 사전 스캔: "
+                    + found + "개 anchored+none Group 등록 (stories=" + storiesScanned + ")");
+        }
+    }
+
+    /**
+     * StoryLoader 가 등록한 deferredAnchoredFloatingIds 를 처리하여 각 페이지 섹션에
+     * BEHIND_TEXT 강조 직사각형(ASTFigure)을 추가한다. 인라인 PNG(inline_NNN.png)를
+     * 그대로 사용해 정확한 시각을 보존.
+     */
+    private static void placeDeferredAnchoredFloating(ResolvedBuildContext ctx, List<ASTSection> sections) {
+        if (ctx.deferredAnchoredFloatingIds == null || ctx.deferredAnchoredFloatingIds.isEmpty()) return;
+        if (ctx.basePath == null) return;
+        int placed = 0;
+        for (Integer domId : ctx.deferredAnchoredFloatingIds) {
+            // pageItem 조회 (페이지 인덱스 + bounds)
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem pi =
+                    ctx.resolvedData.getPageItem(String.valueOf(domId));
+            if (pi == null) continue;
+            int pageIdx = pi.pageIndex();
+            int secIdx = ctx.toSectionIndex.applyAsInt(pageIdx);
+            if (secIdx < 0 || secIdx >= sections.size()) continue;
+            double[] gb = pi.geometricBounds();
+            if (gb == null || gb.length < 4) continue;
+            // 페이지 상대 좌표 (페이지 top-left = 0,0)
+            double pageTop = 0, pageLeft = 0;
+            if (ctx.resolvedData.pages() != null
+                    && pageIdx >= 0 && pageIdx < ctx.resolvedData.pages().size()) {
+                double[] pgB = ctx.resolvedData.pages().get(pageIdx).bounds();
+                if (pgB != null && pgB.length >= 4) {
+                    pageTop = pgB[0]; pageLeft = pgB[1];
+                }
+            }
+            double x = gb[1] - pageLeft;
+            double y = gb[0] - pageTop;
+            double w = Math.abs(gb[3] - gb[1]);
+            double h = Math.abs(gb[2] - gb[0]);
+            if (w <= 0 || h <= 0) continue;
+
+            // inline_NNN.png 가 있으면 이미지로, 없으면 일반 fill 도형으로 처리
+            java.io.File pngFile = null;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                    : ctx.resolvedData.allRenderedFloatingItems()) {
+                if (rg.id() == domId.intValue() && "inline_object".equals(rg.itemType())) {
+                    if (rg.file() != null) pngFile = new java.io.File(ctx.basePath, rg.file());
+                    break;
+                }
+            }
+            if (pngFile == null || !pngFile.exists()) continue;
+            try {
+                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+                if (img == null) continue;
+
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
+                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
+                fig.kind(kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure.FigureKind.IMAGE);
+                fig.imageData(imageData);
+                fig.imageFormat("png");
+                fig.pixelWidth(img.getWidth());
+                fig.pixelHeight(img.getHeight());
+                fig.x(kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter.pointsToHwpunits(x));
+                fig.y(kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter.pointsToHwpunits(y));
+                fig.width(kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter.pointsToHwpunits(w));
+                fig.height(kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter.pointsToHwpunits(h));
+                // BEHIND_TEXT: 텍스트 뒤에 겹쳐서 표시, 텍스트 흐름에 영향 없음
+                fig.textWrapMode("None");
+                // zOrder 작게 (텍스트 뒤로) — pageItem zOrder 기반
+                int z = pi.zOrder();
+                if (z > 0) fig.zOrder(Math.max(2, 10000 - z));
+                else fig.zOrder(2);
+                sections.get(secIdx).addBlock(fig);
+                placed++;
+            } catch (Exception e) {
+                // skip
+            }
+        }
+        if (placed > 0) {
+            System.err.println("[ResolvedToASTBuilder] Phase 3 후처리: " + placed
+                    + "개 anchored floating 강조 도형 배치");
+        }
     }
 
 
@@ -267,6 +517,20 @@ public final class StoryConverter {
 
             // 런 변환 (ResolvedParagraph → runs 직접)
             boolean stopAfterThisRun = false;
+            // SPEC-025: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 의 너비를 paragraph leftMargin 으로
+            // 적용해 InDesign 의 "1 ←여기부터 내려쓰기" 효과 재현 (예: 페이지 32 "가 같은 사건을..." 발문)
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame firstAnchorTf = null;
+            if (rp.runs() != null) {
+                for (ResolvedRun run : rp.runs()) {
+                    if (run.isInlineAnchor()) {
+                        Integer aid = run.anchoredObjectId();
+                        if (aid != null) firstAnchorTf = ctx.resolvedData.getTextFrame(String.valueOf(aid));
+                        break;
+                    }
+                    String t = run.text();
+                    if (t != null && !t.isEmpty()) break; // 텍스트 먼저 나오면 anchor 패턴 아님
+                }
+            }
             if (rp.runs() != null) {
                 for (ResolvedRun run : rp.runs()) {
                     if (stopAfterThisRun) break;
@@ -274,6 +538,11 @@ public final class StoryConverter {
                     if (run.isInlineAnchor()) {
                         Integer anchoredId = run.anchoredObjectId();
                         if (anchoredId != null) {
+                            // AnchoredPosition="Anchored" + TextWrapMode="None" Group:
+                            // 인라인 배치 건너뛰고 후처리가 BEHIND_TEXT floating 으로 배치.
+                            if (ctx.deferredAnchoredFloatingIds.contains(anchoredId)) {
+                                continue;
+                            }
                             // 커스텀 위치 앵커 객체 건너뛰기
                             if (InlineFrameHandler.isAnchoredOutsideParent(ctx, anchoredId, story.id())) {
                                 continue;
@@ -282,6 +551,20 @@ public final class StoryConverter {
                             ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, anchoredId);
                             if (textRun != null) {
                                 para.addItem(textRun);
+                                continue;
+                            }
+                            // 다수 박스(예: ㅍ ㅎ ㅂ ㅅ 자모 배지) → 각 TF 를 박스 스타일 INLINE_TEXT_FRAME 으로 분해
+                            java.util.List<ASTInlineObject> boxList =
+                                    InlineFrameHandler.tryInlineGroupAsBoxList(ctx, anchoredId);
+                            if (boxList != null && !boxList.isEmpty()) {
+                                for (ASTInlineObject box : boxList) para.addItem(box);
+                                continue;
+                            }
+                            // 배경 도형 + 단일 짧은 텍스트프레임 (예: "가" / "나" 캡슐 배지)
+                            // → INLINE_TEXT_FRAME (한 몸 + 검색 가능)
+                            ASTInlineObject singleBadge = InlineFrameHandler.tryInlineGroupAsSingleBadge(ctx, anchoredId);
+                            if (singleBadge != null) {
+                                para.addItem(singleBadge);
                                 continue;
                             }
                             ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, anchoredId);
@@ -311,10 +594,28 @@ public final class StoryConverter {
                     }
                     // 특수 제어 문자 제거 (IDML 경로와 동일)
                     if (runText != null) {
+                        // SPEC-025: ACE 7 (IndentToHere, \u0007 or \u0008) 감지 — 첫 inline anchor 이후
+                        // 처음 등장한 위치에서 후속 줄 좌측 들여쓰기를 위해 paragraph leftMargin 적용
+                        if (firstAnchorTf != null && para.leftMargin() == null) {
+                            int aceIdx = runText.indexOf('\u0007');
+                            if (aceIdx < 0) aceIdx = runText.indexOf('\u0008');
+                            if (aceIdx >= 0) {
+                                double[] gbA = firstAnchorTf.geometricBounds();
+                                if (gbA != null && gbA.length >= 4) {
+                                    double anchorW = Math.abs(gbA[3] - gbA[1]);
+                                    if (anchorW > 0) {
+                                        para.leftMargin(CoordinateConverter.pointsToHwpunits(anchorW));
+                                    }
+                                }
+                            }
+                        }
+                        runText = runText.replace("\u0007", "");
                         runText = runText.replace("\t\u0008", "");
                         runText = runText.replace("\u0008", "");
                         runText = runText.replace("\n", "");
                         runText = runText.replace("\r", "");
+                        // Yoon 폰트 PUA 글리프 → 안전한 유니코드 치환 (□ 빈 정답 칸)
+                        runText = runText.replace('\uE285', '\u25A1').replace('\uE287', '\u25A1').replace('\uE288', '\u25A1');
                         // overline marker: Ó(0xD3) → \uE000{letters}\uE001 마커로 치환
                         if (runText.indexOf('\u00D3') >= 0) {
                             runText = RunPostProcessor.markOverlineSegments(runText);

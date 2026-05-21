@@ -104,6 +104,13 @@ public final class ResolvedBuildContext {
      */
     public kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.TableQualityGateConfig tableQualityGate;
 
+    /**
+     * IDML AnchoredPosition="Anchored" + TextWrapMode="None" 인라인 앵커 Group ID 집합.
+     * 이런 객체는 텍스트를 밀지 않고 BEHIND_TEXT 로 겹쳐야 함 → Phase 3 가 인라인 배치를 건너뛰고
+     * Phase 3 후처리가 floating ASTFigure 로 배치.
+     */
+    public java.util.Set<Integer> deferredAnchoredFloatingIds = new java.util.HashSet<>();
+
     public ResolvedBuildContext() {
     }
 }

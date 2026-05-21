@@ -1903,8 +1903,7 @@ public class IDMLStoryParser {
         PUA_MAP.put('\uE194', "\u0259");         // ə
         PUA_MAP.put('\uE121', "\u0251");         // ɑ
         PUA_MAP.put('\uE13A', "\u02D0");         // ː
-        // 기호
-        PUA_MAP.put('\uE288', "\u2713");         // ✓
+        // 기호: U+E285/E287/E288은 HwpxUtil.sanitizeText에서 □(U+25A1)로 통합 변환
     }
 
     static String replacePUA(String text) {

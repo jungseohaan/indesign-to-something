@@ -39,7 +39,7 @@ import java.util.Map;
  * - loadInlineObject: 인라인 객체 로드
  * - isNoneColor: 색상 헬퍼 (isEmptyContainer 의존)
  */
-class InlineFrameHandler {
+public class InlineFrameHandler {
 
     private InlineFrameHandler() {}
 
@@ -176,10 +176,10 @@ class InlineFrameHandler {
      * 각 TF 를 박스 데코와 매칭 (bounds overlap) 후, Rectangle 의 stroke 색/굵기/cornerRadius
      * 를 inline 박스에 복사한다.
      */
-    static java.util.List<ASTInlineObject> tryInlineGroupAsBoxList(ResolvedBuildContext ctx, int anchoredObjectId) {
+    public static java.util.List<ASTInlineObject> tryInlineGroupAsBoxList(ResolvedBuildContext ctx, int anchoredObjectId) {
         String anchorId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame anchorTf = ctx.resolvedData.getTextFrame(anchorId);
-        if (anchorTf != null) return null; // Group 이 아님
+        if (anchorTf != null) return null;
 
         // 직속 자식 TF 수집 (inline + 텍스트 있음)
         java.util.List<ResolvedTextFrame> childTfs = new java.util.ArrayList<>();
@@ -291,6 +291,7 @@ class InlineFrameHandler {
 
             String jamoText = childTf.frameVisibleText().replace("￼", "").replace("\r", "").replace("\n", "").trim();
             ASTParagraph paraInner = new ASTParagraph();
+            paraInner.alignment("CENTER");
             ASTTextRun textRun = new ASTTextRun();
             textRun.text(jamoText);
             ResolvedStory story = childTf.storyId() != null ? ctx.resolvedData.getStory(childTf.storyId()) : null;
@@ -315,6 +316,130 @@ class InlineFrameHandler {
         }
 
         return result.size() >= 2 ? result : null;
+    }
+
+    /**
+     * 인라인 Group 앵커가 "배경 도형 + 단일 짧은 텍스트프레임"으로 구성된 단일 배지
+     * (예: 페이지 39 "가" / "나" 캡슐 배지) → INLINE_TEXT_FRAME 으로 변환.
+     *
+     * 배경과 글자가 같은 인라인 단위로 묶여 한 몸으로 움직이며, 글자는 검색 가능.
+     *
+     * 조건:
+     * - 앵커 ID 가 Group (TextFrame 아님)
+     * - Group 직속 자식 중 inline + visible-text TextFrame 이 정확히 1 개
+     * - Group 후손 중 fillColor 가 있는 Rectangle/Oval/Polygon 이 1 개 이상
+     */
+    static ASTInlineObject tryInlineGroupAsSingleBadge(ResolvedBuildContext ctx, int anchoredObjectId) {
+        String anchorId = String.valueOf(anchoredObjectId);
+        ResolvedTextFrame anchorTf = ctx.resolvedData.getTextFrame(anchorId);
+        if (anchorTf != null) return null;
+
+        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
+        if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
+
+        // 직속 자식 TF 1 개 (inline + 텍스트 있음)
+        ResolvedTextFrame childTf = null;
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
+            if (pi == null) continue;
+            if (!anchorId.equals(pi.parentId())) continue;
+            if (!tf.isInline()) continue;
+            String vt = tf.frameVisibleText();
+            if (vt == null) continue;
+            String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            if (cleaned.isEmpty()) continue;
+            // 너무 긴 텍스트(>=4자) 는 배지가 아닐 가능성 → 제외
+            if (cleaned.length() >= 4) return null;
+            if (childTf != null) return null; // 2 개 이상 → tryInlineGroupAsBoxList 가 처리
+            childTf = tf;
+        }
+        if (childTf == null) return null;
+
+        // Group 후손 중 fill 색 있는 도형 수집 (가장 큰 fill 도형 = 배경)
+        ResolvedPageItem bgShape = null;
+        double bgArea = 0;
+        for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
+            if (pi == null) continue;
+            if (!"Rectangle".equals(pi.type()) && !"Polygon".equals(pi.type()) && !"Oval".equals(pi.type())) continue;
+            String fcn = pi.fillColorName();
+            boolean hasFill = fcn != null && !"None".equals(fcn) && !"[None]".equals(fcn);
+            if (!hasFill) continue;
+            String curParent = pi.parentId();
+            int hops = 0;
+            boolean inGroup = false;
+            while (curParent != null && hops < 5) {
+                if (anchorId.equals(curParent)) { inGroup = true; break; }
+                ResolvedPageItem next = ctx.resolvedData.getPageItem(curParent);
+                if (next == null) break;
+                curParent = next.parentId();
+                hops++;
+            }
+            if (!inGroup) continue;
+            double[] gb = pi.geometricBounds();
+            if (gb == null || gb.length < 4) continue;
+            double a = Math.abs(gb[3] - gb[1]) * Math.abs(gb[2] - gb[0]);
+            if (a > bgArea) { bgArea = a; bgShape = pi; }
+        }
+        if (bgShape == null) return null;
+
+        // 박스 크기 = Group 의 전체 bounds (capsule 모양 전체 영역 포함)
+        double[] grpBounds = anchorItem.geometricBounds();
+        if (grpBounds == null || grpBounds.length < 4) return null;
+        double w = Math.abs(grpBounds[3] - grpBounds[1]);
+        double h = Math.abs(grpBounds[2] - grpBounds[0]);
+        if (w <= 0 || h <= 0) return null;
+
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        obj.width(CoordinateConverter.pointsToHwpunits(w));
+        obj.height(CoordinateConverter.pointsToHwpunits(h));
+        obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+
+        // 배경 fill 색
+        String fillName = bgShape.fillColorName();
+        String fillHex = ctx.resolvedData.resolveColorHex(fillName);
+        if (fillHex != null) {
+            obj.fillColor(fillHex);
+            obj.fillTint(100);
+        }
+
+        // Group 안에 Oval/Rectangle 이 함께 있으면 capsule 모양 → cornerRadius = h/2
+        // 단일 Rectangle 이면서 cornerRadius 가 있으면 그대로 사용
+        boolean hasOval = false;
+        for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
+            if (pi == null || !"Oval".equals(pi.type())) continue;
+            if (anchorId.equals(pi.parentId())) { hasOval = true; break; }
+        }
+        if (hasOval) {
+            obj.cornerRadius(h / 2.0);
+        } else if (bgShape.cornerRadius() > 0) {
+            obj.cornerRadius(bgShape.cornerRadius());
+        }
+
+        // 텍스트 단락 빌드 (배지 내부는 좌우 가운데 정렬)
+        String text = childTf.frameVisibleText().replace("￼", "").replace("\r", "").replace("\n", "").trim();
+        ASTParagraph paraInner = new ASTParagraph();
+        paraInner.alignment("CENTER");
+        ASTTextRun textRun = new ASTTextRun();
+        textRun.text(text);
+        ResolvedStory story = childTf.storyId() != null ? ctx.resolvedData.getStory(childTf.storyId()) : null;
+        if (story != null && !story.paragraphs().isEmpty()) {
+            ResolvedParagraph rp = story.paragraphs().get(0);
+            if (rp.runs() != null && !rp.runs().isEmpty()) {
+                ResolvedRun rr = rp.runs().get(0);
+                if (rr.fontFamily() != null) textRun.fontFamily(rr.fontFamily());
+                if (rr.fontStyle() != null) textRun.fontStyle(rr.fontStyle());
+                if (rr.fontSize() != null && rr.fontSize() > 0) {
+                    textRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+                }
+                if (rr.fillColor() != null) textRun.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+            }
+        }
+        paraInner.addItem(textRun);
+        obj.addParagraph(paraInner);
+        obj.verticalJustification("CenterAlign");
+
+        return obj;
     }
 
     /**
@@ -766,13 +891,10 @@ class InlineFrameHandler {
         }
 
         // renderedFloatingItems에서 해당 ID의 inline_object 찾기 (badge_group이 있으면 그것으로 교체)
-        // SPEC-025: type 이 없는 renderable inline TF (예: "1" 번호 라벨) 도 같은 ID/file 로 매칭하여
-        // 본문 inline anchor 자리에 PNG 로 배치 (누락 시 후속 PIC 들의 X 위치가 어긋남).
+        // SPEC-025: renderable inline TF (type 없음, 예: "1" 큰 번호 라벨) 는 Phase 7 이 별도 floating
+        // 으로 배치하므로 inline 임베드 하면 중복 → "inline_object" 타입만 처리.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            boolean isInlineObject = "inline_object".equals(rg.itemType());
-            boolean isRenderableNoType = rg.id() == anchoredObjectId
-                    && rg.itemType() == null && rg.file() != null && !rg.file().isEmpty();
-            if (rg.id() == anchoredObjectId && (isInlineObject || isRenderableNoType)) {
+            if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType())) {
                 if (badgeGroup != null) rg = badgeGroup;
                 if (rg.file() == null) return null;
                 File pngFile = new File(ctx.basePath, rg.file());

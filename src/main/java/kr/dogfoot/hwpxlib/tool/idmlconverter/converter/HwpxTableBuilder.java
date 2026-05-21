@@ -228,13 +228,10 @@ public class HwpxTableBuilder {
                 tc.cellSpan().colSpanAnd((short) colSpan)
                         .rowSpanAnd((short) rowSpan);
 
-                // 셀 크기 — 콘텐츠가 있으면 높이 0(자동 확장), 인라인 추출 후 비워졌더라도
-                // astCell.height() 가 양수면 그 값을 유지하여 셀 붕괴 방지
-                // (예: 빈칸 채우기 표에서 스마트워치 그룹이 floating 추출된 뒤 빈 셀이 0 높이로
-                //  무너져 다음 행이 prompt 바로 아래로 올라가는 문제 방지)
+                // 셀 크기 — IDML SingleRowHeight 가 명시된 경우 그대로 사용 (행 그리드/점선 배경 정렬).
+                // height() 가 0 이면 자동(콘텐츠에 맞춤).
                 tc.createCellSz();
-                long preservedHeight = isCellTrulyEmpty(astCell) && astCell.height() > 0
-                        ? astCell.height() : 0L;
+                long preservedHeight = astCell.height() > 0 ? astCell.height() : 0L;
                 tc.cellSz().widthAnd(astCell.width()).heightAnd(preservedHeight);
 
                 // 셀 여백

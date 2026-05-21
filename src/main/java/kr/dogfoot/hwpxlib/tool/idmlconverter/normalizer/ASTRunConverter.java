@@ -189,6 +189,32 @@ public class ASTRunConverter {
                                               ColorResolver colorResolver,
                                               ASTImageLoader imageLoader,
                                               ResolvedData resolvedData) {
+        // AnchoredPosition="Anchored" + TextWrapMode="None" Group → 인라인 삽입 건너뜀.
+        // (Phase 3 후처리가 BEHIND_TEXT floating ASTFigure 로 배치 — 텍스트 겹침)
+        if ("Anchored".equals(ig.anchoredPosition()) && "None".equals(ig.textWrapMode())) {
+            return;
+        }
+        // 다중 박스(예: ㅍ ㅎ ㅂ ㅅ 자모 배지) 인라인 Group → 각 TF 를 박스 INLINE_TEXT_FRAME 으로 분해.
+        // ASTRunConverter 는 ResolvedBuildContext 가 없으므로 임시 ctx 를 만들어 호출.
+        if (resolvedData != null && ig.selfId() != null) {
+            int boxDomId = -1;
+            try { boxDomId = Integer.parseInt(ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId(), 16); } catch (Exception e) {}
+            if (boxDomId > 0) {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
+                        new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();
+                tmpCtx.resolvedData = resolvedData;
+                tmpCtx.scaleFactor = resolvedData.scaleFactor();
+                java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject> boxList =
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                .tryInlineGroupAsBoxList(tmpCtx, boxDomId);
+                if (boxList != null && !boxList.isEmpty()) {
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject box : boxList) {
+                        para.addItem(box);
+                    }
+                    return;
+                }
+            }
+        }
         // renderedFloatingItems의 inline_object PNG가 있으면 즉시 사용 (imageLoader 불필요 — PNG 직접 로드)
         if (resolvedData != null && ig.selfId() != null) {
             int domId = -1;

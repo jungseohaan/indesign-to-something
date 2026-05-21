@@ -91,6 +91,7 @@ public final class FramePlacer {
                     try { domIdInlineEd = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
                     boolean inAnyBadge = false;
                     boolean inMultiChildBadge = false;
+                    int badgeGroupId = -1;
                     if (domIdInlineEd >= 0) {
                         for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
                             if (!rg.isBadgeGroup()) continue;
@@ -104,15 +105,36 @@ public final class FramePlacer {
                             }
                             if (isChild) {
                                 inAnyBadge = true;
+                                badgeGroupId = rg.id();
                                 if (editableSiblings >= 2) inMultiChildBadge = true;
                                 break;
                             }
                         }
                     }
-                    if (inAnyBadge) {
+                    // Phase 3 reachable: 해당 badge_group 이 inline_object 로도 등록되어 있으면
+                    // 본문 inline 앵커 처리 경로에서 도달 가능 → tryInlineGroupAsSingleBadge 가 처리.
+                    // 그렇지 않으면 (예: 큰 원형 배지 안에 중첩된 작은 배지) Phase 3 가 도달 못 함 →
+                    // 플로팅 텍스트박스로 보강해야 검색 가능 텍스트가 살아남음.
+                    boolean phase3Reachable = false;
+                    if (badgeGroupId >= 0) {
+                        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                            if (rg.id() == badgeGroupId && "inline_object".equals(rg.itemType())) {
+                                phase3Reachable = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (inAnyBadge && phase3Reachable) {
                         String vt0 = tf.frameVisibleText();
                         String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
-                        // 자기 텍스트가 ≥2자 또는 멀티 child 배지 → Phase 3 가 결합 텍스트로 임베드 → 플로팅 스킵.
+                        // 자기 텍스트가 ≥1자 또는 멀티 child 배지 → Phase 3 가 인라인 텍스트박스로 임베드 → 플로팅 스킵.
+                        if (cleaned0.length() >= 1 || inMultiChildBadge) {
+                            continue;
+                        }
+                    } else if (inAnyBadge) {
+                        // Phase 3 unreachable: 기존 동작 (≥2 자 또는 멀티-child 만 스킵, 1자 단일은 플로팅 보강)
+                        String vt0 = tf.frameVisibleText();
+                        String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
                         if (cleaned0.length() >= 2 || inMultiChildBadge) {
                             continue;
                         }

@@ -47,7 +47,7 @@ public final class HwpxUtil {
         StringBuilder sb = new StringBuilder(text.length());
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (c == '\uE288') { c = '\u25A1'; }
+            if (c == '\uE285' || c == '\uE287' || c == '\uE288') { c = '\u25A1'; }
             if (c == '\t' || c == '\n' || c == '\r'
                     || (c >= 0x20 && c <= 0xD7FF)
                     || (c >= 0xE000 && c <= 0xFFFD)) {
