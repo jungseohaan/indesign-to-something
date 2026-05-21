@@ -128,6 +128,10 @@ public class ResolvedToASTBuilder {
         BulletInserter.run(this.ctx, sections);
         tagPhase(sections, "Phase4_5.insertBulletsForBulletStyles");
 
+        // Phase 4.7: 단일 행 글상자 폭 자동 확장 (font metric 기반)
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.SingleLineExpander.run(this.ctx, sections);
+        tagPhase(sections, "Phase4_7.singleLineExpand");
+
         // Phase 5: textwrap 글상자 분할 (composedLine wrapIndent 기반)
         WrapPhase5.splitByWrapIndent(this.ctx, sections);
         tagPhase(sections, "Phase5.splitByWrapIndent");

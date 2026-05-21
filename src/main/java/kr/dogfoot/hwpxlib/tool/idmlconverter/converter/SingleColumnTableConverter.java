@@ -93,10 +93,13 @@ final class SingleColumnTableConverter {
                 .borderFillIDRefAnd("1")
                 .noAdjustAnd(false);
 
-        // ShapeSize — 높이 0: 콘텐츠에 맞게 자동 확장 (하단 빈 공간 방지)
+        // ShapeSize — verticalJustification 이 CENTER/BOTTOM 일 때 높이를 명시 (정렬 동작 보장).
+        // TOP 정렬은 0 (auto) 로 두어 콘텐츠 자동 확장 허용.
+        VerticalAlign2 _vAlignForTblSz = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
+        long _tblHeight = (_vAlignForTblSz != VerticalAlign2.TOP && h > 0) ? h : 0L;
         table.createSZ();
         table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(0L).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .heightAnd(_tblHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
         // BaselineShift → 컨테이너 Y 오프셋 보정.
@@ -168,13 +171,19 @@ final class SingleColumnTableConverter {
         tc.createCellSpan();
         tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
 
-        // 셀 크기 — 높이 0: 콘텐츠에 맞게 자동 확장
+        // 셀 크기 — verticalJustification 이 CENTER/BOTTOM 일 때 셀 높이를 명시해야 정렬 동작.
+        // TOP 정렬은 0 (auto) 로 두어 콘텐츠 자동 확장 허용.
         tc.createCellSz();
-        tc.cellSz().widthAnd(w).heightAnd(0L);
+        VerticalAlign2 cellVAlignForSz = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
+        long cellHeight = (cellVAlignForSz != VerticalAlign2.TOP && h > 0) ? h : 0L;
+        tc.cellSz().widthAnd(w).heightAnd(cellHeight);
 
-        // 셀 여백 — 블록 인셋 적용 (InDesign insetSpacing), 하단 최소 5pt
+        // 셀 여백 — 블록 인셋 적용 (InDesign insetSpacing), 하단 최소 5pt.
+        // 단, 셀 높이가 작은 (≤ 2000 hwpu = 20pt) 작은 라벨/배지는 강제 마진 적용 시 텍스트가 셀 밖으로 밀려나므로 인셋 그대로 사용.
         tc.createCellMargin();
-        long bottomInset = Math.max(block.insetBottom(), 500L);
+        long bottomInset = (cellHeight > 0 && cellHeight <= 2000)
+                ? block.insetBottom()
+                : Math.max(block.insetBottom(), 500L);
         tc.cellMargin().leftAnd(block.insetLeft())
                 .rightAnd(block.insetRight())
                 .topAnd(block.insetTop())

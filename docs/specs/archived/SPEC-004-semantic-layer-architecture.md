@@ -1,4 +1,8 @@
-# SPEC-004: Semantic Layer Architecture (SLA)
+# SPEC-004: Semantic Layer Architecture (SLA) — ARCHIVED
+
+> **상태: Archived (2026-05-20).** 이 SPEC의 내용은 [SPEC-018: Semantic Extraction](../SPEC-018-semantic-extraction.md)에 흡수되었다. 시멘틱 작업은 SPEC-018에서 계속된다.
+>
+> SPEC-004는 본래 두 개 (semantic / textwrap-frame-split)가 같은 번호를 공유했다. textwrap이 활성 SPEC으로 남고, semantic은 SPEC-018로 통합된다.
 
 ## 개요
 

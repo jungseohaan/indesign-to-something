@@ -50,6 +50,9 @@ class RunBuilder {
             text = text.replace("\u2003", " ");  // Em Space → 공백 (단어 구분자 보존)
             text = text.replace("\u200A", "");   // Hair Space 제거 (타이포 조정용, 시각상 무의미)
             text = text.replace("\uFFE3", "~");  // Fullwidth Macron → 물결 (한글 호환)
+            // Yoon 폰트 (윤명조/윤고딕) 의 PUA 글리프 → 안전한 유니코드 치환
+            // U+E287 = 빈 정답 칸 (□). 매핑 폰트에서 잘못된 글자 (예: 늣) 로 렌더링되는 회귀 방지.
+            text = text.replace('\uE285', '\u25A1').replace('\uE287', '\u25A1').replace('\uE288', '\u25A1'); // □ White Square
             // EH상부자 overline marker: Ó(0xD3) → \uE000{letters}\uE001 마커로 치환
             // 단락 후처리(splitOverlineRuns)에서 ASTEquation overline{AB}로 변환
             if (text.indexOf('\u00D3') >= 0) {
@@ -137,17 +140,9 @@ class RunBuilder {
             Double trackingVal = (cr.tracking() != null && cr.tracking() != 0)
                     ? cr.tracking() : sc.tracking;
             if (trackingVal != null && trackingVal != 0) {
-                String fn = (tr.fontFamily() != null) ? tr.fontFamily()
-                        : (sc.fontFamily != null ? sc.fontFamily
-                        : (rr != null ? rr.fontFamily() : null));
-                boolean isDefaultFallback = isKoreanFontName(fn);
-                if (isDefaultFallback) {
-                    // 한컴돋움 fallback: tracking 값의 50%
-                    tr.letterSpacing((short) Math.round(trackingVal * 0.5));
-                } else {
-                    // 명시적 매핑: tracking / 10
-                    tr.letterSpacing((short) Math.round(trackingVal / 10.0));
-                }
+                // SPEC-029: IDML tracking 1/1000 em → HWPX spacing % (1/100 em). 표준 변환은 /10.
+                // (이전 한국어 fontName 케이스는 × 0.5 = ×50 적용으로 자간 5배 과대 → 제거)
+                tr.letterSpacing((short) Math.round(trackingVal / 10.0));
             }
         }
         // baselineShift: InDesign에서 작은 글자 + 양수 baselineShift = 위첨자,
@@ -268,12 +263,12 @@ class RunBuilder {
         char first = text.charAt(0);
         if (StoryConverter.BULLET_CHARS.indexOf(first) < 0) return false;
 
-        // 불릿 뒤에 공백/탭이 있어야 분리 (단독 불릿 문자는 무시)
-        int splitIdx = 1;
-        if (splitIdx < text.length() && (text.charAt(splitIdx) == ' ' || text.charAt(splitIdx) == '\t')) {
-            splitIdx++; // 공백/탭 포함
-        }
-        if (splitIdx >= text.length()) return false; // 불릿만 있으면 분리 불필요
+        // 불릿 뒤에 공백/탭이 있어야 분리 (단독 불릿 또는 연속 불릿 문자열은 무시)
+        // 예: "□□" 빈 정답 칸 두 개는 불릿 패턴 아님 → 분리 금지.
+        if (text.length() < 2) return false;
+        char second = text.charAt(1);
+        if (second != ' ' && second != '\t') return false;
+        int splitIdx = 2; // bullet + 공백/탭
 
         // 단락에 불릿 플래그 설정 (이후 런의 색상 리셋용)
         para.bulletParagraph(true);

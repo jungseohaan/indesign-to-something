@@ -278,11 +278,11 @@ if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) 
 | 0 | `normalizer/resolved/phase0/InfraSetup.java` | 211 | IDML 정의 복사 + 스타일 정렬 보강 |
 | 1 | `normalizer/resolved/phase1/PageLayoutBuilder.java` | 66 | 페이지/섹션 |
 | 2 | `normalizer/resolved/phase2/FramePlacer.java` | 679 | TextFrame 분류/배치 |
-| 3 | `normalizer/resolved/phase3/StoryConverter.java` | 386 | 메인 오케스트레이터 (W3로 분해, 구 2695) |
+| 3 | `normalizer/resolved/phase3/StoryConverter.java` | 383 | 메인 오케스트레이터 (W3로 분해, 구 2695) |
 | 3a | `normalizer/resolved/phase3/StoryLoader.java` | 465 | IDML Story XML 로딩 + 단락 변환 |
 | 3b | `normalizer/resolved/phase3/RunBuilder.java` | 715 | 런 빌드 + 매칭 + 스타일 헬퍼 |
-| 3c | `normalizer/resolved/phase3/InlineFrameHandler.java` | 578 | 인라인 객체 + 체인 + 외부 위치 검사 |
-| 3d | `normalizer/resolved/phase3/ParagraphDistributor.java` | 263 | 단락 분배 (연결 글상자 체인) |
+| 3c | `normalizer/resolved/phase3/InlineFrameHandler.java` | 681 | 인라인 객체 + 체인 + 외부 위치 검사 |
+| 3d | `normalizer/resolved/phase3/ParagraphDistributor.java` | 257 | 단락 분배 (연결 글상자 체인) |
 | 3e | `normalizer/resolved/phase3/MathProcessor.java` | 227 | BT/EH/NP 수식 변환 |
 | 3f | `normalizer/resolved/phase3/RunPostProcessor.java` | 241 | overline/italic 후처리 |
 | 4 | `normalizer/resolved/phase4/TableBuilder.java` | 525 | 테이블 |

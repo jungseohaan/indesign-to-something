@@ -287,16 +287,14 @@ public class FontMapper {
             }
         }
 
-        // 자간/장평 보정: InDesign korWidth(mm) → pt 변환
+        // 폭 보정: InDesign korWidth(mm) → pt 변환
         // 대체 폰트 값(3.53mm) 감지: 대부분 폰트가 동일 값이면 대체 폰트로 간주하여 무시
+        // SPEC-029: spacing 과 fontRatio 를 동시에 적용하면 중복 보정으로 자간 과대 → fontRatio (장평) 만 사용.
+        // 장평은 글리프를 가로로 늘려 폭을 맞추므로 가시적 자간 공백이 생기지 않음.
         HwpxMetric hwpxInfo = hwpxMetrics.get(bestKoFont);
         int spacing = 0;
         double idmlKorWidthPt = idmlInfo.korWidth() * scaleFactor;
         boolean isReliableMetric = isReliableIdmlMetric(idmlInfo.korWidth());
-        if (isReliableMetric && hwpxInfo != null && hwpxInfo.korWidth > 0 && idmlKorWidthPt > 0) {
-            double ratio = idmlKorWidthPt / hwpxInfo.korWidth;
-            spacing = (int) Math.round((ratio - 1.0) * 100);
-        }
 
         // 높이 보정: HWPX 폰트의 (ascent+descent) / IDML 폰트의 (ascent+descent)
         double heightScale = 1.0;

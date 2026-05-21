@@ -76,14 +76,18 @@ ExtendScript 추출
  ├─ rendered_frames/*.png (인라인 객체, 배지, 장식 텍스트)
  └─ Links/ (원본 이미지)
 
-ResolvedToASTBuilder (Phase 0~6)
- ├─ Phase 0: IDML Fonts.xml/Styles.xml 파싱, StylePropertyResolver
- ├─ Phase 1: 페이지/섹션 빌드 (resolved pages → ASTSection)
- ├─ Phase 2: TextFrame 배치 (편집 가능한 것만, facing pages 좌표 보정)
- ├─ Phase 3: Story 텍스트 변환 (IDML Story XML + resolved 스타일 하이브리드)
- ├─ Phase 4: 테이블 변환
- ├─ Phase 5: Figure/Image 배치
- └─ Phase 6: 페이지 배경 PNG 주입
+ResolvedToASTBuilder (Phase 0~7)
+ ├─ Phase 0: InfraSetup (IDML 폰트/스타일/색상 정의 복사 + 정렬 보강)
+ ├─ Phase 1: PageLayoutBuilder (페이지/섹션 빌드)
+ ├─ Phase 2: FramePlacer (TextFrame 분류/배치, facing pages 보정)
+ ├─ Phase 3: StoryConverter (Story → AST, W3로 7개 sub-module 분리)
+ │           StoryLoader / RunBuilder / InlineFrameHandler /
+ │           ParagraphDistributor / MathProcessor / RunPostProcessor
+ ├─ Phase 4: TableBuilder (테이블 + SPEC-017 품질 게이트)
+ ├─ Phase 4.5: BulletInserter (불릿 자동 삽입)
+ ├─ Phase 5: WrapPhase5 (textwrap 글상자 분할)
+ ├─ Phase 6: BackgroundInjector (페이지 배경 PNG 주입)
+ └─ Phase 7: RenderableFramePlacer (renderable 프레임/배지 플로팅 배치)
 
 ASTToHwpxConverter → .hwpx
 ```
@@ -91,8 +95,9 @@ ASTToHwpxConverter → .hwpx
 ### 레거시 파이프라인 (resolved.json 없을 때)
 
 ```
-IDML → IDMLNormalizer (Stage1~4) → ResolvedMerger → ASTToHwpxConverter → .hwpx
+IDML → IDMLNormalizer (Stage1~3) → ResolvedMerger → ASTToHwpxConverter → .hwpx
 ```
+> 레거시는 `normalizer/legacy/` 패키지로 격리되어 있다. 신규 변경은 새 파이프라인(Phase 0~7)에 적용한다.
 
 ### 편집 TextFrame 분류 (배경 PNG에서 제외)
 
@@ -134,16 +139,21 @@ src/main/java/kr/dogfoot/hwpxlib/tool/idmlconverter/
 ├── IDMLToHwpxConverter.java       # 변환 파사드
 ├── ast/                           # 중간 표현 (ASTDocument, ASTParagraph, ...)
 ├── normalizer/
-│   ├── ResolvedToASTBuilder.java  # 새 파이프라인 (메인)
-│   ├── IDMLNormalizer.java        # 레거시 파이프라인
-│   └── Stage1~4                   # 레거시 정규화 단계
-├── converter/
-│   ├── ASTToHwpxConverter.java    # AST → HWPX 변환
-│   ├── HwpxParagraphBuilder.java  # 문단 빌더
-│   ├── HwpxTextBoxBuilder.java    # 글상자 빌더
+│   ├── ResolvedToASTBuilder.java  # 새 파이프라인 오케스트레이터 (247 LOC)
+│   ├── resolved/phase0~7/         # Phase 0~7 + phase4_5 + shared
+│   └── legacy/                    # 레거시: IDMLNormalizer + Stage1~3
+├── converter/                     # W4로 9개 sub-module 분리
+│   ├── ASTToHwpxConverter.java    # AST → HWPX 메인
+│   ├── HwpxParagraphBuilder.java  # 단락 빌더 (327 LOC, 구 1206)
+│   │  ↳ LineSpacingResolver / ParaPrFactory / CharPrFactory /
+│   │     InlineItemDispatcher (W4-2)
+│   ├── HwpxTextBoxBuilder.java    # 글상자 빌더 (986 LOC, 구 1980)
+│   │  ↳ TextBoxLayoutHelpers / PageOverlayBuilder /
+│   │     InlineFrameBuilder / SingleColumnTableConverter /
+│   │     FrameTransformations (W4)
 │   ├── HwpxTableBuilder.java      # 표 빌더
 │   ├── HwpxImageBuilder.java      # 이미지 빌더
-│   └── HwpxEnumMapper.java        # IDML→HWPX enum 매핑
+│   └── FontMapper.java            # 3계층 폰트 매핑
 ├── resolved/                      # resolved.json 데이터 처리
 └── idml/                          # IDML 파서
 

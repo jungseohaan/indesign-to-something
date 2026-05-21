@@ -1,12 +1,17 @@
 # SPEC-025: 텍스트 이미지 렌더링 제거
 
-## 진행 상황 (2026-05-19)
+## 진행 상황 (2026-05-20)
 
 **Tier A.5 (masterPageEditable), Tier A.6 (hashiraEditable), Tier B (rotationEditable) 구현 완료**.
 - `conversion-config.json` 의 `rendering.textFrame.spec025` 섹션으로 ON/OFF 가능 (기본 ON).
 - Tier C 는 기존 `exportPageBackgrounds()` 의 editable hide 로직이 이미 처리 (코드 변경 없음).
 - Java 측은 `editableTextFrameIds` + 회전 파이프라인이 이미 연결되어 별도 작업 불필요.
 - **남은 항목**: Tier A.1.5 (비균일 scale), A.4 (page number), A.8 (Group decorative), Tier B 의 stroke/shadow/opacity/glow/bevel, Phase 5 마스터 스프레드 텍스트 페이지별 instance화.
+
+### 후속 변경 (2026-05-19~20 커밋)
+- 인라인 텍스트프레임 + Group 단편 + 1자 라벨 editable 변환 (`94dd8d39`)
+- 중첩 인라인 앵커 처리 + 밑줄 + 배지 충돌 보정 (`6d001722`)
+- **[미커밋]** `WrapPhase5.java` +20줄: 행글 매달림 들여쓰기 패턴 감지 추가. 단락 첫 줄 wrapIndentLeft=0 + 연속 줄 wrapIndentLeft>0 이면 bullet hanging indent → obstacle wrap 으로 오인 방지, shrink 적용 안 함. 커밋 여부는 별도 판단.
 
 미테스트: 박현숙 1단원 소(1) 등 실제 변환은 InDesign 재추출 필요. 빌드만 검증 완료.
 

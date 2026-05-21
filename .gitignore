@@ -58,6 +58,14 @@ test-data/cases.json
 extract_err.log
 physics_items.json
 
+### CLI 변환 출력 (루트에 누적되는 임시 결과물) ###
+out.hwpx
+out2.hwpx
+out_*/
+out2_hwpx/
+_hwpx_tmp*/
+out_baseline/
+
 ### Large hwpx files (over 1MB) ###
 testFile/tool/idml_converted_from_json.hwpx
 testFile/tool/idml_converted_p8_20.hwpx

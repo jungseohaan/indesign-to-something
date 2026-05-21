@@ -1,8 +1,19 @@
 # CLAUDE.md — indesign-to-something
 
+> **새 에이전트/계정이라면**: 먼저 [ONBOARDING.md](ONBOARDING.md)를 10분 안에 훑어 진입점을 잡고, 이 문서로 돌아오세요.
+
 ## 프로젝트 개요
 
 IDML(Adobe InDesign) → HWPX(한글) 변환기. Java 백엔드 + Tauri(Rust) 데스크탑 앱 + React 프론트엔드.
+
+## 활성 작업 (2026-05-20 기준)
+
+- **브랜치**: `open-indd` — main 머지 전
+- **진행 중 SPEC**:
+  - [SPEC-025](docs/specs/SPEC-025-text-image-rendering-removal.md) (텍스트 이미지 렌더링 제거) — Tier A.5/A.6/B 구현 완료, **미테스트** (InDesign 재추출 필요). 잔여: A.1.5/A.4/A.8/Tier B 효과
+  - [SPEC-027](docs/specs/SPEC-027-badge-scribble-outline-png.md) (배지 scribble 외곽선 PNG 폴백) — 신규(2026-05-20). 일러스트 톤 배지 외곽선만 PNG, 텍스트는 HWPX. **데이터 조사 단계**
+- **기타 Active SPEC**: SPEC-012 (속성 우선순위), SPEC-014 (폰트 자동 매핑), SPEC-015 (AST 디버깅), SPEC-018 (시멘틱 M3)
+- **전체 SPEC 인덱스**: [docs/specs/INDEX.md](docs/specs/INDEX.md)
 
 ## 빌드 & 실행
 
@@ -160,7 +171,7 @@ src/main/java/kr/dogfoot/hwpxlib/tool/idmlconverter/
 │   ├── ParaPrFactory.java         # ParaPr 생성/override (W4-2 Step B)
 │   ├── CharPrFactory.java         # TextRun/CharPr + 공백/폰트 (W4-2 Step C)
 │   ├── InlineItemDispatcher.java  # 인라인 객체 + Break + Equation (W4-2 Step D)
-│   ├── HwpxTextBoxBuilder.java    # 글상자 빌더 메인 (984 LOC, 구 1980)
+│   ├── HwpxTextBoxBuilder.java    # 글상자 빌더 메인 (986 LOC, 구 1980)
 │   │   # ↳ W4로 분리: TextBoxLayoutHelpers, PageOverlayBuilder, InlineFrameBuilder, SingleColumnTableConverter, FrameTransformations
 │   ├── TextBoxLayoutHelpers.java  # 단락/열 분배 정적 헬퍼 (W4 Step A)
 │   ├── PageOverlayBuilder.java    # 페이지 오버레이 1×1 테이블 (W4 Step B)
@@ -294,3 +305,18 @@ java -jar ... --convert ... --debug-ast
 ```
 
 데스크탑 앱 추출 결과로 테스트 시: 최신 `indd-extract-*/` 디렉토리에서 `output.idml` + `resolved.json` + 원본 INDD 옆 `Links/` 사용.
+
+## 변경 시 문서 동기화 규칙
+
+코드 변경이 다음에 해당하면 반드시 함께 갱신:
+
+| 변경 종류 | 갱신 대상 |
+|----------|----------|
+| Phase 추가/제거/이름 변경 | [README.md](README.md), [docs/architecture.md](docs/architecture.md), 본 문서의 파이프라인 다이어그램 |
+| 모듈 LOC가 두 배 이상 변동 또는 sub-module 분리 | 본 문서의 모듈 표 + [docs/architecture.md](docs/architecture.md) Phase 클래스 LOC 표 |
+| SPEC 시작 | [docs/specs/INDEX.md](docs/specs/INDEX.md)에 Active로 등록 |
+| SPEC 완료 | [docs/specs/INDEX.md](docs/specs/INDEX.md)에서 Done으로 이동, 본 문서 "활성 작업" 섹션 갱신 |
+| 새로운 트랩/주의사항 발견 | "알려진 이슈" 섹션 추가 (재발 방지) |
+| 브랜치 머지/생성 | "활성 작업" 섹션의 브랜치명 갱신 |
+
+> SPEC 본문이 "구현 완료" 상태로 머무는 동안 문서가 옛 상태로 남으면, 새 에이전트는 그 SPEC을 다시 작업하려고 시도할 수 있다. 종료 시점에 INDEX.md를 갱신하는 게 가장 비용이 낮다.
