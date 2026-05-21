@@ -19,19 +19,18 @@ public final class HwpxEnumMapper {
     public static HorizontalAlign2 mapAlignment(String alignment) {
         if (alignment == null) return HorizontalAlign2.JUSTIFY;
         switch (alignment.toLowerCase()) {
-            case "left": case "leftjustify": case "leftalign": case "left_align": case "left_justified":
+            case "left": case "leftalign": case "left_align":
                 return HorizontalAlign2.LEFT;
-            case "center": case "centerjustify": case "centeralign": case "center_align": case "center_justified":
+            case "center": case "centeralign": case "center_align":
                 return HorizontalAlign2.CENTER;
-            case "right": case "rightjustify": case "rightalign": case "right_align": case "right_justified":
+            case "right": case "rightalign": case "right_align":
                 return HorizontalAlign2.RIGHT;
-            case "leftjustified":
-                return HorizontalAlign2.LEFT;
-            case "centerjustified":
-                return HorizontalAlign2.CENTER;
-            case "rightjustified":
-                return HorizontalAlign2.RIGHT;
-            case "justify": case "fulljustify": case "fullyjustified":
+            // IDML LEFT_JUSTIFIED / CENTER_JUSTIFIED / RIGHT_JUSTIFIED / FULLY_JUSTIFIED 는
+            // 모두 양끝맞춤. 마지막 줄 정렬 차이만 있을 뿐 HWPX 에선 단일 JUSTIFY.
+            case "leftjustify": case "left_justified": case "leftjustified":
+            case "centerjustify": case "center_justified": case "centerjustified":
+            case "rightjustify": case "right_justified": case "rightjustified":
+            case "justify": case "fulljustify": case "fullyjustified": case "fully_justified":
                 return HorizontalAlign2.JUSTIFY;
             default:
                 return HorizontalAlign2.JUSTIFY;

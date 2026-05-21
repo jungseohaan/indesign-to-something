@@ -447,7 +447,8 @@ public class IDMLStoryParser {
                 String data = node.getNodeValue() != null ? node.getNodeValue().trim() : "";
                 if ("ACE".equals(target)) {
                     if ("3".equals(data)) {
-                        builder.append('\n'); // Frame Break → 줄바꿈
+                        // ACE 3 = END_NESTED_STYLE_HERE — 시각 효과 없음, 무시
+                        // (bullet 단락에서 "● <?ACE 3?><?ACE 7?>text" 패턴이 줄바꿈으로 잘못 변환되던 회귀)
                     } else if ("4".equals(data)) {
                         builder.append('\n'); // Column Break → 줄바꿈
                     } else if ("7".equals(data)) {
