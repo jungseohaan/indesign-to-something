@@ -731,6 +731,23 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
             }
         }
 
+        // SPEC-025: editable 로 분류된 자식 TF 는 PNG 에서 제외 → HWPX 가 별도 텍스트 오버레이로 검색 가능 + 시각 중복 방지.
+        var hiddenForExport = [];
+        try {
+            var __grpItemsForHide = grp.allPageItems;
+            for (var __hi = 0; __hi < __grpItemsForHide.length; __hi++) {
+                var __hItem = __grpItemsForHide[__hi];
+                try {
+                    if (__hItem.constructor.name !== "TextFrame") continue;
+                    if (classifyTextFrame(__hItem) !== "editable") continue;
+                    if (__hItem.visible) {
+                        __hItem.visible = false;
+                        hiddenForExport.push(__hItem);
+                    }
+                } catch (eH) {}
+            }
+        } catch (eH2) {}
+
         try {
             if (overlappingDecos.length === 0) {
                 // 데코 없음 — 기존 단일 그룹 export
@@ -803,6 +820,10 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                 renderedIds[tfChildId] = grpEntry;
             }
         } catch (e) {}
+        // SPEC-025: PNG export 가 끝났으므로 임시로 숨긴 editable TF 가시성 복원.
+        for (var __rh = 0; __rh < hiddenForExport.length; __rh++) {
+            try { hiddenForExport[__rh].visible = true; } catch (eR) {}
+        }
     }
 
     // Pass 1.5: 중첩 뱃지 패턴 감지 및 렌더링 (SPEC-021)
@@ -2147,7 +2168,18 @@ function isBadgeGroup(group) {
                     }
                 } catch (e) {}
             } else if (cName === "TextFrame") {
-                try { totalTextLen += item.contents.replace(/[\s\uFEFF]/g, "").length; } catch (e) {}
+                try {
+                    var __tfLen = item.contents.replace(/[\s\uFEFF]/g, "").length;
+                    totalTextLen += __tfLen;
+                    // SPEC-028: \uBE48 story + (fill \uB610\uB294 stroke) TextFrame \uB3C4 \uB3C4\uD615\uC73C\uB85C \uC778\uC815.
+                    // \uC608: outlined \uBB38\uC790 (Black fill + \uBCF5\uC7A1 path), \uBC15\uC2A4 \uD14C\uB450\uB9AC (stroke).
+                    if (__tfLen === 0) {
+                        var __hasFill = false, __hasStroke = false;
+                        try { __hasFill = item.fillColor && item.fillColor.name !== "None" && item.fillColor.name !== "[None]"; } catch (eF) {}
+                        try { __hasStroke = item.strokeColor && item.strokeColor.name !== "None" && item.strokeColor.name !== "[None]" && item.strokeWeight > 0; } catch (eS) {}
+                        if (__hasFill || __hasStroke) hasShape = true;
+                    }
+                } catch (e) {}
             } else if (cName === "Image" || cName === "EPS" || cName === "PDF") {
                 hasImage = true;
             }
@@ -3750,6 +3782,7 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         }
 
         // 2. PDF 배경 렌더링
+        writeProgress(outputDir, "rendered_frames", pi, doc.pages.length); // pdf 시작 전 heartbeat
         var pdfFileName = "page_bg_" + pi + ".pdf";
         var bgPdfFile = File(renderDir + "/" + pdfFileName);
         try {
@@ -3758,6 +3791,7 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         } catch (ePdf) {}
 
         // 3. PNG 배경도 항상 생성 (Java에서 PDF 래스터화 비활성화 상태)
+        writeProgress(outputDir, "rendered_frames", pi, doc.pages.length); // png 시작 전 heartbeat
         var pngFileName = "page_bg_" + pi + ".png";
         var outFile = File(renderDir + "/" + pngFileName);
         try {
@@ -5139,8 +5173,8 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
     try { s25 = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025; } catch (e) {}
     if (!s25 || !(s25.masterPageEditable || s25.nonprintingEditable || s25.hashiraEditable)) return;
 
-    // 1) 페이지 → 적용된 마스터 매핑
-    var masterToPages = {};  // masterSpreadId → [docPageIdx, ...]
+    // 1) 페이지 → 적용된 마스터 매핑 (side 정보 포함)
+    var masterToPages = {};  // masterSpreadId → [{docIdx, side}, ...]
     try {
         for (var pp = 0; pp < doc.pages.length; pp++) {
             try {
@@ -5150,7 +5184,9 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                 if (!am) continue;
                 var mid = am.id.toString();
                 if (!masterToPages[mid]) masterToPages[mid] = [];
-                masterToPages[mid].push(pp);
+                var pgSide = "SINGLE";
+                try { pgSide = doc.pages[pp].side.toString(); } catch (e) {}
+                masterToPages[mid].push({ docIdx: pp, side: pgSide });
             } catch (e) {}
         }
     } catch (e) {}
@@ -5181,6 +5217,10 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             try { cls = classifyTextFrame(mtf); } catch (e) {}
             if (cls !== "editable") continue;
             var baseId = ""; try { baseId = mtf.id.toString(); } catch (e) { continue; }
+            // SPEC-025: 마스터 TF 가 위치한 master page (LEFT/RIGHT) 식별 →
+            // 동일 side 의 doc page 에만 인스턴스 생성 (반대편 페이지로의 잘못된 복제 방지).
+            var mtfSide = "SINGLE";
+            try { mtfSide = mtf.parentPage.side.toString(); } catch (e) {}
             var origStoryId = null;
             try { origStoryId = mtf.parentStory.id.toString(); } catch (e) {}
             // 마스터 TextFrame 의 공통 메타데이터
@@ -5220,7 +5260,10 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             } catch (e) {}
             // 적용 페이지마다 frame + story clone 추가
             for (var ap = 0; ap < appliedPages.length; ap++) {
-                var docPgIdx = appliedPages[ap];
+                var pgEntry = appliedPages[ap];
+                // side 매칭: SINGLE 마스터/페이지는 무조건 통과, LEFT/RIGHT 는 동일 side 만.
+                if (mtfSide !== "SINGLE" && pgEntry.side !== "SINGLE" && mtfSide !== pgEntry.side) continue;
+                var docPgIdx = pgEntry.docIdx;
                 var cloneFrameId = baseId + "_pi" + docPgIdx;
                 var cloneStoryId = origStoryId ? (origStoryId + "_pi" + docPgIdx) : null;
                 var clone = {

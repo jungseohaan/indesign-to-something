@@ -185,7 +185,9 @@ end tell"#,
     let done_path = output_dir.join(".done");
     let mut last_message = String::new();
     let timeout_secs = 3600u64;
-    let stale_secs = 600u64;
+    // rendered_frames 단계에서 PDF/PNG export 가 복잡한 페이지(많은 객체 + 고DPI)에서
+    // 한 페이지에 10분 넘게 걸리는 경우 발생 → stale 1800s (30분) 으로 완화.
+    let stale_secs = 1800u64;
     let started = std::time::Instant::now();
     let mut last_progress_at = std::time::Instant::now();
 
@@ -238,6 +240,8 @@ end tell"#,
                     "resolved_stories" => "스토리 수집 중...".to_string(),
                     "resolved_frames" => "텍스트프레임 수집 중...".to_string(),
                     "resolved_items" => "페이지 아이템 수집 중...".to_string(),
+                    "rendered_frames" if current > 0 && total > 0 => format!("배경/도형 렌더링 중... ({}/{})", current, total),
+                    "rendered_frames" => "배경/도형 렌더링 중...".to_string(),
                     "pdf" => "PDF 프리뷰 생성 중...".to_string(),
                     _ => format!("추출 중... ({})", step),
                 };
