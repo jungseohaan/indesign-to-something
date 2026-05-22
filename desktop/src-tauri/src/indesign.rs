@@ -179,9 +179,12 @@ end using terms from"#,
     // 진행률: 추출 실행 중
     emit_progress(app, "exporting", "IDML 추출 중...");
 
-    // osascript를 직접 스폰 — 타임아웃 시 kill 가능하도록 Child 핸들 유지
+    // AppleScript를 파일로 저장 후 실행 (osascript -e 방식은 InDesign 2026 동적 SDEF 로딩 실패)
+    let script_file = output_dir.join("_extract.applescript");
+    std::fs::write(&script_file, &applescript)
+        .map_err(|e| format!("AppleScript 파일 쓰기 실패: {}", e))?;
     let mut child = Command::new("osascript")
-        .args(["-e", &applescript])
+        .arg(&script_file)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -409,8 +412,11 @@ end using terms from"#,
         skip_render_pages = skip_render_pages_json,
     );
     emit_progress(app, "exporting", "부분 재추출 중 (변경 페이지만)...");
+    let script_file = output_dir.join("_extract.applescript");
+    std::fs::write(&script_file, &applescript)
+        .map_err(|e| format!("AppleScript 파일 쓰기 실패: {}", e))?;
     let mut child = Command::new("osascript")
-        .args(["-e", &applescript])
+        .arg(&script_file)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -514,8 +520,11 @@ end using terms from"#,
         config_path = config_path,
     );
     emit_progress(app, "scanning", "페이지 변경 감지 중...");
+    let script_file = output_dir.join("_extract.applescript");
+    std::fs::write(&script_file, &applescript)
+        .map_err(|e| format!("AppleScript 파일 쓰기 실패: {}", e))?;
     let mut child = Command::new("osascript")
-        .args(["-e", &applescript])
+        .arg(&script_file)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
