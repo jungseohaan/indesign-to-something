@@ -156,12 +156,14 @@ pub async fn run_extraction(
         format!("config_path={}\nperfMode={}\nskipPdf={}\n", config_path, perf_mode, skip_pdf),
     );
     let applescript = format!(
-        r#"tell application "{app_name}"
-    activate
-    with timeout of 3600 seconds
-        do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}"}}
-    end timeout
-end tell"#,
+        r#"using terms from application "{app_name}"
+    tell application "{app_name}"
+        activate
+        with timeout of 3600 seconds
+            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}"}}
+        end timeout
+    end tell
+end using terms from"#,
         app_name = app_name,
         jsx_path = jsx_path,
         indd_path = indd_path,
@@ -193,7 +195,8 @@ end tell"#,
     let mut last_message = String::new();
     let timeout_secs = 3600u64;
     // SPEC-030 B.4: phase별 stale 타임아웃 차등 적용
-    // - idml/open/pdf: 60s (빠른 단계)
+    // - open: 300s (대용량 파일은 열기만 수분 소요)
+    // - idml/pdf: 120s
     // - rendered_frames/render_badge: 1800s (복잡 페이지에서 10분+ 가능)
     // - resolved_*: 300s
     // - 기타: 120s
@@ -242,7 +245,8 @@ end tell"#,
 
                 // SPEC-030 B.4: phase별 stale 타임아웃 갱신
                 current_phase_stale = match step {
-                    "open" | "idml" | "pdf" => 60,
+                    "open" => 300,
+                    "idml" | "pdf" => 120,
                     "rendered_frames" | "render_badge" | "render_frame" => 1800,
                     s if s.starts_with("resolved") => 300,
                     _ => stale_secs_default,
@@ -384,12 +388,14 @@ pub async fn run_extraction_with_skip(
     let config_path = find_bundled_config(app);
     // arguments[9] = skipRenderPages JSON, arguments[10] = mode "full"
     let applescript = format!(
-        r#"tell application "{app_name}"
-    activate
-    with timeout of 3600 seconds
-        do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "{skip_render_pages}", "full"}}
-    end timeout
-end tell"#,
+        r#"using terms from application "{app_name}"
+    tell application "{app_name}"
+        activate
+        with timeout of 3600 seconds
+            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "{skip_render_pages}", "full"}}
+        end timeout
+    end tell
+end using terms from"#,
         app_name = app_name,
         jsx_path = jsx_path,
         indd_path = indd_path,
@@ -493,12 +499,14 @@ pub async fn run_page_hash_scan(
     let config_path = find_bundled_config(app);
     // arguments[10] = "pre_scan"
     let applescript = format!(
-        r#"tell application "{app_name}"
-    activate
-    with timeout of 300 seconds
-        do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "0", "0", "0", "0", "{config_path}", "standard", "0", "", "pre_scan"}}
-    end timeout
-end tell"#,
+        r#"using terms from application "{app_name}"
+    tell application "{app_name}"
+        activate
+        with timeout of 300 seconds
+            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "0", "0", "0", "0", "{config_path}", "standard", "0", "", "pre_scan"}}
+        end timeout
+    end tell
+end using terms from"#,
         app_name = app_name,
         jsx_path = jsx_path,
         indd_path = indd_path,
