@@ -710,7 +710,10 @@ public final class FramePlacer {
                                 }
                             }
                             if (badgeIsInlineAnchored) break; // tf.zOrder() 그대로 사용
-                            int badgeHwpxZ = (rg.zOrder() > 0) ? Math.max(10000 - rg.zOrder(), 10) : 10;
+                            // RenderedGroup에는 zOrder 필드가 없으므로 pageItem에서 가져옴
+                            ResolvedPageItem badgePi = ctx.resolvedData.getPageItem(String.valueOf(rg.id()));
+                            int badgePageZ = (badgePi != null && badgePi.zOrder() > 0) ? badgePi.zOrder() : 0;
+                            int badgeHwpxZ = (badgePageZ > 0) ? Math.max(10000 - badgePageZ, 10) : 10;
                             tfZ = badgeHwpxZ + 1;
                             break;
                         }
