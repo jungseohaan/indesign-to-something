@@ -519,6 +519,21 @@ public class InlineFrameHandler {
             // 그러나 다중 1자 자손 (예: jamo 배지 ㅍㅎ, ㅂㅅ) 은 결합 텍스트가 의미 있으므로 합쳐서 임베드.
             java.util.List<ResolvedTextFrame> inlineDescs = findInlineEditableDescendants(ctx, domId);
             if (!inlineDescs.isEmpty()) {
+                // Badge group children are placed as floating overlay textboxes by Phase 2 — do not inline them
+                java.util.Iterator<ResolvedTextFrame> _remIt = inlineDescs.iterator();
+                while (_remIt.hasNext()) {
+                    ResolvedTextFrame _d = _remIt.next();
+                    int _did;
+                    try { _did = Integer.parseInt(_d.id()); } catch (NumberFormatException e) { continue; }
+                    for (RenderedGroup _rg : ctx.resolvedData.allRenderedTextFrames()) {
+                        if (!_rg.isBadgeGroup()) continue;
+                        int[] _cids = _rg.childTextFrameIds();
+                        if (_cids == null) continue;
+                        boolean _found = false;
+                        for (int _cid : _cids) if (_cid == _did) { _found = true; break; }
+                        if (_found) { _remIt.remove(); break; }
+                    }
+                }
                 StringBuilder _sb = new StringBuilder();
                 for (ResolvedTextFrame d : inlineDescs) {
                     String t = d.frameVisibleText();

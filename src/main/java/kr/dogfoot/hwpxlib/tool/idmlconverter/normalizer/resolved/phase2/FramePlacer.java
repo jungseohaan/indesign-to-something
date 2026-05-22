@@ -132,10 +132,10 @@ public final class FramePlacer {
                             continue;
                         }
                     } else if (inAnyBadge) {
-                        // Phase 3 unreachable: 기존 동작 (≥2 자 또는 멀티-child 만 스킵, 1자 단일은 플로팅 보강)
-                        String vt0 = tf.frameVisibleText();
-                        String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
-                        if (cleaned0.length() >= 2 || inMultiChildBadge) {
+                        // Phase 3 unreachable: 멀티-child 배지만 스킵 (Phase 3 tryInlineGroupAsBoxList 가 처리).
+                        // 단일-child 배지는 텍스트 길이와 무관하게 플로팅 글상자로 배치.
+                        // (이전: ≥2 자 스킵 → "제1항" 같은 레이블이 본문에 인라인 삽입되는 버그)
+                        if (inMultiChildBadge) {
                             continue;
                         }
                     }
@@ -183,7 +183,8 @@ public final class FramePlacer {
 
             // SPEC-025 occlusion: editable 로 승격됐지만 앞쪽(zOrder 작은) 불투명 도형에 가려져
             // PDF 에 안 보이는 TextFrame 은 HWPX 에도 배치하지 않음 (시각 중복 방지).
-            if (ctx.resolvedData.isEditableTextFrame(tf.id()) && isOccludedByOpaqueShape(ctx, tf)) {
+            // inlineToFloating 프레임은 배지 배경 타원/도형이 같은 그룹 안에 있어 occluder 오탐 가능 → 스킵.
+            if (!inlineToFloating && ctx.resolvedData.isEditableTextFrame(tf.id()) && isOccludedByOpaqueShape(ctx, tf)) {
                 continue;
             }
 
