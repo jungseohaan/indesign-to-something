@@ -22,10 +22,17 @@ pub async fn extract_indd(
     spread_mode: Option<bool>,
     start_page: Option<i32>,
     end_page: Option<i32>,
+    // SPEC-030: 성능 옵션. perf_mode = "fast" | "standard" | "high" (기본 "standard").
+    // skip_pdf = preview.pdf 생성 스킵 (기본 false; perf_mode="fast" 면 자동 true).
+    perf_mode: Option<String>,
+    skip_pdf: Option<bool>,
 ) -> Result<crate::indesign::InddExtractResult, String> {
     let sp = start_page.unwrap_or(0);
     let ep = end_page.unwrap_or(0);
     let debug_range = sp > 0 || ep > 0;
+    let pm = perf_mode.unwrap_or_else(|| "standard".to_string());
+    let pm_normalized = pm.to_lowercase();
+    let sk = skip_pdf.unwrap_or(false) || pm_normalized == "fast";
 
     // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵 (기존 동작 유지)
     //    단, 디버그 페이지 범위가 지정되면 항상 신규 추출.
@@ -79,6 +86,8 @@ pub async fn extract_indd(
             Some(std::path::Path::new(&config_path))
         },
         sm,
+        &pm_normalized,
+        sk,
     );
 
     if !debug_range {
@@ -115,6 +124,8 @@ pub async fn extract_indd(
         sp,
         ep,
         sm,
+        &pm_normalized,
+        sk,
     )
     .await
     .map_err(|e| {

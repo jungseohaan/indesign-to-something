@@ -98,6 +98,10 @@ pub fn compute_cache_key(
     jsx_path: &Path,
     config_path: Option<&Path>,
     spread_mode: bool,
+    // SPEC-030: perf_mode 와 skip_pdf 도 캐시 키에 포함 — 모드별 PNG 해상도/PDF 유무 가 다르므로
+    // 서로 다른 캐시 엔트리로 분리.
+    perf_mode: &str,
+    skip_pdf: bool,
 ) -> String {
     let mut hasher = Sha256::new();
 
@@ -126,6 +130,11 @@ pub fn compute_cache_key(
 
     hasher.update(b"spread:");
     hasher.update(if spread_mode { b"1|" } else { b"0|" });
+
+    hasher.update(b"perfMode:");
+    hasher.update(perf_mode.as_bytes());
+    hasher.update(b"|skipPdf:");
+    hasher.update(if skip_pdf { b"1|" } else { b"0|" });
 
     let digest = hasher.finalize();
     format!("{:x}", digest)

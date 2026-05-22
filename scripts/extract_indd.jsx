@@ -113,7 +113,36 @@ function _marker(outputDir, tag) {
         f.write(tag);
         f.close();
     } catch (e) {}
+    // SPEC-030: phase 별 elapsed ms 누적 (지난 _marker 호출 이후 경과 시간 기록)
+    try {
+        var now = (new Date()).getTime();
+        if (!_phaseTimingState) {
+            _phaseTimingState = { lastTime: now, lastTag: tag, startTime: now };
+            // 기존 로그 초기화
+            var f0 = File(outputDir + "/_phase_timing.log");
+            f0.encoding = "UTF-8";
+            f0.open("w");
+            f0.writeln("# SPEC-030 phase timing (ms)");
+            f0.writeln("tag\televatedTotalMs\tdeltaMs");
+            f0.writeln(tag + "\t0\t0");
+            f0.close();
+            return;
+        }
+        var delta = now - _phaseTimingState.lastTime;
+        var total = now - _phaseTimingState.startTime;
+        var f1 = File(outputDir + "/_phase_timing.log");
+        f1.encoding = "UTF-8";
+        f1.open("e"); // append
+        f1.seek(0, 2);
+        f1.writeln(tag + "\t" + total + "\t" + delta);
+        f1.close();
+        _phaseTimingState.lastTime = now;
+        _phaseTimingState.lastTag = tag;
+    } catch (e) {}
 }
+
+// SPEC-030: phase 타이밍 누적 상태 (extract 한 번에 하나).
+var _phaseTimingState = null;
 
 // --- 전역 설정 ---
 var CONFIG = null;
@@ -300,13 +329,26 @@ function main(args) {
     var pdfOnly = (args[5] === "1");
     // conversion-config.json 경로 (선택적)
     var configPath = args[6] || null;
+    // SPEC-030: 성능 모드 ("fast" | "standard" | "high"). 기본 "standard".
+    // fast=PNG 150 DPI + preview.pdf 스킵, standard=220 DPI + PDF 포함, high=300 DPI + PDF 포함
+    var perfMode = (args[7] || "standard").toLowerCase();
+    // SPEC-030: preview.pdf 스킵 ("1" 이면 PDF 미생성). perfMode "fast" 의 기본 동작이지만 명시도 가능.
+    var skipPdf = (args[8] === "1") || (perfMode === "fast");
     CONFIG = loadConversionConfig(configPath);
+    // SPEC-030: perfMode 가 pngExportResolution 을 override (config 값 < CLI 값).
+    if (perfMode === "fast") {
+        CONFIG.rendering.pngExportResolution = 150;
+    } else if (perfMode === "high") {
+        CONFIG.rendering.pngExportResolution = 300;
+    }
     // config 디버그 기록
     try {
         var cfgLog = File(outputDir + "/_config_jsx_debug.log");
         cfgLog.encoding = "UTF-8";
         cfgLog.open("w");
         cfgLog.writeln("configPath=" + configPath);
+        cfgLog.writeln("perfMode=" + perfMode);
+        cfgLog.writeln("skipPdf=" + skipPdf);
         cfgLog.writeln("pngExportResolution=" + CONFIG.rendering.pngExportResolution);
         var _s25 = CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
         cfgLog.writeln("spec025=" + (_s25 ? ("masterPageEditable=" + _s25.masterPageEditable + " hashiraEditable=" + _s25.hashiraEditable + " rotationEditable=" + _s25.rotationEditable + " nonprintingEditable=" + _s25.nonprintingEditable) : "MISSING"));
@@ -541,32 +583,36 @@ function main(args) {
             // 링크 업데이트 실패는 무시
         }
 
-        // 5. PDF 프리뷰 (HWPX와 함께 출력용)
-        try {
-            var pdfFile = File(outputDir + "/preview.pdf");
+        // 5. PDF 프리뷰 (HWPX와 함께 출력용) — SPEC-030: skipPdf 이면 생성 안 함
+        if (!skipPdf) {
+            _marker(outputDir, "12_pdf_export");
+            try {
+                var pdfFile = File(outputDir + "/preview.pdf");
 
-            app.pdfExportPreferences.exportReaderSpreads = spreadMode;
-            app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
-            app.pdfExportPreferences.colorBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
-            app.pdfExportPreferences.colorBitmapSamplingDPI = 300;
-            app.pdfExportPreferences.colorBitmapCompression = BitmapCompression.JPEG;
-            app.pdfExportPreferences.colorBitmapQuality = CompressionQuality.HIGH;
-            app.pdfExportPreferences.grayscaleBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
-            app.pdfExportPreferences.grayscaleBitmapSamplingDPI = 300;
-            app.pdfExportPreferences.grayscaleBitmapCompression = BitmapCompression.JPEG;
-            app.pdfExportPreferences.grayscaleBitmapQuality = CompressionQuality.HIGH;
-            app.pdfExportPreferences.monochromeBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
-            app.pdfExportPreferences.monochromeBitmapSamplingDPI = 1200;
-            app.pdfExportPreferences.cropImagesToFrames = true;
-            app.pdfExportPreferences.compressTextAndLineArt = true;
-            app.pdfExportPreferences.acrobatCompatibility = AcrobatCompatibility.ACROBAT_7;
-            app.pdfExportPreferences.subsetFontsBelow = 100;
-            app.pdfExportPreferences.optimizePDF = true;
+                app.pdfExportPreferences.exportReaderSpreads = spreadMode;
+                app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
+                app.pdfExportPreferences.colorBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
+                app.pdfExportPreferences.colorBitmapSamplingDPI = 300;
+                app.pdfExportPreferences.colorBitmapCompression = BitmapCompression.JPEG;
+                app.pdfExportPreferences.colorBitmapQuality = CompressionQuality.HIGH;
+                app.pdfExportPreferences.grayscaleBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
+                app.pdfExportPreferences.grayscaleBitmapSamplingDPI = 300;
+                app.pdfExportPreferences.grayscaleBitmapCompression = BitmapCompression.JPEG;
+                app.pdfExportPreferences.grayscaleBitmapQuality = CompressionQuality.HIGH;
+                app.pdfExportPreferences.monochromeBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
+                app.pdfExportPreferences.monochromeBitmapSamplingDPI = 1200;
+                app.pdfExportPreferences.cropImagesToFrames = true;
+                app.pdfExportPreferences.compressTextAndLineArt = true;
+                app.pdfExportPreferences.acrobatCompatibility = AcrobatCompatibility.ACROBAT_7;
+                app.pdfExportPreferences.subsetFontsBelow = 100;
+                app.pdfExportPreferences.optimizePDF = true;
 
-            doc.exportFile(ExportFormat.PDF_TYPE, pdfFile);
-        } catch (e) {
-            // PDF 내보내기 실패는 무시
+                doc.exportFile(ExportFormat.PDF_TYPE, pdfFile);
+            } catch (e) {
+                // PDF 내보내기 실패는 무시
+            }
         }
+        _marker(outputDir, "13_done");
 
         // 6. 문서 닫기 (저장 안 함)
         doc.close(SaveOptions.NO);
@@ -4969,7 +5015,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
                             paraYOffsets.push(-1);
                         }
                     }
-                    fData.paragraphYOffsets = paraYOffsets;
+                    // SPEC-030: paragraphYOffsets 제거 (Java 신 파이프라인 미사용)
 
                     // 프레임에 보이는 각 단락의 실제 텍스트 (단락 분할점 계산용)
                     var frameParaTexts = [];
@@ -5034,7 +5080,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
             try { fData.cornerRadius = tf.topLeftCornerRadius; } catch (e) {}
 
             // SPEC-025: 진단/분류 정보 (텍스트 이미지 렌더링 제거 작업용)
-            try { fData.classification = classifyTextFrame(tf); } catch (e) { fData.classification = null; }
+            // SPEC-030: classification 제거 (Java 신 파이프라인 미사용)
             try { fData.isMasterPageItem = !!tf.masterPageItem; } catch (e) { fData.isMasterPageItem = false; }
             try { fData.nonprinting = !!tf.nonprinting; } catch (e) { fData.nonprinting = false; }
             try { fData.onHiddenLayer = isOnHiddenLayer(tf); } catch (e) { fData.onHiddenLayer = false; }
@@ -5136,7 +5182,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
                                 } else { py2.push(-1); }
                             } catch (e3) { py2.push(-1); }
                         }
-                        fData2.paragraphYOffsets = py2;
+                        // SPEC-030: paragraphYOffsets 제거 (Java 신 파이프라인 미사용)
                     }
                 } catch (e) {}
                 try { fData2.geometricBounds = [tf2.geometricBounds[0], tf2.geometricBounds[1], tf2.geometricBounds[2], tf2.geometricBounds[3]]; } catch (e) {}
@@ -5284,7 +5330,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                     rotationAngle: commonRot,
                     fillColor: commonFill,
                     strokeColor: commonStroke,
-                    classification: cls,
+                    // SPEC-030: classification 제거 (Java 신 파이프라인 미사용)
                     isMasterPageItem: false,  // 본인이 master 라서 override 아님
                     nonprinting: commonNonprint,
                     onHiddenLayer: commonHidden,
@@ -5400,14 +5446,10 @@ function collectPageItems(doc, startPage, endPage) {
 
         // 기하 — InDesign이 모든 변환 적용한 절대 좌표 (pt)
         try { data.geometricBounds = arrCopy(pi.geometricBounds); } catch (e) {}
-        try { data.visibleBounds = arrCopy(pi.visibleBounds); } catch (e) {}
+        // SPEC-030: visibleBounds 제거 — Java 측에서 사용 안 함 (geometricBounds 만 사용)
 
-        // 절대 변환
+        // 절대 변환 — SPEC-030: rotationAngle 만 사용됨, shear/scale/flip 은 미사용 제거
         try { data.absoluteRotationAngle = pi.absoluteRotationAngle; } catch (e) {}
-        try { data.absoluteShearAngle = pi.absoluteShearAngle; } catch (e) {}
-        try { data.absoluteHorizontalScale = pi.absoluteHorizontalScale; } catch (e) {}
-        try { data.absoluteVerticalScale = pi.absoluteVerticalScale; } catch (e) {}
-        try { data.absoluteFlip = pi.absoluteFlip.toString(); } catch (e) {}
 
         // 채우기
         try {
@@ -5430,35 +5472,8 @@ function collectPageItems(doc, startPage, endPage) {
         // 투명도
         try { data.opacity = pi.transparencySettings.blendingSettings.opacity; } catch (e) {}
 
-        // 그라디언트 페더
-        try {
-            var gfs = pi.transparencySettings.gradientFeatherSettings;
-            if (gfs && gfs.applied) {
-                data.gradientFeather = {
-                    applied: true,
-                    angle: gfs.angle,
-                    length: gfs.length,
-                    type: gfs.type.toString()
-                };
-            }
-        } catch (e) {}
-
-        // 드롭 섀도우
-        try {
-            var ds = pi.transparencySettings.dropShadowSettings;
-            if (ds) {
-                var dsMode = ds.mode.toString();
-                if (dsMode !== "ShadowMode.NONE") {
-                    data.dropShadow = {
-                        angle: ds.angle,
-                        distance: ds.distance,
-                        size: ds.size,
-                        opacity: ds.opacity
-                    };
-                    try { data.dropShadow.colorName = ds.effectColor ? ds.effectColor.name : null; } catch (e2) {}
-                }
-            }
-        } catch (e) {}
+        // SPEC-030: 그라디언트 페더 / 드롭 섀도우 제거 — 신 파이프라인에서 pageItem 레벨 사용 안 함.
+        //   (TextFrameBlock 의 dropShadow boolean 은 별도로 transparencySettings 에서 직접 추출)
 
         // 코너 반경
         try {
@@ -5483,24 +5498,11 @@ function collectPageItems(doc, startPage, endPage) {
                 }
                 data.childIds = childIds;
             } catch (e) {}
-            try { data.clipContent = pi.clipContent; } catch (e) {}
+            // SPEC-030: clipContent 제거 — 신 파이프라인 미사용
         }
 
-        // NEW: page-relative bounds
-        if (piPageIdx >= 0) {
-            try {
-                var piPage = pi.parentPage;
-                if (piPage && data.geometricBounds) {
-                    var piPB = piPage.bounds;
-                    data.pageRelativeBounds = [
-                        data.geometricBounds[0] - piPB[0],
-                        data.geometricBounds[1] - piPB[1],
-                        data.geometricBounds[2] - piPB[0],
-                        data.geometricBounds[3] - piPB[1]
-                    ];
-                }
-            } catch (e) {}
-        }
+        // SPEC-030: pageRelativeBounds 제거 (pageItems 레벨) — Java 측 신 파이프라인 미사용.
+        // TextFrame 의 pageRelativeBounds 는 별도 emission 위치(fData)에서 계속 유지.
 
         items.push(data);
     }
@@ -5514,10 +5516,14 @@ function arrCopy(a) {
 // --- 유틸리티 ---
 
 function writeJson(path, obj) {
+    // SPEC-030 A.6: indent 제거 (`null, 2` → 무인자).
+    // 출력 크기 -38% (4.9MB → 3.0MB) — Java Gson 파싱 속도/메모리 사용량/디스크 캐시 모두 개선.
+    // (참고: 청크 단위 stream write 시도했으나 ExtendScript f.write() 호출 오버헤드가 커서
+    //  실제론 느려짐 → 단일 stringify 가 최적)
     var f = File(path);
     f.encoding = "UTF-8";
     f.open("w");
-    f.write(JSON.stringify(obj, null, 2));
+    f.write(JSON.stringify(obj));
     f.close();
 }
 

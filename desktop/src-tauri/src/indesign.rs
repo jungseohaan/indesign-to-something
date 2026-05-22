@@ -128,6 +128,8 @@ pub async fn run_extraction(
     start_page: i32,
     end_page: i32,
     spread_mode: bool,
+    perf_mode: &str,
+    skip_pdf: bool,
 ) -> Result<InddExtractResult, String> {
     let app_name = app_name_from_path(indesign_app_path);
     let output_dir_str = output_dir.to_string_lossy().to_string();
@@ -142,19 +144,22 @@ pub async fn run_extraction(
     // - arguments[4] = spreadMode ("1"=스프레드 PDF, "0"=페이지별 PDF)
     // - arguments[5] = pdfOnly ("0"=기본)
     // - arguments[6] = configPath (conversion-config.json 경로, 빈 문자열이면 기본값)
+    // - arguments[7] = perfMode ("fast"|"standard"|"high", SPEC-030)
+    // - arguments[8] = skipPdf ("0"|"1", SPEC-030)
     let spread_flag = if spread_mode { "1" } else { "0" };
+    let skip_pdf_flag = if skip_pdf { "1" } else { "0" };
     // config 파일: 번들 리소스에서 찾거나 빈 문자열
     let config_path = find_bundled_config(&app);
     // 디버그 로그: config 경로를 추출 디렉토리에 기록
     let _ = std::fs::write(
         output_dir.join("_config_debug.log"),
-        format!("config_path={}\n", config_path),
+        format!("config_path={}\nperfMode={}\nskipPdf={}\n", config_path, perf_mode, skip_pdf),
     );
     let applescript = format!(
         r#"tell application "{app_name}"
     activate
     with timeout of 3600 seconds
-        do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}"}}
+        do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}"}}
     end timeout
 end tell"#,
         app_name = app_name,
@@ -165,6 +170,8 @@ end tell"#,
         end_page = end_page,
         spread_flag = spread_flag,
         config_path = config_path,
+        perf_mode = perf_mode,
+        skip_pdf_flag = skip_pdf_flag,
     );
 
     // 진행률: 추출 실행 중
