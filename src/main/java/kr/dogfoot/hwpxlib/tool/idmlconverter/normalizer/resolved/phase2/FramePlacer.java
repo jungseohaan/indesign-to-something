@@ -805,6 +805,9 @@ public final class FramePlacer {
                 }
             }
 
+            if (inlineToFloating) {
+                block.inlineToFloating(true);
+            }
             section.addBlock(block);
         }
     }

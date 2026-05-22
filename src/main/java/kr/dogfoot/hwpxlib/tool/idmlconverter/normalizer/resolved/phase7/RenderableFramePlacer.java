@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
 import java.io.File;
 import java.util.List;
@@ -41,6 +42,29 @@ public final class RenderableFramePlacer {
                     if (rg.id() == rt.id() && "inline_object".equals(rg.itemType())) {
                         alsoInline = true;
                         break;
+                    }
+                }
+                // 배지 자신이 inline_object가 아니더라도 조상 그룹이 inline_object이면
+                // 해당 조상 PNG에 시각이 이미 포함됨 → 중복 배치 방지
+                if (!alsoInline) {
+                    ResolvedPageItem badgeItem = ctx.resolvedData.getPageItem(String.valueOf(rt.id()));
+                    if (badgeItem != null) {
+                        String ancestorId = badgeItem.parentId();
+                        int hops = 0;
+                        outer:
+                        while (ancestorId != null && hops < 5) {
+                            for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                                if (String.valueOf(rg.id()).equals(ancestorId)
+                                        && "inline_object".equals(rg.itemType())) {
+                                    alsoInline = true;
+                                    break outer;
+                                }
+                            }
+                            ResolvedPageItem anc = ctx.resolvedData.getPageItem(ancestorId);
+                            if (anc == null) break;
+                            ancestorId = anc.parentId();
+                            hops++;
+                        }
                     }
                 }
                 if (alsoInline) continue;

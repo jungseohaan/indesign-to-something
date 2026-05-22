@@ -51,6 +51,10 @@ public class ASTTextFrameBlock extends ASTBlock {
     // 겹침 감지: SQUARE textWrap 적용 플래그
     private boolean textWrapSquare;
 
+    // Phase 2가 badge_group 단일-child를 플로팅 글상자로 전환한 경우 true.
+    // HwpxTextBoxBuilder가 이 플래그를 보고 투명 DrawText 경로(hp:rect)로 라우팅.
+    private boolean inlineToFloating;
+
     // composedLines 기반 분할: Story 내 문자 범위
     private int composedCharStart = -1;
     private int composedCharEnd = -1;
@@ -146,6 +150,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean distributed() { return distributed; }
     public void distributed(boolean v) { this.distributed = v; }
+
+    public boolean inlineToFloating() { return inlineToFloating; }
+    public void inlineToFloating(boolean v) { this.inlineToFloating = v; }
 
     public double rotationAngle() { return rotationAngle; }
     public void rotationAngle(double v) { this.rotationAngle = v; }
