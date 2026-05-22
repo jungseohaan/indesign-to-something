@@ -62,6 +62,8 @@ interface AppState {
   spreadBased: boolean;
   vectorDpi: 96 | 150;
   layoutMode: "preserve" | "editable";
+  // SPEC-030: InDesign 추출 성능 모드. fast=150dpi+pdf skip, standard=220dpi+pdf, high=300dpi+pdf
+  perfMode: "fast" | "standard" | "high";
   // SPEC-011: 디버그용 페이지 범위 추출 (0=전체)
   debugStartPage: number;
   debugEndPage: number;
@@ -101,6 +103,7 @@ interface AppState {
   setSpreadBased: (v: boolean) => void;
   setVectorDpi: (v: 96 | 150) => void;
   setLayoutMode: (v: "preserve" | "editable") => void;
+  setPerfMode: (v: "fast" | "standard" | "high") => void;
   setDebugPageRange: (start: number, end: number) => void;
   clearError: () => void;
   setFontMappings: (mappings: Record<string, string>) => void;
@@ -147,6 +150,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   spreadBased: false,
   vectorDpi: 150,
   layoutMode: "preserve",
+  perfMode: (localStorage.getItem("perfMode") as "fast" | "standard" | "high") || "standard",
   debugStartPage: 0,
   debugEndPage: 0,
   indesignPath: null,
@@ -465,6 +469,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSpreadBased: (v) => set({ spreadBased: v }),
   setVectorDpi: (v) => set({ vectorDpi: v }),
   setLayoutMode: (v) => set({ layoutMode: v }),
+  setPerfMode: (v) => {
+    localStorage.setItem("perfMode", v);
+    set({ perfMode: v });
+  },
   setDebugPageRange: (start, end) => set({ debugStartPage: start, debugEndPage: end }),
   clearError: () => set({ error: null }),
   setFontMappings: (mappings) => set({ fontMappings: mappings }),
@@ -589,7 +597,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       );
 
       try {
-        const { debugStartPage, debugEndPage } = get();
+        const { debugStartPage, debugEndPage, perfMode } = get();
         // 1. InDesign으로 추출 (디버그 페이지 범위가 있으면 일부만)
         const extractResult = await invoke<InddExtractResult>("extract_indd", {
           inddPath,
@@ -597,6 +605,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           spreadMode: spreadBased,
           startPage: debugStartPage,
           endPage: debugEndPage,
+          perfMode,
         });
 
         if (get().batchCancelled) break;
@@ -708,13 +717,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!jarPath) throw new Error("JAR 경로를 찾을 수 없습니다");
 
       // 1. InDesign ExtendScript로 추출
-      const { debugStartPage, debugEndPage } = get();
+      const { debugStartPage, debugEndPage, perfMode } = get();
       const extractResult = await invoke<InddExtractResult>("extract_indd", {
         inddPath: path,
         jarPath,
         spreadMode: false,
         startPage: debugStartPage,
         endPage: debugEndPage,
+        perfMode,
       });
 
       // 2. AST 로드

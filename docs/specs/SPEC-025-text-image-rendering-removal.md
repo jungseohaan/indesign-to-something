@@ -1,19 +1,31 @@
 # SPEC-025: 텍스트 이미지 렌더링 제거
 
-## 진행 상황 (2026-05-20)
+## 진행 상황 (2026-05-22 검증 결과)
 
-**Tier A.5 (masterPageEditable), Tier A.6 (hashiraEditable), Tier B (rotationEditable) 구현 완료**.
-- `conversion-config.json` 의 `rendering.textFrame.spec025` 섹션으로 ON/OFF 가능 (기본 ON).
-- Tier C 는 기존 `exportPageBackgrounds()` 의 editable hide 로직이 이미 처리 (코드 변경 없음).
-- Java 측은 `editableTextFrameIds` + 회전 파이프라인이 이미 연결되어 별도 작업 불필요.
-- **남은 항목**: Tier A.1.5 (비균일 scale), A.4 (page number), A.8 (Group decorative), Tier B 의 stroke/shadow/opacity/glow/bevel, Phase 5 마스터 스프레드 텍스트 페이지별 instance화.
+**구현은 되어 있으나 핵심 케이스 미작동 확인** (박현숙 1단원 소(1), 22 페이지 변환 검증):
+
+| Tier | 항목 | 상태 | 실제 동작 |
+|---|---|---|---|
+| A.5 | masterPageEditable | **❌ 미작동** | 대표 사례 TF 3854 ("01. 근거를 바탕으로 작품 해석하기") `editable=False`. ExtendScript 의 `if (item.masterPageItem)` 조건은 마스터 페이지 텍스트 본체가 아닌 **override 만** 잡음 → 검출 0건 |
+| A.6 | hashiraEditable | ⚪ 부분 작동 | `pageIndex=None` TF 23개 중 일부는 editable, 일부는 background. 분류 조건이 일관성 없음 |
+| B | rotationEditable | **❌ 미작동** | `rotationAngle != 0` 인 TF 6개 모두 `editable=False`. 출력 HWPX 에 `rotationInfo angle!=0` 인 텍스트박스 0개 — 회전 텍스트 전부 PNG 로 떨어짐 |
+| C | hideTextFrames | ⚪ 미검증 | 기존 동작 변경 없음, 별도 검증 필요 |
+
+### 진단
+
+- `tf.masterPageItem` 속성은 **"마스터에서 상속받은 override item"** 만 True 반환. 마스터 페이지 위의 원본 텍스트 (pageIndex=None) 는 False → SPEC-025 A.5 조건 미충족.
+- ExtendScript `classifyTextFrame()` 의 조건 5는 마스터 본체를 처리하도록 확장 필요 (`tf.parentPage == masterSpread.pages[i]` 또는 `pageIndex === null` 패턴 추가).
+- 회전 TF 는 `classifyTextFrame()` 보다 먼저 `isRenderableTextFrame()` 에서 PNG 렌더 결정되는 경로 점검 필요.
 
 ### 후속 변경 (2026-05-19~20 커밋)
 - 인라인 텍스트프레임 + Group 단편 + 1자 라벨 editable 변환 (`94dd8d39`)
 - 중첩 인라인 앵커 처리 + 밑줄 + 배지 충돌 보정 (`6d001722`)
 - **[미커밋]** `WrapPhase5.java` +20줄: 행글 매달림 들여쓰기 패턴 감지 추가. 단락 첫 줄 wrapIndentLeft=0 + 연속 줄 wrapIndentLeft>0 이면 bullet hanging indent → obstacle wrap 으로 오인 방지, shrink 적용 안 함. 커밋 여부는 별도 판단.
 
-미테스트: 박현숙 1단원 소(1) 등 실제 변환은 InDesign 재추출 필요. 빌드만 검증 완료.
+### 다음 단계 (실제 동작 만들기)
+1. `classifyTextFrame()` 조건 5 보강: 마스터 페이지 본체 텍스트 검출 추가 (`tf.parentPage` 가 master spread page 이거나 `pageIndex === null` 패턴)
+2. `isRenderableTextFrame()` 의 회전 텍스트 분기를 SPEC-025 Tier B 처리로 우회
+3. 재검증 후 Tier A.1.5/A.4/A.8 추가 구현
 
 ## 문제
 

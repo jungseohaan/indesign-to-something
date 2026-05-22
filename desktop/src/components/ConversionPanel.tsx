@@ -14,6 +14,7 @@ export function ConversionPanel() {
     spreadBased,
     vectorDpi,
     layoutMode,
+    perfMode,
     conversionLogs,
     fontMappings,
     debugStartPage,
@@ -23,6 +24,7 @@ export function ConversionPanel() {
     setSpreadBased,
     setVectorDpi,
     setLayoutMode,
+    setPerfMode,
     clearError,
     openFontMappingModal,
   } = useAppStore();
@@ -212,6 +214,21 @@ export function ConversionPanel() {
             >
               <option value="preserve">레이아웃 유지</option>
               <option value="editable">편집 우선 (1단)</option>
+            </select>
+          </label>
+          <label
+            className="flex items-center gap-1.5 text-sm"
+            title="추출 속도: fast=PNG 150dpi+PDF 스킵, standard=220dpi+PDF, high=300dpi+PDF"
+          >
+            추출:
+            <select
+              value={perfMode}
+              onChange={(e) => setPerfMode(e.target.value as "fast" | "standard" | "high")}
+              className="border border-gray-300 rounded px-2 py-0.5 text-sm"
+            >
+              <option value="fast">빠름</option>
+              <option value="standard">표준</option>
+              <option value="high">고품질</option>
             </select>
           </label>
           <button
