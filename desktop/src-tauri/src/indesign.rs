@@ -192,11 +192,15 @@ end tell"#,
     let done_path = output_dir.join(".done");
     let mut last_message = String::new();
     let timeout_secs = 3600u64;
-    // rendered_frames 단계에서 PDF/PNG export 가 복잡한 페이지(많은 객체 + 고DPI)에서
-    // 한 페이지에 10분 넘게 걸리는 경우 발생 → stale 1800s (30분) 으로 완화.
-    let stale_secs = 1800u64;
+    // SPEC-030 B.4: phase별 stale 타임아웃 차등 적용
+    // - idml/open/pdf: 60s (빠른 단계)
+    // - rendered_frames/render_badge: 1800s (복잡 페이지에서 10분+ 가능)
+    // - resolved_*: 300s
+    // - 기타: 120s
+    let stale_secs_default = 120u64;
     let started = std::time::Instant::now();
     let mut last_progress_at = std::time::Instant::now();
+    let mut current_phase_stale = stale_secs_default;
 
     loop {
         // 프로세스 완료 확인
@@ -209,7 +213,7 @@ end tell"#,
         // 타임아웃 확인 (절대 또는 정체)
         let elapsed = started.elapsed().as_secs();
         let stale = last_progress_at.elapsed().as_secs();
-        if elapsed > timeout_secs || stale > stale_secs {
+        if elapsed > timeout_secs || stale > current_phase_stale {
             // osascript 프로세스 강제 종료
             let _ = child.kill().await;
             let last_step = if last_message.is_empty() {
@@ -220,7 +224,7 @@ end tell"#,
             let reason = if elapsed > timeout_secs {
                 format!("절대 타임아웃 {}초 초과", timeout_secs)
             } else {
-                format!("진행률 정체 {}초 초과", stale_secs)
+                format!("진행률 정체 {}초 초과", current_phase_stale)
             };
             return Err(format!(
                 "InDesign 추출 중단 ({}). 마지막 단계: {}",
@@ -234,6 +238,15 @@ end tell"#,
                 let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
                 let current = prog.get("current").and_then(|v| v.as_i64()).unwrap_or(0);
                 let total = prog.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
+                let desc = prog.get("desc").and_then(|v| v.as_str()).unwrap_or("");
+
+                // SPEC-030 B.4: phase별 stale 타임아웃 갱신
+                current_phase_stale = match step {
+                    "open" | "idml" | "pdf" => 60,
+                    "rendered_frames" | "render_badge" | "render_frame" => 1800,
+                    s if s.starts_with("resolved") => 300,
+                    _ => stale_secs_default,
+                };
 
                 let display = match step {
                     "open" => "문서 열기 중...".to_string(),
@@ -249,6 +262,10 @@ end tell"#,
                     "resolved_items" => "페이지 아이템 수집 중...".to_string(),
                     "rendered_frames" if current > 0 && total > 0 => format!("배경/도형 렌더링 중... ({}/{})", current, total),
                     "rendered_frames" => "배경/도형 렌더링 중...".to_string(),
+                    "render_badge" if !desc.is_empty() && total > 0 => format!("배지 렌더링 중... ({}/{}) {}", current, total, desc),
+                    "render_badge" if total > 0 => format!("배지 렌더링 중... ({}/{})", current, total),
+                    "render_frame" if !desc.is_empty() && total > 0 => format!("프레임 렌더링 중... ({}/{}) {}", current, total, desc),
+                    "render_frame" if total > 0 => format!("프레임 렌더링 중... ({}/{})", current, total),
                     "pdf" => "PDF 프리뷰 생성 중...".to_string(),
                     _ => format!("추출 중... ({})", step),
                 };
@@ -516,6 +533,55 @@ end tell"#,
     }
     let _ = done_path; // 경고 방지
     Ok(())
+}
+
+/// SPEC-030 B.1: `_crop_manifest.json`을 읽어 sips로 배지 PNG를 개별 크롭한다.
+/// 반환값: 크롭에 성공한 항목 수.
+pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
+    let manifest_path = output_dir.join("_crop_manifest.json");
+    let data = match std::fs::read_to_string(&manifest_path) {
+        Ok(d) => d,
+        Err(_) => return 0,
+    };
+    let entries: Vec<serde_json::Value> = match serde_json::from_str(&data) {
+        Ok(v) => v,
+        Err(_) => return 0,
+    };
+    let mut count = 0usize;
+    for entry in &entries {
+        let src_rel = match entry["src"].as_str() { Some(s) => s, None => continue };
+        let dst_rel = match entry["dst"].as_str() { Some(s) => s, None => continue };
+        let x = match entry["x"].as_i64() { Some(v) => v, None => continue };
+        let y = match entry["y"].as_i64() { Some(v) => v, None => continue };
+        let w = match entry["w"].as_i64() { Some(v) if v > 0 => v, _ => continue };
+        let h = match entry["h"].as_i64() { Some(v) if v > 0 => v, _ => continue };
+        let src = output_dir.join(src_rel);
+        let dst = output_dir.join(dst_rel);
+        if !src.exists() { continue; }
+        // sips --cropOffset <rowOffset> <colOffset> --cropBox <height> <width>
+        let status = std::process::Command::new("sips")
+            .args([
+                "--cropOffset", &y.to_string(), &x.to_string(),
+                "--cropBox", &h.to_string(), &w.to_string(),
+                src.to_str().unwrap_or(""),
+                "--out", dst.to_str().unwrap_or(""),
+            ])
+            .status();
+        if matches!(status, Ok(s) if s.success()) {
+            count += 1;
+        }
+    }
+    // 배치 PNG + 매니페스트 정리
+    let mut seen = std::collections::HashSet::new();
+    for entry in &entries {
+        if let Some(src_rel) = entry["src"].as_str() {
+            if seen.insert(src_rel.to_string()) {
+                let _ = std::fs::remove_file(output_dir.join(src_rel));
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&manifest_path);
+    count
 }
 
 /// 추출 진행률 이벤트를 프론트엔드로 emit한다 (공개 버전).

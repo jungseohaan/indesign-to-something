@@ -153,6 +153,14 @@ pub async fn extract_indd(
     })?
     }; // end partial_result else branch
 
+    // SPEC-030 B.1: 배치 export 크롭 매니페스트 처리 (sips)
+    {
+        let cropped = crate::indesign::apply_crop_manifest(&output_dir);
+        if cropped > 0 {
+            eprintln!("[B.1] sips 크롭 완료: {}개", cropped);
+        }
+    }
+
     // 6. 원본 INDD 파일 옆 Links/ 폴더를 temp 디렉토리에 심볼릭 링크
     if let Some(indd_parent) = std::path::Path::new(&indd_path).parent() {
         let source_links = indd_parent.join("Links");

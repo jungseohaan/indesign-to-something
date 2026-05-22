@@ -403,6 +403,90 @@ function buildPageData(doc, startPage, endPage, allItems) {
     return { hashes: hashes, itemMap: itemMap };
 }
 
+// SPEC-030 B.1: 한 페이지의 단순 배지(데코/editable TF 없음)를 임시 그룹으로 묶어
+// 배치 export하고 crop 매니페스트 배열을 반환한다.
+// @param {Array} simpleBadges [{grp, grpDomId, grpPage, childIds, childTextFrameIds}]
+// @return {Array} [{rf: renderedFrames 엔트리, crop: {src,dst,x,y,w,h}}] — 실패 시 []
+function exportPageBadgesBatched(doc, page, simpleBadges, renderDir, dpi) {
+    if (simpleBadges.length < 2) return [];
+    var results = [];
+    var pgIdx0 = page.documentOffset; // 0-based
+    var batchFileName = "badge_batch_p" + (pgIdx0 + 1) + ".png";
+    var batchFile = File(renderDir + "/" + batchFileName);
+    var dups = [];
+    try {
+        for (var i = 0; i < simpleBadges.length; i++) {
+            dups.push(simpleBadges[i].grp.duplicate());
+        }
+        var tempGroup = doc.groups.add(dups);
+        try {
+            tempGroup.exportFile(ExportFormat.PNG_FORMAT, batchFile);
+        } finally {
+            try { tempGroup.remove(); } catch (er) {}
+        }
+
+        // union bounds of all simple badges (pt)
+        var uVB = null;
+        for (var j = 0; j < simpleBadges.length; j++) {
+            try {
+                var bvb = simpleBadges[j].grp.visibleBounds;
+                if (!uVB) { uVB = [bvb[0], bvb[1], bvb[2], bvb[3]]; }
+                else {
+                    uVB[0] = Math.min(uVB[0], bvb[0]);
+                    uVB[1] = Math.min(uVB[1], bvb[1]);
+                    uVB[2] = Math.max(uVB[2], bvb[2]);
+                    uVB[3] = Math.max(uVB[3], bvb[3]);
+                }
+            } catch (e) {}
+        }
+        if (!uVB) return [];
+
+        var pxPerPt = dpi / 72.0;
+        var pageBounds = page.bounds;
+
+        for (var k = 0; k < simpleBadges.length; k++) {
+            var sb = simpleBadges[k];
+            var ivb = null;
+            try { ivb = sb.grp.visibleBounds; } catch (e) {}
+            if (!ivb) continue;
+
+            var cX = Math.round((ivb[1] - uVB[1]) * pxPerPt);
+            var cY = Math.round((ivb[0] - uVB[0]) * pxPerPt);
+            var cW = Math.max(1, Math.round((ivb[3] - ivb[1]) * pxPerPt));
+            var cH = Math.max(1, Math.round((ivb[2] - ivb[0]) * pxPerPt));
+
+            var indivFileName = "badge_" + sb.grpDomId + ".png";
+            var relBounds = [
+                ivb[0] - pageBounds[0], ivb[1] - pageBounds[1],
+                ivb[2] - pageBounds[0], ivb[3] - pageBounds[1]
+            ];
+
+            results.push({
+                rf: {
+                    id: sb.grpDomId,
+                    file: "rendered_frames/" + indivFileName,
+                    bounds: relBounds,
+                    pageIndex: pgIdx0,
+                    type: "badge_group",
+                    childIds: sb.childIds,
+                    childTextFrameIds: sb.childTextFrameIds
+                },
+                crop: {
+                    src: "rendered_frames/" + batchFileName,
+                    dst: "rendered_frames/" + indivFileName,
+                    x: cX, y: cY, w: cW, h: cH
+                }
+            });
+        }
+    } catch (e) {
+        for (var dx = 0; dx < dups.length; dx++) {
+            try { dups[dx].remove(); } catch (er) {}
+        }
+        return [];
+    }
+    return results;
+}
+
 // --- 메인 ---
 
 function main(args) {
@@ -811,6 +895,94 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         } catch (e) {}
     }
 
+    // SPEC-030 B.4: 배지 총 개수 선집계 (진행 표시용)
+    var _totalBadges = 0;
+    for (var _bc = 0; _bc < allItems.length; _bc++) {
+        if (allItems[_bc].constructor.name === "Group" && isBadgeGroup(allItems[_bc])) _totalBadges++;
+    }
+    var _renderedBadges = 0;
+
+    // SPEC-030 B.1: 단순 배지(데코/editable TF 없음)를 페이지별로 모아 배치 export
+    var _batchExportedIds = {};
+    var _cropManifest = [];
+    var _badgesByPage = {};
+    for (var _bgi = 0; _bgi < allItems.length; _bgi++) {
+        var _bgrp = allItems[_bgi];
+        if (_bgrp.constructor.name !== "Group") continue;
+        if (isOnHiddenLayer(_bgrp)) continue;
+        if (!isBadgeGroup(_bgrp)) continue;
+        var _bgrpPage = null;
+        try { _bgrpPage = _bgrp.parentPage; } catch (e) {}
+        if (!_bgrpPage) {
+            try {
+                var _bgvb = _bgrp.visibleBounds;
+                var _bgcy = (_bgvb[0] + _bgvb[2]) / 2;
+                var _bgcx = (_bgvb[1] + _bgvb[3]) / 2;
+                for (var _bpgi = 0; _bpgi < doc.pages.length; _bpgi++) {
+                    var _bpgo = doc.pages[_bpgi];
+                    var _bpgb = _bpgo.bounds;
+                    if (_bgcy >= _bpgb[0] && _bgcy <= _bpgb[2] && _bgcx >= _bpgb[1] && _bgcx <= _bpgb[3]) {
+                        _bgrpPage = _bpgo; break;
+                    }
+                }
+            } catch (e) {}
+        }
+        if (!_bgrpPage) continue;
+        var _bgrpPgIdx = _bgrpPage.documentOffset + 1;
+        if (_bgrpPgIdx < startPage || _bgrpPgIdx > endPage) continue;
+        if (skipRenderPagesMap[_bgrpPgIdx]) continue;
+        // 데코 있으면 배치 제외
+        if (decoCandidatesPass1.length > 0 && findOverlappingDecorations(_bgrp, decoCandidatesPass1).length > 0) continue;
+        // editable TF 자식 있으면 배치 제외
+        var _bHasEditable = false;
+        try {
+            var _bChk = _bgrp.allPageItems;
+            for (var _bei = 0; _bei < _bChk.length; _bei++) {
+                if (_bChk[_bei].constructor.name === "TextFrame" && classifyTextFrame(_bChk[_bei]) === "editable") {
+                    _bHasEditable = true; break;
+                }
+            }
+        } catch (e) {}
+        if (_bHasEditable) continue;
+        // 배치 후보 등록
+        var _bChildIds = [], _bChildTfIds = [];
+        try {
+            var _bChItems = _bgrp.allPageItems;
+            for (var _bci = 0; _bci < _bChItems.length; _bci++) {
+                _bChildIds.push(_bChItems[_bci].id);
+                if (_bChItems[_bci].constructor.name === "TextFrame") _bChildTfIds.push(_bChItems[_bci].id);
+            }
+        } catch (e) {}
+        if (!_badgesByPage[_bgrpPgIdx]) _badgesByPage[_bgrpPgIdx] = [];
+        _badgesByPage[_bgrpPgIdx].push({ grp: _bgrp, grpDomId: _bgrp.id, grpPage: _bgrpPage, childIds: _bChildIds, childTextFrameIds: _bChildTfIds });
+    }
+    // 페이지당 2개 이상인 경우 배치 export
+    var _bDpi = CONFIG.rendering.pngExportResolution || 220;
+    for (var _bpKey in _badgesByPage) {
+        var _bpBadges = _badgesByPage[_bpKey];
+        if (_bpBadges.length < 2) continue;
+        var _bpPage = _bpBadges[0].grpPage;
+        var _bpResults = exportPageBadgesBatched(doc, _bpPage, _bpBadges, renderDir, _bDpi);
+        if (_bpResults.length === 0) continue; // 실패 → 개별 export로 폴백
+        for (var _bpr = 0; _bpr < _bpResults.length; _bpr++) {
+            var _bpEntry = _bpResults[_bpr];
+            _batchExportedIds[_bpEntry.rf.id] = true;
+            renderedIds[_bpEntry.rf.id] = _bpEntry.rf;
+            renderedFrames.push(_bpEntry.rf);
+            for (var _bptfi = 0; _bptfi < _bpEntry.rf.childTextFrameIds.length; _bptfi++) {
+                var _bptfId = _bpEntry.rf.childTextFrameIds[_bptfi];
+                renderedFrames.push({ id: _bptfId, file: _bpEntry.rf.file, bounds: _bpEntry.rf.bounds, pageIndex: _bpEntry.rf.pageIndex, type: "badge_group_child", badgeGroupId: _bpEntry.rf.id });
+                renderedIds[_bptfId] = _bpEntry.rf;
+            }
+            for (var _bgcid = 0; _bgcid < _bpEntry.rf.childIds.length; _bgcid++) {
+                badgeGroupChildIds[_bpEntry.rf.childIds[_bgcid]] = true;
+            }
+            _cropManifest.push(_bpEntry.crop);
+        }
+        // 배치 export 완료 배지는 개별 진행 카운트에서 제외
+        _totalBadges -= _bpResults.length;
+    }
+
     // Pass 1: 배지 그룹 감지 및 렌더링
     // 부모 그룹이 이미 렌더된 경우, 자식 그룹은 건너뜀 (중복 방지)
     for (var gi = 0; gi < allItems.length; gi++) {
@@ -846,6 +1018,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
 
         var grpDomId = grp.id;
         if (renderedIds[grpDomId]) continue;
+        if (_batchExportedIds[grpDomId]) continue; // SPEC-030 B.1: 배치 export 완료
 
         var childIds = [];
         var childTextFrameIds = [];
@@ -863,6 +1036,9 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
 
         var grpFileName = "badge_" + grpDomId + ".png";
         var grpOutFile = File(renderDir + "/" + grpFileName);
+        // SPEC-030 B.4: 배지별 진행 정보
+        _renderedBadges++;
+        writeProgress(outputDir, "render_badge", _renderedBadges, _totalBadges, "p" + grpPgIdx + "_" + grpDomId);
 
         // SPEC-022: 뱃지와 시각적으로 한 덩어리지만 별개 그룹인 외곽선 데코 (예: outlined "Step 1")
         // 를 찾아서 합성 PNG 로 export
@@ -1291,6 +1467,16 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         for (var rh = 0; rh < hiddenEditable.length; rh++) {
             try { hiddenEditable[rh].visible = true; } catch (eR) {}
         }
+    }
+
+    // SPEC-030 B.1: crop manifest 저장 (Rust 측 sips 크롭 대상 목록)
+    if (_cropManifest.length > 0) {
+        try {
+            var _cmFile = File(outputDir + "/_crop_manifest.json");
+            _cmFile.open("w");
+            _cmFile.write(JSON.stringify(_cropManifest));
+            _cmFile.close();
+        } catch (eCm) {}
     }
 
     return { frames: renderedFrames, badgeChildIds: badgeGroupChildIds };
@@ -3316,7 +3502,8 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     writeProgress(outputDir, "resolved_styles", 0, rangePageCount);
     var docInfo = collectDocumentInfo(doc);
     var paraStyles = collectParagraphStyles(doc);
-    var charStyles = collectCharacterStyles(doc);
+    // SPEC-030 B.3: characterStyles는 Java 측 resolved 파이프라인에서 미사용 — 수집 생략
+    // var charStyles = collectCharacterStyles(doc);
     var colors = collectColors(doc);
     var fonts = collectFonts(doc);
 
@@ -3402,7 +3589,6 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     return {
         documentInfo: docInfo,
         paragraphStyles: paraStyles,
-        characterStyles: charStyles,
         colors: colors,
         fonts: fonts,
         stories: stories,
@@ -4175,64 +4361,18 @@ function collectDocumentInfo(doc) {
     };
 }
 
+// SPEC-030 B.3: Java는 name + justification만 사용 — 나머지 필드 제거
 function collectParagraphStyles(doc) {
     var styles = [];
     for (var i = 0; i < doc.allParagraphStyles.length; i++) {
         var ps = doc.allParagraphStyles[i];
         try {
-            var data = {
+            styles.push({
                 name: ps.name,
-                basedOn: ps.basedOn ? ps.basedOn.name : null,
-                fontFamily: null,
-                fontStyle: ps.fontStyle,
-                fontSize: ps.pointSize,
-                leading: ps.leading,
-                autoLeading: ps.autoLeading,
-                justification: ps.justification.toString(),
-                spaceBefore: ps.spaceBefore,
-                spaceAfter: ps.spaceAfter,
-                firstLineIndent: ps.firstLineIndent,
-                leftIndent: ps.leftIndent,
-                rightIndent: ps.rightIndent,
-                hyphenation: ps.hyphenation,
-                dropCapLines: ps.dropCapLines,
-                dropCapCharacters: ps.dropCapCharacters,
-                keepWithNext: null,
-                keepAllLinesTogether: null
-            };
-            try { data.fontFamily = ps.appliedFont ? ps.appliedFont.fontFamily : null; } catch (e) {}
-            try { data.keepWithNext = ps.keepWithNext.toString(); } catch (e) {}
-            try { data.keepAllLinesTogether = ps.keepAllLinesTogether.toString(); } catch (e) {}
-            // 탭 정지
-            try {
-                var ts = ps.tabStops;
-                if (ts && ts.length > 0) {
-                    data.tabStops = [];
-                    for (var t = 0; t < ts.length; t++) {
-                        data.tabStops.push({
-                            position: ts[t].position,
-                            alignment: ts[t].alignment.toString(),
-                            leader: ts[t].leader || ""
-                        });
-                    }
-                }
-            } catch (e) {}
-            // GREP 스타일 수집
-            try {
-                var gs = ps.nestedGrepStyles;
-                if (gs && gs.length > 0) {
-                    data.grepStyles = [];
-                    for (var g = 0; g < gs.length; g++) {
-                        var gd = {};
-                        try { gd.pattern = gs[g].grepExpression; } catch (e) {}
-                        try { gd.charStyle = gs[g].appliedCharacterStyle.name; } catch (e) {}
-                        if (gd.pattern) data.grepStyles.push(gd);
-                    }
-                }
-            } catch (e) {}
-            styles.push(data);
+                justification: ps.justification.toString()
+            });
         } catch (e) {
-            styles.push({ name: ps.name, error: e.message });
+            try { styles.push({ name: ps.name, justification: "LEFT_ALIGN" }); } catch (e2) {}
         }
     }
     return styles;
@@ -5157,25 +5297,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
                         if (storyParas[sp].index === lastIdx) fData.paragraphEnd = sp;
                     }
 
-                    // 각 단락의 첫 줄 Y좌표 (프레임 상단 기준 오프셋, points)
-                    var frameBounds = tf.geometricBounds; // [top, left, bottom, right]
-                    var frameTop = frameBounds[0];
-                    var paraYOffsets = [];
-                    for (var fp = 0; fp < frameParas.length; fp++) {
-                        try {
-                            var lines = frameParas[fp].lines.everyItem().getElements();
-                            if (lines.length > 0) {
-                                // 첫 줄의 baseline을 사용하되, ascent 보정을 위해 bounds 사용
-                                var lineBounds = lines[0].geometricBounds; // [top, left, bottom, right]
-                                paraYOffsets.push(Math.round((lineBounds[0] - frameTop) * 100) / 100);
-                            } else {
-                                paraYOffsets.push(-1);
-                            }
-                        } catch (e2) {
-                            paraYOffsets.push(-1);
-                        }
-                    }
-                    // SPEC-030: paragraphYOffsets 제거 (Java 신 파이프라인 미사용)
+                    // SPEC-030 B.3: paragraphYOffsets 계산 제거 (Java 신 파이프라인 미사용)
 
                     // 프레임에 보이는 각 단락의 실제 텍스트 (단락 분할점 계산용)
                     var frameParaTexts = [];
@@ -5331,18 +5453,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
                             if (sp2[sk].index === fi2) fData2.paragraphStart = sk;
                             if (sp2[sk].index === li2) fData2.paragraphEnd = sk;
                         }
-                        var fb2 = tf2.geometricBounds;
-                        var ft2 = fb2[0];
-                        var py2 = [];
-                        for (var fk = 0; fk < fp2.length; fk++) {
-                            try {
-                                var ln2 = fp2[fk].lines.everyItem().getElements();
-                                if (ln2.length > 0) {
-                                    py2.push(Math.round((ln2[0].geometricBounds[0] - ft2) * 100) / 100);
-                                } else { py2.push(-1); }
-                            } catch (e3) { py2.push(-1); }
-                        }
-                        // SPEC-030: paragraphYOffsets 제거 (Java 신 파이프라인 미사용)
+                        // SPEC-030 B.3: paragraphYOffsets 계산 제거 (Java 신 파이프라인 미사용)
                     }
                 } catch (e) {}
                 try { fData2.geometricBounds = [tf2.geometricBounds[0], tf2.geometricBounds[1], tf2.geometricBounds[2], tf2.geometricBounds[3]]; } catch (e) {}
@@ -5854,8 +5965,10 @@ function writeJson(path, obj) {
     f.close();
 }
 
-function writeProgress(outputDir, step, current, total) {
+// SPEC-030 B.4: desc 파라미터 추가 (아이템 ID 등 세부 정보)
+function writeProgress(outputDir, step, current, total, desc) {
     var obj = { step: step, current: current, total: total };
+    if (desc) obj.desc = desc;
     var f = File(outputDir + "/.progress");
     f.encoding = "UTF-8";
     f.open("w");
