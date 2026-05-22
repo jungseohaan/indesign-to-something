@@ -405,8 +405,8 @@ function buildPageData(doc, startPage, endPage, allItems) {
 
 // SPEC-030 B.1: 한 페이지의 단순 배지(데코/editable TF 없음)를 임시 그룹으로 묶어
 // 배치 export하고 crop 매니페스트 배열을 반환한다.
-// @param {Array} simpleBadges [{grp, grpDomId, grpPage, childIds, childTextFrameIds}]
-// @return {Array} [{rf: renderedFrames 엔트리, crop: {src,dst,x,y,w,h}}] — 실패 시 []
+// param: simpleBadges [{grp, grpDomId, grpPage, childIds, childTextFrameIds}]
+// return: [{rf: renderedFrames 엔트리, crop: {src,dst,x,y,w,h}}] — 실패 시 []
 function exportPageBadgesBatched(doc, page, simpleBadges, renderDir, dpi) {
     if (simpleBadges.length < 2) return [];
     var results = [];
