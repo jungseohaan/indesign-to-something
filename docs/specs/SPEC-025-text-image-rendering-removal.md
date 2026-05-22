@@ -23,9 +23,19 @@
 - **[미커밋]** `WrapPhase5.java` +20줄: 행글 매달림 들여쓰기 패턴 감지 추가. 단락 첫 줄 wrapIndentLeft=0 + 연속 줄 wrapIndentLeft>0 이면 bullet hanging indent → obstacle wrap 으로 오인 방지, shrink 적용 안 함. 커밋 여부는 별도 판단.
 
 ### 다음 단계 (실제 동작 만들기)
-1. `classifyTextFrame()` 조건 5 보강: 마스터 페이지 본체 텍스트 검출 추가 (`tf.parentPage` 가 master spread page 이거나 `pageIndex === null` 패턴)
-2. `isRenderableTextFrame()` 의 회전 텍스트 분기를 SPEC-025 Tier B 처리로 우회
-3. 재검증 후 Tier A.1.5/A.4/A.8 추가 구현
+1. ✅ `classifyTextFrame()` 조건 5 보강: 마스터 spread 직속 TF 검출 (2026-05-22 적용). 효과: 1개 인스턴스 (2453_pi20) 정상 생성.
+2. ⚠️ "off-canvas override" 케이스 (parent=Spread, pageIndex=-1, y<0): TF 3854 같은 case 는 master spread 에 직접 있지 않고 일반 spread 의 pasteboard 영역에 있음. Phase 5 instanceMasterFrames 가 못 잡음 → 별도 처리 필요:
+   - Phase 5 확장: `tf.masterPageItem` 있는 override 도 적용 페이지마다 인스턴스화
+   - 또는 Phase 2 FramePlacer 가 pageIndex=-1 + masterPageItem 있는 TF 를 "어느 페이지에 표시할지" 결정 (y 좌표 + 페이지 사이즈로 추정)
+3. Tier B 회전 텍스트: 회전 bypass 자체는 코드에 있지만 (line 2644+, 2850), 실제 출력에 회전 textbox 0개. 별도 진단 필요.
+4. 재검증 후 Tier A.1.5/A.4/A.8 추가 구현
+
+### 2026-05-22 검증 데이터 (박현숙 1단원 소(1))
+- config debug log 확인: `spec025=masterPageEditable=true hashiraEditable=true rotationEditable=true nonprintingEditable=true` ✓ 정상 로딩
+- pageIndex=None TF 23개 → 모두 editable=True (분류 단계 OK)
+- 회전 TF 6개 → 4개 editable (분류 OK)
+- 동기화된 master 인스턴스 (synthetic id `_pi`): 1개만 생성 (대다수 master TF 가 spread root 에 있어 instanceMasterFrames 못 잡음)
+- Phase 2 FramePlacer 가 pageIndex<0 인 TF 를 건너뜀 → 최종 HWPX 출력에 master/회전 텍스트 0건
 
 ## 문제
 

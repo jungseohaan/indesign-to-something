@@ -2623,6 +2623,31 @@ function classifyTextFrame(item) {
     // 1. TextFrame만 처리
     if (item.constructor.name !== "TextFrame") return null;
 
+    // SPEC-025 Tier A.5 보강 (2026-05-22): 마스터 페이지 본체 텍스트 검출.
+    // 기존 조건 5 (`item.masterPageItem`) 는 오버라이드만 잡고, 마스터 스프레드 위 원본 텍스트는
+    // 검출하지 못함. 부모 체인을 거슬러 올라가 MasterSpread 가 있으면 마스터 본체로 간주.
+    try {
+        var __s25master = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
+        if (__s25master && __s25master.masterPageEditable) {
+            var __onMasterBody = false;
+            try {
+                var __mp = item.parent;
+                var __hop = 0;
+                while (__mp && __hop < 10) {
+                    if (__mp.constructor && __mp.constructor.name === "MasterSpread") { __onMasterBody = true; break; }
+                    __mp = __mp.parent;
+                    __hop++;
+                }
+            } catch (e) {}
+            if (__onMasterBody) {
+                // 텍스트 콘텐츠가 있어야 의미 있음. 빈 마스터 placeholder 는 background.
+                var __cmp = "";
+                try { __cmp = String(item.contents).replace(/[\s﻿\r\n￼]/g, ""); } catch (e) {}
+                if (__cmp.length > 0) return "editable";
+            }
+        }
+    } catch (e) {}
+
     // 1.5. 비균일/축소 변환된 TextFrame → background
     // (예: 부록 181p 의 0.184x 축소 TextFrame — HWPX 는 ItemTransform 의 스케일을
     //  글상자 크기/폰트에 그대로 반영하지 못해 글자가 너무 크게 출력됨.
