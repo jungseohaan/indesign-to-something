@@ -95,10 +95,6 @@ class ParagraphDistributor {
         }
 
         // 단일 프레임: frameVisibleText와 Story 텍스트 길이 비교
-        if (storyId != null && storyId.contains("255271")) {
-            System.err.println("[ParagraphDistributor] storyId=" + storyId + " blocks=" + blocks.size() + " hasComposed=" + hasComposedBlocks);
-            for (ASTTextFrameBlock b : blocks) { System.err.println("  block sourceId=" + b.sourceId() + " visLen=" + b.frameVisibleTextLength()); }
-        }
         if (blocks.size() == 1) {
             ASTTextFrameBlock block = blocks.get(0);
             // Story 텍스트가 길고 frameVisibleText가 거의 비어있으면 할당하지 않음
