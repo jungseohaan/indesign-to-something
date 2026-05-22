@@ -476,7 +476,17 @@ public final class FramePlacer {
             if (w <= 0) continue;
 
             // composedLines 기반 글상자 분할
-            if (tf.composedLines() != null && tf.composedLines().size() > 1) {
+            // 단, 다른 페이지의 연결 글상자가 있으면 YGap 분할 금지:
+            // YGap 블록이 생기면 distributeByComposedCharRange 경로를 타고 연결 글상자 체인 블록들이
+            // 단락 배분에서 제외되어 텍스트가 다음 페이지로 흐르지 못하는 버그 발생.
+            boolean hasNextPageChain = false;
+            if (tf.nextFrameId() != null) {
+                ResolvedTextFrame nextTfCheck = ctx.resolvedData.getTextFrame(tf.nextFrameId());
+                if (nextTfCheck != null && nextTfCheck.pageIndex() != tf.pageIndex()) {
+                    hasNextPageChain = true;
+                }
+            }
+            if (!hasNextPageChain && tf.composedLines() != null && tf.composedLines().size() > 1) {
                 // 1) wrap indent 기반 분할 (텍스트가 이미지를 비껴가는 경우)
                 // placeByWrapIndent는 Phase 5에서 후처리 (Phase 3 변환 파이프라인 유지)
                 // if (placeByWrapIndent(tf, section, pageLeft, pageTop)) continue;
