@@ -345,6 +345,179 @@ end tell"#,
     })
 }
 
+/// SPEC-030 B.2: 스킵 페이지 목록을 포함한 부분 추출.
+/// skip_render_pages: 렌더링을 건너뛸 1-based 페이지 인덱스 배열 (JSON 문자열, 예: "[1,3,5]")
+pub async fn run_extraction_with_skip(
+    app: &AppHandle,
+    indd_path: &str,
+    output_dir: &std::path::Path,
+    jsx_path: &str,
+    indesign_app_path: &str,
+    start_page: i32,
+    end_page: i32,
+    spread_mode: bool,
+    perf_mode: &str,
+    skip_pdf: bool,
+    skip_render_pages_json: &str,
+) -> Result<InddExtractResult, String> {
+    let app_name = app_name_from_path(indesign_app_path);
+    let output_dir_str = output_dir.to_string_lossy().to_string();
+    let spread_flag = if spread_mode { "1" } else { "0" };
+    let skip_pdf_flag = if skip_pdf { "1" } else { "0" };
+    let config_path = find_bundled_config(app);
+    // arguments[9] = skipRenderPages JSON, arguments[10] = mode "full"
+    let applescript = format!(
+        r#"tell application "{app_name}"
+    activate
+    with timeout of 3600 seconds
+        do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "{skip_render_pages}", "full"}}
+    end timeout
+end tell"#,
+        app_name = app_name,
+        jsx_path = jsx_path,
+        indd_path = indd_path,
+        output_dir = output_dir_str,
+        start_page = start_page,
+        end_page = end_page,
+        spread_flag = spread_flag,
+        config_path = config_path,
+        perf_mode = perf_mode,
+        skip_pdf_flag = skip_pdf_flag,
+        skip_render_pages = skip_render_pages_json,
+    );
+    emit_progress(app, "exporting", "부분 재추출 중 (변경 페이지만)...");
+    let mut child = Command::new("osascript")
+        .args(["-e", &applescript])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("osascript 실행 실패: {}", e))?;
+    // run_extraction과 동일한 대기 루프 — 공통 헬퍼로 추출하지 않고 인라인 복사
+    let done_path = output_dir.join(".done");
+    let progress_path = output_dir.join(".progress");
+    let mut last_message = String::new();
+    let timeout_secs = 3600u64;
+    let stale_secs = 1800u64;
+    let started = std::time::Instant::now();
+    let mut last_progress_at = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => break,
+        }
+        let elapsed = started.elapsed().as_secs();
+        let stale = last_progress_at.elapsed().as_secs();
+        if elapsed > timeout_secs || stale > stale_secs {
+            let _ = child.kill().await;
+            return Err(format!(
+                "부분 추출 타임아웃. 마지막 단계: {}",
+                if last_message.is_empty() { "시작 중".to_string() } else { last_message.clone() }
+            ));
+        }
+        if let Ok(content) = std::fs::read_to_string(&progress_path) {
+            if content != last_message {
+                last_message = content.clone();
+                last_progress_at = std::time::Instant::now();
+                if let Ok(prog) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
+                    let cur = prog.get("current").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let tot = prog.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
+                    emit_progress(app, step, &format!("{}/{}", cur, tot));
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let _ = child.wait().await;
+    if done_path.exists() {
+        let done_content = std::fs::read_to_string(&done_path).unwrap_or_default();
+        if let Ok(sig) = serde_json::from_str::<DoneSignal>(&done_content) {
+            if sig.status == "error" {
+                return Err(format!("부분 추출 오류: {}", sig.message.unwrap_or_default()));
+            }
+        }
+    }
+    let idml_path = output_dir.join("output.idml");
+    if !idml_path.exists() {
+        return Err("부분 추출 실패: output.idml이 생성되지 않았습니다.".into());
+    }
+    let resolved_json_path = output_dir.join("resolved.json");
+    let preview_pdf_path = output_dir.join("preview.pdf");
+    emit_progress(app, "done", "부분 추출 완료");
+    Ok(InddExtractResult {
+        idml_path: idml_path.to_string_lossy().to_string(),
+        resolved_json_path: if resolved_json_path.exists() {
+            Some(resolved_json_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        preview_pdf_path: if preview_pdf_path.exists() {
+            Some(preview_pdf_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        temp_dir: output_dir_str,
+    })
+}
+
+/// SPEC-030 B.2: 경량 pre-scan — 해시/아이템맵만 계산하고 종료.
+/// 결과 page_hashes.json + page_item_map.json 을 output_dir에 생성한다.
+/// 타임아웃은 120초 (렌더링 없음).
+pub async fn run_page_hash_scan(
+    app: &AppHandle,
+    indd_path: &str,
+    output_dir: &std::path::Path,
+    jsx_path: &str,
+    indesign_app_path: &str,
+) -> Result<(), String> {
+    let app_name = app_name_from_path(indesign_app_path);
+    let output_dir_str = output_dir.to_string_lossy().to_string();
+    let config_path = find_bundled_config(app);
+    // arguments[10] = "pre_scan"
+    let applescript = format!(
+        r#"tell application "{app_name}"
+    activate
+    with timeout of 300 seconds
+        do script (read POSIX file "{jsx_path}") language javascript with arguments {{"{indd_path}", "{output_dir}", "0", "0", "0", "0", "{config_path}", "standard", "0", "", "pre_scan"}}
+    end timeout
+end tell"#,
+        app_name = app_name,
+        jsx_path = jsx_path,
+        indd_path = indd_path,
+        output_dir = output_dir_str,
+        config_path = config_path,
+    );
+    emit_progress(app, "scanning", "페이지 변경 감지 중...");
+    let mut child = Command::new("osascript")
+        .args(["-e", &applescript])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("pre-scan osascript 실행 실패: {}", e))?;
+    let done_path = output_dir.join(".done");
+    let timeout_secs = 300u64;
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => break,
+        }
+        if started.elapsed().as_secs() > timeout_secs {
+            let _ = child.kill().await;
+            return Err("pre-scan 타임아웃".into());
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let _ = child.wait().await;
+    if !output_dir.join("page_hashes.json").exists() {
+        return Err("pre-scan 실패: page_hashes.json 미생성".into());
+    }
+    let _ = done_path; // 경고 방지
+    Ok(())
+}
+
 /// 추출 진행률 이벤트를 프론트엔드로 emit한다 (공개 버전).
 pub fn emit_progress_pub(app: &AppHandle, phase: &str, message: &str) {
     emit_progress(app, phase, message);

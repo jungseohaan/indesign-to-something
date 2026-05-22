@@ -208,6 +208,8 @@ pub fn store(
     if let Ok(json) = serde_json::to_string_pretty(&meta) {
         let _ = std::fs::write(target.join("_cache_meta.json"), json);
     }
+    // SPEC-030 B.2: 경로 인덱스 갱신 (전체 파일 해시가 변해도 이전 캐시를 찾을 수 있게)
+    update_path_index(std::path::Path::new(indd_path), cache_key);
 
     let idml = target.join("output.idml");
     let resolved = target.join("resolved.json");
@@ -298,4 +300,192 @@ fn dir_size(path: &Path) -> std::io::Result<u64> {
         }
     }
     Ok(total)
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SPEC-030 B.2: 페이지 단위 부분 캐시
+// ─────────────────────────────────────────────────────────────────
+
+/// INDD 경로 → 최근 캐시 키 인덱스 파일 경로.
+/// 전체 파일 해시가 변해도 이전 캐시 엔트리를 찾을 수 있게 한다.
+fn path_index_file() -> Result<PathBuf, String> {
+    Ok(cache_root()?.join("_path_index.json"))
+}
+
+/// INDD 절대 경로로 가장 최근 캐시 키를 조회한다.
+pub fn lookup_previous_cache_key(indd_path: &Path) -> Option<String> {
+    let index_path = path_index_file().ok()?;
+    let content = std::fs::read_to_string(&index_path).ok()?;
+    let map: std::collections::HashMap<String, String> =
+        serde_json::from_str(&content).ok()?;
+    let canonical = indd_path
+        .canonicalize()
+        .unwrap_or_else(|_| indd_path.to_path_buf());
+    map.get(&canonical.to_string_lossy().to_string()).cloned()
+}
+
+/// 경로 인덱스에 최신 캐시 키를 기록한다.
+pub fn update_path_index(indd_path: &Path, cache_key: &str) {
+    let Ok(index_path) = path_index_file() else { return };
+    let mut map: std::collections::HashMap<String, String> = std::fs::read_to_string(&index_path)
+        .ok()
+        .and_then(|c| serde_json::from_str(&c).ok())
+        .unwrap_or_default();
+    let canonical = indd_path
+        .canonicalize()
+        .unwrap_or_else(|_| indd_path.to_path_buf());
+    map.insert(canonical.to_string_lossy().to_string(), cache_key.to_string());
+    if let Ok(json) = serde_json::to_string(&map) {
+        let _ = std::fs::write(&index_path, json);
+    }
+}
+
+/// 캐시 엔트리에서 page_hashes.json을 읽어 반환한다.
+/// 키: 1-based 페이지 인덱스 문자열 → 해시 문자열
+pub fn load_page_hashes(cache_key: &str) -> Option<std::collections::HashMap<String, String>> {
+    let dir = cache_entry_dir(cache_key).ok()?;
+    let content = std::fs::read_to_string(dir.join("page_hashes.json")).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// 캐시 엔트리에서 page_item_map.json을 읽어 반환한다.
+/// 키: 1-based 페이지 인덱스 문자열 → item DOM ID 배열
+pub fn load_page_item_map(
+    cache_key: &str,
+) -> Option<std::collections::HashMap<String, Vec<u64>>> {
+    let dir = cache_entry_dir(cache_key).ok()?;
+    let content = std::fs::read_to_string(dir.join("page_item_map.json")).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// 두 해시 맵을 비교해 변경되지 않은 페이지 인덱스(1-based) 목록을 반환한다.
+pub fn unchanged_page_indices(
+    cached: &std::collections::HashMap<String, String>,
+    current: &std::collections::HashMap<String, String>,
+) -> Vec<u32> {
+    let mut unchanged = Vec::new();
+    for (page_str, curr_hash) in current {
+        if let Some(cached_hash) = cached.get(page_str) {
+            if cached_hash == curr_hash {
+                if let Ok(idx) = page_str.parse::<u32>() {
+                    unchanged.push(idx);
+                }
+            }
+        }
+    }
+    unchanged.sort_unstable();
+    unchanged
+}
+
+/// 이전 캐시 엔트리에서 변경되지 않은 페이지의 PNG/PDF 파일을 새 추출 디렉토리로 복사한다.
+/// `rendered_frames/` 안의 파일은 page_item_map을 통해 해당 페이지 소속 아이템을 판단하고,
+/// `rendered_frames/page_bg_N.*` 파일은 페이지 인덱스로 직접 매칭한다.
+pub fn copy_cached_pages(
+    cached_cache_key: &str,
+    new_dir: &Path,
+    unchanged_pages: &[u32],
+    item_map: &std::collections::HashMap<String, Vec<u64>>,
+) -> usize {
+    if unchanged_pages.is_empty() {
+        return 0;
+    }
+
+    let cached_dir = match cache_entry_dir(cached_cache_key) {
+        Ok(d) => d,
+        Err(_) => return 0,
+    };
+
+    // 변경되지 않은 페이지 index set (0-based for page_bg_N naming)
+    let page_set: std::collections::HashSet<u32> =
+        unchanged_pages.iter().copied().collect();
+
+    // unchanged pages 의 item ID set 구축
+    let mut item_id_set: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    for page_idx in unchanged_pages {
+        let key = page_idx.to_string();
+        if let Some(ids) = item_map.get(&key) {
+            for id in ids {
+                item_id_set.insert(*id);
+            }
+        }
+    }
+
+    let mut copied = 0usize;
+
+    // 1. rendered_frames/ — page_bg_N.* 파일 (0-based page index)
+    let cached_rf = cached_dir.join("rendered_frames");
+    let new_rf = new_dir.join("rendered_frames");
+    let _ = std::fs::create_dir_all(&new_rf);
+    if let Ok(rd) = std::fs::read_dir(&cached_rf) {
+        for entry in rd.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let dst = new_rf.join(&name);
+            if dst.exists() {
+                continue;
+            }
+            // page_bg_N.png / page_bg_N.pdf — N is 0-based, pgIdx (1-based) = N+1
+            if name.starts_with("page_bg_") {
+                if let Some(rest) = name.strip_prefix("page_bg_") {
+                    let num_str = rest.split('.').next().unwrap_or("");
+                    if let Ok(n) = num_str.parse::<u32>() {
+                        let one_based = n + 1;
+                        if page_set.contains(&one_based) {
+                            if std::fs::copy(entry.path(), &dst).is_ok() {
+                                copied += 1;
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            // badge_ID.png / frame_ID.png / graphic_ID.png / etc — match by item ID
+            let item_id = extract_item_id_from_filename(&name);
+            if let Some(id) = item_id {
+                if item_id_set.contains(&id) {
+                    if std::fs::copy(entry.path(), &dst).is_ok() {
+                        copied += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. pageBackgrounds/ (page_bg_N.pdf 는 여기서도 있을 수 있음)
+    let cached_pb = cached_dir.join("pageBackgrounds");
+    let new_pb = new_dir.join("pageBackgrounds");
+    if cached_pb.is_dir() {
+        let _ = std::fs::create_dir_all(&new_pb);
+        if let Ok(rd) = std::fs::read_dir(&cached_pb) {
+            for entry in rd.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let dst = new_pb.join(&name);
+                if dst.exists() {
+                    continue;
+                }
+                if name.starts_with("page_bg_") {
+                    if let Some(rest) = name.strip_prefix("page_bg_") {
+                        let num_str = rest.split('.').next().unwrap_or("");
+                        if let Ok(n) = num_str.parse::<u32>() {
+                            let one_based = n + 1;
+                            if page_set.contains(&one_based) {
+                                if std::fs::copy(entry.path(), &dst).is_ok() {
+                                    copied += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    copied
+}
+
+/// 파일명에서 item DOM ID를 추출한다 (badge_12345.png → 12345).
+fn extract_item_id_from_filename(name: &str) -> Option<u64> {
+    // 패턴: <prefix>_<id>.<ext>
+    let without_ext = name.rsplit_once('.').map(|(l, _)| l).unwrap_or(name);
+    let after_underscore = without_ext.rsplit_once('_').map(|(_, r)| r)?;
+    after_underscore.parse().ok()
 }

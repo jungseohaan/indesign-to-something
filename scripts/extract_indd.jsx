@@ -315,6 +315,94 @@ function isBlackColor(character, blackThreshold) {
     }
 }
 
+// --- SPEC-030 B.2: 페이지별 해시 + 아이템 맵 ---
+
+/**
+ * 페이지의 경량 체크섬을 계산한다.
+ * item ID 목록 + 각 item의 geometricBounds를 폴리노미얼 해시로 압축.
+ * ExtendScript는 SHA256을 제공하지 않으므로 간단한 uint32 해시 사용.
+ */
+function computePageHash(page) {
+    var h = 0;
+    var items;
+    try { items = page.allPageItems; } catch (e) { return "0"; }
+    h = (h * 31 + items.length) | 0;
+    for (var i = 0; i < items.length; i++) {
+        try {
+            h = (h * 31 + items[i].id) | 0;
+            var b = items[i].geometricBounds; // [top, left, bottom, right]
+            h = (h * 31 + Math.round(b[0] * 10)) | 0;
+            h = (h * 31 + Math.round(b[1] * 10)) | 0;
+            h = (h * 31 + Math.round(b[2] * 10)) | 0;
+            h = (h * 31 + Math.round(b[3] * 10)) | 0;
+        } catch (e2) {}
+    }
+    // 텍스트 프레임 내용 샘플 (첫 200자)
+    try {
+        var tfs = page.textFrames;
+        for (var t = 0; t < tfs.length; t++) {
+            try {
+                var txt = tfs[t].contents;
+                var len = Math.min(txt.length, 200);
+                h = (h * 31 + txt.length) | 0;
+                for (var c = 0; c < len; c++) {
+                    h = (h * 31 + txt.charCodeAt(c)) | 0;
+                }
+            } catch (e3) {}
+        }
+    } catch (e) {}
+    return (h >>> 0).toString(16);
+}
+
+/**
+ * 전체 페이지 범위에 대해 해시 맵과 아이템-페이지 맵을 한 번에 빌드한다.
+ * hashes: {pageIdx(1-based): hashStr}
+ * itemMap: {pageIdx(1-based): [domId, ...]}
+ */
+function buildPageData(doc, startPage, endPage, allItems) {
+    var hashes = {};
+    var itemMap = {};
+
+    // 페이지 해시
+    for (var pi = 0; pi < doc.pages.length; pi++) {
+        var page = doc.pages[pi];
+        var pgIdx = page.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+        hashes[pgIdx] = computePageHash(page);
+        itemMap[pgIdx] = [];
+    }
+
+    // allItems → 페이지 귀속 (item.parentPage 사용, 없으면 bounds 기반 매칭)
+    for (var ai = 0; ai < allItems.length; ai++) {
+        try {
+            var item = allItems[ai];
+            var itemPage = null;
+            try { itemPage = item.parentPage; } catch (e) {}
+            if (!itemPage) {
+                // bounds 기반 페이지 탐색
+                try {
+                    var ib = item.visibleBounds;
+                    var icy = (ib[0] + ib[2]) / 2;
+                    var icx = (ib[1] + ib[3]) / 2;
+                    for (var pp = 0; pp < doc.pages.length; pp++) {
+                        var _p = doc.pages[pp];
+                        var _pb = _p.bounds;
+                        if (icy >= _pb[0] && icy <= _pb[2] && icx >= _pb[1] && icx <= _pb[3]) {
+                            itemPage = _p;
+                            break;
+                        }
+                    }
+                } catch (e2) {}
+            }
+            if (!itemPage) continue;
+            var ipIdx = itemPage.documentOffset + 1;
+            if (itemMap[ipIdx]) itemMap[ipIdx].push(item.id);
+        } catch (e) {}
+    }
+
+    return { hashes: hashes, itemMap: itemMap };
+}
+
 // --- 메인 ---
 
 function main(args) {
@@ -334,6 +422,18 @@ function main(args) {
     var perfMode = (args[7] || "standard").toLowerCase();
     // SPEC-030: preview.pdf 스킵 ("1" 이면 PDF 미생성). perfMode "fast" 의 기본 동작이지만 명시도 가능.
     var skipPdf = (args[8] === "1") || (perfMode === "fast");
+    // SPEC-030 B.2: 렌더링 스킵할 1-based 페이지 인덱스 JSON 배열 (예: "[1,3,5]").
+    // 변경되지 않은 페이지는 PNG 렌더링을 건너뛰고 캐시에서 복사한다.
+    var skipRenderPagesRaw = args[9] || "";
+    var skipRenderPagesMap = {};  // {pageIdx(1-based): true}
+    if (skipRenderPagesRaw) {
+        try {
+            var _srp = JSON.parse(skipRenderPagesRaw);
+            for (var _si = 0; _si < _srp.length; _si++) skipRenderPagesMap[_srp[_si]] = true;
+        } catch (e) {}
+    }
+    // SPEC-030 B.2: "pre_scan" 모드 — 해시만 계산하고 렌더링 없이 종료.
+    var extractMode = (args[10] || "full").toLowerCase();
     CONFIG = loadConversionConfig(configPath);
     // SPEC-030: perfMode 가 pngExportResolution 을 override (config 값 < CLI 값).
     if (perfMode === "fast") {
@@ -469,6 +569,26 @@ function main(args) {
             _marker(outputDir, "03_allPageItems");
             var allItems = doc.allPageItems;
 
+            // SPEC-030 B.2: 페이지 해시 + 아이템 맵 계산 → page_hashes.json / page_item_map.json
+            _marker(outputDir, "03b_pageHashes");
+            try {
+                var _pageData = buildPageData(doc, startPage, endPage, allItems);
+                var _phFile = File(outputDir + "/page_hashes.json");
+                _phFile.encoding = "UTF-8"; _phFile.open("w");
+                _phFile.write(JSON.stringify(_pageData.hashes)); _phFile.close();
+                var _pmFile = File(outputDir + "/page_item_map.json");
+                _pmFile.encoding = "UTF-8"; _pmFile.open("w");
+                _pmFile.write(JSON.stringify(_pageData.itemMap)); _pmFile.close();
+            } catch (eHash) { $.writeln("[pageHash] error: " + eHash); }
+
+            // SPEC-030 B.2: pre_scan 모드 — 해시/맵만 생성하고 렌더링 없이 종료
+            if (extractMode === "pre_scan") {
+                doc.close(SaveOptions.NO);
+                doc = null;
+                writeDone(outputDir, "ok", null);
+                return;
+            }
+
             // 2.6~2.11. 기존 개별 렌더 함수 비활성화 → 페이지 단위 렌더링으로 통합
             var renderedFrames = [];
             var renderedPdfFrames = [];
@@ -480,7 +600,7 @@ function main(args) {
             _marker(outputDir, "04_pageRendering");
             writeProgress(outputDir, "rendered_frames", 0, rangePageCount);
 
-            var bgResult = exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems);
+            var bgResult = exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, skipRenderPagesMap);
             var renderedFloatingItems = bgResult.items;
             var editableFrameIds = bgResult.editableFrameIds;
             // 테이블+인라인 렌더링 결과를 renderedFloatingItems에 추가
@@ -493,7 +613,7 @@ function main(args) {
 
             // 2.13. 배지 그룹 + 장식 텍스트 프레임 렌더링
             _marker(outputDir, "05_badgeRendering");
-            var rtfResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, editableFrameIds);
+            var rtfResult = exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, editableFrameIds, skipRenderPagesMap);
             renderedFrames = rtfResult.frames;
             var badgeChildIds = rtfResult.badgeChildIds;
             // 배지 자식 항목을 renderedFloatingItems에 추가
@@ -590,7 +710,12 @@ function main(args) {
                 var pdfFile = File(outputDir + "/preview.pdf");
 
                 app.pdfExportPreferences.exportReaderSpreads = spreadMode;
-                app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
+                // SPEC-030 A.3: 페이지 범위가 지정된 경우 PDF도 해당 범위만 출력
+                if (startPage === 1 && endPage === pageCount) {
+                    app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
+                } else {
+                    app.pdfExportPreferences.pageRange = startPage + "-" + endPage;
+                }
                 app.pdfExportPreferences.colorBitmapSampling = Sampling.BICUBIC_DOWNSAMPLE;
                 app.pdfExportPreferences.colorBitmapSamplingDPI = 300;
                 app.pdfExportPreferences.colorBitmapCompression = BitmapCompression.JPEG;
@@ -641,7 +766,8 @@ function main(args) {
 /**
  * 짧은 텍스트 프레임(장식 텍스트)과 배지 그룹을 PNG로 렌더링한다.
  */
-function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, editableFrameIds) {
+function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, editableFrameIds, skipRenderPagesMap) {
+    if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -716,6 +842,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         if (!grpPage) continue;
         var grpPgIdx = grpPage.documentOffset + 1;
         if (grpPgIdx < startPage || grpPgIdx > endPage) continue;
+        if (skipRenderPagesMap[grpPgIdx]) continue; // SPEC-030 B.2
 
         var grpDomId = grp.id;
         if (renderedIds[grpDomId]) continue;
@@ -909,6 +1036,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         if (!nGrpPage) continue;
         var nPgIdx = nGrpPage.documentOffset + 1;
         if (nPgIdx < startPage || nPgIdx > endPage) continue;
+        if (skipRenderPagesMap[nPgIdx]) continue; // SPEC-030 B.2
 
         var nGrpId = nGrp.id;
         var nFileName = "badge_" + nGrpId + ".png";
@@ -1019,6 +1147,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         if (!parentPage) continue;
         var pgIdx = parentPage.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
+        if (skipRenderPagesMap[pgIdx]) continue; // SPEC-030 B.2
 
         if (isTextFrame && classifyTextFrame(item) !== "renderable") continue;
 
@@ -3327,7 +3456,8 @@ function isInlineItem(item) {
  *
  * @return {Array} renderedFloatingItems 호환 배열 (페이지당 1개 엔트리)
  */
-function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
+function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, skipRenderPagesMap) {
+    if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -3824,6 +3954,11 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems) {
         var page = doc.pages[pi];
         var pgIdx = page.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
+        // SPEC-030 B.2: 변경되지 않은 페이지는 PNG/PDF 렌더링 스킵 (캐시에서 복사)
+        if (skipRenderPagesMap[pgIdx]) {
+            writeProgress(outputDir, "rendered_frames", pi, doc.pages.length);
+            continue;
+        }
 
         // 1. 해당 페이지의 편집 가능 텍스트 프레임 숨기기 (PDF/PNG 공통)
         var hiddenItems = [];
@@ -5400,6 +5535,173 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
     }
     if (frameClones > 0 || storyClones > 0) {
         $.writeln("[SPEC-025 Phase 5] cloned " + frameClones + " master frame instances, " + storyClones + " story copies");
+    }
+
+    // SPEC-025 Phase 5 보강 (2026-05-22): off-canvas master override 처리.
+    // TF.masterPageItem 이 설정된 일반 spread item 이 parentPage=null (pasteboard 영역, y<0 등) 일 경우
+    // Phase 2 가 pageIndex<0 으로 건너뜀 → 인스턴스화 안 됨.
+    // 해결: 부모 spread 의 모든 doc page 에 clone (보통 1~2 페이지 spread).
+    var offCanvasClones = 0;
+    try {
+        for (var sp = 0; sp < doc.spreads.length; sp++) {
+            var spread = doc.spreads[sp];
+            var spreadItems = [];
+            try { spreadItems = spread.allPageItems; } catch (e) { continue; }
+            // spread 가 가진 doc page indices (1 또는 2)
+            var spreadPageIdxs = [];
+            try {
+                for (var pi = 0; pi < spread.pages.length; pi++) {
+                    var dpi = spread.pages[pi].documentOffset;
+                    var dpg = dpi + 1; // 1-based
+                    if (dpg < startPage || dpg > endPage) continue;
+                    spreadPageIdxs.push(dpi);
+                }
+            } catch (e) {}
+            if (spreadPageIdxs.length === 0) continue;
+
+            for (var ii = 0; ii < spreadItems.length; ii++) {
+                var oTf = spreadItems[ii];
+                try { if (oTf.constructor.name !== "TextFrame") continue; } catch (e) { continue; }
+                // 1) parentPage = null (off-canvas)
+                var pp = null;
+                try { pp = oTf.parentPage; } catch (e) {}
+                if (pp) continue;
+                // 부모가 Spread (또는 Group on Spread) 인 경우만 — Cell/Table 안에 있는 TF 는 제외
+                var __parentChain = oTf.parent;
+                var __isOnSpread = false;
+                var __hopOC = 0;
+                while (__parentChain && __hopOC < 8) {
+                    var __pcName = "";
+                    try { __pcName = __parentChain.constructor.name; } catch (e) {}
+                    if (__pcName === "Cell") { __isOnSpread = false; break; } // 테이블 셀 안 → skip
+                    if (__pcName === "Spread") { __isOnSpread = true; break; }
+                    if (__pcName === "MasterSpread") { __isOnSpread = false; break; } // 이미 master 케이스에서 처리
+                    try { __parentChain = __parentChain.parent; } catch (e) { break; }
+                    __hopOC++;
+                }
+                if (!__isOnSpread) continue;
+                // 2) inline 제외 (인라인 객체)
+                try { if (isInlineItem(oTf)) continue; } catch (e) {}
+                // 진단 로그 (id + masterPageItem flag + text 앞 40자)
+                try {
+                    var __mpi = false;
+                    try { __mpi = !!oTf.masterPageItem; } catch (e) {}
+                    var __snippet = "";
+                    try { __snippet = String(oTf.contents).substring(0, 40); } catch (e) {}
+                    $.writeln("[SPEC-025 off-canvas] id=" + oTf.id + " masterPageItem=" + __mpi + " text=" + __snippet);
+                } catch (e) {}
+                // 3) 텍스트 콘텐츠가 있어야 의미 있음 (background 빈칸/장식 제외).
+                //    classifyTextFrame 가 renderable 로 분류해도 master override 는 검색 가능 텍스트로 처리.
+                var ocText = "";
+                try { ocText = String(oTf.contents).replace(/[\s﻿\r\n￼]/g, ""); } catch (e) {}
+                if (ocText.length === 0) continue;
+                // hidden layer 는 제외 (안 보여야 함)
+                try { if (isOnHiddenLayer(oTf)) continue; } catch (e) {}
+
+                var ocBaseId = ""; try { ocBaseId = oTf.id.toString(); } catch (e) { continue; }
+                var ocStoryId = null;
+                try { ocStoryId = oTf.parentStory.id.toString(); } catch (e) {}
+
+                // 공통 메타데이터 수집
+                var ocGb = null;
+                try { var gb2 = oTf.geometricBounds; ocGb = [gb2[0], gb2[1], gb2[2], gb2[3]]; } catch (e) {}
+                var ocRot = 0;       try { ocRot = oTf.absoluteRotationAngle; } catch (e) {}
+                var ocCols = 1;      try { ocCols = oTf.textFramePreferences.textColumnCount; } catch (e) {}
+                var ocGutter = 0;    try { ocGutter = oTf.textFramePreferences.textColumnGutter; } catch (e) {}
+                var ocInset = null;  try { var ins2 = oTf.textFramePreferences.insetSpacing; ocInset = [ins2[0], ins2[1], ins2[2], ins2[3]]; } catch (e) {}
+                var ocVAlign = null; try { ocVAlign = oTf.textFramePreferences.verticalJustification.toString(); } catch (e) {}
+                var ocFill = null;   try { ocFill = oTf.fillColor.name; } catch (e) {}
+                var ocFillTint;      try { ocFillTint = oTf.fillTint; } catch (e) {}
+                var ocStroke = null; try { ocStroke = oTf.strokeColor.name; } catch (e) {}
+                var ocStrokeW;       try { ocStrokeW = oTf.strokeWeight; } catch (e) {}
+                var ocOpacity;       try { ocOpacity = oTf.transparencySettings.blendingSettings.opacity; } catch (e) {}
+                var ocCorner;        try { ocCorner = oTf.topLeftCornerRadius; } catch (e) {}
+                var ocNonprint;      try { ocNonprint = !!oTf.nonprinting; } catch (e) { ocNonprint = false; }
+                var ocHidden;        try { ocHidden = isOnHiddenLayer(oTf); } catch (e) { ocHidden = false; }
+                var ocVisibleText = "";
+                try {
+                    ocVisibleText = oTf.contents;
+                    if (typeof ocVisibleText === "string") ocVisibleText = ocVisibleText.replace(/\r/g, "\n");
+                } catch (e) {}
+                // paragraph index 범위
+                var ocParaStart = -1, ocParaEnd = -1;
+                try {
+                    var ocfp = oTf.paragraphs.everyItem().getElements();
+                    if (ocfp.length > 0) {
+                        var ocsp = oTf.parentStory.paragraphs.everyItem().getElements();
+                        var ocfiIdx = ocfp[0].index;
+                        var ocliIdx = ocfp[ocfp.length - 1].index;
+                        for (var ocsk = 0; ocsk < ocsp.length; ocsk++) {
+                            if (ocsp[ocsk].index === ocfiIdx) ocParaStart = ocsk;
+                            if (ocsp[ocsk].index === ocliIdx) ocParaEnd = ocsk;
+                        }
+                    }
+                } catch (e) {}
+
+                for (var spi = 0; spi < spreadPageIdxs.length; spi++) {
+                    var docPgIdx2 = spreadPageIdxs[spi];
+                    var ocCloneId = ocBaseId + "_oc" + docPgIdx2;
+                    var ocCloneStoryId = ocStoryId ? (ocStoryId + "_oc" + docPgIdx2) : null;
+                    var ocClone = {
+                        id: ocCloneId,
+                        masterSourceId: ocBaseId,
+                        isMasterInstance: true,
+                        pageIndex: docPgIdx2,
+                        storyId: ocCloneStoryId,
+                        overflows: false,
+                        lineCount: 0,
+                        paragraphStart: ocParaStart,
+                        paragraphEnd: ocParaEnd,
+                        geometricBounds: ocGb,
+                        columnCount: ocCols,
+                        columnGutter: ocGutter,
+                        insetSpacing: ocInset,
+                        verticalJustification: ocVAlign,
+                        rotationAngle: ocRot,
+                        fillColor: ocFill,
+                        strokeColor: ocStroke,
+                        isMasterPageItem: false,
+                        nonprinting: ocNonprint,
+                        onHiddenLayer: ocHidden,
+                        isInline: false,
+                        frameVisibleText: ocVisibleText
+                    };
+                    if (typeof ocFillTint !== "undefined") ocClone.fillTint = ocFillTint;
+                    if (typeof ocStrokeW !== "undefined") ocClone.strokeWeight = ocStrokeW;
+                    if (typeof ocOpacity !== "undefined") ocClone.opacity = ocOpacity;
+                    if (typeof ocCorner !== "undefined") ocClone.cornerRadius = ocCorner;
+                    try {
+                        if (ocGb) {
+                            var dpb2 = doc.pages[docPgIdx2].bounds;
+                            ocClone.pageRelativeBounds = [
+                                ocGb[0] - dpb2[0],
+                                ocGb[1] - dpb2[1],
+                                ocGb[2] - dpb2[0],
+                                ocGb[3] - dpb2[1]
+                            ];
+                        }
+                    } catch (e) {}
+                    editableIds[ocCloneId] = true;
+                    textFrames.push(ocClone);
+                    offCanvasClones++;
+                    // story clone
+                    if (ocStoryId && storyById[ocStoryId] && ocCloneStoryId) {
+                        var ocOrigSt = storyById[ocStoryId];
+                        var ocStClone = {
+                            id: ocCloneStoryId,
+                            length: ocOrigSt.length,
+                            paragraphCount: ocOrigSt.paragraphCount,
+                            paragraphs: ocOrigSt.paragraphs,
+                            tables: ocOrigSt.tables
+                        };
+                        stories.push(ocStClone);
+                    }
+                }
+            }
+        }
+    } catch (eOC) { $.writeln("[SPEC-025 Phase 5 off-canvas error] " + eOC); }
+    if (offCanvasClones > 0) {
+        $.writeln("[SPEC-025 Phase 5] off-canvas overrides: " + offCanvasClones + " frame clones");
     }
 }
 

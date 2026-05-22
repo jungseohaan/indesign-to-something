@@ -111,11 +111,29 @@ pub async fn extract_indd(
         }
     }
 
-    // 5. 캐시 미스 → 실제 추출 실행
+    // 5. 캐시 미스 → SPEC-030 B.2: 이전 캐시 엔트리가 있으면 per-page 부분 추출 시도
     let indesign_app_path = crate::indesign::find_indesign_app()?;
     let output_dir = crate::indesign::create_extraction_temp_dir()?;
 
-    let result = crate::indesign::run_extraction(
+    // B.2: 같은 INDD 경로의 이전 캐시 엔트리를 찾고 page hash 비교
+    let partial_result = if !debug_range {
+        try_partial_extraction(
+            &app,
+            &indd_path,
+            &output_dir,
+            &jsx_path,
+            &indesign_app_path,
+            sp, ep, sm, &pm_normalized, sk,
+        )
+        .await
+    } else {
+        None
+    };
+
+    let result = if let Some(r) = partial_result {
+        r
+    } else {
+    crate::indesign::run_extraction(
         &app,
         &indd_path,
         &output_dir,
@@ -132,7 +150,8 @@ pub async fn extract_indd(
         // 추출 실패 시 임시 디렉토리 정리
         let _ = std::fs::remove_dir_all(&output_dir);
         e
-    })?;
+    })?
+    }; // end partial_result else branch
 
     // 6. 원본 INDD 파일 옆 Links/ 폴더를 temp 디렉토리에 심볼릭 링크
     if let Some(indd_parent) = std::path::Path::new(&indd_path).parent() {
@@ -207,3 +226,101 @@ pub async fn export_ast(idml_path: String, jar_path: String) -> Result<serde_jso
         .map_err(|e| format!("Failed to parse AST JSON: {}", e))
 }
 
+// ─────────────────────────────────────────────────────────────────
+// SPEC-030 B.2: 부분 캐시 추출 헬퍼
+// ─────────────────────────────────────────────────────────────────
+
+/// 이전 캐시 엔트리를 이용해 변경된 페이지만 재추출한다.
+/// 성공하면 InddExtractResult를 반환하고, 이전 캐시가 없거나 pre-scan 실패 시 None 반환.
+async fn try_partial_extraction(
+    app: &tauri::AppHandle,
+    indd_path: &str,
+    output_dir: &std::path::Path,
+    jsx_path: &str,
+    indesign_app_path: &str,
+    start_page: i32,
+    end_page: i32,
+    spread_mode: bool,
+    perf_mode: &str,
+    skip_pdf: bool,
+) -> Option<crate::indesign::InddExtractResult> {
+    // 1. 이전 캐시 키 조회
+    let indd = std::path::Path::new(indd_path);
+    let prev_key = extract_cache::lookup_previous_cache_key(indd)?;
+    let cached_hashes = extract_cache::load_page_hashes(&prev_key)?;
+    let cached_item_map = extract_cache::load_page_item_map(&prev_key)?;
+
+    // 2. pre-scan: 현재 페이지 해시 계산 (경량 InDesign 실행)
+    let scan_dir = crate::indesign::create_extraction_temp_dir().ok()?;
+    let scan_ok = crate::indesign::run_page_hash_scan(
+        app,
+        indd_path,
+        &scan_dir,
+        jsx_path,
+        indesign_app_path,
+    )
+    .await;
+    if scan_ok.is_err() {
+        let _ = std::fs::remove_dir_all(&scan_dir);
+        return None;
+    }
+
+    // 3. 현재 해시 읽기
+    let current_hashes: std::collections::HashMap<String, String> = std::fs::read_to_string(
+        scan_dir.join("page_hashes.json"),
+    )
+    .ok()
+    .and_then(|c| serde_json::from_str(&c).ok())?;
+    let _ = std::fs::remove_dir_all(&scan_dir);
+
+    // 4. 변경되지 않은 페이지 계산
+    let unchanged = extract_cache::unchanged_page_indices(&cached_hashes, &current_hashes);
+    if unchanged.is_empty() {
+        // 모든 페이지 변경 → 일반 전체 추출로 폴백
+        return None;
+    }
+
+    // 부분 재추출이 충분히 이득이 있을 때만 진행 (50% 이상 스킵 가능)
+    let total_pages = current_hashes.len();
+    if unchanged.len() * 2 < total_pages {
+        return None;
+    }
+
+    eprintln!(
+        "[B.2] 부분 재추출: {}/{} 페이지 스킵 (변경: {})",
+        unchanged.len(),
+        total_pages,
+        total_pages - unchanged.len()
+    );
+
+    // 5. 스킵 목록 JSON 직렬화
+    let skip_json = serde_json::to_string(&unchanged).ok()?;
+
+    // 6. 변경된 페이지만 포함한 부분 추출 실행
+    let result = crate::indesign::run_extraction_with_skip(
+        app,
+        indd_path,
+        output_dir,
+        jsx_path,
+        indesign_app_path,
+        start_page,
+        end_page,
+        spread_mode,
+        perf_mode,
+        skip_pdf,
+        &skip_json,
+    )
+    .await
+    .ok()?;
+
+    // 7. 이전 캐시에서 변경되지 않은 페이지 PNG 복사
+    let copied = extract_cache::copy_cached_pages(
+        &prev_key,
+        output_dir,
+        &unchanged,
+        &cached_item_map,
+    );
+    eprintln!("[B.2] 캐시에서 {} 파일 복사", copied);
+
+    Some(result)
+}
