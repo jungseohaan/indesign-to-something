@@ -177,8 +177,9 @@ public final class RenderableFramePlacer {
 
                 kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTf
                         = ctx.resolvedData.getTextFrame(String.valueOf(rt.id()));
-                // null-type inline TF: Phase 3 가 inline 앵커에서 PNG로 직접 임베드 →
-                // 여기서 floating 배치하면 중복. Phase 3 에 위임.
+                // null-type inline TF: Phase 3의 tryInlineTextFrameAsRun이 inline text로 처리.
+                // Phase 7 에서 TextFrameBlock 생성하면 본문 텍스트와 중복 → skip.
+                if (rtTf != null && rtTf.isInline() && rt.itemType() == null) continue;
                 // SPEC-025: renderable inline TF 가 짧은 단일 텍스트 (≤3자) 면 PNG 대신
                 // TextFrameBlock 으로 변환 → 텍스트로 검색 가능 + 폰트 매핑/스케일 자유.
                 // (예: 페이지 32 "1" 큰 번호 라벨)
@@ -239,7 +240,10 @@ public final class RenderableFramePlacer {
                 }
                 // SPEC-025 확장: 비-인라인 플로팅 renderable TF 도 짧은 단일 텍스트(≤20자, 인라인 객체 없음)면
                 // PNG 대신 TextFrameBlock 으로 변환. 예: "한글 맞춤법의 원리" (소단원명 데코 TF)
-                if (!convertedToText && rtTf != null && !rtTf.isInline() && !rt.isBadgeGroup()) {
+                // 단, 비-편집 가능 TF는 PNG로 처리 (시각 스타일 보존 우선 — 예: 보기 박스 내 자식 TF).
+                // 비-편집 TF가 TextFrameBlock을 먼저 생성하면 dedupKey를 선점 → 부모 컨테이너 ASTFigure가 skip됨.
+                if (!convertedToText && rtTf != null && !rtTf.isInline() && !rt.isBadgeGroup()
+                        && ctx.resolvedData.isEditableTextFrame(rtTf.id())) {
                     String visText2 = rtTf.frameVisibleText();
                     if (visText2 != null && !visText2.contains("￼")) {
                         String cleaned2 = visText2.replace("\r", "").replace("\n", "").trim();
@@ -494,6 +498,8 @@ public final class RenderableFramePlacer {
         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
             if (rt.isBadgeGroup()) continue;
             if ("inline_object".equals(rt.type())) continue; // Phase 7 floating 건너뜀 — Phase 3가 처리
+            // null-type inline TF: Phase 7가 skip → Phase 3가 tryInlineTextFrameAsRun으로 처리 → 등록 불필요
+            if (rt.itemType() == null) continue;
             kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTf =
                     ctx.resolvedData.getTextFrame(String.valueOf(rt.id()));
             if (rtTf == null || !rtTf.isInline()) continue;
