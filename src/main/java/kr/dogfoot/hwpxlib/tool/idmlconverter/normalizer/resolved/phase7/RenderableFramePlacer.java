@@ -118,8 +118,12 @@ public final class RenderableFramePlacer {
                 // SPEC-025: 인라인 앵커 PNG (예: 번호 라벨 "1") 가 텍스트프레임 첫 줄과 겹치면
                 // PNG 를 좌측으로 shift 하여 텍스트와 겹치지 않게 한다.
                 // InDesign 에서는 text wrap 으로 자동 회피되지만 HWPX 는 wrap 미지원 → 수동 보정.
-                // 단, badge_group PNG 는 자식 텍스트와 의도적으로 겹치므로 shift 금지.
-                if (!rt.isBadgeGroup()) {
+                // 단, badge_group PNG 와 인라인 앵커가 아닌 일반 플로팅 PNG(배경 박스 등)는 shift 금지.
+                // (일반 PNG에 shift를 적용하면 배경 박스가 제 위치를 벗어남 — frame_257021 사례)
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTfForShift
+                        = ctx.resolvedData.getTextFrame(String.valueOf(rt.id()));
+                boolean isInlineAnchorPng = rtTfForShift != null && rtTfForShift.isInline();
+                if (!rt.isBadgeGroup() && isInlineAnchorPng) {
                     // PNG bounds 는 page-relative pt. composedLine bounds 는 spread pt → page 의 left/top 차감 필요.
                     double rtPageLeft = 0, rtPageTop = 0;
                     if (ctx.resolvedData.pages() != null
