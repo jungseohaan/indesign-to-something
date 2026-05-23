@@ -54,8 +54,11 @@ final class SingleColumnTableConverter {
                                            long x, long y, long w, long h,
                                            java.util.List<ASTParagraph> paragraphs,
                                            boolean suppressBorder) {
-        // 폰트 메트릭 기반 높이 보정: 매핑 폰트가 원본보다 세로로 크면 글상자 확장
-        h = TextBoxLayoutHelpers.adjustHeightByFontMetrics(ctx, h, paragraphs);
+        // 폰트 메트릭 기반 높이 보정: TOP 정렬만 적용 (CENTER/BOTTOM은 팽창 시 중앙/하단 정렬 위치가 틀어짐)
+        VerticalAlign2 _vAlignCheck = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
+        if (_vAlignCheck == VerticalAlign2.TOP) {
+            h = TextBoxLayoutHelpers.adjustHeightByFontMetrics(ctx, h, paragraphs);
+        }
 
         // overflow 방지 높이 축소: resolved 기반 파이프라인에서는 geometricBounds가 정확하므로 비활성화
         // (레거시 파이프라인용 코드, 새 파이프라인에서는 필요 없음)

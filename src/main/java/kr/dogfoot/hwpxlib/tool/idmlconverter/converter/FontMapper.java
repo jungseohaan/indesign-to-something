@@ -225,12 +225,12 @@ public class FontMapper {
             result = categoryFallback(idmlFontFamily, fontStyle);
         }
 
-        // heightScale 미설정 시 HWPX 메트릭에서 계산
+        // heightScale 미설정 시 HWPX 메트릭에서 계산 (ratio는 반드시 보존)
         if (result.heightScale == 1.0 && !hwpxMetrics.isEmpty()) {
             double hs = computeHwpxHeightScale(result.koFont);
             if (hs > 1.0) {
                 result = new MappingResult(result.koFont, result.enFont,
-                        result.spacingAdjustPercent, result.scaleAdjust, hs);
+                        result.spacingAdjustPercent, result.scaleAdjust, hs, result.ratio);
             }
         }
 
@@ -467,11 +467,11 @@ public class FontMapper {
             return new MappingResult(configSansKo, configSansKo, 0);
         }
 
-        // HU/Rix/SD 계열 → 한컴돋움
+        // HU/Rix/SD 계열 → 한컴돋움 (장평 90% 보정: 장식 폰트는 한컴돋움보다 폭이 좁음)
         if (lower.startsWith("hu") || lower.startsWith("rix") || lower.startsWith("sd ")
                 || lower.contains("상상토끼") || lower.contains("둘기마요")) {
-            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + configSansKo + "\" (카테고리폴백: korean-decorative)");
-            return new MappingResult(configSansKo, configSansKo, 0);
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + configSansKo + "\" (카테고리폴백: korean-decorative, ratio=0.9)");
+            return new MappingResult(configSansKo, configSansKo, 0, 0, 1.0, 0.9);
         }
 
         // 서양 폰트 기본 → 산세리프

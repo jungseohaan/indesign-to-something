@@ -266,6 +266,7 @@ public class HwpxTextBoxBuilder {
             return;
         }
 
+
         // inlineToFloating: 배지 단일-child — fill 없으면 hp:tbl 흰 배경 방지를 위해 투명 DrawText 경로 사용
         if (block.inlineToFloating() && block.fillColor() == null && !block.isBackgroundOnly()) {
             frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);

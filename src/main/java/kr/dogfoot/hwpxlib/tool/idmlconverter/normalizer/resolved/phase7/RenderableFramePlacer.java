@@ -30,10 +30,31 @@ public final class RenderableFramePlacer {
         int count = 0;
         // 같은 PNG 파일을 여러 ID로 등록한 경우 중복 배치 방지 (페이지+파일 단위)
         java.util.Set<String> placedKeys = new java.util.HashSet<>();
+
+        // 사전 계산: inline_object(Phase 3가 inline PNG로 처리하는 오발/그룹)와
+        // 동일 파일/페이지 그룹에 속하는 renderedTextFrame dedupKey 세트.
+        // 이 그룹에 속한 항목(부모 오발 + 자식 TF)은 모두 배치 스킵 — Phase 3가 처리.
+        // (HashMap 순서 비결정성으로 자식 TF가 먼저 처리되면 부모 inline_object 체크를
+        // 건너뛰고 TextFrameBlock이 생성되는 버그 방지.)
+        java.util.Set<String> inlineObjDedupKeys = new java.util.HashSet<>();
+        for (RenderedGroup rt2 : ctx.resolvedData.allRenderedTextFrames()) {
+            if (rt2.file() == null) continue;
+            String dk2 = rt2.pageIndex() + "|" + rt2.file();
+            if (inlineObjDedupKeys.contains(dk2)) continue;
+            for (RenderedGroup flt2 : ctx.resolvedData.allRenderedFloatingItems()) {
+                if (flt2.id() == rt2.id() && "inline_object".equals(flt2.itemType())) {
+                    inlineObjDedupKeys.add(dk2);
+                    break;
+                }
+            }
+        }
+
         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
             if (rt.file() == null) continue;
             String dedupKey = rt.pageIndex() + "|" + rt.file();
             if (!placedKeys.add(dedupKey)) continue; // 이미 배치된 동일 파일/페이지
+            // inline_object 그룹: Phase 3가 inline PNG로 처리 → 배치 스킵
+            if (inlineObjDedupKeys.contains(dedupKey)) continue;
             // badge_group은 인라인 앵커(inline_object)로 배치된 경우에만 건너뜀.
             // 인라인 참조가 없는 독립 badge는 여기서 플로팅으로 배치해야 함.
             if (rt.isBadgeGroup()) {
@@ -351,6 +372,18 @@ public final class RenderableFramePlacer {
                     } catch (Exception e3) { /* skip IDML fallback */ }
                 }
                 if (convertedToText) continue;
+                // renderedFloatingItems에 동일 id의 inline_object 항목이 있으면
+                // Phase 3이 인라인 PNG로 처리 → floating ASTFigure 중복 금지
+                {
+                    boolean hasInlineObjectInFloating = false;
+                    for (RenderedGroup flt : ctx.resolvedData.allRenderedFloatingItems()) {
+                        if (flt.id() == rt.id() && "inline_object".equals(flt.itemType())) {
+                            hasInlineObjectInFloating = true;
+                            break;
+                        }
+                    }
+                    if (hasInlineObjectInFloating) continue;
+                }
 
                 ASTFigure fig = new ASTFigure();
                 fig.sourceId("renderable_" + rt.id());
@@ -447,6 +480,29 @@ public final class RenderableFramePlacer {
 
         if (count > 0) {
             System.err.println("[ResolvedToASTBuilder] Phase 7: " + count + " renderable frames placed");
+        }
+    }
+
+    /**
+     * Phase 3 실행 전 호출: inline anchor이면서 짧은 단문(≤3자, ￼ 없음)인 renderable 항목을
+     * inlineObjectsToConvertToFloating에 미리 등록한다.
+     * Phase 7이 이 항목들을 floating TextFrameBlock으로 배치하므로,
+     * Phase 3의 loadInlineObject가 이를 건너뛰어 중복 렌더링을 방지한다.
+     */
+    public static void preRegisterInlineShortTextItems(ResolvedBuildContext ctx) {
+        if (ctx.resolvedData == null) return;
+        for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
+            if (rt.isBadgeGroup()) continue;
+            if ("inline_object".equals(rt.type())) continue; // Phase 7 floating 건너뜀 — Phase 3가 처리
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTf =
+                    ctx.resolvedData.getTextFrame(String.valueOf(rt.id()));
+            if (rtTf == null || !rtTf.isInline()) continue;
+            String visText = rtTf.frameVisibleText();
+            if (visText == null) continue;
+            String cleaned = visText.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            if (!cleaned.isEmpty() && cleaned.length() <= 3) {
+                ctx.inlineObjectsToConvertToFloating.add(rt.id());
+            }
         }
     }
 }
