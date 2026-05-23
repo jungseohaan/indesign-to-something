@@ -575,11 +575,11 @@ pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
         let src = output_dir.join(src_rel);
         let dst = output_dir.join(dst_rel);
         if !src.exists() { continue; }
-        // sips --cropOffset <rowOffset> <colOffset> --cropBox <height> <width>
+        // sips: cropOffset 먼저, 그 다음 cropToHeightWidth로 크롭
         let status = std::process::Command::new("sips")
             .args([
                 "--cropOffset", &y.to_string(), &x.to_string(),
-                "--cropBox", &h.to_string(), &w.to_string(),
+                "-c", &h.to_string(), &w.to_string(),
                 src.to_str().unwrap_or(""),
                 "--out", dst.to_str().unwrap_or(""),
             ])
