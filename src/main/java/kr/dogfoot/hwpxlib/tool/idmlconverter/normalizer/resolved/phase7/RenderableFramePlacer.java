@@ -235,9 +235,18 @@ public final class RenderableFramePlacer {
                 fig.pixelWidth(img.getWidth());
                 fig.pixelHeight(img.getHeight());
                 // InDesign allPageItems: index 0 = 맨 앞, 큰 값 = 뒤.
-                // HWPX zOrder: 큰 값 = 앞. → 역매핑하여 겹침 순서 보존.
+                // HWPX zOrder: 큰 값 = 앞. → 역매핑.
+                // 배지/인라인 앵커 PNG: 편집 가능 TF 앞에 와야 하므로 높은 값 유지.
+                // 비-배지/비-인라인 배경 PNG: Phase 7 역매핑값(~9000)이 FramePlacer raw zOrder(100~300)보다
+                // 훨씬 커서 편집 가능 TF 앞으로 나오는 문제 방지 → 낮은 고정값(10).
                 int indesignIdx = rt.zOrder();
-                int hwpxZ = (indesignIdx > 0) ? Math.max(10000 - indesignIdx, 10) : 10;
+                boolean isInlineAnchorForZ = rtTf != null && rtTf.isInline();
+                int hwpxZ;
+                if (rt.isBadgeGroup() || isInlineAnchorForZ) {
+                    hwpxZ = (indesignIdx > 0) ? Math.max(10000 - indesignIdx, 10) : 10;
+                } else {
+                    hwpxZ = 10;
+                }
                 fig.zOrder(hwpxZ);
                 fig.fromGroup(true); // IN_FRONT_OF_TEXT
                 sections.get(pageIdx).addBlock(fig);

@@ -461,15 +461,10 @@ public class FontMapper {
             return new MappingResult(configSansKo, configSansKo, 0);
         }
 
-        // 210 계열 장식 폰트 → weight 기반 윤고딕 매핑
+        // 210 계열 장식 폰트 → 한컴돋움
         if (lower.startsWith("210 ") || lower.startsWith("210")) {
-            int weight = parseFontStyleWeight(fontStyle);
-            String ko;
-            if (weight >= 600) ko = "한컴 윤고딕 250";
-            else if (weight >= 400) ko = "한컴 윤고딕 240";
-            else ko = "한컴 윤고딕 230";
-            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + ko + "\" (카테고리폴백: 210-decorative)");
-            return new MappingResult(ko, ko, 0);
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + configSansKo + "\" (카테고리폴백: 210-decorative)");
+            return new MappingResult(configSansKo, configSansKo, 0);
         }
 
         // HU/Rix/SD 계열 → 한컴돋움
@@ -496,34 +491,9 @@ public class FontMapper {
      * @return 매핑된 한/글 번들 폰트명, 없으면 null
      */
     private static String keywordMapping(String lowerName, String fontStyle) {
-        // 윤고딕 계열 → 한컴 윤고딕 (웨이트 기반 매핑)
+        // 윤고딕 계열 → 한컴돋움 (기본폰트 정책)
         if (lowerName.contains("윤고딕")) {
-            // 가변폰트("[Yoon가변] 윤고딕100_OTF" 등)는 fontStyle이 실제 웨이트
-            // (예: fontStyle="20" → weight 20 = Ultra-Thin)
-            // 비가변폰트는 폰트명의 숫자가 웨이트 (예: "윤고딕700" → weight 700)
-            int weight;
-            boolean isVariable = lowerName.contains("가변");
-            int styleWeight = parseFontStyleWeight(fontStyle);
-            if (isVariable && styleWeight > 0) {
-                weight = styleWeight;
-            } else if (styleWeight > 0 && styleWeight < 100) {
-                // 비가변 폰트의 fontStyle이 숫자(30~90)이면 10배하여 weight로 사용
-                // (윤고딕 700Std style=40 → weight 400 = Regular)
-                weight = styleWeight * 10;
-            } else {
-                weight = extractWeightNumber(lowerName);
-            }
-            // 한컴 윤고딕 매핑 (한컴한글 2014 호환: 230, 240, 250, 760만 사용):
-            // ~99 → 함초롬돋움 (극세: 한컴 윤고딕 230보다 얇은 느낌)
-            // 100~400 → 한컴 윤고딕 230 (가는)
-            // 401~700 → 한컴 윤고딕 240 (중간)
-            // 701~800 → 한컴 윤고딕 250 (굵은)
-            // 801~ → 한컴 윤고딕 760 (진한)
-            if (weight < 100) return "함초롬돋움";
-            if (weight <= 400) return "한컴 윤고딕 720";
-            if (weight <= 700) return "한컴 윤고딕 240";
-            if (weight <= 800) return "한컴 윤고딕 250";
-            return "한컴 윤고딕 760";
+            return DEFAULT_SANS;
         }
         // 윤명조 → 한컴바탕
         if (lowerName.contains("윤명조")) return DEFAULT_SERIF;
@@ -531,10 +501,10 @@ public class FontMapper {
         if (lowerName.contains("나눔고딕") || lowerName.contains("nanum gothic")) return DEFAULT_SANS;
         // 나눔명조 → 한컴바탕
         if (lowerName.contains("나눔명조") || lowerName.contains("nanum myeongjo")) return DEFAULT_SERIF;
-        // 나눔스퀘어 → 한컴 윤고딕 250 (2014 호환, 원래 740)
-        if (lowerName.contains("나눔스퀘어") || lowerName.contains("nanumsquare")) return "한컴 윤고딕 250";
-        // 본고딕/Noto Sans → 한컴 윤고딕 240 (2014 호환, 원래 720)
-        if (lowerName.contains("본고딕") || lowerName.contains("noto sans")) return "한컴 윤고딕 240";
+        // 나눔스퀘어 → 한컴돋움 (기본폰트 정책)
+        if (lowerName.contains("나눔스퀘어") || lowerName.contains("nanumsquare")) return DEFAULT_SANS;
+        // 본고딕/Noto Sans → 한컴돋움 (기본폰트 정책)
+        if (lowerName.contains("본고딕") || lowerName.contains("noto sans")) return DEFAULT_SANS;
         // 본명조/Noto Serif → 한컴바탕
         if (lowerName.contains("본명조") || lowerName.contains("noto serif")) return DEFAULT_SERIF;
         // 맑은 고딕 → 맑은 고딕 (한/글 번들에 포함)
@@ -544,51 +514,6 @@ public class FontMapper {
         if (lowerName.contains("함초롬") && lowerName.contains("돋움")) return "함초롬돋움";
 
         return null;
-    }
-
-    /** 폰트명에서 웨이트 숫자를 추출 (예: "윤고딕100" → 100, "윤고딕 700" → 700) */
-    private static int extractWeightNumber(String lowerName) {
-        // "윤고딕" 뒤의 숫자를 찾음
-        int idx = lowerName.indexOf("윤고딕");
-        if (idx >= 0) {
-            String after = lowerName.substring(idx + 3); // "윤고딕" 이후
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < after.length(); i++) {
-                char c = after.charAt(i);
-                if (Character.isDigit(c)) {
-                    sb.append(c);
-                } else if (sb.length() > 0) {
-                    break;
-                }
-            }
-            if (sb.length() > 0) {
-                return Integer.parseInt(sb.toString());
-            }
-        }
-        return 400; // 기본 웨이트
-    }
-
-    /** fontStyle 문자열에서 웨이트 숫자를 추출 (예: "20" → 20, "Bold" → 700, null → 0) */
-    private static int parseFontStyleWeight(String fontStyle) {
-        if (fontStyle == null || fontStyle.isEmpty()) return 0;
-        // 순수 숫자인 경우 (가변폰트 인스턴스)
-        try {
-            return Integer.parseInt(fontStyle.trim());
-        } catch (NumberFormatException e) {
-            // 무시
-        }
-        // 키워드 기반
-        String lower = fontStyle.toLowerCase();
-        if (lower.contains("thin") || lower.contains("hairline")) return 100;
-        if (lower.contains("extralight") || lower.contains("ultralight")) return 200;
-        if (lower.contains("light")) return 300;
-        if (lower.contains("regular") || lower.contains("normal")) return 400;
-        if (lower.contains("medium")) return 500;
-        if (lower.contains("semibold") || lower.contains("demibold")) return 600;
-        if (lower.contains("extrabold") || lower.contains("ultrabold")) return 800;
-        if (lower.contains("bold")) return 700;
-        if (lower.contains("black") || lower.contains("heavy")) return 900;
-        return 0;
     }
 
     /**

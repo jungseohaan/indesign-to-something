@@ -552,7 +552,13 @@ public class InlineFrameHandler {
         if (!tf.isInline()) return null;
 
         // rendered된 TF(badge_group 등)는 PNG로 이미 배치됨 → 텍스트 런 변환 안 함
-        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
+        // 단, itemType=null 인 inline TF 는 Phase 7 이 continue 로 skip → 여기서 처리해야 함.
+        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rtCheck =
+                    ctx.resolvedData.getRenderedTextFrameByDomId(String.valueOf(anchoredObjectId));
+            boolean isNullTypeInlineTf = rtCheck != null && rtCheck.itemType() == null && tf.isInline();
+            if (!isNullTypeInlineTf) return null;
+        }
         // SPEC-025: 단순 배지 자식 (Phase 2 가 별도 글상자로 배치) → 인라인 임베드 중복 방지.
         if (ctx.resolvedData.isSimpleBadgeChild(domId)) return null;
 
@@ -632,31 +638,6 @@ public class InlineFrameHandler {
                 }
             }
             return null;
-        }
-
-        // 장식 번호 인라인(≤3자 + 큰 폰트 또는 정사각형 프레임) → 텍스트 런 변환하지 않음 (PNG 유지)
-        if (visText.length() <= 3) {
-            ResolvedStory rs = (tf.storyId() != null) ? ctx.resolvedData.getStory(tf.storyId()) : null;
-            boolean isDecorativeNumber = false;
-            // 큰 폰트(≥16pt) 체크
-            if (rs != null && !rs.paragraphs().isEmpty()) {
-                ResolvedParagraph rp0 = rs.paragraphs().get(0);
-                if (rp0.runs() != null && !rp0.runs().isEmpty()) {
-                    Double fs = rp0.runs().get(0).fontSize();
-                    if (fs != null && fs >= 16) isDecorativeNumber = true;
-                }
-            }
-            // 정사각형에 가까운 프레임 (가로/세로 비율 0.7~1.4)
-            double[] gb = tf.geometricBounds();
-            if (gb != null && gb.length >= 4) {
-                double fw = gb[3] - gb[1];
-                double fh = gb[2] - gb[0];
-                if (fw > 0 && fh > 0) {
-                    double ratio = fw / fh;
-                    if (ratio >= 0.7 && ratio <= 1.4) isDecorativeNumber = true;
-                }
-            }
-            if (isDecorativeNumber) return null; // PNG 폴백 (loadInlineObject로 처리)
         }
 
         // resolved story에서 런 스타일 가져오기
