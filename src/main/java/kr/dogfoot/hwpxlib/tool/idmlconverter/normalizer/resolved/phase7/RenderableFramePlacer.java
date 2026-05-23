@@ -261,13 +261,26 @@ public final class RenderableFramePlacer {
 
                 double[] bounds2 = rg.bounds();
                 if (bounds2 == null || bounds2.length < 4) continue;
-                // renderedFloatingItems bounds는 normalizeToPoints() 미적용 (mm단위) → scaleFactor로 pt 변환
+                // renderedFloatingItems bounds는 normalizeToPoints() 미적용 (mm단위, spread 절대좌표)
+                // → TF 의 page offset(page bounds top/left)을 빼서 page-relative 로 변환 후 scaleFactor로 pt 환산
                 double sf2 = ctx.scaleFactor;
+                double pageTop2 = 0, pageLeft2 = 0;
+                int boundsPageIdx = tfPi != null ? tfPi : rg.pageIndex();
+                if (ctx.resolvedData.pages() != null
+                        && boundsPageIdx >= 0 && boundsPageIdx < ctx.resolvedData.pages().size()) {
+                    double[] pgB2 = ctx.resolvedData.pages().get(boundsPageIdx).bounds();
+                    if (pgB2 != null && pgB2.length >= 4) {
+                        pageTop2 = pgB2[0];
+                        pageLeft2 = pgB2[1];
+                    }
+                }
+                // bounds2는 mm (spread 절대), pages()는 pt (normalizeToPoints 적용됨)
+                // → bounds2를 pt로 변환 후 page offset(pt) 차감하여 page-relative pt 좌표로
                 double bw2 = Math.abs(bounds2[3] - bounds2[1]) * sf2;
                 double bh2 = Math.abs(bounds2[2] - bounds2[0]) * sf2;
                 if (bw2 <= 0 || bh2 <= 0) continue;
-                double x2 = bounds2[1] * sf2;
-                double y2 = bounds2[0] * sf2;
+                double x2 = bounds2[1] * sf2 - pageLeft2;
+                double y2 = bounds2[0] * sf2 - pageTop2;
 
                 ASTFigure fig2 = new ASTFigure();
                 fig2.sourceId("inline_float_" + rg.id());
