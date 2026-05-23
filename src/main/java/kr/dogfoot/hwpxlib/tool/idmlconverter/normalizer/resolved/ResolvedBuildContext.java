@@ -111,6 +111,21 @@ public final class ResolvedBuildContext {
      */
     public java.util.Set<Integer> deferredAnchoredFloatingIds = new java.util.HashSet<>();
 
+    /**
+     * Phase 2 가 non-editable inline TF 를 inlineToFloating 으로 전환할 때,
+     * 해당 TF 의 조상 inline_object 를 여기에 등록한다.
+     * Phase 3 (loadInlineObject) 는 이 집합에 있는 ID 의 inline PNG 를 inline 배치에서 억제하고,
+     * Phase 7 이 동일 PNG 를 플로팅 ASTFigure 로 재배치한다.
+     */
+    public java.util.Set<Integer> inlineObjectsToConvertToFloating = new java.util.HashSet<>();
+
+    /**
+     * inline_object ID → TF 의 pageIndex 매핑.
+     * inline_object의 renderedGroup.pageIndex()가 TF의 실제 섹션과 다를 수 있으므로
+     * Phase 2 에서 TF 의 pageIndex 를 함께 저장해 Phase 7b 가 올바른 섹션에 배치.
+     */
+    public java.util.Map<Integer, Integer> inlineObjectTfPageIndex = new java.util.HashMap<>();
+
     public ResolvedBuildContext() {
     }
 }

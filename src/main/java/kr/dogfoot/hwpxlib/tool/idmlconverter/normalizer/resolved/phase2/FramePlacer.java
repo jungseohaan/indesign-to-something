@@ -810,6 +810,29 @@ public final class FramePlacer {
 
             if (inlineToFloating) {
                 block.inlineToFloating(true);
+                // Case 1 (non-editable inline TF with text): 조상 inline_object PNG 를
+                // inline 배치에서 억제하고 Phase 7 이 floating 으로 재배치하도록 등록.
+                // Case 2 (editable badge child)는 badge PNG 가 inline 앵커 그대로 유지되어야 하므로 제외.
+                if (!ctx.resolvedData.isEditableTextFrame(tf.id())) {
+                    ResolvedPageItem _ancCurPi = ctx.resolvedData.getPageItem(tf.id());
+                    int _ancHops = 0;
+                    outer_anc:
+                    while (_ancCurPi != null && _ancHops < 10) {
+                        String _ancPid = _ancCurPi.parentId();
+                        if (_ancPid == null) break;
+                        for (RenderedGroup _ancRg : ctx.resolvedData.allRenderedFloatingItems()) {
+                            if (String.valueOf(_ancRg.id()).equals(_ancPid)
+                                    && "inline_object".equals(_ancRg.itemType())) {
+                                ctx.inlineObjectsToConvertToFloating.add(_ancRg.id());
+                                // TF의 pageIndex를 저장 (rg.pageIndex()와 다를 수 있음)
+                                ctx.inlineObjectTfPageIndex.put(_ancRg.id(), tf.pageIndex());
+                                break outer_anc;
+                            }
+                        }
+                        _ancCurPi = ctx.resolvedData.getPageItem(_ancPid);
+                        _ancHops++;
+                    }
+                }
             }
             section.addBlock(block);
         }

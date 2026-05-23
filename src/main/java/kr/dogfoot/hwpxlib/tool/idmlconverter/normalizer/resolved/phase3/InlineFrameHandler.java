@@ -858,6 +858,10 @@ public class InlineFrameHandler {
     static ASTInlineObject loadInlineObject(ResolvedBuildContext ctx, int anchoredObjectId) {
         if (ctx.basePath == null) return null;
 
+        // Phase 2 가 이 inline_object 의 자손 TF 를 floating 으로 전환했으면
+        // inline PNG 는 Phase 7 이 floating ASTFigure 로 재배치 → 여기서 억제.
+        if (ctx.inlineObjectsToConvertToFloating.contains(anchoredObjectId)) return null;
+
         // 자식/자손 TextFrame이 플로팅 텍스트박스로 배치될 예정이면
         // inline_object PNG를 로드하지 않는다 (이미지 + 글상자 중복 방지).
         // Rectangle은 childIds가 비어있고 자식이 parentId로만 참조하므로 textFrames를 훑는다.

@@ -237,6 +237,57 @@ public final class RenderableFramePlacer {
                 count++;
             } catch (Exception e) { /* skip */ }
         }
+        // Phase 7b: inline_object items that were suppressed from inline placement (Phase 3)
+        // and need to be re-placed as floating ASTFigures behind their inlineToFloating TF.
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (!"inline_object".equals(rg.itemType())) continue;
+            if (!ctx.inlineObjectsToConvertToFloating.contains(rg.id())) continue;
+            if (rg.file() == null) continue;
+            String dedupKey2 = rg.pageIndex() + "|" + rg.file();
+            if (!placedKeys.add(dedupKey2)) continue;
+
+            File pngFile2 = new File(ctx.basePath, rg.file());
+            if (!pngFile2.exists()) continue;
+
+            // TF 의 pageIndex 를 우선 사용 (rg.pageIndex()는 앵커 텍스트 기준으로 TF 섹션과 다를 수 있음)
+            Integer tfPi = ctx.inlineObjectTfPageIndex.get(rg.id());
+            int pageIdx2 = ctx.toSectionIndex.applyAsInt(tfPi != null ? tfPi : rg.pageIndex());
+            if (pageIdx2 < 0 || pageIdx2 >= sections.size()) continue;
+
+            try {
+                byte[] imageData2 = java.nio.file.Files.readAllBytes(pngFile2.toPath());
+                java.awt.image.BufferedImage img2 = javax.imageio.ImageIO.read(pngFile2);
+                if (img2 == null || img2.getWidth() <= 2) continue;
+
+                double[] bounds2 = rg.bounds();
+                if (bounds2 == null || bounds2.length < 4) continue;
+                // renderedFloatingItems bounds는 normalizeToPoints() 미적용 (mm단위) → scaleFactor로 pt 변환
+                double sf2 = ctx.scaleFactor;
+                double bw2 = Math.abs(bounds2[3] - bounds2[1]) * sf2;
+                double bh2 = Math.abs(bounds2[2] - bounds2[0]) * sf2;
+                if (bw2 <= 0 || bh2 <= 0) continue;
+                double x2 = bounds2[1] * sf2;
+                double y2 = bounds2[0] * sf2;
+
+                ASTFigure fig2 = new ASTFigure();
+                fig2.sourceId("inline_float_" + rg.id());
+                fig2.x(CoordinateConverter.pointsToHwpunits(x2));
+                fig2.y(CoordinateConverter.pointsToHwpunits(y2));
+                fig2.width(CoordinateConverter.pointsToHwpunits(bw2));
+                fig2.height(CoordinateConverter.pointsToHwpunits(bh2));
+                fig2.imageData(imageData2);
+                fig2.imageFormat("png");
+                fig2.pixelWidth(img2.getWidth());
+                fig2.pixelHeight(img2.getHeight());
+                // inline_object는 inlineToFloating TF 의 배경 컨테이너 → TF 보다 뒤에 놓여야 함.
+                // InDesign z-order 는 inline anchor 기준이라 변환 불가 → 낮은 고정값 사용.
+                fig2.zOrder(10);
+                fig2.fromGroup(true);
+                sections.get(pageIdx2).addBlock(fig2);
+                count++;
+            } catch (Exception e2) { /* skip */ }
+        }
+
         if (count > 0) {
             System.err.println("[ResolvedToASTBuilder] Phase 7: " + count + " renderable frames placed");
         }
