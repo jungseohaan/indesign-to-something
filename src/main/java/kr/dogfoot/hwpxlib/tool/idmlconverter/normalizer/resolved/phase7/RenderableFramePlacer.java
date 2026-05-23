@@ -83,23 +83,18 @@ public final class RenderableFramePlacer {
             }
 
             File pngFile = new File(ctx.basePath, rt.file());
-            if (!pngFile.exists()) continue;
 
             int pageIdx = ctx.toSectionIndex.applyAsInt(rt.pageIndex());
-            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
 
             try {
                 byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
                 java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-                if (img == null || img.getWidth() <= 2) continue;
 
                 double[] bounds = rt.bounds();
-                if (bounds == null || bounds.length < 4) continue;
 
                 // bounds는 normalizeToPoints()에서 이미 pt 단위로 변환됨
                 double bw = Math.abs(bounds[3] - bounds[1]);
                 double bh = Math.abs(bounds[2] - bounds[0]);
-                if (bw <= 0 || bh <= 0) continue;
 
                 // PNG 비율 보정 — 보정 후 원본 bounds 의 중심을 유지하도록 x/y 재계산
                 double bwOrig = bw, bhOrig = bh;
@@ -163,7 +158,6 @@ public final class RenderableFramePlacer {
                         = ctx.resolvedData.getTextFrame(String.valueOf(rt.id()));
                 // null-type inline TF: Phase 3 가 inline 앵커에서 PNG로 직접 임베드 →
                 // 여기서 floating 배치하면 중복. Phase 3 에 위임.
-                if (rtTf != null && rtTf.isInline() && rt.itemType() == null) continue;
                 // SPEC-025: renderable inline TF 가 짧은 단일 텍스트 (≤3자) 면 PNG 대신
                 // TextFrameBlock 으로 변환 → 텍스트로 검색 가능 + 폰트 매핑/스케일 자유.
                 // (예: 페이지 32 "1" 큰 번호 라벨)
@@ -221,6 +215,140 @@ public final class RenderableFramePlacer {
                             convertedToText = true;
                         }
                     }
+                }
+                // SPEC-025 확장: 비-인라인 플로팅 renderable TF 도 짧은 단일 텍스트(≤20자, 인라인 객체 없음)면
+                // PNG 대신 TextFrameBlock 으로 변환. 예: "한글 맞춤법의 원리" (소단원명 데코 TF)
+                if (!convertedToText && rtTf != null && !rtTf.isInline() && !rt.isBadgeGroup()) {
+                    String visText2 = rtTf.frameVisibleText();
+                    if (visText2 != null && !visText2.contains("￼")) {
+                        String cleaned2 = visText2.replace("\r", "").replace("\n", "").trim();
+                        if (!cleaned2.isEmpty() && cleaned2.length() <= 20) {
+                            double tx2 = bounds[1];
+                            double ty2 = bounds[0];
+                            double tw2 = Math.abs(bounds[3] - bounds[1]);
+                            double th2 = Math.abs(bounds[2] - bounds[0]);
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock block2 =
+                                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock();
+                            block2.sourceId("renderable_text_float_" + rt.id());
+                            block2.x(CoordinateConverter.pointsToHwpunits(tx2));
+                            block2.y(CoordinateConverter.pointsToHwpunits(ty2));
+                            block2.width(CoordinateConverter.pointsToHwpunits(tw2));
+                            block2.height(CoordinateConverter.pointsToHwpunits(th2));
+                            int idesignIdx3 = rt.zOrder();
+                            int hwpxZ3 = (idesignIdx3 > 0) ? Math.max(10000 - idesignIdx3, 10) : 10;
+                            block2.zOrder(hwpxZ3);
+                            block2.verticalJustification("CENTER_ALIGN");
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph paraT2 =
+                                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph();
+                            paraT2.alignment("CENTER_ALIGN");
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun trRun2 =
+                                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun();
+                            trRun2.text(cleaned2);
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs3 =
+                                    rtTf.storyId() != null ? ctx.resolvedData.getStory(rtTf.storyId()) : null;
+                            if (rs3 != null && !rs3.paragraphs().isEmpty()
+                                    && rs3.paragraphs().get(0).runs() != null
+                                    && !rs3.paragraphs().get(0).runs().isEmpty()) {
+                                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun rr3 =
+                                        rs3.paragraphs().get(0).runs().get(0);
+                                if (rr3.fontFamily() != null) trRun2.fontFamily(rr3.fontFamily());
+                                if (rr3.fontSize() != null && rr3.fontSize() > 0) {
+                                    trRun2.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr3.fontSize()));
+                                }
+                                if (rr3.fontStyle() != null) trRun2.fontStyle(rr3.fontStyle());
+                                if (rr3.fillColor() != null) {
+                                    String hex3 = ctx.resolvedData.resolveColorHex(rr3.fillColor());
+                                    if (hex3 != null) trRun2.textColor(hex3);
+                                }
+                            }
+                            paraT2.addItem(trRun2);
+                            block2.addParagraph(paraT2);
+                            sections.get(pageIdx).addBlock(block2);
+                            count++;
+                            convertedToText = true;
+                        }
+                    }
+                }
+                // IDML 폴백: resolved.json textFrames에 없는 렌더러블 TF (rtTf==null) 처리.
+                // IDML 스프레드에서 hex domId로 TextFrame을 찾아 ParentStory → IDMLStory 텍스트 추출.
+                // 예: "한글 맞춤법의 원리" (domId=3072, 소단원명 데코 TF)
+                if (!convertedToText && rtTf == null && !rt.isBadgeGroup()
+                        && ctx.idmlDocumentSupplier != null) {
+                    try {
+                        ctx.ensureIdmlInfra.run();
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDoc =
+                                ctx.idmlDocumentSupplier.get();
+                        if (idmlDoc != null) {
+                            String hexSelf = "u" + Integer.toHexString(rt.id());
+                            String parentStoryId = null;
+                            outer3:
+                            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread sp : idmlDoc.spreads()) {
+                                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame itf : sp.textFrames()) {
+                                    if (hexSelf.equals(itf.selfId())) {
+                                        parentStoryId = itf.parentStoryId();
+                                        break outer3;
+                                    }
+                                }
+                            }
+                            if (parentStoryId != null) {
+                                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory idmlStory =
+                                        idmlDoc.getStory(parentStoryId);
+                                if (idmlStory != null && !idmlStory.isEmpty()) {
+                                    StringBuilder storyTextBuf = new StringBuilder();
+                                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph para
+                                            : idmlStory.paragraphs()) {
+                                        String ptext = para.getPlainText();
+                                        if (ptext != null) storyTextBuf.append(ptext);
+                                    }
+                                    String storyText = storyTextBuf.toString().trim();
+                                    if (!storyText.isEmpty() && !storyText.contains("￼")
+                                            && storyText.length() <= 20) {
+                                        double tx3 = bounds[1];
+                                        double ty3 = bounds[0];
+                                        double tw3 = Math.abs(bounds[3] - bounds[1]);
+                                        double th3 = Math.abs(bounds[2] - bounds[0]);
+                                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock block3 =
+                                                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock();
+                                        block3.sourceId("renderable_text_idml_" + rt.id());
+                                        block3.x(CoordinateConverter.pointsToHwpunits(tx3));
+                                        block3.y(CoordinateConverter.pointsToHwpunits(ty3));
+                                        block3.width(CoordinateConverter.pointsToHwpunits(tw3));
+                                        block3.height(CoordinateConverter.pointsToHwpunits(th3));
+                                        int hwpxZ4 = rt.zOrder() > 0 ? Math.max(10000 - rt.zOrder(), 10) : 10;
+                                        block3.zOrder(hwpxZ4);
+                                        block3.verticalJustification("CENTER_ALIGN");
+                                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph paraT4 =
+                                                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph();
+                                        paraT4.alignment("CENTER_ALIGN");
+                                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun trRun4 =
+                                                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun();
+                                        trRun4.text(storyText);
+                                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph para
+                                                : idmlStory.paragraphs()) {
+                                            if (!para.characterRuns().isEmpty()) {
+                                                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun cr =
+                                                        para.characterRuns().get(0);
+                                                if (cr.fontFamily() != null) trRun4.fontFamily(cr.fontFamily());
+                                                if (cr.fontSize() != null && cr.fontSize() > 0)
+                                                    trRun4.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(cr.fontSize()));
+                                                if (cr.fontStyle() != null) trRun4.fontStyle(cr.fontStyle());
+                                                if (cr.fillColor() != null) {
+                                                    String hex5 = ctx.resolvedData.resolveColorHex(cr.fillColor());
+                                                    if (hex5 != null) trRun4.textColor(hex5);
+                                                }
+                                                break;
+                                            }
+                                        }
+                                        paraT4.addItem(trRun4);
+                                        block3.addParagraph(paraT4);
+                                        sections.get(pageIdx).addBlock(block3);
+                                        count++;
+                                        convertedToText = true;
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e3) { /* skip IDML fallback */ }
                 }
                 if (convertedToText) continue;
 

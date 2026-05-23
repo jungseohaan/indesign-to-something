@@ -44,7 +44,6 @@ public final class WrapPhase5 {
                 String domId;
                 try { domId = String.valueOf(Integer.parseInt(hexPart, 16)); }
                 catch (NumberFormatException e) { newBlocks.add(blk); continue; }
-
                 ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
                 if (rtf == null) { newBlocks.add(blk); continue; }
 
