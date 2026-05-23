@@ -155,11 +155,14 @@ public final class RenderableFramePlacer {
                     }
                 }
 
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTf
+                        = ctx.resolvedData.getTextFrame(String.valueOf(rt.id()));
+                // null-type inline TF: Phase 3 가 inline 앵커에서 PNG로 직접 임베드 →
+                // 여기서 floating 배치하면 중복. Phase 3 에 위임.
+                if (rtTf != null && rtTf.isInline() && rt.itemType() == null) continue;
                 // SPEC-025: renderable inline TF 가 짧은 단일 텍스트 (≤3자) 면 PNG 대신
                 // TextFrameBlock 으로 변환 → 텍스트로 검색 가능 + 폰트 매핑/스케일 자유.
                 // (예: 페이지 32 "1" 큰 번호 라벨)
-                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTf
-                        = ctx.resolvedData.getTextFrame(String.valueOf(rt.id()));
                 boolean convertedToText = false;
                 if (rtTf != null && rtTf.isInline() && !rt.isBadgeGroup()) {
                     String visText = rtTf.frameVisibleText();

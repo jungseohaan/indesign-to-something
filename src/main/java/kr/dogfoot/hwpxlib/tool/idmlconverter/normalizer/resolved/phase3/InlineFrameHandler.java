@@ -909,11 +909,18 @@ public class InlineFrameHandler {
             }
         }
 
-        // renderedFloatingItems에서 해당 ID의 inline_object 찾기 (badge_group이 있으면 그것으로 교체)
-        // SPEC-025: renderable inline TF (type 없음, 예: "1" 큰 번호 라벨) 는 Phase 7 이 별도 floating
-        // 으로 배치하므로 inline 임베드 하면 중복 → "inline_object" 타입만 처리.
+        // renderedFloatingItems에서 해당 ID의 inline_object 또는 null-type inline TF 찾기.
+        // null-type: renderable inline TF (예: 번호 라벨 "1", "가") — Phase 7 floating 대신
+        // inline PNG로 임베드하여 텍스트 baseline과 수평 정렬 보장.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType())) {
+            if (rg.id() != anchoredObjectId) continue;
+            boolean proceed = "inline_object".equals(rg.itemType());
+            if (!proceed && rg.itemType() == null) {
+                ResolvedTextFrame ancTf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredObjectId));
+                proceed = ancTf != null && ancTf.isInline();
+            }
+            if (proceed) {
+                boolean isNullTypeInline = rg.itemType() == null; // badgeGroup override 전에 기록
                 if (badgeGroup != null) rg = badgeGroup;
                 if (rg.file() == null) return null;
                 File pngFile = new File(ctx.basePath, rg.file());
@@ -950,7 +957,8 @@ public class InlineFrameHandler {
                         double boundsRatio = bw / bh;
                         // bounds 비율과 PNG 비율이 다르면 PNG 비율 기준으로 보정
                         // bounds의 작은 쪽을 기준으로 맞춤 (원본 크기 초과 방지)
-                        if (Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
+                        // null-type inline TF(번호 라벨 등)는 bounds 원본 크기 유지
+                        if (!isNullTypeInline && Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
                             if (pngRatio < 1.0) {
                                 // 세로가 더 긴 PNG → 높이 유지, 폭 축소
                                 bw = bh * pngRatio;
@@ -971,8 +979,9 @@ public class InlineFrameHandler {
 
                     // 장식 번호 인라인(≤3자 + 큰 폰트/정사각형): 높이를 본문 줄 높이로 제한
                     // 인라인 이미지 높이가 줄간격을 벌리는 것 방지
+                    // null-type inline TF는 원본 크기 유지 (자연 크기가 baseline 정렬에 필요)
                     ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredObjectId));
-                    if (rtf != null && obj.height() > 1500) { // 15pt 초과
+                    if (!isNullTypeInline && rtf != null && obj.height() > 1500) { // 15pt 초과
                         // 프레임 가로/세로 비율이 정사각형에 가까우면 높이 제한
                         double[] rtfGb = rtf.geometricBounds();
                         if (rtfGb != null && rtfGb.length >= 4) {

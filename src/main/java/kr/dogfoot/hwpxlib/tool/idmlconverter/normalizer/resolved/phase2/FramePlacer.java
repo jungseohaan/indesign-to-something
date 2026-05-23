@@ -737,6 +737,20 @@ public final class FramePlacer {
             if (tf.verticalJustification() != null) {
                 block.verticalJustification(tf.verticalJustification());
             }
+            // composedLines 로 실제 텍스트 위치를 확인: TOP_ALIGN 이지만 텍스트가 프레임 상단에서
+            // 15% 이상 아래에 있으면 InDesign 이 inset/padding 으로 시각적 중앙 정렬을 구현한 것.
+            // HWPX TOP_ALIGN 은 inset 을 무시하므로 CENTER_ALIGN 으로 보정.
+            if ("TOP_ALIGN".equals(block.verticalJustification())
+                    && tf.composedLines() != null && !tf.composedLines().isEmpty()
+                    && tf.geometricBounds() != null && tf.geometricBounds().length >= 4) {
+                double frameH = tf.geometricBounds()[2] - tf.geometricBounds()[0];
+                double lineTop = tf.composedLines().get(0).bounds() != null
+                        ? tf.composedLines().get(0).bounds()[0] : tf.geometricBounds()[0];
+                double topOffset = lineTop - tf.geometricBounds()[0];
+                if (frameH > 0 && topOffset / frameH > 0.15) {
+                    block.verticalJustification("CENTER_ALIGN");
+                }
+            }
             // SPEC-025: 배지 자식 (badge_group child) 텍스트는 HWPX cell-height vs fontSize 의 좁은 여유 때문에
             // BOTTOM_ALIGN 적용 시 텍스트가 셀 밖으로 밀려나는 현상 발생 → CENTER_ALIGN 으로 강제하여 안정 배치.
             if (_isBadgeChild) {
@@ -765,6 +779,17 @@ public final class FramePlacer {
                 }
                 if (tf.cornerRadius() > 0) {
                     block.cornerRadius(tf.cornerRadius() * ctx.scaleFactor);
+                }
+                // TF 자체 strokeColor/strokeWeight 복사 (배지 자식 override 이전 기본값).
+                // fillColor와 동일한 방식: page_bg에 border가 없는 editable 텍스트박스는
+                // TF stroke로 HWPX 테두리를 그려야 시각적으로 border가 보임.
+                if (tf.strokeColor() != null && !"None".equals(tf.strokeColor()) && !"[None]".equals(tf.strokeColor())
+                        && tf.strokeWeight() > 0) {
+                    String strokeHex = ctx.resolvedData.resolveColorHex(tf.strokeColor());
+                    if (strokeHex != null) {
+                        block.strokeColor(strokeHex);
+                        block.strokeWeight(tf.strokeWeight());
+                    }
                 }
                 // SPEC-025: badge_group_child 의 styling 을 frame 에 복사 (PNG 제거 대신 styled box 로 렌더)
                 if (_badgeFill != null) {
