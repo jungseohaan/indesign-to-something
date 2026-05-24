@@ -126,6 +126,12 @@ public final class ResolvedBuildContext {
      */
     public java.util.Map<Integer, Integer> inlineObjectTfPageIndex = new java.util.HashMap<>();
 
+    /**
+     * Phase 2 가 non-editable 플로팅 TF 를 텍스트 글상자로 배치할 때 등록.
+     * Phase 7 은 이 집합에 있는 ID 의 PNG 를 건너뜀 (텍스트 글상자가 이미 배치됨).
+     */
+    public java.util.Set<Integer> renderedTfPlacedAsText = new java.util.HashSet<>();
+
     public ResolvedBuildContext() {
     }
 }

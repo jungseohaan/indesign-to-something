@@ -188,6 +188,10 @@ public final class RenderableFramePlacer {
                 if (rt.itemType() == null && rtTf != null && rtTf.isInline()) {
                     continue;
                 }
+                // Phase 2 가 텍스트 글상자로 배치한 non-editable 플로팅 TF → PNG 건너뜀 (중복 방지).
+                if (ctx.renderedTfPlacedAsText.contains(rt.id())) {
+                    continue;
+                }
                 boolean convertedToText = false;
                 if (rtTf != null && rtTf.isInline() && !rt.isBadgeGroup()) {
                     String visText = rtTf.frameVisibleText();

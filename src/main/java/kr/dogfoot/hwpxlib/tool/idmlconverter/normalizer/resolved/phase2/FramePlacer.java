@@ -161,7 +161,34 @@ public final class FramePlacer {
                     }
                 }
                 if (!sharedWithEditable) {
-                    continue;
+                    // non-editable 플로팅 TF 중, 자기 story + 텍스트가 있고 PNG로 렌더됐으며
+                    // 부모가 회전된 Rectangle (absoluteRotationAngle≠0)인 경우 텍스트 글상자로 배치.
+                    // (예: 오느른/운느라/싸인 — 부모 Rectangle이 비스듬히 기울어진 TF)
+                    // Phase 7 PNG 는 이후 ctx.renderedTfPlacedAsText 확인 시 건너뜀.
+                    String _vis = tf.frameVisibleText();
+                    String _visCleaned = (_vis == null) ? "" : _vis.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+                    int _domId = -1;
+                    try { _domId = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
+                    boolean _hasOwnText = _visCleaned.length() >= 2;
+                    boolean _isRendered = _domId >= 0 && ctx.resolvedData.isRenderedByOtherChannel(_domId);
+                    // 부모 Rectangle이 실제로 회전된 경우에만 텍스트 배치 (VectorShape/TextPath 는 제외)
+                    boolean _parentIsRotatedRect = false;
+                    if (_hasOwnText && _isRendered && !tf.isInline()) {
+                        ResolvedPageItem _tfi = ctx.resolvedData.getPageItem(tf.id());
+                        if (_tfi != null && _tfi.parentId() != null) {
+                            ResolvedPageItem _parent = ctx.resolvedData.getPageItem(_tfi.parentId());
+                            if (_parent != null && "Rectangle".equals(_parent.type())
+                                    && Math.abs(_parent.absoluteRotationAngle()) > 0.5) {
+                                _parentIsRotatedRect = true;
+                            }
+                        }
+                    }
+                    if (_parentIsRotatedRect) {
+                        ctx.renderedTfPlacedAsText.add(_domId);
+                        // fall through → 글상자로 배치
+                    } else {
+                        continue;
+                    }
                 }
             }
             // badge_group_child는 부모 badge PNG에 텍스트가 이미 포함되어 있으므로 글상자 배치 건너뜀 (중복 방지)
