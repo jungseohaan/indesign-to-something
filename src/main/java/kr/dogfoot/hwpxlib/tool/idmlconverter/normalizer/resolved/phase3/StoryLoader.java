@@ -10,9 +10,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.MatchConfidence;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 
@@ -23,9 +21,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTabStop;
 import java.io.File;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Phase 3 IDML Story 로딩 & 분기 (W3 Step C, 재시도).
@@ -43,7 +39,6 @@ class StoryLoader {
      */
     static List<ASTParagraph> convertStoryFromIDML(ResolvedBuildContext ctx, String storyId) {
         if (ctx.idmlDir == null) return null;
-
         // storyId(DOM decimal) → IDML hex → Story_u{hex}.xml
         String hexId;
         try {
@@ -303,16 +298,23 @@ class StoryLoader {
                     if (ehFont != null) run.fontFamily(ehFont);
                 }
 
+                // ORC-only run: 인라인 프레임/그래픽 플레이스홀더(￼)만 있는 런은
+                // 수식(EH/NP/BT) 분류 대상에서 제외 — 실제 텍스트 내용이 없으므로 수식일 수 없음.
+                // (예: "약물" 이 포함된 배지 CharacterStyle 때문에 isEHFontStyle이 true를 반환하는 오분류 방지)
+                String _runTxt = run.content();
+                boolean _orcOnly = _runTxt != null && !_runTxt.isEmpty()
+                        && _runTxt.replace("￼", "").isEmpty();
+
                 // EH 수식 그룹 진입
-                boolean enterEH = run.isEHFont()
+                boolean enterEH = !_orcOnly && (run.isEHFont()
                         || EHFontGlyphMap.containsEHEncodedChars(run.content())
                         || EHFontGlyphMap.containsEHFractionPattern(run.content())
                         || (!ehMathGroup.isEmpty() && ASTMathGrouper.isEHMathBridgeRun(run, runs, idx))
-                        || (!ehMathGroup.isEmpty() && MathProcessor.isEHSqrtContent(run, ehMathGroup));
+                        || (!ehMathGroup.isEmpty() && MathProcessor.isEHSqrtContent(run, ehMathGroup)));
 
                 // NP 수식 그룹 진입
                 boolean enterNP = false;
-                if (!enterEH) {
+                if (!enterEH && !_orcOnly) {
                     enterNP = run.isNPFont()
                             || (!npMathGroup.isEmpty() && ASTMathGrouper.isNPMathBridgeRun(run, runs, idx))
                             || (npMathGroup.isEmpty() && ASTMathGrouper.isPreNPMathRun(run, runs, idx))
@@ -323,7 +325,7 @@ class StoryLoader {
 
                 // BT 수식 그룹 진입
                 boolean enterBT = false;
-                if (!enterEH && !enterNP) {
+                if (!enterEH && !enterNP && !_orcOnly) {
                     enterBT = (run.isBTFont()
                                 && !ASTMathGrouper.isBTRunWithOnlyKorean(run.content()))
                             || (!mathGroup.isEmpty() && ASTMathGrouper.isMathBridgeRun(run, runs, idx))

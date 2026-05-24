@@ -20,7 +20,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -558,17 +557,7 @@ public class InlineFrameHandler {
                     ctx.resolvedData.getRenderedTextFrameByDomId(String.valueOf(anchoredObjectId));
             boolean isNullTypeInlineTf = rtCheck != null && rtCheck.itemType() == null && tf.isInline();
             if (!isNullTypeInlineTf) return null;
-            // null-type inline TF: Phase 7 skip → loadInlineObject 가 badge PNG 인라인 임베드.
-            // 텍스트 런으로 변환하면 배지 내부 텍스트 색상(예: 흰색)이 페이지 배경으로 사라짐 → null 반환.
-            if (ctx.basePath != null) {
-                for (RenderedGroup _rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                    if (_rg.id() == anchoredObjectId && _rg.file() != null) {
-                        File _pf = new File(ctx.basePath, _rg.file());
-                        if (_pf.exists()) return null;
-                        break;
-                    }
-                }
-            }
+            // null-type inline TF: Phase 7 는 건너뜀 → 여기서 ASTTextRun 으로 변환 진행.
         }
         // SPEC-025: 단순 배지 자식 (Phase 2 가 별도 글상자로 배치) → 인라인 임베드 중복 방지.
         if (ctx.resolvedData.isSimpleBadgeChild(domId)) return null;

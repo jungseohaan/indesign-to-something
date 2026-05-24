@@ -52,9 +52,13 @@ public final class RenderableFramePlacer {
         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
             if (rt.file() == null) continue;
             String dedupKey = rt.pageIndex() + "|" + rt.file();
-            if (!placedKeys.add(dedupKey)) continue; // 이미 배치된 동일 파일/페이지
+            if (!placedKeys.add(dedupKey)) {
+                continue; // 이미 배치된 동일 파일/페이지
+            }
             // inline_object 그룹: Phase 3가 inline PNG로 처리 → 배치 스킵
-            if (inlineObjDedupKeys.contains(dedupKey)) continue;
+            if (inlineObjDedupKeys.contains(dedupKey)) {
+                continue;
+            }
             // badge_group은 인라인 앵커(inline_object)로 배치된 경우에만 건너뜀.
             // 인라인 참조가 없는 독립 badge는 여기서 플로팅으로 배치해야 함.
             if (rt.isBadgeGroup()) {
@@ -177,12 +181,13 @@ public final class RenderableFramePlacer {
 
                 kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTf
                         = ctx.resolvedData.getTextFrame(String.valueOf(rt.id()));
-                // null-type inline TF: Phase 3의 tryInlineTextFrameAsRun이 inline text로 처리.
-                // Phase 7 에서 TextFrameBlock 생성하면 본문 텍스트와 중복 → skip.
-                if (rtTf != null && rtTf.isInline() && rt.itemType() == null) continue;
                 // SPEC-025: renderable inline TF 가 짧은 단일 텍스트 (≤3자) 면 PNG 대신
                 // TextFrameBlock 으로 변환 → 텍스트로 검색 가능 + 폰트 매핑/스케일 자유.
                 // (예: 페이지 32 "1" 큰 번호 라벨)
+                // null-type inline TF (예: 가/나 배지)는 Phase 3 가 ASTTextRun 으로 처리 → Phase 7 건너뜀.
+                if (rt.itemType() == null && rtTf != null && rtTf.isInline()) {
+                    continue;
+                }
                 boolean convertedToText = false;
                 if (rtTf != null && rtTf.isInline() && !rt.isBadgeGroup()) {
                     String visText = rtTf.frameVisibleText();
@@ -386,7 +391,9 @@ public final class RenderableFramePlacer {
                             break;
                         }
                     }
-                    if (hasInlineObjectInFloating) continue;
+                    if (hasInlineObjectInFloating) {
+                        continue;
+                    }
                 }
 
                 ASTFigure fig = new ASTFigure();
@@ -498,8 +505,7 @@ public final class RenderableFramePlacer {
         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
             if (rt.isBadgeGroup()) continue;
             if ("inline_object".equals(rt.type())) continue; // Phase 7 floating 건너뜀 — Phase 3가 처리
-            // null-type inline TF: Phase 7가 skip → Phase 3가 tryInlineTextFrameAsRun으로 처리 → 등록 불필요
-            if (rt.itemType() == null) continue;
+            if (rt.itemType() == null) continue; // null-type inline TF는 Phase 3가 ASTTextRun으로 처리
             kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTf =
                     ctx.resolvedData.getTextFrame(String.valueOf(rt.id()));
             if (rtTf == null || !rtTf.isInline()) continue;
