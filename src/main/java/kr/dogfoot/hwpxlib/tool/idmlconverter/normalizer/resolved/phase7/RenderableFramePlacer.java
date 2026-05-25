@@ -51,6 +51,11 @@ public final class RenderableFramePlacer {
 
         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
             if (rt.file() == null) continue;
+            // Phase 2 가 텍스트 글상자로 배치한 TF → PNG 건너뜀 (dedupKey 선점 전에 체크).
+            // 부모 Rectangle 항목은 별도로 같은 PNG 를 배치 → 배경 도형으로 남음.
+            if (ctx.renderedTfPlacedAsText.contains(rt.id())) {
+                continue;
+            }
             String dedupKey = rt.pageIndex() + "|" + rt.file();
             if (!placedKeys.add(dedupKey)) {
                 continue; // 이미 배치된 동일 파일/페이지
@@ -186,10 +191,6 @@ public final class RenderableFramePlacer {
                 // (예: 페이지 32 "1" 큰 번호 라벨)
                 // null-type inline TF (예: 가/나 배지)는 Phase 3 가 ASTTextRun 으로 처리 → Phase 7 건너뜀.
                 if (rt.itemType() == null && rtTf != null && rtTf.isInline()) {
-                    continue;
-                }
-                // Phase 2 가 텍스트 글상자로 배치한 non-editable 플로팅 TF → PNG 건너뜀 (중복 방지).
-                if (ctx.renderedTfPlacedAsText.contains(rt.id())) {
                     continue;
                 }
                 boolean convertedToText = false;

@@ -1383,6 +1383,20 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                 }
             } catch (eHideAll) {}
         }
+        // renderTarget !== item: item 이 non-editable TF 이고 회전된 Rectangle 안에 있는 경우
+        // Java 파이프라인이 이 TF 를 텍스트박스로 재배치 → 부모 PNG 에 텍스트 중복 방지를 위해 숨김.
+        if (renderTarget !== item && isTextFrame && !editableFrameIds[item.id]) {
+            var pRot = 0;
+            try { pRot = renderTarget.absoluteRotationAngle; } catch (ePRot) {}
+            if (Math.abs(pRot) > 0.5 && renderTarget.constructor.name === "Rectangle") {
+                try {
+                    if (item.visible) {
+                        item.visible = false;
+                        hiddenEditable.push(item);
+                    }
+                } catch (eRotHide) {}
+            }
+        }
 
         try {
             // SPEC-023: 배경 도형이 있으면 별도 PNG 로 추가 render
