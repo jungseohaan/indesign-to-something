@@ -987,6 +987,7 @@ public class ASTRunConverter {
 
             obj.anchoredPosition(ig.anchoredPosition());
             obj.textWrapMode(ig.textWrapMode());
+            obj.keepInline(true); // IDML AnchoredPosition=InlineOrAbove → floating 추출 금지
 
             // 그룹 자체 + 자식 ID를 consumed로 마킹 → orphan 주입에서 제외
             resolvedData.markConsumedRenderedGraphic(String.valueOf(rg.id()));

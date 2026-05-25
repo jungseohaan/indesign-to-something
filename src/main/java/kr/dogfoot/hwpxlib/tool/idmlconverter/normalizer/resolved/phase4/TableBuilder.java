@@ -298,6 +298,7 @@ public final class TableBuilder {
                 if (!(item instanceof ASTInlineObject)) continue;
                 ASTInlineObject inline = (ASTInlineObject) item;
                 if (inline.imageData() == null) continue;
+                if (inline.keepInline()) continue; // IDML inline_object — floating 추출 금지
 
                 ASTFigure fig = inlineToFigure(inline, cellX, cellY, tableZOrder);
                 if (fig == null) continue;
