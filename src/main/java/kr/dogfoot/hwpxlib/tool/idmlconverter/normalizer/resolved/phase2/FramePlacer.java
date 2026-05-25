@@ -118,20 +118,24 @@ public final class FramePlacer {
                             }
                         }
                     }
-                    // Phase 3 reachable: badge_group 이 inline_object 로도 등록되어 있으면
-                    // tryInlineGroupAsSingleBadge 는 PNG 우선 경로에서 null 반환 → 인라인 텍스트박스 미생성.
-                    // 따라서 inline_object 인 배지는 Phase 3 에서 처리 불가 → 플로팅 텍스트박스로 보강.
-                    // inline_object 가 아닌 배지(중첩 배지 등)는 tryInlineGroupAsSingleBadge 가 정상 처리.
+                    // phase3Reachable 판별:
+                    // 배지가 renderedFloatingItems에 inline_object만 있으면
+                    //   → inline PNG가 텍스트 포함 전체 배지 → floating 불필요 → phase3Reachable=true
+                    // 배지가 inline_object + badge_group 둘 다 있으면
+                    //   → inline PNG는 배경만, badge_group PNG가 별도 → tryInlineGroupAsSingleBadge는 null 반환
+                    //   → 텍스트가 아무데도 없음 → floating 텍스트박스로 보강 → phase3Reachable=false
                     boolean badgeAlsoInlineObject = false;
+                    boolean badgeHasBadgeGroupFloating = false;
                     if (badgeGroupId >= 0) {
                         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                            if (rg.id() == badgeGroupId && "inline_object".equals(rg.itemType())) {
-                                badgeAlsoInlineObject = true;
-                                break;
+                            if (rg.id() == badgeGroupId) {
+                                if ("inline_object".equals(rg.itemType())) badgeAlsoInlineObject = true;
+                                if ("badge_group".equals(rg.itemType())) badgeHasBadgeGroupFloating = true;
                             }
                         }
                     }
-                    boolean phase3Reachable = !badgeAlsoInlineObject;
+                    // floating 필요: inline PNG(배경) + badge_group PNG 모두 존재할 때만
+                    boolean phase3Reachable = !(badgeAlsoInlineObject && badgeHasBadgeGroupFloating);
                     if (inAnyBadge && phase3Reachable) {
                         String vt0 = tf.frameVisibleText();
                         String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
@@ -145,6 +149,23 @@ public final class FramePlacer {
                         // (이전: ≥2 자 스킵 → "제1항" 같은 레이블이 본문에 인라인 삽입되는 버그)
                         if (inMultiChildBadge) {
                             continue;
+                        }
+                    }
+                    // 부모 Group이 badge_group 없이 inline_object만 있으면
+                    // → inline PNG가 텍스트 포함 전체 배지 → floating 불필요.
+                    // (badge_group도 있는 경우는 inAnyBadge=true 경로에서 처리됨)
+                    if (!inAnyBadge && domIdInlineEd >= 0) {
+                        ResolvedPageItem _tfi2 = ctx.resolvedData.getPageItem(tf.id());
+                        if (_tfi2 != null && _tfi2.parentId() != null) {
+                            boolean _parentIsInlineObj = false;
+                            for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                                if (String.valueOf(rg.id()).equals(_tfi2.parentId())
+                                        && "inline_object".equals(rg.itemType())) {
+                                    _parentIsInlineObj = true;
+                                    break;
+                                }
+                            }
+                            if (_parentIsInlineObj) continue;
                         }
                     }
                     inlineToFloating = true;
@@ -210,9 +231,8 @@ public final class FramePlacer {
                     }
                 }
             }
-            // badge_group_child는 부모 inline PNG에 텍스트가 포함된 경우에만 글상자 배치 건너뜀.
-            // SPEC-025: editable 로 승격된 frame 은 page_bg 에서 숨겨지므로 PNG 중복 우려 없음 → 건너뛰지 않음
-            // inline_object.childIds가 비어있으면 inline PNG는 배경만 캡처 → 텍스트 TF는 별도 배치 필요.
+            // badge_group_child(non-editable)는 부모 PNG가 텍스트를 포함하므로 글상자 배치 건너뜀.
+            // SPEC-025: editable로 승격된 frame은 !isEditableTextFrame 가드로 보호됨 → 건너뛰지 않음
             boolean skipAsBadgeChild = false;
             if (!ctx.resolvedData.isEditableTextFrame(tf.id())) {
                 int domIdInt2 = -1;
@@ -220,29 +240,7 @@ public final class FramePlacer {
                 if (domIdInt2 >= 0) {
                     for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
                         if (rg.id() == domIdInt2 && "badge_group_child".equals(rg.itemType())) {
-                            int parentBadgeId2 = rg.badgeGroupId();
-                            for (RenderedGroup prg : ctx.resolvedData.allRenderedFloatingItems()) {
-                                if (prg.id() == parentBadgeId2 && "inline_object".equals(prg.itemType())) {
-                                    int[] pChildIds2 = prg.childIds();
-                                    if (pChildIds2 != null) {
-                                        for (int pcid : pChildIds2) {
-                                            if (pcid == domIdInt2) { skipAsBadgeChild = true; break; }
-                                        }
-                                    }
-                                    break;
-                                }
-                            }
-                            if (!skipAsBadgeChild) {
-                                // inline_object가 없거나 childIds에 미포함 → badge_group PNG에 있는지 확인.
-                                // badge_group PNG(Phase 7이 처리)가 존재하면 TF는 별도 배치 불필요.
-                                for (RenderedGroup prg : ctx.resolvedData.allRenderedFloatingItems()) {
-                                    if (prg.id() == parentBadgeId2 && "badge_group".equals(prg.itemType())
-                                            && prg.file() != null && !inlineToFloating) {
-                                        skipAsBadgeChild = true;
-                                        break;
-                                    }
-                                }
-                            }
+                            skipAsBadgeChild = true;
                             break;
                         }
                     }
@@ -1097,7 +1095,6 @@ public final class FramePlacer {
         } catch (NumberFormatException nfe) {
             sourceIdBase = "u" + tf.id();
         }
-        int charOffset = 0;
         List<ASTTextFrameBlock> createdBlocks = new ArrayList<>();
 
         for (int gi = 0; gi < groups.size(); gi++) {
@@ -1184,7 +1181,6 @@ public final class FramePlacer {
                 block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
             }
 
-            charOffset += groupCharCount;
             createdBlocks.add(block);
             section.addBlock(block);
         }
