@@ -3320,45 +3320,45 @@ function isRenderableTextFrame(tf) {
         // 드롭 섀도우
         try {
             var dss = tf.transparencySettings.dropShadowSettings;
-            if (dss.mode != ShadowMode.NONE) return true;
+            if (dss.mode != ShadowMode.NONE) { return true; }
         } catch (e) {}
 
         // 외부 광선 (Outer Glow)
         try {
-            if (tf.transparencySettings.outerGlowSettings.applied) return true;
+            if (tf.transparencySettings.outerGlowSettings.applied) { return true; }
         } catch (e) {}
 
         // 내부 광선 (Inner Glow)
         try {
-            if (tf.transparencySettings.innerGlowSettings.applied) return true;
+            if (tf.transparencySettings.innerGlowSettings.applied) { return true; }
         } catch (e) {}
 
         // 베벨/엠보스
         try {
-            if (tf.transparencySettings.bevelAndEmbossSettings.applied) return true;
+            if (tf.transparencySettings.bevelAndEmbossSettings.applied) { return true; }
         } catch (e) {}
 
         // 새틴 (Satin)
         try {
-            if (tf.transparencySettings.satinSettings.applied) return true;
+            if (tf.transparencySettings.satinSettings.applied) { return true; }
         } catch (e) {}
 
         // 프레임 투명도 (불투명도 < 100%)
         try {
             var opacity = tf.transparencySettings.blendingSettings.opacity;
-            if (opacity < 100) return true;
+            if (opacity < 100) { return true; }
         } catch (e) {}
 
         // 텍스트 수준 드롭 섀도우 (문자에 직접 적용)
         try {
             var charDss = firstChar.transparencySettings.dropShadowSettings;
-            if (charDss.mode != ShadowMode.NONE) return true;
+            if (charDss.mode != ShadowMode.NONE) { return true; }
         } catch (e) {}
 
         // 텍스트 수준 투명도
         try {
             var charOpacity = firstChar.transparencySettings.blendingSettings.opacity;
-            if (charOpacity < 100) return true;
+            if (charOpacity < 100) { return true; }
         } catch (e) {}
 
         // 장식 대형 컬러 텍스트: fontSize >= minFontSize AND 색상이 검정이 아님
@@ -3369,14 +3369,16 @@ function isRenderableTextFrame(tf) {
                 var dltCfg = CONFIG.rendering.textFrame.decorativeLargeText;
                 if (dltCfg.enabled) {
                     var fontSize = firstChar.pointSize;
+                   
                     if (fontSize >= dltCfg.minFontSize) {
                         if (!dltCfg.excludeBlack || !isBlackColor(firstChar, dltCfg.blackThreshold)) {
+                           
                             return true;
                         }
                     }
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
 
         // 장식 스타일 텍스트: 짧은 텍스트(≤10자) + 비검정 + Object Style(배경색/테두리/둥근모서리)
         // SPEC-025: decorativeStyledTextEditable=true 면 장식 라벨/배지도 editable 로
@@ -3390,30 +3392,29 @@ function isRenderableTextFrame(tf) {
                     // 배경색 체크
                     try {
                         var fillName = tf.fillColor ? tf.fillColor.name : "None";
+                       
                         if (fillName !== "None" && fillName !== "[None]") hasObjStyle = true;
                     } catch (e) {}
                     // 테두리 체크
                     if (!hasObjStyle) {
                         try {
-                            if (tf.strokeWeight > 0) {
+                            var sw95b = tf.strokeWeight || 0;
+                            if (sw95b > 0) {
                                 var sName = tf.strokeColor ? tf.strokeColor.name : "None";
+                               
                                 if (sName !== "None" && sName !== "[None]") hasObjStyle = true;
                             }
-                        } catch (e) {}
-                    }
-                    // 둥근 모서리 체크
-                    if (!hasObjStyle) {
-                        try {
-                            if (tf.topLeftCornerOption !== CornerOptions.NONE
-                                || tf.topRightCornerOption !== CornerOptions.NONE) hasObjStyle = true;
                         } catch (e) {}
                     }
                     // 부모 객체의 배경색 체크 (TextFrame이 Rectangle 안에 있는 경우)
                     if (!hasObjStyle) {
                         try {
                             var parent = tf.parent;
-                            if (parent && parent.constructor.name !== "Story" && parent.constructor.name !== "Spread" && parent.constructor.name !== "Page") {
+                            var pName = parent ? parent.constructor.name : "null";
+                           
+                            if (parent && pName !== "Story" && pName !== "Spread" && pName !== "Page") {
                                 var pFill = parent.fillColor ? parent.fillColor.name : "None";
+                               
                                 if (pFill !== "None" && pFill !== "[None]") hasObjStyle = true;
                             }
                         } catch (e) {}
@@ -3422,15 +3423,18 @@ function isRenderableTextFrame(tf) {
                     hasObjStyle = true; // requireObjectStyle=false이면 무조건 통과
                 }
 
+               
                 if (hasObjStyle) {
                     if (!dstCfg.excludeBlack || !isBlackColor(firstChar, dstCfg.blackThreshold)) {
+                       
                         return true;
                     }
                 }
             }
-        } catch (e) {}
-    } catch (e) {}
+        } catch (e) { }
+    } catch (e) { }
 
+   
     return false;
 }
 
@@ -3470,12 +3474,6 @@ function isDecorativeStyledTextFrame(tf) {
                         var sName = tf.strokeColor ? tf.strokeColor.name : "None";
                         if (sName !== "None" && sName !== "[None]") hasStyle = true;
                     }
-                } catch (e) {}
-            }
-            if (!hasStyle) {
-                try {
-                    if (tf.topLeftCornerOption !== CornerOptions.NONE
-                        || tf.topRightCornerOption !== CornerOptions.NONE) hasStyle = true;
                 } catch (e) {}
             }
             if (!hasStyle) return false;

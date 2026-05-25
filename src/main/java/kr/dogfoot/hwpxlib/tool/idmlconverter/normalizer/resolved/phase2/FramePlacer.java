@@ -183,7 +183,18 @@ public final class FramePlacer {
                             }
                         }
                     }
-                    if (_parentIsRotatedRect) {
+                    // itemType=null인 renderedTextFrames 항목: ExtendScript 장식 휴리스틱이
+                    // 잘못 분류한 경우(예: 큰 제목 텍스트를 renderable로 분류) → 텍스트로 승격
+                    boolean _noItemTypeRendered = false;
+                    if (!_parentIsRotatedRect && _hasOwnText && _isRendered && !tf.isInline()) {
+                        for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
+                            if (rt.id() == _domId && rt.itemType() == null) {
+                                _noItemTypeRendered = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (_parentIsRotatedRect || _noItemTypeRendered) {
                         ctx.renderedTfPlacedAsText.add(_domId);
                         // fall through → 글상자로 배치
                     } else {
