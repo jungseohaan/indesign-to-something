@@ -36,18 +36,25 @@ public final class FramePlacer {
                     int domIdInt = -1;
                     try { domIdInt = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
                     boolean rendered = domIdInt >= 0 && ctx.resolvedData.isRenderedByOtherChannel(domIdInt);
-                    // badge_group_child의 부모 badge_group이 inline_object로도 배치되면
-                    // 해당 PNG에 텍스트가 포함되어 있으므로 플로팅 텍스트 배치 건너뜀 (중복 방지)
-                    if (!rendered && domIdInt >= 0) {
+                    // badge_group_child: 부모 inline_object의 childIds에 포함된 경우에만 PNG에 텍스트가 있음.
+                    // childIds가 비어있으면 inline PNG는 배경만 캡처 → 텍스트 TF는 별도 플로팅 배치 필요.
+                    if (rendered && domIdInt >= 0) {
                         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
                             if (rg.id() == domIdInt && "badge_group_child".equals(rg.itemType())) {
                                 int parentBadgeId = rg.badgeGroupId();
+                                boolean inInlinePng = false;
                                 for (RenderedGroup prg : ctx.resolvedData.allRenderedFloatingItems()) {
                                     if (prg.id() == parentBadgeId && "inline_object".equals(prg.itemType())) {
-                                        rendered = true;
+                                        int[] pChildIds = prg.childIds();
+                                        if (pChildIds != null) {
+                                            for (int pcid : pChildIds) {
+                                                if (pcid == domIdInt) { inInlinePng = true; break; }
+                                            }
+                                        }
                                         break;
                                     }
                                 }
+                                if (!inInlinePng) rendered = false; // inline PNG에 텍스트 없음 → 플로팅 배치 허용
                                 break;
                             }
                         }
@@ -111,19 +118,20 @@ public final class FramePlacer {
                             }
                         }
                     }
-                    // Phase 3 reachable: 해당 badge_group 이 inline_object 로도 등록되어 있으면
-                    // 본문 inline 앵커 처리 경로에서 도달 가능 → tryInlineGroupAsSingleBadge 가 처리.
-                    // 그렇지 않으면 (예: 큰 원형 배지 안에 중첩된 작은 배지) Phase 3 가 도달 못 함 →
-                    // 플로팅 텍스트박스로 보강해야 검색 가능 텍스트가 살아남음.
-                    boolean phase3Reachable = false;
+                    // Phase 3 reachable: badge_group 이 inline_object 로도 등록되어 있으면
+                    // tryInlineGroupAsSingleBadge 는 PNG 우선 경로에서 null 반환 → 인라인 텍스트박스 미생성.
+                    // 따라서 inline_object 인 배지는 Phase 3 에서 처리 불가 → 플로팅 텍스트박스로 보강.
+                    // inline_object 가 아닌 배지(중첩 배지 등)는 tryInlineGroupAsSingleBadge 가 정상 처리.
+                    boolean badgeAlsoInlineObject = false;
                     if (badgeGroupId >= 0) {
                         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
                             if (rg.id() == badgeGroupId && "inline_object".equals(rg.itemType())) {
-                                phase3Reachable = true;
+                                badgeAlsoInlineObject = true;
                                 break;
                             }
                         }
                     }
+                    boolean phase3Reachable = !badgeAlsoInlineObject;
                     if (inAnyBadge && phase3Reachable) {
                         String vt0 = tf.frameVisibleText();
                         String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
@@ -202,8 +210,9 @@ public final class FramePlacer {
                     }
                 }
             }
-            // badge_group_child는 부모 badge PNG에 텍스트가 이미 포함되어 있으므로 글상자 배치 건너뜀 (중복 방지)
+            // badge_group_child는 부모 inline PNG에 텍스트가 포함된 경우에만 글상자 배치 건너뜀.
             // SPEC-025: editable 로 승격된 frame 은 page_bg 에서 숨겨지므로 PNG 중복 우려 없음 → 건너뛰지 않음
+            // inline_object.childIds가 비어있으면 inline PNG는 배경만 캡처 → 텍스트 TF는 별도 배치 필요.
             boolean skipAsBadgeChild = false;
             if (!ctx.resolvedData.isEditableTextFrame(tf.id())) {
                 int domIdInt2 = -1;
@@ -211,7 +220,29 @@ public final class FramePlacer {
                 if (domIdInt2 >= 0) {
                     for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
                         if (rg.id() == domIdInt2 && "badge_group_child".equals(rg.itemType())) {
-                            skipAsBadgeChild = true;
+                            int parentBadgeId2 = rg.badgeGroupId();
+                            for (RenderedGroup prg : ctx.resolvedData.allRenderedFloatingItems()) {
+                                if (prg.id() == parentBadgeId2 && "inline_object".equals(prg.itemType())) {
+                                    int[] pChildIds2 = prg.childIds();
+                                    if (pChildIds2 != null) {
+                                        for (int pcid : pChildIds2) {
+                                            if (pcid == domIdInt2) { skipAsBadgeChild = true; break; }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            if (!skipAsBadgeChild) {
+                                // inline_object가 없거나 childIds에 미포함 → badge_group PNG에 있는지 확인.
+                                // badge_group PNG(Phase 7이 처리)가 존재하면 TF는 별도 배치 불필요.
+                                for (RenderedGroup prg : ctx.resolvedData.allRenderedFloatingItems()) {
+                                    if (prg.id() == parentBadgeId2 && "badge_group".equals(prg.itemType())
+                                            && prg.file() != null && !inlineToFloating) {
+                                        skipAsBadgeChild = true;
+                                        break;
+                                    }
+                                }
+                            }
                             break;
                         }
                     }

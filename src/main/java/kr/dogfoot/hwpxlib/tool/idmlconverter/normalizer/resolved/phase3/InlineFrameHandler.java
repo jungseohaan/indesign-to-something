@@ -336,6 +336,13 @@ public class InlineFrameHandler {
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
         if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
 
+        // 이미 inline_object PNG로 렌더링된 경우 → PNG 우선 (loadInlineObject 에 위임)
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
+                return null;
+            }
+        }
+
         // 직속 자식 TF 1 개 (inline + 텍스트 있음)
         ResolvedTextFrame childTf = null;
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
@@ -984,6 +991,63 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    /**
+     * inline_object PNG로 배치된 Group의 직속 editable 자식 TF를
+     * INLINE_TEXT_FRAME으로 변환한다.
+     *
+     * PNG에는 editable TF 내용이 포함되지 않으므로 별도로 배치해야 한다.
+     */
+    static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {
+        java.util.List<ASTInlineObject> result = new ArrayList<>();
+        String groupIdStr = String.valueOf(groupId);
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
+            if (pi == null || !groupIdStr.equals(pi.parentId())) continue;
+            if (!tf.isInline()) continue;
+            if (!ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
+            String vt = tf.frameVisibleText();
+            if (vt == null) continue;
+            String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            if (cleaned.isEmpty()) continue;
+            double[] gb = tf.geometricBounds();
+            if (gb == null || gb.length < 4) continue;
+            double w = Math.abs(gb[3] - gb[1]);
+            double h = Math.abs(gb[2] - gb[0]);
+            if (w <= 0 || h <= 0) continue;
+            int tfDomId;
+            try { tfDomId = Integer.parseInt(tf.id()); } catch (NumberFormatException e) { continue; }
+
+            ASTInlineObject box = new ASTInlineObject();
+            box.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+            box.width(CoordinateConverter.pointsToHwpunits(w));
+            box.height(CoordinateConverter.pointsToHwpunits(h));
+            box.sourceId("child_u" + Integer.toHexString(tfDomId));
+
+            ASTParagraph paraInner = new ASTParagraph();
+            paraInner.alignment("CENTER");
+            ASTTextRun textRunInner = new ASTTextRun();
+            textRunInner.text(cleaned);
+            ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+            if (story != null && !story.paragraphs().isEmpty()) {
+                ResolvedParagraph rp = story.paragraphs().get(0);
+                if (rp.runs() != null && !rp.runs().isEmpty()) {
+                    ResolvedRun rr = rp.runs().get(0);
+                    if (rr.fontFamily() != null) textRunInner.fontFamily(rr.fontFamily());
+                    if (rr.fontStyle() != null) textRunInner.fontStyle(rr.fontStyle());
+                    if (rr.fontSize() != null && rr.fontSize() > 0) {
+                        textRunInner.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+                    }
+                    if (rr.fillColor() != null) textRunInner.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+                }
+            }
+            paraInner.addItem(textRunInner);
+            box.addParagraph(paraInner);
+            box.verticalJustification("CenterAlign");
+            result.add(box);
+        }
+        return result;
     }
 
     /**
