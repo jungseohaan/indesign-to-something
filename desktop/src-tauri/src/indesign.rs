@@ -113,6 +113,32 @@ struct DoneSignal {
     message: Option<String>,
 }
 
+/// InDesign 2026 동적 SDEF 대응: `using terms from application "..."` 컴파일 전에
+/// InDesign이 실행 중이어야 SDEF를 로드할 수 있다.
+/// InDesign이 실행 중이 아니면 `activate` 스크립트로 launch하고 초기화를 기다린다.
+/// `activate`는 InDesign SDEF 없이도 실행 가능한 표준 Apple Event.
+async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
+    let already_running = tokio::process::Command::new("pgrep")
+        .args(["-x", app_name])
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if already_running {
+        return;
+    }
+    let prelaunch = format!("tell application \"{}\" to activate", app_name);
+    let prelaunch_file = output_dir.join("_prelaunch.applescript");
+    if std::fs::write(&prelaunch_file, &prelaunch).is_ok() {
+        let _ = tokio::process::Command::new("osascript")
+            .arg(&prelaunch_file)
+            .output()
+            .await;
+        // 동적 SDEF 초기화 대기 (InDesign 2026은 15초 이상 필요할 수 있음)
+        tokio::time::sleep(Duration::from_secs(15)).await;
+    }
+}
+
 /// osascript를 통해 InDesign ExtendScript를 실행하고 완료를 대기한다.
 ///
 /// 흐름:
@@ -132,6 +158,8 @@ pub async fn run_extraction(
     skip_pdf: bool,
 ) -> Result<InddExtractResult, String> {
     let app_name = app_name_from_path(indesign_app_path);
+    // InDesign 2026 동적 SDEF: 컴파일 전에 앱이 실행 중이어야 `using terms from` 성공
+    ensure_indesign_running(&app_name, output_dir).await;
     let output_dir_str = output_dir.to_string_lossy().to_string();
 
     // 진행률: InDesign 실행 중
@@ -248,7 +276,7 @@ end using terms from"#,
 
                 // SPEC-030 B.4: phase별 stale 타임아웃 갱신
                 current_phase_stale = match step {
-                    "open" => 300,
+                    "open" => 600,
                     "idml" | "pdf" => 120,
                     "rendered_frames" | "render_badge" | "render_frame" => 1800,
                     s if s.starts_with("resolved") => 300,
@@ -385,6 +413,8 @@ pub async fn run_extraction_with_skip(
     skip_render_pages_json: &str,
 ) -> Result<InddExtractResult, String> {
     let app_name = app_name_from_path(indesign_app_path);
+    // InDesign 2026 동적 SDEF: 컴파일 전에 앱이 실행 중이어야 `using terms from` 성공
+    ensure_indesign_running(&app_name, output_dir).await;
     let output_dir_str = output_dir.to_string_lossy().to_string();
     let spread_flag = if spread_mode { "1" } else { "0" };
     let skip_pdf_flag = if skip_pdf { "1" } else { "0" };
@@ -501,6 +531,8 @@ pub async fn run_page_hash_scan(
     indesign_app_path: &str,
 ) -> Result<(), String> {
     let app_name = app_name_from_path(indesign_app_path);
+    // InDesign 2026 동적 SDEF: 컴파일 전에 앱이 실행 중이어야 `using terms from` 성공
+    ensure_indesign_running(&app_name, output_dir).await;
     let output_dir_str = output_dir.to_string_lossy().to_string();
     let config_path = find_bundled_config(app);
     // arguments[10] = "pre_scan"
