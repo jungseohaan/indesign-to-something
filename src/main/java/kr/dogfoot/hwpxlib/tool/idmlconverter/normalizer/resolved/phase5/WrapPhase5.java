@@ -55,6 +55,8 @@ public final class WrapPhase5 {
                     while (nextId != null) {
                         ResolvedTextFrame nextTf = ctx.resolvedData.getTextFrame(nextId);
                         if (nextTf == null) break;
+                        // 다른 페이지의 연결 글상자는 wrap 분석에 포함하지 않음
+                        if (nextTf.pageIndex() != rtf.pageIndex()) break;
                         if (nextTf.composedLines() != null) allComposedLines.addAll(nextTf.composedLines());
                         nextId = nextTf.nextFrameId();
                     }
