@@ -3661,7 +3661,9 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
 
     app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 220;
     app.pngExportPreferences.antiAlias = true;
-    app.pngExportPreferences.transparentBackground = true;
+    // 페이지 배경은 흰 배경으로 렌더링 — transparentBackground=true 시 연한 CMYK 색상(C=0 M=0.1 Y=0.08 K=0 등)이
+    // "흰 바탕 언멀티플라이" 처리로 거의 투명하게 렌더되어 배경 도형이 사라지는 현상 방지
+    app.pngExportPreferences.transparentBackground = false;
     app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
 
     // 고품질 이미지 표시로 전환 (배치 이미지를 원본 해상도로 렌더)

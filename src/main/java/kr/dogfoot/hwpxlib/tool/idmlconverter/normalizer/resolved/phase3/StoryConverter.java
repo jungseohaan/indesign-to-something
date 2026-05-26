@@ -350,7 +350,20 @@ public final class StoryConverter {
                         if (selfId == null || selfId.length() < 2) continue;
                         try {
                             int domId = Integer.parseInt(selfId.substring(1), 16);
-                            if (ctx.deferredAnchoredFloatingIds.add(domId)) found++;
+                            // inline_object PNG가 있는 anchored 그룹은 loadInlineObject가 인라인 배치 담당.
+                            // deferredAnchoredFloating은 PNG 없이 page coords만 있는 highlight 전용.
+                            boolean hasInlinePng = false;
+                            if (ctx.resolvedData != null) {
+                                for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                                        : ctx.resolvedData.allRenderedFloatingItems()) {
+                                    if (rg.id() == domId && "inline_object".equals(rg.itemType())
+                                            && rg.file() != null) {
+                                        hasInlinePng = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!hasInlinePng && ctx.deferredAnchoredFloatingIds.add(domId)) found++;
                         } catch (NumberFormatException e) { /* skip */ }
                     }
                 }
