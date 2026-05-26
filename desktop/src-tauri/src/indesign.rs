@@ -116,7 +116,9 @@ struct DoneSignal {
 /// InDesign 2026 동적 SDEF 대응: `using terms from application "..."` 컴파일 전에
 /// InDesign이 실행 중이어야 SDEF를 로드할 수 있다.
 /// InDesign이 실행 중이 아니면 `activate` 스크립트로 launch하고 초기화를 기다린다.
-/// `activate`는 InDesign SDEF 없이도 실행 가능한 표준 Apple Event.
+/// 프로세스 실행 여부와 무관하게, `using terms from` 블록으로 SDEF 로드 완료를
+/// 확인한다. InDesign 2026은 OSAScriptingDefinitionIsDynamic = true이므로 프로세스가
+/// 살아 있어도 SDEF가 준비되지 않으면 `do script`가 -2741로 실패한다.
 async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
     let already_running = tokio::process::Command::new("pgrep")
         .args(["-x", app_name])
@@ -126,6 +128,7 @@ async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
         .unwrap_or(false);
 
     if !already_running {
+        // 표준 Apple Event (SDEF 불필요) 로 InDesign 실행
         let prelaunch = format!("tell application \"{}\" to activate", app_name);
         let prelaunch_file = output_dir.join("_prelaunch.applescript");
         if std::fs::write(&prelaunch_file, &prelaunch).is_ok() {
@@ -133,18 +136,21 @@ async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
                 .arg(&prelaunch_file)
                 .output()
                 .await;
-            // 동적 SDEF 초기화 대기 (InDesign 2026은 15초 이상 필요할 수 있음)
-            tokio::time::sleep(Duration::from_secs(15)).await;
         }
-        return;
+        // 첫 기동은 SDEF 로드에 시간이 더 걸림 → 먼저 10초 대기
+        tokio::time::sleep(Duration::from_secs(10)).await;
     }
 
-    // 실행 중이더라도 크래시 후 재실행 직후엔 Apple Events가 준비 안 됐을 수 있음 (-609).
-    // 표준 이벤트(get name, SDEF 불필요)로 연결 준비 여부를 확인하고 최대 30초 대기.
-    let probe = format!("tell application \"{}\" to get name", app_name);
+    // SDEF 준비 확인: `using terms from` 블록은 컴파일 시 SDEF를 로드하므로
+    // 이 프로브가 성공 → do script 도 성공함을 보장한다.
+    // 최대 90초(10회 × 9초) 대기.
+    let probe = format!(
+        "using terms from application \"{n}\"\n    tell application \"{n}\" to get name\nend using terms from",
+        n = app_name
+    );
     let probe_file = output_dir.join("_probe.applescript");
     if std::fs::write(&probe_file, &probe).is_ok() {
-        for _ in 0..6u8 {
+        for attempt in 0..10u8 {
             let ok = tokio::process::Command::new("osascript")
                 .arg(&probe_file)
                 .output()
@@ -154,7 +160,9 @@ async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
             if ok {
                 return;
             }
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            // 프로브 실패: SDEF 미준비 또는 -609. 9초 대기 후 재시도.
+            let wait = if attempt == 0 { 5 } else { 9 };
+            tokio::time::sleep(Duration::from_secs(wait)).await;
         }
     }
 }
