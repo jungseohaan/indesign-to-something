@@ -20,9 +20,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.io.File;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * SPEC-013 Phase 4 + SPEC-017 v2: 테이블 포함 TextFrame → ASTTable / ASTFigure 변환.
@@ -62,6 +64,8 @@ public final class TableBuilder {
                 ? ctx.tableQualityGate
                 : new ConversionConfig.TableQualityGateConfig();
         Phase4Report report = new Phase4Report();
+        // 같은 Table이 연결 글상자 체인의 복수 TF에서 중복 처리되는 것을 방지
+        Set<String> processedTableIds = new HashSet<>();
 
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             String storyId = tf.storyId();
@@ -117,6 +121,9 @@ public final class TableBuilder {
 
             long tableYOffset = 0;
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : allTables) {
+                // 같은 Table이 TF 연결 체인에서 중복 배치되는 것을 방지
+                if (!processedTableIds.add(idmlTable.selfId())) continue;
+
                 long thisX = hx;
                 long thisY = hy;
 
