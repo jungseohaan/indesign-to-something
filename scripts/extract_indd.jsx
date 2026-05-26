@@ -3921,7 +3921,16 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                     }
                 } catch (eWalk) {}
                 try {
+                    // 보존된 라벨 텍스트(inlineConsumedChildIds)가 있는 버튼/배지는
+                    // "Paper"(흰색) 텍스트가 transparentBackground=true의 inverse matte 알고리즘에서
+                    // 투명이 되는 문제를 방지하기 위해 흰 배경으로 내보냄.
+                    // 배지 모서리에 흰 배경이 남지만 통상 흰 페이지에서는 보이지 않음.
+                    var _origTransparent = app.pngExportPreferences.transparentBackground;
+                    if (inlineConsumedChildIds.length > 0) {
+                        try { app.pngExportPreferences.transparentBackground = false; } catch (e) {}
+                    }
                     inItem.exportFile(ExportFormat.PNG_FORMAT, inOutFile);
+                    try { app.pngExportPreferences.transparentBackground = _origTransparent; } catch (e) {}
                     if (inOutFile.exists) {
                         var inBounds = null;
                         try {

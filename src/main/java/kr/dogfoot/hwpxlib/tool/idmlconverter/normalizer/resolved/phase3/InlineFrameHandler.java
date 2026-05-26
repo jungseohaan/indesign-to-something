@@ -336,18 +336,10 @@ public class InlineFrameHandler {
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
         if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
 
-        // 이미 inline_object PNG로 렌더링된 경우 → 기본적으로 PNG 우선 (loadInlineObject 에 위임).
-        // 단, 동일 ID가 renderedTextFrames에서 badge_group으로도 등록된 경우
-        // SPEC-025가 텍스트를 숨긴 PNG이므로 PNG 대신 INLINE_TEXT_FRAME 로 빌드.
+        // 이미 inline_object PNG로 렌더링된 경우 → PNG 우선 (loadInlineObject 에 위임)
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
-                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rtf =
-                        ctx.resolvedData.getRenderedTextFrameByDomId(anchorId);
-                if (rtf == null || !rtf.isBadgeGroup()) {
-                    return null; // 일반 inline_object → PNG 경로에 위임
-                }
-                // badge_group + inline_object 동시 등록 → SPEC-025 텍스트 숨김 → INLINE_TEXT_FRAME 사용
-                break;
+                return null;
             }
         }
 
@@ -895,16 +887,6 @@ public class InlineFrameHandler {
             }
         }
 
-        // 같은 ID가 badge_group으로도 등록되어 있으면 badge PNG를 우선 사용.
-        // (inline_object PNG는 자식 텍스트를 누락하는 경우가 있음)
-        RenderedGroup badgeGroup = null;
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg.id() == anchoredObjectId && "badge_group".equals(rg.itemType())) {
-                badgeGroup = rg;
-                break;
-            }
-        }
-
         // renderedFloatingItems에서 해당 ID의 inline_object 또는 null-type inline TF 찾기.
         // null-type: renderable inline TF (예: 번호 라벨 "1", "가") — Phase 7 floating 대신
         // inline PNG로 임베드하여 텍스트 baseline과 수평 정렬 보장.
@@ -916,8 +898,7 @@ public class InlineFrameHandler {
                 proceed = ancTf != null && ancTf.isInline();
             }
             if (proceed) {
-                boolean isNullTypeInline = rg.itemType() == null; // badgeGroup override 전에 기록
-                if (badgeGroup != null) rg = badgeGroup;
+                boolean isNullTypeInline = rg.itemType() == null;
                 if (rg.file() == null) return null;
                 File pngFile = new File(ctx.basePath, rg.file());
                 if (!pngFile.exists()) return null;
