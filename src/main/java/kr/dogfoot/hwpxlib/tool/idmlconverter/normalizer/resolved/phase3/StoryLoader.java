@@ -86,21 +86,26 @@ class StoryLoader {
             }
 
             // 단락 속성: resolved에서 가져옴 (정확한 pt 값)
-            // 정렬: IDML 스타일 → resolved 단락 → resolved top-level paragraphStyles → JUSTIFY
+            // 정렬 우선순위: IDML 단락(스토리) → IDML 스타일 → resolved 단락 → resolved top-level paragraphStyles
+            // IDML ParagraphStyleRange의 Justification이 스타일 정의와 다를 경우 로컬 오버라이드이므로 최우선 적용
             {
                 String idmlStyleName = ip.appliedParagraphStyle();
                 String cleanStyleName = (idmlStyleName != null && idmlStyleName.contains("/"))
                         ? idmlStyleName.substring(idmlStyleName.lastIndexOf('/') + 1) : idmlStyleName;
-                String idmlStyleJust = StoryConverter.resolveStyleAlignment(cleanStyleName, ctx.astDocument);
-                if (idmlStyleJust != null) {
-                    para.alignment(idmlStyleJust);
-                } else if (resolvedStory != null && i < resolvedStory.paragraphs().size()
-                        && resolvedStory.paragraphs().get(i).justification() != null) {
-                    para.alignment(resolvedStory.paragraphs().get(i).justification());
-                } else if (cleanStyleName != null && ctx.resolvedData != null
-                        && ctx.resolvedData.getParagraphStyleJustification(cleanStyleName) != null) {
-                    // resolved.json top-level paragraphStyles fallback
-                    para.alignment(ctx.resolvedData.getParagraphStyleJustification(cleanStyleName));
+                if (ip.justification() != null) {
+                    para.alignment(ip.justification());
+                } else {
+                    String idmlStyleJust = StoryConverter.resolveStyleAlignment(cleanStyleName, ctx.astDocument);
+                    if (idmlStyleJust != null) {
+                        para.alignment(idmlStyleJust);
+                    } else if (resolvedStory != null && i < resolvedStory.paragraphs().size()
+                            && resolvedStory.paragraphs().get(i).justification() != null) {
+                        para.alignment(resolvedStory.paragraphs().get(i).justification());
+                    } else if (cleanStyleName != null && ctx.resolvedData != null
+                            && ctx.resolvedData.getParagraphStyleJustification(cleanStyleName) != null) {
+                        // resolved.json top-level paragraphStyles fallback
+                        para.alignment(ctx.resolvedData.getParagraphStyleJustification(cleanStyleName));
+                    }
                 }
                 // alignment가 null이면 HwpxParagraphBuilder에서 baseStyle 또는 기본 JUSTIFY 적용
             }
