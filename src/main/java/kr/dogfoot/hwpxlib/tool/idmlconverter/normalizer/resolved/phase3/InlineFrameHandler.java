@@ -336,10 +336,18 @@ public class InlineFrameHandler {
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
         if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
 
-        // 이미 inline_object PNG로 렌더링된 경우 → PNG 우선 (loadInlineObject 에 위임)
+        // 이미 inline_object PNG로 렌더링된 경우 → 기본적으로 PNG 우선 (loadInlineObject 에 위임).
+        // 단, 동일 ID가 renderedTextFrames에서 badge_group으로도 등록된 경우
+        // SPEC-025가 텍스트를 숨긴 PNG이므로 PNG 대신 INLINE_TEXT_FRAME 로 빌드.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
-                return null;
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rtf =
+                        ctx.resolvedData.getRenderedTextFrameByDomId(anchorId);
+                if (rtf == null || !rtf.isBadgeGroup()) {
+                    return null; // 일반 inline_object → PNG 경로에 위임
+                }
+                // badge_group + inline_object 동시 등록 → SPEC-025 텍스트 숨김 → INLINE_TEXT_FRAME 사용
+                break;
             }
         }
 
@@ -964,6 +972,13 @@ public class InlineFrameHandler {
                     }
 
                     obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+
+                    // AnchoredPosition="Anchored" 커스텀 위치 앵커: IDML에서 앵커 문자가 공간을 차지하고
+                    // 이미지가 앵커 기준 오프셋에 배치되어 이미지 우측~텍스트 시작 사이에 gap이 생김.
+                    // HWPX 인라인 배치 시 동일한 시각 간격을 위해 우측 여백 추가.
+                    if (ctx.customAnchoredInlineIds != null && ctx.customAnchoredInlineIds.contains(anchoredObjectId)) {
+                        obj.textWrapRight(200L); // 2pt 우측 여백
+                    }
 
                     // 장식 번호 인라인(≤3자 + 큰 폰트/정사각형): 높이를 본문 줄 높이로 제한
                     // 인라인 이미지 높이가 줄간격을 벌리는 것 방지
