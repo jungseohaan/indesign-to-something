@@ -124,18 +124,38 @@ async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
         .await
         .map(|o| o.status.success())
         .unwrap_or(false);
-    if already_running {
+
+    if !already_running {
+        let prelaunch = format!("tell application \"{}\" to activate", app_name);
+        let prelaunch_file = output_dir.join("_prelaunch.applescript");
+        if std::fs::write(&prelaunch_file, &prelaunch).is_ok() {
+            let _ = tokio::process::Command::new("osascript")
+                .arg(&prelaunch_file)
+                .output()
+                .await;
+            // 동적 SDEF 초기화 대기 (InDesign 2026은 15초 이상 필요할 수 있음)
+            tokio::time::sleep(Duration::from_secs(15)).await;
+        }
         return;
     }
-    let prelaunch = format!("tell application \"{}\" to activate", app_name);
-    let prelaunch_file = output_dir.join("_prelaunch.applescript");
-    if std::fs::write(&prelaunch_file, &prelaunch).is_ok() {
-        let _ = tokio::process::Command::new("osascript")
-            .arg(&prelaunch_file)
-            .output()
-            .await;
-        // 동적 SDEF 초기화 대기 (InDesign 2026은 15초 이상 필요할 수 있음)
-        tokio::time::sleep(Duration::from_secs(15)).await;
+
+    // 실행 중이더라도 크래시 후 재실행 직후엔 Apple Events가 준비 안 됐을 수 있음 (-609).
+    // 표준 이벤트(get name, SDEF 불필요)로 연결 준비 여부를 확인하고 최대 30초 대기.
+    let probe = format!("tell application \"{}\" to get name", app_name);
+    let probe_file = output_dir.join("_probe.applescript");
+    if std::fs::write(&probe_file, &probe).is_ok() {
+        for _ in 0..6u8 {
+            let ok = tokio::process::Command::new("osascript")
+                .arg(&probe_file)
+                .output()
+                .await
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if ok {
+                return;
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
     }
 }
 
