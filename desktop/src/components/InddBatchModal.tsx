@@ -8,6 +8,8 @@ export function InddBatchModal() {
     batchResults,
     isBatchProcessing,
     batchCurrentIndex,
+    noPreview,
+    setNoPreview,
     closeBatchModal,
     startBatch,
     cancelBatch,
@@ -252,12 +254,23 @@ export function InddBatchModal() {
 
           {/* Actions */}
           <div className="px-5 py-4 flex items-center justify-between">
-            <button
-              onClick={toggleAll}
-              className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
-            >
-              {selected.size === allPaths.length ? "선택 해제" : "전체 선택"}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleAll}
+                className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+              >
+                {selected.size === allPaths.length ? "선택 해제" : "전체 선택"}
+              </button>
+              <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={noPreview}
+                  onChange={(e) => setNoPreview(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                변환 후 열지 않음
+              </label>
+            </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => { setInitialized(false); closeBatchModal(); }}

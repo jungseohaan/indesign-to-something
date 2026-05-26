@@ -67,6 +67,7 @@ interface AppState {
   // SPEC-011: 디버그용 페이지 범위 추출 (0=전체)
   debugStartPage: number;
   debugEndPage: number;
+  noPreview: boolean;
   // InDesign
   indesignPath: string | null;
 
@@ -104,6 +105,7 @@ interface AppState {
   setVectorDpi: (v: 96 | 150) => void;
   setLayoutMode: (v: "preserve" | "editable") => void;
   setPerfMode: (v: "fast" | "standard" | "high") => void;
+  setNoPreview: (v: boolean) => void;
   setDebugPageRange: (start: number, end: number) => void;
   clearError: () => void;
   setFontMappings: (mappings: Record<string, string>) => void;
@@ -151,6 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   vectorDpi: 150,
   layoutMode: "preserve",
   perfMode: (localStorage.getItem("perfMode") as "fast" | "standard" | "high") || "standard",
+  noPreview: localStorage.getItem("noPreview") === "true",
   debugStartPage: 0,
   debugEndPage: 0,
   indesignPath: null,
@@ -443,19 +446,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }
 
-      // HWPX 파일 열기
-      try {
-        await invoke("open_file", { path: outputPath });
-      } catch {
-        // 열기 실패해도 변환 자체는 성공
-      }
-
-      // PDF 파일 열기
-      if (copiedPdfPath) {
+      // HWPX / PDF 파일 열기 (noPreview 모드 시 건너뜀)
+      if (!get().noPreview) {
         try {
-          await invoke("open_file", { path: copiedPdfPath });
+          await invoke("open_file", { path: outputPath });
         } catch {
-          // 열기 실패해도 무시
+          // 열기 실패해도 변환 자체는 성공
+        }
+        if (copiedPdfPath) {
+          try {
+            await invoke("open_file", { path: copiedPdfPath });
+          } catch {}
         }
       }
     } catch (e: any) {
@@ -472,6 +473,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPerfMode: (v) => {
     localStorage.setItem("perfMode", v);
     set({ perfMode: v });
+  },
+  setNoPreview: (v) => {
+    localStorage.setItem("noPreview", String(v));
+    set({ noPreview: v });
   },
   setDebugPageRange: (start, end) => set({ debugStartPage: start, debugEndPage: end }),
   clearError: () => set({ error: null }),
@@ -671,10 +676,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           ),
         }));
 
-        // 변환된 파일을 즉시 열기 (HWPX → PDF 순)
-        try { await invoke("open_file", { path: hwpxOutputPath }); } catch {}
-        if (pdfOutputPath) {
-          try { await invoke("open_file", { path: pdfOutputPath }); } catch {}
+        // 변환된 파일을 즉시 열기 (noPreview 모드 시 건너뜀)
+        if (!get().noPreview) {
+          try { await invoke("open_file", { path: hwpxOutputPath }); } catch {}
+          if (pdfOutputPath) {
+            try { await invoke("open_file", { path: pdfOutputPath }); } catch {}
+          }
         }
 
         // 단일 파일일 때 AST 자동 로드 (시멘틱 레이어 탭용)

@@ -21,10 +21,12 @@ export function ConversionPanel() {
     debugEndPage,
     setDebugPageRange,
     startConversion,
+    noPreview,
     setSpreadBased,
     setVectorDpi,
     setLayoutMode,
     setPerfMode,
+    setNoPreview,
     clearError,
     openFontMappingModal,
   } = useAppStore();
@@ -230,6 +232,15 @@ export function ConversionPanel() {
               <option value="standard">표준</option>
               <option value="high">고품질</option>
             </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-sm">
+            <input
+              type="checkbox"
+              checked={noPreview}
+              onChange={(e) => setNoPreview(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            변환 후 열지 않음
           </label>
           <button
             onClick={openFontMappingModal}
