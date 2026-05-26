@@ -336,19 +336,10 @@ public class InlineFrameHandler {
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
         if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
 
-        // 이미 inline_object PNG로 렌더링된 경우 → 기본적으로 PNG 우선 (loadInlineObject 에 위임).
-        // 단, 동일 ID가 renderedTextFrames에서 badge_group으로도 등록된 경우
-        // ExtendScript의 inline_object PNG가 "Paper"(흰색) 텍스트를 포함하지 못하므로
-        // PNG 대신 INLINE_TEXT_FRAME 으로 직접 빌드.
+        // 이미 inline_object 또는 badge_group PNG로 렌더링된 경우 → loadInlineObject 에 위임.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
-                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rtf =
-                        ctx.resolvedData.getRenderedTextFrameByDomId(anchorId);
-                if (rtf == null || !rtf.isBadgeGroup()) {
-                    return null; // 일반 inline_object → PNG 경로에 위임
-                }
-                // badge_group + inline_object 동시 등록 → INLINE_TEXT_FRAME 으로 재구성
-                break;
+                return null; // PNG 경로에 위임
             }
         }
 
@@ -908,8 +899,19 @@ public class InlineFrameHandler {
             }
             if (proceed) {
                 boolean isNullTypeInline = rg.itemType() == null;
-                if (rg.file() == null) return null;
-                File pngFile = new File(ctx.basePath, rg.file());
+                // badge_group PNG가 있으면 inline_object PNG 대신 사용.
+                // badge_group export 시 inline TF(Paper 흰색 텍스트)를 숨기지 않으므로
+                // transparentBackground=true에서 흰색 픽셀이 투명 구멍이 되어 텍스트가 보인다.
+                RenderedGroup effectiveRg = rg;
+                for (RenderedGroup candidate : ctx.resolvedData.allRenderedFloatingItems()) {
+                    if (candidate.id() == anchoredObjectId && "badge_group".equals(candidate.itemType())
+                            && candidate.file() != null) {
+                        effectiveRg = candidate;
+                        break;
+                    }
+                }
+                if (effectiveRg.file() == null) return null;
+                File pngFile = new File(ctx.basePath, effectiveRg.file());
                 if (!pngFile.exists()) return null;
 
                 try {

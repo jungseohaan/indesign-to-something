@@ -1081,6 +1081,9 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         }
 
         // SPEC-025: editable 로 분류된 자식 TF 는 PNG 에서 제외 → HWPX 가 별도 텍스트 오버레이로 검색 가능 + 시각 중복 방지.
+        // 단, inline TF(배지 안 "가"/"나" 같은 Paper 흰색 텍스트)는 숨기지 않는다.
+        // transparentBackground=true 에서 흰색 픽셀이 alpha=0(투명 구멍)이 되어
+        // HWPX 흰 배경 위에서 배경색과 대비되어 텍스트가 보이게 된다.
         var hiddenForExport = [];
         try {
             var __grpItemsForHide = grp.allPageItems;
@@ -1088,6 +1091,7 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                 var __hItem = __grpItemsForHide[__hi];
                 try {
                     if (__hItem.constructor.name !== "TextFrame") continue;
+                    if (isInlineItem(__hItem)) continue; // inline TF는 투명 구멍 방식으로 텍스트 표시
                     if (classifyTextFrame(__hItem) !== "editable") continue;
                     if (__hItem.visible) {
                         __hItem.visible = false;
