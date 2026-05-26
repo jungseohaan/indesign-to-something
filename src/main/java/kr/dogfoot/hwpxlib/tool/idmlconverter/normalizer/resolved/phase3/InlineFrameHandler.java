@@ -336,10 +336,19 @@ public class InlineFrameHandler {
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
         if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
 
-        // 이미 inline_object PNG로 렌더링된 경우 → PNG 우선 (loadInlineObject 에 위임)
+        // 이미 inline_object PNG로 렌더링된 경우 → 기본적으로 PNG 우선 (loadInlineObject 에 위임).
+        // 단, 동일 ID가 renderedTextFrames에서 badge_group으로도 등록된 경우
+        // ExtendScript의 inline_object PNG가 "Paper"(흰색) 텍스트를 포함하지 못하므로
+        // PNG 대신 INLINE_TEXT_FRAME 으로 직접 빌드.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
-                return null;
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rtf =
+                        ctx.resolvedData.getRenderedTextFrameByDomId(anchorId);
+                if (rtf == null || !rtf.isBadgeGroup()) {
+                    return null; // 일반 inline_object → PNG 경로에 위임
+                }
+                // badge_group + inline_object 동시 등록 → INLINE_TEXT_FRAME 으로 재구성
+                break;
             }
         }
 
