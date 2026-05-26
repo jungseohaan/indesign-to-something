@@ -255,6 +255,7 @@ end using terms from"#,
     let stale_secs_default = 120u64;
     let started = std::time::Instant::now();
     let mut last_progress_at = std::time::Instant::now();
+    let mut last_heartbeat_at = std::time::Instant::now();
     let mut current_phase_stale = stale_secs_default;
 
     loop {
@@ -331,12 +332,26 @@ end using terms from"#,
                 if display != last_message {
                     last_message = display.clone();
                     last_progress_at = std::time::Instant::now();
+                    last_heartbeat_at = std::time::Instant::now();
                     let phase = match step {
                         "open" => "launching",
                         "pdf" => "checking",
                         _ => "exporting",
                     };
                     emit_progress(app, phase, &display);
+                } else if matches!(step, "pdf" | "idml" | "open")
+                    && last_heartbeat_at.elapsed().as_secs() >= 10
+                {
+                    let stale = last_progress_at.elapsed().as_secs();
+                    let heartbeat_msg = match step {
+                        "pdf" => format!("PDF 프리뷰 생성 중... ({}초 경과)", stale),
+                        "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
+                        "open" => format!("문서 열기 중... ({}초 경과)", stale),
+                        _ => display.clone(),
+                    };
+                    last_heartbeat_at = std::time::Instant::now();
+                    let phase = if step == "pdf" { "checking" } else { "exporting" };
+                    emit_progress(app, phase, &heartbeat_msg);
                 }
             }
         }
@@ -482,6 +497,7 @@ end using terms from"#,
     let stale_secs = 1800u64;
     let started = std::time::Instant::now();
     let mut last_progress_at = std::time::Instant::now();
+    let mut last_heartbeat_at = std::time::Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
@@ -501,11 +517,27 @@ end using terms from"#,
             if content != last_message {
                 last_message = content.clone();
                 last_progress_at = std::time::Instant::now();
+                last_heartbeat_at = std::time::Instant::now();
                 if let Ok(prog) = serde_json::from_str::<serde_json::Value>(&content) {
                     let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
                     let cur = prog.get("current").and_then(|v| v.as_i64()).unwrap_or(0);
                     let tot = prog.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
                     emit_progress(app, step, &format!("{}/{}", cur, tot));
+                }
+            } else if last_heartbeat_at.elapsed().as_secs() >= 10 {
+                if let Ok(prog) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
+                    if matches!(step, "pdf" | "idml" | "open") {
+                        let heartbeat_msg = match step {
+                            "pdf" => format!("PDF 프리뷰 생성 중... ({}초 경과)", stale),
+                            "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
+                            "open" => format!("문서 열기 중... ({}초 경과)", stale),
+                            _ => format!("추출 중... ({}초 경과)", stale),
+                        };
+                        last_heartbeat_at = std::time::Instant::now();
+                        let phase = if step == "pdf" { "checking" } else { "exporting" };
+                        emit_progress(app, phase, &heartbeat_msg);
+                    }
                 }
             }
         }

@@ -234,9 +234,15 @@ export interface InddFolderScanResult {
 export interface BatchFileResult {
   path: string;
   filename: string;
+  baseFolder?: string;                // 속한 폴더 경로 (멀티 폴더 제거용)
   status: "pending" | "extracting" | "converting" | "done" | "error";
   error?: string;
   cached?: boolean;
+  // 소요 시간 추적
+  startedAt?: number;
+  extractStartedAt?: number;
+  convertStartedAt?: number;
+  completedAt?: number;
 }
 
 // Resolved Data Types (InDesign DOM에서 추출한 계산된 속성)

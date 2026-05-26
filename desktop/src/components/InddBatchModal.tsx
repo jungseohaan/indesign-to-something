@@ -1,36 +1,51 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAppStore } from "../stores/useAppStore";
+
+function useElapsedTick(intervalMs = 500) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+}
+
+function formatElapsed(startMs: number, endMs?: number): string {
+  const ms = (endMs ?? Date.now()) - startMs;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}초`;
+  return `${Math.floor(s / 60)}분 ${s % 60}초`;
+}
 
 export function InddBatchModal() {
   const {
     showBatchModal,
     batchScanResult,
+    selectedFolderPaths,
     batchResults,
     isBatchProcessing,
     batchCurrentIndex,
+    batchCurrentPhaseMessage,
     noPreview,
     setNoPreview,
     closeBatchModal,
     startBatch,
     cancelBatch,
+    addFolders,
+    removeFolderFromBatch,
   } = useAppStore();
 
-  // 선택된 파일 경로 (처리 시작 전)
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [initialized, setInitialized] = useState(false);
+  useElapsedTick(500);
 
   if (!showBatchModal) return null;
 
   // 모달 열릴 때 전체 선택으로 초기화
   if (batchScanResult && !initialized && !isBatchProcessing) {
     const allPaths = new Set<string>();
-    for (const p of batchScanResult.direct_files) {
-      allPaths.add(p);
-    }
+    for (const p of batchScanResult.direct_files) allPaths.add(p);
     for (const sf of batchScanResult.subfolder_files) {
-      for (const f of sf.indd_files) {
-        allPaths.add(f.path);
-      }
+      for (const f of sf.indd_files) allPaths.add(f.path);
     }
     if (allPaths.size > 0 && selected.size === 0) {
       setSelected(allPaths);
@@ -38,7 +53,7 @@ export function InddBatchModal() {
     }
   }
 
-  // 처리 중 또는 처리 완료: 진행률/결과 UI (선택 UI보다 먼저 체크)
+  // 처리 중 또는 처리 완료 UI
   if (isBatchProcessing || batchResults.length > 0) {
     const total = batchResults.length;
     const doneCount = batchResults.filter((r) => r.status === "done").length;
@@ -49,7 +64,7 @@ export function InddBatchModal() {
 
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg shadow-xl w-[540px] max-h-[80vh] flex flex-col">
+        <div className="bg-white rounded-lg shadow-xl w-[580px] max-h-[80vh] flex flex-col">
           {/* Header */}
           <div className="px-5 pt-5 pb-3">
             <h2 className="text-base font-bold text-gray-800">
@@ -63,51 +78,62 @@ export function InddBatchModal() {
                 <span className="text-green-600 font-normal ml-2">완료</span>
               )}
             </h2>
-            {allDone && (
+            {allDone ? (
               <p className="text-xs text-gray-500 mt-1">
                 성공 {doneCount}개{errorCount > 0 && `, 실패 ${errorCount}개`}
               </p>
-            )}
+            ) : batchCurrentPhaseMessage ? (
+              <p className="text-xs text-blue-500 mt-1 truncate" title={batchCurrentPhaseMessage}>
+                {batchCurrentPhaseMessage}
+              </p>
+            ) : null}
           </div>
 
           {/* File Progress List */}
           <div className="px-5 py-2 max-h-[400px] overflow-y-auto border-y">
-            {batchResults.map((r, i) => (
-              <div
-                key={r.path}
-                className={`py-1.5 px-2 rounded text-sm ${
-                  i === batchCurrentIndex && isBatchProcessing ? "bg-blue-50" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <StatusIcon status={r.status} />
-                  <span className="flex-1 truncate text-gray-700" title={r.path}>
-                    {r.filename}
-                  </span>
-                  <span className="text-xs text-gray-400 shrink-0 flex items-center gap-1">
-                    {r.cached && (
-                      <span
-                        className="px-1.5 py-0.5 rounded bg-green-50 text-green-600 text-[10px] font-medium"
-                        title="추출 캐시 사용 (ExtendScript 건너뜀)"
-                      >
-                        캐시
-                      </span>
-                    )}
-                    {r.status === "extracting" && "추출 중..."}
-                    {r.status === "converting" && "변환 중..."}
-                    {r.status === "done" && "완료"}
-                    {r.status === "error" && (
-                      <span className="text-red-500">실패</span>
-                    )}
-                  </span>
-                </div>
-                {r.status === "error" && r.error && (
-                  <div className="ml-6 mt-1 text-xs text-red-400 break-words whitespace-pre-wrap">
-                    {r.error}
+            {batchResults.map((r, i) => {
+              const isActive = i === batchCurrentIndex && isBatchProcessing;
+              const elapsed = r.startedAt
+                ? formatElapsed(r.startedAt, r.completedAt)
+                : null;
+              return (
+                <div
+                  key={r.path}
+                  className={`py-1.5 px-2 rounded text-sm ${isActive ? "bg-blue-50" : ""}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <StatusIcon status={r.status} />
+                    <span className="flex-1 truncate text-gray-700" title={r.path}>
+                      {r.filename}
+                    </span>
+                    <span className="text-xs text-gray-400 shrink-0 flex items-center gap-1.5">
+                      {r.cached && (
+                        <span
+                          className="px-1.5 py-0.5 rounded bg-green-50 text-green-600 text-[10px] font-medium"
+                          title="추출 캐시 사용 (ExtendScript 건너뜀)"
+                        >
+                          캐시
+                        </span>
+                      )}
+                      {elapsed && (
+                        <span className="text-gray-400 text-[11px]">{elapsed}</span>
+                      )}
+                      {r.status === "extracting" && "추출 중..."}
+                      {r.status === "converting" && "변환 중..."}
+                      {r.status === "done" && "완료"}
+                      {r.status === "error" && (
+                        <span className="text-red-500">실패</span>
+                      )}
+                    </span>
                   </div>
-                )}
-              </div>
-            ))}
+                  {r.status === "error" && r.error && (
+                    <div className="ml-6 mt-1 text-xs text-red-400 break-words whitespace-pre-wrap">
+                      {r.error}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Progress Bar */}
@@ -150,17 +176,14 @@ export function InddBatchModal() {
     );
   }
 
-  // 파일 선택 UI (아직 처리 시작 전)
+  // 파일 선택 UI (처리 시작 전)
   if (batchScanResult) {
     const allPaths: string[] = [...batchScanResult.direct_files];
     for (const sf of batchScanResult.subfolder_files) {
-      for (const f of sf.indd_files) {
-        allPaths.push(f.path);
-      }
+      for (const f of sf.indd_files) allPaths.push(f.path);
     }
 
     const hasDirectFiles = batchScanResult.direct_files.length > 0;
-    const folderCount = batchScanResult.subfolder_files.length + (hasDirectFiles ? 1 : 0);
 
     const toggleFile = (path: string) => {
       setSelected((prev) => {
@@ -172,11 +195,8 @@ export function InddBatchModal() {
     };
 
     const toggleAll = () => {
-      if (selected.size === allPaths.length) {
-        setSelected(new Set());
-      } else {
-        setSelected(new Set(allPaths));
-      }
+      if (selected.size === allPaths.length) setSelected(new Set());
+      else setSelected(new Set(allPaths));
     };
 
     const handleStart = () => {
@@ -189,19 +209,57 @@ export function InddBatchModal() {
 
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg shadow-xl w-[540px] max-h-[80vh] flex flex-col">
+        <div className="bg-white rounded-lg shadow-xl w-[580px] max-h-[85vh] flex flex-col">
           {/* Header */}
           <div className="px-5 pt-5 pb-3">
             <h2 className="text-base font-bold text-gray-800">INDD 일괄 변환</h2>
             <p className="text-xs text-gray-500 mt-1">
-              {folderCount > 1
-                ? `${folderCount}개 폴더에서 ${allPaths.length}개 InDesign 문서를 찾았습니다.`
-                : `${allPaths.length}개 InDesign 문서를 찾았습니다.`}
+              {allPaths.length}개 InDesign 문서
             </p>
           </div>
 
+          {/* Folder List */}
+          <div className="px-5 pb-2 flex flex-wrap gap-1.5">
+            {selectedFolderPaths.map((fp) => {
+              const folderName = fp.replace(/^.*[/\\]/, "") || fp;
+              return (
+                <span
+                  key={fp}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-full"
+                  title={fp}
+                >
+                  {folderName}
+                  <button
+                    onClick={() => {
+                      removeFolderFromBatch(fp);
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        for (const sf of batchScanResult.subfolder_files) {
+                          if (sf.folder_path === fp) {
+                            for (const f of sf.indd_files) next.delete(f.path);
+                          }
+                        }
+                        return next;
+                      });
+                    }}
+                    className="text-blue-400 hover:text-blue-700 leading-none ml-0.5"
+                    title="폴더 제거"
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+            <button
+              onClick={addFolders}
+              className="inline-flex items-center gap-1 px-2 py-0.5 border border-dashed border-gray-300 text-gray-500 text-xs rounded-full hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            >
+              + 폴더 추가
+            </button>
+          </div>
+
           {/* File List */}
-          <div className="px-5 py-2 max-h-[400px] overflow-y-auto border-y">
+          <div className="px-5 py-2 flex-1 min-h-0 max-h-[360px] overflow-y-auto border-y">
             {/* 직접 하위 파일 */}
             {hasDirectFiles && (
               <div className="mb-2">

@@ -82,6 +82,7 @@ interface AppState {
   // Batch Processing
   showBatchModal: boolean;
   batchScanResult: InddFolderScanResult | null;
+  selectedFolderPaths: string[];          // 멀티 폴더 선택 목록
   batchQueue: string[];
   batchBasePath: string | null;
   batchOutputDir: string | null;
@@ -89,6 +90,7 @@ interface AppState {
   batchResults: BatchFileResult[];
   isBatchProcessing: boolean;
   batchCancelled: boolean;
+  batchCurrentPhaseMessage: string | null; // 현재 phase 진행 메시지 (heartbeat 포함)
 
   // Actions
   initJarPath: () => Promise<void>;
@@ -112,6 +114,8 @@ interface AppState {
   openFontMappingModal: () => void;
   closeFontMappingModal: () => void;
   selectInddFolder: () => Promise<void>;
+  addFolders: () => Promise<void>;
+  removeFolderFromBatch: (folderPath: string) => void;
   startBatch: (selectedPaths: string[]) => Promise<void>;
   closeBatchModal: () => void;
   cancelBatch: () => void;
@@ -163,6 +167,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastExportDir: localStorage.getItem("lastExportDir"),
   showBatchModal: false,
   batchScanResult: null,
+  selectedFolderPaths: [],
   batchQueue: [],
   batchBasePath: null,
   batchOutputDir: null,
@@ -170,6 +175,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   batchResults: [],
   isBatchProcessing: false,
   batchCancelled: false,
+  batchCurrentPhaseMessage: null,
   isExtractingForSemantic: false,
   extractSemanticError: null,
 
@@ -486,48 +492,54 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   selectInddFolder: async () => {
     const { lastOpenDir } = get();
-    const folderPath = await open({
+    const selected = await open({
       directory: true,
+      multiple: true,
       title: "InDesign 폴더 선택",
       defaultPath: lastOpenDir ?? undefined,
     });
-    if (!folderPath) return;
+    if (!selected) return;
+    const folders = Array.isArray(selected) ? selected : [selected as string];
+    if (folders.length === 0) return;
 
-    localStorage.setItem("lastOpenDir", folderPath as string);
-    set({ lastOpenDir: folderPath as string });
+    localStorage.setItem("lastOpenDir", folders[0]);
+    set({ lastOpenDir: folders[0] });
 
-    try {
-      const result = await invoke<InddFolderScanResult>("scan_indd_folder", {
-        path: folderPath,
-      });
+    await _mergeFoldersIntoBatch(folders, true, get, set);
+  },
 
-      // 모든 .indd 파일 수집 (직접 하위 + 서브폴더)
-      const allFiles: string[] = [...result.direct_files];
-      for (const sf of result.subfolder_files) {
-        for (const f of sf.indd_files) {
-          allFiles.push(f.path);
-        }
-      }
+  addFolders: async () => {
+    const { lastOpenDir } = get();
+    const selected = await open({
+      directory: true,
+      multiple: true,
+      title: "폴더 추가",
+      defaultPath: lastOpenDir ?? undefined,
+    });
+    if (!selected) return;
+    const folders = Array.isArray(selected) ? selected : [selected as string];
+    if (folders.length === 0) return;
 
-      if (allFiles.length === 0) {
-        set({ error: "선택한 폴더에서 InDesign 문서를 찾을 수 없습니다." });
-        return;
-      }
+    await _mergeFoldersIntoBatch(folders, false, get, set);
+  },
 
-      // 단일 파일이든 다중 파일이든 배치 모달 표시
-      // (직접 하위 파일만 있으면 subfolder 없이 direct_files로 표시)
-      set({
-        showBatchModal: true,
-        batchScanResult: result,
-        batchBasePath: folderPath,
-        batchResults: [],
-        batchCurrentIndex: -1,
-        isBatchProcessing: false,
-        batchCancelled: false,
-      });
-    } catch (e: any) {
-      set({ error: String(e) });
-    }
+  removeFolderFromBatch: (folderPath: string) => {
+    set((s) => {
+      const newFolderPaths = s.selectedFolderPaths.filter((p) => p !== folderPath);
+      // 해당 폴더 소속 파일 제거 후 ScanResult 재구성
+      const prev = s.batchScanResult;
+      if (!prev) return { selectedFolderPaths: newFolderPaths };
+      const newDirect = prev.direct_files.filter(
+        (p) => !p.startsWith(folderPath + "/") && !p.startsWith(folderPath + "\\")
+      );
+      const newSubfolders = prev.subfolder_files.filter(
+        (sf) => sf.folder_path !== folderPath && !sf.folder_path.startsWith(folderPath + "/") && !sf.folder_path.startsWith(folderPath + "\\")
+      );
+      return {
+        selectedFolderPaths: newFolderPaths,
+        batchScanResult: { direct_files: newDirect, subfolder_files: newSubfolders },
+      };
+    });
   },
 
   startBatch: async (selectedPaths: string[]) => {
@@ -579,14 +591,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       const inddPath = selectedPaths[i];
       set({ batchCurrentIndex: i });
 
-      // 상태 업데이트: extracting
+      // 상태 업데이트: extracting + 시작 시각 기록
+      const startedAt = Date.now();
       set((s) => ({
         batchResults: s.batchResults.map((r, idx) =>
-          idx === i ? { ...r, status: "extracting" as const } : r
+          idx === i ? { ...r, status: "extracting" as const, startedAt, extractStartedAt: startedAt } : r
         ),
       }));
 
-      // SPEC-011: 추출 캐시 적중 감지 — `phase: "cached"` progress 이벤트 수신 시 현재 항목에 표시
+      // 추출 진행 이벤트: 캐시 적중 감지 + phase 메시지 저장
       const unlistenExtractProgress = await listen<InddExtractionProgress>(
         "indd-extraction-progress",
         (event) => {
@@ -598,6 +611,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               ),
             }));
           }
+          set({ batchCurrentPhaseMessage: event.payload.message });
         }
       );
 
@@ -615,10 +629,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         if (get().batchCancelled) break;
 
-        // 상태 업데이트: converting
+        // 상태 업데이트: converting + 변환 시작 시각
+        const convertStartedAt = Date.now();
         set((s) => ({
           batchResults: s.batchResults.map((r, idx) =>
-            idx === i ? { ...r, status: "converting" as const } : r
+            idx === i ? { ...r, status: "converting" as const, convertStartedAt } : r
           ),
         }));
 
@@ -669,11 +684,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
         }
 
-        // 성공
+        // 성공 + 완료 시각
         set((s) => ({
           batchResults: s.batchResults.map((r, idx) =>
-            idx === i ? { ...r, status: "done" as const } : r
+            idx === i ? { ...r, status: "done" as const, completedAt: Date.now() } : r
           ),
+          batchCurrentPhaseMessage: null,
         }));
 
         // 변환된 파일을 즉시 열기 (noPreview 모드 시 건너뜀)
@@ -696,8 +712,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         // 실패 — 다음 파일 계속
         set((s) => ({
           batchResults: s.batchResults.map((r, idx) =>
-            idx === i ? { ...r, status: "error" as const, error: String(e) } : r
+            idx === i ? { ...r, status: "error" as const, error: String(e), completedAt: Date.now() } : r
           ),
+          batchCurrentPhaseMessage: null,
         }));
       } finally {
         unlistenExtractProgress();
@@ -755,9 +772,77 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeBatchModal: () => set({
     showBatchModal: false,
     batchScanResult: null,
+    selectedFolderPaths: [],
     batchResults: [],
     isBatchProcessing: false,
+    batchCurrentPhaseMessage: null,
   }),
 
   cancelBatch: () => set({ batchCancelled: true }),
 }));
+
+// 폴더 목록을 스캔하여 기존 batchScanResult에 병합하는 헬퍼
+async function _mergeFoldersIntoBatch(
+  folders: string[],
+  replace: boolean,
+  get: () => AppState,
+  set: (partial: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => void
+) {
+  const { selectedFolderPaths, batchScanResult } = get();
+
+  // 중복 제거
+  const existing = new Set(selectedFolderPaths);
+  const newFolders = folders.filter((f) => !existing.has(f));
+  if (newFolders.length === 0 && !replace) return;
+
+  const baseFolderPaths = replace ? folders : [...selectedFolderPaths, ...newFolders];
+  const foldersToScan = replace ? folders : newFolders;
+
+  let merged: InddFolderScanResult = replace
+    ? { direct_files: [], subfolder_files: [] }
+    : (batchScanResult ?? { direct_files: [], subfolder_files: [] });
+
+  for (const folder of foldersToScan) {
+    try {
+      const result = await invoke<InddFolderScanResult>("scan_indd_folder", { path: folder });
+      // 단일 폴더의 직접 파일을 서브폴더 항목으로 합산 (폴더 그룹 유지)
+      const folderName = folder.replace(/^.*[/\\]/, "");
+      const allFromFolder = [
+        ...result.direct_files.map((p) => ({ path: p, filename: p.replace(/^.*[/\\]/, "") })),
+        ...result.subfolder_files.flatMap((sf) => sf.indd_files),
+      ];
+      if (allFromFolder.length > 0) {
+        merged = {
+          direct_files: merged.direct_files,
+          subfolder_files: [
+            ...merged.subfolder_files,
+            { folder_path: folder, folder_name: folderName, indd_files: allFromFolder },
+            ...result.subfolder_files.map((sf) => ({ ...sf })),
+          ],
+        };
+      }
+    } catch {
+      // 스캔 실패한 폴더는 건너뜀
+    }
+  }
+
+  const allFiles = [
+    ...merged.direct_files,
+    ...merged.subfolder_files.flatMap((sf) => sf.indd_files.map((f) => f.path)),
+  ];
+  if (allFiles.length === 0) {
+    set({ error: "선택한 폴더에서 InDesign 문서를 찾을 수 없습니다." });
+    return;
+  }
+
+  set({
+    showBatchModal: true,
+    batchScanResult: merged,
+    selectedFolderPaths: baseFolderPaths,
+    batchBasePath: baseFolderPaths[0] ?? null,
+    batchResults: [],
+    batchCurrentIndex: -1,
+    isBatchProcessing: false,
+    batchCancelled: false,
+  });
+}
