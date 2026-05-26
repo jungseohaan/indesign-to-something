@@ -247,7 +247,8 @@ end using terms from"#,
     let timeout_secs = 3600u64;
     // SPEC-030 B.4: phase별 stale 타임아웃 차등 적용
     // - open: 300s (대용량 파일은 열기만 수분 소요)
-    // - idml/pdf: 120s
+    // - idml: 120s
+    // - pdf: 600s (48페이지 복잡한 파일 PDF 내보내기 3~4분 소요)
     // - rendered_frames/render_badge: 1800s (복잡 페이지에서 10분+ 가능)
     // - resolved_*: 300s
     // - 기타: 120s
@@ -297,7 +298,9 @@ end using terms from"#,
                 // SPEC-030 B.4: phase별 stale 타임아웃 갱신
                 current_phase_stale = match step {
                     "open" => 600,
-                    "idml" | "pdf" => 120,
+                    "idml" => 120,
+                    // PDF 내보내기는 48페이지 복잡한 파일에서 3~4분 소요 가능
+                    "pdf" => 600,
                     "rendered_frames" | "render_badge" | "render_frame" => 1800,
                     s if s.starts_with("resolved") => 300,
                     _ => stale_secs_default,
