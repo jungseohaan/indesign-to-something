@@ -373,7 +373,26 @@ end using terms from"#,
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr));
+        // -2741: InDesign SDEF 미준비 (크래시 후 재시작 중 경합) → 재시도 1회
+        if stderr.contains("-2741") {
+            emit_progress(app, "launching", "InDesign 재시작 대기 중...");
+            ensure_indesign_running(&app_name, output_dir).await;
+            emit_progress(app, "exporting", "IDML 추출 재시도 중...");
+            let mut child2 = Command::new("osascript")
+                .arg(&script_file)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("osascript 재시도 실행 실패: {}", e))?;
+            let output2 = child2.wait_with_output().await
+                .map_err(|e| format!("osascript 재시도 결과 수집 실패: {}", e))?;
+            if !output2.status.success() {
+                let stderr2 = String::from_utf8_lossy(&output2.stderr);
+                return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr2));
+            }
+        } else {
+            return Err(format!("InDesign 스크립트 실행 실패:\n{}", stderr));
+        }
     }
 
     // 진행률: 완료 확인 중
