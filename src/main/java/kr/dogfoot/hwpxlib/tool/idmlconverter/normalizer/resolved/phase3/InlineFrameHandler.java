@@ -1002,6 +1002,18 @@ public class InlineFrameHandler {
                             }
                         }
                     }
+                    // Group 기반 inline(rtf==null) 과대 크기 방지.
+                    // 비율 0.5~4 범위 아이콘/배지: 14pt 상한.
+                    // scribble 외곽선(비율 4.3, 5.8 등)은 page layout 영향으로 제외.
+                    if (!isNullTypeInline && rtf == null && obj.height() > 1500) {
+                        double ar = (double) obj.width() / obj.height();
+                        if (ar >= 0.5 && ar <= 4.0) {
+                            long maxH = 1400;
+                            long scaledW = obj.width() * maxH / obj.height();
+                            obj.height(maxH);
+                            obj.width(scaledW);
+                        }
+                    }
 
                     return obj;
                 } catch (Exception e) {

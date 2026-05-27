@@ -668,6 +668,8 @@ end using terms from"#,
 
 /// SPEC-030 B.1: `_crop_manifest.json`을 읽어 sips로 배지 PNG를 개별 크롭한다.
 /// 반환값: 크롭에 성공한 항목 수.
+/// 구 JSX 버그 보정: visibleBounds가 mm 단위일 때 dpi/72 계수 사용 → 좌표가 작게 계산됨.
+/// 배치 PNG 너비와 매니페스트 max(x+w)의 비율로 스케일을 자동 감지.
 pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
     let manifest_path = output_dir.join("_crop_manifest.json");
     let data = match std::fs::read_to_string(&manifest_path) {
@@ -678,6 +680,31 @@ pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
         Ok(v) => v,
         Err(_) => return 0,
     };
+    // src별 max(x+w) 계산
+    let mut src_max_xw: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for entry in &entries {
+        let src_rel = match entry["src"].as_str() { Some(s) => s, None => continue };
+        let x = entry["x"].as_i64().unwrap_or(0);
+        let w = entry["w"].as_i64().unwrap_or(0);
+        let xw = x + w;
+        let cur = src_max_xw.entry(src_rel.to_string()).or_insert(0);
+        if xw > *cur { *cur = xw; }
+    }
+    // src별 스케일 감지 (PNG 너비를 읽어 ratio 계산)
+    let mut src_scale: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for (src_rel, max_xw) in &src_max_xw {
+        if *max_xw <= 0 { src_scale.insert(src_rel.clone(), 1.0); continue; }
+        let src_path = output_dir.join(src_rel);
+        let png_w = read_png_width(&src_path).unwrap_or(0);
+        if png_w > 0 {
+            let ratio = png_w as f64 / *max_xw as f64;
+            // 1.3~4.0 범위면 구 JSX 버그 보정 필요 (mm 단위)
+            let scale = if ratio >= 1.3 && ratio <= 4.0 { ratio } else { 1.0 };
+            src_scale.insert(src_rel.clone(), scale);
+        } else {
+            src_scale.insert(src_rel.clone(), 1.0);
+        }
+    }
     let mut count = 0usize;
     for entry in &entries {
         let src_rel = match entry["src"].as_str() { Some(s) => s, None => continue };
@@ -689,11 +716,16 @@ pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
         let src = output_dir.join(src_rel);
         let dst = output_dir.join(dst_rel);
         if !src.exists() { continue; }
+        let scale = *src_scale.get(src_rel).unwrap_or(&1.0);
+        let sx = (x as f64 * scale).round() as i64;
+        let sy = (y as f64 * scale).round() as i64;
+        let sw = ((w as f64 * scale).round() as i64).max(1);
+        let sh = ((h as f64 * scale).round() as i64).max(1);
         // sips: cropOffset 먼저, 그 다음 cropToHeightWidth로 크롭
         let status = std::process::Command::new("sips")
             .args([
-                "--cropOffset", &y.to_string(), &x.to_string(),
-                "-c", &h.to_string(), &w.to_string(),
+                "--cropOffset", &sy.to_string(), &sx.to_string(),
+                "-c", &sh.to_string(), &sw.to_string(),
                 src.to_str().unwrap_or(""),
                 "--out", dst.to_str().unwrap_or(""),
             ])
@@ -713,6 +745,17 @@ pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
     }
     let _ = std::fs::remove_file(&manifest_path);
     count
+}
+
+/// PNG 파일의 너비를 IHDR 청크에서 읽는다 (외부 라이브러리 없이).
+fn read_png_width(path: &std::path::Path) -> Option<u32> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut buf = [0u8; 24];
+    f.read_exact(&mut buf).ok()?;
+    // PNG signature: 8 bytes, IHDR length: 4 bytes, IHDR type: 4 bytes, width: 4 bytes BE
+    if &buf[0..8] != b"\x89PNG\r\n\x1a\n" { return None; }
+    Some(u32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]))
 }
 
 /// 추출 진행률 이벤트를 프론트엔드로 emit한다 (공개 버전).

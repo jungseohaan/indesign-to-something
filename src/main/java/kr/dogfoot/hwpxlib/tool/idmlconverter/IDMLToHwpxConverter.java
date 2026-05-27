@@ -86,6 +86,7 @@ public class IDMLToHwpxConverter {
                     reporter.reportProgress(3, 100, "resolved 데이터 로딩 중...");
                     resolvedData = ResolvedDataReader.read(options.resolvedJsonPath());
                     resolvedData.basePath(getResolvedDir(options));
+                    applyCropManifest(resolvedData.basePath());
                 } catch (Exception e) {
                     System.err.println("Warning: resolved.json 로드 실패 (무시): " + e.getMessage());
                     earlyWarnings.add("[Resolved] resolved.json 로드 실패: " + e.getMessage());
@@ -1453,6 +1454,95 @@ public class IDMLToHwpxConverter {
             resolvedFile = resolvedFile.getAbsoluteFile();
         }
         return resolvedFile.getParent();
+    }
+
+    // SPEC-030 B.1: _crop_manifest.json이 있으면 배치 PNG에서 개별 배지 PNG를 크롭한다.
+    // 데스크탑 앱(Rust)이 크롭을 적용하지 못한 경우(CLI 직접 변환 등) 여기서 보정.
+    // 구 JSX 버그: visibleBounds가 mm 단위일 때 dpi/72 계수를 사용해 좌표가 작게 계산됨.
+    // 보정: 배치 PNG 너비와 매니페스트 max(x+w)의 비율로 스케일을 자동 감지.
+    private static void applyCropManifest(String baseDir) {
+        if (baseDir == null) return;
+        java.io.File manifest = new java.io.File(baseDir, "_crop_manifest.json");
+        if (!manifest.exists()) return;
+        try {
+            String json = new String(java.nio.file.Files.readAllBytes(manifest.toPath()), java.nio.charset.StandardCharsets.UTF_8).trim();
+            java.util.regex.Pattern objPat = java.util.regex.Pattern.compile("\\{([^}]+)\\}");
+            java.util.regex.Pattern strPat = java.util.regex.Pattern.compile("\"(src|dst)\"\\s*:\\s*\"([^\"]+)\"");
+            java.util.regex.Pattern numPat = java.util.regex.Pattern.compile("\"([xywh])\"\\s*:\\s*(-?\\d+)");
+            // 1패스: 전체 파싱
+            java.util.List<java.util.Map<String, Object>> entries = new java.util.ArrayList<>();
+            java.util.regex.Matcher objM = objPat.matcher(json);
+            while (objM.find()) {
+                String obj = objM.group(1);
+                java.util.regex.Matcher sm = strPat.matcher(obj);
+                java.util.Map<String, String> strs = new java.util.HashMap<>();
+                while (sm.find()) strs.put(sm.group(1), sm.group(2));
+                java.util.regex.Matcher nm = numPat.matcher(obj);
+                java.util.Map<String, Integer> nums = new java.util.HashMap<>();
+                while (nm.find()) nums.put(nm.group(1), Integer.parseInt(nm.group(2)));
+                if (strs.get("src") == null || strs.get("dst") == null) continue;
+                java.util.Map<String, Object> e = new java.util.HashMap<>();
+                e.put("src", strs.get("src")); e.put("dst", strs.get("dst"));
+                e.put("x", nums.getOrDefault("x", 0)); e.put("y", nums.getOrDefault("y", 0));
+                e.put("w", nums.getOrDefault("w", 0)); e.put("h", nums.getOrDefault("h", 0));
+                entries.add(e);
+            }
+            // 2패스: src별로 배치 PNG 로드 + 스케일 자동 감지 + 크롭
+            java.util.Map<String, java.awt.image.BufferedImage> batches = new java.util.HashMap<>();
+            java.util.Map<String, Double> scales = new java.util.HashMap<>();
+            java.util.Set<String> srcFiles = new java.util.HashSet<>();
+            int count = 0;
+            // 스케일 계산: src별 max(x+w)를 배치 너비와 비교
+            for (java.util.Map<String, Object> e : entries) {
+                String src = (String) e.get("src");
+                if (!batches.containsKey(src)) {
+                    java.io.File sf = new java.io.File(baseDir, src);
+                    if (!sf.exists()) continue;
+                    java.awt.image.BufferedImage b = javax.imageio.ImageIO.read(sf);
+                    if (b != null) { batches.put(src, b); scales.put(src, 1.0); }
+                }
+                if (!batches.containsKey(src)) continue;
+                int xw = (Integer) e.get("x") + (Integer) e.get("w");
+                if (xw > 0) {
+                    double ratio = (double) batches.get(src).getWidth() / xw;
+                    // 구 JSX 버그로 인해 ratio ≈ 2.83 (72/25.4) 이면 mm 단위 보정 필요
+                    if (ratio > scales.get(src)) scales.put(src, ratio);
+                }
+            }
+            // 스케일이 1.3~4.0 범위면 보정 적용, 그 외는 1.0 (신 JSX 또는 pt 문서)
+            for (String src : scales.keySet()) {
+                double r = scales.get(src);
+                if (r < 1.3 || r > 4.0) scales.put(src, 1.0);
+            }
+            // 크롭
+            for (java.util.Map<String, Object> e : entries) {
+                String src = (String) e.get("src"), dst = (String) e.get("dst");
+                java.awt.image.BufferedImage batch = batches.get(src);
+                if (batch == null) continue;
+                java.io.File dstFile = new java.io.File(baseDir, dst);
+                if (dstFile.exists()) continue;
+                double sc = scales.getOrDefault(src, 1.0);
+                int x = (int) Math.round((Integer) e.get("x") * sc);
+                int y = (int) Math.round((Integer) e.get("y") * sc);
+                int w = (int) Math.round((Integer) e.get("w") * sc);
+                int h = (int) Math.round((Integer) e.get("h") * sc);
+                if (w <= 0 || h <= 0) continue;
+                x = Math.max(0, Math.min(x, batch.getWidth() - 1));
+                y = Math.max(0, Math.min(y, batch.getHeight() - 1));
+                w = Math.min(w, batch.getWidth() - x);
+                h = Math.min(h, batch.getHeight() - y);
+                if (w <= 0 || h <= 0) continue;
+                try {
+                    java.awt.image.BufferedImage crop = batch.getSubimage(x, y, w, h);
+                    javax.imageio.ImageIO.write(crop, "PNG", dstFile);
+                    srcFiles.add(src);
+                    count++;
+                } catch (Exception ex) { /* skip */ }
+            }
+            if (count > 0) System.err.println("[IDMLToHwpxConverter] crop_manifest: " + count + " badge PNG(s) cropped");
+            for (String s : srcFiles) { new java.io.File(baseDir, s).delete(); }
+            manifest.delete();
+        } catch (Exception ex) { /* skip manifest failures */ }
     }
 
     /**

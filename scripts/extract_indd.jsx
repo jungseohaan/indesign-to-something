@@ -441,7 +441,12 @@ function exportPageBadgesBatched(doc, page, simpleBadges, renderDir, dpi) {
         }
         if (!uVB) return [];
 
-        var pxPerPt = dpi / 72.0;
+        // visibleBounds는 문서 측정 단위로 반환됨. 단위별로 px 변환 계수 계산.
+        var _hUnit = doc.viewPreferences.horizontalMeasurementUnits;
+        var pxPerPt;
+        if (_hUnit == MeasurementUnits.MILLIMETERS)   { pxPerPt = dpi / 25.4; }
+        else if (_hUnit == MeasurementUnits.INCHES)    { pxPerPt = dpi; }
+        else                                           { pxPerPt = dpi / 72.0; }
         var pageBounds = page.bounds;
 
         for (var k = 0; k < simpleBadges.length; k++) {
