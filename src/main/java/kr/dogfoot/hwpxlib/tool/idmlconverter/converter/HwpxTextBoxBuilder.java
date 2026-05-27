@@ -281,8 +281,9 @@ public class HwpxTextBoxBuilder {
         // 단, 180도 배수 회전(0, 180, -180, 360...)은 텍스트 방향에 영향이 없으므로 일반 경로로 처리.
         // InDesign에서 부모 Group과 함께 180도 회전된 TF는 시각적으로 정방향으로 보이며
         // geometricBounds가 이미 실제 페이지 좌표로 주어지므로 회전 없이 배치해야 함.
+        // ±5° 이하 소각도 회전은 HWPX 텍스트박스로 무시 (DrawTextBox 대신 일반 경로 처리).
         short rotAngle = (short) Math.round(block.rotationAngle() % 180);
-        if (rotAngle != 0) {
+        if (Math.abs(rotAngle) > 5) {
             frameTransformations.convertRotatedFloatingBlock(framePara, block, w, h, rotAngle);
             return;
         }
