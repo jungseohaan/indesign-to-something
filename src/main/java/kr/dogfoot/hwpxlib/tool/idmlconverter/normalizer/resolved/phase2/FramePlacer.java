@@ -1052,6 +1052,13 @@ public final class FramePlacer {
                 if (textW > 0 && textH > 0 && shapeW < textW * 1.2 && shapeH < textH * 1.2) {
                     continue;
                 }
+                // Polygon/Oval 은 불규칙 패스일 수 있어 AABB 가 실제 채움 영역보다 훨씬 큼.
+                // AABB 면적이 텍스트 면적의 50 배 초과이면 스크리블/장식 패스로 간주 → occluder 제외.
+                if (!"Rectangle".equals(t) && textW > 0 && textH > 0) {
+                    double shapeArea = shapeW * shapeH;
+                    double textArea = textW * textH;
+                    if (shapeArea > textArea * 50.0) continue;
+                }
                 return true;
             }
         }
