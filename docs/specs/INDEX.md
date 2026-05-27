@@ -26,7 +26,6 @@
 
 | SPEC | 제목 | 요약 |
 |------|------|------|
-| [SPEC-031](SPEC-031-dsl-rule-engine.md) | Java-Kotlin 하이브리드 DSL 규칙 엔진 | 서식 규칙을 Kotlin DSL로 분리 → AI 바이브코딩 안전 구역 확보 |
 | [SPEC-002](SPEC-002-large-file-split.md) | 대형 파일 분할 | 1000+ LOC 모듈화 (W3/W4로 부분 진행됨) |
 | [SPEC-003](SPEC-003-zorder-semantic-layers.md) | Z-Order 시멘틱 레이어 분류 | 이진 분류 → 다층 semantic layer |
 | [SPEC-004](SPEC-004-textwrap-frame-split.md) | TextWrap 기반 본문 프레임 분할 | 겹치는 객체 피해 텍스트 흐름. `phase5/WrapPhase5`와 직결 |
@@ -54,6 +53,7 @@
 | [SPEC-022](SPEC-022-overlapping-decoration-merge.md) | 뱃지 위 데코 병합 | Polygon 외곽선 + 뱃지 합성 |
 | [SPEC-023](SPEC-023-renderable-text-bg-merge.md) | 외곽선 텍스트 배지 배경 병합 | TextFrame 외곽선 + 라운드 |
 | [SPEC-024](SPEC-024-rulebelow-idml-doc-null.md) | RuleBelow 감지 실패 | lazy IDMLDocument 초기화 순서 |
+| [SPEC-031](SPEC-031-dsl-rule-engine.md) | Java-Kotlin 하이브리드 DSL 규칙 엔진 | 2026-05-27. ConversionRules.kt 단일 파일로 서식 규칙 정의 |
 | [SPEC-badge-extraction](SPEC-badge-extraction.md) | 배지 추출/변환 (초기 안) | SPEC-021/022로 진화 |
 | [SPEC-idml-free-pipeline](SPEC-idml-free-pipeline.md) | 하이브리드 파이프라인 (초기 안) | 신 파이프라인 진입점 |
 | [SPEC-pdf-export](SPEC-pdf-export.md) | PDF 프리뷰 생성 | 링크 재연결 + 고해상도 |

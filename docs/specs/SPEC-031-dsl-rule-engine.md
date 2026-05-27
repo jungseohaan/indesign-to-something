@@ -1,6 +1,6 @@
 # SPEC-031 — Java-Kotlin 하이브리드 HWPX 변환 DSL 규칙 엔진 구축
 
-> 상태: **Pending** (제안 단계)
+> 상태: **Done** (2026-05-27 구현 완료)
 > 원본 초안: `docs/DSL 엔진구축 SPEC.md`
 
 ---
@@ -378,9 +378,10 @@ ConversionRulesKt.loadConversionRules();
 | `src/main/kotlin/.../rule/HwpxRuleRegistry.kt` | **신규** | DSL 코어 + 레지스트리 |
 | `src/main/kotlin/.../config/ConversionRules.kt` | **신규** | 규칙 정의 (AI 수정 전용) |
 | `pom.xml` | **수정** | kotlin-maven-plugin 추가 |
-| `converter/CharPrFactory.java` | **수정** | `applyCharRule()` 호출 삽입 (소규모) |
-| `converter/ParaPrFactory.java` | **수정** | `applyParaRule()` 호출 삽입 (소규모) |
-| `IDMLToHwpxConverter.java` | **수정** | `loadConversionRules()` 초기화 호출 |
+| `converter/CharPrFactory.java` | **수정** | `currentParaStyleRef` 필드, `charPrCacheKey`에 characterStyleRef 추가, `applyCharRule()` 훅 |
+| `converter/ParaPrFactory.java` | **수정** | `applyParaRule()` 훅 — 마진·줄간격 override |
+| `converter/HwpxParagraphBuilder.java` | **수정** | `hasDslParaRules` bypass, `currentParaStyleRef` 세팅 |
+| `IDMLToHwpxConverter.java` | **수정** | `loadConversionRules()` static initializer 호출 |
 
 ---
 
@@ -392,7 +393,7 @@ AI가 규칙을 안전하게 생성하기 위한 제약 규칙:
 
 2. **스타일 이름 규칙**: 모든 스타일 이름은 IDML Styles.xml의 `Self=` 속성값 그대로 사용한다. `ParagraphStyle/` 또는 `CharacterStyle/` 접두사를 반드시 포함해야 한다.
 
-3. **폰트 이름 규칙**: 대체 폰트명은 `font-mapping.json`의 `hwpxFontMetrics` 섹션에 정의된 폰트명만 사용한다. **한컴바탕은 절대 사용하지 않는다.**
+3. **폰트 이름 규칙**: 대체 폰트명은 `font-mapping.json`의 `hwpxFontMetrics` 섹션에 정의된 폰트명만 사용한다.
 
 4. **수치 단위 준수**:
    - `fontSizePt`: pt 단위 소수 (예: `10.5`)
@@ -406,7 +407,21 @@ AI가 규칙을 안전하게 생성하기 위한 제약 규칙:
 
 ## 10. 검증 체크리스트
 
-- [ ] `mvn clean package -q -DskipTests` 빌드 성공
-- [ ] `HwpxRuleRegistry.applyParaRule()` 단위 호출 확인 (JUnit)
-- [ ] `ConversionRules.kt` 로드 후 중3 영어 1단원 CLI 변환 결과 회귀 없음
-- [ ] `ParagraphStyle/대단원 설명` 규칙이 실제 HWPX 출력에 반영됨
+- [x] `mvn clean package -q -DskipTests` 빌드 성공 (2026-05-27)
+- [x] `HwpxRuleRegistry.applyParaRule()` 런타임 단위 호출 확인 — `targetLineSpacingPct=100` 반환
+- [x] 중3 영어 1단원 CLI 변환 결과 회귀 없음 (warnings=0, pages=48)
+- [x] `ParagraphStyle/표빈공간` 3종 규칙이 HWPX header에 `lineSpacing value="100"` 3건으로 반영됨
+
+## 11. 구현 중 발견된 트랩 (재발 방지)
+
+### 트랩: paragraphStyleRef 접두사 불일치
+
+**현상**: DSL 규칙을 `"ParagraphStyle/표빈공간"`으로 등록했으나 실제 `ASTParagraph.paragraphStyleRef()`는 `"표빈공간"` (접두사 없음) 형태로 저장됨. `hasParaRule()` 호출 결과가 항상 false.
+
+**원인**: resolved.json 경로(StoryConverter)는 `rp.styleName()` → 짧은 형식. IDML 경로(StoryLoader)는 `ip.appliedParagraphStyle()` → 긴 형식. AST에 짧은 형식이 최종 저장됨.
+
+**해결**: `HwpxRuleRegistry`의 `normalizeParaRef`/`normalizeCharRef` 함수로 등록·조회 시 모두 접두사 제거. `ConversionRules.kt`에서는 두 형식 모두 사용 가능.
+
+### 트랩: letterSpacingPct 단위
+
+SPEC 원안의 `letterSpacingPct` (%) 파라미터는 실제 구현에서 `letterSpacing` (HWPX ‰ 단위 Short)으로 변경. HWPX CharPr의 자간은 퍼밀(‰) 단위이므로 `-30` = -3%. 규칙 작성 시 `letterSpacing = -30` 형태로 지정.

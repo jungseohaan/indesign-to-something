@@ -105,19 +105,6 @@ public class FontMapper {
         configSerifEn = config.defaultSerifEn();
         configSansEn = config.defaultSansEn();
 
-        // mappings
-        for (Map.Entry<String, kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMappingEntry> entry
-                : config.fontMappings().entrySet()) {
-            kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMappingEntry src = entry.getValue();
-            MappingEntry me = new MappingEntry();
-            me.ko = src.ko;
-            me.en = src.en;
-            me.spacing = src.spacing;
-            me.scaleAdjust = src.scaleAdjust;
-            me.ratio = src.ratio;
-            externalMappings.put(entry.getKey(), me);
-        }
-
         // hwpxFontMetrics
         for (Map.Entry<String, kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMetricEntry> entry
                 : config.hwpxFontMetrics().entrySet()) {
@@ -150,6 +137,14 @@ public class FontMapper {
                 idmlMetrics.put(entry.getKey(), fm);
             }
         }
+
+        // DSL fontDefaults로 기본 폰트 오버라이드 (ConversionRules.kt 값이 최우선)
+        kr.dogfoot.hwpxlib.tool.idmlconverter.rule.FontDefaultsBuilder dslDefaults =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry.getFontDefaults();
+        configSerifKo = dslDefaults.getDefaultSerifKo();
+        configSansKo  = dslDefaults.getDefaultSansKo();
+        configSerifEn = dslDefaults.getDefaultSerifEn();
+        configSansEn  = dslDefaults.getDefaultSansEn();
 
         System.out.println("[FontMapper] config 로드: mappings=" + config.fontMappings().size()
                 + ", hwpxFontMetrics=" + config.hwpxFontMetrics().size()
@@ -213,16 +208,27 @@ public class FontMapper {
 
         MappingResult result;
 
-        // [1] 외부 JSON 명시적 매핑
-        MappingEntry ext = externalMappings.get(idmlFontFamily);
-        if (ext != null) {
-            result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, 1.0, ext.ratio);
-            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
+        // [0] DSL fontRule (ConversionRules.kt — 최우선)
+        kr.dogfoot.hwpxlib.tool.idmlconverter.rule.FontRuleBuilder dsl =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry.applyFontRule(idmlFontFamily);
+        if (dsl != null) {
+            String ko = dsl.getKoFont() != null ? dsl.getKoFont() : DEFAULT_HWPX_FONT;
+            String en = dsl.getEnFont() != null ? dsl.getEnFont() : ko;
+            result = new MappingResult(ko, en, dsl.getSpacing(), dsl.getScaleAdjust(), 1.0, dsl.getRatio());
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ko + "\" (DSL)" + (dsl.getRatio() != 1.0 ? " 장평=" + dsl.getRatio() : ""));
         }
-        // [2] 카테고리/키워드 폴백 (이름 기반)
-        // 메트릭 매칭은 비활성 — hwpxFontMetrics 카테고리 정확도 개선 후 재활성화
+        // [1] 외부 JSON 명시적 매핑
         else {
-            result = categoryFallback(idmlFontFamily, fontStyle);
+            MappingEntry ext = externalMappings.get(idmlFontFamily);
+            if (ext != null) {
+                result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, 1.0, ext.ratio);
+                System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
+            }
+            // [2] 카테고리/키워드 폴백 (이름 기반)
+            // 메트릭 매칭은 비활성 — hwpxFontMetrics 카테고리 정확도 개선 후 재활성화
+            else {
+                result = categoryFallback(idmlFontFamily, fontStyle);
+            }
         }
 
         // heightScale 미설정 시 HWPX 메트릭에서 계산 (ratio는 반드시 보존)
@@ -487,33 +493,15 @@ public class FontMapper {
 
     /**
      * 폰트명 키워드로 한/글 번들 폰트에 직접 매핑.
-     * 가변 폰트, 외부 폰트 등 이름만으로 한/글 번들에 매핑 가능한 경우.
-     * @return 매핑된 한/글 번들 폰트명, 없으면 null
+     * ConversionRules.kt의 keywordFontRule() 등록 순서 우선.
+     * @return DEFAULT_SERIF/DEFAULT_SANS 센티널 또는 정확한 폰트명, 없으면 null
      */
     private static String keywordMapping(String lowerName, String fontStyle) {
-        // 윤고딕 계열 → 한컴돋움 (기본폰트 정책)
-        if (lowerName.contains("윤고딕")) {
-            return DEFAULT_SANS;
-        }
-        // 윤명조 → 한컴바탕
-        if (lowerName.contains("윤명조")) return DEFAULT_SERIF;
-        // 나눔고딕 → 한컴돋움
-        if (lowerName.contains("나눔고딕") || lowerName.contains("nanum gothic")) return DEFAULT_SANS;
-        // 나눔명조 → 한컴바탕
-        if (lowerName.contains("나눔명조") || lowerName.contains("nanum myeongjo")) return DEFAULT_SERIF;
-        // 나눔스퀘어 → 한컴돋움 (기본폰트 정책)
-        if (lowerName.contains("나눔스퀘어") || lowerName.contains("nanumsquare")) return DEFAULT_SANS;
-        // 본고딕/Noto Sans → 한컴돋움 (기본폰트 정책)
-        if (lowerName.contains("본고딕") || lowerName.contains("noto sans")) return DEFAULT_SANS;
-        // 본명조/Noto Serif → 한컴바탕
-        if (lowerName.contains("본명조") || lowerName.contains("noto serif")) return DEFAULT_SERIF;
-        // 맑은 고딕 → 맑은 고딕 (한/글 번들에 포함)
-        if (lowerName.contains("맑은") && lowerName.contains("고딕")) return "맑은 고딕";
-        // 함초롬 → 함초롬 시리즈
-        if (lowerName.contains("함초롬") && lowerName.contains("바탕")) return "함초롬바탕";
-        if (lowerName.contains("함초롬") && lowerName.contains("돋움")) return "함초롬돋움";
-
-        return null;
+        kr.dogfoot.hwpxlib.tool.idmlconverter.rule.KeywordFontRuleBuilder rule =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry.applyKeywordFontRule(lowerName);
+        if (rule == null) return null;
+        if (rule.getKoFont() != null) return rule.getKoFont();
+        return rule.isSerif() ? DEFAULT_SERIF : DEFAULT_SANS;
     }
 
     /**
