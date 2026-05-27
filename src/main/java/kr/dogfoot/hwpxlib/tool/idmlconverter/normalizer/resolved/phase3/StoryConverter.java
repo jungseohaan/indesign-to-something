@@ -93,6 +93,13 @@ public final class StoryConverter {
                     ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
                     if (rtf != null && rtf.storyId() != null) {
                         String storyId = rtf.storyId();
+                        // IDML story에 테이블이 있으면 Phase 4가 ASTTable로 처리 → Phase 3 skip
+                        // (동일 TF에 대해 1×1 래퍼 TextBox 중복 생성 방지)
+                        if (ctx.loadIDMLStory != null) {
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory _chk =
+                                    ctx.loadIDMLStory.apply(storyId);
+                            if (_chk != null && _chk.hasTables()) continue;
+                        }
                         // 빈 본문 스토리이고 TextPath 매핑이 있으면 TextPath 스토리로 대체.
                         // frameVisibleTextLength 도 TextPath 스토리 길이로 보정하여 단락 분배 필터를 통과시킨다.
                         String subStoryId = textPathStorySub.get(domId);

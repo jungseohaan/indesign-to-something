@@ -265,6 +265,10 @@ public class HwpxTextBoxBuilder {
         if (w <= 0 || h <= 0) {
             return;
         }
+        // Phase 4가 ASTTable로 처리한 table-story TF — paragraphs 없음, 래퍼 1×1 생성 불필요
+        if (block.paragraphs() == null || block.paragraphs().isEmpty()) {
+            return;
+        }
 
 
         // inlineToFloating: 배지 단일-child — fill 없으면 hp:tbl 흰 배경 방지를 위해 투명 DrawText 경로 사용
@@ -305,11 +309,29 @@ public class HwpxTextBoxBuilder {
             if (hasWrapper && block.cornerRadius() > 0) {
                 convertRoundedWrapperDrawText(framePara, block, w, h);
             } else {
-                if (hasWrapper) {
-                    addWrapperRoundedRect(framePara, block, w, h);
+                // 단락 하나 + inlineTable만 있는 경우: 1x1 외곽 래퍼 없이 표를 직접 배치
+                // (SingleColumnTableConverter가 만드는 외곽 1x1 표가 불필요한 표-안-표 구조 생성)
+                java.util.List<ASTParagraph> _paras = block.paragraphs();
+                ASTTable _singleInnerTable = null;
+                if (!hasWrapper && ctx.tableBuilderRef != null
+                        && _paras != null && _paras.size() == 1
+                        && (_paras.get(0).items() == null || _paras.get(0).items().isEmpty())
+                        && _paras.get(0).inlineTable() != null) {
+                    _singleInnerTable = _paras.get(0).inlineTable();
                 }
-                singleColumnTableConverter.convertSingleColumnTable(framePara, block, block.effectiveX(), block.y(), w, h,
-                        block.paragraphs(), hasWrapper);
+                if (_singleInnerTable != null) {
+                    _singleInnerTable.x(block.effectiveX());
+                    _singleInnerTable.y(block.y());
+                    _singleInnerTable.width(w);
+                    _singleInnerTable.zOrder(block.zOrder());
+                    ctx.tableBuilderRef.convertTable(framePara, _singleInnerTable);
+                } else {
+                    if (hasWrapper) {
+                        addWrapperRoundedRect(framePara, block, w, h);
+                    }
+                    singleColumnTableConverter.convertSingleColumnTable(framePara, block, block.effectiveX(), block.y(), w, h,
+                            block.paragraphs(), hasWrapper);
+                }
             }
         } else {
             // 다단 — N개 독립 글상자(1×1 테이블)를 수평 배치

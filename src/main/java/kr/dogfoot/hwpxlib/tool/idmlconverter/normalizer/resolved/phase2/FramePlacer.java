@@ -145,23 +145,22 @@ public final class FramePlacer {
                         }
                     }
                     // phase3Reachable 판별:
-                    // 배지가 renderedFloatingItems에 inline_object만 있으면
-                    //   → inline PNG가 텍스트 포함 전체 배지 → floating 불필요 → phase3Reachable=true
-                    // 배지가 inline_object + badge_group 둘 다 있으면
-                    //   → inline PNG는 배경만, badge_group PNG가 별도 → tryInlineGroupAsSingleBadge는 null 반환
-                    //   → 텍스트가 아무데도 없음 → floating 텍스트박스로 보강 → phase3Reachable=false
+                    // 배지가 renderedFloatingItems에 inline_object로 있으면
+                    //   → Phase 3 loadInlineObject가 처리 (badge_group PNG가 있으면 swap해서 로드)
+                    //   → inline PNG든 badge_group PNG든 텍스트 포함 → floating 불필요 → phase3Reachable=true
+                    // inline_object가 없으면 Phase 3가 ORC 앵커를 PNG로 처리할 수 없음
+                    //   → floating 텍스트박스로 보강 → phase3Reachable=false
                     boolean badgeAlsoInlineObject = false;
-                    boolean badgeHasBadgeGroupFloating = false;
                     if (badgeGroupId >= 0) {
                         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                            if (rg.id() == badgeGroupId) {
-                                if ("inline_object".equals(rg.itemType())) badgeAlsoInlineObject = true;
-                                if ("badge_group".equals(rg.itemType())) badgeHasBadgeGroupFloating = true;
+                            if (rg.id() == badgeGroupId && "inline_object".equals(rg.itemType())) {
+                                badgeAlsoInlineObject = true;
+                                break;
                             }
                         }
                     }
-                    // floating 필요: inline PNG(배경) + badge_group PNG 모두 존재할 때만
-                    boolean phase3Reachable = !(badgeAlsoInlineObject && badgeHasBadgeGroupFloating);
+                    // inline_object로 앵커된 배지 → Phase 3 loadInlineObject가 badge_group PNG(텍스트 포함)를 로드 → floating 불필요
+                    boolean phase3Reachable = badgeAlsoInlineObject;
                     if (inAnyBadge && phase3Reachable) {
                         String vt0 = tf.frameVisibleText();
                         String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
