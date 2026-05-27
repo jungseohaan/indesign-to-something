@@ -342,6 +342,12 @@ public class InlineFrameHandler {
                 return null; // PNG 경로에 위임
             }
         }
+        // renderedTextFrames에 badge_group PNG가 있으면 → Phase 7 floating 배치에 위임
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
+            if (rg.id() == anchoredObjectId && rg.isBadgeGroup() && rg.file() != null) {
+                return null;
+            }
+        }
 
         // 직속 자식 TF 1 개 (inline + 텍스트 있음)
         ResolvedTextFrame childTf = null;

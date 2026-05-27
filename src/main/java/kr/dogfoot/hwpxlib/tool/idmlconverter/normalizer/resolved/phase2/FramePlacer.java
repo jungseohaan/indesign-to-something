@@ -599,6 +599,7 @@ public final class FramePlacer {
             String _badgeFill = null, _badgeStroke = null;
             double _badgeStrokeW = 0, _badgeCorner = 0;
             boolean _isBadgeChild = false;
+            boolean _skipBadgeChildInlineAnchor = false;
             try {
                 int domIdInt5 = -1;
                 try { domIdInt5 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
@@ -795,7 +796,12 @@ public final class FramePlacer {
                                     break;
                                 }
                             }
-                            if (badgeIsInlineAnchored) break; // tf.zOrder() 그대로 사용
+                            if (badgeIsInlineAnchored) {
+                                // inline_object 배지의 child TF는 loadInlineObject가 inline PNG로 처리.
+                                // floating TextFrameBlock을 추가하면 텍스트가 별도로 표시되어 중복 발생 → 건너뜀.
+                                _skipBadgeChildInlineAnchor = true;
+                                break;
+                            }
                             // RenderedGroup에는 zOrder 필드가 없으므로 pageItem에서 가져옴
                             ResolvedPageItem badgePi = ctx.resolvedData.getPageItem(String.valueOf(rg.id()));
                             int badgePageZ = (badgePi != null && badgePi.zOrder() > 0) ? badgePi.zOrder() : 0;
@@ -945,6 +951,7 @@ public final class FramePlacer {
                     }
                 }
             }
+            if (_skipBadgeChildInlineAnchor) continue;
             section.addBlock(block);
         }
     }
