@@ -112,6 +112,13 @@ public final class ResolvedBuildContext {
     public java.util.Set<Integer> deferredAnchoredFloatingIds = new java.util.HashSet<>();
 
     /**
+     * AnchoredPosition="Anchored" + TextWrapMode="None" 이지만 inline_object PNG가 있어
+     * loadInlineObject 로 인라인 배치되는 Group ID 집합.
+     * 이 객체들은 IDML에서 anchor 앞뒤로 gap이 있으므로 인라인 배치 시 우측 여백을 추가한다.
+     */
+    public java.util.Set<Integer> customAnchoredInlineIds = new java.util.HashSet<>();
+
+    /**
      * Phase 2 가 non-editable inline TF 를 inlineToFloating 으로 전환할 때,
      * 해당 TF 의 조상 inline_object 를 여기에 등록한다.
      * Phase 3 (loadInlineObject) 는 이 집합에 있는 ID 의 inline PNG 를 inline 배치에서 억제하고,

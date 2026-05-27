@@ -40,6 +40,11 @@ import java.util.Map;
  */
 public class IDMLToHwpxConverter {
 
+    static {
+        // SPEC-031: DSL 규칙 엔진 초기화 — 클래스 로딩 시 1회 실행 (thread-safe)
+        kr.dogfoot.hwpxlib.tool.idmlconverter.config.ConversionRulesKt.loadConversionRules();
+    }
+
     /**
      * IDML 파일을 HWPX 파일로 변환한다.
      *

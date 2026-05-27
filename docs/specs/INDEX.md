@@ -26,6 +26,7 @@
 
 | SPEC | 제목 | 요약 |
 |------|------|------|
+| [SPEC-031](SPEC-031-dsl-rule-engine.md) | Java-Kotlin 하이브리드 DSL 규칙 엔진 | 서식 규칙을 Kotlin DSL로 분리 → AI 바이브코딩 안전 구역 확보 |
 | [SPEC-002](SPEC-002-large-file-split.md) | 대형 파일 분할 | 1000+ LOC 모듈화 (W3/W4로 부분 진행됨) |
 | [SPEC-003](SPEC-003-zorder-semantic-layers.md) | Z-Order 시멘틱 레이어 분류 | 이진 분류 → 다층 semantic layer |
 | [SPEC-004](SPEC-004-textwrap-frame-split.md) | TextWrap 기반 본문 프레임 분할 | 겹치는 객체 피해 텍스트 흐름. `phase5/WrapPhase5`와 직결 |

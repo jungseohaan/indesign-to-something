@@ -84,6 +84,16 @@ final class ParaPrFactory {
         int next = resolveParaLong(astPara.spaceAfter(),
                 baseStyle != null ? baseStyle.spaceAfter() : null);
 
+        // SPEC-031: DSL para rule — 마진/여백 오버라이드 (줄간격은 아래 lsValue 결정 후 추가 처리)
+        kr.dogfoot.hwpxlib.tool.idmlconverter.rule.RuleContext dslCtx =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.rule.RuleContext(
+                        astPara.paragraphStyleRef(), null, "");
+        kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry.applyParaRule(dslCtx);
+        if (dslCtx.targetLeftIndentMm != null)
+            left = (int) (dslCtx.targetLeftIndentMm * ConverterConstants.HWPUNIT_PER_INCH / 25.4);
+        if (dslCtx.targetSpaceBeforeMm != null)
+            prev = (int) (dslCtx.targetSpaceBeforeMm * ConverterConstants.HWPUNIT_PER_INCH / 25.4);
+
         // InDesign 탭 위치는 프레임 기준(절대) — HWPX에서도 동일하게 사용
 
         // 인라인 탭 정지점 → TabPr 생성 (마진 조정 후에 실행해야 암시적 탭 포함)
@@ -159,6 +169,11 @@ final class ParaPrFactory {
         if (lsValue == null && baseStyle != null && baseStyle.lineSpacing() != null) {
             lsValue = baseStyle.lineSpacing();
             lsType = baseStyle.lineSpacingType();
+        }
+        // SPEC-031: DSL para rule — 줄간격 오버라이드 (dslCtx는 위에서 이미 applyParaRule 호출됨)
+        if (dslCtx.targetLineSpacingPct != null) {
+            lsValue = dslCtx.targetLineSpacingPct;
+            lsType = "percent";
         }
         if (lsValue != null) {
             LineSpacingType hwpxType = "fixed".equals(lsType)

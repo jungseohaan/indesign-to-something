@@ -187,7 +187,8 @@ public class HwpxImageBuilder {
             pic.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
                     .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
         } else {
-            pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+            // 인라인 이미지: 기본 여백은 0이지만, 커스텀 앵커 오프셋으로 인한 gap은 rightAnd에 반영
+            pic.outMargin().leftAnd(0L).rightAnd(obj.textWrapRight()).topAnd(0L).bottomAnd(0L);
         }
 
         // ImageRect — 표시 영역 (HWPUNIT)

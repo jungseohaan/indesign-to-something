@@ -15,6 +15,7 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <kotlin.version>1.9.22</kotlin.version>
     </properties>
 
     <licenses>
@@ -55,6 +56,28 @@
             </resource>
         </resources>
         <plugins>
+            <!-- SPEC-031: Kotlin DSL 규칙 엔진 — Java보다 먼저 컴파일되어야 Java에서 참조 가능 -->
+            <plugin>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-maven-plugin</artifactId>
+                <version>${kotlin.version}</version>
+                <executions>
+                    <execution>
+                        <id>compile</id>
+                        <phase>process-sources</phase>
+                        <goals><goal>compile</goal></goals>
+                        <configuration>
+                            <sourceDirs>
+                                <sourceDir>${project.basedir}/src/main/kotlin</sourceDir>
+                                <sourceDir>${project.basedir}/src/main/java</sourceDir>
+                            </sourceDirs>
+                        </configuration>
+                    </execution>
+                </executions>
+                <configuration>
+                    <jvmTarget>1.8</jvmTarget>
+                </configuration>
+            </plugin>
             <!-- compile -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -63,6 +86,18 @@
                     <source>8</source>
                     <target>8</target>
                 </configuration>
+                <executions>
+                    <!-- default-compile을 비활성화: kotlin이 먼저 실행된 후 java가 컴파일 -->
+                    <execution>
+                        <id>default-compile</id>
+                        <phase>none</phase>
+                    </execution>
+                    <execution>
+                        <id>java-compile</id>
+                        <phase>compile</phase>
+                        <goals><goal>compile</goal></goals>
+                    </execution>
+                </executions>
             </plugin>
             <!-- make jar -->
             <plugin>
@@ -205,6 +240,12 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>2.0.32</version>
+        </dependency>
+        <!-- SPEC-031: Kotlin DSL 규칙 엔진 -->
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib-jdk8</artifactId>
+            <version>${kotlin.version}</version>
         </dependency>
     </dependencies>
 

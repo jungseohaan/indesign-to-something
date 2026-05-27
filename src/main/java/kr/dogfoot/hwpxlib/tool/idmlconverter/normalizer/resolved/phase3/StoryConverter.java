@@ -363,7 +363,11 @@ public final class StoryConverter {
                                     }
                                 }
                             }
-                            if (!hasInlinePng && ctx.deferredAnchoredFloatingIds.add(domId)) found++;
+                            if (hasInlinePng) {
+                                ctx.customAnchoredInlineIds.add(domId);
+                            } else if (ctx.deferredAnchoredFloatingIds.add(domId)) {
+                                found++;
+                            }
                         } catch (NumberFormatException e) { /* skip */ }
                     }
                 }

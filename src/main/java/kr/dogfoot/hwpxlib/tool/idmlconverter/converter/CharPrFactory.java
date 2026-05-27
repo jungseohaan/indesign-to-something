@@ -23,6 +23,9 @@ final class CharPrFactory {
 
     private final HwpxConverterContext ctx;
 
+    /** HwpxParagraphBuilder가 단락 처리 시작 시 세팅 — DSL char rule에서 para style 참조용 (SPEC-031) */
+    String currentParaStyleRef = null;
+
     CharPrFactory(HwpxConverterContext ctx) {
         this.ctx = ctx;
     }
@@ -45,8 +48,10 @@ final class CharPrFactory {
             }
         }
 
-        // 인라인 스타일 오버라이드
-        if (hasCharacterOverrides(textRun)) {
+        // 인라인 스타일 오버라이드 (SPEC-031: DSL char rule이 있으면 override 강제)
+        boolean hasDslChar = kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry
+                .hasCharRule(textRun.characterStyleRef());
+        if (hasCharacterOverrides(textRun) || hasDslChar) {
             charPrId = createOverrideCharPr(textRun);
         } else if (textRun.characterStyleRef() != null) {
             String charRef = HwpxUtil.resolveStyleRef(textRun.characterStyleRef(), ctx.styleRegistry);
@@ -195,7 +200,8 @@ final class CharPrFactory {
     }
 
     String charPrCacheKey(ASTTextRun textRun) {
-        return (textRun.fontFamily() != null ? textRun.fontFamily() : "")
+        return (textRun.characterStyleRef() != null ? textRun.characterStyleRef() : "")
+                + "|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "")
                 + "|" + (textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : "")
                 + "|" + (textRun.textColor() != null ? textRun.textColor() : "")
                 + "|" + (textRun.fontStyle() != null ? textRun.fontStyle() : "")
@@ -223,6 +229,19 @@ final class CharPrFactory {
         int height = textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : 1000;
         String textColor = textRun.textColor() != null ? textRun.textColor() : "#000000";
         String fontStyle = textRun.fontStyle() != null ? textRun.fontStyle().toLowerCase() : "";
+        String fontFamilyToUse = textRun.fontFamily();
+        Short letterSpacingToUse = textRun.letterSpacing();
+
+        // SPEC-031: DSL char rule 적용
+        kr.dogfoot.hwpxlib.tool.idmlconverter.rule.RuleContext ruleCtx =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.rule.RuleContext(
+                        currentParaStyleRef, textRun.characterStyleRef(),
+                        textRun.text() != null ? textRun.text() : "");
+        kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry.applyCharRule(ruleCtx);
+        if (ruleCtx.targetKoFont != null) fontFamilyToUse = ruleCtx.targetKoFont;
+        if (ruleCtx.targetFontSizePt != null)
+            height = (int) (ruleCtx.targetFontSizePt * kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ConverterConstants.HWPUNIT_PER_POINT);
+        if (ruleCtx.targetLetterSpacing != null) letterSpacingToUse = ruleCtx.targetLetterSpacing;
 
         // underline shape: ASTTextRun.underlineShape → LineType3
         LineType3 ulShape = null;
@@ -231,8 +250,8 @@ final class CharPrFactory {
         }
 
         CharPrBuilder.build(charPr, newId, height, textColor,
-                textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
-                textRun.letterSpacing(),
+                fontFamilyToUse, textRun.fontStyle(), ctx.fontRegistry,
+                letterSpacingToUse,
                 effectiveBoldStyle(fontStyle, textRun.fontFamily()),
                 isItalicStyle(fontStyle),
                 textRun.superscript(), textRun.subscript(),

@@ -139,9 +139,15 @@ public class HwpxParagraphBuilder {
         if (astPara.lineSpacing() != null && astPara.lineSpacing() == 0) {
             astPara.lineSpacing(null); // lineSpacing=0은 무의미 → null로 복원
         }
-        if (hasParagraphOverrides(astPara)) {
+        // SPEC-031: DSL para rule이 있으면 기존 override 없이도 createOverrideParaPr 호출
+        boolean hasDslParaRules = kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry
+                .hasParaRule(astPara.paragraphStyleRef());
+        if (hasParagraphOverrides(astPara) || hasDslParaRules) {
             paraPrId = createOverrideParaPr(astPara, paraPrId);
         }
+
+        // SPEC-031: CharPrFactory에 현재 단락 스타일 전달 (char DSL rule 참조용)
+        charPrFactory.currentParaStyleRef = astPara.paragraphStyleRef();
 
         // 셀 높이가 작으면 줄간격을 FIXED로 강제하여 한컴의 최소 행높이 확장 방지
         if (cellHeight > 0 && cellHeight < ConverterConstants.MIN_TEXT_BOX_HEIGHT) {
