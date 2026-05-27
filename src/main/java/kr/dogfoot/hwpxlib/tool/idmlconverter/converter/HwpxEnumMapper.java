@@ -19,17 +19,17 @@ public final class HwpxEnumMapper {
     public static HorizontalAlign2 mapAlignment(String alignment) {
         if (alignment == null) return HorizontalAlign2.JUSTIFY;
         switch (alignment.toLowerCase()) {
+            // InDesign *_ALIGN: 순수 정렬 (양쪽맞춤 없음)
             case "left": case "leftalign": case "left_align":
-            // IDML LeftJustified = InDesign 왼쪽 정렬 (left-aligned, not fully justified)
-            case "leftjustify": case "left_justified": case "leftjustified":
                 return HorizontalAlign2.LEFT;
             case "center": case "centeralign": case "center_align":
-            case "centerjustify": case "center_justified": case "centerjustified":
                 return HorizontalAlign2.CENTER;
             case "right": case "rightalign": case "right_align":
-            case "rightjustify": case "right_justified": case "rightjustified":
                 return HorizontalAlign2.RIGHT;
-            // IDML FullyJustified / Justify 만 양끝맞춤
+            // InDesign *_JUSTIFIED: 모두 양쪽맞춤 (마지막 줄 정렬만 다를 뿐, HWPX에서는 동일)
+            case "leftjustify": case "left_justified": case "leftjustified":
+            case "centerjustify": case "center_justified": case "centerjustified":
+            case "rightjustify": case "right_justified": case "rightjustified":
             case "justify": case "fulljustify": case "fullyjustified": case "fully_justified":
                 return HorizontalAlign2.JUSTIFY;
             default:

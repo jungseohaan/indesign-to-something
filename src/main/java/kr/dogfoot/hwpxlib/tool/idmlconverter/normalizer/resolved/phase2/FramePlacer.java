@@ -492,14 +492,18 @@ public final class FramePlacer {
                     // InDesign textwrap이 이미 레이아웃을 제어 → badge-shift 금지.
                     // (예: 정의 박스 상단에 배지가 걸쳐 있을 때)
                     boolean hasTextwrapRight = false;
+                    boolean hasTextwrapLeft = false;
                     if (tf.composedLines() != null) {
                         double[] tfGb = tf.geometricBounds();
                         double tfW = (tfGb != null && tfGb.length >= 4) ? (tfGb[3] - tfGb[1]) : 0;
                         for (ResolvedTextFrame.ComposedLine cl : tf.composedLines()) {
-                            if (tfW > 0 && cl.wrapIndentRight() > tfW * 0.30) { hasTextwrapRight = true; break; }
+                            if (tfW > 0 && cl.wrapIndentRight() > tfW * 0.30) { hasTextwrapRight = true; }
+                            if (tfW > 0 && cl.wrapIndentLeft() > tfW * 0.20) { hasTextwrapLeft = true; }
+                            if (hasTextwrapRight && hasTextwrapLeft) break;
                         }
                     }
                     if (hasTextwrapRight) continue;
+                    if (hasTextwrapLeft) continue;
                     double margin = 4.0; // pt
                     double newX = bR + margin;
                     double delta = newX - x;
