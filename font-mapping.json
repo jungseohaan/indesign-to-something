@@ -3020,6 +3020,7 @@
       "weight": 400,
       "ascent": 8.6,
       "descent": 1.4
-    }
+    },
+    "_comment": "InDesign 폰트 메트릭 (10pt 기준, measure_indesign_fonts.py로 측정). 폰트 너비 비율 계산에 사용"
   }
 }

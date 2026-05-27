@@ -84,8 +84,27 @@ public class FontMapper {
                     }
                 }
 
+                // indesignFontMetrics 섹션
+                if (root.has("indesignFontMetrics")) {
+                    JsonObject metrics = root.getAsJsonObject("indesignFontMetrics");
+                    for (Map.Entry<String, JsonElement> entry : metrics.entrySet()) {
+                        if (entry.getKey().startsWith("_")) continue;
+                        JsonObject val = entry.getValue().getAsJsonObject();
+                        FontMetricEntry fm = new FontMetricEntry();
+                        fm.family(entry.getKey());
+                        fm.korWidth(val.has("korWidth") ? val.get("korWidth").getAsDouble() / scaleFactor : 0);
+                        fm.latWidth(val.has("latWidth") ? val.get("latWidth").getAsDouble() / scaleFactor : 0);
+                        fm.ascent(val.has("ascent") ? val.get("ascent").getAsDouble() : 0);
+                        fm.descent(val.has("descent") ? val.get("descent").getAsDouble() : 0);
+                        if (!idmlMetrics.containsKey(entry.getKey())) {
+                            idmlMetrics.put(entry.getKey(), fm);
+                        }
+                    }
+                }
+
                 System.out.println("[FontMapper] font-mapping.json 로드: mappings=" + externalMappings.size()
-                        + ", hwpxFontMetrics=" + hwpxMetrics.size());
+                        + ", hwpxFontMetrics=" + hwpxMetrics.size()
+                        + ", indesignFontMetrics=" + idmlMetrics.size());
             } finally {
                 reader.close();
             }
@@ -95,61 +114,17 @@ public class FontMapper {
     }
 
     /**
-     * ConversionConfig에서 폰트 매핑 및 메트릭을 로드한다.
+     * DSL fontDefaults로 기본 폰트를 초기화한다 (ConversionRules.kt 값 적용).
+     * fontMapping 섹션은 font-mapping.json으로 이전됨 — config에서 더 이상 로드하지 않음.
      */
     public void loadFromConfig(kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config) {
-        if (config == null) return;
-
-        configSerifKo = config.defaultSerifKo();
-        configSansKo = config.defaultSansKo();
-        configSerifEn = config.defaultSerifEn();
-        configSansEn = config.defaultSansEn();
-
-        // hwpxFontMetrics
-        for (Map.Entry<String, kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMetricEntry> entry
-                : config.hwpxFontMetrics().entrySet()) {
-            kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMetricEntry src = entry.getValue();
-            HwpxMetric hm = new HwpxMetric();
-            hm.korWidth = src.korWidth;
-            hm.latWidth = src.latWidth;
-            hm.weight = src.weight;
-            hm.xHeight = src.xHeight;
-            hm.ascent = src.ascent;
-            hm.descent = src.descent;
-            hm.category = src.category;
-            hwpxMetrics.put(entry.getKey(), hm);
-        }
-
-        // indesignFontMetrics (fonttools 측정값, scaleFactor 불필요 — 이미 pt 단위)
-        for (Map.Entry<String, kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMetricEntry> entry
-                : config.indesignFontMetrics().entrySet()) {
-            kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig.FontMetricEntry src = entry.getValue();
-            FontMetricEntry fm = new FontMetricEntry();
-            fm.family(entry.getKey());
-            // fonttools 측정값은 이미 pt 단위 → scaleFactor로 나눠서 저장
-            // findBestMatchByMetrics에서 scaleFactor를 곱하면 원래 pt 값 복원
-            fm.korWidth(src.korWidth / scaleFactor);
-            fm.latWidth(src.latWidth / scaleFactor);
-            fm.ascent(src.ascent);
-            fm.descent(src.descent);
-            // idmlMetrics에 없는 경우만 추가 (resolved.json 런타임 값 우선)
-            if (!idmlMetrics.containsKey(entry.getKey())) {
-                idmlMetrics.put(entry.getKey(), fm);
-            }
-        }
-
-        // DSL fontDefaults로 기본 폰트 오버라이드 (ConversionRules.kt 값이 최우선)
         kr.dogfoot.hwpxlib.tool.idmlconverter.rule.FontDefaultsBuilder dslDefaults =
                 kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry.getFontDefaults();
         configSerifKo = dslDefaults.getDefaultSerifKo();
         configSansKo  = dslDefaults.getDefaultSansKo();
         configSerifEn = dslDefaults.getDefaultSerifEn();
         configSansEn  = dslDefaults.getDefaultSansEn();
-
-        System.out.println("[FontMapper] config 로드: mappings=" + config.fontMappings().size()
-                + ", hwpxFontMetrics=" + config.hwpxFontMetrics().size()
-                + ", indesignFontMetrics=" + config.indesignFontMetrics().size()
-                + ", defaultKo=" + configSerifKo + "/" + configSansKo);
+        System.out.println("[FontMapper] 기본 폰트: serif=" + configSerifKo + ", sans=" + configSansKo);
     }
 
     /**
