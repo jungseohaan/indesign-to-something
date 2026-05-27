@@ -86,6 +86,32 @@ public final class FramePlacer {
                     if (rpi != null && rpi.parentId() != null) hasParent = true;
                     if (hasText && !rendered && !sharedWithEditable && hasParent) {
                         inlineToFloating = true;
+                    } else if (!hasText && rendered && domIdInt >= 0) {
+                        // null-type inline TF(renderedTextFrames에 있음) + 큰 폰트 → floating text box 승격.
+                        // Phase 3이 인라인 텍스트 런으로 병합하면 첫 줄 행간이 팽창하므로 단독 글상자로 배치.
+                        boolean _isNullTypeRt = false;
+                        for (RenderedGroup _rt : ctx.resolvedData.allRenderedTextFrames()) {
+                            if (_rt.id() == domIdInt && _rt.itemType() == null) {
+                                _isNullTypeRt = true;
+                                break;
+                            }
+                        }
+                        if (_isNullTypeRt && tf.storyId() != null) {
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory _inlS =
+                                    ctx.resolvedData.getStory(tf.storyId());
+                            if (_inlS != null && !_inlS.paragraphs().isEmpty()) {
+                                java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun> _inlRuns =
+                                        _inlS.paragraphs().get(0).runs();
+                                if (_inlRuns != null && !_inlRuns.isEmpty()) {
+                                    Double _inlFs = _inlRuns.get(0).fontSize();
+                                    if (_inlFs != null && _inlFs > 16.0) {
+                                        ctx.renderedTfPlacedAsText.add(domIdInt);
+                                        inlineToFloating = true;
+                                    }
+                                }
+                            }
+                        }
+                        if (!inlineToFloating) continue;
                     } else {
                         continue;
                     }

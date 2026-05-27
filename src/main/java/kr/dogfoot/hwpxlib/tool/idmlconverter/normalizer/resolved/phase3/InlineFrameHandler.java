@@ -523,6 +523,10 @@ public class InlineFrameHandler {
     }
 
     static ASTTextRun tryInlineTextFrameAsRun(ResolvedBuildContext ctx, int anchoredObjectId) {
+        // Phase 2가 floating text box로 승격한 TF → 인라인 런 중복 방지
+        if (ctx.renderedTfPlacedAsText != null && ctx.renderedTfPlacedAsText.contains(anchoredObjectId)) {
+            return null;
+        }
         String domId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
         if (tf == null) {
@@ -855,6 +859,8 @@ public class InlineFrameHandler {
         // Phase 2 가 이 inline_object 의 자손 TF 를 floating 으로 전환했으면
         // inline PNG 는 Phase 7 이 floating ASTFigure 로 재배치 → 여기서 억제.
         if (ctx.inlineObjectsToConvertToFloating.contains(anchoredObjectId)) return null;
+        // Phase 2 가 floating text box 로 승격한 inline TF → inline PNG 도 억제 (28pt PNG가 행간 팽창하는 것 방지).
+        if (ctx.renderedTfPlacedAsText != null && ctx.renderedTfPlacedAsText.contains(anchoredObjectId)) return null;
 
         // 자식/자손 TextFrame이 플로팅 텍스트박스로 배치될 예정이면
         // inline_object PNG를 로드하지 않는다 (이미지 + 글상자 중복 방지).
