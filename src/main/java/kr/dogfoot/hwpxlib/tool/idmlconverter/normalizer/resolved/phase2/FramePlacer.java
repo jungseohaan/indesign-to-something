@@ -1080,6 +1080,23 @@ public final class FramePlacer {
                     double shapeArea = shapeW * shapeH;
                     double textArea = textW * textH;
                     if (shapeArea > textArea * 50.0) continue;
+                    // AABB 가 페이지 크기의 2 배 이상이면 페이지 밖으로 뻗은 장식 스윕 패스 → occluder 제외.
+                    // (예: 첫 페이지 배경 웨이브 Polygon 이 x: -100mm~502mm 로 페이지 220mm 를 훨씬 초과)
+                    // pageBounds 는 normalizeToPoints() 후 이미 pt — scaleFactor 추가 곱셈 금지.
+                    try {
+                        java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage> pages =
+                                ctx.resolvedData.pages();
+                        if (selfPage < pages.size()) {
+                            double[] pageBounds = pages.get(selfPage).bounds();
+                            if (pageBounds != null && pageBounds.length >= 4) {
+                                double pageW = pageBounds[3] - pageBounds[1];
+                                double pageH = pageBounds[2] - pageBounds[0];
+                                if ((pageW > 0 && shapeW > pageW * 2.0) || (pageH > 0 && shapeH > pageH * 2.0)) {
+                                    continue;
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
                 }
                 return true;
             }
