@@ -912,13 +912,21 @@ public class InlineFrameHandler {
             if (proceed) {
                 boolean isNullTypeInline = rg.itemType() == null;
                 // badge_group PNG가 있으면 inline_object PNG 대신 사용.
-                // badge_group export 시 inline TF(Paper 흰색 텍스트)를 숨기지 않으므로
-                // transparentBackground=true에서 흰색 픽셀이 투명 구멍이 되어 텍스트가 보인다.
+                // 단, badge_group PNG가 사실상 빈 이미지(가시 픽셀 < 10%)인 경우 inline_object PNG 유지.
+                // (badge_group PNG 추출 실패 시 노이즈 픽셀만 남는 현상 방어)
                 RenderedGroup effectiveRg = rg;
                 for (RenderedGroup candidate : ctx.resolvedData.allRenderedFloatingItems()) {
                     if (candidate.id() == anchoredObjectId && "badge_group".equals(candidate.itemType())
                             && candidate.file() != null) {
-                        effectiveRg = candidate;
+                        File bgFile = new File(ctx.basePath, candidate.file());
+                        if (bgFile.exists()) {
+                            try {
+                                BufferedImage bgImg = ImageIO.read(bgFile);
+                                if (bgImg != null && isBadgePngValid(bgImg)) {
+                                    effectiveRg = candidate;
+                                }
+                            } catch (Exception ignored) {}
+                        }
                         break;
                     }
                 }
@@ -966,6 +974,15 @@ public class InlineFrameHandler {
                                 // 가로가 더 긴 PNG → 폭 유지, 높이 축소
                                 bh = bw / pngRatio;
                             }
+                        }
+                        // 전체 폭 배경 데코레이션 감지: 가로/세로 비율 > 8 이면서 폭 > 100pt 이면
+                        // 인라인 배치 시 한 줄을 전부 차지하여 이후 텍스트를 밀어냄 → 인라인 스킵.
+                        // Phase 7이 floating ASTFigure로 배치하도록 위임.
+                        // (예: 주황색 라운드사각형 배경 AR=16 — 텍스트 배경이지 인라인 문자가 아님)
+                        // AR=6~7 정도의 라벨 박스(예: "최근 사회·문화적 맥락" 36mm×6mm)는 인라인 유지.
+                        if (bw > bh * 8.0 && bw > 100.0) {
+                            ctx.inlineObjectsToConvertToFloating.add(anchoredObjectId);
+                            return null;
                         }
                         obj.width(CoordinateConverter.pointsToHwpunits(bw));
                         obj.height(CoordinateConverter.pointsToHwpunits(bh));
@@ -1241,5 +1258,21 @@ public class InlineFrameHandler {
             }
         }
         return sb.toString();
+    }
+
+    /** badge_group PNG가 실질적 내용을 담고 있는지 확인 (가시 픽셀 > 10%). */
+    private static boolean isBadgePngValid(BufferedImage img) {
+        int total = img.getWidth() * img.getHeight();
+        if (total == 0) return false;
+        int threshold = total / 10;
+        int vis = 0;
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                if (((img.getRGB(x, y) >> 24) & 0xFF) > 50) {
+                    if (++vis > threshold) return true;
+                }
+            }
+        }
+        return false;
     }
 }

@@ -139,6 +139,13 @@ public final class ResolvedBuildContext {
      */
     public java.util.Set<Integer> renderedTfPlacedAsText = new java.util.HashSet<>();
 
+    /**
+     * Phase 2 가 _skipTfBadgePng 로 완전히 건너뛴 inline TF ID 집합.
+     * 해당 TF 는 부모 inline_object PNG 에 텍스트가 이미 렌더링되어 있어 별도 배치 불필요.
+     * Phase 3 (loadInlineObject) 에서 이 TF 가 자식으로 발견될 때 PNG 폐기(return null) 예외 처리.
+     */
+    public java.util.Set<Integer> skippedBadgeChildTfIds = new java.util.HashSet<>();
+
 
     public ResolvedBuildContext() {
     }

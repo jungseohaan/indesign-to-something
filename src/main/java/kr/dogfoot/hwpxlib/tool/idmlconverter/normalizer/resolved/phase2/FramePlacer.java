@@ -766,6 +766,23 @@ public final class FramePlacer {
                                 }
                             }
                         }
+                        // Fallback: resolved.json 에 cornerRadius 가 없지만 badge PNG 코너가 투명하면
+                        // InDesign per-corner RoundedCorner 배지(pi.cornerRadius=0)로 판단 → pill 형태 적용.
+                        if (_badgeCorner <= 0 && isSimpleBadge && parentBadge.file() != null && ctx.basePath != null) {
+                            try {
+                                java.io.File bpngF = new java.io.File(ctx.basePath, parentBadge.file());
+                                if (bpngF.exists()) {
+                                    java.awt.image.BufferedImage bpng = javax.imageio.ImageIO.read(bpngF);
+                                    if (bpng != null && bpng.getColorModel().hasAlpha()) {
+                                        int tlAlpha = (bpng.getRGB(0, 0) >> 24) & 0xFF;
+                                        if (tlAlpha < 20) {
+                                            // 코너 투명 → pill 형태: cornerRadius = h/2 (mm)
+                                            _badgeCorner = (pbB - pbT) / (2.0 * ctx.scaleFactor);
+                                        }
+                                    }
+                                }
+                            } catch (Exception _ePillCorner) {}
+                        }
                     }
                 }
             } catch (Exception eBadge) {}
@@ -955,6 +972,9 @@ public final class FramePlacer {
                 // Case 1 (non-editable inline TF with text): 조상 inline_object PNG 를
                 // inline 배치에서 억제하고 Phase 7 이 floating 으로 재배치하도록 등록.
                 // Case 2 (editable badge child)는 badge PNG 가 inline 앵커 그대로 유지되어야 하므로 제외.
+                // Case 3 (non-editable TF inside inline_object): inline_object PNG가 이미 inline으로 배치됨.
+                //   floating text 오버레이는 생성하되, inline_object는 floating 전환 금지.
+                //   (전환하면 body text가 밀리지 않고 겹침)
                 if (!ctx.resolvedData.isEditableTextFrame(tf.id())) {
                     ResolvedPageItem _ancCurPi = ctx.resolvedData.getPageItem(tf.id());
                     int _ancHops = 0;
@@ -965,8 +985,10 @@ public final class FramePlacer {
                         for (RenderedGroup _ancRg : ctx.resolvedData.allRenderedFloatingItems()) {
                             if (String.valueOf(_ancRg.id()).equals(_ancPid)
                                     && "inline_object".equals(_ancRg.itemType())) {
+                                // inline_object PNG가 있으면 inline 배치 유지 → floating 전환 등록 안 함.
+                                // TF는 floating text box로 배치되어 PNG 위에 텍스트 오버레이 역할을 한다.
+                                if (_ancRg.file() != null) break outer_anc;
                                 ctx.inlineObjectsToConvertToFloating.add(_ancRg.id());
-                                // TF의 pageIndex를 저장 (rg.pageIndex()와 다를 수 있음)
                                 ctx.inlineObjectTfPageIndex.put(_ancRg.id(), tf.pageIndex());
                                 break outer_anc;
                             }

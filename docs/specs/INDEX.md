@@ -19,6 +19,7 @@
 | **[SPEC-029](SPEC-029-page-30-31-merged.md)** | 페이지 30/31 합쳐져 변환 | **신규(2026-05-21)**. XML 구조상 페이지 분리 정상이나 시각 결과는 합쳐 보임. 데이터 조사 필요 |
 | **[SPEC-030](SPEC-030-indesign-extraction-performance.md)** | InDesign 추출 속도 개선 | **신규(2026-05-22)**. P0. 4단계 플랜 (측정 → Tier A 즉시 → 페이지캐시/range → 대규모 리팩토링) |
 | [SPEC-desktop-app](SPEC-desktop-app.md) | Desktop App 아키텍처 | Tauri 2.0 + React 18 — 상시 참조 |
+| **[SPEC-032](SPEC-032-windows-cross-platform.md)** | Windows 크로스 플랫폼 지원 | **신규(2026-05-27)**. osascript→PowerShell COM, sips→image crate, Java/open 분기. Draft |
 
 ## Pending (제안/검토 대기)
 
