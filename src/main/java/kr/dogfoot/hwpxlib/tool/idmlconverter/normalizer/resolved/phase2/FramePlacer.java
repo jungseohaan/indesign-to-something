@@ -745,7 +745,10 @@ public final class FramePlacer {
                                 if (!"Rectangle".equals(ctype) && !"Polygon".equals(ctype) && !"Oval".equals(ctype) && !"TextFrame".equals(ctype)) continue;
                                 String fcn = cpi.fillColorName();
                                 String scn = cpi.strokeColorName();
-                                boolean hasFill = fcn != null && !"None".equals(fcn) && !"[None]".equals(fcn);
+                                // fillTint=0 → 0% 농도 = 흰색(Paper) → 채우기 없는 것으로 취급.
+                                // fillTint=-1 은 기본값(100%), 양수는 실제 농도.
+                                boolean hasFill = fcn != null && !"None".equals(fcn) && !"[None]".equals(fcn)
+                                        && cpi.fillTint() != 0;
                                 boolean hasStroke = scn != null && !"None".equals(scn) && !"[None]".equals(scn) && cpi.strokeWeight() > 0;
                                 if (!hasFill && !hasStroke) continue;
                                 double[] cgb = cpi.geometricBounds();

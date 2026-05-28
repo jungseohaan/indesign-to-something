@@ -51,6 +51,10 @@ public final class RenderableFramePlacer {
 
         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
             if (rt.file() == null) continue;
+            // badge_group_child: Phase 2 가 이미 TextFrameBlock 으로 배치.
+            // Phase 7 이 재처리하면 dedupKey 경합으로 부모 badge_group PNG 가 skip 될 수 있고,
+            // "≤20자 non-inline float" 경로로 중복 TextFrameBlock 이 생성됨 → 무조건 skip.
+            if (rt.isBadgeGroupChild()) continue;
             // Phase 2 가 텍스트 글상자로 배치한 TF → PNG 건너뜀 (dedupKey 선점 전에 체크).
             // 부모 Rectangle 항목은 별도로 같은 PNG 를 배치 → 배경 도형으로 남음.
             if (ctx.renderedTfPlacedAsText.contains(rt.id())) {
