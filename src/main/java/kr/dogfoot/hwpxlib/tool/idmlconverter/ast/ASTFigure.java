@@ -141,4 +141,24 @@ public class ASTFigure extends ASTBlock {
         return cropLeftFraction > 0 || cropTopFraction > 0
                 || cropRightFraction > 0 || cropBottomFraction > 0;
     }
+
+    // 비-인라인 badge_group 컨테이너: 배지 PNG 위에 오버레이할 텍스트 정보.
+    // null이면 일반 floating ASTFigure. non-null이면 HwpxImageBuilder가 hp:container를 생성.
+    public static class BadgeOverlay {
+        public String text;
+        public String fontFamily;
+        public int fontSizeHwpunits;
+        public String textColor;
+        public long relX, relY, relW, relH; // 배지 좌상단 기준 상대 좌표 (hwpunits)
+        public String verticalJustification = "CENTER_ALIGN";
+        public String alignment = "CENTER_ALIGN";
+    }
+
+    private java.util.List<BadgeOverlay> badgeOverlays;
+
+    public java.util.List<BadgeOverlay> badgeOverlays() { return badgeOverlays; }
+    public void addBadgeOverlay(BadgeOverlay v) {
+        if (badgeOverlays == null) badgeOverlays = new java.util.ArrayList<BadgeOverlay>();
+        badgeOverlays.add(v);
+    }
 }

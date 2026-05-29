@@ -408,6 +408,71 @@ public final class RenderableFramePlacer {
                     hwpxZ = 10;
                 }
                 fig.zOrder(hwpxZ);
+
+                // 비-인라인 badge_group: child TF 텍스트 오버레이 수집 → hp:container로 그룹화
+                if (rt.isBadgeGroup() && rt.childTextFrameIds() != null
+                        && rt.childTextFrameIds().length > 0) {
+                    double pgTop = 0, pgLeft = 0;
+                    if (ctx.resolvedData.pages() != null
+                            && rt.pageIndex() >= 0
+                            && rt.pageIndex() < ctx.resolvedData.pages().size()) {
+                        double[] pgBB = ctx.resolvedData.pages().get(rt.pageIndex()).bounds();
+                        if (pgBB != null && pgBB.length >= 4) {
+                            pgTop = pgBB[0]; pgLeft = pgBB[1];
+                        }
+                    }
+                    for (int childTfId : rt.childTextFrameIds()) {
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem cpi =
+                                ctx.resolvedData.getPageItem(String.valueOf(childTfId));
+                        if (cpi == null) continue;
+                        double[] cgb = cpi.geometricBounds(); // spread-relative pt (post-normalize)
+                        if (cgb == null || cgb.length < 4) continue;
+                        // child를 배지 좌상단 기준 상대 좌표로 변환
+                        double relTopPt = cgb[0] - pgTop - bounds[0];
+                        double relLeftPt = cgb[1] - pgLeft - bounds[1];
+                        double relHPt = Math.abs(cgb[2] - cgb[0]);
+                        double relWPt = Math.abs(cgb[3] - cgb[1]);
+                        // child TF의 story에서 텍스트/폰트 정보 추출
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame cTf =
+                                ctx.resolvedData.getTextFrame(String.valueOf(childTfId));
+                        if (cTf == null || cTf.storyId() == null) continue;
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory cStory =
+                                ctx.resolvedData.getStory(cTf.storyId());
+                        if (cStory == null || cStory.paragraphs() == null
+                                || cStory.paragraphs().isEmpty()) continue;
+                        StringBuilder sbT = new StringBuilder();
+                        String ff = null; int fsHwp = 0; String tc = null;
+                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph cp
+                                : cStory.paragraphs()) {
+                            if (cp.runs() == null) continue;
+                            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun cr
+                                    : cp.runs()) {
+                                if (cr.text() != null) sbT.append(cr.text());
+                                if (ff == null && cr.fontFamily() != null) ff = cr.fontFamily();
+                                if (fsHwp == 0 && cr.fontSize() != null && cr.fontSize() > 0)
+                                    fsHwp = (int) CoordinateConverter.pointsToHwpunits(cr.fontSize());
+                                if (tc == null && cr.fillColor() != null) {
+                                    String h = ctx.resolvedData.resolveColorHex(cr.fillColor());
+                                    if (h != null) tc = h;
+                                }
+                            }
+                        }
+                        String oText = sbT.toString().replace("\r","").replace("\n","").trim();
+                        if (oText.isEmpty()) continue;
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure.BadgeOverlay ov =
+                                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure.BadgeOverlay();
+                        ov.text = oText;
+                        ov.fontFamily = ff;
+                        ov.fontSizeHwpunits = fsHwp;
+                        ov.textColor = tc;
+                        ov.relX = CoordinateConverter.pointsToHwpunits(relLeftPt);
+                        ov.relY = CoordinateConverter.pointsToHwpunits(relTopPt);
+                        ov.relW = Math.max(100L, CoordinateConverter.pointsToHwpunits(relWPt));
+                        ov.relH = Math.max(100L, CoordinateConverter.pointsToHwpunits(relHPt));
+                        fig.addBadgeOverlay(ov);
+                    }
+                }
+
                 fig.fromGroup(true); // IN_FRONT_OF_TEXT
                 sections.get(pageIdx).addBlock(fig);
                 count++;

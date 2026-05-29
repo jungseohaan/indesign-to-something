@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.CharPr;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
@@ -11,6 +12,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.CharPrBuilder;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
 import javax.imageio.ImageIO;
@@ -66,9 +68,14 @@ public class HwpxImageBuilder {
     }
 
     private final HwpxConverterContext ctx;
+    private HwpxParagraphBuilder paragraphBuilder;
 
     public HwpxImageBuilder(HwpxConverterContext ctx) {
         this.ctx = ctx;
+    }
+
+    void setParagraphBuilder(HwpxParagraphBuilder pb) {
+        this.paragraphBuilder = pb;
     }
 
     // ── 인라인 이미지 ──
@@ -540,7 +547,198 @@ public class HwpxImageBuilder {
      * 공유 앵커 단락을 사용하는 figure 변환 (페이지 넘침 방지).
      */
     public void convertFigure(Para anchorPara, ASTFigure figure) {
-        convertFigureImage(anchorPara, figure);
+        if (figure.badgeOverlays() != null && !figure.badgeOverlays().isEmpty()) {
+            convertFloatingBadgeContainer(anchorPara, figure);
+        } else {
+            convertFigureImage(anchorPara, figure);
+        }
+    }
+
+    /**
+     * 비-인라인 badge_group → hp:container (floating, PAPER 좌표)
+     *   자식1: hp:pic  — 배지 배경 PNG
+     *   자식2..N: hp:rect + drawText — 텍스트 오버레이 (child TF별)
+     */
+    private void convertFloatingBadgeContainer(Para anchorPara, ASTFigure figure) {
+        byte[] imageData = figure.imageData();
+        if (imageData == null || imageData.length == 0) {
+            convertFigureImage(anchorPara, figure);
+            return;
+        }
+
+        String format = figure.imageFormat() != null ? figure.imageFormat() : "png";
+        String itemId = ImageInserter.registerImage(ctx.hwpxFile, imageData, format);
+
+        long w = figure.width();
+        long h = figure.height();
+        long x = figure.x();
+        long y = figure.y();
+
+        // ── Container ──
+        Run run = anchorPara.addNewRun();
+        run.charPrIDRef("0");
+        Container container = run.addNewContainer();
+
+        container.idAnd(HwpxUtil.nextShapeId())
+                .zOrderAnd(figure.zOrder())
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+        container.hrefAnd("").groupLevelAnd((short) 0).instidAnd(HwpxUtil.nextShapeId());
+        container.createOffset(); container.offset().set(0L, 0L);
+        container.createOrgSz(); container.orgSz().set(w, h);
+        container.createCurSz(); container.curSz().set(0L, 0L);
+        container.createFlip(); container.flip().horizontalAnd(false).verticalAnd(false);
+        container.createRotationInfo();
+        container.rotationInfo().angleAnd((short) 0).centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        container.createRenderingInfo();
+        container.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        container.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        container.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        container.createSZ();
+        container.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE).protectAnd(false);
+        container.createPos();
+        container.pos().treatAsCharAnd(false).affectLSpacingAnd(false).flowWithTextAnd(false)
+                .allowOverlapAnd(true).holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER).horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP).horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(y).horzOffset(x);
+        container.createOutMargin();
+        container.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        // ── 자식1: Picture (배경 PNG) ──
+        Picture pic = container.addNewPicture();
+        pic.idAnd(HwpxUtil.nextShapeId())
+                .zOrderAnd(0).numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT).textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false).dropcapstyleAnd(DropCapStyle.None).reverseAnd(false);
+        pic.hrefAnd("").groupLevelAnd((short) 1).instidAnd(HwpxUtil.nextShapeId());
+        setupPictureGeometry(pic, w, h, false, false, (short) 0);
+        pic.createSZ();
+        pic.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE).protectAnd(false);
+        pic.createPos();
+        pic.pos().treatAsCharAnd(false).affectLSpacingAnd(false).flowWithTextAnd(false)
+                .allowOverlapAnd(true).holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PARA).horzRelToAnd(HorzRelTo.PARA)
+                .vertAlignAnd(VertAlign.TOP).horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(0L).horzOffset(0L);
+        pic.createOutMargin(); pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        pic.createImgRect();
+        pic.imgRect().createPt0(); pic.imgRect().pt0().set(0L, 0L);
+        pic.imgRect().createPt1(); pic.imgRect().pt1().set(w, 0L);
+        pic.imgRect().createPt2(); pic.imgRect().pt2().set(w, h);
+        pic.imgRect().createPt3(); pic.imgRect().pt3().set(0L, h);
+        pic.createImgClip(); pic.imgClip().leftAnd(0L).rightAnd(w).topAnd(0L).bottomAnd(h);
+        pic.createInMargin(); pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        pic.createImgDim(); pic.imgDim().dimwidthAnd(w).dimheightAnd(h);
+        pic.createImg();
+        pic.img().binaryItemIDRefAnd(itemId).brightAnd(0).contrastAnd(0)
+                .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
+
+        // ── 자식2..N: Rectangle + DrawText per overlay ──
+        int zIdx = 1;
+        for (ASTFigure.BadgeOverlay ov : figure.badgeOverlays()) {
+            long rw = ov.relW > 0 ? ov.relW : w;
+            long rh = ov.relH > 0 ? ov.relH : h;
+            long rx = ov.relX;
+            long ry = ov.relY;
+
+            Rectangle rect = container.addNewRectangle();
+            rect.idAnd(HwpxUtil.nextShapeId())
+                    .zOrderAnd(zIdx++).numberingTypeAnd(NumberingType.PICTURE)
+                    .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT).textFlowAnd(TextFlowSide.BOTH_SIDES)
+                    .lockAnd(false).dropcapstyleAnd(DropCapStyle.None);
+            rect.hrefAnd("").groupLevelAnd((short) 1).instidAnd(HwpxUtil.nextShapeId());
+            rect.createOffset(); rect.offset().set(rx, ry);
+            rect.createOrgSz(); rect.orgSz().set(rw, rh);
+            rect.createCurSz(); rect.curSz().set(rw, rh);
+            rect.createFlip(); rect.flip().horizontalAnd(false).verticalAnd(false);
+            rect.createRotationInfo();
+            rect.rotationInfo().angleAnd((short) 0).centerXAnd(rw / 2).centerYAnd(rh / 2).rotateimageAnd(true);
+            rect.createRenderingInfo();
+            rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+            rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+            rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+            rect.createLineShape();
+            rect.lineShape().colorAnd("#000000").widthAnd(0).styleAnd(LineType2.NONE)
+                    .endCapAnd(LineCap.FLAT)
+                    .headStyleAnd(ArrowType.NORMAL).tailStyleAnd(ArrowType.NORMAL)
+                    .headfillAnd(true).tailfillAnd(true)
+                    .headSzAnd(ArrowSize.SMALL_SMALL).tailSzAnd(ArrowSize.SMALL_SMALL)
+                    .outlineStyleAnd(OutlineStyle.NORMAL).alphaAnd(0f);
+            rect.createDrawText();
+            DrawText dt = rect.drawText();
+            dt.lastWidthAnd(rw).nameAnd("").editableAnd(false);
+            dt.createTextMargin();
+            dt.textMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+            dt.createSubList();
+            SubList subList = dt.subList();
+            VerticalAlign2 vAlign = HwpxEnumMapper.mapVerticalJustification(ov.verticalJustification);
+            subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
+                    .lineWrapAnd(LineWrapMethod.BREAK).vertAlignAnd(vAlign)
+                    .linkListIDRefAnd("0").linkListNextIDRefAnd("0")
+                    .textWidthAnd(0).textHeightAnd(0)
+                    .hasTextRefAnd(false).hasNumRefAnd(false);
+
+            // CharPr 등록 (overlay 텍스트 전용)
+            String charPrId = buildOverlayCharPr(ov);
+
+            // Para 생성 (중앙 정렬)
+            ASTParagraph astPara = new ASTParagraph();
+            astPara.alignment(ov.alignment);
+            ASTTextRun textRun = new ASTTextRun();
+            textRun.text(ov.text);
+            textRun.fontFamily(ov.fontFamily);
+            textRun.fontSizeHwpunits(ov.fontSizeHwpunits > 0 ? ov.fontSizeHwpunits : null);
+            textRun.textColor(ov.textColor);
+            astPara.addItem(textRun);
+
+            if (paragraphBuilder != null) {
+                paragraphBuilder.addParagraphToSubList(subList, astPara);
+            } else {
+                // paragraphBuilder 미주입 시 최소 Para 직접 생성
+                Para p = subList.addNewPara();
+                p.idAnd(HwpxUtil.nextParaId()).paraPrIDRefAnd("3").styleIDRefAnd("0")
+                        .pageBreakAnd(false).columnBreakAnd(false).merged(false);
+                Run r = p.addNewRun();
+                r.charPrIDRef(charPrId);
+                r.addNewT().addText(ov.text);
+            }
+
+            rect.ratioAnd((short) 0);
+            rect.createPt0(); rect.pt0().set(0L, 0L);
+            rect.createPt1(); rect.pt1().set(rw, 0L);
+            rect.createPt2(); rect.pt2().set(rw, rh);
+            rect.createPt3(); rect.pt3().set(0L, rh);
+            rect.createSZ();
+            rect.sz().widthAnd(rw).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                    .heightAnd(rh).heightRelToAnd(HeightRelTo.ABSOLUTE).protectAnd(false);
+            rect.createPos();
+            rect.pos().treatAsCharAnd(false).affectLSpacingAnd(false).flowWithTextAnd(false)
+                    .allowOverlapAnd(true).holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA).horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.TOP).horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(0L).horzOffset(0L);
+            rect.createOutMargin(); rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        }
+
+        ctx.imagesConverted++;
+    }
+
+    private String buildOverlayCharPr(ASTFigure.BadgeOverlay ov) {
+        String id = ctx.styleRegistry.nextCharPrId();
+        CharPr charPr = ctx.hwpxFile.headerXMLFile().refList().charProperties().addNew();
+        int height = ov.fontSizeHwpunits > 0 ? ov.fontSizeHwpunits : 1000;
+        String color = ov.textColor != null ? ov.textColor : "#000000";
+        CharPrBuilder.build(charPr, id, height, color,
+                ov.fontFamily, ctx.fontRegistry,
+                null, false, false, false, false,
+                UnderlineType.NONE, "#000000", null, null, false, null, null);
+        return id;
     }
 
     /**

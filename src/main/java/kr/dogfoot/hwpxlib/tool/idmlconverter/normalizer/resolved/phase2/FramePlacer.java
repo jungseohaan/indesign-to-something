@@ -145,7 +145,8 @@ public final class FramePlacer {
                     boolean badgeAlsoInlineObject = badgeGroupId >= 0
                             && ctx.resolvedData.isBadgeGroupAlsoInline(badgeGroupId); // O(1)
                     // 인라인 앵커 배지: Phase 3가 INLINE_TEXT_FRAME으로 처리 → floating text 불필요.
-                    // 비-인라인 배지: Phase 7이 badge PNG(배경) 배치, Phase 2가 floating text 배치.
+                    // 인라인 배지: Phase 3이 INLINE_TEXT_FRAME으로 처리.
+                    // 비-인라인 배지: Phase 7이 badge PNG + 텍스트 오버레이를 hp:container로 묶어 처리 → 항상 스킵.
                     if (inAnyBadge && badgeAlsoInlineObject) {
                         String vt0 = tf.frameVisibleText();
                         String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
@@ -153,10 +154,8 @@ public final class FramePlacer {
                             continue;
                         }
                     } else if (inAnyBadge) {
-                        // 비-인라인 배지: 멀티-child만 스킵 (Phase 3 tryInlineGroupAsBoxList가 처리).
-                        if (inMultiChildBadge) {
-                            continue;
-                        }
+                        // 비-인라인 배지: Phase 7의 hp:container가 텍스트 오버레이를 포함 → 별도 글상자 불필요.
+                        continue;
                     }
                     // 부모 Group이 badge_group 없이 inline_object만 있으면
                     // → inline PNG가 텍스트 포함 전체 배지 → floating 불필요.
