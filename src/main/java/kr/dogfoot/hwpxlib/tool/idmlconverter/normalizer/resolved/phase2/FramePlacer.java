@@ -786,6 +786,12 @@ public final class FramePlacer {
                     }
                 }
             } catch (Exception eBadge) {}
+            // badge_group_child 이면서 simple 로 표시되지 않은 것 → Phase 7 PNG 가 시각 담당
+            // (decorative 배지: area>50% + complex shapes, illustrated 배지: area<50% 모두 포함)
+            // PNG 에 텍스트가 베이킹되어 있으므로 텍스트 블록 생성 시 중복 발생.
+            if (_isBadgeChild && !ctx.resolvedData.isSimpleBadgeChild(tf.id())) {
+                _isDecorativeBadge = true;
+            }
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
