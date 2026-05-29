@@ -231,6 +231,21 @@ pub fn store(
     })
 }
 
+/// Links 폴더를 대상 경로에 연결한다.
+/// Unix: 심볼릭 링크, Windows: junction 시도 → 실패 시 재귀 복사.
+pub(crate) fn link_or_copy_links_dir(src: &Path, target: &Path) {
+    #[cfg(unix)]
+    {
+        let _ = std::os::unix::fs::symlink(src, target);
+    }
+    #[cfg(windows)]
+    {
+        if junction::create(src, target).is_err() {
+            let _ = copy_dir_recursive(src, target);
+        }
+    }
+}
+
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
@@ -240,11 +255,18 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         if ty.is_dir() {
             copy_dir_recursive(&entry.path(), &dst_path)?;
         } else if ty.is_symlink() {
-            // 심볼릭 링크는 그대로 복사 (Links 폴더용)
+            // Unix: 심볼릭 링크 그대로 복사, Windows: 대상 경로로 재귀 복사
             #[cfg(unix)]
             {
                 let target = std::fs::read_link(entry.path())?;
                 let _ = std::os::unix::fs::symlink(target, &dst_path);
+            }
+            #[cfg(windows)]
+            {
+                // Windows에서 캐시 복사 시 심볼릭 링크 대신 실제 파일 복사
+                if let Ok(real) = std::fs::read_link(entry.path()) {
+                    let _ = copy_dir_recursive(&real, &dst_path);
+                }
             }
         } else {
             std::fs::copy(entry.path(), &dst_path)?;

@@ -97,14 +97,14 @@ pub async fn extract_indd(
                 "cached",
                 "캐시된 추출 결과 사용 중... (ExtendScript 건너뜀)",
             );
-            // 캐시 디렉토리에 Links 심볼릭 링크가 없으면 다시 만들어둔다
+            // 캐시 디렉토리에 Links 링크가 없으면 다시 만들어둔다
             if let Some(src_links) = links_dir.as_deref() {
                 let target_links = std::path::Path::new(&cached.temp_dir).join("Links");
                 if !target_links.exists() {
-                    #[cfg(unix)]
-                    {
-                        let _ = std::os::unix::fs::symlink(src_links, &target_links);
-                    }
+                    crate::extract_cache::link_or_copy_links_dir(
+                        std::path::Path::new(src_links),
+                        &target_links,
+                    );
                 }
             }
             return Ok(cached);
@@ -161,15 +161,12 @@ pub async fn extract_indd(
         }
     }
 
-    // 6. 원본 INDD 파일 옆 Links/ 폴더를 temp 디렉토리에 심볼릭 링크
+    // 6. 원본 INDD 파일 옆 Links/ 폴더를 temp 디렉토리에 링크
     if let Some(indd_parent) = std::path::Path::new(&indd_path).parent() {
         let source_links = indd_parent.join("Links");
         let target_links = output_dir.join("Links");
         if source_links.is_dir() && !target_links.exists() {
-            #[cfg(unix)]
-            {
-                let _ = std::os::unix::fs::symlink(&source_links, &target_links);
-            }
+            crate::extract_cache::link_or_copy_links_dir(&source_links, &target_links);
         }
     }
 
@@ -179,14 +176,14 @@ pub async fn extract_indd(
     }
     match extract_cache::store(&cache_key, &indd_path, &output_dir) {
         Ok(moved) => {
-            // 캐시 이동 성공 시 Links 심볼릭 링크 다시 연결
+            // 캐시 이동 성공 시 Links 링크 다시 연결
             if let Some(src_links) = links_dir.as_deref() {
                 let target_links = std::path::Path::new(&moved.temp_dir).join("Links");
                 if !target_links.exists() {
-                    #[cfg(unix)]
-                    {
-                        let _ = std::os::unix::fs::symlink(src_links, &target_links);
-                    }
+                    crate::extract_cache::link_or_copy_links_dir(
+                        std::path::Path::new(src_links),
+                        &target_links,
+                    );
                 }
             }
             Ok(moved)

@@ -57,8 +57,9 @@ pub struct ExtractionProgress {
     pub message: String,
 }
 
-/// macOS에서 설치된 Adobe InDesign 앱 경로를 탐지한다.
-/// 2025 → 2024 → 2023 순으로 검색.
+/// 설치된 Adobe InDesign 앱 경로를 탐지한다.
+/// macOS: /Applications, Windows: C:\Program Files\Adobe.
+#[cfg(target_os = "macos")]
 pub fn find_indesign_app() -> Result<String, String> {
     let years = ["2026", "2025", "2024", "2023", "2022"];
     for year in years {
@@ -70,8 +71,6 @@ pub fn find_indesign_app() -> Result<String, String> {
             return Ok(path);
         }
     }
-
-    // CC 버전 (이전 명명 규칙)
     let cc_paths = [
         "/Applications/Adobe InDesign CC 2019/Adobe InDesign CC 2019.app",
         "/Applications/Adobe InDesign CC 2018/Adobe InDesign CC 2018.app",
@@ -81,15 +80,44 @@ pub fn find_indesign_app() -> Result<String, String> {
             return Ok(path.to_string());
         }
     }
-
     Err("Adobe InDesign이 설치되어 있지 않습니다. /Applications 에서 Adobe InDesign을 찾을 수 없습니다.".into())
 }
 
+#[cfg(target_os = "windows")]
+pub fn find_indesign_app() -> Result<String, String> {
+    let years = ["2026", "2025", "2024", "2023", "2022"];
+    for year in years {
+        let path = format!(
+            r"C:\Program Files\Adobe\Adobe InDesign {}\InDesign.exe",
+            year
+        );
+        if Path::new(&path).exists() {
+            return Ok(path);
+        }
+    }
+    Err("Adobe InDesign이 설치되어 있지 않습니다. C:\\Program Files\\Adobe 에서 InDesign을 찾을 수 없습니다.".into())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn find_indesign_app() -> Result<String, String> {
+    Err("이 플랫폼에서는 InDesign 자동화를 지원하지 않습니다.".into())
+}
+
 /// InDesign 앱 경로에서 앱 이름을 추출한다.
-/// 예: "/Applications/Adobe InDesign 2025/Adobe InDesign 2025.app" → "Adobe InDesign 2025"
+/// macOS: ".../Adobe InDesign 2025.app" → "Adobe InDesign 2025"
+/// Windows: "...Adobe InDesign 2025\InDesign.exe" → 부모 디렉토리명에서 추출
 fn app_name_from_path(app_path: &str) -> String {
-    Path::new(app_path)
-        .file_stem()
+    let p = Path::new(app_path);
+    // Windows: 실행파일 이름이 "InDesign.exe"이면 부모 폴더 이름을 사용
+    if p.file_name().map(|n| n == "InDesign.exe").unwrap_or(false) {
+        if let Some(parent) = p.parent() {
+            return parent
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Adobe InDesign".to_string());
+        }
+    }
+    p.file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "Adobe InDesign".to_string())
 }
@@ -717,20 +745,11 @@ pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
         let dst = output_dir.join(dst_rel);
         if !src.exists() { continue; }
         let scale = *src_scale.get(src_rel).unwrap_or(&1.0);
-        let sx = (x as f64 * scale).round() as i64;
-        let sy = (y as f64 * scale).round() as i64;
-        let sw = ((w as f64 * scale).round() as i64).max(1);
-        let sh = ((h as f64 * scale).round() as i64).max(1);
-        // sips: cropOffset 먼저, 그 다음 cropToHeightWidth로 크롭
-        let status = std::process::Command::new("sips")
-            .args([
-                "--cropOffset", &sy.to_string(), &sx.to_string(),
-                "-c", &sh.to_string(), &sw.to_string(),
-                src.to_str().unwrap_or(""),
-                "--out", dst.to_str().unwrap_or(""),
-            ])
-            .status();
-        if matches!(status, Ok(s) if s.success()) {
+        let sx = ((x as f64 * scale).round() as i64).max(0) as u32;
+        let sy = ((y as f64 * scale).round() as i64).max(0) as u32;
+        let sw = ((w as f64 * scale).round() as i64).max(1) as u32;
+        let sh = ((h as f64 * scale).round() as i64).max(1) as u32;
+        if crop_png(&src, &dst, sx, sy, sw, sh) {
             count += 1;
         }
     }
@@ -745,6 +764,14 @@ pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
     }
     let _ = std::fs::remove_file(&manifest_path);
     count
+}
+
+/// `image` crate로 PNG를 크롭해 dst에 저장한다. 성공 시 true.
+fn crop_png(src: &std::path::Path, dst: &std::path::Path, x: u32, y: u32, w: u32, h: u32) -> bool {
+    match image::open(src) {
+        Ok(img) => img.crop_imm(x, y, w, h).save(dst).is_ok(),
+        Err(_) => false,
+    }
 }
 
 /// PNG 파일의 너비를 IHDR 청크에서 읽는다 (외부 라이브러리 없이).

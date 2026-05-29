@@ -13,41 +13,81 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tokio::process::Command;
 
-/// Find Java executable path on macOS
+/// Find Java executable path (platform-aware)
 pub(crate) fn find_java() -> String {
-    // Try common Java locations on macOS
-    let java_paths = [
-        "/opt/homebrew/opt/java/bin/java",
-        "/opt/homebrew/opt/openjdk/bin/java",
-        "/opt/homebrew/opt/openjdk@17/bin/java",
-        "/opt/homebrew/opt/openjdk@21/bin/java",
-        "/usr/bin/java",
-        "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java",
-        "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin/java",
-        "/Library/Java/JavaVirtualMachines/zulu-21.jdk/Contents/Home/bin/java",
-        "/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home/bin/java",
-    ];
-
-    for path in &java_paths {
-        if std::path::Path::new(path).exists() {
-            return path.to_string();
+    // JAVA_HOME 환경변수 우선 (모든 플랫폼)
+    if let Ok(java_home) = std::env::var("JAVA_HOME") {
+        #[cfg(windows)]
+        let bin = format!(r"{}\bin\java.exe", java_home);
+        #[cfg(not(windows))]
+        let bin = format!("{}/bin/java", java_home);
+        if std::path::Path::new(&bin).exists() {
+            return bin;
         }
     }
 
-    // Try to get Java home from java_home utility
-    if let Ok(output) = std::process::Command::new("/usr/libexec/java_home")
-        .output()
+    #[cfg(target_os = "macos")]
     {
-        if output.status.success() {
-            let java_home = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let java_bin = format!("{}/bin/java", java_home);
-            if std::path::Path::new(&java_bin).exists() {
-                return java_bin;
+        let java_paths = [
+            "/opt/homebrew/opt/java/bin/java",
+            "/opt/homebrew/opt/openjdk/bin/java",
+            "/opt/homebrew/opt/openjdk@17/bin/java",
+            "/opt/homebrew/opt/openjdk@21/bin/java",
+            "/usr/bin/java",
+            "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home/bin/java",
+            "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home/bin/java",
+            "/Library/Java/JavaVirtualMachines/zulu-21.jdk/Contents/Home/bin/java",
+            "/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home/bin/java",
+        ];
+        for path in &java_paths {
+            if std::path::Path::new(path).exists() {
+                return path.to_string();
+            }
+        }
+        // macOS 전용 java_home 유틸리티
+        if let Ok(output) = std::process::Command::new("/usr/libexec/java_home").output() {
+            if output.status.success() {
+                let java_home = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let java_bin = format!("{}/bin/java", java_home);
+                if std::path::Path::new(&java_bin).exists() {
+                    return java_bin;
+                }
             }
         }
     }
 
-    // Fallback to just "java" and hope PATH is set
+    #[cfg(target_os = "windows")]
+    {
+        let java_paths = [
+            r"C:\Program Files\Eclipse Adoptium\jdk-21\bin\java.exe",
+            r"C:\Program Files\Eclipse Adoptium\jdk-17\bin\java.exe",
+            r"C:\Program Files\Microsoft\jdk-21.0.0.0\bin\java.exe",
+            r"C:\Program Files\Java\jdk-21\bin\java.exe",
+            r"C:\Program Files\Java\jdk-17\bin\java.exe",
+            r"C:\Program Files\Java\jre-21\bin\java.exe",
+            r"C:\Program Files\Java\jre-17\bin\java.exe",
+        ];
+        for path in &java_paths {
+            if std::path::Path::new(path).exists() {
+                return path.to_string();
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let java_paths = [
+            "/usr/bin/java",
+            "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
+            "/usr/lib/jvm/java-17-openjdk-amd64/bin/java",
+        ];
+        for path in &java_paths {
+            if std::path::Path::new(path).exists() {
+                return path.to_string();
+            }
+        }
+    }
+
     "java".to_string()
 }
 
@@ -382,10 +422,24 @@ pub fn check_indesign() -> Result<String, String> {
 /// 파일을 시스템 기본 앱으로 열기.
 #[tauri::command]
 pub fn open_file(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
     std::process::Command::new("open")
         .arg(&path)
         .spawn()
         .map_err(|e| format!("파일 열기 실패: {}", e))?;
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", &path])
+        .spawn()
+        .map_err(|e| format!("파일 열기 실패: {}", e))?;
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("파일 열기 실패: {}", e))?;
+
     Ok(())
 }
 

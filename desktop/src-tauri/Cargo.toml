@@ -21,6 +21,10 @@ urlencoding = "2"
 tokio = { version = "1", features = ["process", "io-util", "time"] }
 sha2 = "0.10"
 dirs = "5"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(windows)'.dependencies]
+junction = "1"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
