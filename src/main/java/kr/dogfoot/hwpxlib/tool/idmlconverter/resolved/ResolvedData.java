@@ -550,6 +550,15 @@ public class ResolvedData {
                 }
             }
         }
+        // renderedFloatingItems에 inline_object가 없더라도 pageItems에서 isInline=true인
+        // badge_group은 인라인 앵커이므로 inlineLinkedBadgeGroupIds에 추가
+        for (Integer badgeDomId : domIdToBadgeGroup.keySet()) {
+            if (inlineLinkedBadgeGroupIds.contains(badgeDomId)) continue;
+            ResolvedPageItem pi = getPageItem(String.valueOf(badgeDomId));
+            if (pi != null && pi.isInline()) {
+                inlineLinkedBadgeGroupIds.add(badgeDomId);
+            }
+        }
         if (badgeCount > 0) {
             System.out.println("[ResolvedData] 배지 그룹 " + badgeCount + "개, "
                     + "자식 도형 " + badgeGroupShapeIdmlIds.size() + "개, "
@@ -596,6 +605,16 @@ public class ResolvedData {
      */
     public boolean isBadgeGroupAlsoInline(int domId) {
         return inlineLinkedBadgeGroupIds != null && inlineLinkedBadgeGroupIds.contains(domId);
+    }
+
+    /**
+     * AboveLine 앵커 ID 집합을 inlineLinkedBadgeGroupIds에서 제거한다.
+     * prepopulateAnchoredFloatingIds 이후 호출하여 오분류 정정.
+     */
+    public void refineInlineLinkedBadgeGroups(java.util.Set<Integer> aboveLineIds) {
+        if (inlineLinkedBadgeGroupIds != null && aboveLineIds != null) {
+            inlineLinkedBadgeGroupIds.removeAll(aboveLineIds);
+        }
     }
 
     /**

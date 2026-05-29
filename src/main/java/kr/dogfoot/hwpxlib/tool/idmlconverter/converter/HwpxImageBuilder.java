@@ -2,10 +2,14 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SectionXMLFile;
+import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Container;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
@@ -216,6 +220,153 @@ public class HwpxImageBuilder {
         pic.img().binaryItemIDRefAnd(itemId)
                 .brightAnd(0).contrastAnd(0)
                 .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
+
+        ctx.imagesConverted++;
+    }
+
+    // ── 인라인 배지 그룹 (PNG 배경 + 텍스트 글상자, 글자처럼 취급) ──
+
+    /**
+     * INLINE_BADGE_GROUP → hp:container (treatAsChar=true)
+     *   자식1: hp:pic  — 배지 배경 PNG (shape-only)
+     *   자식2: hp:rect + drawText — 텍스트 오버레이 (투명 배경)
+     *
+     * 한글 2014 호환: 자식 크기/좌표 모두 명시.
+     */
+    void addInlineBadgeGroup(Para para, ASTInlineObject obj,
+                             HwpxTextBoxBuilder textBoxBuilder,
+                             HwpxParagraphBuilder paragraphBuilder) {
+        byte[] imageData = obj.imageData();
+        if (imageData == null || imageData.length == 0) {
+            textBoxBuilder.addInlineTextFrame(para, obj);
+            return;
+        }
+
+        String format = obj.imageFormat() != null ? obj.imageFormat() : "png";
+        String itemId = ImageInserter.registerImage(ctx.hwpxFile, imageData, format);
+
+        long w = obj.width() > 0 ? obj.width() : 5000;
+        long h = obj.height() > 0 ? obj.height() : 2000;
+
+        // ── Container ──
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+        Container container = run.addNewContainer();
+
+        container.idAnd(HwpxUtil.nextShapeId())
+                .zOrderAnd(0)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None);
+        container.hrefAnd("").groupLevelAnd((short) 0).instidAnd(HwpxUtil.nextShapeId());
+        container.createOffset(); container.offset().set(0L, 0L);
+        container.createOrgSz(); container.orgSz().set(w, h);
+        container.createCurSz(); container.curSz().set(0L, 0L); // Container 스펙: curSz=0
+        container.createFlip(); container.flip().horizontalAnd(false).verticalAnd(false);
+        container.createRotationInfo();
+        container.rotationInfo().angleAnd((short) 0).centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        container.createRenderingInfo();
+        container.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        container.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        container.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        container.createSZ();
+        container.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE).protectAnd(false);
+        container.createPos();
+        container.pos().treatAsCharAnd(true).affectLSpacingAnd(true).flowWithTextAnd(true)
+                .allowOverlapAnd(false).holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PARA).horzRelToAnd(HorzRelTo.PARA)
+                .vertAlignAnd(VertAlign.BOTTOM).horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(0L).horzOffset(0L);
+        container.createOutMargin();
+        container.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        // ── 자식1: Picture (배경 PNG) ──
+        Picture pic = container.addNewPicture();
+        pic.idAnd(HwpxUtil.nextShapeId())
+                .zOrderAnd(0).numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT).textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false).dropcapstyleAnd(DropCapStyle.None).reverseAnd(false);
+        pic.hrefAnd("").groupLevelAnd((short) 1).instidAnd(HwpxUtil.nextShapeId());
+        setupPictureGeometry(pic, w, h, false, false, (short) 0);
+        pic.createSZ();
+        pic.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE).protectAnd(false);
+        pic.createPos();
+        pic.pos().treatAsCharAnd(false).affectLSpacingAnd(false).flowWithTextAnd(true)
+                .allowOverlapAnd(false).holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PARA).horzRelToAnd(HorzRelTo.PARA)
+                .vertAlignAnd(VertAlign.BOTTOM).horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(0L).horzOffset(0L);
+        pic.createOutMargin(); pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        pic.createImgRect();
+        pic.imgRect().createPt0(); pic.imgRect().pt0().set(0L, 0L);
+        pic.imgRect().createPt1(); pic.imgRect().pt1().set(w, 0L);
+        pic.imgRect().createPt2(); pic.imgRect().pt2().set(w, h);
+        pic.imgRect().createPt3(); pic.imgRect().pt3().set(0L, h);
+        pic.createImgClip(); pic.imgClip().leftAnd(0L).rightAnd(w).topAnd(0L).bottomAnd(h);
+        pic.createInMargin(); pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        pic.createImgDim(); pic.imgDim().dimwidthAnd(w).dimheightAnd(h);
+        pic.createImg();
+        pic.img().binaryItemIDRefAnd(itemId).brightAnd(0).contrastAnd(0)
+                .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
+
+        // ── 자식2: Rectangle + DrawText (텍스트 오버레이) ──
+        Rectangle rect = container.addNewRectangle();
+        rect.idAnd(HwpxUtil.nextShapeId())
+                .zOrderAnd(1).numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT).textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false).dropcapstyleAnd(DropCapStyle.None);
+        rect.hrefAnd("").groupLevelAnd((short) 1).instidAnd(HwpxUtil.nextShapeId());
+        rect.createOffset(); rect.offset().set(0L, 0L);
+        rect.createOrgSz(); rect.orgSz().set(w, h);
+        rect.createCurSz(); rect.curSz().set(w, h);
+        rect.createFlip(); rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0).centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        textBoxBuilder.setupTextBoxLineShape(rect, null, 0, "None", 100); // 테두리 없음
+        // 배경 없음 (투명) — setupTextBoxFillBrush 호출 불필요 (null fillColor → fillBrush 미생성)
+        rect.createDrawText();
+        DrawText dt = rect.drawText();
+        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
+        dt.createTextMargin();
+        dt.textMargin().leftAnd(obj.textMarginLeft()).rightAnd(obj.textMarginRight())
+                .topAnd(obj.textMarginTop()).bottomAnd(obj.textMarginBottom());
+        dt.createSubList();
+        SubList subList = dt.subList();
+        VerticalAlign2 vAlign = HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification());
+        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
+                .lineWrapAnd(LineWrapMethod.BREAK).vertAlignAnd(vAlign)
+                .linkListIDRefAnd("0").linkListNextIDRefAnd("0")
+                .textWidthAnd(0).textHeightAnd(0)
+                .hasTextRefAnd(false).hasNumRefAnd(false);
+        if (obj.paragraphs() != null) {
+            for (ASTParagraph p : obj.paragraphs()) {
+                paragraphBuilder.addParagraphToSubList(subList, p);
+            }
+        }
+        if (subList.countOfPara() == 0) paragraphBuilder.addEmptySubListPara(subList);
+        rect.ratioAnd((short) 0);
+        rect.createPt0(); rect.pt0().set(0L, 0L);
+        rect.createPt1(); rect.pt1().set(w, 0L);
+        rect.createPt2(); rect.pt2().set(w, h);
+        rect.createPt3(); rect.pt3().set(0L, h);
+        rect.createSZ();
+        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE).protectAnd(false);
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false).affectLSpacingAnd(false).flowWithTextAnd(true)
+                .allowOverlapAnd(true).holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PARA).horzRelToAnd(HorzRelTo.PARA)
+                .vertAlignAnd(VertAlign.BOTTOM).horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(0L).horzOffset(0L);
+        rect.createOutMargin(); rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         ctx.imagesConverted++;
     }

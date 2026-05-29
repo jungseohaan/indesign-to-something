@@ -34,7 +34,10 @@ final class InlineItemDispatcher {
     // ── 인라인 객체 디스패치 ──
 
     void addInlineObject(Para para, ASTInlineObject obj) {
-        if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) {
+        if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP) {
+            paragraphBuilder.imageBuilder.addInlineBadgeGroup(para, obj,
+                    paragraphBuilder.textBoxBuilder, paragraphBuilder);
+        } else if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) {
             if (shouldFlattenInlineTextFrame(obj)) {
                 flattenInlineTextFrame(para, obj);
             } else {

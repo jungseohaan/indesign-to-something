@@ -6,7 +6,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.ast;
  * 자식 노드를 가질 수 없음 (Stage3에서 축소 완료).
  */
 public class ASTInlineObject extends ASTInlineItem {
-    public enum ObjectKind { IMAGE, RENDERED_GROUP, INLINE_TEXT_FRAME, SPACER_RECT }
+    public enum ObjectKind { IMAGE, RENDERED_GROUP, INLINE_TEXT_FRAME, INLINE_BADGE_GROUP, SPACER_RECT }
 
     private ObjectKind kind;
     private String sourceId;

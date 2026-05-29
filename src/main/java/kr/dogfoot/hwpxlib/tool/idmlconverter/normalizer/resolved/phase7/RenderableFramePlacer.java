@@ -92,12 +92,7 @@ public final class RenderableFramePlacer {
                     }
                 }
                 if (alsoInline) continue;
-                // PNG에 텍스트가 베이킹된 경우(textHiddenBeforeExport=false) → PNG 건너뜀.
-                // Phase 2가 텍스트 블록을 배치하므로 이미지+텍스트 중복 발생. 재추출 후 true가 되면 배치.
-                if (rt.childTextFrameIds() != null && rt.childTextFrameIds().length > 0
-                        && !rt.isTextHiddenBeforeExport()) {
-                    continue;
-                }
+                // 비-인라인 배지: badge PNG를 항상 배치. Phase 2의 skipAsBadgeChild가 text box 중복 방지.
             }
 
             File pngFile = new File(ctx.basePath, rt.file());

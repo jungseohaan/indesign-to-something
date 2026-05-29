@@ -351,7 +351,18 @@ public final class StoryConverter {
                 for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : ip.characterRuns()) {
                     if (run.inlineGraphics() == null) continue;
                     for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
-                        if (!"Anchored".equals(ig.anchoredPosition())) continue;
+                        String anchorPos = ig.anchoredPosition();
+                        // AboveLine 앵커 수집 (badge 오분류 정정용)
+                        if ("AboveLine".equals(anchorPos)) {
+                            String selfId = ig.selfId();
+                            if (selfId != null && selfId.length() >= 2) {
+                                try {
+                                    ctx.aboveLineAnchoredIds.add(Integer.parseInt(selfId.substring(1), 16));
+                                } catch (NumberFormatException e) { /* skip */ }
+                            }
+                            continue;
+                        }
+                        if (!"Anchored".equals(anchorPos)) continue;
                         if (!"None".equals(ig.textWrapMode())) continue;
                         String selfId = ig.selfId();
                         if (selfId == null || selfId.length() < 2) continue;
@@ -380,9 +391,17 @@ public final class StoryConverter {
                 }
             }
         }
+        // AboveLine 배지를 inlineLinkedBadgeGroupIds에서 제거 (pi.isInline() 오분류 정정)
+        if (!ctx.aboveLineAnchoredIds.isEmpty() && ctx.resolvedData != null) {
+            ctx.resolvedData.refineInlineLinkedBadgeGroups(ctx.aboveLineAnchoredIds);
+        }
         if (found > 0) {
             System.err.println("[ResolvedToASTBuilder] Phase 3 사전 스캔: "
                     + found + "개 anchored+none Group 등록 (stories=" + storiesScanned + ")");
+        }
+        if (!ctx.aboveLineAnchoredIds.isEmpty()) {
+            System.err.println("[ResolvedToASTBuilder] Phase 3 사전 스캔: "
+                    + ctx.aboveLineAnchoredIds.size() + "개 AboveLine 앵커 수집 (배지 오분류 정정)");
         }
     }
 

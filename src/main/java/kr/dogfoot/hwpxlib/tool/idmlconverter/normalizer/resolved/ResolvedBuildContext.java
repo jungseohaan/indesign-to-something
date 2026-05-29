@@ -134,6 +134,13 @@ public final class ResolvedBuildContext {
     public java.util.Map<Integer, Integer> inlineObjectTfPageIndex = new java.util.HashMap<>();
 
     /**
+     * IDML AnchoredPosition="AboveLine" 인 앵커 객체 ID 집합.
+     * AboveLine 배지는 실제 인라인이 아니므로 badge PNG floating 처리 대상.
+     * prepopulateAnchoredFloatingIds 이후 유효.
+     */
+    public java.util.Set<Integer> aboveLineAnchoredIds = new java.util.HashSet<>();
+
+    /**
      * Phase 2 가 non-editable 플로팅 TF 를 텍스트 글상자로 배치할 때 등록.
      * Phase 7 은 이 집합에 있는 ID 의 PNG 를 건너뜀 (텍스트 글상자가 이미 배치됨).
      */

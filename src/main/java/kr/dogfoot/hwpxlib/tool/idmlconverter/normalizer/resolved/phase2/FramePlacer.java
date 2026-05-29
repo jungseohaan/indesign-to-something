@@ -142,31 +142,18 @@ public final class FramePlacer {
                             }
                         }
                     }
-                    // phase3Reachable 판별:
-                    // 배지가 renderedFloatingItems에 inline_object로 있으면
-                    //   → Phase 3 loadInlineObject가 처리 (badge_group PNG가 있으면 swap해서 로드)
-                    //   → inline PNG든 badge_group PNG든 텍스트 포함 → floating 불필요 → phase3Reachable=true
-                    // inline_object가 없으면 Phase 3가 ORC 앵커를 PNG로 처리할 수 없음
-                    //   → floating 텍스트박스로 보강 → phase3Reachable=false
                     boolean badgeAlsoInlineObject = badgeGroupId >= 0
                             && ctx.resolvedData.isBadgeGroupAlsoInline(badgeGroupId); // O(1)
-                    // inline_object로 앵커된 배지 → Phase 3 loadInlineObject가 badge_group PNG(텍스트 포함)를 로드 → floating 불필요.
-                    // 단, textHiddenBeforeExport=false: PNG에 텍스트 베이킹 → Phase 3 PNG 억제 → floating text 배치 필요.
-                    RenderedGroup _parentBadgeRg = badgeGroupId >= 0
-                            ? ctx.resolvedData.getBadgeGroupByDomId(badgeGroupId) : null;
-                    boolean badgePngHasTextBaked = _parentBadgeRg != null && !_parentBadgeRg.isTextHiddenBeforeExport();
-                    boolean phase3Reachable = badgeAlsoInlineObject && !badgePngHasTextBaked;
-                    if (inAnyBadge && phase3Reachable) {
+                    // 인라인 앵커 배지: Phase 3가 INLINE_TEXT_FRAME으로 처리 → floating text 불필요.
+                    // 비-인라인 배지: Phase 7이 badge PNG(배경) 배치, Phase 2가 floating text 배치.
+                    if (inAnyBadge && badgeAlsoInlineObject) {
                         String vt0 = tf.frameVisibleText();
                         String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
-                        // 자기 텍스트가 ≥1자 또는 멀티 child 배지 → Phase 3 가 인라인 텍스트박스로 임베드 → 플로팅 스킵.
                         if (cleaned0.length() >= 1 || inMultiChildBadge) {
                             continue;
                         }
                     } else if (inAnyBadge) {
-                        // Phase 3 unreachable: 멀티-child 배지만 스킵 (Phase 3 tryInlineGroupAsBoxList 가 처리).
-                        // 단일-child 배지는 텍스트 길이와 무관하게 플로팅 글상자로 배치.
-                        // (이전: ≥2 자 스킵 → "제1항" 같은 레이블이 본문에 인라인 삽입되는 버그)
+                        // 비-인라인 배지: 멀티-child만 스킵 (Phase 3 tryInlineGroupAsBoxList가 처리).
                         if (inMultiChildBadge) {
                             continue;
                         }
@@ -405,6 +392,8 @@ public final class FramePlacer {
                             if (_other == null || _other == tf) continue;
                             if (_other.pageIndex() != tf.pageIndex()) continue;
                             if (_other.id() == null || _other.id().equals(tf.id())) continue;
+                            // 인라인 TF(inline badge child 등)는 본문 단락에 앵커된 객체 → 타이틀 오버레이 아님
+                            if (_other.isInline()) continue;
                             double[] _ogb = _other.geometricBounds();
                             if (_ogb == null || _ogb.length < 4) continue;
                             double _oT = _ogb[0], _oL = _ogb[1], _oB = _ogb[2], _oR = _ogb[3];
@@ -693,7 +682,6 @@ public final class FramePlacer {
                         }
                     }
                     // inlineToFloating=true: Phase 2가 floating text 배치를 명시적으로 결정 → skip 금지.
-                    // (textHiddenBeforeExport=false 배지: Phase 3이 PNG를 억제하므로 floating text가 유일한 표현)
                     if (badgeIsInlineAnchored && !inlineToFloating) {
                         _skipBadgeChildInlineAnchor = true;
                     } else {
