@@ -926,21 +926,16 @@ public class InlineFrameHandler {
                 // 단, badge_group PNG가 사실상 빈 이미지(가시 픽셀 < 10%)인 경우 inline_object PNG 유지.
                 // (badge_group PNG 추출 실패 시 노이즈 픽셀만 남는 현상 방어)
                 RenderedGroup effectiveRg = rg;
-                // badge_group 은 renderedTextFrames 에 등록됨 (renderedFloatingItems 가 아님)
-                // 항목의 분류는 type 필드(isBadgeGroup)이며, itemType 필드는 별개(null)
-                for (RenderedGroup candidate : ctx.resolvedData.allRenderedTextFrames()) {
-                    if (candidate.id() == anchoredObjectId && candidate.isBadgeGroup()
-                            && candidate.file() != null) {
-                        File bgFile = new File(ctx.basePath, candidate.file());
-                        if (bgFile.exists()) {
-                            try {
-                                BufferedImage bgImg = ImageIO.read(bgFile);
-                                if (bgImg != null && isBadgePngValid(bgImg)) {
-                                    effectiveRg = candidate;
-                                }
-                            } catch (Exception ignored) {}
-                        }
-                        break;
+                RenderedGroup badgeCandidate = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId); // O(1)
+                if (badgeCandidate != null && badgeCandidate.file() != null) {
+                    File bgFile = new File(ctx.basePath, badgeCandidate.file());
+                    if (bgFile.exists()) {
+                        try {
+                            BufferedImage bgImg = ImageIO.read(bgFile);
+                            if (bgImg != null && isBadgePngValid(bgImg)) {
+                                effectiveRg = badgeCandidate;
+                            }
+                        } catch (Exception ignored) {}
                     }
                 }
                 if (effectiveRg.file() == null) return null;

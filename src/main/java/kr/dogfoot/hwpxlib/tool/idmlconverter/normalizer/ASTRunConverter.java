@@ -215,58 +215,50 @@ public class ASTRunConverter {
                 }
             }
         }
-        // renderedFloatingItems의 inline_object PNG가 있으면 즉시 사용 (imageLoader 불필요 — PNG 직접 로드)
-        if (resolvedData != null && ig.selfId() != null) {
-            int domId = -1;
+        // DOM id 파싱 (이하 badge_group / inline_object 판별에 공통 사용)
+        int domId = -1;
+        if (ig.selfId() != null) {
             try { domId = Integer.parseInt(ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId(), 16); } catch (Exception e) {}
-            if (domId > 0) {
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
-                    if (rg.id() == domId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
-                        // badge_group PNG가 있으면 inline_object(텍스트 없는 blank)보다 우선 → badge_group 경로로 낙하
-                        boolean hasBadgeGroup = false;
-                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup tf : resolvedData.allRenderedTextFrames()) {
-                            if (tf.id() == domId && tf.isBadgeGroup()) { hasBadgeGroup = true; break; }
-                        }
-                        if (hasBadgeGroup) break;
-                        // 자손 TextFrame이 텍스트를 가지고 플로팅 텍스트박스로 배치되면
-                        // PNG 로드 시 이미지+글상자로 중복됨 → 스킵.
-                        if (inlineObjectContainsFloatingTextFrame(domId, resolvedData)) {
-                            return;
-                        }
-                        ASTInlineObject inlineImg = loadRenderedGroupAsInlineImage(ig, rg, null, resolvedData);
-                        if (inlineImg != null) {
-                            para.addItem(inlineImg);
-                            return;
-                        }
-                        break;
+        }
+
+        // 1순위: badge_group PNG (텍스트 포함, 항상 inline_object보다 우선)
+        if (resolvedData != null && domId > 0) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup badgeRg =
+                    resolvedData.getBadgeGroupByDomId(domId);
+            // 중첩 Group(외부 래퍼 → 내부 배지) 폴백
+            if (badgeRg == null && ig.childGraphics() != null) {
+                for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+                    if (child.selfId() == null) continue;
+                    int childDomId = -1;
+                    try { childDomId = Integer.parseInt(child.selfId().startsWith("u") ? child.selfId().substring(1) : child.selfId(), 16); } catch (Exception e) {}
+                    if (childDomId > 0) {
+                        badgeRg = resolvedData.getBadgeGroupByDomId(childDomId);
+                        if (badgeRg != null) break;
                     }
                 }
             }
-        }
-        // 배지 그룹이면 배지 PNG 이미지로 즉시 교체 (후속 래퍼/오버레이 처리 생략)
-        if (resolvedData != null && ig.selfId() != null) {
-            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup badgeRg =
-                    resolvedData.getRenderedTextFrameByIdmlId(ig.selfId());
-            if (badgeRg != null && badgeRg.isBadgeGroup() && badgeRg.file() != null) {
+            if (badgeRg != null && badgeRg.file() != null) {
                 ASTInlineObject badgeObj = loadBadgeImage(ig, badgeRg, resolvedData);
                 if (badgeObj != null) {
                     para.addItem(badgeObj);
                     return;
                 }
             }
-            // 자식 그래픽에서도 배지 매칭 시도 (중첩 Group: 외부 래퍼 → 내부 배지)
-            if (badgeRg == null && ig.childGraphics() != null) {
-                for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
-                    if (child.selfId() == null) continue;
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup childRg =
-                            resolvedData.getRenderedTextFrameByIdmlId(child.selfId());
-                    if (childRg != null && childRg.isBadgeGroup() && childRg.file() != null) {
-                        ASTInlineObject badgeObj = loadBadgeImage(ig, childRg, resolvedData);
-                        if (badgeObj != null) {
-                            para.addItem(badgeObj);
-                            return;
-                        }
+        }
+        // 2순위: inline_object PNG (badge_group 없는 경우, imageLoader 불필요)
+        if (resolvedData != null && domId > 0) {
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+                if (rg.id() == domId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
+                    // 자손 TextFrame이 플로팅 텍스트박스로 배치되면 PNG와 글상자 중복됨 → 스킵
+                    if (inlineObjectContainsFloatingTextFrame(domId, resolvedData)) {
+                        return;
                     }
+                    ASTInlineObject inlineImg = loadRenderedGroupAsInlineImage(ig, rg, null, resolvedData);
+                    if (inlineImg != null) {
+                        para.addItem(inlineImg);
+                        return;
+                    }
+                    break;
                 }
             }
         }

@@ -126,21 +126,19 @@ public final class FramePlacer {
                     boolean inMultiChildBadge = false;
                     int badgeGroupId = -1;
                     if (domIdInlineEd >= 0) {
-                        for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
-                            if (!rg.isBadgeGroup()) continue;
-                            int[] cTfIds = rg.childTextFrameIds();
-                            if (cTfIds == null) continue;
-                            boolean isChild = false;
-                            int editableSiblings = 0;
-                            for (int cid : cTfIds) {
-                                if (cid == domIdInlineEd) isChild = true;
-                                if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) editableSiblings++;
-                            }
-                            if (isChild) {
-                                inAnyBadge = true;
-                                badgeGroupId = rg.id();
+                        // O(1): badgeChildTextFrameMap(TF domId → 부모 badge_group) 직접 조회
+                        RenderedGroup parentBadge = ctx.resolvedData.getBadgeGroupByChildTextFrameIdmlId(
+                                "u" + Integer.toHexString(domIdInlineEd));
+                        if (parentBadge != null) {
+                            inAnyBadge = true;
+                            badgeGroupId = parentBadge.id();
+                            int[] cTfIds = parentBadge.childTextFrameIds();
+                            if (cTfIds != null) {
+                                int editableSiblings = 0;
+                                for (int cid : cTfIds) {
+                                    if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) editableSiblings++;
+                                }
                                 if (editableSiblings >= 2) inMultiChildBadge = true;
-                                break;
                             }
                         }
                     }
@@ -150,15 +148,8 @@ public final class FramePlacer {
                     //   → inline PNG든 badge_group PNG든 텍스트 포함 → floating 불필요 → phase3Reachable=true
                     // inline_object가 없으면 Phase 3가 ORC 앵커를 PNG로 처리할 수 없음
                     //   → floating 텍스트박스로 보강 → phase3Reachable=false
-                    boolean badgeAlsoInlineObject = false;
-                    if (badgeGroupId >= 0) {
-                        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                            if (rg.id() == badgeGroupId && "inline_object".equals(rg.itemType())) {
-                                badgeAlsoInlineObject = true;
-                                break;
-                            }
-                        }
-                    }
+                    boolean badgeAlsoInlineObject = badgeGroupId >= 0
+                            && ctx.resolvedData.isBadgeGroupAlsoInline(badgeGroupId); // O(1)
                     // inline_object로 앵커된 배지 → Phase 3 loadInlineObject가 badge_group PNG(텍스트 포함)를 로드 → floating 불필요
                     boolean phase3Reachable = badgeAlsoInlineObject;
                     if (inAnyBadge && phase3Reachable) {
@@ -182,15 +173,10 @@ public final class FramePlacer {
                     if (!inAnyBadge && domIdInlineEd >= 0) {
                         ResolvedPageItem _tfi2 = ctx.resolvedData.getPageItem(tf.id());
                         if (_tfi2 != null && _tfi2.parentId() != null) {
-                            boolean _parentIsInlineObj = false;
-                            for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                                if (String.valueOf(rg.id()).equals(_tfi2.parentId())
-                                        && "inline_object".equals(rg.itemType())) {
-                                    _parentIsInlineObj = true;
-                                    break;
-                                }
-                            }
-                            if (_parentIsInlineObj) continue;
+                            try {
+                                int parentDomId = Integer.parseInt(_tfi2.parentId());
+                                if (ctx.resolvedData.isInlineObjectId(parentDomId)) continue; // O(1)
+                            } catch (NumberFormatException ignored) {}
                         }
                     }
                     inlineToFloating = true;

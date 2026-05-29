@@ -28,7 +28,10 @@ public class ResolvedData {
     private final Map<String, RenderedGroup> childImageToGroupMap = new HashMap<>();  // 자식 이미지 DOM id → 부모 그룹 RenderedGroup
     private final Set<Integer> processedImageGroupIds = new HashSet<>();  // 이미 Figure로 변환된 그룹 렌더 ID
     private Set<String> badgeGroupShapeIdmlIds;  // 배지 그룹 소속 도형 IDML hex ID ("u1735")
-    private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TextFrame DOM id → 배지 그룹 RenderedGroup
+    private Map<String, RenderedGroup> badgeChildTextFrameMap;  // 배지 자식 TF DOM id (+ 배지 자신) → 배지 그룹 RenderedGroup
+    private Map<Integer, RenderedGroup> domIdToBadgeGroup;      // badge_group DOM int id → RenderedGroup (O(1) 직접 조회)
+    private Set<Integer> inlineObjectDomIds;                     // inline_object로 등록된 DOM id 집합 (Phase 7 조상 검사용)
+    private Set<Integer> inlineLinkedBadgeGroupIds;              // inline_object에 직접 연결된 badge_group id 집합
     private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
     private double scaleFactor = 2.8346;  // resolved 좌표 → pt 변환 스케일
     private final Map<String, FontMetricEntry> fontMetricMap = new HashMap<>();  // family → metric
@@ -515,10 +518,12 @@ public class ResolvedData {
     public void buildBadgeGroupIndex() {
         badgeGroupShapeIdmlIds = new HashSet<>();
         badgeChildTextFrameMap = new HashMap<>();
+        domIdToBadgeGroup = new HashMap<>();
         int badgeCount = 0;
         for (RenderedGroup rg : renderedTextFrameMap.values()) {
             if (rg.isBadgeGroup() && rg.childIds() != null) {
                 badgeCount++;
+                domIdToBadgeGroup.put(rg.id(), rg);
                 for (int childDomId : rg.childIds()) {
                     // DOM decimal → IDML hex ("u" + hex)
                     String idmlId = "u" + Integer.toHexString(childDomId);
@@ -534,9 +539,21 @@ public class ResolvedData {
                 badgeChildTextFrameMap.put(String.valueOf(rg.id()), rg);
             }
         }
+        // inline_object로 등록된 DOM id 집합 (Phase 7 badge skip + FramePlacer 조상 검사용)
+        inlineObjectDomIds = new HashSet<>();
+        inlineLinkedBadgeGroupIds = new HashSet<>();
+        for (RenderedGroup flt : renderedFloatingItems) {
+            if ("inline_object".equals(flt.itemType())) {
+                inlineObjectDomIds.add(flt.id());
+                if (domIdToBadgeGroup.containsKey(flt.id())) {
+                    inlineLinkedBadgeGroupIds.add(flt.id());
+                }
+            }
+        }
         if (badgeCount > 0) {
             System.out.println("[ResolvedData] 배지 그룹 " + badgeCount + "개, "
-                    + "자식 도형 " + badgeGroupShapeIdmlIds.size() + "개 인덱싱");
+                    + "자식 도형 " + badgeGroupShapeIdmlIds.size() + "개, "
+                    + "inline 연결 " + inlineLinkedBadgeGroupIds.size() + "개 인덱싱");
         }
     }
 
@@ -562,6 +579,32 @@ public class ResolvedData {
     public boolean isShapeInBadgeGroup(String idmlId) {
         if (badgeGroupShapeIdmlIds == null || idmlId == null) return false;
         return badgeGroupShapeIdmlIds.contains(idmlId);
+    }
+
+    /**
+     * DOM int ID로 badge_group RenderedGroup을 O(1) 조회한다.
+     * buildBadgeGroupIndex() 이후 유효.
+     */
+    public RenderedGroup getBadgeGroupByDomId(int domId) {
+        return domIdToBadgeGroup != null ? domIdToBadgeGroup.get(domId) : null;
+    }
+
+    /**
+     * badge_group이 inline_object로도 등록되어 있는지 O(1) 조회.
+     * Phase 7: 이미 inline 경로로 처리되는 배지 PNG 중복 배치 방지용.
+     * buildBadgeGroupIndex() 이후 유효.
+     */
+    public boolean isBadgeGroupAlsoInline(int domId) {
+        return inlineLinkedBadgeGroupIds != null && inlineLinkedBadgeGroupIds.contains(domId);
+    }
+
+    /**
+     * domId가 inline_object로 등록된 항목인지 O(1) 조회.
+     * Phase 2/7 조상 탐색 시 allRenderedFloatingItems() O(N) 스캔 대체용.
+     * buildBadgeGroupIndex() 이후 유효.
+     */
+    public boolean isInlineObjectId(int domId) {
+        return inlineObjectDomIds != null && inlineObjectDomIds.contains(domId);
     }
 
     // --- ExtendScript 렌더 통합 조건 ---

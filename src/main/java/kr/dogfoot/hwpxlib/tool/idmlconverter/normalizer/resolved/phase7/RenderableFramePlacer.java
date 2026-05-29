@@ -71,32 +71,22 @@ public final class RenderableFramePlacer {
             // badge_group은 인라인 앵커(inline_object)로 배치된 경우에만 건너뜀.
             // 인라인 참조가 없는 독립 badge는 여기서 플로팅으로 배치해야 함.
             if (rt.isBadgeGroup()) {
-                boolean alsoInline = false;
-                for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                    if (rg.id() == rt.id() && "inline_object".equals(rg.itemType())) {
-                        alsoInline = true;
-                        break;
-                    }
-                }
-                // 배지 자신이 inline_object가 아니더라도 조상 그룹이 inline_object이면
-                // 해당 조상 PNG에 시각이 이미 포함됨 → 중복 배치 방지
+                // 직접 inline_object 연결: O(1) 인덱스 조회
+                boolean alsoInline = ctx.resolvedData.isBadgeGroupAlsoInline(rt.id());
+                // 조상이 inline_object인 경우: 해당 조상 PNG에 배지 시각이 이미 포함됨 → 중복 배치 방지
                 if (!alsoInline) {
                     ResolvedPageItem badgeItem = ctx.resolvedData.getPageItem(String.valueOf(rt.id()));
                     if (badgeItem != null) {
                         String ancestorId = badgeItem.parentId();
                         int hops = 0;
-                        outer:
-                        while (ancestorId != null && hops < 5) {
-                            for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                                if (String.valueOf(rg.id()).equals(ancestorId)
-                                        && "inline_object".equals(rg.itemType())) {
-                                    alsoInline = true;
-                                    break outer;
-                                }
+                        while (ancestorId != null && hops < 5 && !alsoInline) {
+                            try { alsoInline = ctx.resolvedData.isInlineObjectId(Integer.parseInt(ancestorId)); }
+                            catch (NumberFormatException ignored) {}
+                            if (!alsoInline) {
+                                ResolvedPageItem anc = ctx.resolvedData.getPageItem(ancestorId);
+                                if (anc == null) break;
+                                ancestorId = anc.parentId();
                             }
-                            ResolvedPageItem anc = ctx.resolvedData.getPageItem(ancestorId);
-                            if (anc == null) break;
-                            ancestorId = anc.parentId();
                             hops++;
                         }
                     }
