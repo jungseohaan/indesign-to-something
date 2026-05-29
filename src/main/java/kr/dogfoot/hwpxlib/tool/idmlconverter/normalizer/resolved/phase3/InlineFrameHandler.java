@@ -330,24 +330,13 @@ public class InlineFrameHandler {
      */
     static ASTInlineObject tryInlineGroupAsSingleBadge(ResolvedBuildContext ctx, int anchoredObjectId) {
         String anchorId = String.valueOf(anchoredObjectId);
+        // AboveLine 앵커는 floating badge → Phase 7 이 처리, 인라인 변환 불가
+        if (ctx.aboveLineAnchoredIds.contains(anchoredObjectId)) return null;
         ResolvedTextFrame anchorTf = ctx.resolvedData.getTextFrame(anchorId);
         if (anchorTf != null) return null;
 
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
         if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
-
-        // 이미 inline_object 또는 badge_group PNG로 렌더링된 경우 → loadInlineObject 에 위임.
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg.id() == anchoredObjectId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
-                return null; // PNG 경로에 위임
-            }
-        }
-        // renderedTextFrames에 badge_group PNG가 있으면 → Phase 7 floating 배치에 위임
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
-            if (rg.id() == anchoredObjectId && rg.isBadgeGroup() && rg.file() != null) {
-                return null;
-            }
-        }
 
         // 직속 자식 TF 1 개 (inline + 텍스트 있음)
         ResolvedTextFrame childTf = null;
@@ -367,7 +356,7 @@ public class InlineFrameHandler {
         }
         if (childTf == null) return null;
 
-        // Group 후손 중 fill 색 있는 도형 수집 (가장 큰 fill 도형 = 배경)
+        // Group 후손 중 fill 또는 stroke 있는 도형 수집 (가장 큰 도형 = 배경)
         ResolvedPageItem bgShape = null;
         double bgArea = 0;
         for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
@@ -375,7 +364,9 @@ public class InlineFrameHandler {
             if (!"Rectangle".equals(pi.type()) && !"Polygon".equals(pi.type()) && !"Oval".equals(pi.type())) continue;
             String fcn = pi.fillColorName();
             boolean hasFill = fcn != null && !"None".equals(fcn) && !"[None]".equals(fcn);
-            if (!hasFill) continue;
+            String scn = pi.strokeColorName();
+            boolean hasStroke = scn != null && !"None".equals(scn) && !"[None]".equals(scn) && pi.strokeWeight() > 0;
+            if (!hasFill && !hasStroke) continue;
             String curParent = pi.parentId();
             int hops = 0;
             boolean inGroup = false;
@@ -408,6 +399,17 @@ public class InlineFrameHandler {
         double h = Math.abs(grpBounds[2] - grpBounds[0]);
         if (w <= 0 || h <= 0) return null;
 
+        // INLINE_TEXT_FRAME 높이에는 child TF bounds 사용: group bounds에는 오버행이 포함돼
+        // 한글이 행간을 팽창시킴. child TF가 더 작으면 그 높이로 제한.
+        double hForInline = h;
+        {
+            double[] ctfBounds = childTf.geometricBounds();
+            if (ctfBounds != null && ctfBounds.length >= 4) {
+                double ctfH = Math.abs(ctfBounds[2] - ctfBounds[0]);
+                if (ctfH > 0 && ctfH < h) hForInline = ctfH;
+            }
+        }
+
         // SPEC-028: Oval 배경 배지인데 종횡비가 심하게 틀어진 경우 (ratio < 0.6),
         // Group bounds 에 TextFrame 높이까지 포함되어 비례 왜곡이 발생한 것으로 판단.
         // (예: AboveLine 앵커, 원형 배경+텍스트프레임이 상하 적층된 구조 → 6.48×12.27pt → "●" 오렌더)
@@ -417,27 +419,74 @@ public class InlineFrameHandler {
             if (ratio < 0.6) return null;
         }
 
+        // INLINE_BADGE_GROUP: badge PNG(shape only, textHiddenBeforeExport=true) + 텍스트 글상자 오버레이
+        RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
+        if (badgeRg != null && badgeRg.file() != null && badgeRg.isTextHiddenBeforeExport()) {
+            File pngFile = new File(ctx.basePath, badgeRg.file());
+            if (pngFile.exists()) {
+                try {
+                    byte[] pngBytes = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                    ASTInlineObject grpObj = new ASTInlineObject();
+                    grpObj.kind(ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP);
+                    grpObj.width(CoordinateConverter.pointsToHwpunits(w));
+                    grpObj.height(CoordinateConverter.pointsToHwpunits(h));
+                    grpObj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+                    grpObj.imageData(pngBytes);
+                    grpObj.imageFormat("png");
+                    // 텍스트 여백: child TF bounds vs group bounds
+                    ResolvedPageItem childTfItem = ctx.resolvedData.getPageItem(childTf.id());
+                    if (childTfItem != null && childTfItem.geometricBounds() != null
+                            && childTfItem.geometricBounds().length >= 4) {
+                        double[] tfBounds = childTfItem.geometricBounds();
+                        grpObj.textMarginLeft(CoordinateConverter.pointsToHwpunits(Math.max(0, tfBounds[1] - grpBounds[1])));
+                        grpObj.textMarginTop(CoordinateConverter.pointsToHwpunits(Math.max(0, tfBounds[0] - grpBounds[0])));
+                        grpObj.textMarginRight(CoordinateConverter.pointsToHwpunits(Math.max(0, grpBounds[3] - tfBounds[3])));
+                        grpObj.textMarginBottom(CoordinateConverter.pointsToHwpunits(Math.max(0, grpBounds[2] - tfBounds[2])));
+                    }
+                    buildBadgeParagraph(ctx, childTf, grpObj);
+                    grpObj.verticalJustification("CenterAlign");
+                    return grpObj;
+                } catch (java.io.IOException ignored) {}
+            }
+        }
+
         ASTInlineObject obj = new ASTInlineObject();
         obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
         obj.width(CoordinateConverter.pointsToHwpunits(w));
-        obj.height(CoordinateConverter.pointsToHwpunits(h));
+        obj.height(CoordinateConverter.pointsToHwpunits(hForInline));
         obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
 
-        // 배경 fill 색
+        // 배경 fill 색 (없으면 stroke 색 적용)
         String fillName = bgShape.fillColorName();
         String fillHex = ctx.resolvedData.resolveColorHex(fillName);
         if (fillHex != null) {
             obj.fillColor(fillHex);
             obj.fillTint(100);
+        } else {
+            String strokeName = bgShape.strokeColorName();
+            String strokeHex = ctx.resolvedData.resolveColorHex(strokeName);
+            if (strokeHex != null) {
+                obj.strokeColor(strokeHex);
+                double sw = bgShape.strokeWeight();
+                if (ctx.scaleFactor > 0) sw = sw / ctx.scaleFactor;
+                obj.strokeWeight(Math.max(sw, 0.5));
+            }
         }
 
         if (hasOval) {
-            obj.cornerRadius(h / 2.0);
+            obj.cornerRadius(hForInline / 2.0);
         } else if (bgShape.cornerRadius() > 0) {
             obj.cornerRadius(bgShape.cornerRadius());
         }
 
-        // 텍스트 단락 빌드 (배지 내부는 좌우 가운데 정렬)
+        buildBadgeParagraph(ctx, childTf, obj);
+        obj.verticalJustification("CenterAlign");
+
+        return obj;
+    }
+
+    /** 배지 텍스트 단락 빌드 (CENTER 정렬, 폰트 속성 복사). INLINE_TEXT_FRAME/INLINE_BADGE_GROUP 공용. */
+    private static void buildBadgeParagraph(ResolvedBuildContext ctx, ResolvedTextFrame childTf, ASTInlineObject obj) {
         String text = childTf.frameVisibleText().replace("￼", "").replace("\r", "").replace("\n", "").trim();
         ASTParagraph paraInner = new ASTParagraph();
         paraInner.alignment("CENTER");
@@ -458,9 +507,6 @@ public class InlineFrameHandler {
         }
         paraInner.addItem(textRun);
         obj.addParagraph(paraInner);
-        obj.verticalJustification("CenterAlign");
-
-        return obj;
     }
 
     /**
@@ -897,14 +943,9 @@ public class InlineFrameHandler {
             // PNG는 그 입력란을 둘러싼 시각적 배경(일러스트/라운드 외곽선)만 담는다.
             // 텍스트는 별도 오버레이되므로 PNG를 폐기하면 안 됨.
             if (isEmptyContainer(childTf)) continue;
-            // SPEC-025: inline+editable 배지 자식은 Phase 2 가 플로팅 배치 스킵 →
-            // PNG 가 유일한 시각 표현. loadInlineObject 가 PNG 폐기하면 배지 자체가 사라짐 → 통과시킴.
-            // 단, textHiddenBeforeExport=false: PNG에 텍스트가 베이킹됨. Phase 2가 floating text 배치 → PNG 억제.
+            // inline+editable 배지 자식: Phase 3가 INLINE_TEXT_FRAME으로 전담 처리 →
+            // 이 TF의 텍스트는 INLINE_TEXT_FRAME 내부에 포함됨 → loadInlineObject PNG 폐기.
             if (childTf.isInline() && ctx.resolvedData.isEditableTextFrame(childTf.id())) {
-                RenderedGroup _badgeForTf = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
-                if (_badgeForTf != null && !_badgeForTf.isTextHiddenBeforeExport()) {
-                    return null; // Phase 2가 floating text block 배치 → PNG 제거
-                }
                 continue;
             }
             if (ctx.resolvedData.isEditableTextFrame(childTf.id())) {
@@ -936,22 +977,9 @@ public class InlineFrameHandler {
             }
             if (proceed) {
                 boolean isNullTypeInline = rg.itemType() == null;
-                // badge_group PNG가 있으면 inline_object PNG 대신 사용.
-                // 단, badge_group PNG가 사실상 빈 이미지(가시 픽셀 < 10%)인 경우 inline_object PNG 유지.
-                // (badge_group PNG 추출 실패 시 노이즈 픽셀만 남는 현상 방어)
+                // inline_object PNG를 그대로 사용 (tryInlineGroupAsSingleBadge가 먼저 INLINE_TEXT_FRAME을 시도했으므로
+                // 여기 도달했다면 구조 조건 미충족 → PNG fallback이 가장 정확한 표현).
                 RenderedGroup effectiveRg = rg;
-                RenderedGroup badgeCandidate = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId); // O(1)
-                if (badgeCandidate != null && badgeCandidate.file() != null) {
-                    File bgFile = new File(ctx.basePath, badgeCandidate.file());
-                    if (bgFile.exists()) {
-                        try {
-                            BufferedImage bgImg = ImageIO.read(bgFile);
-                            if (bgImg != null && isBadgePngValid(bgImg)) {
-                                effectiveRg = badgeCandidate;
-                            }
-                        } catch (Exception ignored) {}
-                    }
-                }
                 if (effectiveRg.file() == null) return null;
                 File pngFile = new File(ctx.basePath, effectiveRg.file());
                 if (!pngFile.exists()) return null;
@@ -1224,27 +1252,6 @@ public class InlineFrameHandler {
     }
 
     /** 주어진 anchoredId 그룹의 자손 중 첫 inline+editable TF (텍스트 길이 ≥ 1) 를 찾는다. */
-    private static ResolvedTextFrame findInlineEditableDescendant(ResolvedBuildContext ctx, String anchorIdStr) {
-        for (ResolvedTextFrame childTf : ctx.resolvedData.textFrames()) {
-            if (childTf == null || !childTf.isInline()) continue;
-            if (!ctx.resolvedData.isEditableTextFrame(childTf.id())) continue;
-            String vt = childTf.frameVisibleText();
-            if (vt == null || vt.replace("￼", "").trim().isEmpty()) continue;
-            String curId = childTf.id();
-            int depth = 0;
-            while (curId != null && depth < 8) {
-                ResolvedPageItem pi = ctx.resolvedData.getPageItem(curId);
-                if (pi == null) break;
-                String pid = pi.parentId();
-                if (pid == null) break;
-                if (anchorIdStr.equals(pid)) return childTf;
-                curId = pid;
-                depth++;
-            }
-        }
-        return null;
-    }
-
     /** IDML selfId 의 TextFrame 이 단순 scribble 배지 자식 (Phase 2 가 글상자로 배치) 인지 확인. */
     private static boolean isSimpleBadgeChild(ResolvedBuildContext ctx, String idmlSelfId) {
         if (ctx == null || ctx.resolvedData == null || idmlSelfId == null) return false;
@@ -1282,19 +1289,4 @@ public class InlineFrameHandler {
         return sb.toString();
     }
 
-    /** badge_group PNG가 실질적 내용을 담고 있는지 확인 (가시 픽셀 > 10%). */
-    private static boolean isBadgePngValid(BufferedImage img) {
-        int total = img.getWidth() * img.getHeight();
-        if (total == 0) return false;
-        int threshold = total / 10;
-        int vis = 0;
-        for (int y = 0; y < img.getHeight(); y++) {
-            for (int x = 0; x < img.getWidth(); x++) {
-                if (((img.getRGB(x, y) >> 24) & 0xFF) > 50) {
-                    if (++vis > threshold) return true;
-                }
-            }
-        }
-        return false;
-    }
 }
