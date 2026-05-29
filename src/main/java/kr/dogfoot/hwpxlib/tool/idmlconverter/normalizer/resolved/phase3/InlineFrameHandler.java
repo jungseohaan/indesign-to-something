@@ -394,12 +394,28 @@ public class InlineFrameHandler {
         }
         if (bgShape == null) return null;
 
+        // Group 안에 Oval 직속 자식이 있는지 먼저 확인 (크기 보정 판단에 필요)
+        boolean hasOval = false;
+        for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
+            if (pi == null || !"Oval".equals(pi.type())) continue;
+            if (anchorId.equals(pi.parentId())) { hasOval = true; break; }
+        }
+
         // 박스 크기 = Group 의 전체 bounds (capsule 모양 전체 영역 포함)
         double[] grpBounds = anchorItem.geometricBounds();
         if (grpBounds == null || grpBounds.length < 4) return null;
         double w = Math.abs(grpBounds[3] - grpBounds[1]);
         double h = Math.abs(grpBounds[2] - grpBounds[0]);
         if (w <= 0 || h <= 0) return null;
+
+        // SPEC-028: Oval 배경 배지인데 종횡비가 심하게 틀어진 경우 (ratio < 0.6),
+        // Group bounds 에 TextFrame 높이까지 포함되어 비례 왜곡이 발생한 것으로 판단.
+        // (예: AboveLine 앵커, 원형 배경+텍스트프레임이 상하 적층된 구조 → 6.48×12.27pt → "●" 오렌더)
+        // 이 경우 INLINE_TEXT_FRAME 생성을 포기하고 space run으로 대체 (floating badge 가 시각을 담당).
+        if (hasOval) {
+            double ratio = w > h ? h / w : w / h; // min/max, 1.0=정방형
+            if (ratio < 0.6) return null;
+        }
 
         ASTInlineObject obj = new ASTInlineObject();
         obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
@@ -415,13 +431,6 @@ public class InlineFrameHandler {
             obj.fillTint(100);
         }
 
-        // Group 안에 Oval/Rectangle 이 함께 있으면 capsule 모양 → cornerRadius = h/2
-        // 단일 Rectangle 이면서 cornerRadius 가 있으면 그대로 사용
-        boolean hasOval = false;
-        for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
-            if (pi == null || !"Oval".equals(pi.type())) continue;
-            if (anchorId.equals(pi.parentId())) { hasOval = true; break; }
-        }
         if (hasOval) {
             obj.cornerRadius(h / 2.0);
         } else if (bgShape.cornerRadius() > 0) {
