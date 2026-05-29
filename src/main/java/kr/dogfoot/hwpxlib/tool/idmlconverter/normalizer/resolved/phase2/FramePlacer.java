@@ -604,181 +604,48 @@ public final class FramePlacer {
                 _srcId = "u" + tf.id();  // 그대로 prefix 만 붙임 (Phase 3 가 sourceId parse 시 분기 처리)
             }
             block.sourceId(_srcId);
-            // SPEC-025: editable 로 승격된 badge_group_child 는 부모 배지 visual 영역으로 확장 +
-            // 배지 자식 도형의 fill/stroke/corner 를 frame 에 복사 (PNG 제거 후 시각 배지 재현).
-            // badge_group_child 는 ResolvedDataReader 가 filterOut 해서 allRenderedTextFrames 에 없음
-            // → 부모 badge_group 의 childTextFrameIds 에 우리 frame.id 가 있는지 확인
-            String _badgeFill = null, _badgeStroke = null;
-            double _badgeStrokeW = 0, _badgeCorner = 0;
+            // badge_group_child: 텍스트+배경도형이 그룹된 배지의 editable TF 자식.
+            // 원칙: 분류(simple/decorative/illustrated) 없이 항상 텍스트 블록으로 변환.
+            // Phase 7 이 badge PNG(장식) 를 배치하고, Phase 2 는 텍스트를 그 위에 오버레이.
+            RenderedGroup _parentBadge = null;
             boolean _isBadgeChild = false;
             boolean _skipBadgeChildInlineAnchor = false;
             try {
                 int domIdInt5 = -1;
                 try { domIdInt5 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
                 if (domIdInt5 >= 0) {
-                    RenderedGroup parentBadge = null;
                     for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
                         if (!rg.isBadgeGroup()) continue;
                         int[] cTfIds = rg.childTextFrameIds();
                         if (cTfIds == null) continue;
-                        boolean isChild = false;
-                        for (int cid : cTfIds) { if (cid == domIdInt5) { isChild = true; break; } }
-                        if (isChild) { parentBadge = rg; break; }
+                        for (int cid : cTfIds) {
+                            if (cid == domIdInt5) { _parentBadge = rg; break; }
+                        }
+                        if (_parentBadge != null) break;
                     }
-                    if (parentBadge != null && parentBadge.bounds() != null && parentBadge.bounds().length >= 4) {
+                    if (_parentBadge != null && _parentBadge.bounds() != null && _parentBadge.bounds().length >= 4) {
                         _isBadgeChild = true;
-                        // parentBadge bounds 는 normalizeToPoints 후 이미 pt 이며 extract_indd.jsx 가 이미 page-relative 로
-                        // 변환했음 (line 773-779). pageTop/pageLeft 재차감 금지.
-                        double[] pb = parentBadge.bounds();
-                        double pbT = pb[0];
-                        double pbL = pb[1];
-                        double pbB = pb[2];
-                        double pbR = pb[3];
-                        double groupArea = (pbB > pbT && pbR > pbL) ? (pbR - pbL) * (pbB - pbT) : 0;
-                        // 배지 내 모든 editable child TF 의 총 면적 합산.
-                        // - 합산 > 50%: "simple" 배지 — PNG 를 흰 텍스트박스 로 대체 (1자/jamo 다중 등 포함)
-                        // - 합산 < 50%: "illustrated" 배지 (예: 선인장 + 작은 라벨) — PNG 유지 + 라벨 위에 흰 박스 오버레이
-                        double sumEditableChildArea = 0;
+                        double[] pb = _parentBadge.bounds();
+                        double pbT = pb[0], pbL = pb[1], pbB = pb[2], pbR = pb[3];
+                        // 단일 editable child → 그룹 bounds 로 확장 (배지 장식 영역 시각적으로 흡수)
+                        int[] cTfIdsAll = _parentBadge.childTextFrameIds();
                         int editableChildCount = 0;
-                        int[] cTfIdsAll = parentBadge.childTextFrameIds();
                         if (cTfIdsAll != null) {
                             for (int cid : cTfIdsAll) {
-                                if (!ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) continue;
-                                ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(String.valueOf(cid));
-                                double[] cb = childTf == null ? null : childTf.geometricBounds();
-                                if (cb == null || cb.length < 4) continue;
-                                double carea = Math.abs((cb[3] - cb[1]) * (cb[2] - cb[0]));
-                                sumEditableChildArea += carea;
-                                editableChildCount++;
+                                if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) editableChildCount++;
                             }
                         }
-                        boolean isSimpleBadge = (groupArea > 0 && sumEditableChildArea / groupArea > 0.5);
-                        // SPEC-025: extract_indd.jsx 가 PNG export 시 editable TF 를 숨기므로,
-                        // illustrated 배지 (예: 선인장, QR, "1" 인라인 등) 자식 텍스트도 Phase 2 가 floating 으로 배치해야 검색 가능.
-                        // (이전 PNG 가 텍스트 포함 시 _skipIllustratedBadgeChild 가 중복 방지 → 이제 불필요.)
-                        // 배지 구조 검사: 모든 자손 도형(non-TF) 의 수 ≥ 2 면 데코 보존이 필요한 "decorative" 배지.
-                        // (예: 단어 이해하기 — Polygon stroke + Rectangle fill 별도, 말하는 이의 소망 — 이중 Oval)
-                        // → PNG 유지 + 텍스트만 투명 오버레이.
-                        String _badgeGroupIdStr = String.valueOf(parentBadge.id());
-                        int totalShapeDescendantCount = 0;
-                        boolean hasOutlineOnlyShape = false;
-                        for (ResolvedPageItem cpi2 : ctx.resolvedData.pageItems()) {
-                            if (cpi2 == null || cpi2.id() == null) continue;
-                            String t = cpi2.type();
-                            if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t) && !"GraphicLine".equals(t)) continue;
-                            // 조상 chain 확인
-                            String pid2 = cpi2.parentId();
-                            int hops2 = 0;
-                            while (pid2 != null && hops2 < 5) {
-                                if (_badgeGroupIdStr.equals(pid2)) {
-                                    totalShapeDescendantCount++;
-                                    // fillTint=0 → 채우기 없음(외곽선만). 구름/scribble 등 PNG 배경 유지 필요.
-                                    if (cpi2.fillTint() == 0) hasOutlineOnlyShape = true;
-                                    break;
-                                }
-                                ResolvedPageItem parent2 = ctx.resolvedData.getPageItem(pid2);
-                                if (parent2 == null) break;
-                                pid2 = parent2.parentId();
-                                hops2++;
-                            }
-                        }
-                        // fillTint=0 외곽선 도형이 있는 배지 → 단일 자식이라도 PNG 배경이 의미 있으므로 decorative 처리.
-                        boolean isDecorativeBadge = isSimpleBadge && (totalShapeDescendantCount >= 2 || hasOutlineOnlyShape);
-                        // (이전: illustrated 배지 _skipIllustratedBadgeChild → 제거됨. PNG 가 텍스트를 더 이상 베이크하지 않음.)
-                        if (isDecorativeBadge) {
-                            // PNG 유지 (Phase 7 가 배치) + 텍스트만 투명 오버레이 (검색 가능 + 시각 데코 보존).
-                            // simpleBadgeChild 표시 안 함 → Phase 7 가 PNG 를 건너뛰지 않음.
-                            isSimpleBadge = false;
-                        }
-                        // 단일 child 가 그룹을 거의 채우면 bounds 를 그룹 전체로 확장 (스크리블 배지 visual 흡수).
-                        // 다중 child 는 각자 자기 bounds 유지 (확장하면 서로 겹침).
-                        boolean expandToGroup = isSimpleBadge && editableChildCount == 1
-                                && pbB > pbT && pbR > pbL;
-                        if (expandToGroup) {
+                        if (editableChildCount == 1 && pbB > pbT && pbR > pbL) {
                             x = pbL; y = pbT;
                             w = pbR - pbL; h = pbB - pbT;
                         }
-                        if (isSimpleBadge) {
-                            // 단순 배지의 모든 editable 자식을 simple 로 표시 → Phase 7 에서 PNG 한 번만 건너뜀.
-                            if (cTfIdsAll != null) {
-                                for (int cid : cTfIdsAll) {
-                                    if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
-                                        ctx.resolvedData.markSimpleBadgeChild(String.valueOf(cid));
-                                    }
+                        // 모든 editable 자식을 badge text child 로 표시 → Phase 3(InlineFrameHandler) 중복 처리 방지
+                        if (cTfIdsAll != null) {
+                            for (int cid : cTfIdsAll) {
+                                if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
+                                    ctx.resolvedData.markSimpleBadgeChild(String.valueOf(cid));
                                 }
                             }
-                        }
-                        // 흰 배경: simple 배지만 적용 (PNG visual 을 텍스트박스가 완전히 대체).
-                        // illustrated 배지는 PNG 가 유지되므로 흰 박스가 PNG 텍스트와 시각 충돌 → 투명 유지하고
-                        // editable 텍스트만 PNG 의 글자 위에 오버레이 (검색 가능).
-                        if (isSimpleBadge) {
-                            _badgeFill = "Paper";
-                        }
-                        if (isSimpleBadge) {
-                            // 단순 배지: fill / stroke / cornerRadius 를 각각 가장 적합한 sibling 도형에서 추출.
-                            // - fill: fill 을 가진 가장 큰 도형
-                            // - stroke: stroke 를 가진 가장 큰 도형 (별도 추적)
-                            // - cornerRadius: fill 또는 stroke 도형 중 가장 큰 것
-                            String parentBadgeIdStr = String.valueOf(parentBadge.id());
-                            double bestFillArea = 0, bestStrokeArea = 0, bestAnyArea = 0;
-                            for (ResolvedPageItem cpi : ctx.resolvedData.pageItems()) {
-                                if (cpi == null || cpi.id() == null) continue;
-                                String pid = cpi.parentId();
-                                boolean isInBadge = false;
-                                int hops = 0;
-                                while (pid != null && hops < 5) {
-                                    if (parentBadgeIdStr.equals(pid)) { isInBadge = true; break; }
-                                    ResolvedPageItem parent = ctx.resolvedData.getPageItem(pid);
-                                    if (parent == null) break;
-                                    pid = parent.parentId();
-                                    hops++;
-                                }
-                                if (!isInBadge) continue;
-                                if (cpi.id().equals(tf.id())) continue;
-                                String ctype = cpi.type();
-                                if (!"Rectangle".equals(ctype) && !"Polygon".equals(ctype) && !"Oval".equals(ctype) && !"TextFrame".equals(ctype)) continue;
-                                String fcn = cpi.fillColorName();
-                                String scn = cpi.strokeColorName();
-                                // fillTint=0 → 0% 농도 = 흰색(Paper) → 채우기 없는 것으로 취급.
-                                // fillTint=-1 은 기본값(100%), 양수는 실제 농도.
-                                boolean hasFill = fcn != null && !"None".equals(fcn) && !"[None]".equals(fcn)
-                                        && cpi.fillTint() != 0;
-                                boolean hasStroke = scn != null && !"None".equals(scn) && !"[None]".equals(scn) && cpi.strokeWeight() > 0;
-                                if (!hasFill && !hasStroke) continue;
-                                double[] cgb = cpi.geometricBounds();
-                                if (cgb == null || cgb.length < 4) continue;
-                                double carea = Math.abs((cgb[3] - cgb[1]) * (cgb[2] - cgb[0]));
-                                if (hasFill && carea > bestFillArea) {
-                                    bestFillArea = carea;
-                                    _badgeFill = fcn;
-                                }
-                                if (hasStroke && carea > bestStrokeArea) {
-                                    bestStrokeArea = carea;
-                                    _badgeStroke = scn;
-                                    _badgeStrokeW = cpi.strokeWeight();
-                                }
-                                if (carea > bestAnyArea) {
-                                    bestAnyArea = carea;
-                                    _badgeCorner = cpi.cornerRadius();
-                                }
-                            }
-                        }
-                        // Fallback: resolved.json 에 cornerRadius 가 없지만 badge PNG 코너가 투명하면
-                        // InDesign per-corner RoundedCorner 배지(pi.cornerRadius=0)로 판단 → pill 형태 적용.
-                        if (_badgeCorner <= 0 && isSimpleBadge && parentBadge.file() != null && ctx.basePath != null) {
-                            try {
-                                java.io.File bpngF = new java.io.File(ctx.basePath, parentBadge.file());
-                                if (bpngF.exists()) {
-                                    java.awt.image.BufferedImage bpng = javax.imageio.ImageIO.read(bpngF);
-                                    if (bpng != null && bpng.getColorModel().hasAlpha()) {
-                                        int tlAlpha = (bpng.getRGB(0, 0) >> 24) & 0xFF;
-                                        if (tlAlpha < 20) {
-                                            // 코너 투명 → pill 형태: cornerRadius = h/2 (mm)
-                                            _badgeCorner = (pbB - pbT) / (2.0 * ctx.scaleFactor);
-                                        }
-                                    }
-                                }
-                            } catch (Exception _ePillCorner) {}
                         }
                     }
                 }
@@ -811,43 +678,23 @@ public final class FramePlacer {
                         }
                     }
                 }
-                // SPEC-025 일러스트 배지: PNG 가 유지되는 경우 그 위에 라벨 텍스트박스가 와야 함.
-                // simpleBadgeChild 가 아닌 editable badge_group 자식 → Phase 7 에서 PNG 배치 → 텍스트 z 를 PNG z + 1 로.
-                // 단, 인라인-앵커 배지 (inline_object 로도 등록된) 는 PNG 가 body TF 내부에 inline 으로 들어가므로
-                // 이 override 를 적용하면 body TF z(>10) 보다 작아져 가려짐 → 원래 tf.zOrder() 유지.
-                if (ctx.resolvedData.isEditableTextFrame(tf.id())
-                        && !ctx.resolvedData.isSimpleBadgeChild(tf.id())) {
-                    int domIdInt6 = -1;
-                    try { domIdInt6 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
-                    if (domIdInt6 >= 0) {
-                        for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
-                            if (!rg.isBadgeGroup()) continue;
-                            int[] cTfIds = rg.childTextFrameIds();
-                            if (cTfIds == null) continue;
-                            boolean isChild = false;
-                            for (int cid : cTfIds) { if (cid == domIdInt6) { isChild = true; break; } }
-                            if (!isChild) continue;
-                            // 인라인-앵커 배지 검사: 같은 ID 가 renderedFloatingItems 에 inline_object 로 등록?
-                            boolean badgeIsInlineAnchored = false;
-                            for (RenderedGroup rg2 : ctx.resolvedData.allRenderedFloatingItems()) {
-                                if (rg2.id() == rg.id() && "inline_object".equals(rg2.itemType())) {
-                                    badgeIsInlineAnchored = true;
-                                    break;
-                                }
-                            }
-                            if (badgeIsInlineAnchored) {
-                                // inline_object 배지의 child TF는 loadInlineObject가 inline PNG로 처리.
-                                // floating TextFrameBlock을 추가하면 텍스트가 별도로 표시되어 중복 발생 → 건너뜀.
-                                _skipBadgeChildInlineAnchor = true;
-                                break;
-                            }
-                            // RenderedGroup에는 zOrder 필드가 없으므로 pageItem에서 가져옴
-                            ResolvedPageItem badgePi = ctx.resolvedData.getPageItem(String.valueOf(rg.id()));
-                            int badgePageZ = (badgePi != null && badgePi.zOrder() > 0) ? badgePi.zOrder() : 0;
-                            int badgeHwpxZ = (badgePageZ > 0) ? Math.max(10000 - badgePageZ, 10) : 10;
-                            tfZ = badgeHwpxZ + 1;
+                // badge_group_child → Phase 7 PNG 위에 텍스트 오버레이.
+                // inline_object 로 앵커된 배지는 PNG 가 body TF 내 inline 으로 배치되므로 z-override 금지.
+                if (_isBadgeChild && _parentBadge != null) {
+                    boolean badgeIsInlineAnchored = false;
+                    for (RenderedGroup rg2 : ctx.resolvedData.allRenderedFloatingItems()) {
+                        if (rg2.id() == _parentBadge.id() && "inline_object".equals(rg2.itemType())) {
+                            badgeIsInlineAnchored = true;
                             break;
                         }
+                    }
+                    if (badgeIsInlineAnchored) {
+                        _skipBadgeChildInlineAnchor = true;
+                    } else {
+                        ResolvedPageItem badgePi = ctx.resolvedData.getPageItem(String.valueOf(_parentBadge.id()));
+                        int badgePageZ = (badgePi != null && badgePi.zOrder() > 0) ? badgePi.zOrder() : 0;
+                        int badgeHwpxZ = (badgePageZ > 0) ? Math.max(10000 - badgePageZ, 10) : 10;
+                        tfZ = badgeHwpxZ + 1;
                     }
                 }
             } catch (Exception e) {}
@@ -921,29 +768,6 @@ public final class FramePlacer {
                         block.strokeColor(strokeHex);
                         block.strokeWeight(tf.strokeWeight());
                     }
-                }
-                // SPEC-025: badge_group_child 의 styling 을 frame 에 복사 (PNG 제거 대신 styled box 로 렌더)
-                if (_badgeFill != null) {
-                    String fh = ctx.resolvedData.resolveColorHex(_badgeFill);
-                    if (fh != null) {
-                        block.fillColor(fh);
-                        block.fillTint(100);
-                    }
-                    // _badgeFill 이 "Paper" 일 때만 cornerRadius=0 (illustrated 배지 흰 오버레이 — pill 방지).
-                    // sibling 도형에서 색 fill 을 가져온 경우 (simple 배지 컬러 pill) 는 tf.cornerRadius 유지.
-                    if ("Paper".equals(_badgeFill)) {
-                        block.cornerRadius(0);
-                    }
-                }
-                if (_badgeStroke != null && _badgeStrokeW > 0) {
-                    String sh = ctx.resolvedData.resolveColorHex(_badgeStroke);
-                    if (sh != null) {
-                        block.strokeColor(sh);
-                        block.strokeWeight(_badgeStrokeW);
-                    }
-                }
-                if (_badgeCorner > 0 && block.cornerRadius() == 0) {
-                    block.cornerRadius(_badgeCorner * ctx.scaleFactor);
                 }
             } catch (Exception eFill) {}
 
