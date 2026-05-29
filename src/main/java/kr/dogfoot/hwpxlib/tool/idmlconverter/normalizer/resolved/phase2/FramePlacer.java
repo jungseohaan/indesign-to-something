@@ -612,7 +612,6 @@ public final class FramePlacer {
             double _badgeStrokeW = 0, _badgeCorner = 0;
             boolean _isBadgeChild = false;
             boolean _skipBadgeChildInlineAnchor = false;
-            boolean _isDecorativeBadge = false;
             try {
                 int domIdInt5 = -1;
                 try { domIdInt5 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
@@ -687,11 +686,9 @@ public final class FramePlacer {
                         boolean isDecorativeBadge = isSimpleBadge && (totalShapeDescendantCount >= 2 || hasOutlineOnlyShape);
                         // (이전: illustrated 배지 _skipIllustratedBadgeChild → 제거됨. PNG 가 텍스트를 더 이상 베이크하지 않음.)
                         if (isDecorativeBadge) {
-                            // PNG 유지 (Phase 7 가 배치). extract_indd.jsx 가 복잡한 배지 그룹에서
-                            // 내부 TF 텍스트를 숨기지 못해 PNG 에 텍스트가 베이킹됨 → 텍스트 블록 생성 시 중복.
-                            // 텍스트 블록 생성 금지 (_isDecorativeBadge) → PNG 가 시각 역할 담당.
+                            // PNG 유지 (Phase 7 가 배치) + 텍스트만 투명 오버레이 (검색 가능 + 시각 데코 보존).
+                            // simpleBadgeChild 표시 안 함 → Phase 7 가 PNG 를 건너뛰지 않음.
                             isSimpleBadge = false;
-                            _isDecorativeBadge = true;
                         }
                         // 단일 child 가 그룹을 거의 채우면 bounds 를 그룹 전체로 확장 (스크리블 배지 visual 흡수).
                         // 다중 child 는 각자 자기 bounds 유지 (확장하면 서로 겹침).
@@ -786,12 +783,6 @@ public final class FramePlacer {
                     }
                 }
             } catch (Exception eBadge) {}
-            // badge_group_child 이면서 simple 로 표시되지 않은 것 → Phase 7 PNG 가 시각 담당
-            // (decorative 배지: area>50% + complex shapes, illustrated 배지: area<50% 모두 포함)
-            // PNG 에 텍스트가 베이킹되어 있으므로 텍스트 블록 생성 시 중복 발생.
-            if (_isBadgeChild && !ctx.resolvedData.isSimpleBadgeChild(tf.id())) {
-                _isDecorativeBadge = true;
-            }
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
@@ -1004,7 +995,7 @@ public final class FramePlacer {
                     }
                 }
             }
-            if (_skipBadgeChildInlineAnchor || _isDecorativeBadge) continue;
+            if (_skipBadgeChildInlineAnchor) continue;
             section.addBlock(block);
         }
     }
