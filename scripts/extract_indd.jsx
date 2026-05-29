@@ -418,6 +418,20 @@ function exportPageBadgesBatched(doc, page, simpleBadges, renderDir, dpi) {
         for (var i = 0; i < simpleBadges.length; i++) {
             dups.push(simpleBadges[i].grp.duplicate());
         }
+        // PNG 배경만 추출: 각 복제본의 TextFrame 자식 숨기기 (내용 있는 TF만 — 빈 TF는 시각적 컨테이너)
+        for (var hi = 0; hi < dups.length; hi++) {
+            try {
+                var dupItems = dups[hi].allPageItems;
+                for (var hj = 0; hj < dupItems.length; hj++) {
+                    try {
+                        if (dupItems[hj].constructor.name !== "TextFrame" || !dupItems[hj].visible) continue;
+                        var _bTfCont = "";
+                        try { _bTfCont = (dupItems[hj].contents + "").replace(/[\s\r\n﻿￼]/g, ""); } catch (e) {}
+                        if (_bTfCont.length > 0) dupItems[hj].visible = false;
+                    } catch (eHj) {}
+                }
+            } catch (eHi) {}
+        }
         var tempGroup = doc.groups.add(dups);
         try {
             tempGroup.exportFile(ExportFormat.PNG_FORMAT, batchFile);
@@ -474,7 +488,8 @@ function exportPageBadgesBatched(doc, page, simpleBadges, renderDir, dpi) {
                     pageIndex: pgIdx0,
                     type: "badge_group",
                     childIds: sb.childIds,
-                    childTextFrameIds: sb.childTextFrameIds
+                    childTextFrameIds: sb.childTextFrameIds,
+                    textHiddenBeforeExport: true
                 },
                 crop: {
                     src: "rendered_frames/" + batchFileName,
@@ -955,7 +970,13 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
             var _bChItems = _bgrp.allPageItems;
             for (var _bci = 0; _bci < _bChItems.length; _bci++) {
                 _bChildIds.push(_bChItems[_bci].id);
-                if (_bChItems[_bci].constructor.name === "TextFrame") _bChildTfIds.push(_bChItems[_bci].id);
+                if (_bChItems[_bci].constructor.name === "TextFrame") {
+                    _bChildTfIds.push(_bChItems[_bci].id);
+                    // PNG에서 텍스트를 숨기므로 HWPX 텍스트 오버레이가 필요 → editable로 승격
+                    var _bTfContents = "";
+                    try { _bTfContents = (_bChItems[_bci].contents + "").replace(/[\s﻿\r\n￼]/g, ""); } catch (e) {}
+                    if (_bTfContents.length > 0) editableFrameIds[_bChItems[_bci].id] = true;
+                }
             }
         } catch (e) {}
         if (!_badgesByPage[_bgrpPgIdx]) _badgesByPage[_bgrpPgIdx] = [];
@@ -1097,11 +1118,13 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                 var __hItem = __grpItemsForHide[__hi];
                 try {
                     if (__hItem.constructor.name !== "TextFrame") continue;
-                    if (isInlineItem(__hItem)) continue; // inline TF는 투명 구멍 방식으로 텍스트 표시
-                    if (__hItem.visible) {
-                        __hItem.visible = false;
-                        hiddenForExport.push(__hItem);
-                    }
+                    if (!__hItem.visible) continue;
+                    // 빈 TF(시각적 컨테이너)는 숨기지 않음 — 내용 있는 TF만 숨겨야 배경 그래픽이 보임
+                    var __hCont = "";
+                    try { __hCont = (__hItem.contents + "").replace(/[\s\r\n﻿￼]/g, ""); } catch (eC) {}
+                    if (__hCont.length === 0) continue;
+                    __hItem.visible = false;
+                    hiddenForExport.push(__hItem);
                 } catch (eH) {}
             }
         } catch (eH2) {}
