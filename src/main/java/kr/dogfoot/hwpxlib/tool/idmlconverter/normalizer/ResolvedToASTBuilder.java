@@ -202,7 +202,13 @@ public class ResolvedToASTBuilder {
 
         String hexId;
         try {
-            hexId = Integer.toHexString(Integer.parseInt(storyId));
+            if (storyId.startsWith("u") || storyId.startsWith("U")) {
+                // IDML hex format: "u4daf" → hexId = "4daf"
+                hexId = storyId.substring(1).toLowerCase();
+            } else {
+                // decimal format (from resolved.json): "17203" → hex
+                hexId = Integer.toHexString(Integer.parseInt(storyId));
+            }
         } catch (NumberFormatException e) {
             return null;
         }
