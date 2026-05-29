@@ -899,7 +899,12 @@ public class InlineFrameHandler {
             if (isEmptyContainer(childTf)) continue;
             // SPEC-025: inline+editable 배지 자식은 Phase 2 가 플로팅 배치 스킵 →
             // PNG 가 유일한 시각 표현. loadInlineObject 가 PNG 폐기하면 배지 자체가 사라짐 → 통과시킴.
+            // 단, textHiddenBeforeExport=false: PNG에 텍스트가 베이킹됨. Phase 2가 floating text 배치 → PNG 억제.
             if (childTf.isInline() && ctx.resolvedData.isEditableTextFrame(childTf.id())) {
+                RenderedGroup _badgeForTf = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
+                if (_badgeForTf != null && !_badgeForTf.isTextHiddenBeforeExport()) {
+                    return null; // Phase 2가 floating text block 배치 → PNG 제거
+                }
                 continue;
             }
             if (ctx.resolvedData.isEditableTextFrame(childTf.id())) {

@@ -18,6 +18,7 @@ public class RenderedGroup {
     private int[] childImageIds; // 그룹 렌더링 시 자식 이미지 프레임 DOM ID 목록
     private int zOrder;          // ExtendScript 할당 z-order (renderedFloatingItems)
     private String itemType;     // "vector" | "group" | "text_decoration" | "image" | "other"
+    private boolean textHiddenBeforeExport; // true: PNG 내보내기 전 TF 텍스트를 숨겼음 → PNG는 텍스트 없음
 
     public int id() { return id; }
     public void id(int v) { this.id = v; }
@@ -63,6 +64,9 @@ public class RenderedGroup {
 
     public int pdfPageIndex() { return pdfPageIndex; }
     public void pdfPageIndex(int v) { this.pdfPageIndex = v; }
+
+    public boolean isTextHiddenBeforeExport() { return textHiddenBeforeExport; }
+    public void textHiddenBeforeExport(boolean v) { this.textHiddenBeforeExport = v; }
 
     public boolean isBadgeGroup() { return "badge_group".equals(type); }
     public boolean isBadgeGroupChild() { return "badge_group_child".equals(type); }

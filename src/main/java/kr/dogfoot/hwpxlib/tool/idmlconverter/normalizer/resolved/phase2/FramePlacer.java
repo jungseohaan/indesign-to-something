@@ -150,8 +150,12 @@ public final class FramePlacer {
                     //   → floating 텍스트박스로 보강 → phase3Reachable=false
                     boolean badgeAlsoInlineObject = badgeGroupId >= 0
                             && ctx.resolvedData.isBadgeGroupAlsoInline(badgeGroupId); // O(1)
-                    // inline_object로 앵커된 배지 → Phase 3 loadInlineObject가 badge_group PNG(텍스트 포함)를 로드 → floating 불필요
-                    boolean phase3Reachable = badgeAlsoInlineObject;
+                    // inline_object로 앵커된 배지 → Phase 3 loadInlineObject가 badge_group PNG(텍스트 포함)를 로드 → floating 불필요.
+                    // 단, textHiddenBeforeExport=false: PNG에 텍스트 베이킹 → Phase 3 PNG 억제 → floating text 배치 필요.
+                    RenderedGroup _parentBadgeRg = badgeGroupId >= 0
+                            ? ctx.resolvedData.getBadgeGroupByDomId(badgeGroupId) : null;
+                    boolean badgePngHasTextBaked = _parentBadgeRg != null && !_parentBadgeRg.isTextHiddenBeforeExport();
+                    boolean phase3Reachable = badgeAlsoInlineObject && !badgePngHasTextBaked;
                     if (inAnyBadge && phase3Reachable) {
                         String vt0 = tf.frameVisibleText();
                         String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
@@ -688,7 +692,9 @@ public final class FramePlacer {
                             break;
                         }
                     }
-                    if (badgeIsInlineAnchored) {
+                    // inlineToFloating=true: Phase 2가 floating text 배치를 명시적으로 결정 → skip 금지.
+                    // (textHiddenBeforeExport=false 배지: Phase 3이 PNG를 억제하므로 floating text가 유일한 표현)
+                    if (badgeIsInlineAnchored && !inlineToFloating) {
                         _skipBadgeChildInlineAnchor = true;
                     } else {
                         ResolvedPageItem badgePi = ctx.resolvedData.getPageItem(String.valueOf(_parentBadge.id()));

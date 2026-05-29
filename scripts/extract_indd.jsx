@@ -1160,7 +1160,8 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                 pageIndex: grpPage.documentOffset,
                 type: "badge_group",
                 childIds: childIds,
-                childTextFrameIds: childTextFrameIds
+                childTextFrameIds: childTextFrameIds,
+                textHiddenBeforeExport: hiddenForExport.length > 0
             };
             renderedFrames.push(grpEntry);
             renderedIds[grpDomId] = grpEntry;

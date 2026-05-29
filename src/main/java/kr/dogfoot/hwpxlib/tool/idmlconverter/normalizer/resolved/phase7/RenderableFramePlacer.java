@@ -92,7 +92,12 @@ public final class RenderableFramePlacer {
                     }
                 }
                 if (alsoInline) continue;
-                // badge PNG 는 항상 배치 (장식 역할). 텍스트는 Phase 2 가 그 위에 오버레이로 배치.
+                // PNG에 텍스트가 베이킹된 경우(textHiddenBeforeExport=false) → PNG 건너뜀.
+                // Phase 2가 텍스트 블록을 배치하므로 이미지+텍스트 중복 발생. 재추출 후 true가 되면 배치.
+                if (rt.childTextFrameIds() != null && rt.childTextFrameIds().length > 0
+                        && !rt.isTextHiddenBeforeExport()) {
+                    continue;
+                }
             }
 
             File pngFile = new File(ctx.basePath, rt.file());
