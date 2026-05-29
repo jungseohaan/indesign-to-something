@@ -715,7 +715,7 @@ function main(args) {
             writeProgress(outputDir, "resolved", 0, rangePageCount);
 
             // 3. resolved 속성 수집 (페이지 범위 필터링)
-            var resolved = collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableFrameIds);
+            var resolved = collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableFrameIds, skipRenderPagesMap);
             resolved.renderedTextFrames = renderedFrames;
             resolved.renderedPdfFrames = renderedPdfFrames;
             resolved.renderedGraphicFrames = renderedGraphicFrames;
@@ -3519,7 +3519,9 @@ function isLightColoredText(tf) {
 
 // --- resolved 속성 수집 ---
 
-function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableIds) {
+function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableIds, skipRenderPagesMap) {
+    if (!skipRenderPagesMap) skipRenderPagesMap = {};
+
     writeProgress(outputDir, "resolved_styles", 0, rangePageCount);
     var docInfo = collectDocumentInfo(doc);
     var paraStyles = collectParagraphStyles(doc);
@@ -3529,6 +3531,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     var fonts = collectFonts(doc);
 
     // 범위 내 페이지의 텍스트프레임에 연결된 스토리 ID 수집
+    // SPEC-030: 증분 추출 시 변경 페이지의 스토리만 수집 (skipRenderPagesMap 제외)
     var rangeStoryIds = {};
     try {
         var tfs = doc.textFrames.everyItem().getElements();
@@ -3538,7 +3541,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
                 var pp = tf.parentPage;
                 if (pp) {
                     var pgIdx = pp.documentOffset + 1;
-                    if (pgIdx >= startPage && pgIdx <= endPage) {
+                    if (pgIdx >= startPage && pgIdx <= endPage && !skipRenderPagesMap[pgIdx]) {
                         try {
                             rangeStoryIds[tf.parentStory.id.toString()] = true;
                         } catch (e2) {}
@@ -3554,6 +3557,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
             var page = doc.pages[pi];
             var pgIdx2 = page.documentOffset + 1;
             if (pgIdx2 < startPage || pgIdx2 > endPage) continue;
+            if (skipRenderPagesMap[pgIdx2]) continue; // SPEC-030
             var allItems = page.allPageItems;
             for (var ai = 0; ai < allItems.length; ai++) {
                 try {
@@ -3566,7 +3570,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     } catch (e) {}
 
     // SPEC-025: 마스터 스프레드의 TextFrame 스토리도 rangeStoryIds 에 추가 (Phase 5 master instancing 용)
-    // 적용된 마스터에 한해 수집 → 미적용 마스터는 무시.
+    // 증분 추출에서도 마스터 스토리는 항상 수집 (변경 여부와 무관)
     try {
         var _appliedMasterIds = {};
         for (var pp25 = 0; pp25 < doc.pages.length; pp25++) {
@@ -3596,14 +3600,15 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     var stories = collectStories(doc, outputDir, rangePageCount, rangeStoryIds);
 
     writeProgress(outputDir, "resolved_frames", 0, rangePageCount);
-    var textFrames = collectTextFrames(doc, startPage, endPage, editableIds);
+    var textFrames = collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPagesMap);
 
     // SPEC-025 Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화 (frame + story clone)
+    // 증분 추출에서도 실행 (마스터 인스턴스는 경량 연산)
     try { instanceMasterFrames(doc, startPage, endPage, textFrames, stories, editableIds); } catch (ePhase5) { $.writeln("[SPEC-025 Phase 5 error] " + ePhase5); }
 
     writeProgress(outputDir, "resolved_items", 0, rangePageCount);
-    var pages = collectPages(doc, startPage, endPage);
-    var pageItems = collectPageItems(doc, startPage, endPage);
+    var pages = collectPages(doc, startPage, endPage, skipRenderPagesMap);
+    var pageItems = collectPageItems(doc, startPage, endPage, skipRenderPagesMap);
 
     var fontMetrics = measureFontMetrics(doc);
 
@@ -5270,8 +5275,9 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
 
 // --- 텍스트 프레임 수집 (오버플로/줄 수) ---
 
-function collectTextFrames(doc, startPage, endPage, editableIds) {
+function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPagesMap) {
     if (!editableIds) editableIds = {};
+    if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var frames = [];
     var collectedStoryIds = {};  // 범위 내 프레임의 storyId 수집
     var collectedTfIds = {};     // 수집된 프레임 ID 추적
@@ -5292,6 +5298,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds) {
                 if (pp) {
                     var pgIdx = pp.documentOffset + 1;
                     if (pgIdx < startPage || pgIdx > endPage) continue;
+                    if (skipRenderPagesMap[pgIdx]) continue; // SPEC-030: 증분 추출 스킵
                 }
             } catch (e) {}
             try { collectedStoryIds[tf.parentStory.id] = true; } catch (e) {}
@@ -5841,11 +5848,13 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
 
 // --- 페이지 수집 ---
 
-function collectPages(doc, startPage, endPage) {
+function collectPages(doc, startPage, endPage, skipRenderPagesMap) {
+    if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var pages = [];
     for (var i = 0; i < doc.pages.length; i++) {
         var pgIdx = i + 1; // 1-based
         if (pgIdx < startPage || pgIdx > endPage) continue;
+        if (skipRenderPagesMap[pgIdx]) continue; // SPEC-030: 증분 추출 스킵
         var pg = doc.pages[i];
         var data = {
             index: i,
@@ -5867,7 +5876,8 @@ function collectPages(doc, startPage, endPage) {
 
 // --- 페이지 아이템 수집 (벡터/이미지/그룹 속성 평탄화) ---
 
-function collectPageItems(doc, startPage, endPage) {
+function collectPageItems(doc, startPage, endPage, skipRenderPagesMap) {
+    if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var items = [];
     var allItems = doc.allPageItems;
     for (var i = 0; i < allItems.length; i++) {
@@ -5883,6 +5893,7 @@ function collectPageItems(doc, startPage, endPage) {
         if (piPageIdx >= 0) {
             var pgIdx1 = piPageIdx + 1;
             if (pgIdx1 < startPage || pgIdx1 > endPage) continue;
+            if (skipRenderPagesMap[pgIdx1]) continue; // SPEC-030: 증분 추출 스킵
         }
 
         var data = {

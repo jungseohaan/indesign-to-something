@@ -330,5 +330,14 @@ async fn try_partial_extraction(
     );
     eprintln!("[B.2] 캐시에서 {} 파일 복사", copied);
 
+    // 8. SPEC-030: partial resolved.json + 캐시된 complete resolved.json 병합
+    let resolved_path = output_dir.join("resolved.json");
+    if resolved_path.exists() {
+        match extract_cache::merge_resolved_json(&resolved_path, &prev_key) {
+            Ok(()) => eprintln!("[SPEC-030] resolved.json 병합 성공"),
+            Err(e) => eprintln!("[SPEC-030] resolved.json 병합 실패 (무시): {}", e),
+        }
+    }
+
     Some(result)
 }

@@ -489,3 +489,145 @@ fn extract_item_id_from_filename(name: &str) -> Option<u64> {
     let after_underscore = without_ext.rsplit_once('_').map(|(_, r)| r)?;
     after_underscore.parse().ok()
 }
+
+// ─────────────────────────────────────────────────────────────────
+// SPEC-030: 부분 resolved.json 과 캐시된 전체 resolved.json 병합
+// ─────────────────────────────────────────────────────────────────
+
+/// 증분 추출 후 partial resolved.json 과 이전 캐시의 complete resolved.json 을 병합한다.
+///
+/// 병합 규칙:
+/// - documentInfo, paragraphStyles, colors, fonts, fontMetrics: 새 파일 우선
+/// - stories, textFrames, pages, pageItems: ID/index 기준으로 합산 (새 파일 항목 우선)
+/// - renderedTextFrames, renderedFloatingItems: id 기준으로 합산 (새 파일 항목 우선)
+/// - editableTextFrameIds: 합산 후 중복 제거
+///
+/// 변경된 페이지의 항목은 새 파일에, 변경 없는 페이지의 항목은 캐시에 있다.
+pub fn merge_resolved_json(
+    new_path: &Path,
+    cached_cache_key: &str,
+) -> Result<(), String> {
+    let cached_dir = cache_entry_dir(cached_cache_key)
+        .map_err(|e| format!("캐시 디렉토리 조회 실패: {}", e))?;
+    let cached_path = cached_dir.join("resolved.json");
+
+    if !cached_path.exists() {
+        // 캐시에 resolved.json 없으면 병합 불필요
+        return Ok(());
+    }
+
+    let new_content = std::fs::read_to_string(new_path)
+        .map_err(|e| format!("new resolved.json 읽기 실패: {}", e))?;
+    let cached_content = std::fs::read_to_string(&cached_path)
+        .map_err(|e| format!("cached resolved.json 읽기 실패: {}", e))?;
+
+    let mut new_val: serde_json::Value = serde_json::from_str(&new_content)
+        .map_err(|e| format!("new resolved.json 파싱 실패: {}", e))?;
+    let cached_val: serde_json::Value = serde_json::from_str(&cached_content)
+        .map_err(|e| format!("cached resolved.json 파싱 실패: {}", e))?;
+
+    // 배열 필드 병합 헬퍼: new 배열에 없는 ID의 cached 항목을 추가
+    fn merge_array_by_field(
+        new_val: &mut serde_json::Value,
+        cached_val: &serde_json::Value,
+        field: &str,
+        id_key: &str,
+    ) {
+        let new_arr = match new_val.get_mut(field).and_then(|v| v.as_array_mut()) {
+            Some(a) => a,
+            None => return,
+        };
+        let cached_arr = match cached_val.get(field).and_then(|v| v.as_array()) {
+            Some(a) => a,
+            None => return,
+        };
+        // 새 배열의 ID 세트 구축
+        let new_ids: std::collections::HashSet<String> = new_arr
+            .iter()
+            .filter_map(|item| item.get(id_key))
+            .filter_map(|v| match v {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .collect();
+        // cached에만 있는 항목 추가
+        for item in cached_arr {
+            let item_id = item
+                .get(id_key)
+                .and_then(|v| match v {
+                    serde_json::Value::String(s) => Some(s.clone()),
+                    serde_json::Value::Number(n) => Some(n.to_string()),
+                    _ => None,
+                });
+            if let Some(id) = item_id {
+                if !new_ids.contains(&id) {
+                    new_arr.push(item.clone());
+                }
+            }
+        }
+    }
+
+    // pages는 "index" 필드 기준
+    fn merge_pages(new_val: &mut serde_json::Value, cached_val: &serde_json::Value) {
+        let new_arr = match new_val.get_mut("pages").and_then(|v| v.as_array_mut()) {
+            Some(a) => a,
+            None => return,
+        };
+        let cached_arr = match cached_val.get("pages").and_then(|v| v.as_array()) {
+            Some(a) => a,
+            None => return,
+        };
+        let new_indices: std::collections::HashSet<i64> = new_arr
+            .iter()
+            .filter_map(|item| item.get("index").and_then(|v| v.as_i64()))
+            .collect();
+        for item in cached_arr {
+            if let Some(idx) = item.get("index").and_then(|v| v.as_i64()) {
+                if !new_indices.contains(&idx) {
+                    new_arr.push(item.clone());
+                }
+            }
+        }
+    }
+
+    // editableTextFrameIds: 두 배열 합산 후 중복 제거
+    fn merge_editable_ids(new_val: &mut serde_json::Value, cached_val: &serde_json::Value) {
+        let new_arr = match new_val.get_mut("editableTextFrameIds").and_then(|v| v.as_array_mut()) {
+            Some(a) => a,
+            None => return,
+        };
+        let cached_arr = match cached_val.get("editableTextFrameIds").and_then(|v| v.as_array()) {
+            Some(a) => a,
+            None => return,
+        };
+        let existing: std::collections::HashSet<String> = new_arr
+            .iter()
+            .map(|v| v.to_string())
+            .collect();
+        for item in cached_arr {
+            if !existing.contains(&item.to_string()) {
+                new_arr.push(item.clone());
+            }
+        }
+    }
+
+    merge_array_by_field(&mut new_val, &cached_val, "stories", "id");
+    merge_array_by_field(&mut new_val, &cached_val, "textFrames", "id");
+    merge_array_by_field(&mut new_val, &cached_val, "pageItems", "id");
+    merge_array_by_field(&mut new_val, &cached_val, "renderedTextFrames", "id");
+    merge_array_by_field(&mut new_val, &cached_val, "renderedFloatingItems", "id");
+    merge_array_by_field(&mut new_val, &cached_val, "renderedPdfFrames", "id");
+    merge_array_by_field(&mut new_val, &cached_val, "renderedGraphicFrames", "id");
+    merge_array_by_field(&mut new_val, &cached_val, "renderedImageFrames", "id");
+    merge_pages(&mut new_val, &cached_val);
+    merge_editable_ids(&mut new_val, &cached_val);
+
+    let merged = serde_json::to_string(&new_val)
+        .map_err(|e| format!("merged resolved.json 직렬화 실패: {}", e))?;
+    std::fs::write(new_path, merged)
+        .map_err(|e| format!("merged resolved.json 쓰기 실패: {}", e))?;
+
+    eprintln!("[SPEC-030] resolved.json 병합 완료 (캐시: {})", cached_cache_key);
+    Ok(())
+}
