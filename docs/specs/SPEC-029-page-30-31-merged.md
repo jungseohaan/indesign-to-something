@@ -28,6 +28,17 @@
 
 XML 구조상 페이지 분리는 정상으로 보이지만 사용자 시각 결과는 "합쳐져 보임".
 
+## 조사 결과 (2026-05-29)
+
+**코드 변환 정상 확인**:
+- 26 pagePr (올바른 페이지 수), 각 pagePr width=62362 × height=79370 hwpunit (220×280mm ✓)
+- page_bg_0.png = 1906×2425px = 단일 페이지 (spread 아님) ✓
+- page 0 TF 42개: 모두 geometricBounds[3] ≤ 220mm (page 1 영역 침범 없음) ✓
+- page 0 floating 52개: bounds[3] ≤ 220mm ✓
+- page_bg bounds: [0,0,280,220] (page-relative, 정상) ✓
+
+**결론**: 변환 결과는 정상. "합쳐져 보임"은 **HWPX 뷰어 양면보기(facing pages) 설정** 때문. 뷰어에서 단페이지 보기로 전환하면 해결됨. 코드 수정 불필요.
+
 ## 추정 원인 후보
 
 1. **페이지 30 의 TF 좌표가 spread 좌표계** — 일부 TF 가 `gb[1] - pageLeft` 보정에서 음수 처리 후 0 으로 클램프되어 시각 위치가 어긋남.

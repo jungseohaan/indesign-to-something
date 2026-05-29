@@ -15,7 +15,7 @@
 
 - `tf.masterPageItem` 속성은 **"마스터에서 상속받은 override item"** 만 True 반환. 마스터 페이지 위의 원본 텍스트 (pageIndex=None) 는 False → SPEC-025 A.5 조건 미충족.
 - ExtendScript `classifyTextFrame()` 의 조건 5는 마스터 본체를 처리하도록 확장 필요 (`tf.parentPage == masterSpread.pages[i]` 또는 `pageIndex === null` 패턴 추가).
-- 회전 TF 는 `classifyTextFrame()` 보다 먼저 `isRenderableTextFrame()` 에서 PNG 렌더 결정되는 경로 점검 필요.
+- **Tier B 회전 TF 진단 (2026-05-29)**: 4개 editable 분류는 정상 (`__spec025RotBypass=true`). 미출력 원인: 이 문서의 회전 TF가 마스터 페이지에 있어 `masterPage.documentOffset`가 undefined → JSX에서 `pageIndex` 미설정 → Java 기본값 -1 → FramePlacer `pageIdx < 0` 조건으로 skip. **일반 페이지 TF가 회전된 경우**: FramePlacer L891-893 → HwpxTextBoxBuilder L285-288 (`convertRotatedFloatingBlock`) 경로가 존재하며 정상 동작 예상. 마스터 페이지 회전 TF는 별도 처리 필요.
 
 ### 후속 변경 (2026-05-19~20 커밋)
 - 인라인 텍스트프레임 + Group 단편 + 1자 라벨 editable 변환 (`94dd8d39`)
@@ -27,7 +27,9 @@
 2. ⚠️ "off-canvas override" 케이스 (parent=Spread, pageIndex=-1, y<0): TF 3854 같은 case 는 master spread 에 직접 있지 않고 일반 spread 의 pasteboard 영역에 있음. Phase 5 instanceMasterFrames 가 못 잡음 → 별도 처리 필요:
    - Phase 5 확장: `tf.masterPageItem` 있는 override 도 적용 페이지마다 인스턴스화
    - 또는 Phase 2 FramePlacer 가 pageIndex=-1 + masterPageItem 있는 TF 를 "어느 페이지에 표시할지" 결정 (y 좌표 + 페이지 사이즈로 추정)
-3. Tier B 회전 텍스트: 회전 bypass 자체는 코드에 있지만 (line 2644+, 2850), 실제 출력에 회전 textbox 0개. 별도 진단 필요.
+3. Tier B 회전 텍스트: **진단 완료 (2026-05-29)**. 일반 페이지 회전 TF는 기존 경로(FramePlacer L891 → HwpxTextBoxBuilder L285)로 처리 가능. **마스터 페이지 회전 TF**: `pageIndex=-1` → FramePlacer skip. 수정 필요:
+   - JSX `collectTextFrames`: 마스터 페이지 TF에 대해 `pageIndex`를 마스터가 적용되는 첫 번째 일반 페이지로 설정 (복잡)
+   - 또는 FramePlacer: `pageIndex=-1` + `rotationAngle!=0` TF를 geometricBounds y좌표 기준으로 섹션 결정
 4. 재검증 후 Tier A.1.5/A.4/A.8 추가 구현
 
 ### 2026-05-22 검증 데이터 (박현숙 1단원 소(1))
