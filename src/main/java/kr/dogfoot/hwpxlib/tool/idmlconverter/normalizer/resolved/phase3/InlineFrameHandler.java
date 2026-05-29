@@ -893,9 +893,20 @@ public class InlineFrameHandler {
             if (childTf.isInline() && ctx.resolvedData.isEditableTextFrame(childTf.id())) {
                 continue;
             }
-            if (ctx.resolvedData.isEditableTextFrame(childTf.id())
-                    || childTf.isInline()) {
+            if (ctx.resolvedData.isEditableTextFrame(childTf.id())) {
                 return null;
+            }
+            // inline + non-editable: 부모가 badge_group(PNG에 시각이 이미 포함됨)이면 계속 사용.
+            // 아닐 경우 Phase 3 가 이 child TF 를 별도로 처리할 수 있으므로 PNG 폐기.
+            if (childTf.isInline()) {
+                boolean parentIsBadgeGroup = false;
+                for (RenderedGroup cand : ctx.resolvedData.allRenderedTextFrames()) {
+                    if (cand.id() == anchoredObjectId && cand.isBadgeGroup()) {
+                        parentIsBadgeGroup = true;
+                        break;
+                    }
+                }
+                if (!parentIsBadgeGroup) return null;
             }
         }
 
@@ -915,8 +926,10 @@ public class InlineFrameHandler {
                 // 단, badge_group PNG가 사실상 빈 이미지(가시 픽셀 < 10%)인 경우 inline_object PNG 유지.
                 // (badge_group PNG 추출 실패 시 노이즈 픽셀만 남는 현상 방어)
                 RenderedGroup effectiveRg = rg;
-                for (RenderedGroup candidate : ctx.resolvedData.allRenderedFloatingItems()) {
-                    if (candidate.id() == anchoredObjectId && "badge_group".equals(candidate.itemType())
+                // badge_group 은 renderedTextFrames 에 등록됨 (renderedFloatingItems 가 아님)
+                // 항목의 분류는 type 필드(isBadgeGroup)이며, itemType 필드는 별개(null)
+                for (RenderedGroup candidate : ctx.resolvedData.allRenderedTextFrames()) {
+                    if (candidate.id() == anchoredObjectId && candidate.isBadgeGroup()
                             && candidate.file() != null) {
                         File bgFile = new File(ctx.basePath, candidate.file());
                         if (bgFile.exists()) {

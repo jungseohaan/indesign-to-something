@@ -817,7 +817,7 @@ async function _mergeFoldersIntoBatch(
           subfolder_files: [
             ...merged.subfolder_files,
             { folder_path: folder, folder_name: folderName, indd_files: allFromFolder },
-            ...result.subfolder_files.map((sf) => ({ ...sf })),
+            // result.subfolder_files는 allFromFolder에 이미 포함 → 재추가 금지 (중복 방지)
           ],
         };
       }

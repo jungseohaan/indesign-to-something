@@ -222,6 +222,12 @@ public class ASTRunConverter {
             if (domId > 0) {
                 for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
                     if (rg.id() == domId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
+                        // badge_group PNG가 있으면 inline_object(텍스트 없는 blank)보다 우선 → badge_group 경로로 낙하
+                        boolean hasBadgeGroup = false;
+                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup tf : resolvedData.allRenderedTextFrames()) {
+                            if (tf.id() == domId && tf.isBadgeGroup()) { hasBadgeGroup = true; break; }
+                        }
+                        if (hasBadgeGroup) break;
                         // 자손 TextFrame이 텍스트를 가지고 플로팅 텍스트박스로 배치되면
                         // PNG 로드 시 이미지+글상자로 중복됨 → 스킵.
                         if (inlineObjectContainsFloatingTextFrame(domId, resolvedData)) {
@@ -924,6 +930,7 @@ public class ASTRunConverter {
             // 앵커/래핑 속성 복사
             obj.anchoredPosition(ig.anchoredPosition());
             obj.textWrapMode(ig.textWrapMode());
+            obj.keepInline(true); // 테이블 셀에서 floating 추출 금지 (inline에 유지)
 
             System.out.println("[InlineBadge] " + ig.selfId() + " → " + badgeRg.file());
             return obj;

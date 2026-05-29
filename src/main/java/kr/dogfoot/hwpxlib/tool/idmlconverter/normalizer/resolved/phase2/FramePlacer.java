@@ -242,7 +242,8 @@ public final class FramePlacer {
                     boolean _noItemTypeRendered = false;
                     if (!_parentIsRotatedRect && _hasOwnText && _isRendered && !tf.isInline()) {
                         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
-                            if (rt.id() == _domId && rt.itemType() == null) {
+                            // badge_group_child 항목은 itemType()=null 이어도 부모 PNG 가 텍스트를 포함 → 승격 제외
+                            if (rt.id() == _domId && rt.itemType() == null && !rt.isBadgeGroupChild()) {
                                 _noItemTypeRendered = true;
                                 break;
                             }
@@ -674,6 +675,7 @@ public final class FramePlacer {
                         // → PNG 유지 + 텍스트만 투명 오버레이.
                         String _badgeGroupIdStr = String.valueOf(parentBadge.id());
                         int totalShapeDescendantCount = 0;
+                        boolean hasOutlineOnlyShape = false;
                         for (ResolvedPageItem cpi2 : ctx.resolvedData.pageItems()) {
                             if (cpi2 == null || cpi2.id() == null) continue;
                             String t = cpi2.type();
@@ -682,14 +684,20 @@ public final class FramePlacer {
                             String pid2 = cpi2.parentId();
                             int hops2 = 0;
                             while (pid2 != null && hops2 < 5) {
-                                if (_badgeGroupIdStr.equals(pid2)) { totalShapeDescendantCount++; break; }
+                                if (_badgeGroupIdStr.equals(pid2)) {
+                                    totalShapeDescendantCount++;
+                                    // fillTint=0 → 채우기 없음(외곽선만). 구름/scribble 등 PNG 배경 유지 필요.
+                                    if (cpi2.fillTint() == 0) hasOutlineOnlyShape = true;
+                                    break;
+                                }
                                 ResolvedPageItem parent2 = ctx.resolvedData.getPageItem(pid2);
                                 if (parent2 == null) break;
                                 pid2 = parent2.parentId();
                                 hops2++;
                             }
                         }
-                        boolean isDecorativeBadge = isSimpleBadge && totalShapeDescendantCount >= 2;
+                        // fillTint=0 외곽선 도형이 있는 배지 → 단일 자식이라도 PNG 배경이 의미 있으므로 decorative 처리.
+                        boolean isDecorativeBadge = isSimpleBadge && (totalShapeDescendantCount >= 2 || hasOutlineOnlyShape);
                         // (이전: illustrated 배지 _skipIllustratedBadgeChild → 제거됨. PNG 가 텍스트를 더 이상 베이크하지 않음.)
                         if (isDecorativeBadge) {
                             // PNG 유지 (Phase 7 가 배치) + 텍스트만 투명 오버레이 (검색 가능 + 시각 데코 보존).
