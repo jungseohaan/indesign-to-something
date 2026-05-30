@@ -26,6 +26,13 @@ public final class FramePlacer {
         List<ResolvedTextFrame> frames = ctx.resolvedData.textFrames();
 
         for (ResolvedTextFrame tf : frames) {
+            // badge_group_child: Phase 7의 hp:container가 텍스트 오버레이를 포함 → 인라인/비-인라인 무관하게 항상 스킵.
+            {
+                int _bcDomId = -1;
+                try { _bcDomId = Integer.parseInt(tf.id()); } catch (NumberFormatException ignored) {}
+                if (_bcDomId >= 0 && ctx.resolvedData.getBadgeGroupByChildTextFrameIdmlId(
+                        "u" + Integer.toHexString(_bcDomId)) != null) continue;
+            }
             // 인라인 프레임은 Phase 3에서 처리
             // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
             boolean inlineToFloating = false;
