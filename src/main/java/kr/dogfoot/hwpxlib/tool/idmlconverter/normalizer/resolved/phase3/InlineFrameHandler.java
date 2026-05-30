@@ -338,6 +338,11 @@ public class InlineFrameHandler {
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
         if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
 
+        // badge_group PNG 여부를 미리 확인 — textHiddenBeforeExport=true 이면 ExtendScript가
+        // 명시적으로 배지로 분류한 것이므로 자식 TF 텍스트 길이 제한을 적용하지 않는다.
+        RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
+        boolean hasBadgePng = badgeRg != null && badgeRg.file() != null && badgeRg.isTextHiddenBeforeExport();
+
         // 직속 자식 TF 1 개 (inline + 텍스트 있음)
         ResolvedTextFrame childTf = null;
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
@@ -349,8 +354,9 @@ public class InlineFrameHandler {
             if (vt == null) continue;
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) continue;
-            // 너무 긴 텍스트(>=4자) 는 배지가 아닐 가능성 → 제외
-            if (cleaned.length() >= 4) return null;
+            // badge PNG 없는 경우: 너무 긴 텍스트는 배지가 아닐 가능성 → 제외
+            // badge PNG 있는 경우(textHiddenBeforeExport): 길이 무제한 (ExtendScript 확인됨)
+            if (!hasBadgePng && cleaned.length() >= 4) return null;
             if (childTf != null) return null; // 2 개 이상 → tryInlineGroupAsBoxList 가 처리
             childTf = tf;
         }
@@ -419,37 +425,8 @@ public class InlineFrameHandler {
             if (ratio < 0.6) return null;
         }
 
-        // INLINE_BADGE_GROUP: badge PNG(shape only, textHiddenBeforeExport=true) + 텍스트 글상자 오버레이
-        RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
-        if (badgeRg != null && badgeRg.file() != null && badgeRg.isTextHiddenBeforeExport()) {
-            File pngFile = new File(ctx.basePath, badgeRg.file());
-            if (pngFile.exists()) {
-                try {
-                    byte[] pngBytes = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                    ASTInlineObject grpObj = new ASTInlineObject();
-                    grpObj.kind(ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP);
-                    grpObj.width(CoordinateConverter.pointsToHwpunits(w));
-                    grpObj.height(CoordinateConverter.pointsToHwpunits(h));
-                    grpObj.sourceId("u" + Integer.toHexString(anchoredObjectId));
-                    grpObj.imageData(pngBytes);
-                    grpObj.imageFormat("png");
-                    // 텍스트 여백: child TF bounds vs group bounds
-                    ResolvedPageItem childTfItem = ctx.resolvedData.getPageItem(childTf.id());
-                    if (childTfItem != null && childTfItem.geometricBounds() != null
-                            && childTfItem.geometricBounds().length >= 4) {
-                        double[] tfBounds = childTfItem.geometricBounds();
-                        grpObj.textMarginLeft(CoordinateConverter.pointsToHwpunits(Math.max(0, tfBounds[1] - grpBounds[1])));
-                        grpObj.textMarginTop(CoordinateConverter.pointsToHwpunits(Math.max(0, tfBounds[0] - grpBounds[0])));
-                        grpObj.textMarginRight(CoordinateConverter.pointsToHwpunits(Math.max(0, grpBounds[3] - tfBounds[3])));
-                        grpObj.textMarginBottom(CoordinateConverter.pointsToHwpunits(Math.max(0, grpBounds[2] - tfBounds[2])));
-                    }
-                    buildBadgeParagraph(ctx, childTf, grpObj);
-                    grpObj.verticalJustification("CenterAlign");
-                    return grpObj;
-                } catch (java.io.IOException ignored) {}
-            }
-        }
-
+        // INLINE_TEXT_FRAME: 배지 fill color + 텍스트 (hp:container PNG 오버레이 방식은 HWP에서 텍스트 미표시 문제)
+        // hasBadgePng 여부와 무관하게 항상 fill color 기반 INLINE_TEXT_FRAME 사용.
         ASTInlineObject obj = new ASTInlineObject();
         obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
         obj.width(CoordinateConverter.pointsToHwpunits(w));
@@ -461,7 +438,8 @@ public class InlineFrameHandler {
         String fillHex = ctx.resolvedData.resolveColorHex(fillName);
         if (fillHex != null) {
             obj.fillColor(fillHex);
-            obj.fillTint(100);
+            int tint = bgShape.fillTint() > 0 ? (int) bgShape.fillTint() : 100;
+            obj.fillTint(tint);
         } else {
             String strokeName = bgShape.strokeColorName();
             String strokeHex = ctx.resolvedData.resolveColorHex(strokeName);

@@ -504,6 +504,10 @@ public class ResolvedDataReader {
         group.pdfPageIndex(getInt(o, "pdfPageIndex", -1));
         // z-order (InDesign allPageItems 인덱스: 0=앞, 큰 값=뒤)
         group.zOrder(getInt(o, "zOrder", 0));
+        // badge_group: PNG 내보내기 전 TF 텍스트를 숨겼는지 여부
+        if (o.has("textHiddenBeforeExport") && !o.get("textHiddenBeforeExport").isJsonNull()) {
+            group.textHiddenBeforeExport(o.get("textHiddenBeforeExport").getAsBoolean());
+        }
         return group;
     }
 
