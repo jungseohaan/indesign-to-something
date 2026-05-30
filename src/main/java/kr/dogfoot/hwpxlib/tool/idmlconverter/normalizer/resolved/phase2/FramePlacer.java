@@ -78,6 +78,18 @@ public final class FramePlacer {
                             }
                         }
                     }
+                    // 부모 Group이 inline_object → Phase 3가 INLINE_TEXT_FRAME으로 배지 처리 → floating 불필요.
+                    // childIds 빈 경우(배지 PNG가 배경만 포함)에도 부모 경로로 감지.
+                    if (!rendered && domIdInt >= 0) {
+                        ResolvedPageItem _inlPi = ctx.resolvedData.getPageItem(tf.id());
+                        if (_inlPi != null && _inlPi.parentId() != null) {
+                            try {
+                                if (ctx.resolvedData.isInlineObjectId(Integer.parseInt(_inlPi.parentId()))) {
+                                    rendered = true;
+                                }
+                            } catch (NumberFormatException ignored) {}
+                        }
+                    }
                     boolean sharedWithEditable = false;
                     if (tf.storyId() != null) {
                         for (ResolvedTextFrame other : frames) {

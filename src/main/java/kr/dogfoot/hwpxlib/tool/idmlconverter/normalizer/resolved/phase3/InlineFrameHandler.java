@@ -354,9 +354,9 @@ public class InlineFrameHandler {
             if (vt == null) continue;
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) continue;
-            // badge PNG 없는 경우: 너무 긴 텍스트는 배지가 아닐 가능성 → 제외
+            // badge PNG 없는 경우: 단일 라인이면 길이 무관(배지 레이블), 다중 라인이면 제외
             // badge PNG 있는 경우(textHiddenBeforeExport): 길이 무제한 (ExtendScript 확인됨)
-            if (!hasBadgePng && cleaned.length() >= 4) return null;
+            if (!hasBadgePng && tf.lineCount() != 1 && cleaned.length() >= 4) return null;
             if (childTf != null) return null; // 2 개 이상 → tryInlineGroupAsBoxList 가 처리
             childTf = tf;
         }
