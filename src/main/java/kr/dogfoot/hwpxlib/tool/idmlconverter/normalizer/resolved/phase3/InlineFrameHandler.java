@@ -988,13 +988,24 @@ public class InlineFrameHandler {
                         obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(pyPt));
                         double bw = Math.abs(bounds[3] - bounds[1]) * ctx.scaleFactor; // right - left
                         double bh = Math.abs(bounds[2] - bounds[0]) * ctx.scaleFactor; // bottom - top
+                        // GraphicLine: top=bottom (height=0) → strokeWeight를 높이로 사용
+                        boolean isGraphicLine = false;
+                        if (bh < 1.0) {
+                            ResolvedPageItem _lineItem = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
+                            if (_lineItem != null && "GraphicLine".equals(_lineItem.type())) {
+                                isGraphicLine = true;
+                                double sw = _lineItem.strokeWeight();
+                                bh = sw > 0 ? sw : 0.5;
+                            }
+                        }
                         // PNG 비율로 보정 (bounds가 부정확한 경우)
+                        // GraphicLine은 PNG 비율 보정 불필요 — strokeWeight가 실제 높이
                         double pngRatio = (double) img.getWidth() / img.getHeight();
-                        double boundsRatio = bw / bh;
+                        double boundsRatio = bh > 0 ? bw / bh : Double.MAX_VALUE;
                         // bounds 비율과 PNG 비율이 다르면 PNG 비율 기준으로 보정
                         // bounds의 작은 쪽을 기준으로 맞춤 (원본 크기 초과 방지)
                         // null-type inline TF(번호 라벨 등)는 bounds 원본 크기 유지
-                        if (!isNullTypeInline && Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
+                        if (!isNullTypeInline && !isGraphicLine && Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
                             if (pngRatio < 1.0) {
                                 // 세로가 더 긴 PNG → 높이 유지, 폭 축소
                                 bw = bh * pngRatio;
@@ -1008,7 +1019,8 @@ public class InlineFrameHandler {
                         // Phase 7이 floating ASTFigure로 배치하도록 위임.
                         // (예: 주황색 라운드사각형 배경 AR=16 — 텍스트 배경이지 인라인 문자가 아님)
                         // AR=6~7 정도의 라벨 박스(예: "최근 사회·문화적 맥락" 36mm×6mm)는 인라인 유지.
-                        if (bw > bh * 8.0 && bw > 100.0) {
+                        // GraphicLine(인라인 선)은 제외.
+                        if (!isGraphicLine && bw > bh * 8.0 && bw > 100.0) {
                             ctx.inlineObjectsToConvertToFloating.add(anchoredObjectId);
                             return null;
                         }
