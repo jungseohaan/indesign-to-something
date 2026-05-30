@@ -135,7 +135,6 @@ public class ASTToHwpxConverter {
 
         // 순환 의존 해소 (setter 주입)
         paragraphBuilder.setBuilders(textBoxBuilder, tableBuilder, imageBuilder);
-        imageBuilder.setParagraphBuilder(paragraphBuilder);
         ctx.tableBuilderRef = tableBuilder;
 
         // 4. 폰트 등록

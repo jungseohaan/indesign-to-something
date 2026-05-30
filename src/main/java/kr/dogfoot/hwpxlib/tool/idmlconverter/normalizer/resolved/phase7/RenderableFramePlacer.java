@@ -409,7 +409,8 @@ public final class RenderableFramePlacer {
                 }
                 fig.zOrder(hwpxZ);
 
-                // 비-인라인 badge_group: child TF 텍스트 오버레이 수집 → hp:container로 그룹화
+                // 비-인라인 badge_group: child TF 텍스트 → 독립 플로팅 ASTTextFrameBlock으로 오버레이
+                // hp:container 방식 대신 PAPER 절대좌표 텍스트박스(투명 배경)를 배지 PNG 위에 얹는다.
                 if (rt.isBadgeGroup() && rt.childTextFrameIds() != null
                         && rt.childTextFrameIds().length > 0) {
                     double pgTop = 0, pgLeft = 0;
@@ -427,12 +428,13 @@ public final class RenderableFramePlacer {
                         if (cpi == null) continue;
                         double[] cgb = cpi.geometricBounds(); // spread-relative pt (post-normalize)
                         if (cgb == null || cgb.length < 4) continue;
-                        // child를 배지 좌상단 기준 상대 좌표로 변환
-                        double relTopPt = cgb[0] - pgTop - bounds[0];
-                        double relLeftPt = cgb[1] - pgLeft - bounds[1];
-                        double relHPt = Math.abs(cgb[2] - cgb[0]);
-                        double relWPt = Math.abs(cgb[3] - cgb[1]);
-                        // child TF의 story에서 텍스트/폰트 정보 추출
+                        // child TF를 page-relative 절대 좌표로 변환
+                        double txtX = cgb[1] - pgLeft;
+                        double txtY = cgb[0] - pgTop;
+                        double txtW = Math.abs(cgb[3] - cgb[1]);
+                        double txtH = Math.abs(cgb[2] - cgb[0]);
+                        if (txtW <= 0 || txtH <= 0) continue;
+                        // child TF story에서 텍스트/폰트 정보 추출
                         kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame cTf =
                                 ctx.resolvedData.getTextFrame(String.valueOf(childTfId));
                         if (cTf == null || cTf.storyId() == null) continue;
@@ -459,17 +461,30 @@ public final class RenderableFramePlacer {
                         }
                         String oText = sbT.toString().replace("\r","").replace("\n","").trim();
                         if (oText.isEmpty()) continue;
-                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure.BadgeOverlay ov =
-                                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure.BadgeOverlay();
-                        ov.text = oText;
-                        ov.fontFamily = ff;
-                        ov.fontSizeHwpunits = fsHwp;
-                        ov.textColor = tc;
-                        ov.relX = CoordinateConverter.pointsToHwpunits(relLeftPt);
-                        ov.relY = CoordinateConverter.pointsToHwpunits(relTopPt);
-                        ov.relW = Math.max(100L, CoordinateConverter.pointsToHwpunits(relWPt));
-                        ov.relH = Math.max(100L, CoordinateConverter.pointsToHwpunits(relHPt));
-                        fig.addBadgeOverlay(ov);
+                        // 독립 플로팅 텍스트박스: 투명 배경, CENTER 세로 정렬, 배지 PNG보다 높은 z-order
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock overlay =
+                                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock();
+                        overlay.sourceId("badge_text_" + childTfId);
+                        overlay.x(CoordinateConverter.pointsToHwpunits(txtX));
+                        overlay.y(CoordinateConverter.pointsToHwpunits(txtY));
+                        overlay.width(Math.max(100L, CoordinateConverter.pointsToHwpunits(txtW)));
+                        overlay.height(Math.max(100L, CoordinateConverter.pointsToHwpunits(txtH)));
+                        overlay.zOrder(hwpxZ + 1);
+                        overlay.verticalJustification("CENTER_ALIGN");
+                        // inlineToFloating=true → HwpxTextBoxBuilder가 투명 DrawText 경로(hp:tbl 흰 배경 회피) 사용
+                        overlay.inlineToFloating(true);
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph overlayPara =
+                                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph();
+                        overlayPara.alignment("CENTER_ALIGN");
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun overlayRun =
+                                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun();
+                        overlayRun.text(oText);
+                        overlayRun.fontFamily(ff);
+                        overlayRun.fontSizeHwpunits(fsHwp > 0 ? fsHwp : null);
+                        overlayRun.textColor(tc);
+                        overlayPara.addItem(overlayRun);
+                        overlay.addParagraph(overlayPara);
+                        sections.get(pageIdx).addBlock(overlay);
                     }
                 }
 
