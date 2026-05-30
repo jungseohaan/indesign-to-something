@@ -228,8 +228,11 @@ public class InlineFrameHandler {
         }
         if (rectangles.isEmpty()) return null;
 
-        // 각 TF 를 가장 잘 겹치는 Rectangle 과 매칭하여 INLINE_TEXT_FRAME 생성
-        java.util.List<ASTInlineObject> result = new java.util.ArrayList<>();
+        // 각 TF/도형 쌍을 (sortY, sortX, obj) 로 수집한 뒤 정렬
+        java.util.List<double[]> sortKeys = new java.util.ArrayList<>();
+        java.util.List<ASTInlineObject> unsorted = new java.util.ArrayList<>();
+
+        // Phase A: Group 직속 TF → 가장 잘 겹치는 Rectangle 과 매칭
         for (ResolvedTextFrame childTf : childTfs) {
             double[] tfBounds = childTf.geometricBounds();
             if (tfBounds == null || tfBounds.length < 4) continue;
@@ -285,6 +288,8 @@ public class InlineFrameHandler {
                 }
                 if (matchedRect.cornerRadius() > 0) {
                     obj.cornerRadius(matchedRect.cornerRadius());
+                } else {
+                    obj.cornerRadius(h / 2.0);
                 }
             }
 
@@ -308,11 +313,107 @@ public class InlineFrameHandler {
             }
             paraInner.addItem(textRun);
             obj.addParagraph(paraInner);
-            // 박스 안 텍스트는 가운데 정렬
             obj.verticalJustification("CenterAlign");
 
-            result.add(obj);
+            unsorted.add(obj);
+            sortKeys.add(new double[]{elBounds[0], elBounds[1]});
         }
+
+        // Phase B: Group 직속 Rectangle/Oval 자식 중 자체 TF 자식이 있는 "중첩 배지"
+        // (예: Group → Rectangle[주어 oval] → TF["주어"])
+        for (ResolvedPageItem rectPi : ctx.resolvedData.pageItems()) {
+            if (rectPi == null) continue;
+            if (!anchorId.equals(rectPi.parentId())) continue;
+            String rtype = rectPi.type();
+            if (!"Rectangle".equals(rtype) && !"Oval".equals(rtype) && !"Polygon".equals(rtype)) continue;
+            double[] rectBounds = rectPi.geometricBounds();
+            if (rectBounds == null || rectBounds.length < 4) continue;
+            double rw = Math.abs(rectBounds[3] - rectBounds[1]);
+            double rh = Math.abs(rectBounds[2] - rectBounds[0]);
+            if (rw <= 0 || rh <= 0) continue;
+
+            for (ResolvedTextFrame nestedTf : ctx.resolvedData.textFrames()) {
+                ResolvedPageItem nestedPi = ctx.resolvedData.getPageItem(nestedTf.id());
+                if (nestedPi == null || !rectPi.id().equals(nestedPi.parentId())) continue;
+                String vt = nestedTf.frameVisibleText();
+                if (vt == null) continue;
+                String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+                if (cleaned.isEmpty()) continue;
+
+                ASTInlineObject obj = new ASTInlineObject();
+                obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+                obj.width(CoordinateConverter.pointsToHwpunits(rw));
+                obj.height(CoordinateConverter.pointsToHwpunits(rh));
+                try {
+                    obj.sourceId("u" + Integer.toHexString(Integer.parseInt(nestedTf.id())));
+                } catch (NumberFormatException nfe) {
+                    obj.sourceId("u" + nestedTf.id());
+                }
+
+                String strokeName = rectPi.strokeColorName();
+                if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)) {
+                    String hex = ctx.resolvedData.resolveColorHex(strokeName);
+                    if (hex != null) {
+                        obj.strokeColor(hex);
+                        double sw = rectPi.strokeWeight();
+                        if (ctx.scaleFactor > 0) sw = sw / ctx.scaleFactor;
+                        obj.strokeWeight(Math.max(sw, 0.6));
+                    }
+                }
+                String fillName = rectPi.fillColorName();
+                if (fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
+                    String hex = ctx.resolvedData.resolveColorHex(fillName);
+                    if (hex != null) {
+                        obj.fillColor(hex);
+                        obj.fillTint(100);
+                    }
+                }
+                double cr = rectPi.cornerRadius();
+                if (cr > 0) {
+                    obj.cornerRadius(cr);
+                } else {
+                    // resolved.json에 cornerRadius가 없으면 height/2로 pill 형태 근사
+                    // (IDML의 RoundedCorner 속성은 resolved.json에 미포함)
+                    obj.cornerRadius(rh / 2.0);
+                }
+
+                ASTParagraph paraInner = new ASTParagraph();
+                paraInner.alignment("CENTER");
+                ASTTextRun textRun = new ASTTextRun();
+                textRun.text(cleaned);
+                ResolvedStory story = nestedTf.storyId() != null ? ctx.resolvedData.getStory(nestedTf.storyId()) : null;
+                if (story != null && !story.paragraphs().isEmpty()) {
+                    ResolvedParagraph rp = story.paragraphs().get(0);
+                    if (rp.runs() != null && !rp.runs().isEmpty()) {
+                        ResolvedRun rr = rp.runs().get(0);
+                        if (rr.fontFamily() != null) textRun.fontFamily(rr.fontFamily());
+                        if (rr.fontStyle() != null) textRun.fontStyle(rr.fontStyle());
+                        if (rr.fontSize() != null && rr.fontSize() > 0) {
+                            textRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+                        }
+                        if (rr.fillColor() != null) textRun.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+                    }
+                }
+                paraInner.addItem(textRun);
+                obj.addParagraph(paraInner);
+                obj.verticalJustification("CenterAlign");
+
+                unsorted.add(obj);
+                sortKeys.add(new double[]{rectBounds[0], rectBounds[1]});
+                break; // Rectangle 당 배지 TF 하나만
+            }
+        }
+
+        // Y → X 순으로 정렬
+        java.util.List<Integer> indices = new java.util.ArrayList<>();
+        for (int i = 0; i < unsorted.size(); i++) indices.add(i);
+        indices.sort((ia, ib) -> {
+            double[] ka = sortKeys.get(ia), kb = sortKeys.get(ib);
+            if (Math.abs(ka[0] - kb[0]) > 1.0) return Double.compare(ka[0], kb[0]);
+            return Double.compare(ka[1], kb[1]);
+        });
+        java.util.List<ASTInlineObject> result = new java.util.ArrayList<>();
+        for (int idx : indices) result.add(unsorted.get(idx));
 
         return result.size() >= 2 ? result : null;
     }
