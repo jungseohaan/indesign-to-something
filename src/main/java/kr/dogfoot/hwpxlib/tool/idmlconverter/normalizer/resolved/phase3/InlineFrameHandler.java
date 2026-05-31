@@ -3,8 +3,11 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -383,12 +386,14 @@ public class InlineFrameHandler {
                     }
                 }
                 double cr = rectPi.cornerRadius();
+                if (cr <= 0) cr = lookupIdmlShapeCornerRadius(ctx, rectPi.id());
                 if (cr > 0) {
                     obj.cornerRadius(cr);
-                } else {
-                    // resolved.json에 cornerRadius가 없으면 height/2로 pill 형태 근사
-                    // (IDML의 RoundedCorner 속성은 resolved.json에 미포함)
+                } else if ("Oval".equals(rtype)) {
                     obj.cornerRadius(rh / 2.0);
+                } else {
+                    // Rectangle 배경: pill 대신 라운드사각형 근사 (≈17% rounding)
+                    obj.cornerRadius(rh / 6.0);
                 }
 
                 ASTParagraph paraInner = new ASTParagraph();
@@ -466,7 +471,10 @@ public class InlineFrameHandler {
             for (ResolvedPageItem sibling : ctx.resolvedData.pageItems()) {
                 if (sibling == null || !tfParentId.equals(sibling.parentId())) continue;
                 String st = sibling.type();
-                if (!"Rectangle".equals(st) && !"Oval".equals(st) && !"Polygon".equals(st)) continue;
+                boolean isGeoShape = "Rectangle".equals(st) || "Oval".equals(st) || "Polygon".equals(st);
+                boolean isBorderedTf = "TextFrame".equals(st) && sibling.strokeColorName() != null
+                        && !"None".equals(sibling.strokeColorName()) && !"[None]".equals(sibling.strokeColorName());
+                if (!isGeoShape && !isBorderedTf) continue;
                 double[] sb = sibling.geometricBounds();
                 if (sb == null || sb.length < 4) continue;
                 double yOv = Math.min(tfBounds[2], sb[2]) - Math.max(tfBounds[0], sb[0]);
@@ -506,7 +514,15 @@ public class InlineFrameHandler {
                 if (hex != null) { obj.fillColor(hex); obj.fillTint(bestSibling.fillTint()); }
             }
             double cr = bestSibling.cornerRadius();
-            obj.cornerRadius(cr > 0 ? cr : rh / 2.0);
+            if (cr <= 0) cr = lookupIdmlShapeCornerRadius(ctx, bestSibling.id());
+            if (cr > 0) {
+                obj.cornerRadius(cr);
+            } else if ("Oval".equals(bestSibling.type())) {
+                obj.cornerRadius(rh / 2.0);
+            } else {
+                // Rectangle/TextFrame 배경: 라운드사각형 근사 (≈17% rounding)
+                obj.cornerRadius(rh / 6.0);
+            }
 
             ASTParagraph paraInner = new ASTParagraph();
             paraInner.alignment("CENTER");
@@ -1676,6 +1692,28 @@ public class InlineFrameHandler {
             }
         }
         return sb.toString();
+    }
+
+    /** resolved.json에 없는 cornerRadius를 IDML spread의 vectorShapes에서 조회. */
+    private static double lookupIdmlShapeCornerRadius(ResolvedBuildContext ctx, String decimalId) {
+        if (decimalId == null || ctx.idmlDocumentSupplier == null) return 0;
+        if (ctx.ensureIdmlInfra != null) ctx.ensureIdmlInfra.run();
+        IDMLDocument idoc = ctx.idmlDocumentSupplier.get();
+        if (idoc == null) return 0;
+        String hexId;
+        try { hexId = "u" + Integer.toHexString(Integer.parseInt(decimalId)); }
+        catch (NumberFormatException e) { return 0; }
+        for (IDMLSpread spread : idoc.spreads()) {
+            for (IDMLVectorShape shape : spread.vectorShapes()) {
+                if (hexId.equals(shape.selfId())) return shape.cornerRadius();
+            }
+        }
+        for (IDMLSpread master : idoc.masterSpreads().values()) {
+            for (IDMLVectorShape shape : master.vectorShapes()) {
+                if (hexId.equals(shape.selfId())) return shape.cornerRadius();
+            }
+        }
+        return 0;
     }
 
 }
