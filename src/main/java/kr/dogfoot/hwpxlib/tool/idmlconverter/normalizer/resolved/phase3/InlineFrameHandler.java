@@ -293,7 +293,14 @@ public class InlineFrameHandler {
                 if (matchedRect.cornerRadius() > 0) {
                     obj.cornerRadius(matchedRect.cornerRadius());
                 } else {
-                    obj.cornerRadius(h / 2.0);
+                    double crLookup = lookupIdmlShapeCornerRadius(ctx, matchedRect.id());
+                    if (crLookup > 0) {
+                        obj.cornerRadius(crLookup);
+                    } else if ("Oval".equals(matchedRect.type())) {
+                        obj.cornerRadius(h / 2.0);
+                    } else {
+                        obj.cornerRadius(h / 6.0);
+                    }
                 }
             }
 
@@ -855,6 +862,13 @@ public class InlineFrameHandler {
             obj.cornerRadius(hForInline / 2.0);
         } else if (bgShape.cornerRadius() > 0) {
             obj.cornerRadius(bgShape.cornerRadius());
+        } else {
+            double crLookup = lookupIdmlShapeCornerRadius(ctx, bgShape.id());
+            if (crLookup > 0) {
+                obj.cornerRadius(crLookup);
+            } else {
+                obj.cornerRadius(hForInline / 6.0);
+            }
         }
 
         buildBadgeParagraph(ctx, childTf, obj);

@@ -237,7 +237,10 @@ public class ASTRunConverter {
                     }
                 }
             }
-            if (badgeRg != null && badgeRg.file() != null) {
+            // textHiddenBeforeExport=true → 배지 PNG에 텍스트가 없음 (신 파이프라인 InlineFrameHandler가
+            // 처리해야 하지만, 테이블 셀은 ASTTableConverter 경유로 여기 도달.
+            // 이 경우 badge PNG 대신 inline_object PNG(텍스트 포함)를 사용하도록 스킵.
+            if (badgeRg != null && badgeRg.file() != null && !badgeRg.isTextHiddenBeforeExport()) {
                 ASTInlineObject badgeObj = loadBadgeImage(ig, badgeRg, resolvedData);
                 if (badgeObj != null) {
                     para.addItem(badgeObj);
