@@ -244,6 +244,31 @@ public class HwpxTextBoxBuilder {
     }
 
     /**
+     * 배경 PNG 바이트로 INLINE_TEXT_FRAME 의 fillBrush 설정.
+     * winBrush 대신 imgBrush(TOTAL 모드)를 사용하여 섹션 배지 배경을 PNG로 표시.
+     * @return 등록 성공 여부
+     */
+    boolean setupTextBoxImgBrush(Rectangle rect, byte[] pngData) {
+        if (pngData == null || pngData.length == 0) return false;
+        try {
+            String itemId = ImageInserter.registerImage(ctx.hwpxFile, pngData, "png");
+            if (itemId == null) return false;
+            rect.createFillBrush();
+            rect.fillBrush().createImgBrush();
+            rect.fillBrush().imgBrush().modeAnd(ImageBrushMode.TOTAL);
+            rect.fillBrush().imgBrush().createImg();
+            rect.fillBrush().imgBrush().img()
+                    .binaryItemIDRefAnd(itemId)
+                    .brightAnd(0)
+                    .contrastAnd(0)
+                    .effectAnd(ImageEffect.REAL_PIC);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
      * IDML verticalJustification → HWPX VerticalAlign2 매핑
      */
     VerticalAlign2 mapVerticalJustification(String vj) {
@@ -674,47 +699,60 @@ public class HwpxTextBoxBuilder {
 
         long halfWidth = containerWidth / 2;
 
-        // 모든 단락에 걸쳐 좁은 인라인 TextFrame을 수집
-        // (InDesign에서 각 인라인 TF가 별도 단락에 배치되는 경우가 많음)
-        // 단, 작은 정사각형 박스 (자모 배지 등 ≤4000 hwpu) 는 다단 layout 이 아니라 데코 박스 → 제외
-        java.util.List<ASTInlineObject> narrowFrames = new java.util.ArrayList<>();
+        // 단락별로 독립 처리: 다른 행의 배지가 같이 묶여 폭이 잘못 계산되는 것을 방지
+        // (다중 행 rightITF에서 각 행의 배지+텍스트가 별도 단락으로 있을 때)
         for (ASTParagraph para : paragraphs) {
+            java.util.List<ASTInlineObject> narrowFrames = new java.util.ArrayList<>();
+            java.util.List<ASTInlineObject> wideFrames = new java.util.ArrayList<>();
+            long totalWidth = 0;
             for (ASTInlineItem item : para.items()) {
                 if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
                     ASTInlineObject obj = (ASTInlineObject) item;
                     if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
-                            && obj.width() < halfWidth
                             && obj.height() >= ConverterConstants.MIN_TEXT_BOX_HEIGHT
                             // 데코 박스 (예: 자모 ㅍㅎㅂㅅ 배지) 는 작고 정사각형에 가까움 → 다단 후보 아님
                             && !(obj.width() < 4000 && obj.height() < 4000)) {
-                        narrowFrames.add(obj);
+                        if (obj.width() < halfWidth) {
+                            narrowFrames.add(obj);
+                        } else {
+                            wideFrames.add(obj);
+                        }
+                        totalWidth += obj.width();
                     }
                 }
             }
-        }
-        if (narrowFrames.size() < 2) return;
 
-        // 한 행에 배치할 프레임 수 추정
-        long totalOrigWidth = 0;
-        for (ASTInlineObject f : narrowFrames) {
-            totalOrigWidth += f.width();
-        }
-        int framesPerRow;
-        if (totalOrigWidth <= containerWidth) {
-            framesPerRow = narrowFrames.size();
-        } else {
-            long avgWidth = totalOrigWidth / narrowFrames.size();
-            framesPerRow = Math.max(2, (int) (containerWidth / avgWidth));
-        }
-
-        long equalWidth = containerWidth * 95 / 100 / framesPerRow;
-        for (ASTInlineObject obj : narrowFrames) {
-            obj.width(equalWidth);
-        }
-        // 좌우 마진 제거 (줄바꿈 방지)
-        for (ASTParagraph para : paragraphs) {
-            para.leftMargin(0L);
-            para.rightMargin(0L);
+            if (narrowFrames.size() >= 2) {
+                // 다단 배지(가/나 등): 좁은 프레임들을 균등 분배
+                long totalNarrow = 0;
+                for (ASTInlineObject f : narrowFrames) totalNarrow += f.width();
+                int framesPerRow;
+                if (totalNarrow <= containerWidth) {
+                    framesPerRow = narrowFrames.size();
+                } else {
+                    long avgWidth = totalNarrow / narrowFrames.size();
+                    framesPerRow = Math.max(2, (int) (containerWidth / avgWidth));
+                }
+                long equalWidth = containerWidth * 95 / 100 / framesPerRow;
+                for (ASTInlineObject obj : narrowFrames) {
+                    obj.width(equalWidth);
+                }
+                para.leftMargin(0L);
+                para.rightMargin(0L);
+            } else if (narrowFrames.size() == 1 && !wideFrames.isEmpty()
+                    && totalWidth > containerWidth) {
+                // 배지(narrow) + 텍스트(wide) 패턴: 텍스트 폭이 컨테이너를 초과 → 텍스트 폭 축소
+                long narrowSum = 0;
+                for (ASTInlineObject f : narrowFrames) narrowSum += f.width();
+                long availableForWide = containerWidth * 95 / 100 - narrowSum;
+                if (availableForWide > 0) {
+                    // wide 프레임이 여러 개면 균등 분배
+                    long wideEach = availableForWide / wideFrames.size();
+                    for (ASTInlineObject obj : wideFrames) {
+                        obj.width(wideEach);
+                    }
+                }
+            }
         }
     }
 

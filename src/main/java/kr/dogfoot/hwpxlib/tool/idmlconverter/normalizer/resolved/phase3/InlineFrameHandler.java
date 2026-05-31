@@ -193,7 +193,8 @@ public class InlineFrameHandler {
             if (cleaned.isEmpty()) continue;
             childTfs.add(tf);
         }
-        if (childTfs.size() < 2) return null;
+        // Phase B/C가 중첩 배지를 추가할 수 있으므로 직속 TF 수로 조기 종료하지 않음
+        // 최종 result.size() < 2 이면 null 반환 (아래)
 
         // 읽기 순서 (Y → X) 정렬
         childTfs.sort((a, b) -> {
@@ -283,7 +284,7 @@ public class InlineFrameHandler {
                     String hex = ctx.resolvedData.resolveColorHex(fillName);
                     if (hex != null) {
                         obj.fillColor(hex);
-                        obj.fillTint(100);
+                        obj.fillTint(matchedRect.fillTint());
                     }
                 }
                 if (matchedRect.cornerRadius() > 0) {
@@ -316,16 +317,29 @@ public class InlineFrameHandler {
             obj.verticalJustification("CenterAlign");
 
             unsorted.add(obj);
-            sortKeys.add(new double[]{elBounds[0], elBounds[1]});
+            // top-Y 대신 center-Y: 높이가 다른 아이템이 같은 행에 수직 정렬될 때 별도 row로 분리 방지
+            double centerYA = (elBounds[0] + elBounds[2]) / 2.0;
+            sortKeys.add(new double[]{centerYA, elBounds[1]});
         }
 
-        // Phase B: Group 직속 Rectangle/Oval 자식 중 자체 TF 자식이 있는 "중첩 배지"
-        // (예: Group → Rectangle[주어 oval] → TF["주어"])
+        // Phase B: Group 후손 Rectangle/Oval 중 TF 자식이 있는 "중첩 배지"
+        // (예: Group → ... → Rectangle → TF["관형어"]) — 최대 5 hop 깊이 허용
         for (ResolvedPageItem rectPi : ctx.resolvedData.pageItems()) {
             if (rectPi == null) continue;
-            if (!anchorId.equals(rectPi.parentId())) continue;
             String rtype = rectPi.type();
             if (!"Rectangle".equals(rtype) && !"Oval".equals(rtype) && !"Polygon".equals(rtype)) continue;
+            // rectPi가 anchorId의 후손인지 확인 (최대 5 hop)
+            {
+                String curP = rectPi.parentId();
+                boolean found = false;
+                for (int h = 0; h < 5 && curP != null; h++) {
+                    if (anchorId.equals(curP)) { found = true; break; }
+                    ResolvedPageItem nxt = ctx.resolvedData.getPageItem(curP);
+                    if (nxt == null) break;
+                    curP = nxt.parentId();
+                }
+                if (!found) continue;
+            }
             double[] rectBounds = rectPi.geometricBounds();
             if (rectBounds == null || rectBounds.length < 4) continue;
             double rw = Math.abs(rectBounds[3] - rectBounds[1]);
@@ -365,7 +379,7 @@ public class InlineFrameHandler {
                     String hex = ctx.resolvedData.resolveColorHex(fillName);
                     if (hex != null) {
                         obj.fillColor(hex);
-                        obj.fillTint(100);
+                        obj.fillTint(rectPi.fillTint());
                     }
                 }
                 double cr = rectPi.cornerRadius();
@@ -399,9 +413,127 @@ public class InlineFrameHandler {
                 obj.verticalJustification("CenterAlign");
 
                 unsorted.add(obj);
-                sortKeys.add(new double[]{rectBounds[0], rectBounds[1]});
+                // top-Y 대신 center-Y: Phase A/C와 동일 기준으로 row 그룹핑
+                double centerYB = (rectBounds[0] + rectBounds[2]) / 2.0;
+                sortKeys.add(new double[]{centerYB, rectBounds[1]});
                 break; // Rectangle 당 배지 TF 하나만
             }
+        }
+
+        // Phase C: descendant Group 직속 TF 중, 같은 Group 안에 배경 Rect/Oval이 있는 경우
+        // (예: Group 18558 → TF "체언..." + sibling Oval 18559)
+        // Phase A/B에서 이미 처리된 sourceId 는 건너뜀
+        java.util.Set<String> coveredSourceIds = new java.util.HashSet<>();
+        for (ASTInlineObject covObj : unsorted) {
+            if (covObj.sourceId() != null) coveredSourceIds.add(covObj.sourceId());
+        }
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            ResolvedPageItem tfPi = ctx.resolvedData.getPageItem(tf.id());
+            if (tfPi == null) continue;
+            String tfParentId = tfPi.parentId();
+            if (tfParentId == null || anchorId.equals(tfParentId)) continue; // Phase A 가 처리
+            ResolvedPageItem parentPi = ctx.resolvedData.getPageItem(tfParentId);
+            if (parentPi == null || !"Group".equals(parentPi.type())) continue; // 부모가 Group 이어야 함
+
+            // 부모 Group 이 anchor 의 후손인지 확인 (최대 5 hop)
+            String curP = tfParentId;
+            boolean inGroup = false;
+            for (int h = 0; h < 5 && curP != null; h++) {
+                if (anchorId.equals(curP)) { inGroup = true; break; }
+                ResolvedPageItem nxt = ctx.resolvedData.getPageItem(curP);
+                if (nxt == null) break;
+                curP = nxt.parentId();
+            }
+            if (!inGroup) continue;
+
+            // visible text 확인
+            String vt = tf.frameVisibleText();
+            if (vt == null) continue;
+            String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            if (cleaned.isEmpty()) continue;
+
+            // 이미 Phase A/B 에서 처리된 TF 이면 skip
+            String tfSourceId;
+            try { tfSourceId = "u" + Integer.toHexString(Integer.parseInt(tf.id())); }
+            catch (NumberFormatException e) { tfSourceId = "u" + tf.id(); }
+            if (coveredSourceIds.contains(tfSourceId)) continue;
+
+            // 같은 부모 Group 안에서 가장 잘 겹치는 Rect/Oval 찾기
+            double[] tfBounds = tf.geometricBounds();
+            if (tfBounds == null || tfBounds.length < 4) continue;
+            ResolvedPageItem bestSibling = null;
+            double bestOverlap = 0;
+            for (ResolvedPageItem sibling : ctx.resolvedData.pageItems()) {
+                if (sibling == null || !tfParentId.equals(sibling.parentId())) continue;
+                String st = sibling.type();
+                if (!"Rectangle".equals(st) && !"Oval".equals(st) && !"Polygon".equals(st)) continue;
+                double[] sb = sibling.geometricBounds();
+                if (sb == null || sb.length < 4) continue;
+                double yOv = Math.min(tfBounds[2], sb[2]) - Math.max(tfBounds[0], sb[0]);
+                double xOv = Math.min(tfBounds[3], sb[3]) - Math.max(tfBounds[1], sb[1]);
+                if (yOv > 0 && xOv > 0) {
+                    double overlap = yOv * xOv;
+                    if (overlap > bestOverlap) { bestOverlap = overlap; bestSibling = sibling; }
+                }
+            }
+            if (bestSibling == null) continue;
+
+            // INLINE_TEXT_FRAME 생성 (sibling 도형 사용)
+            double[] elBounds = bestSibling.geometricBounds();
+            double rw = Math.abs(elBounds[3] - elBounds[1]);
+            double rh = Math.abs(elBounds[2] - elBounds[0]);
+            if (rw <= 0 || rh <= 0) continue;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+            obj.width(CoordinateConverter.pointsToHwpunits(rw));
+            obj.height(CoordinateConverter.pointsToHwpunits(rh));
+            obj.sourceId(tfSourceId);
+
+            String strokeName = bestSibling.strokeColorName();
+            if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)) {
+                String hex = ctx.resolvedData.resolveColorHex(strokeName);
+                if (hex != null) {
+                    obj.strokeColor(hex);
+                    double sw = bestSibling.strokeWeight();
+                    if (ctx.scaleFactor > 0) sw = sw / ctx.scaleFactor;
+                    obj.strokeWeight(Math.max(sw, 0.6));
+                }
+            }
+            String fillName = bestSibling.fillColorName();
+            if (fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
+                String hex = ctx.resolvedData.resolveColorHex(fillName);
+                if (hex != null) { obj.fillColor(hex); obj.fillTint(bestSibling.fillTint()); }
+            }
+            double cr = bestSibling.cornerRadius();
+            obj.cornerRadius(cr > 0 ? cr : rh / 2.0);
+
+            ASTParagraph paraInner = new ASTParagraph();
+            paraInner.alignment("CENTER");
+            ASTTextRun textRun = new ASTTextRun();
+            textRun.text(cleaned);
+            ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+            if (story != null && !story.paragraphs().isEmpty()) {
+                ResolvedParagraph rp = story.paragraphs().get(0);
+                if (rp.runs() != null && !rp.runs().isEmpty()) {
+                    ResolvedRun rr = rp.runs().get(0);
+                    if (rr.fontFamily() != null) textRun.fontFamily(rr.fontFamily());
+                    if (rr.fontStyle() != null) textRun.fontStyle(rr.fontStyle());
+                    if (rr.fontSize() != null && rr.fontSize() > 0) {
+                        textRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+                    }
+                    if (rr.fillColor() != null) textRun.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+                }
+            }
+            paraInner.addItem(textRun);
+            obj.addParagraph(paraInner);
+            obj.verticalJustification("CenterAlign");
+
+            unsorted.add(obj);
+            // top-Y 대신 center-Y 사용: 높이가 다른 아이템(텍스트 컨테이너 vs 배지)이
+            // 같은 행에 있어도 top-Y 차이로 별도 row group으로 분리되는 문제 방지
+            double centerY = (elBounds[0] + elBounds[2]) / 2.0;
+            sortKeys.add(new double[]{centerY, elBounds[1]});
         }
 
         // Y → X 순으로 정렬
@@ -413,9 +545,160 @@ public class InlineFrameHandler {
             return Double.compare(ka[1], kb[1]);
         });
         java.util.List<ASTInlineObject> result = new java.util.ArrayList<>();
-        for (int idx : indices) result.add(unsorted.get(idx));
+        java.util.List<double[]> resultKeys = new java.util.ArrayList<>();
+        for (int idx : indices) {
+            result.add(unsorted.get(idx));
+            resultKeys.add(sortKeys.get(idx));
+        }
 
-        return result.size() >= 2 ? result : null;
+        if (result.size() < 2) return null;
+
+        // Y 좌표 기준 row 그룹핑 (2pt tolerance)
+        // 같은 Y 행의 배지+설명을 outer container 의 단일 단락에 묶어 한 줄에 배치
+        java.util.List<java.util.List<Integer>> rowGroups = new java.util.ArrayList<>();
+        java.util.List<Integer> currentGroup = new java.util.ArrayList<>();
+        double currentGroupY = resultKeys.get(0)[0];
+        currentGroup.add(0);
+        for (int i = 1; i < result.size(); i++) {
+            double y = resultKeys.get(i)[0];
+            if (Math.abs(y - currentGroupY) <= 2.0) {
+                currentGroup.add(i);
+            } else {
+                rowGroups.add(currentGroup);
+                currentGroup = new java.util.ArrayList<>();
+                currentGroup.add(i);
+                currentGroupY = y;
+            }
+        }
+        rowGroups.add(currentGroup);
+
+        // row 그룹이 1개뿐이면 flat 리스트 반환 (기존 단일-행 배지 동작 유지)
+        if (rowGroups.size() < 2) return result;
+
+        // Group bounds 로 outer container 크기 설정
+        ResolvedPageItem groupPi = ctx.resolvedData.getPageItem(anchorId);
+        double outerW = 0, outerH = 0;
+        double groupXMin = 0;
+        if (groupPi != null) {
+            double[] gb = groupPi.geometricBounds();
+            if (gb != null && gb.length >= 4) {
+                outerW = Math.abs(gb[3] - gb[1]);
+                outerH = Math.abs(gb[2] - gb[0]);
+                groupXMin = gb[1];
+            }
+        }
+        if (outerW <= 0) outerW = 100;
+        if (outerH <= 0) outerH = 50;
+
+        // 섹션 배지 감지: X_min 이 Group 의 X_min 에 근접 (5mm 이내)
+        // 주성분/부속성분/독립성분 같은 좌측 레이블 배지를 다른 배지들보다 먼저 배치
+        java.util.List<Integer> sectionBadgeIndices = new java.util.ArrayList<>();
+        java.util.List<java.util.List<Integer>> regularRowGroups = new java.util.ArrayList<>();
+        for (java.util.List<Integer> rowGroup : rowGroups) {
+            java.util.List<Integer> regularInRow = new java.util.ArrayList<>();
+            for (int ri : rowGroup) {
+                double itemXMin = resultKeys.get(ri)[1];
+                if (Math.abs(itemXMin - groupXMin) < 5.0) {
+                    sectionBadgeIndices.add(ri);
+                } else {
+                    regularInRow.add(ri);
+                }
+            }
+            if (!regularInRow.isEmpty()) regularRowGroups.add(regularInRow);
+        }
+
+        // 섹션 배지에 badge_group PNG(textHiddenBeforeExport=true)가 있으면 imageFillData 설정
+        if (!sectionBadgeIndices.isEmpty()) {
+            RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
+            boolean hasBgPng = badgeRg != null && badgeRg.file() != null && badgeRg.isTextHiddenBeforeExport();
+            if (hasBgPng) {
+                byte[] pngBytes = null;
+                try {
+                    File bgFile = new File(ctx.basePath, badgeRg.file());
+                    if (bgFile.exists()) pngBytes = java.nio.file.Files.readAllBytes(bgFile.toPath());
+                } catch (Exception ignored) {}
+                if (pngBytes != null && pngBytes.length > 0) {
+                    for (int ri : sectionBadgeIndices) {
+                        result.get(ri).imageFillData(pngBytes);
+                        result.get(ri).strokeColor(null); // PNG가 배경을 담당 → Java stroke 불필요
+                    }
+                }
+            }
+        }
+
+        // 모든 항목이 섹션 배지로 분류된 경우 (regularRowGroups 비어 있음) → flat 반환
+        if (regularRowGroups.isEmpty()) return result;
+
+        long totalW = CoordinateConverter.pointsToHwpunits(outerW);
+        long totalH = CoordinateConverter.pointsToHwpunits(outerH);
+
+        // regularRowGroups의 첫 번째~두 번째 rowGroup Y 좌표 차로 원본 행간 계산
+        // 결과가 있는 경우에만 사용, 없으면 0 (기본값 유지)
+        int rowSpacingHwpunit = computeRowSpacing(regularRowGroups, resultKeys);
+
+        if (!sectionBadgeIndices.isEmpty()) {
+            // 2-column: 섹션 배지(LEFT ITF) | 나머지(RIGHT ITF)
+            // StoryConverter 가 두 ITF 를 같은 단락에 추가 → 나란히 배치
+            sectionBadgeIndices.sort((ia, ib) -> Double.compare(resultKeys.get(ia)[1], resultKeys.get(ib)[1]));
+
+            long sectionBadgeW = 0;
+            for (int ri : sectionBadgeIndices) {
+                sectionBadgeW = Math.max(sectionBadgeW, result.get(ri).width());
+            }
+
+            // LEFT ITF: 섹션 배지
+            ASTInlineObject leftITF = new ASTInlineObject();
+            leftITF.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+            leftITF.width(sectionBadgeW);
+            leftITF.height(totalH);
+            leftITF.sourceId("u" + Integer.toHexString(anchoredObjectId) + "_sb");
+            leftITF.verticalJustification("CenterAlign");
+            ASTParagraph sbPara = new ASTParagraph();
+            sbPara.alignment("CENTER");
+            for (int ri : sectionBadgeIndices) sbPara.addItem(result.get(ri));
+            leftITF.addParagraph(sbPara);
+
+            // RIGHT ITF: 나머지 행 (배지 + 설명)
+            long rightW = Math.max(totalW - sectionBadgeW, 3000L);
+            ASTInlineObject rightITF = new ASTInlineObject();
+            rightITF.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+            rightITF.width(rightW);
+            rightITF.height(totalH);
+            rightITF.sourceId("u" + Integer.toHexString(anchoredObjectId));
+            for (java.util.List<Integer> rowGroup : regularRowGroups) {
+                rowGroup.sort((ia, ib) -> Double.compare(resultKeys.get(ia)[1], resultKeys.get(ib)[1]));
+                ASTParagraph rowPara = new ASTParagraph();
+                if (rowSpacingHwpunit > 0) {
+                    rowPara.lineSpacing(rowSpacingHwpunit);
+                    rowPara.lineSpacingType("fixed");
+                }
+                for (int ri : rowGroup) rowPara.addItem(result.get(ri));
+                rightITF.addParagraph(rowPara);
+            }
+
+            java.util.List<ASTInlineObject> twoCol = new java.util.ArrayList<>();
+            twoCol.add(leftITF);
+            twoCol.add(rightITF);
+            return twoCol;
+        }
+
+        // 섹션 배지 없음 → 단일 outer container
+        ASTInlineObject outer = new ASTInlineObject();
+        outer.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        outer.width(totalW);
+        outer.height(totalH);
+        outer.sourceId("u" + Integer.toHexString(anchoredObjectId));
+        for (java.util.List<Integer> rowGroup : regularRowGroups) {
+            rowGroup.sort((ia, ib) -> Double.compare(resultKeys.get(ia)[1], resultKeys.get(ib)[1]));
+            ASTParagraph rowPara = new ASTParagraph();
+            if (rowSpacingHwpunit > 0) {
+                rowPara.lineSpacing(rowSpacingHwpunit);
+                rowPara.lineSpacingType("fixed");
+            }
+            for (int ri : rowGroup) rowPara.addItem(result.get(ri));
+            outer.addParagraph(rowPara);
+        }
+        return java.util.Collections.singletonList(outer);
     }
 
     /**
@@ -969,6 +1252,21 @@ public class InlineFrameHandler {
         run.text(sb.toString());
         run.underline(true);
         return run;
+    }
+
+    /**
+     * regularRowGroups 의 첫 두 행 간 Y 좌표 차이로 원본 행간(pt→hwpunit)을 계산.
+     * 행이 1개 이하이거나 gap이 2pt 미만이면 0 반환 (기본 행간 사용).
+     */
+    private static int computeRowSpacing(
+            java.util.List<java.util.List<Integer>> regularRowGroups,
+            java.util.List<double[]> resultKeys) {
+        if (regularRowGroups.size() < 2) return 0;
+        double y0 = resultKeys.get(regularRowGroups.get(0).get(0))[0];
+        double y1 = resultKeys.get(regularRowGroups.get(1).get(0))[0];
+        double gap = Math.abs(y1 - y0);
+        if (gap < 2.0) return 0;
+        return (int) CoordinateConverter.pointsToHwpunits(gap);
     }
 
     private static boolean isNoneColor(String c) {
