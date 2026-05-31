@@ -484,7 +484,8 @@ public final class FramePlacer {
                             if (_otherText == null || _otherText.isEmpty()) continue;
                             String _otherClean = _otherText.replace("￼", "").replace("\r", "").replace("\n", "").trim();
                             if (_otherClean.length() < 3) continue;
-                            if (paraText.contains(_otherClean)) {
+                            if (paraText.contains(_otherClean)
+                                    && _otherClean.length() * 2 >= paraText.length()) {
                                 if (excludedParaIndices == null) excludedParaIndices = new java.util.HashSet<>();
                                 excludedParaIndices.add(pi + tf.paragraphStart());
                                 break;

@@ -281,7 +281,6 @@ public final class WrapPhase5 {
                 double[] gb = rtf.geometricBounds();
                 double frameW = gb[3] - gb[1];
                 System.err.println("[WrapPhase5] tf=" + domId + " sourceId=" + tfb.sourceId() + " frameW=" + String.format("%.1f", frameW) + " lines=" + lines.size() + " maxConsR=" + maxConsecutive);
-
                 int charOffset = 0;
                 for (int gi = 0; gi < groups.size(); gi++) {
                     List<ResolvedTextFrame.ComposedLine> group = groups.get(gi);
