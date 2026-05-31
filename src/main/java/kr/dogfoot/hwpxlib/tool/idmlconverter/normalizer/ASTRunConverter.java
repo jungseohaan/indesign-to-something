@@ -213,6 +213,14 @@ public class ASTRunConverter {
                     }
                     return;
                 }
+                // 단일 배지 (배경 도형 + TF 1개): INLINE_TEXT_FRAME으로 변환
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject singleBadge =
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                .tryInlineGroupAsSingleBadge(tmpCtx, boxDomId);
+                if (singleBadge != null) {
+                    para.addItem(singleBadge);
+                    return;
+                }
             }
         }
         // DOM id 파싱 (이하 badge_group / inline_object 판별에 공통 사용)

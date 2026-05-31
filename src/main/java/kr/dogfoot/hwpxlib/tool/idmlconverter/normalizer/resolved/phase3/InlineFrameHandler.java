@@ -735,7 +735,7 @@ public class InlineFrameHandler {
      * - Group 직속 자식 중 inline + visible-text TextFrame 이 정확히 1 개
      * - Group 후손 중 fillColor 가 있는 Rectangle/Oval/Polygon 이 1 개 이상
      */
-    static ASTInlineObject tryInlineGroupAsSingleBadge(ResolvedBuildContext ctx, int anchoredObjectId) {
+    public static ASTInlineObject tryInlineGroupAsSingleBadge(ResolvedBuildContext ctx, int anchoredObjectId) {
         String anchorId = String.valueOf(anchoredObjectId);
         // AboveLine 앵커는 floating badge → Phase 7 이 처리, 인라인 변환 불가
         if (ctx.aboveLineAnchoredIds.contains(anchoredObjectId)) return null;
