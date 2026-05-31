@@ -273,6 +273,7 @@ public class ResolvedDataReader {
         }
 
         tf.onHiddenLayer(getBool(o, "onHiddenLayer", false));
+        tf.isMasterInstance(getBool(o, "isMasterInstance", false));
 
         return tf;
     }

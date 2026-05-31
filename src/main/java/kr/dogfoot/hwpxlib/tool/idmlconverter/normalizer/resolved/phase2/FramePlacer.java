@@ -213,6 +213,9 @@ public final class FramePlacer {
             // 숨김 레이어 TF (onHiddenLayer=true) → 변환 불필요
             if (tf.onHiddenLayer()) continue;
 
+            // 마스터 인스턴스 TF가 composed되지 않은 경우 (lineCount=0) → 해당 페이지에서 override됨 → skip
+            if (tf.isMasterInstance() && tf.lineCount() == 0) continue;
+
             // 다른 TextFrame 안에 중첩된 프레임은 건너뜀 (부모가 배경에 포함)
             if (!inlineToFloating && isNestedInTextFrame(ctx, tf)) {
                 continue;

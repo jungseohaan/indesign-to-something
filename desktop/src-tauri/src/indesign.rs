@@ -334,6 +334,7 @@ end using terms from"#,
 
                 // SPEC-030 B.4: phase별 stale 타임아웃 갱신
                 current_phase_stale = match step {
+                    "close_docs" => 60,
                     "open" => 600,
                     "idml" => 120,
                     // PDF 내보내기는 48페이지 복잡한 파일에서 3~4분 소요 가능
@@ -344,6 +345,7 @@ end using terms from"#,
                 };
 
                 let display = match step {
+                    "close_docs" => "이전 문서 정리 중...".to_string(),
                     "open" => "문서 열기 중...".to_string(),
                     "idml" if total > 0 => format!("IDML 내보내기 중... ({}페이지)", total),
                     "idml" => "IDML 내보내기 중...".to_string(),
@@ -370,18 +372,19 @@ end using terms from"#,
                     last_progress_at = std::time::Instant::now();
                     last_heartbeat_at = std::time::Instant::now();
                     let phase = match step {
-                        "open" => "launching",
+                        "open" | "close_docs" => "launching",
                         "pdf" => "checking",
                         _ => "exporting",
                     };
                     emit_progress(app, phase, &display);
-                } else if matches!(step, "pdf" | "idml" | "open")
+                } else if matches!(step, "pdf" | "idml" | "open" | "close_docs")
                     && last_heartbeat_at.elapsed().as_secs() >= 10
                 {
                     let stale = last_progress_at.elapsed().as_secs();
                     let heartbeat_msg = match step {
                         "pdf" => format!("PDF 프리뷰 생성 중... ({}초 경과)", stale),
                         "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
+                        "close_docs" => format!("이전 문서 정리 중... ({}초 경과)", stale),
                         "open" => format!("문서 열기 중... ({}초 경과)", stale),
                         _ => display.clone(),
                     };
@@ -582,10 +585,11 @@ end using terms from"#,
             } else if last_heartbeat_at.elapsed().as_secs() >= 10 {
                 if let Ok(prog) = serde_json::from_str::<serde_json::Value>(&content) {
                     let step = prog.get("step").and_then(|v| v.as_str()).unwrap_or("");
-                    if matches!(step, "pdf" | "idml" | "open") {
+                    if matches!(step, "pdf" | "idml" | "open" | "close_docs") {
                         let heartbeat_msg = match step {
                             "pdf" => format!("PDF 프리뷰 생성 중... ({}초 경과)", stale),
                             "idml" => format!("IDML 내보내기 중... ({}초 경과)", stale),
+                            "close_docs" => format!("이전 문서 정리 중... ({}초 경과)", stale),
                             "open" => format!("문서 열기 중... ({}초 경과)", stale),
                             _ => format!("추출 중... ({}초 경과)", stale),
                         };

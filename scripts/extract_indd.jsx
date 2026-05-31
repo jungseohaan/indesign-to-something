@@ -573,9 +573,13 @@ function main(args) {
         app.scriptPreferences.enableRedraw = false;
         app.linkingPreferences.checkLinksAtOpen = false;
         app.linkingPreferences.findMissingLinksAtOpen = false;
+        // Preflight 자동 실행 비활성화: 대용량 문서에서 수백 초 blocking 방지
+        try { app.preflightOptions.preflightOn = false; } catch(e) {}
+        // 자동 업데이트 비활성화
+        try { app.generalPreferences.ungroupRemembersLayers = false; } catch(e) {}
 
         _marker(outputDir, "00_start");
-        writeProgress(outputDir, "open", 0, 0);
+        writeProgress(outputDir, "close_docs", 0, 0);
 
         // 0. 이전 배치에서 닫히지 않은 문서 정리
         try {
@@ -585,6 +589,7 @@ function main(args) {
         } catch (e) {}
 
         // 1. 문서 열기 (창 표시 안 함)
+        writeProgress(outputDir, "open", 0, 0);
         _marker(outputDir, "01_open");
         var inddFile = File(inddPath);
         if (!inddFile.exists) {
@@ -862,6 +867,7 @@ function main(args) {
         app.scriptPreferences.enableRedraw = savedEnableRedraw;
         app.linkingPreferences.checkLinksAtOpen = savedCheckLinks;
         app.linkingPreferences.findMissingLinksAtOpen = savedFindMissing;
+        try { app.preflightOptions.preflightOn = true; } catch(e) {}
     }
 }
 
