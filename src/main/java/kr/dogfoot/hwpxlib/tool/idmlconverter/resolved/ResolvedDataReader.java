@@ -272,6 +272,8 @@ public class ResolvedDataReader {
             tf.composedLines(lines);
         }
 
+        tf.onHiddenLayer(getBool(o, "onHiddenLayer", false));
+
         return tf;
     }
 

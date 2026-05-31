@@ -39,6 +39,7 @@ public class ResolvedTextFrame {
     private double cornerRadius;
     private java.util.List<String> frameParaTexts;  // 프레임에 보이는 각 단락의 실제 텍스트
     private String frameVisibleText;  // 프레임에 실제 보이는 전체 텍스트 (오버플로우 제외)
+    private boolean onHiddenLayer;    // InDesign 숨김 레이어에 있는 TF → 변환 불필요
 
     public String id() { return id; }
     public void id(String v) { this.id = v; }
@@ -120,6 +121,9 @@ public class ResolvedTextFrame {
     public void frameParaTexts(java.util.List<String> v) { this.frameParaTexts = v; }
     public String frameVisibleText() { return frameVisibleText; }
     public void frameVisibleText(String v) { this.frameVisibleText = v; }
+
+    public boolean onHiddenLayer() { return onHiddenLayer; }
+    public void onHiddenLayer(boolean v) { this.onHiddenLayer = v; }
 
     // Phase 4: 조판 결과 (composed lines)
     private java.util.List<ComposedLine> composedLines;

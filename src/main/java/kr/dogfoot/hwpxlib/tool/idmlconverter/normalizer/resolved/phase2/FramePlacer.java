@@ -210,6 +210,9 @@ public final class FramePlacer {
                 }
             }
 
+            // 숨김 레이어 TF (onHiddenLayer=true) → 변환 불필요
+            if (tf.onHiddenLayer()) continue;
+
             // 다른 TextFrame 안에 중첩된 프레임은 건너뜀 (부모가 배경에 포함)
             if (!inlineToFloating && isNestedInTextFrame(ctx, tf)) {
                 continue;
