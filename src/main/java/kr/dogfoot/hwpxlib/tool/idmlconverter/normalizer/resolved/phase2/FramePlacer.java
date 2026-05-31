@@ -622,6 +622,9 @@ public final class FramePlacer {
                         // 형제의 상단이 TF 상단에서 절반 이상 아래에 있으면 장식 요소(말풍선 꼬리 등) →
                         // 텍스트 옆으로 shift 금지 (형제가 TF 하단부에만 겹치면 사이드 라벨 패턴이 아님)
                         if ((sbT - y) >= h * 0.5) continue;
+                        // 형제의 Y-extent 가 TF 높이의 1.3배 이상이면 배경 도형(TF를 감싸는 container) →
+                        // 텍스트가 배경 위에 올라타는 패턴이므로 shift 금지
+                        if (sibYExt > h * 1.3) continue;
                         // X 보정 — 형제가 TF 좌측을 가리고 우측 절반 안 침범
                         // 보정 후 너비가 너무 작아지면 스킵 (사실상 TF 전체가 형제로 덮인 케이스)
                         if (sbR > x && sbL < x + w * 0.5 && sbR < x + w) {
