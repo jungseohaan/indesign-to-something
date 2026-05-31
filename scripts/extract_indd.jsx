@@ -176,7 +176,7 @@ function loadConversionConfig(configPath) {
                     // 9.5 박스 라벨 (테두리+짧은 텍스트 → renderable) 도 editable 로.
                     boxLabelEditable: true }
             },
-            badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600, maxAspectRatio: 4.5, nestedEnabled: true, nestedMaxTextLength: 3, decorationMergeEnabled: true, decorationMergeMinOverlap: 0.5, decorationMergeAdjacency: 20 },
+            badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600, maxAspectRatio: 4.5, nestedEnabled: true, nestedMaxTextLength: 6, decorationMergeEnabled: true, decorationMergeMinOverlap: 0.5, decorationMergeAdjacency: 20 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
             rotation: { minAngle: 0.1 },
             pngExportResolution: 220
@@ -1275,6 +1275,8 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         }
 
         try {
+            // 배경만 추출: TF 복제본 숨기고 도형만 export
+            try { nDupTf.visible = false; } catch (eHide) {}
             nTempGrp.exportFile(ExportFormat.PNG_FORMAT, nOutFile);
 
             var nBounds = nRealBounds;
@@ -1295,7 +1297,8 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                 pageIndex: nGrpPage.documentOffset,
                 type: "badge_group",
                 childIds: [nBadgeShape.id, nBadgeTf.id],
-                childTextFrameIds: [nBadgeTf.id]
+                childTextFrameIds: [nBadgeTf.id],
+                textHiddenBeforeExport: true
             };
             renderedFrames.push(nEntry);
             renderedIds[nGrpId] = nEntry;

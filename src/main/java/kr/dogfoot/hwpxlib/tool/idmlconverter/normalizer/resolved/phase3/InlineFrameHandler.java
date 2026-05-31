@@ -814,6 +814,9 @@ public class InlineFrameHandler {
 
         // INLINE_TEXT_FRAME 높이에는 child TF bounds 사용: group bounds에는 오버행이 포함돼
         // 한글이 행간을 팽창시킴. child TF가 더 작으면 그 높이로 제한.
+        // 단, child TF 가 그룹 높이의 40% 미만이면 상단 레이블 TF가 있는 컨테이너 박스로 판단.
+        // (예: "안은문장" 컨테이너 박스 — 레이블 TF(9.92pt)가 그룹(33.74pt)의 29%)
+        // 이 경우 inline ITF로 변환하면 문장이 박스 밖으로 나가므로, null 반환 → loadInlineObject fallback.
         double hForInline = h;
         {
             double[] ctfBounds = childTf.geometricBounds();

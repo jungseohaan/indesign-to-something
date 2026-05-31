@@ -78,16 +78,34 @@ public final class FramePlacer {
                             }
                         }
                     }
-                    // 부모 Group이 inline_object → Phase 3가 INLINE_TEXT_FRAME으로 배지 처리 → floating 불필요.
-                    // childIds 빈 경우(배지 PNG가 배경만 포함)에도 부모 경로로 감지.
+                    // 부모/조상 Group이 inline_object 이거나 inline PNG로 캡처된 경우
+                    // → Phase 3가 INLINE_TEXT_FRAME으로 처리 → floating 불필요.
+                    // 5 hop 조상 체인을 검사하여 중첩 Group(예: Group18498 → Group18558 → TF18579) 도 처리.
                     if (!rendered && domIdInt >= 0) {
                         ResolvedPageItem _inlPi = ctx.resolvedData.getPageItem(tf.id());
-                        if (_inlPi != null && _inlPi.parentId() != null) {
+                        String _curParentId = (_inlPi != null) ? _inlPi.parentId() : null;
+                        for (int _h = 0; _h < 5 && _curParentId != null && !rendered; _h++) {
                             try {
-                                if (ctx.resolvedData.isInlineObjectId(Integer.parseInt(_inlPi.parentId()))) {
+                                int _pid = Integer.parseInt(_curParentId);
+                                if (ctx.resolvedData.isInlineObjectId(_pid)) {
                                     rendered = true;
                                 }
                             } catch (NumberFormatException ignored) {}
+                            if (!rendered) {
+                                // allRenderedFloatingItems 에 inline_ 파일로 등록된 Group → 인라인 앵커 Group
+                                for (RenderedGroup _rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                                    if (String.valueOf(_rg.id()).equals(_curParentId)
+                                            && _rg.file() != null && _rg.file().contains("inline_")) {
+                                        rendered = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (!rendered) {
+                                ResolvedPageItem _nextPi = ctx.resolvedData.getPageItem(_curParentId);
+                                if (_nextPi == null) break;
+                                _curParentId = _nextPi.parentId();
+                            }
                         }
                     }
                     boolean sharedWithEditable = false;
@@ -244,9 +262,39 @@ public final class FramePlacer {
                             }
                         }
                     }
+                    // PNG 렌더링 없이 자기 스토리에 텍스트만 있는 non-editable TF:
+                    // 조상 Group에 PNG가 없는 경우 텍스트 글상자로 배치 (예: "새로운 단어가..." 글상자)
+                    boolean _nonRenderedWithText = false;
+                    if (!_parentIsRotatedRect && !_noItemTypeRendered && _hasOwnText && !_isRendered
+                            && tf.storyId() != null && !tf.isInline()) {
+                        boolean _ancestorHasPng = false;
+                        ResolvedPageItem _anPi = ctx.resolvedData.getPageItem(tf.id());
+                        String _anPid = (_anPi != null) ? _anPi.parentId() : null;
+                        for (int _d = 0; _d < 5 && _anPid != null && !_ancestorHasPng; _d++) {
+                            try {
+                                int _anPidInt = Integer.parseInt(_anPid);
+                                if (ctx.resolvedData.isInlineObjectId(_anPidInt)) { _ancestorHasPng = true; break; }
+                                for (RenderedGroup _rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                                    if (_rg.id() == _anPidInt && _rg.file() != null) { _ancestorHasPng = true; break; }
+                                }
+                                if (!_ancestorHasPng) {
+                                    for (RenderedGroup _rg : ctx.resolvedData.allRenderedTextFrames()) {
+                                        if (_rg.id() == _anPidInt && _rg.file() != null) { _ancestorHasPng = true; break; }
+                                    }
+                                }
+                            } catch (NumberFormatException ignored) {}
+                            if (!_ancestorHasPng) {
+                                ResolvedPageItem _anParPi = ctx.resolvedData.getPageItem(_anPid);
+                                _anPid = (_anParPi != null) ? _anParPi.parentId() : null;
+                            }
+                        }
+                        _nonRenderedWithText = !_ancestorHasPng;
+                    }
                     if (_parentIsRotatedRect || _noItemTypeRendered) {
                         ctx.renderedTfPlacedAsText.add(_domId);
                         // fall through → 글상자로 배치
+                    } else if (_nonRenderedWithText) {
+                        // fall through → 텍스트 글상자로 배치
                     } else {
                         continue;
                     }
@@ -893,6 +941,10 @@ public final class FramePlacer {
             if (fc == null || "None".equals(fc) || "[None]".equals(fc)) continue;
             // opacity 50 이하면 반투명 → 텍스트 가림으로 보지 않음 (50% 이하는 배경이 충분히 비침)
             if (pi.opacity() <= 50) continue;
+            // fillTint 50 미만 → 매우 연한 색 → 실질적 가림 아님
+            if (pi.fillTint() >= 0 && pi.fillTint() < 50) continue;
+            // 10도 이상 회전된 도형은 AABB가 실제 채움 영역보다 크게 과대평가 → occluder 제외
+            if (Math.abs(pi.absoluteRotationAngle()) > 10) continue;
             double[] sb = pi.geometricBounds();
             if (sb == null || sb.length < 4) continue;
             // bounds 가 텍스트 영역을 포함하는지 확인 (1pt 여유)

@@ -78,6 +78,9 @@ public class ASTInlineObject extends ASTInlineItem {
     // inline_object 타입 (IDML AnchoredPosition=InlineOrAbove)은 항상 true
     private boolean keepInline = false;
 
+    // INLINE_TEXT_FRAME 배경 PNG 바이트 (설정된 경우 winBrush 대신 imgBrush로 배경 표시)
+    private byte[] imageFillData;
+
     // IMAGE 그룹 내 오버레이 텍스트프레임 목록 (IMAGE kind 전용)
     // 이미지 컨테이너 내부에 중첩하여 이미지 위에 올바르게 배치
     private java.util.List<ASTInlineObject> overlayFrames;
@@ -216,6 +219,9 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public boolean keepInline() { return keepInline; }
     public void keepInline(boolean v) { this.keepInline = v; }
+
+    public byte[] imageFillData() { return imageFillData; }
+    public void imageFillData(byte[] v) { this.imageFillData = v; }
 
     public String bundlePath() { return bundlePath; }
     public void bundlePath(String v) { this.bundlePath = v; }
