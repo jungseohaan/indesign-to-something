@@ -625,6 +625,15 @@ public final class FramePlacer {
                         // 형제의 Y-extent 가 TF 높이의 1.3배 이상이면 배경 도형(TF를 감싸는 container) →
                         // 텍스트가 배경 위에 올라타는 패턴이므로 shift 금지
                         if (sibYExt > h * 1.3) continue;
+                        // 첫 composedLine 텍스트가 형제 도형의 X 범위 안에서 시작하면 배경 도형 → shift 금지
+                        // (예: 연두 배경 위 "자신이 고른 인물")
+                        if (tf.composedLines() != null && !tf.composedLines().isEmpty()) {
+                            double[] clBounds = tf.composedLines().get(0).bounds();
+                            if (clBounds != null && clBounds.length >= 4) {
+                                double clLeft = clBounds[1] - pageLeft;
+                                if (clLeft >= sbL - 4.0 && clLeft <= sbR + 4.0) continue;
+                            }
+                        }
                         // X 보정 — 형제가 TF 좌측을 가리고 우측 절반 안 침범
                         // 보정 후 너비가 너무 작아지면 스킵 (사실상 TF 전체가 형제로 덮인 케이스)
                         if (sbR > x && sbL < x + w * 0.5 && sbR < x + w) {
