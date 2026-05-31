@@ -65,9 +65,10 @@ final class InlineFrameBuilder {
         long w = obj.width() > 0 ? obj.width() : 5000;
         if (w < ConverterConstants.MIN_TEXT_BOX_WIDTH) w = ConverterConstants.MIN_TEXT_BOX_WIDTH;
 
-        // 내부에 2개 이상의 인라인 TextFrame이 있는 중간 래퍼는
-        // 부모 컨테이너 폭으로 확장 (InDesign에서 나란히 배치되는 다단 레이아웃)
-        if (ctx.currentContainerWidth > w && obj.paragraphs() != null) {
+        // 단일 단락 안에 2+ ITF 자식 → 다단 래퍼 → 부모 폭으로 확장
+        // (InDesign에서 나란히 배치되는 다단 레이아웃)
+        // 복수 단락 ITF(각 행이 독립 단락인 배지 그룹의 RIGHT 컬럼)는 확장하지 않음
+        if (ctx.currentContainerWidth > w && obj.paragraphs() != null && obj.paragraphs().size() == 1) {
             int innerCount = 0;
             for (ASTParagraph p : obj.paragraphs()) {
                 for (ASTInlineItem it : p.items()) {
@@ -150,8 +151,14 @@ final class InlineFrameBuilder {
         // LineShape — 부모 Group 배경 사각형의 테두리
         textBoxBuilder.setupTextBoxLineShape(rect, obj.strokeColor(), obj.strokeWeight(), "Solid", obj.strokeTint());
 
-        // FillBrush — 부모 Group 배경 사각형의 채우기 색상
-        textBoxBuilder.setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());
+        // FillBrush — 배경 PNG가 있으면 imgBrush, 없으면 winBrush(solid color)
+        boolean imgBrushSet = false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
+            imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(rect, obj.imageFillData());
+        }
+        if (!imgBrushSet) {
+            textBoxBuilder.setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());
+        }
 
         // DrawText
         rect.createDrawText();
@@ -175,12 +182,13 @@ final class InlineFrameBuilder {
                 .hasNumRefAnd(false);
 
         // 인라인 텍스트 프레임 균등 분배 (재귀: 인라인 프레임 안에 또 인라인 프레임)
-        // 중간 래퍼의 좁은 폭이 아니라 부모 컨테이너 폭을 사용
+        // 이 ITF 자신의 폭을 기준으로 분배 (부모 폭 사용 시 2-column 분할된 rightITF 내부에서 오버플로 발생)
+        long savedContainerWidth = ctx.currentContainerWidth;
+        ctx.currentContainerWidth = w;
         if (obj.paragraphs() != null) {
-            long parentWidth = ctx.currentContainerWidth > 0
-                    ? ctx.currentContainerWidth
-                    : w - obj.textMarginLeft() - obj.textMarginRight();
-            HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(obj.paragraphs(), parentWidth);
+            long redistWidth = w - obj.textMarginLeft() - obj.textMarginRight();
+            if (redistWidth <= 0) redistWidth = w;
+            HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(obj.paragraphs(), redistWidth);
         }
 
         // 내용 단락 (풀 버전 — 인라인 객체도 재귀 처리)
@@ -189,6 +197,7 @@ final class InlineFrameBuilder {
                 paragraphBuilder.addParagraphToSubList(subList, astPara);
             }
         }
+        ctx.currentContainerWidth = savedContainerWidth;
 
         // 인라인 테이블 → SubList 내 인라인 테이블
         if (obj.inlineTables() != null && ctx.tableBuilderRef != null) {
@@ -247,15 +256,16 @@ final class InlineFrameBuilder {
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
         } else {
-            // 기존 인라인 (글자처럼 취급)
+            // 인라인 (글자처럼 취급): 배지 등 인라인 도형은 행간을 팽창시키지 않도록 affectLSpacing=false
+            // vertAlign=CENTER로 줄 내 수직 중앙 배치
             rect.pos().treatAsCharAnd(true)
-                    .affectLSpacingAnd(true)
+                    .affectLSpacingAnd(false)
                     .flowWithTextAnd(true)
                     .allowOverlapAnd(false)
                     .holdAnchorAndSOAnd(false)
                     .vertRelToAnd(VertRelTo.PARA)
                     .horzRelToAnd(HorzRelTo.PARA)
-                    .vertAlignAnd(VertAlign.BOTTOM)
+                    .vertAlignAnd(VertAlign.CENTER)
                     .horzAlignAnd(HorzAlign.LEFT)
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
