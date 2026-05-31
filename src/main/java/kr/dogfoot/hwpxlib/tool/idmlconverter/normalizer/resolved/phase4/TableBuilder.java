@@ -16,14 +16,17 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.io.File;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 
 /**
@@ -207,6 +210,11 @@ public final class TableBuilder {
                         idmlTable, thisX, thisY, tf.zOrder(),
                         ctx.idmlDocumentSupplier.get(), ctx.colorResolverSupplier.get(),
                         ctx.imageLoaderSupplier.get(), ctx.resolvedData);
+
+                // 테이블 셀에 포함된 인라인 그룹 → 컬럼 분할 (예: 문장 성분의 종류 마인드맵)
+                ASTTable expandedTable = tryExpandInlineGroupColumns(ctx, astTable, idmlTable);
+                if (expandedTable != null) astTable = expandedTable;
+
                 section.addBlock(astTable);
 
                 // 분기 3a: cell-level 모드 — 트리거 셀의 인라인 객체를 floating으로 추출
@@ -230,6 +238,278 @@ public final class TableBuilder {
         }
 
         printReport(report);
+    }
+
+    /**
+     * 테이블 셀에 포함된 인라인 그룹(tryInlineGroupAsBoxList가 [leftITF, rightITF]를 반환)이
+     * 있으면 해당 컬럼을 2개로 분할하여 3컬럼 테이블로 재구성한다.
+     * 처리된 그룹 ID는 ctx.renderedTfPlacedAsText에 등록하여 Phase 7 중복 배치를 방지한다.
+     *
+     * @return 재구성된 ASTTable, 또는 확장 불필요 시 null
+     */
+    private static ASTTable tryExpandInlineGroupColumns(
+            ResolvedBuildContext ctx,
+            ASTTable original,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable) {
+
+        if (ctx == null || ctx.resolvedData == null) return null;
+
+        // (rowIdx_colIdx) → [leftITF, rightITF]
+        Map<String, List<ASTInlineObject>> expansionMap = new HashMap<>();
+        Set<Integer> expandColIndices = new HashSet<>();
+        Set<Integer> suppressGroupIds = new HashSet<>();
+        long firstLeftW = 0, firstRightW = 0;
+
+        int rowIdx = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow idmlRow : idmlTable.rows()) {
+            int colIdx = 0;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell : idmlRow.cells()) {
+                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph para : idmlCell.paragraphs()) {
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : para.characterRuns()) {
+                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+                            if (anchor.type() != kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineAnchorType.GRAPHIC) continue;
+                            java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineGraphic> igs = run.inlineGraphics();
+                            if (anchor.index() >= igs.size()) continue;
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineGraphic ig = igs.get(anchor.index());
+                            if (ig == null || ig.selfId() == null) continue;
+                            String hexId = ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId();
+                            int domId;
+                            try { domId = Integer.parseInt(hexId, 16); } catch (NumberFormatException e) { continue; }
+
+                            List<ASTInlineObject> boxList =
+                                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler.tryInlineGroupAsBoxList(ctx, domId);
+                            if (boxList != null && boxList.size() >= 2) {
+                                // 인라인 그룹이 텍스트 흐름 안에 박혀있는 경우 (앞뒤에 텍스트 있음)
+                                // → 테이블 컬럼 분할 대상이 아님. 단독 셀 콘텐츠일 때만 확장.
+                                boolean hasTextBesideAnchor = false;
+                                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun otherRun : para.characterRuns()) {
+                                    String ct = otherRun.content();
+                                    if (ct != null && !ct.trim().isEmpty()) {
+                                        hasTextBesideAnchor = true;
+                                        break;
+                                    }
+                                }
+                                if (hasTextBesideAnchor) continue;
+
+                                String key = rowIdx + "_" + colIdx;
+                                if (!expansionMap.containsKey(key)) {
+                                    expansionMap.put(key, boxList);
+                                    expandColIndices.add(colIdx);
+                                    suppressGroupIds.add(domId);
+                                    if (firstLeftW == 0) {
+                                        firstLeftW = boxList.get(0).width();
+                                        firstRightW = boxList.get(1).width();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                colIdx++;
+            }
+            rowIdx++;
+        }
+
+        if (expansionMap.isEmpty()) return null;
+
+        // Phase 7 중복 배치 방지: 부모 그룹 ID + 같은 파일을 공유하는 TF ID + 자손 TF ID 모두 등록
+        suppressAllDescendantsFromPhase7(ctx, suppressGroupIds);
+
+        // 확장 컬럼을 2개로 분할한 새 컬럼 너비 목록
+        List<Long> origColWidths = original.columnWidths();
+        List<Long> newColWidths = new java.util.ArrayList<>();
+        Map<Integer, Integer> oldToNewCol = new HashMap<>();
+        int nc = 0;
+        for (int c = 0; c < origColWidths.size(); c++) {
+            oldToNewCol.put(c, nc);
+            if (expandColIndices.contains(c)) {
+                newColWidths.add(firstLeftW);
+                newColWidths.add(firstRightW);
+                nc += 2;
+            } else {
+                newColWidths.add(origColWidths.get(c));
+                nc++;
+            }
+        }
+
+        ASTTable newTable = new ASTTable();
+        newTable.sourceId(original.sourceId());
+        newTable.x(original.x());
+        newTable.y(original.y());
+        newTable.zOrder(original.zOrder());
+        for (long cw : newColWidths) newTable.addColumnWidth(cw);
+        newTable.colCount(newColWidths.size());
+
+        int ri = 0;
+        for (ASTTableRow origRow : original.rows()) {
+            ASTTableRow newRow = new ASTTableRow();
+            newRow.rowIndex(ri);
+            newRow.rowHeight(origRow.rowHeight());
+            newRow.autoGrow(origRow.autoGrow());
+
+            for (ASTTableCell origCell : origRow.cells()) {
+                int oldCol = origCell.columnIndex();
+                int newBaseCol = oldToNewCol.getOrDefault(oldCol, oldCol);
+                String key = ri + "_" + oldCol;
+                List<ASTInlineObject> boxList = expansionMap.get(key);
+
+                if (boxList != null) {
+                    // 확장 셀: leftITF 셀 + rightITF 셀
+                    ASTInlineObject leftITF = boxList.get(0);
+                    leftITF.height(origRow.rowHeight());
+
+                    ASTTableCell leftCell = cloneCellMeta(origCell);
+                    leftCell.rowIndex(ri);
+                    leftCell.columnIndex(newBaseCol);
+                    leftCell.width(newColWidths.get(newBaseCol));
+                    leftCell.height(origCell.height());
+                    ASTParagraph leftPara = new ASTParagraph();
+                    leftPara.addItem(leftITF);
+                    leftCell.addParagraph(leftPara);
+                    newRow.addCell(leftCell);
+
+                    ASTInlineObject rightITF = boxList.get(1);
+                    rightITF.height(origRow.rowHeight());
+
+                    ASTTableCell rightCell = cloneCellMeta(origCell);
+                    rightCell.rowIndex(ri);
+                    rightCell.columnIndex(newBaseCol + 1);
+                    rightCell.width(newColWidths.get(newBaseCol + 1));
+                    rightCell.height(origCell.height());
+                    ASTParagraph rightPara = new ASTParagraph();
+                    rightPara.addItem(rightITF);
+                    rightCell.addParagraph(rightPara);
+                    newRow.addCell(rightCell);
+                } else {
+                    // 일반 셀: 복사 후 columnIndex 갱신
+                    ASTTableCell newCell = cloneCellFull(origCell);
+                    newCell.rowIndex(ri);
+                    newCell.columnIndex(newBaseCol);
+                    // 확장 컬럼이지만 이 행에 inline group 없음 → 두 분할 열을 colSpan=2로 병합
+                    if (expandColIndices.contains(oldCol)) {
+                        long mergedW = 0;
+                        if (newBaseCol < newColWidths.size()) mergedW += newColWidths.get(newBaseCol);
+                        if (newBaseCol + 1 < newColWidths.size()) mergedW += newColWidths.get(newBaseCol + 1);
+                        newCell.width(mergedW);
+                        newCell.columnSpan(2);
+                    } else {
+                        if (newBaseCol < newColWidths.size()) newCell.width(newColWidths.get(newBaseCol));
+                    }
+                    newRow.addCell(newCell);
+                }
+            }
+
+            newTable.addRow(newRow);
+            ri++;
+        }
+        newTable.rowCount(ri);
+
+        long totalW = 0;
+        for (long cw : newColWidths) totalW += cw;
+        newTable.width(totalW);
+        long totalH = 0;
+        for (ASTTableRow row : newTable.rows()) totalH += row.rowHeight();
+        newTable.height(totalH);
+
+        return newTable;
+    }
+
+    /** 셀 메타데이터(테두리/여백/색상)만 복사, 내용(단락) 제외 */
+    private static ASTTableCell cloneCellMeta(ASTTableCell src) {
+        ASTTableCell cell = new ASTTableCell();
+        cell.rowIndex(src.rowIndex());
+        cell.columnIndex(src.columnIndex());
+        cell.rowSpan(src.rowSpan());
+        cell.columnSpan(src.columnSpan());
+        cell.fillColor(src.fillColor());
+        cell.topBorder(src.topBorder());
+        cell.bottomBorder(src.bottomBorder());
+        cell.leftBorder(src.leftBorder());
+        cell.rightBorder(src.rightBorder());
+        cell.topLeftDiagonalLine(src.topLeftDiagonalLine());
+        cell.topRightDiagonalLine(src.topRightDiagonalLine());
+        cell.diagonalBorder(src.diagonalBorder());
+        cell.marginTop(src.marginTop());
+        cell.marginBottom(src.marginBottom());
+        cell.marginLeft(src.marginLeft());
+        cell.marginRight(src.marginRight());
+        cell.verticalAlign(src.verticalAlign());
+        cell.width(src.width());
+        cell.height(src.height());
+        return cell;
+    }
+
+    /** 셀 전체(메타+단락) 복사 */
+    private static ASTTableCell cloneCellFull(ASTTableCell src) {
+        ASTTableCell cell = cloneCellMeta(src);
+        if (src.paragraphs() != null) {
+            for (ASTParagraph p : src.paragraphs()) cell.addParagraph(p);
+        }
+        return cell;
+    }
+
+    /**
+     * 그룹 ID 집합과 그 모든 자손을 Phase 7에서 처리하지 않도록 등록.
+     *
+     * 처리 순서:
+     * 1) groupIds 자체를 renderedTfPlacedAsText에 추가
+     * 2) groupIds가 사용하는 배지 PNG 파일 경로를 수집 →
+     *    같은 파일을 공유하는 TF(형제 TF) 도 suppressed
+     * 3) pageItems childIds BFS로 그룹 자손 전체 수집 → suppressed
+     */
+    private static void suppressAllDescendantsFromPhase7(
+            ResolvedBuildContext ctx, Set<Integer> groupIds) {
+        if (ctx.renderedTfPlacedAsText == null || ctx.resolvedData == null) return;
+
+        // Step 1: 부모 그룹 직접 등록
+        ctx.renderedTfPlacedAsText.addAll(groupIds);
+
+        // Step 2: 배지 PNG 파일 공유 TF 억제
+        Set<String> badgeFiles = new HashSet<>();
+        for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
+            if (groupIds.contains(rt.id()) && rt.file() != null) {
+                badgeFiles.add(rt.file());
+            }
+        }
+        for (RenderedGroup rt : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (groupIds.contains(rt.id()) && rt.file() != null) {
+                badgeFiles.add(rt.file());
+            }
+        }
+        if (!badgeFiles.isEmpty()) {
+            for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
+                if (rt.file() != null && badgeFiles.contains(rt.file())) {
+                    ctx.renderedTfPlacedAsText.add(rt.id());
+                }
+            }
+            for (RenderedGroup rt : ctx.resolvedData.allRenderedFloatingItems()) {
+                if (rt.file() != null && badgeFiles.contains(rt.file())) {
+                    ctx.renderedTfPlacedAsText.add(rt.id());
+                }
+            }
+        }
+
+        // Step 3: pageItems childIds BFS로 자손 전체 억제
+        Map<Integer, int[]> childMap = new HashMap<>();
+        for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
+            if (pi == null || pi.childIds() == null || pi.childIds().length == 0) continue;
+            int pid;
+            try { pid = Integer.parseInt(pi.id()); } catch (NumberFormatException e) { continue; }
+            childMap.put(pid, pi.childIds());
+        }
+        Queue<Integer> queue = new LinkedList<>(groupIds);
+        Set<Integer> visited = new HashSet<>(groupIds);
+        while (!queue.isEmpty()) {
+            int cur = queue.poll();
+            int[] children = childMap.get(cur);
+            if (children == null) continue;
+            for (int child : children) {
+                if (visited.add(child)) {
+                    ctx.renderedTfPlacedAsText.add(child);
+                    queue.add(child);
+                }
+            }
+        }
     }
 
     /**
