@@ -5709,12 +5709,28 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                     }
                 }
             } catch (e) {}
+            // 마스터 TF 의 실제 조판 줄 수 (override 없는 페이지에서 배치 결정용)
+            var commonLineCount = 0;
+            try { commonLineCount = mtf.lines.length; } catch (e) {}
             // 적용 페이지마다 frame + story clone 추가
             for (var ap = 0; ap < appliedPages.length; ap++) {
                 var pgEntry = appliedPages[ap];
                 // side 매칭: SINGLE 마스터/페이지는 무조건 통과, LEFT/RIGHT 는 동일 side 만.
                 if (mtfSide !== "SINGLE" && pgEntry.side !== "SINGLE" && mtfSide !== pgEntry.side) continue;
                 var docPgIdx = pgEntry.docIdx;
+                // 이 페이지에 baseId 마스터 TF 의 override 가 있으면 clone 불필요 (override 가 정상 배치됨)
+                var hasOverrideOnPage = false;
+                try {
+                    var pgItems = doc.pages[docPgIdx].allPageItems;
+                    for (var opi = 0; opi < pgItems.length && !hasOverrideOnPage; opi++) {
+                        try {
+                            if (pgItems[opi].constructor.name !== "TextFrame") continue;
+                            var _mpi = pgItems[opi].masterPageItem;
+                            if (_mpi && _mpi.id.toString() === baseId) hasOverrideOnPage = true;
+                        } catch (e) {}
+                    }
+                } catch (e) {}
+                if (hasOverrideOnPage) continue;
                 var cloneFrameId = baseId + "_pi" + docPgIdx;
                 var cloneStoryId = origStoryId ? (origStoryId + "_pi" + docPgIdx) : null;
                 var clone = {
@@ -5724,7 +5740,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                     pageIndex: docPgIdx,
                     storyId: cloneStoryId,
                     overflows: false,
-                    lineCount: 0,
+                    lineCount: commonLineCount,
                     paragraphStart: commonParaStart,
                     paragraphEnd: commonParaEnd,
                     geometricBounds: commonGb,
@@ -5883,6 +5899,9 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                     }
                 } catch (e) {}
 
+                // off-canvas TF 의 실제 조판 줄 수
+                var ocLineCount = 0;
+                try { ocLineCount = oTf.lines.length; } catch (e) {}
                 for (var spi = 0; spi < spreadPageIdxs.length; spi++) {
                     var docPgIdx2 = spreadPageIdxs[spi];
                     var ocCloneId = ocBaseId + "_oc" + docPgIdx2;
@@ -5890,11 +5909,11 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                     var ocClone = {
                         id: ocCloneId,
                         masterSourceId: ocBaseId,
-                        isMasterInstance: true,
+                        isMasterInstance: false,  // off-canvas override는 마스터 spread 아이템 아님
                         pageIndex: docPgIdx2,
                         storyId: ocCloneStoryId,
                         overflows: false,
-                        lineCount: 0,
+                        lineCount: ocLineCount,
                         paragraphStart: ocParaStart,
                         paragraphEnd: ocParaEnd,
                         geometricBounds: ocGb,

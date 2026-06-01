@@ -31,9 +31,12 @@ public final class ParagraphTextHelpers {
         String s = sourceId.startsWith("u") ? sourceId.substring(1) : sourceId;
         int us = s.indexOf('_');
         if (us >= 0) {
-            // SPEC-025 master instance: "_pi" 접미사는 stripping 하지 않음 (별도 frame entry)
-            if (us + 3 <= s.length() && "_pi".equals(s.substring(us, us + 3))) {
-                return s; // 그대로 사용 ("originalDomId_pi<pageIdx>")
+            // SPEC-025 master instance / off-canvas clone: "_pi"/"_oc" 접미사는 stripping 하지 않음 (별도 frame entry)
+            if (us + 3 <= s.length()) {
+                String suffix3 = s.substring(us, us + 3);
+                if ("_pi".equals(suffix3) || "_oc".equals(suffix3)) {
+                    return s; // 그대로 사용 ("originalDomId_pi<pageIdx>" or "originalDomId_oc<pageIdx>")
+                }
             }
             s = s.substring(0, us);
         }
