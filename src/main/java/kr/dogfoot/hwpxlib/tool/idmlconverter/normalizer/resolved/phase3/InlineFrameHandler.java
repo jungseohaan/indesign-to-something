@@ -710,12 +710,18 @@ public class InlineFrameHandler {
     public static ASTInlineObject tryInlineGroupAsSingleBadge(ResolvedBuildContext ctx, int anchoredObjectId) {
         String anchorId = String.valueOf(anchoredObjectId);
         // AboveLine 앵커는 floating badge → Phase 7 이 처리, 인라인 변환 불가
-        if (ctx.aboveLineAnchoredIds.contains(anchoredObjectId)) return null;
+        if (ctx.aboveLineAnchoredIds.contains(anchoredObjectId)) {
+            return null;
+        }
         ResolvedTextFrame anchorTf = ctx.resolvedData.getTextFrame(anchorId);
-        if (anchorTf != null) return null;
+        if (anchorTf != null) {
+            return null;
+        }
 
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
-        if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
+        if (anchorItem == null || !"Group".equals(anchorItem.type())) {
+            return null;
+        }
 
         // badge_group PNG가 있으면 자식 TF 텍스트 길이 제한을 적용하지 않는다.
         RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
@@ -743,7 +749,9 @@ public class InlineFrameHandler {
             if (childTf != null) return null; // 2 개 이상 → tryInlineGroupAsBoxList 가 처리
             childTf = tf;
         }
-        if (childTf == null) return null;
+        if (childTf == null) {
+            return null;
+        }
 
         // Group 후손 중 fill 또는 stroke 있는 도형 수집 (가장 큰 도형 = 배경)
         ResolvedPageItem bgShape = null;
@@ -782,7 +790,9 @@ public class InlineFrameHandler {
                 if (a2 > bgArea) { bgArea = a2; bgShape = pi2; }
             }
         }
-        if (bgShape == null) return null;
+        if (bgShape == null) {
+            return null;
+        }
 
         // Group 안에 Oval 직속 자식이 있는지 먼저 확인 (크기 보정 판단에 필요)
         boolean hasOval = false;
@@ -830,7 +840,9 @@ public class InlineFrameHandler {
         // 이 경우 INLINE_TEXT_FRAME 생성을 포기하고 space run으로 대체 (floating badge 가 시각을 담당).
         if (hasOval) {
             double ratio = w > h ? h / w : w / h; // min/max, 1.0=정방형
-            if (ratio < 0.6) return null;
+            if (ratio < 0.6) {
+                return null;
+            }
         }
 
         // INLINE_TEXT_FRAME: fill color 기반 (hp:container PNG 오버레이는 HWP에서 텍스트 미표시 문제로 사용 안 함)
