@@ -223,12 +223,15 @@ class RunBuilder {
             }
         }
         // CharacterStyle 이름에서 밑줄/취소선 추론
+        // resolved.json이 명시적으로 false면 run 레벨 오버라이드 → 스타일 이름 휴리스틱 무시
+        boolean resolvedUnderlineFalse = rr != null && rr.underline() != null && !rr.underline();
+        boolean resolvedStrikeFalse = rr != null && rr.strikeThru() != null && !rr.strikeThru();
         String charStyle = cr.appliedCharacterStyle();
         if (charStyle != null) {
-            if (charStyle.contains("밑줄") || charStyle.toLowerCase().contains("underline")) {
+            if (!resolvedUnderlineFalse && (charStyle.contains("밑줄") || charStyle.toLowerCase().contains("underline"))) {
                 tr.underline(true);
             }
-            if (charStyle.contains("취소선") || charStyle.toLowerCase().contains("strikethrough")) {
+            if (!resolvedStrikeFalse && (charStyle.contains("취소선") || charStyle.toLowerCase().contains("strikethrough"))) {
                 tr.strikeThrough(true);
             }
             // CharacterStyle에서 물결 밑줄 추론

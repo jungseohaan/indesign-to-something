@@ -625,6 +625,9 @@ public final class FramePlacer {
                         // 형제의 Y-extent 가 TF 높이의 1.3배 이상이면 배경 도형(TF를 감싸는 container) →
                         // 텍스트가 배경 위에 올라타는 패턴이므로 shift 금지
                         if (sibYExt > h * 1.3) continue;
+                        // 형제의 Y-extent 가 TF 높이의 20% 미만이면 얇은 장식 줄(horizontal strip) →
+                        // 텍스트가 위에 올라타는 패턴이므로 shift 금지
+                        if (sibYExt < h * 0.20) continue;
                         // 첫 composedLine 텍스트가 형제 도형의 X 범위 안에서 시작하면 배경 도형 → shift 금지
                         // (예: 연두 배경 위 "자신이 고른 인물")
                         if (tf.composedLines() != null && !tf.composedLines().isEmpty()) {
