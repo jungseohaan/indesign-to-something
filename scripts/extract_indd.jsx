@@ -956,10 +956,10 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         } catch (e) {}
     }
 
-    // SPEC-030 B.4: 배지 총 개수 선집계 (진행 표시용)
+    // SPEC-030 B.4: 배지 총 개수 선집계 (진행 표시용). A.4: inline 배지는 PNG 미생성 → 카운트 제외
     var _totalBadges = 0;
     for (var _bc = 0; _bc < allItems.length; _bc++) {
-        if (allItems[_bc].constructor.name === "Group" && isBadgeGroup(allItems[_bc])) _totalBadges++;
+        if (allItems[_bc].constructor.name === "Group" && isBadgeGroup(allItems[_bc]) && !isInlineItem(allItems[_bc])) _totalBadges++;
     }
     var _renderedBadges = 0;
 
@@ -972,6 +972,8 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
         if (_bgrp.constructor.name !== "Group") continue;
         if (isOnHiddenLayer(_bgrp)) continue;
         if (!isBadgeGroup(_bgrp)) continue;
+        // A.4: inline 배지는 Java가 INLINE_TEXT_FRAME으로 처리 → 배치 export 제외
+        if (isInlineItem(_bgrp)) continue;
         var _bgrpPage = null;
         try { _bgrpPage = _bgrp.parentPage; } catch (e) {}
         if (!_bgrpPage) {
@@ -1100,6 +1102,23 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                 }
             }
         } catch (e) {}
+
+        // A.4: inline 배지 PNG 스킵 — Java가 tryInlineGroupAsSingleBadge / tryInlineGroupAsBoxList로 처리.
+        // AboveLine 앵커(floating) 배지만 PNG 필요. AnchorPosition 조회 실패 시 안전하게 export 유지.
+        if (isInlineItem(grp)) {
+            var _isAboveLine = false;
+            try {
+                var _as = grp.anchoredObjectSettings;
+                _isAboveLine = (_as.anchorPosition === AnchorPosition.ABOVE_LINE);
+            } catch (e) {}
+            if (!_isAboveLine) {
+                // child TF 텍스트 수집 유지 (editable 등록)
+                for (var _a4i = 0; _a4i < childTextFrameIds.length; _a4i++) {
+                    editableFrameIds[childTextFrameIds[_a4i]] = true;
+                }
+                continue;
+            }
+        }
 
         var grpFileName = "badge_" + grpDomId + ".png";
         var grpOutFile = File(renderDir + "/" + grpFileName);
@@ -1572,31 +1591,19 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
 // --- 렌더링 시 TextFrame 텍스트 제거 헬퍼 ---
 
 function hideTextFrames(renderTarget) {
+    // tf.visible = false 방식: 문자별 color 저장 없이 TF 자체를 숨김.
+    // 이전 per-character fillColor 방식은 수천 개 charData 객체를 JS 힙에 쌓아
+    // 57회 반복 후 JS 힙 고갈로 InDesign 크래시를 유발했음.
     var saved = [];
     try {
-        var noneColor = renderTarget.parentPage
-            ? renderTarget.parentPage.parent.parent.swatches.item("None")
-            : app.documents[0].swatches.item("None");
         var nested = renderTarget.allPageItems;
         for (var hi = 0; hi < nested.length; hi++) {
             if (nested[hi].constructor.name === "TextFrame") {
                 try {
                     var tf = nested[hi];
-                    var chars = tf.parentStory.characters;
-                    if (chars.length === 0) continue;
-                    // 문자별 fillColor/strokeColor 저장 후 None으로 변경
-                    var charData = [];
-                    for (var ci = 0; ci < chars.length; ci++) {
-                        try {
-                            charData.push({
-                                fill: chars[ci].fillColor,
-                                stroke: chars[ci].strokeColor
-                            });
-                            chars[ci].fillColor = noneColor;
-                            chars[ci].strokeColor = noneColor;
-                        } catch (e2) { charData.push(null); }
-                    }
-                    saved.push({ tf: tf, charData: charData });
+                    var wasVisible = tf.visible;
+                    tf.visible = false;
+                    saved.push({ tf: tf, wasVisible: wasVisible });
                 } catch (e) {}
             }
         }
@@ -1607,17 +1614,7 @@ function hideTextFrames(renderTarget) {
 function restoreTextFrames(saved) {
     for (var ri = 0; ri < saved.length; ri++) {
         try {
-            var tf = saved[ri].tf;
-            var charData = saved[ri].charData;
-            var chars = tf.parentStory.characters;
-            for (var ci = 0; ci < chars.length && ci < charData.length; ci++) {
-                if (charData[ci]) {
-                    try {
-                        chars[ci].fillColor = charData[ci].fill;
-                        chars[ci].strokeColor = charData[ci].stroke;
-                    } catch (e2) {}
-                }
-            }
+            saved[ri].tf.visible = saved[ri].wasVisible;
         } catch (e) {}
     }
 }
@@ -1781,7 +1778,12 @@ function exportPdfPlacedFrames(doc, outputDir, startPage, endPage, allItems) {
 }
 
 /**
- * 이미지 배치 프레임(PSD, AI 등)을 PNG로 렌더링한다.
+ * 이미지 배치 프레임을 처리한다.
+ *
+ * standalone 프레임 (그룹 없음): 소스 파일 직접 복사 — exportFile 불필요, 메모리 0.
+ * 그룹 내 프레임 (텍스트/도형과 함께): exportFile(PNG) + 아이템별 $.gc().
+ *
+ * 이전 exportFile 전용 방식은 57개 이상 처리 시 InDesign 메모리 고갈 크래시 발생.
  */
 function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
@@ -1837,9 +1839,65 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
         if (pgIdx < startPage || pgIdx > endPage) continue;
 
         var domId = renderTarget.id;
+
+        var bounds = null;
+        try { bounds = arrCopy(renderTarget.visibleBounds); } catch (e) {}
+        if (!bounds) try { bounds = arrCopy(renderTarget.geometricBounds); } catch (e) {}
+        if (bounds) {
+            var pageBounds = parentPage.bounds;
+            bounds[0] -= pageBounds[0];
+            bounds[1] -= pageBounds[1];
+            bounds[2] -= pageBounds[0];
+            bounds[3] -= pageBounds[1];
+        }
+
+        if (!isGroupRender) {
+            // standalone: 소스 파일 직접 복사 (exportFile 없음 → 메모리 부하 0)
+            var srcPath = null;
+            var srcExt = "jpg";
+            try {
+                var lnk = item.images[0].itemLink;
+                if (lnk && lnk.filePath) {
+                    srcPath = lnk.filePath;
+                    var m = srcPath.match(/\.([^.]+)$/);
+                    if (m) srcExt = m[1].toLowerCase();
+                }
+            } catch (e) {}
+
+            // JPEG/PNG만 직접 복사; 그 외(PSD/AI/EPS)는 exportFile 경로로 fallback
+            var isCopyable = (srcExt === "jpg" || srcExt === "jpeg" || srcExt === "png"
+                              || srcExt === "gif" || srcExt === "bmp");
+            if (srcPath && isCopyable) {
+                var srcFile = File(srcPath);
+                if (!srcFile.exists) {
+                    // 상대 경로 폴백: document folder 기준
+                    try {
+                        var docFolder = Folder(doc.filePath);
+                        srcFile = File(docFolder + "/" + srcPath);
+                    } catch (e) {}
+                }
+                if (srcFile.exists) {
+                    var dstFileName = "img_" + domId + "." + srcExt;
+                    var dstFile = File(renderDir + "/" + dstFileName);
+                    try { srcFile.copy(dstFile); } catch (e) {}
+                    renderedImageFrames.push({
+                        id: domId,
+                        file: "rendered_frames/" + dstFileName,
+                        imageFormat: srcExt,
+                        bounds: bounds,
+                        pageIndex: parentPage.documentOffset,
+                        childImageIds: null
+                    });
+                    continue;
+                }
+                // 소스 파일 없음 → exportFile fallback
+            }
+            // isCopyable 아니거나 경로 없음 → exportFile fallback (아래 공통 경로)
+        }
+
+        // 그룹 렌더링 또는 exportFile fallback
         var fileName = "img_" + domId + ".png";
         var outFile = File(renderDir + "/" + fileName);
-
         try {
             _marker(outputDir, "08_img_" + domId + "_hide");
             var hiddenTFs = isGroupRender ? hideTextFrames(renderTarget) : [];
@@ -1847,20 +1905,7 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
             renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
             _marker(outputDir, "08_img_" + domId + "_restore");
             if (hiddenTFs.length > 0) restoreTextFrames(hiddenTFs);
-
-            var bounds = null;
-            try { bounds = arrCopy(renderTarget.visibleBounds); } catch (e) {}
-            if (!bounds) {
-                try { bounds = arrCopy(renderTarget.geometricBounds); } catch (e) {}
-            }
-
-            if (bounds) {
-                var pageBounds = parentPage.bounds;
-                bounds[0] -= pageBounds[0];
-                bounds[1] -= pageBounds[1];
-                bounds[2] -= pageBounds[0];
-                bounds[3] -= pageBounds[1];
-            }
+            try { $.gc(); } catch (gcErr) {}  // 아이템별 GC: 누적 메모리 해제
 
             var childIds = null;
             if (isGroupRender) {
