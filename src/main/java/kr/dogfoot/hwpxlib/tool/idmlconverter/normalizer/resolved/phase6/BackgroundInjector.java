@@ -9,7 +9,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Phase 6: 개별 객체 PNG를 ASTFigure로 주입.
@@ -28,9 +32,43 @@ public final class BackgroundInjector {
         List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
         if (floatingItems == null || floatingItems.isEmpty()) return;
 
+        // Pass 1: id → pageIndex 맵 구성 (자식의 페이지 판별용)
+        Map<Integer, Integer> idToPage = new HashMap<>();
+        for (RenderedGroup rg : floatingItems) {
+            idToPage.put(rg.id(), rg.pageIndex());
+        }
+
+        // Pass 1b: page_object 아이템의 childIds/childImageIds 중 부모와 같은 페이지의 자식만 수집
+        // 다른 페이지 자식은 그룹 PNG에 포함되지 않으므로 개별 렌더링 필요
+        Set<Integer> childOfGroup = new HashSet<>();
+        for (RenderedGroup rg : floatingItems) {
+            if (!"page_object".equals(rg.itemType())) continue;
+            int parentPage = rg.pageIndex();
+            if (rg.childIds() != null) {
+                for (int cid : rg.childIds()) {
+                    Integer cp = idToPage.get(cid);
+                    if (cp != null && cp == parentPage) childOfGroup.add(cid);
+                }
+            }
+            if (rg.childImageIds() != null) {
+                for (int cid : rg.childImageIds()) {
+                    Integer cp = idToPage.get(cid);
+                    if (cp != null && cp == parentPage) childOfGroup.add(cid);
+                }
+            }
+        }
+
+        Set<Integer> processedIds = new HashSet<>();
+
         for (RenderedGroup rg : floatingItems) {
             String itemType = rg.itemType();
             if (!"page_object".equals(itemType)) continue;
+            // inline_object로 이미 처리된 ID는 Phase 3가 인라인으로 배치 → 중복 방지
+            if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
+            // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
+            if (childOfGroup.contains(rg.id())) continue;
+            // 같은 ID가 img_/deco_ 등으로 중복 추출된 경우 첫 번째만 사용
+            if (!processedIds.add(rg.id())) continue;
 
             int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
@@ -66,14 +104,16 @@ public final class BackgroundInjector {
             fig.width(w);
             fig.height(h);
             fig.imageData(imageData);
-            fig.imageFormat("png");
+            String fmt = rg.imageFormat();
+            fig.imageFormat((fmt != null && !fmt.isEmpty()) ? fmt : "png");
             fig.pixelWidth(pixelW);
             fig.pixelHeight(pixelH);
             fig.zOrder(Math.max(rg.zOrder(), 0));
-            fig.fromGroup(false);  // BEHIND_TEXT
+            fig.fromGroup(true);   // IN_FRONT_OF_TEXT — z-order로 텍스트TF와의 순서 결정
             fig.sourceId("page_obj_" + rg.id());
 
-            sections.get(pageIdx).addBlock(fig);
+            // BEHIND_TEXT 항목은 XML 순서상 앞에 올수록 더 아래 레이어 → addBlockAtFront
+            sections.get(pageIdx).addBlockAtFront(fig);
         }
     }
 

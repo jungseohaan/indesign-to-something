@@ -188,7 +188,9 @@ public final class StoryConverter {
             } else {
                 // 2차: resolved.json fallback
                 ResolvedStory story = ctx.resolvedData.getStory(storyId);
-                if (story == null) continue;
+                if (story == null) {
+                    continue;
+                }
                 paragraphs = convertStoryParagraphs(ctx, story);
                 resolvedCount++;
             }

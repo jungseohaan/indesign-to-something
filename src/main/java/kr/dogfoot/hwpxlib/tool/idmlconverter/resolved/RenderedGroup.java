@@ -19,6 +19,7 @@ public class RenderedGroup {
     private int zOrder;          // ExtendScript 할당 z-order (renderedFloatingItems)
     private String itemType;     // "vector" | "group" | "text_decoration" | "image" | "other"
     private boolean textHiddenBeforeExport; // true: PNG 내보내기 전 TF 텍스트를 숨겼음 → PNG는 텍스트 없음
+    private String imageFormat;   // "jpg", "jpeg", "png" 등 (소스 파일 직접 복사 시 설정)
 
     public int id() { return id; }
     public void id(int v) { this.id = v; }
@@ -67,6 +68,9 @@ public class RenderedGroup {
 
     public boolean isTextHiddenBeforeExport() { return textHiddenBeforeExport; }
     public void textHiddenBeforeExport(boolean v) { this.textHiddenBeforeExport = v; }
+
+    public String imageFormat() { return imageFormat; }
+    public void imageFormat(String v) { this.imageFormat = v; }
 
     public boolean isBadgeGroup() { return "badge_group".equals(type); }
     public boolean isBadgeGroupChild() { return "badge_group_child".equals(type); }

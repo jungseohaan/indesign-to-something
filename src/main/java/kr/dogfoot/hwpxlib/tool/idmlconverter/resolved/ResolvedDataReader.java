@@ -136,6 +136,7 @@ public class ResolvedDataReader {
                 JsonObject obj = e.getAsJsonObject();
                 if (obj.has("zOrder")) rg.zOrder(obj.get("zOrder").getAsInt());
                 if (obj.has("type")) rg.itemType(obj.get("type").getAsString());
+                if (obj.has("imageFormat") && !obj.get("imageFormat").isJsonNull()) rg.imageFormat(obj.get("imageFormat").getAsString());
                 data.addRenderedFloatingItem(rg);
             }
         }

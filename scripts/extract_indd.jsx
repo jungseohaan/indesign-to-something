@@ -739,8 +739,13 @@ function main(args) {
             try { $.gc(); } catch (e) {}
 
             // 2.15. 장식 그룹 개별 렌더링 (도형 전용 Group → deco_DOMID.png)
+            // imgRenderedIds: exportImagePlacedFrames에서 이미 렌더링한 ID → exportDecorationGroups에서 중복 방지
+            var imgRenderedIds = {};
+            for (var iri = 0; iri < renderedImageFrames.length; iri++) {
+                imgRenderedIds[renderedImageFrames[iri].id] = true;
+            }
             _marker(outputDir, "07_decoGroups");
-            var decoResult = exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildIds, allItems);
+            var decoResult = exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildIds, allItems, imgRenderedIds);
             var decoChildIds = decoResult.childIds || {};
             addItemType(decoResult.frames, "page_object");
             for (var di = 0; di < decoResult.frames.length; di++) {
@@ -1672,6 +1677,15 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
         var pgIdx = parentPage.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
 
+        // 스프레드를 걸치는 프레임(페이지 너비 120% 초과)은 그룹 export 생략 → 자식 개별 처리
+        try {
+            var _cgPgBounds = parentPage.bounds;
+            var _cgPgWidth = _cgPgBounds[3] - _cgPgBounds[1];
+            var _cgItemBounds = item.geometricBounds;
+            var _cgItemWidth = _cgItemBounds[3] - _cgItemBounds[1];
+            if (_cgItemWidth > _cgPgWidth * 1.2) continue;
+        } catch (e) {}
+
         var domId = item.id;
         var fileName = "graphic_" + domId + ".png";
         var outFile = File(renderDir + "/" + fileName);
@@ -1959,7 +1973,7 @@ function exportImagePlacedFramesSafe(doc, outputDir, startPage, endPage, allItem
  *
  * @return {{ frames: Array, childIds: Object }}
  */
-function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildIds, allItems) {
+function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildIds, allItems, imgRenderedIds) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -2048,6 +2062,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
         if (renderedIds[grpDomId]) continue;
         if (decoChildIds[grpDomId]) continue;  // 이미 클리핑 컨테이너 자식
         if (badgeChildIds && badgeChildIds[grpDomId]) continue;
+        if (imgRenderedIds && imgRenderedIds[grpDomId]) continue;  // exportImagePlacedFrames에서 이미 렌더링
 
         // 부모가 이미 처리된 컨테이너면 스킵
         try {
@@ -2562,6 +2577,24 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
                 if (grpPage) parentPage = grpPage;
             } catch (e) {}
         }
+        // 여전히 null이면 bounds 기반 page 판정 (스프레드 걸친 컨테이너 내부 도형 대응)
+        if (!parentPage) {
+            try {
+                var _vsb = null;
+                try { _vsb = item.visibleBounds; } catch (e) {}
+                if (!_vsb) _vsb = item.geometricBounds;
+                var _vcy = (_vsb[0] + _vsb[2]) / 2;
+                var _vcx = (_vsb[1] + _vsb[3]) / 2;
+                for (var _vpi = 0; _vpi < doc.pages.length; _vpi++) {
+                    var _vpg = doc.pages[_vpi];
+                    var _vpb = _vpg.bounds;
+                    if (_vcy >= _vpb[0] && _vcy <= _vpb[2] && _vcx >= _vpb[1] && _vcx <= _vpb[3]) {
+                        parentPage = _vpg;
+                        break;
+                    }
+                }
+            } catch (e) {}
+        }
         if (!parentPage) continue;
         var pgIdx = parentPage.documentOffset + 1;
         if (pgIdx < startPage || pgIdx > endPage) continue;
@@ -2637,6 +2670,14 @@ function isOnHiddenLayer(item) {
  * 모든 텍스트는 TF로 변환하는 원칙에 따라 그룹 배경(도형)은 PNG, 텍스트는 별도 TF로 처리.
  */
 function isBadgeGroup(group) {
+    // 크기가 80mm 이상인 그룹은 배지가 아님 (스프레드 전체에 걸치는 장식 그룹 등)
+    try {
+        var _gb = group.geometricBounds;
+        var _gw = _gb[3] - _gb[1];
+        var _gh = _gb[2] - _gb[0];
+        if (_gw > 80 || _gh > 80) return false;
+    } catch (e) {}
+
     var hasShape = false;
     var hasText = false;
 

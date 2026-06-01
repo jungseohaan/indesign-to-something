@@ -23,4 +23,5 @@ public class ASTSection {
 
     public List<ASTBlock> blocks() { return blocks; }
     public void addBlock(ASTBlock b) { blocks.add(b); }
+    public void addBlockAtFront(ASTBlock b) { blocks.add(0, b); }
 }

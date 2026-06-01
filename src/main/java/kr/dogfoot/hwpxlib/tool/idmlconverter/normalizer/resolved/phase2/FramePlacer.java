@@ -28,11 +28,14 @@ public final class FramePlacer {
 
         for (ResolvedTextFrame tf : frames) {
             // badge_group_child: Phase 7의 hp:container가 텍스트 오버레이를 포함 → 인라인/비-인라인 무관하게 항상 스킵.
+            // 단, editableTextFrameIds에 포함된 TF는 실제 텍스트 내용이 있으므로 스킵하지 않음.
+            // (예: 단원 도비라 전체 스프레드 그룹이 badge_group으로 오분류 → 내부 editable TF가 스킵되는 문제)
             {
                 int _bcDomId = -1;
                 try { _bcDomId = Integer.parseInt(tf.id()); } catch (NumberFormatException ignored) {}
                 if (_bcDomId >= 0 && ctx.resolvedData.getBadgeGroupByChildTextFrameIdmlId(
-                        "u" + Integer.toHexString(_bcDomId)) != null) continue;
+                        "u" + Integer.toHexString(_bcDomId)) != null
+                        && !ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
             }
             // 인라인 프레임은 Phase 3에서 처리
             // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
@@ -420,7 +423,14 @@ public final class FramePlacer {
 
             // 음수 좌표 클램핑
             if (x < 0) { w += x; x = 0; }
-            if (y < 0) { h += y; y = 0; }
+            if (y < 0) {
+                double origH = h;
+                h += y;
+                y = 0;
+                // SPEC-025: _oc 해시라 헤더 등 페이지 위쪽 경계선에 위치한 TF (예: y=-8, h=8) 는
+                // 클램핑 후 h=0 이 되어 스킵됨 → 원래 높이를 복원해 페이지 상단에 배치.
+                if (h <= 0 && origH > 0) h = origH;
+            }
             if (w <= 0 || h <= 0) {
                 continue;
             }

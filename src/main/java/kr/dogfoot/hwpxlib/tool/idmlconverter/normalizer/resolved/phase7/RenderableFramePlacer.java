@@ -343,6 +343,8 @@ public final class RenderableFramePlacer {
                         }
                     }
                     for (int childTfId : rt.childTextFrameIds()) {
+                        // editableTextFrame은 Phase 2가 이미 TextFrameBlock으로 배치 → 중복 방지
+                        if (ctx.resolvedData.isEditableTextFrame(String.valueOf(childTfId))) continue;
                         kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem cpi =
                                 ctx.resolvedData.getPageItem(String.valueOf(childTfId));
                         if (cpi == null) continue;
