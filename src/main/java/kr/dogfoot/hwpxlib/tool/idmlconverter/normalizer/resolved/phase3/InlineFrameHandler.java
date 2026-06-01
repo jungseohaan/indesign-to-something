@@ -751,11 +751,22 @@ public class InlineFrameHandler {
         boolean hasBadgePng = badgeRg != null && badgeRg.file() != null && badgeRg.isTextHiddenBeforeExport();
 
         // 직속 자식 TF 1 개 (inline + 텍스트 있음)
+        // hasBadgePng=true: 중첩 그룹 구조(예: Group→Group→TF)도 허용 (최대 5 hop)
         ResolvedTextFrame childTf = null;
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
             if (pi == null) continue;
-            if (!anchorId.equals(pi.parentId())) continue;
+            boolean inGroup = anchorId.equals(pi.parentId());
+            if (!inGroup) {
+                String curP = pi.parentId();
+                for (int h = 0; h < 5 && curP != null; h++) {
+                    if (anchorId.equals(curP)) { inGroup = true; break; }
+                    ResolvedPageItem nxt = ctx.resolvedData.getPageItem(curP);
+                    if (nxt == null) break;
+                    curP = nxt.parentId();
+                }
+            }
+            if (!inGroup) continue;
             if (!tf.isInline()) continue;
             String vt = tf.frameVisibleText();
             if (vt == null) continue;

@@ -1425,19 +1425,15 @@ function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, 
                 }
             } catch (eHideAll) {}
         }
-        // renderTarget !== item: item 이 non-editable TF 이고 회전된 Rectangle 안에 있는 경우
+        // renderTarget !== item: non-editable TF 가 부모 컨테이너로 렌더링되는 경우
         // Java 파이프라인이 이 TF 를 텍스트박스로 재배치 → 부모 PNG 에 텍스트 중복 방지를 위해 숨김.
         if (renderTarget !== item && isTextFrame && !editableFrameIds[item.id]) {
-            var pRot = 0;
-            try { pRot = renderTarget.absoluteRotationAngle; } catch (ePRot) {}
-            if (Math.abs(pRot) > 0.5 && renderTarget.constructor.name === "Rectangle") {
-                try {
-                    if (item.visible) {
-                        item.visible = false;
-                        hiddenEditable.push(item);
-                    }
-                } catch (eRotHide) {}
-            }
+            try {
+                if (item.visible) {
+                    item.visible = false;
+                    hiddenEditable.push(item);
+                }
+            } catch (eRotHide) {}
         }
 
         try {
@@ -3908,7 +3904,9 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                         } catch (e) {}
                         if (!isButtonContainer && containerType === "Group") {
                             try {
-                                var gpItems = inItem.pageItems;
+                                // 직속 자식(pageItems)이 Group만 있는 경우 중첩 배지를 놓칠 수 있으므로
+                                // allPageItems 로 전체 후손을 확인 (예: 그룹→그룹→Rectangle 구조)
+                                var gpItems = inItem.allPageItems;
                                 for (var gpi = 0; gpi < gpItems.length; gpi++) {
                                     var gpIt = gpItems[gpi];
                                     var gpCn = gpIt.constructor.name;
