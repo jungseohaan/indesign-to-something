@@ -134,8 +134,13 @@ public class ResolvedDataReader {
             for (JsonElement e : root.getAsJsonArray("renderedFloatingItems")) {
                 RenderedGroup rg = parseRenderedGroup(e.getAsJsonObject());
                 JsonObject obj = e.getAsJsonObject();
-                if (obj.has("zOrder")) rg.zOrder(obj.get("zOrder").getAsInt());
-                if (obj.has("type")) rg.itemType(obj.get("type").getAsString());
+                if (obj.has("zOrder") && !obj.get("zOrder").isJsonNull()) rg.zOrder(obj.get("zOrder").getAsInt());
+                // "itemType" 키 우선, 구 포맷 폴백으로 "type" 키 읽기
+                if (obj.has("itemType") && !obj.get("itemType").isJsonNull()) {
+                    rg.itemType(obj.get("itemType").getAsString());
+                } else if (obj.has("type") && !obj.get("type").isJsonNull()) {
+                    rg.itemType(obj.get("type").getAsString());
+                }
                 if (obj.has("imageFormat") && !obj.get("imageFormat").isJsonNull()) rg.imageFormat(obj.get("imageFormat").getAsString());
                 data.addRenderedFloatingItem(rg);
             }

@@ -101,14 +101,54 @@ public final class RenderableFramePlacer {
             try {
                 byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
                 java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+                if (img == null) continue;
 
                 double[] bounds = rt.bounds();
-
                 // bounds는 normalizeToPoints()에서 이미 pt 단위로 변환됨
-                double bw = Math.abs(bounds[3] - bounds[1]);
-                double bh = Math.abs(bounds[2] - bounds[0]);
+                double rawLeft = bounds[1], rawTop = bounds[0];
+                double rawRight = bounds[3], rawBottom = bounds[2];
+                double fullW = rawRight - rawLeft;
+                double fullH = rawBottom - rawTop;
 
-                // PNG 비율 보정 — 보정 후 원본 bounds 의 중심을 유지하도록 x/y 재계산
+                // 페이지 경계 밖으로 넘치는 PNG를 가시 영역으로 크롭
+                double pageWidthPt = 1e9, pageHeightPt = 1e9;
+                if (ctx.resolvedData.pages() != null
+                        && rt.pageIndex() >= 0
+                        && rt.pageIndex() < ctx.resolvedData.pages().size()) {
+                    double[] pgB = ctx.resolvedData.pages().get(rt.pageIndex()).bounds();
+                    if (pgB != null && pgB.length >= 4) {
+                        pageWidthPt = pgB[3] - pgB[1];
+                        pageHeightPt = pgB[2] - pgB[0];
+                    }
+                }
+                double visLeft = Math.max(0.0, rawLeft);
+                double visTop = Math.max(0.0, rawTop);
+                double visRight = Math.min(rawRight, pageWidthPt);
+                double visBottom = Math.min(rawBottom, pageHeightPt);
+                if (visLeft >= visRight || visTop >= visBottom) continue;
+                if (fullW > 1.0 && fullH > 1.0
+                        && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
+                            || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5)) {
+                    int pxX = (int) Math.round((visLeft - rawLeft) / fullW * img.getWidth());
+                    int pxY = (int) Math.round((visTop - rawTop) / fullH * img.getHeight());
+                    int pxW = (int) Math.round((visRight - rawLeft) / fullW * img.getWidth()) - pxX;
+                    int pxH = (int) Math.round((visBottom - rawTop) / fullH * img.getHeight()) - pxY;
+                    pxX = Math.max(0, Math.min(pxX, img.getWidth() - 1));
+                    pxY = Math.max(0, Math.min(pxY, img.getHeight() - 1));
+                    pxW = Math.max(1, Math.min(img.getWidth() - pxX, pxW));
+                    pxH = Math.max(1, Math.min(img.getHeight() - pxY, pxH));
+                    try {
+                        img = img.getSubimage(pxX, pxY, pxW, pxH);
+                        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                        javax.imageio.ImageIO.write(img, "png", baos);
+                        imageData = baos.toByteArray();
+                    } catch (Exception cropEx) { /* keep original on crop failure */ }
+                }
+
+                double bw = visRight - visLeft;
+                double bh = visBottom - visTop;
+
+                // PNG 비율 보정 — 보정 후 가시 영역 중심을 유지하도록 x/y 재계산
                 double bwOrig = bw, bhOrig = bh;
                 double pngRatio = (double) img.getWidth() / img.getHeight();
                 double boundsRatio = bw / bh;
@@ -116,9 +156,9 @@ public final class RenderableFramePlacer {
                     if (pngRatio < 1.0) { bw = bh * pngRatio; } else { bh = bw / pngRatio; }
                 }
 
-                // 원본 중심을 유지하면서 좌상단(x,y) 재산출
-                double centerX = bounds[1] + bwOrig / 2.0;
-                double centerY = bounds[0] + bhOrig / 2.0;
+                // 가시 영역 중심을 유지하면서 좌상단(x,y) 재산출
+                double centerX = visLeft + bwOrig / 2.0;
+                double centerY = visTop + bhOrig / 2.0;
                 double x = centerX - bw / 2.0;
                 double y = centerY - bh / 2.0;
 
