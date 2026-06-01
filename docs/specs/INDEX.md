@@ -16,6 +16,7 @@
 | **[SPEC-025](SPEC-025-text-image-rendering-removal.md)** | 텍스트 이미지 렌더링 제거 | **2026-05-22 검증**: A.5(masterPage) ❌ / B(rotation) ❌ 미작동. ExtendScript `classifyTextFrame` 조건 5 + `isRenderableTextFrame` 보강 필요 |
 | **[SPEC-027](SPEC-027-badge-scribble-outline-png.md)** | 배지 scribble 외곽선 PNG 폴백 | **신규(2026-05-20)**. 일러스트 톤 배지 외곽선만 PNG, 텍스트는 HWPX. 데이터 조사 단계 |
 | **[SPEC-028](SPEC-028-inline-anchored-group-duplicate.md)** | 인라인 앵커 Group 중복 렌더링 | **신규(2026-05-21)**. 타이틀 ③ 가 floating + 작은 inline PIC 두 번 렌더 — page 46 타이틀 줄바꿈 회귀 |
+| **[SPEC-033](SPEC-033-badge-inline-simplification.md)** | 배지 인라인 처리 단순화 | **신규(2026-06-01)**. textHiddenBeforeExport 의존 제거 + bgShape 폴백 + 인라인 배지 배경 숨김 |
 | **[SPEC-029](SPEC-029-page-30-31-merged.md)** | 페이지 30/31 합쳐져 변환 | **신규(2026-05-21)**. XML 구조상 페이지 분리 정상이나 시각 결과는 합쳐 보임. 데이터 조사 필요 |
 | **[SPEC-030](SPEC-030-indesign-extraction-performance.md)** | InDesign 추출 속도 개선 | **신규(2026-05-22)**. P0. 4단계 플랜 (측정 → Tier A 즉시 → 페이지캐시/range → 대규모 리팩토링) |
 | [SPEC-desktop-app](SPEC-desktop-app.md) | Desktop App 아키텍처 | Tauri 2.0 + React 18 — 상시 참조 |
