@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -57,9 +58,7 @@ public final class RenderableFramePlacer {
             if (rt.isBadgeGroupChild()) continue;
             // Phase 2 가 텍스트 글상자로 배치한 TF → PNG 건너뜀 (dedupKey 선점 전에 체크).
             // 부모 Rectangle 항목은 별도로 같은 PNG 를 배치 → 배경 도형으로 남음.
-            if (ctx.renderedTfPlacedAsText.contains(rt.id())) {
-                continue;
-            }
+            if (ctx.isDisposed(rt.id(), FrameDisposition.TEXT_BLOCK_PLACED)) continue;
             String dedupKey = rt.pageIndex() + "|" + rt.file();
             if (!placedKeys.add(dedupKey)) {
                 continue; // 이미 배치된 동일 파일/페이지
@@ -497,7 +496,7 @@ public final class RenderableFramePlacer {
         // and need to be re-placed as floating ASTFigures behind their inlineToFloating TF.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (!"inline_object".equals(rg.itemType())) continue;
-            if (!ctx.inlineObjectsToConvertToFloating.contains(rg.id())) continue;
+            if (!ctx.isDisposed(rg.id(), FrameDisposition.PNG_CONVERT_TO_FLOATING)) continue;
             if (rg.file() == null) continue;
             String dedupKey2 = rg.pageIndex() + "|" + rg.file();
             if (!placedKeys.add(dedupKey2)) continue;
@@ -564,7 +563,7 @@ public final class RenderableFramePlacer {
 
     /**
      * Phase 3 실행 전 호출: inline anchor이면서 짧은 단문(≤3자, ￼ 없음)인 renderable 항목을
-     * inlineObjectsToConvertToFloating에 미리 등록한다.
+     * PNG_CONVERT_TO_FLOATING disposition으로 미리 등록한다.
      * Phase 7이 이 항목들을 floating TextFrameBlock으로 배치하므로,
      * Phase 3의 loadInlineObject가 이를 건너뛰어 중복 렌더링을 방지한다.
      */
@@ -581,7 +580,7 @@ public final class RenderableFramePlacer {
             if (visText == null) continue;
             String cleaned = visText.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (!cleaned.isEmpty() && cleaned.length() <= 3) {
-                ctx.inlineObjectsToConvertToFloating.add(rt.id());
+                ctx.setDisposition(rt.id(), FrameDisposition.PNG_CONVERT_TO_FLOATING);
             }
         }
     }

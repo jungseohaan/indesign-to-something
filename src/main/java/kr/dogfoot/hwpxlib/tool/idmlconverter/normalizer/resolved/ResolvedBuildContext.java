@@ -119,12 +119,25 @@ public final class ResolvedBuildContext {
     public java.util.Set<Integer> customAnchoredInlineIds = new java.util.HashSet<>();
 
     /**
-     * Phase 2 가 non-editable inline TF 를 inlineToFloating 으로 전환할 때,
-     * 해당 TF 의 조상 inline_object 를 여기에 등록한다.
-     * Phase 3 (loadInlineObject) 는 이 집합에 있는 ID 의 inline PNG 를 inline 배치에서 억제하고,
-     * Phase 7 이 동일 PNG 를 플로팅 ASTFigure 로 재배치한다.
+     * DOM 객체 ID → 처리 소유권 결정 맵.
+     *
+     * <p>Phase 2 / Phase 4 / Phase 7 prep이 {@link #setDisposition}으로 등록하고,
+     * Phase 3 / Phase 7이 {@link #isDisposed}로 읽는다.
+     * 등록되지 않은 ID는 기본 경로(Phase 3 스토리 변환 / Phase 7 PNG 배치)를 따른다.</p>
+     *
+     * @see FrameDisposition
      */
-    public java.util.Set<Integer> inlineObjectsToConvertToFloating = new java.util.HashSet<>();
+    public java.util.Map<Integer, FrameDisposition> frameDispositions = new java.util.HashMap<>();
+
+    /** domId의 disposition을 등록한다. */
+    public void setDisposition(int domId, FrameDisposition d) {
+        frameDispositions.put(domId, d);
+    }
+
+    /** domId가 지정된 disposition으로 등록되어 있으면 true. */
+    public boolean isDisposed(int domId, FrameDisposition d) {
+        return d.equals(frameDispositions.get(domId));
+    }
 
     /**
      * inline_object ID → TF 의 pageIndex 매핑.
@@ -139,19 +152,6 @@ public final class ResolvedBuildContext {
      * prepopulateAnchoredFloatingIds 이후 유효.
      */
     public java.util.Set<Integer> aboveLineAnchoredIds = new java.util.HashSet<>();
-
-    /**
-     * Phase 2 가 non-editable 플로팅 TF 를 텍스트 글상자로 배치할 때 등록.
-     * Phase 7 은 이 집합에 있는 ID 의 PNG 를 건너뜀 (텍스트 글상자가 이미 배치됨).
-     */
-    public java.util.Set<Integer> renderedTfPlacedAsText = new java.util.HashSet<>();
-
-    /**
-     * Phase 2 가 _skipTfBadgePng 로 완전히 건너뛴 inline TF ID 집합.
-     * 해당 TF 는 부모 inline_object PNG 에 텍스트가 이미 렌더링되어 있어 별도 배치 불필요.
-     * Phase 3 (loadInlineObject) 에서 이 TF 가 자식으로 발견될 때 PNG 폐기(return null) 예외 처리.
-     */
-    public java.util.Set<Integer> skippedBadgeChildTfIds = new java.util.HashSet<>();
 
 
     public ResolvedBuildContext() {

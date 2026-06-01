@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -142,7 +143,7 @@ public final class FramePlacer {
                                 if (_inlRuns != null && !_inlRuns.isEmpty()) {
                                     Double _inlFs = _inlRuns.get(0).fontSize();
                                     if (_inlFs != null && _inlFs > 16.0) {
-                                        ctx.renderedTfPlacedAsText.add(domIdInt);
+                                        ctx.setDisposition(domIdInt, FrameDisposition.TEXT_BLOCK_PLACED);
                                         inlineToFloating = true;
                                     }
                                 }
@@ -237,7 +238,7 @@ public final class FramePlacer {
                     // non-editable 플로팅 TF 중, 자기 story + 텍스트가 있고 PNG로 렌더됐으며
                     // 부모가 회전된 Rectangle (absoluteRotationAngle≠0)인 경우 텍스트 글상자로 배치.
                     // (예: 오느른/운느라/싸인 — 부모 Rectangle이 비스듬히 기울어진 TF)
-                    // Phase 7 PNG 는 이후 ctx.renderedTfPlacedAsText 확인 시 건너뜀.
+                    // Phase 7 PNG 는 이후 ctx.frameDispositions(TEXT_BLOCK_PLACED) 확인 시 건너뜀.
                     String _vis = tf.frameVisibleText();
                     String _visCleaned = (_vis == null) ? "" : _vis.replace("￼", "").replace("\r", "").replace("\n", "").trim();
                     int _domId = -1;
@@ -297,7 +298,7 @@ public final class FramePlacer {
                         _nonRenderedWithText = !_ancestorHasPng;
                     }
                     if (_parentIsRotatedRect || _noItemTypeRendered) {
-                        ctx.renderedTfPlacedAsText.add(_domId);
+                        ctx.setDisposition(_domId, FrameDisposition.TEXT_BLOCK_PLACED);
                         // fall through → 글상자로 배치
                     } else if (_nonRenderedWithText) {
                         // fall through → 텍스트 글상자로 배치
@@ -891,7 +892,7 @@ public final class FramePlacer {
                                 // inline_object PNG가 있으면 inline 배치 유지 → floating 전환 등록 안 함.
                                 // TF는 floating text box로 배치되어 PNG 위에 텍스트 오버레이 역할을 한다.
                                 if (_ancRg.file() != null) break outer_anc;
-                                ctx.inlineObjectsToConvertToFloating.add(_ancRg.id());
+                                ctx.setDisposition(_ancRg.id(), FrameDisposition.PNG_CONVERT_TO_FLOATING);
                                 ctx.inlineObjectTfPageIndex.put(_ancRg.id(), tf.pageIndex());
                                 break outer_anc;
                             }

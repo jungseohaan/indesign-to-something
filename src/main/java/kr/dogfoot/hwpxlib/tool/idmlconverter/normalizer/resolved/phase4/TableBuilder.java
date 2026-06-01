@@ -13,6 +13,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
@@ -243,7 +244,7 @@ public final class TableBuilder {
     /**
      * 테이블 셀에 포함된 인라인 그룹(tryInlineGroupAsBoxList가 [leftITF, rightITF]를 반환)이
      * 있으면 해당 컬럼을 2개로 분할하여 3컬럼 테이블로 재구성한다.
-     * 처리된 그룹 ID는 ctx.renderedTfPlacedAsText에 등록하여 Phase 7 중복 배치를 방지한다.
+     * 처리된 그룹 ID는 TEXT_BLOCK_PLACED로 등록하여 Phase 7 중복 배치를 방지한다.
      *
      * @return 재구성된 ASTTable, 또는 확장 불필요 시 null
      */
@@ -452,17 +453,17 @@ public final class TableBuilder {
      * 그룹 ID 집합과 그 모든 자손을 Phase 7에서 처리하지 않도록 등록.
      *
      * 처리 순서:
-     * 1) groupIds 자체를 renderedTfPlacedAsText에 추가
+     * 1) groupIds 자체를 TEXT_BLOCK_PLACED로 등록
      * 2) groupIds가 사용하는 배지 PNG 파일 경로를 수집 →
      *    같은 파일을 공유하는 TF(형제 TF) 도 suppressed
      * 3) pageItems childIds BFS로 그룹 자손 전체 수집 → suppressed
      */
     private static void suppressAllDescendantsFromPhase7(
             ResolvedBuildContext ctx, Set<Integer> groupIds) {
-        if (ctx.renderedTfPlacedAsText == null || ctx.resolvedData == null) return;
+        if (ctx.frameDispositions == null || ctx.resolvedData == null) return;
 
         // Step 1: 부모 그룹 직접 등록
-        ctx.renderedTfPlacedAsText.addAll(groupIds);
+        for (int id : groupIds) ctx.setDisposition(id, FrameDisposition.TEXT_BLOCK_PLACED);
 
         // Step 2: 배지 PNG 파일 공유 TF 억제
         Set<String> badgeFiles = new HashSet<>();
@@ -479,12 +480,12 @@ public final class TableBuilder {
         if (!badgeFiles.isEmpty()) {
             for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
                 if (rt.file() != null && badgeFiles.contains(rt.file())) {
-                    ctx.renderedTfPlacedAsText.add(rt.id());
+                    ctx.setDisposition(rt.id(), FrameDisposition.TEXT_BLOCK_PLACED);
                 }
             }
             for (RenderedGroup rt : ctx.resolvedData.allRenderedFloatingItems()) {
                 if (rt.file() != null && badgeFiles.contains(rt.file())) {
-                    ctx.renderedTfPlacedAsText.add(rt.id());
+                    ctx.setDisposition(rt.id(), FrameDisposition.TEXT_BLOCK_PLACED);
                 }
             }
         }
@@ -505,7 +506,7 @@ public final class TableBuilder {
             if (children == null) continue;
             for (int child : children) {
                 if (visited.add(child)) {
-                    ctx.renderedTfPlacedAsText.add(child);
+                    ctx.setDisposition(child, FrameDisposition.TEXT_BLOCK_PLACED);
                     queue.add(child);
                 }
             }
