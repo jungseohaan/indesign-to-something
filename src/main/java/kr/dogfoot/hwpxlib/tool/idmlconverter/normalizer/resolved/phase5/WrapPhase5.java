@@ -62,6 +62,17 @@ public final class WrapPhase5 {
                     }
                 }
                 if (allComposedLines.size() < 2) {
+                    // composedLines 없는 경우 paragraphYOffsets 기반 Y-gap 폴백
+                    if (allComposedLines.isEmpty()
+                            && rtf.paragraphYOffsets() != null && rtf.paragraphYOffsets().length >= 3
+                            && tfb.paragraphs() != null && tfb.paragraphs().size() >= 2) {
+                        List<ASTBlock> fallback = splitByYGap(tfb, rtf);
+                        if (fallback != null && fallback.size() > 1) {
+                            newBlocks.addAll(fallback);
+                            splitCount++;
+                            continue;
+                        }
+                    }
                     newBlocks.add(blk);
                     continue;
                 }
@@ -94,6 +105,7 @@ public final class WrapPhase5 {
                 // wrap 감지: 좌/우 indent > threshold 가 3행 이상 연속
                 // (normalizeToPoints 후 indent는 pt 단위)
                 double[] gb0 = rtf.geometricBounds();
+                if (gb0 == null || gb0.length < 4) { newBlocks.add(blk); continue; }
                 double frameW0 = gb0[3] - gb0[1];
                 // 연결 글상자 체인은 indent가 작아도 일관되면 textwrap → threshold 낮춤
                 double indentThreshold = frameW0 * (isLinkedChain ? 0.12 : 0.20);
@@ -279,6 +291,7 @@ public final class WrapPhase5 {
 
                 // 각 그룹의 문자 범위 계산 (composedLine 텍스트 누적)
                 double[] gb = rtf.geometricBounds();
+                if (gb == null || gb.length < 4) { newBlocks.add(blk); continue; }
                 double frameW = gb[3] - gb[1];
                 System.err.println("[WrapPhase5] tf=" + domId + " sourceId=" + tfb.sourceId() + " frameW=" + String.format("%.1f", frameW) + " lines=" + lines.size() + " maxConsR=" + maxConsecutive);
                 int charOffset = 0;
@@ -404,6 +417,74 @@ public final class WrapPhase5 {
         if (splitCount > 0) {
             System.err.println("[SplitByWrapIndent] " + splitCount + " blocks split");
         }
+    }
+
+    /**
+     * composedLines 없을 때 paragraphYOffsets 기반 Y-gap 분할 폴백.
+     * 연속 단락 간 Y 간격이 평균의 2.5배 이상이면 분할점으로 판정.
+     * 분할이 없으면 null 반환.
+     */
+    private static List<ASTBlock> splitByYGap(ASTTextFrameBlock tfb, ResolvedTextFrame rtf) {
+        double[] yOff = rtf.paragraphYOffsets();
+        int paraCount = tfb.paragraphs().size();
+        int offCount = Math.min(paraCount, yOff.length);
+        if (offCount < 2) return null;
+
+        // 연속 Y 간격 계산
+        double[] gaps = new double[offCount - 1];
+        double gapSum = 0;
+        for (int i = 0; i < gaps.length; i++) {
+            gaps[i] = yOff[i + 1] - yOff[i];
+            if (gaps[i] < 0) gaps[i] = 0;
+            gapSum += gaps[i];
+        }
+        double avgGap = gapSum / gaps.length;
+        if (avgGap <= 0) return null;
+        double threshold = avgGap * 2.5;
+
+        // 분할점 탐색
+        List<Integer> splitBefore = new ArrayList<>();
+        for (int i = 0; i < gaps.length; i++) {
+            if (gaps[i] > threshold) splitBefore.add(i + 1);
+        }
+        if (splitBefore.isEmpty()) return null;
+
+        double[] gb = rtf.geometricBounds();
+        if (gb == null) return null;
+        double frameTop = gb[0];
+        double frameW = gb[3] - gb[1];
+
+        List<ASTBlock> result = new ArrayList<>();
+        int groupStart = 0;
+        for (int si = 0; si <= splitBefore.size(); si++) {
+            int groupEnd = (si < splitBefore.size()) ? splitBefore.get(si) : paraCount;
+            if (groupEnd <= groupStart) continue;
+
+            double groupTopOff = (groupStart < yOff.length) ? yOff[groupStart] : 0;
+            double groupBottomOff = (groupEnd < yOff.length) ? yOff[groupEnd]
+                    : (gb[2] - frameTop);
+            double groupH = groupBottomOff - groupTopOff;
+            if (groupH <= 0) groupH = (gb[2] - gb[0]) / (splitBefore.size() + 1);
+
+            ASTTextFrameBlock sub = new ASTTextFrameBlock();
+            sub.sourceId(tfb.sourceId());
+            sub.x(tfb.x());
+            sub.y(tfb.y() + CoordinateConverter.pointsToHwpunits(groupTopOff));
+            sub.width(CoordinateConverter.pointsToHwpunits(frameW));
+            sub.height(CoordinateConverter.pointsToHwpunits(groupH));
+            sub.zOrder(tfb.zOrder());
+            sub.columnCount(1);
+            sub.insetTop(tfb.insetTop());
+            sub.insetLeft(tfb.insetLeft());
+            sub.insetBottom(tfb.insetBottom());
+            sub.insetRight(tfb.insetRight());
+            for (int pi = groupStart; pi < groupEnd; pi++) {
+                sub.addParagraph(tfb.paragraphs().get(pi));
+            }
+            result.add(sub);
+            groupStart = groupEnd;
+        }
+        return result.size() > 1 ? result : null;
     }
 
     private static int groupTextLen(List<ResolvedTextFrame.ComposedLine> group) {

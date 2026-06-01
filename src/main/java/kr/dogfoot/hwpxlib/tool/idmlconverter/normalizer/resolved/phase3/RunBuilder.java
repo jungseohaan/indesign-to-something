@@ -573,15 +573,10 @@ class RunBuilder {
             String normRemaining = normalizeSpaces(remaining);
             String normRRText = normalizeSpaces(rrText);
             if (normRemaining.startsWith(normRRText)) {
-                // 정규화 후 정확 접두사 매칭 → HIGH
+                // 정규화 후 정확 접두사 매칭 → HIGH (특수 공백 포함 원문 raw 매칭도 이 경로로 처리됨)
                 int cutLen = findOriginalLength(remaining, normRRText.length());
                 segments.add(new Segment(remaining.substring(0, cutLen), rIdx, MatchConfidence.HIGH));
                 remaining = remaining.substring(cutLen);
-                rIdx++;
-            } else if (remaining.startsWith(rrText)) {
-                // 원문 그대로 접두사 매칭 → HIGH
-                segments.add(new Segment(rrText, rIdx, MatchConfidence.HIGH));
-                remaining = remaining.substring(rrText.length());
                 rIdx++;
             } else if (rrText.length() > 0 && remaining.startsWith(rrText.substring(0, Math.min(3, rrText.length())))) {
                 // 부분 매칭: 앞 3자만 일치 → 다음 런 키워드로 분할
@@ -699,15 +694,15 @@ class RunBuilder {
                 return runs.get(i);
             }
         }
-        // 못 찾으면 처음부터
-        for (int i = 0; i < Math.min(startIdx, runs.size()); i++) {
+        // 앞쪽 소수 런만 역방향 재탐색 (O(n²) 방지: 전체 restart 대신 최대 8칸 window)
+        int backWindow = Math.max(0, startIdx - 8);
+        for (int i = backWindow; i < startIdx; i++) {
             String rt = runs.get(i).text();
             if (rt != null && rt.contains(key)) {
                 ctx.lastMatchResult[0] = i;
                 return runs.get(i);
             }
         }
-        // 매칭 실패 시 null 반환 — 호출측에서 defaultRR 사용
         return null;
     }
 }

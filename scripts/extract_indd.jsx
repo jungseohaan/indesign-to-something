@@ -4161,13 +4161,17 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
     // 인라인 배지 Groups도 배경에서 숨김:
     // doc.allPageItems는 인라인 앵커 객체를 포함하지 않으므로
     // editable TF들의 story.allPageItems를 통해 인라인 배지를 별도 수집한다.
-    var inlineBadgeStoryIds = {};
+    // 인라인 앵커 객체는 parentPage=null이어서 spreadFrames 경로로 가지만,
+    // visibleBounds가 실패하거나 bounds 겹침 체크가 틀어지는 문제가 있으므로
+    // 페이지 루프 전에 전역으로 숨기는 방식을 사용한다.
+    var inlineBadgesToHideGlobally = [];
+    var _ibStoryIds = {};
     for (var ibsi = 0; ibsi < editableFrames.length; ibsi++) {
         try {
             var ibStory = editableFrames[ibsi].parentStory;
             var ibStoryKey = ibStory.id.toString();
-            if (inlineBadgeStoryIds[ibStoryKey]) continue;
-            inlineBadgeStoryIds[ibStoryKey] = true;
+            if (_ibStoryIds[ibStoryKey]) continue;
+            _ibStoryIds[ibStoryKey] = true;
             var ibAllItems = ibStory.allPageItems;
             for (var ibai = 0; ibai < ibAllItems.length; ibai++) {
                 try {
@@ -4175,11 +4179,52 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                     if (ibItem.constructor.name !== "Group") continue;
                     if (!isInlineItem(ibItem)) continue;
                     if (!isBadgeGroup(ibItem)) continue;
-                    framesToHide.push(ibItem);
+                    inlineBadgesToHideGlobally.push(ibItem);
                 } catch (e) {}
             }
         } catch (e) {}
     }
+    // 페이지 루프 전에 모든 인라인 배지를 일괄 숨김
+    // Group 자체 + 자식 아이템 모두 숨김 (인라인 앵커 Group은 visible 속성이
+    // PNG export에 반영 안 될 수 있으므로 자식별 숨김도 함께 수행)
+    var hiddenInlineBadgesGlobal = [];
+    var _inlineBadgeLog = ["[inline_badge_hide] found=" + inlineBadgesToHideGlobally.length];
+    for (var hib = 0; hib < inlineBadgesToHideGlobally.length; hib++) {
+        try {
+            var hibGroup = inlineBadgesToHideGlobally[hib];
+            var hibId = "?";
+            try { hibId = hibGroup.id; } catch(e) {}
+            var hibVisOk = false;
+            // Group 자체 숨김
+            try {
+                var _hibVis = hibGroup.visible;
+                if (_hibVis) {
+                    hibGroup.visible = false;
+                    hiddenInlineBadgesGlobal.push({ item: hibGroup, wasGroup: true });
+                    hibVisOk = true;
+                }
+            } catch (eVis) { _inlineBadgeLog.push("  grp " + hibId + " visible THROW: " + eVis); }
+            _inlineBadgeLog.push("  grp " + hibId + " vis=" + hibVisOk);
+            // 자식 아이템 숨김 (Group.visible이 PNG export에 반영 안 될 경우 대비)
+            try {
+                var hibChildren = hibGroup.pageItems;
+                for (var hic = 0; hic < hibChildren.length; hic++) {
+                    try {
+                        if (hibChildren[hic].visible) {
+                            hibChildren[hic].visible = false;
+                            hiddenInlineBadgesGlobal.push({ item: hibChildren[hic], wasGroup: false });
+                        }
+                    } catch (e2) {}
+                }
+            } catch (e) {}
+        } catch (e) {}
+    }
+    // 디버그 로그 기록
+    try {
+        var _ibLogFile = File(outputDir + "/_inline_badge_hide.log");
+        _ibLogFile.encoding = "UTF-8"; _ibLogFile.open("w");
+        _ibLogFile.write(_inlineBadgeLog.join("\n")); _ibLogFile.close();
+    } catch (eLog) {}
 
     // 페이지별 프레임 인덱스 미리 빌드 (O(pages × frames) → O(frames) + O(pages))
     var framesByPage = {};  // pageOffset → [frame, ...]
@@ -4295,6 +4340,11 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
         results.push(entry);
 
         writeProgress(outputDir, "rendered_frames", pi + 1, doc.pages.length);
+    }
+
+    // 인라인 배지 전역 숨김 복원
+    for (var rib = 0; rib < hiddenInlineBadgesGlobal.length; rib++) {
+        try { hiddenInlineBadgesGlobal[rib].item.visible = true; } catch (e) {}
     }
 
     // SPEC-025: 마스터 스프레드 아이템 visibility 복원

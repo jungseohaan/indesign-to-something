@@ -184,6 +184,57 @@ public class ResolvedData {
         }
     }
 
+    /**
+     * ancestorId를 루트로 최대 maxDepth 깊이까지 자손 ID 집합을 구축한다.
+     * tryInlineGroupAsBoxList 등에서 O(P×depth) 반복 순회 대신 O(1) 조회를 가능하게 한다.
+     */
+    public java.util.Set<String> buildDescendantSet(String ancestorId, int maxDepth) {
+        java.util.Set<String> result = new java.util.HashSet<>();
+        if (ancestorId == null || maxDepth <= 0) return result;
+        // 자식 목록 인덱스: parentId → children (pageItems 한 번 순회)
+        java.util.Map<String, java.util.List<String>> childMap = new java.util.HashMap<>();
+        for (ResolvedPageItem pi : pageItems) {
+            if (pi == null || pi.parentId() == null) continue;
+            childMap.computeIfAbsent(pi.parentId(), k -> new java.util.ArrayList<>()).add(pi.id());
+        }
+        // BFS
+        java.util.Queue<String> queue = new java.util.ArrayDeque<>();
+        queue.add(ancestorId);
+        java.util.Queue<String> nextLevel = new java.util.ArrayDeque<>();
+        for (int d = 0; d < maxDepth && !queue.isEmpty(); d++) {
+            while (!queue.isEmpty()) {
+                String cur = queue.poll();
+                java.util.List<String> children = childMap.get(cur);
+                if (children != null) {
+                    for (String child : children) {
+                        if (result.add(child)) nextLevel.add(child);
+                    }
+                }
+            }
+            queue.addAll(nextLevel);
+            nextLevel.clear();
+        }
+        return result;
+    }
+
+    /**
+     * itemId의 조상 체인을 최대 maxHops 단계까지 순회하여 ancestorId가 있으면 true.
+     * FramePlacer / InlineFrameHandler 전역에서 반복되는 "5 hop 부모 체인 순회" 패턴의 공통 구현.
+     */
+    public boolean isDescendantOf(String itemId, String ancestorId, int maxHops) {
+        if (itemId == null || ancestorId == null) return false;
+        ResolvedPageItem pi = pageItemMap.get(itemId);
+        if (pi == null) return false;
+        String cur = pi.parentId();
+        for (int h = 0; h < maxHops && cur != null; h++) {
+            if (ancestorId.equals(cur)) return true;
+            ResolvedPageItem next = pageItemMap.get(cur);
+            if (next == null) break;
+            cur = next.parentId();
+        }
+        return false;
+    }
+
     // --- Page ---
 
     public void addPage(ResolvedPage page) {

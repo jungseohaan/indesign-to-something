@@ -43,6 +43,12 @@ public final class StoryConverter {
 
     static final String BULLET_CHARS = "●•◆◇▶▷■□";
 
+    // scanTextPathStorySubstitutions 전용 — 메서드 호출마다 재컴파일 방지
+    private static final java.util.regex.Pattern TEXT_FRAME_PATTERN =
+            java.util.regex.Pattern.compile("<TextFrame\\s+Self=\"u([0-9a-f]+)\"");
+    private static final java.util.regex.Pattern TEXT_PATH_PATTERN =
+            java.util.regex.Pattern.compile("<TextPath\\s+Self=\"[^\"]+\"\\s+ParentStory=\"u([0-9a-f]+)\"");
+
     private StoryConverter() {}
 
     /** ParagraphStyle에서 미리 구한 스타일 속성 (런에서 없을 때 폴백용) */
@@ -229,10 +235,8 @@ public final class StoryConverter {
         if (ctx.idmlDir == null) return map;
         java.io.File spreadsDir = new java.io.File(ctx.idmlDir, "Spreads");
         if (!spreadsDir.isDirectory()) return map;
-        java.util.regex.Pattern tfPattern = java.util.regex.Pattern.compile(
-                "<TextFrame\\s+Self=\"u([0-9a-f]+)\"");
-        java.util.regex.Pattern tpPattern = java.util.regex.Pattern.compile(
-                "<TextPath\\s+Self=\"[^\"]+\"\\s+ParentStory=\"u([0-9a-f]+)\"");
+        java.util.regex.Pattern tfPattern = TEXT_FRAME_PATTERN;
+        java.util.regex.Pattern tpPattern = TEXT_PATH_PATTERN;
         for (java.io.File f : spreadsDir.listFiles()) {
             if (!f.getName().endsWith(".xml")) continue;
             try {

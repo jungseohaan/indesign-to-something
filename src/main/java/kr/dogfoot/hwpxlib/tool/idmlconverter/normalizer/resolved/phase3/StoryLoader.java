@@ -21,6 +21,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTabStop;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Map;
 import java.util.List;
 
 /**
@@ -68,6 +69,9 @@ class StoryLoader {
         // resolved에서 단락 속성 보강용
         ResolvedStory resolvedStory = ctx.resolvedData.getStory(storyId);
 
+        // cleanStyleName → alignment 캐시: 같은 스타일명이 수백 단락에 반복 적용될 때 중복 resolve 방지
+        Map<String, String> styleAlignCache = new java.util.HashMap<>();
+
         List<ASTParagraph> paragraphs = new ArrayList<>();
         List<IDMLParagraph> idmlParas = idmlStory.paragraphs();
         for (int i = 0; i < idmlParas.size(); i++) {
@@ -95,7 +99,9 @@ class StoryLoader {
                 if (ip.justification() != null) {
                     para.alignment(ip.justification());
                 } else {
-                    String idmlStyleJust = StoryConverter.resolveStyleAlignment(cleanStyleName, ctx.astDocument);
+                    String idmlStyleJust = cleanStyleName == null ? null
+                            : styleAlignCache.computeIfAbsent(cleanStyleName,
+                                k -> StoryConverter.resolveStyleAlignment(k, ctx.astDocument));
                     if (idmlStyleJust != null) {
                         para.alignment(idmlStyleJust);
                     } else if (resolvedStory != null && i < resolvedStory.paragraphs().size()
@@ -178,15 +184,15 @@ class StoryLoader {
                 resolvedRuns = resolvedStory.paragraphs().get(i).runs();
             }
 
-            // SPEC-025: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 다음에  (BEL) 또는
-            //  (IDML 변환값) 이 나오면 첫 anchor TF 폭만큼 paragraph leftMargin 적용.
+            // SPEC-025: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 다음에 \u0007 (BEL) 또는
+            // \u0008 (BS, IDML 변환값) 이 나오면 첫 anchor TF 폭만큼 paragraph leftMargin 적용.
             // (예: "1  가 같은 사건을..." 패턴에서 "가" 부터의 줄은 "1" 폭만큼 들여쓰기)
             if (resolvedRuns != null && resolvedRuns.size() >= 2 && para.leftMargin() == null) {
                 ResolvedRun rA = resolvedRuns.get(0);
                 ResolvedRun rB = resolvedRuns.get(1);
                 if (rA.isInlineAnchor() && rA.anchoredObjectId() != null
                         && rB.text() != null
-                        && (rB.text().indexOf('') >= 0 || rB.text().indexOf('') >= 0)) {
+                        && (rB.text().indexOf('\u0007') >= 0 || rB.text().indexOf('\u0008') >= 0)) {
                     kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame anchorTf
                             = ctx.resolvedData.getTextFrame(String.valueOf(rA.anchoredObjectId()));
                     if (anchorTf != null) {

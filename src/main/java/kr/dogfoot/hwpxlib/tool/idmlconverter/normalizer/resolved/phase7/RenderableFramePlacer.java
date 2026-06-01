@@ -142,28 +142,28 @@ public final class RenderableFramePlacer {
                         }
                     }
                     double pngLeft = x, pngRight = x + bw, pngTop = y, pngBottom = y + bh;
+                    double maxShift = 0;
                     for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame otf : ctx.resolvedData.textFrames()) {
                         if (otf == null) continue;
                         if (otf.pageIndex() != rt.pageIndex()) continue;
                         if (!ctx.resolvedData.isEditableTextFrame(otf.id())) continue;
                         if (otf.composedLines() == null || otf.composedLines().isEmpty()) continue;
-                        double[] cl0 = otf.composedLines().get(0).bounds();
-                        if (cl0 == null || cl0.length < 4) continue;
-                        double clTop = cl0[0] - rtPageTop;
-                        double clLeft = cl0[1] - rtPageLeft;
-                        double clBottom = cl0[2] - rtPageTop;
-                        double clRight = cl0[3] - rtPageLeft;
-                        boolean overlap = pngLeft < clRight && pngRight > clLeft
-                                && pngTop < clBottom && pngBottom > clTop;
-                        if (!overlap) continue;
-                        double gap = 2.0;
-                        double newRight = clLeft - gap;
-                        double shiftAmount = pngRight - newRight;
-                        if (shiftAmount > 0) {
-                            x -= shiftAmount;
+                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame.ComposedLine cl : otf.composedLines()) {
+                            double[] clB = cl.bounds();
+                            if (clB == null || clB.length < 4) continue;
+                            double clTop = clB[0] - rtPageTop;
+                            double clLeft = clB[1] - rtPageLeft;
+                            double clBottom = clB[2] - rtPageTop;
+                            double clRight = clB[3] - rtPageLeft;
+                            boolean overlap = pngLeft < clRight && pngRight > clLeft
+                                    && pngTop < clBottom && pngBottom > clTop;
+                            if (!overlap) continue;
+                            double gap = 2.0;
+                            double shift = pngRight - (clLeft - gap);
+                            if (shift > maxShift) maxShift = shift;
                         }
-                        break;
                     }
+                    if (maxShift > 0) x -= maxShift;
                 }
 
                 kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTf
@@ -181,49 +181,8 @@ public final class RenderableFramePlacer {
                     if (visText != null) {
                         String cleaned = visText.replace("￼", "").replace("\r", "").replace("\n", "").trim();
                         if (!cleaned.isEmpty() && cleaned.length() <= 3) {
-                            // 짧은 텍스트 → TextFrameBlock 으로 변환
-                            // 텍스트 블록은 PNG 비율 보정 / overlap shift 가 불필요 → 원본 bounds 사용
-                            double tx = bounds[1];
-                            double ty = bounds[0];
-                            double tw = Math.abs(bounds[3] - bounds[1]);
-                            double th = Math.abs(bounds[2] - bounds[0]);
                             kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock block =
-                                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock();
-                            block.sourceId("renderable_text_" + rt.id());
-                            block.x(CoordinateConverter.pointsToHwpunits(tx));
-                            block.y(CoordinateConverter.pointsToHwpunits(ty));
-                            block.width(CoordinateConverter.pointsToHwpunits(tw));
-                            block.height(CoordinateConverter.pointsToHwpunits(th));
-                            int idesignIdx2 = rt.zOrder();
-                            int hwpxZ2 = (idesignIdx2 > 0) ? Math.max(10000 - idesignIdx2, 10) : 10;
-                            block.zOrder(hwpxZ2);
-                            block.verticalJustification("CENTER_ALIGN");
-                            // 텍스트 런 생성 (resolved story 에서 폰트/사이즈 가져오기)
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph paraT =
-                                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph();
-                            paraT.alignment("CENTER_ALIGN");
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun trRun =
-                                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun();
-                            trRun.text(cleaned);
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs2 =
-                                    rtTf.storyId() != null ? ctx.resolvedData.getStory(rtTf.storyId()) : null;
-                            if (rs2 != null && !rs2.paragraphs().isEmpty()
-                                    && rs2.paragraphs().get(0).runs() != null
-                                    && !rs2.paragraphs().get(0).runs().isEmpty()) {
-                                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun rr2 =
-                                        rs2.paragraphs().get(0).runs().get(0);
-                                if (rr2.fontFamily() != null) trRun.fontFamily(rr2.fontFamily());
-                                if (rr2.fontSize() != null && rr2.fontSize() > 0) {
-                                    trRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr2.fontSize()));
-                                }
-                                if (rr2.fontStyle() != null) trRun.fontStyle(rr2.fontStyle());
-                                if (rr2.fillColor() != null) {
-                                    String hex = ctx.resolvedData.resolveColorHex(rr2.fillColor());
-                                    if (hex != null) trRun.textColor(hex);
-                                }
-                            }
-                            paraT.addItem(trRun);
-                            block.addParagraph(paraT);
+                                    buildShortTextBlock(ctx, "renderable_text_", rt.id(), rtTf, bounds, cleaned, rt.zOrder());
                             sections.get(pageIdx).addBlock(block);
                             count++;
                             convertedToText = true;
@@ -240,46 +199,8 @@ public final class RenderableFramePlacer {
                     if (visText2 != null && !visText2.contains("￼")) {
                         String cleaned2 = visText2.replace("\r", "").replace("\n", "").trim();
                         if (!cleaned2.isEmpty() && cleaned2.length() <= 20) {
-                            double tx2 = bounds[1];
-                            double ty2 = bounds[0];
-                            double tw2 = Math.abs(bounds[3] - bounds[1]);
-                            double th2 = Math.abs(bounds[2] - bounds[0]);
                             kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock block2 =
-                                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock();
-                            block2.sourceId("renderable_text_float_" + rt.id());
-                            block2.x(CoordinateConverter.pointsToHwpunits(tx2));
-                            block2.y(CoordinateConverter.pointsToHwpunits(ty2));
-                            block2.width(CoordinateConverter.pointsToHwpunits(tw2));
-                            block2.height(CoordinateConverter.pointsToHwpunits(th2));
-                            int idesignIdx3 = rt.zOrder();
-                            int hwpxZ3 = (idesignIdx3 > 0) ? Math.max(10000 - idesignIdx3, 10) : 10;
-                            block2.zOrder(hwpxZ3);
-                            block2.verticalJustification("CENTER_ALIGN");
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph paraT2 =
-                                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph();
-                            paraT2.alignment("CENTER_ALIGN");
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun trRun2 =
-                                    new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun();
-                            trRun2.text(cleaned2);
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs3 =
-                                    rtTf.storyId() != null ? ctx.resolvedData.getStory(rtTf.storyId()) : null;
-                            if (rs3 != null && !rs3.paragraphs().isEmpty()
-                                    && rs3.paragraphs().get(0).runs() != null
-                                    && !rs3.paragraphs().get(0).runs().isEmpty()) {
-                                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun rr3 =
-                                        rs3.paragraphs().get(0).runs().get(0);
-                                if (rr3.fontFamily() != null) trRun2.fontFamily(rr3.fontFamily());
-                                if (rr3.fontSize() != null && rr3.fontSize() > 0) {
-                                    trRun2.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr3.fontSize()));
-                                }
-                                if (rr3.fontStyle() != null) trRun2.fontStyle(rr3.fontStyle());
-                                if (rr3.fillColor() != null) {
-                                    String hex3 = ctx.resolvedData.resolveColorHex(rr3.fillColor());
-                                    if (hex3 != null) trRun2.textColor(hex3);
-                                }
-                            }
-                            paraT2.addItem(trRun2);
-                            block2.addParagraph(paraT2);
+                                    buildShortTextBlock(ctx, "renderable_text_float_", rt.id(), rtTf, bounds, cleaned2, rt.zOrder());
                             sections.get(pageIdx).addBlock(block2);
                             count++;
                             convertedToText = true;
@@ -567,6 +488,62 @@ public final class RenderableFramePlacer {
      * Phase 7이 이 항목들을 floating TextFrameBlock으로 배치하므로,
      * Phase 3의 loadInlineObject가 이를 건너뛰어 중복 렌더링을 방지한다.
      */
+    /**
+     * renderable TF의 짧은 가시 텍스트를 ASTTextFrameBlock으로 변환하는 공통 헬퍼.
+     * 인라인(≤3자)과 비-인라인 플로팅(≤20자) 경로의 중복 50행을 통합.
+     *
+     * @param sourceIdPrefix  "renderable_text_" 또는 "renderable_text_float_"
+     * @param rtTf            resolved TextFrame (storyId 조회 소스)
+     * @param bounds          [top, left, bottom, right] pt 단위 page-relative bounds
+     * @param cleaned         공백/제어문자 제거된 가시 텍스트
+     * @param zOrder          InDesign zOrder (hwpxZ = max(10000-zOrder, 10))
+     */
+    private static kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock buildShortTextBlock(
+            ResolvedBuildContext ctx,
+            String sourceIdPrefix, int rtId,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame rtTf,
+            double[] bounds, String cleaned, int zOrder) {
+        double tx = bounds[1], ty = bounds[0];
+        double tw = Math.abs(bounds[3] - bounds[1]);
+        double th = Math.abs(bounds[2] - bounds[0]);
+        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock block =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock();
+        block.sourceId(sourceIdPrefix + rtId);
+        block.x(CoordinateConverter.pointsToHwpunits(tx));
+        block.y(CoordinateConverter.pointsToHwpunits(ty));
+        block.width(CoordinateConverter.pointsToHwpunits(tw));
+        block.height(CoordinateConverter.pointsToHwpunits(th));
+        block.zOrder(zOrder > 0 ? Math.max(10000 - zOrder, 10) : 10);
+        block.verticalJustification("CENTER_ALIGN");
+        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph paraT =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph();
+        paraT.alignment("CENTER_ALIGN");
+        kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun trRun =
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun();
+        trRun.text(cleaned);
+        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs =
+                (rtTf != null && rtTf.storyId() != null)
+                        ? ctx.resolvedData.getStory(rtTf.storyId()) : null;
+        if (rs != null && !rs.paragraphs().isEmpty()
+                && rs.paragraphs().get(0).runs() != null
+                && !rs.paragraphs().get(0).runs().isEmpty()) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun rr =
+                    rs.paragraphs().get(0).runs().get(0);
+            if (rr.fontFamily() != null) trRun.fontFamily(rr.fontFamily());
+            if (rr.fontSize() != null && rr.fontSize() > 0) {
+                trRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+            }
+            if (rr.fontStyle() != null) trRun.fontStyle(rr.fontStyle());
+            if (rr.fillColor() != null) {
+                String hex = ctx.resolvedData.resolveColorHex(rr.fillColor());
+                if (hex != null) trRun.textColor(hex);
+            }
+        }
+        paraT.addItem(trRun);
+        block.addParagraph(paraT);
+        return block;
+    }
+
     public static void preRegisterInlineShortTextItems(ResolvedBuildContext ctx) {
         if (ctx.resolvedData == null) return;
         for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {

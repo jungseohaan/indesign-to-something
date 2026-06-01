@@ -1085,12 +1085,42 @@ public final class FramePlacer {
         } catch (NumberFormatException nfe) {
             sourceIdBase = "u" + tf.id();
         }
-        List<ASTTextFrameBlock> createdBlocks = new ArrayList<>();
+        int n = groups.size();
+        int tfParaStart = tf.paragraphStart();
+        double[] tfGb = tf.geometricBounds();
 
-        for (int gi = 0; gi < groups.size(); gi++) {
+        // Step 1: 각 그룹의 단락 범위 사전 계산
+        int[] absParaStarts = new int[n];
+        int[] absParaEnds = new int[n];
+        for (int gi = 0; gi < n; gi++) {
+            int s = Integer.MAX_VALUE, e = -1;
+            for (ResolvedTextFrame.ComposedLine cl : groups.get(gi)) {
+                int pi = cl.paraIndex();
+                if (pi >= 0) {
+                    int abs = tfParaStart + pi;
+                    if (abs < s) s = abs;
+                    if (abs > e) e = abs;
+                }
+            }
+            absParaStarts[gi] = s;
+            absParaEnds[gi] = e;
+        }
+
+        // Step 2: 빈 단락 갭 흡수 (createdBlocks 2차 순회 제거)
+        for (int bi = 0; bi < n; bi++) {
+            if (absParaStarts[bi] == Integer.MAX_VALUE) continue;
+            int nextStart = (bi + 1 < n && absParaStarts[bi + 1] != Integer.MAX_VALUE)
+                    ? absParaStarts[bi + 1]
+                    : (tf.paragraphEnd() >= 0 ? tf.paragraphEnd() + 1 : Integer.MAX_VALUE);
+            if (nextStart > absParaEnds[bi] + 1 && nextStart != Integer.MAX_VALUE) {
+                absParaEnds[bi] = nextStart - 1;
+            }
+        }
+
+        // Step 3: 블록 생성 (단일 패스)
+        for (int gi = 0; gi < n; gi++) {
             List<ResolvedTextFrame.ComposedLine> group = groups.get(gi);
 
-            // 그룹 bounds (앞뒤 빈 줄은 높이 계산에서 제외)
             int firstSubstantive = 0;
             while (firstSubstantive < group.size()) {
                 String lt = group.get(firstSubstantive).text();
@@ -1103,23 +1133,20 @@ public final class FramePlacer {
                 if (lt != null && !lt.replace("\r", "").replace("\n", "").replace("\uFFFC", "").trim().isEmpty()) break;
                 lastSubstantive--;
             }
-            double minLeft = Double.MAX_VALUE, minTop = Double.MAX_VALUE;
-            double maxRight = -Double.MAX_VALUE, maxBottom = -Double.MAX_VALUE;
+            double minTop = Double.MAX_VALUE, maxBottom = -Double.MAX_VALUE;
             int groupCharCount = 0;
+            StringBuilder groupText = new StringBuilder();
             for (int li = 0; li < group.size(); li++) {
                 ResolvedTextFrame.ComposedLine line = group.get(li);
                 double[] b = line.bounds();
-                // 앞뒤 빈 줄은 top/bottom 계산에서 제외
+                if (b == null) continue;
                 if (li >= firstSubstantive && b[0] < minTop) minTop = b[0];
-                if (b[1] < minLeft) minLeft = b[1];
                 if (li <= lastSubstantive && b[2] > maxBottom) maxBottom = b[2];
-                if (b[3] > maxRight) maxRight = b[3];
                 if (line.text() != null) groupCharCount += line.text().length();
+                if (li >= firstSubstantive && li <= lastSubstantive && line.text() != null)
+                    groupText.append(line.text());
             }
 
-            // normalizeToPoints() 후 bounds는 이미 pt 단위
-            // 폭은 TF의 geometricBounds를 사용 (composedLine bounds는 텍스트 영역만 반영하여 좁음)
-            double[] tfGb = tf.geometricBounds();
             double gx = tfGb[1] - pageLeft;
             double gy = minTop - pageTop;
             double gw = tfGb[3] - tfGb[1];
@@ -1130,39 +1157,20 @@ public final class FramePlacer {
             if (gw <= 0 || gh <= 0) continue;
 
             ASTTextFrameBlock block = new ASTTextFrameBlock();
-            block.sourceId(sourceIdBase + (groups.size() > 1 ? "_g" + gi : ""));
+            block.sourceId(sourceIdBase + (n > 1 ? "_g" + gi : ""));
             block.x(CoordinateConverter.pointsToHwpunits(gx));
             block.y(CoordinateConverter.pointsToHwpunits(gy));
             block.width(CoordinateConverter.pointsToHwpunits(gw));
             block.height(CoordinateConverter.pointsToHwpunits(gh));
             block.zOrder(tf.zOrder());
             block.storyId(tf.storyId());
-            block.distributed(true); // 분할 블록: 연결 글상자 링크 해제
+            block.distributed(true);
             block.frameVisibleTextLength(groupCharCount);
-            // frameVisibleText 설정 (distributeParagraphs에서 텍스트 기반 분배 사용)
-            StringBuilder groupText = new StringBuilder();
-            for (int li = firstSubstantive; li <= lastSubstantive && li < group.size(); li++) {
-                ResolvedTextFrame.ComposedLine cl = group.get(li);
-                if (cl.text() != null) groupText.append(cl.text());
-            }
             block.frameVisibleText(groupText.toString());
-            // paraIndex를 resolved TF의 paragraphStart 기준 절대 인덱스로 변환
-            int tfParaStart = tf.paragraphStart();
-            int absParaStart = Integer.MAX_VALUE, absParaEnd = -1;
-            for (int li = firstSubstantive; li <= lastSubstantive && li < group.size(); li++) {
-                int pi = group.get(li).paraIndex();
-                if (pi >= 0) {
-                    int abs = tfParaStart + pi;
-                    if (abs < absParaStart) absParaStart = abs;
-                    if (abs > absParaEnd) absParaEnd = abs;
-                }
+            if (absParaStarts[gi] != Integer.MAX_VALUE) {
+                block.composedCharStart(absParaStarts[gi]);
+                block.composedCharEnd(absParaEnds[gi]);
             }
-            if (absParaStart != Integer.MAX_VALUE) {
-                block.composedCharStart(absParaStart);
-                block.composedCharEnd(absParaEnd);
-            }
-
-            // 프레임 속성 복사 (insetSpacing은 이미 pt)
             if (tf.insetSpacing() != null) {
                 double[] inset = tf.insetSpacing();
                 block.insetTop(CoordinateConverter.pointsToHwpunits(inset[0]));
@@ -1170,28 +1178,7 @@ public final class FramePlacer {
                 block.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
                 block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
             }
-
-            createdBlocks.add(block);
             section.addBlock(block);
-        }
-
-        // 빈 단락(인라인 앵커 전용 등) 흡수: 각 YGap 블록의 absParaEnd를 다음 블록의 absParaStart-1까지 확장
-        // 예) g0=[18,18], g1=[20,20] → g0=[18,19], g1=[20,20]
-        // 마지막 블록은 tf.paragraphEnd까지 확장
-        for (int bi = 0; bi < createdBlocks.size(); bi++) {
-            ASTTextFrameBlock cb = createdBlocks.get(bi);
-            if (cb.composedCharStart() < 0) continue;
-            int curEnd = cb.composedCharEnd();
-            int nextStart;
-            if (bi + 1 < createdBlocks.size()) {
-                ASTTextFrameBlock nb = createdBlocks.get(bi + 1);
-                nextStart = nb.composedCharStart() >= 0 ? nb.composedCharStart() : Integer.MAX_VALUE;
-            } else {
-                nextStart = (tf.paragraphEnd() >= 0) ? tf.paragraphEnd() + 1 : Integer.MAX_VALUE;
-            }
-            if (nextStart > curEnd + 1 && nextStart != Integer.MAX_VALUE) {
-                cb.composedCharEnd(nextStart - 1);
-            }
         }
 
         return true;

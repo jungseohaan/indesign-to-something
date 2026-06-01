@@ -209,27 +209,19 @@ public class InlineFrameHandler {
             return Double.compare(ab[1], bb[1]);
         });
 
-        // Group 후손 중 stroke 가 있는 Rectangle 수집
+        // anchorId 후손 ID 집합 — Phase A/B/C 세 루프 모두 재사용해 O(P×depth) → O(1) 조회
+        java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 5);
+
+        // Group 후손 중 stroke/fill 있는 Rectangle 수집
         java.util.List<ResolvedPageItem> rectangles = new java.util.ArrayList<>();
         for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
-            if (pi == null) continue;
+            if (pi == null || !descendantIds.contains(pi.id())) continue;
             if (!"Rectangle".equals(pi.type()) && !"Polygon".equals(pi.type()) && !"Oval".equals(pi.type())) continue;
             String scn = pi.strokeColorName();
             boolean hasStroke = scn != null && !"None".equals(scn) && !"[None]".equals(scn) && pi.strokeWeight() > 0;
             String fcn = pi.fillColorName();
             boolean hasFill = fcn != null && !"None".equals(fcn) && !"[None]".equals(fcn);
-            if (!hasStroke && !hasFill) continue;
-            String curParent = pi.parentId();
-            int hops = 0;
-            boolean inGroup = false;
-            while (curParent != null && hops < 5) {
-                if (anchorId.equals(curParent)) { inGroup = true; break; }
-                ResolvedPageItem next = ctx.resolvedData.getPageItem(curParent);
-                if (next == null) break;
-                curParent = next.parentId();
-                hops++;
-            }
-            if (inGroup) rectangles.add(pi);
+            if (hasStroke || hasFill) rectangles.add(pi);
         }
         if (rectangles.isEmpty()) return null;
 
@@ -336,21 +328,9 @@ public class InlineFrameHandler {
         // Phase B: Group 후손 Rectangle/Oval 중 TF 자식이 있는 "중첩 배지"
         // (예: Group → ... → Rectangle → TF["관형어"]) — 최대 5 hop 깊이 허용
         for (ResolvedPageItem rectPi : ctx.resolvedData.pageItems()) {
-            if (rectPi == null) continue;
+            if (rectPi == null || !descendantIds.contains(rectPi.id())) continue;
             String rtype = rectPi.type();
             if (!"Rectangle".equals(rtype) && !"Oval".equals(rtype) && !"Polygon".equals(rtype)) continue;
-            // rectPi가 anchorId의 후손인지 확인 (최대 5 hop)
-            {
-                String curP = rectPi.parentId();
-                boolean found = false;
-                for (int h = 0; h < 5 && curP != null; h++) {
-                    if (anchorId.equals(curP)) { found = true; break; }
-                    ResolvedPageItem nxt = ctx.resolvedData.getPageItem(curP);
-                    if (nxt == null) break;
-                    curP = nxt.parentId();
-                }
-                if (!found) continue;
-            }
             double[] rectBounds = rectPi.geometricBounds();
             if (rectBounds == null || rectBounds.length < 4) continue;
             double rw = Math.abs(rectBounds[3] - rectBounds[1]);
@@ -448,16 +428,7 @@ public class InlineFrameHandler {
             ResolvedPageItem parentPi = ctx.resolvedData.getPageItem(tfParentId);
             if (parentPi == null || !"Group".equals(parentPi.type())) continue; // 부모가 Group 이어야 함
 
-            // 부모 Group 이 anchor 의 후손인지 확인 (최대 5 hop)
-            String curP = tfParentId;
-            boolean inGroup = false;
-            for (int h = 0; h < 5 && curP != null; h++) {
-                if (anchorId.equals(curP)) { inGroup = true; break; }
-                ResolvedPageItem nxt = ctx.resolvedData.getPageItem(curP);
-                if (nxt == null) break;
-                curP = nxt.parentId();
-            }
-            if (!inGroup) continue;
+            if (!descendantIds.contains(tfParentId)) continue;
 
             // visible text 확인
             String vt = tf.frameVisibleText();
@@ -750,22 +721,16 @@ public class InlineFrameHandler {
         RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
         boolean hasBadgePng = badgeRg != null && badgeRg.file() != null;
 
+        // anchorId 후손 ID 집합 — 아래 세 루프 모두 재사용
+        java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 5);
+
         // 직속 자식 TF 1 개 (inline + 텍스트 있음)
         // hasBadgePng=true: 중첩 그룹 구조(예: Group→Group→TF)도 허용 (최대 5 hop)
         ResolvedTextFrame childTf = null;
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
             if (pi == null) continue;
-            boolean inGroup = anchorId.equals(pi.parentId());
-            if (!inGroup) {
-                String curP = pi.parentId();
-                for (int h = 0; h < 5 && curP != null; h++) {
-                    if (anchorId.equals(curP)) { inGroup = true; break; }
-                    ResolvedPageItem nxt = ctx.resolvedData.getPageItem(curP);
-                    if (nxt == null) break;
-                    curP = nxt.parentId();
-                }
-            }
+            boolean inGroup = anchorId.equals(pi.parentId()) || descendantIds.contains(pi.parentId());
             if (!inGroup) continue;
             if (!tf.isInline()) continue;
             String vt = tf.frameVisibleText();
@@ -791,17 +756,7 @@ public class InlineFrameHandler {
             String scn = pi.strokeColorName();
             boolean hasStroke = scn != null && !"None".equals(scn) && !"[None]".equals(scn) && pi.strokeWeight() > 0;
             if (!hasFill && !hasStroke) continue;
-            String curParent = pi.parentId();
-            int hops = 0;
-            boolean inGroup = false;
-            while (curParent != null && hops < 5) {
-                if (anchorId.equals(curParent)) { inGroup = true; break; }
-                ResolvedPageItem next = ctx.resolvedData.getPageItem(curParent);
-                if (next == null) break;
-                curParent = next.parentId();
-                hops++;
-            }
-            if (!inGroup) continue;
+            if (!descendantIds.contains(pi.id())) continue;
             double[] gb = pi.geometricBounds();
             if (gb == null || gb.length < 4) continue;
             double a = Math.abs(gb[3] - gb[1]) * Math.abs(gb[2] - gb[0]);
@@ -820,18 +775,7 @@ public class InlineFrameHandler {
                 String vt2 = tf2.frameVisibleText();
                 String c2 = vt2 == null ? "" : vt2.replace("￼","").replace("\r","").replace("\n","").trim();
                 if (!c2.isEmpty()) continue;
-                // 이 TF가 anchorId의 후손인지 확인
-                String curP2 = pi2 != null ? pi2.parentId() : null;
-                boolean inGroup2 = anchorId.equals(curP2);
-                if (!inGroup2) {
-                    for (int h = 0; h < 5 && curP2 != null; h++) {
-                        if (anchorId.equals(curP2)) { inGroup2 = true; break; }
-                        ResolvedPageItem nxt2 = ctx.resolvedData.getPageItem(curP2);
-                        if (nxt2 == null) break;
-                        curP2 = nxt2.parentId();
-                    }
-                }
-                if (!inGroup2) continue;
+                if (!descendantIds.contains(tf2.id())) continue;
                 double[] gb2 = pi2 != null ? pi2.geometricBounds() : null;
                 if (gb2 == null || gb2.length < 4) continue;
                 double a2 = Math.abs(gb2[3] - gb2[1]) * Math.abs(gb2[2] - gb2[0]);
