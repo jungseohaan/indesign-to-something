@@ -727,7 +727,10 @@ public final class FramePlacer {
                                 if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) editableChildCount++;
                             }
                         }
-                        if (editableChildCount == 1 && pbB > pbT && pbR > pbL) {
+                        // TF가 그룹 하단부(50% 이하)에만 있으면 이미지 캡션 — 그룹 bounds 확장 금지.
+                        double _groupH = pbB - pbT;
+                        double _tfTopRatio = (_groupH > 1.0) ? (y - pbT) / _groupH : 0.0;
+                        if (editableChildCount == 1 && pbB > pbT && pbR > pbL && _tfTopRatio < 0.5) {
                             x = pbL; y = pbT;
                             w = pbR - pbL; h = pbB - pbT;
                         }
