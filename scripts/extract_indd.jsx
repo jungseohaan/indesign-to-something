@@ -4158,6 +4158,29 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
         } catch (e) {}
     }
 
+    // 인라인 배지 Groups도 배경에서 숨김:
+    // doc.allPageItems는 인라인 앵커 객체를 포함하지 않으므로
+    // editable TF들의 story.allPageItems를 통해 인라인 배지를 별도 수집한다.
+    var inlineBadgeStoryIds = {};
+    for (var ibsi = 0; ibsi < editableFrames.length; ibsi++) {
+        try {
+            var ibStory = editableFrames[ibsi].parentStory;
+            var ibStoryKey = ibStory.id.toString();
+            if (inlineBadgeStoryIds[ibStoryKey]) continue;
+            inlineBadgeStoryIds[ibStoryKey] = true;
+            var ibAllItems = ibStory.allPageItems;
+            for (var ibai = 0; ibai < ibAllItems.length; ibai++) {
+                try {
+                    var ibItem = ibAllItems[ibai];
+                    if (ibItem.constructor.name !== "Group") continue;
+                    if (!isInlineItem(ibItem)) continue;
+                    if (!isBadgeGroup(ibItem)) continue;
+                    framesToHide.push(ibItem);
+                } catch (e) {}
+            }
+        } catch (e) {}
+    }
+
     // 페이지별 프레임 인덱스 미리 빌드 (O(pages × frames) → O(frames) + O(pages))
     var framesByPage = {};  // pageOffset → [frame, ...]
     var spreadFrames = [];  // parentPage 없는 프레임 (Spread 직속)

@@ -630,10 +630,10 @@ public class InlineFrameHandler {
             if (!regularInRow.isEmpty()) regularRowGroups.add(regularInRow);
         }
 
-        // 섹션 배지에 badge_group PNG(textHiddenBeforeExport=true)가 있으면 imageFillData 설정
+        // 섹션 배지에 badge_group PNG가 있으면 imageFillData 설정
         if (!sectionBadgeIndices.isEmpty()) {
             RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
-            boolean hasBgPng = badgeRg != null && badgeRg.file() != null && badgeRg.isTextHiddenBeforeExport();
+            boolean hasBgPng = badgeRg != null && badgeRg.file() != null;
             if (hasBgPng) {
                 byte[] pngBytes = null;
                 try {
@@ -745,10 +745,9 @@ public class InlineFrameHandler {
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(anchorId);
         if (anchorItem == null || !"Group".equals(anchorItem.type())) return null;
 
-        // badge_group PNG 여부를 미리 확인 — textHiddenBeforeExport=true 이면 ExtendScript가
-        // 명시적으로 배지로 분류한 것이므로 자식 TF 텍스트 길이 제한을 적용하지 않는다.
+        // badge_group PNG가 있으면 자식 TF 텍스트 길이 제한을 적용하지 않는다.
         RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
-        boolean hasBadgePng = badgeRg != null && badgeRg.file() != null && badgeRg.isTextHiddenBeforeExport();
+        boolean hasBadgePng = badgeRg != null && badgeRg.file() != null;
 
         // 직속 자식 TF 1 개 (inline + 텍스트 있음)
         // hasBadgePng=true: 중첩 그룹 구조(예: Group→Group→TF)도 허용 (최대 5 hop)
@@ -773,7 +772,7 @@ public class InlineFrameHandler {
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) continue;
             // badge PNG 없는 경우: 단일 라인이면 길이 무관(배지 레이블), 다중 라인이면 제외
-            // badge PNG 있는 경우(textHiddenBeforeExport): 길이 무제한 (ExtendScript 확인됨)
+            // badge PNG 있는 경우: 길이 무제한 (ExtendScript 확인됨)
             if (!hasBadgePng && tf.lineCount() != 1 && cleaned.length() >= 4) return null;
             if (childTf != null) return null; // 2 개 이상 → tryInlineGroupAsBoxList 가 처리
             childTf = tf;
@@ -807,6 +806,37 @@ public class InlineFrameHandler {
             double a = Math.abs(gb[3] - gb[1]) * Math.abs(gb[2] - gb[0]);
             if (a > bgArea) { bgArea = a; bgShape = pi; }
         }
+        // bgShape 없음: 비편집 채워진 TF를 배경으로 폴백
+        // (예: Group → [TF(fill=gray, 빈 텍스트, 배경용) + TF(text="예")] 구조)
+        if (bgShape == null) {
+            for (ResolvedTextFrame tf2 : ctx.resolvedData.textFrames()) {
+                if (ctx.resolvedData.isEditableTextFrame(tf2.id())) continue;
+                String fcn2 = null;
+                ResolvedPageItem pi2 = ctx.resolvedData.getPageItem(tf2.id());
+                if (pi2 != null) fcn2 = pi2.fillColorName();
+                if (fcn2 == null || "None".equals(fcn2) || "[None]".equals(fcn2)) continue;
+                // 텍스트가 있으면 배경 TF가 아님
+                String vt2 = tf2.frameVisibleText();
+                String c2 = vt2 == null ? "" : vt2.replace("￼","").replace("\r","").replace("\n","").trim();
+                if (!c2.isEmpty()) continue;
+                // 이 TF가 anchorId의 후손인지 확인
+                String curP2 = pi2 != null ? pi2.parentId() : null;
+                boolean inGroup2 = anchorId.equals(curP2);
+                if (!inGroup2) {
+                    for (int h = 0; h < 5 && curP2 != null; h++) {
+                        if (anchorId.equals(curP2)) { inGroup2 = true; break; }
+                        ResolvedPageItem nxt2 = ctx.resolvedData.getPageItem(curP2);
+                        if (nxt2 == null) break;
+                        curP2 = nxt2.parentId();
+                    }
+                }
+                if (!inGroup2) continue;
+                double[] gb2 = pi2 != null ? pi2.geometricBounds() : null;
+                if (gb2 == null || gb2.length < 4) continue;
+                double a2 = Math.abs(gb2[3] - gb2[1]) * Math.abs(gb2[2] - gb2[0]);
+                if (a2 > bgArea) { bgArea = a2; bgShape = pi2; }
+            }
+        }
         if (bgShape == null) return null;
 
         // Group 안에 Oval 직속 자식이 있는지 먼저 확인 (크기 보정 판단에 필요)
@@ -814,6 +844,18 @@ public class InlineFrameHandler {
         for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
             if (pi == null || !"Oval".equals(pi.type())) continue;
             if (anchorId.equals(pi.parentId())) { hasOval = true; break; }
+        }
+        // TF 배경이고 Oval이 없지만 정방형 그룹이면 원형으로 처리
+        if (!hasOval && "TextFrame".equals(bgShape.type())) {
+            double[] grpB = anchorItem.geometricBounds();
+            if (grpB != null && grpB.length >= 4) {
+                double gw0 = Math.abs(grpB[3] - grpB[1]);
+                double gh0 = Math.abs(grpB[2] - grpB[0]);
+                if (gw0 > 0 && gh0 > 0) {
+                    double ratio0 = Math.min(gw0, gh0) / Math.max(gw0, gh0);
+                    if (ratio0 >= 0.85) hasOval = true; // 정방형에 가까우면 원형 배지
+                }
+            }
         }
 
         // 박스 크기 = Group 의 전체 bounds (capsule 모양 전체 영역 포함)
@@ -846,8 +888,7 @@ public class InlineFrameHandler {
             if (ratio < 0.6) return null;
         }
 
-        // INLINE_TEXT_FRAME: 배지 fill color + 텍스트 (hp:container PNG 오버레이 방식은 HWP에서 텍스트 미표시 문제)
-        // hasBadgePng 여부와 무관하게 항상 fill color 기반 INLINE_TEXT_FRAME 사용.
+        // INLINE_TEXT_FRAME: fill color 기반 (hp:container PNG 오버레이는 HWP에서 텍스트 미표시 문제로 사용 안 함)
         ASTInlineObject obj = new ASTInlineObject();
         obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
         obj.width(CoordinateConverter.pointsToHwpunits(w));
