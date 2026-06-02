@@ -17,6 +17,7 @@ import type {
   InddExtractionProgress,
   InddFolderScanResult,
   BatchFileResult,
+  ExtractStats,
 } from "../types";
 import { useAstStore } from "./useAstStore";
 
@@ -92,6 +93,12 @@ interface AppState {
   batchCancelled: boolean;
   batchCurrentPhaseMessage: string | null; // 현재 phase 진행 메시지 (heartbeat 포함)
 
+  // Extract Stats
+  lastExtractStats: ExtractStats | null;
+
+  // 분할 추출: 0 = 단일 세션, N = N페이지 단위 청크
+  extractChunkSize: number;
+
   // Actions
   initJarPath: () => Promise<void>;
   selectFile: () => Promise<void>;
@@ -109,6 +116,7 @@ interface AppState {
   setPerfMode: (v: "fast" | "standard" | "high") => void;
   setNoPreview: (v: boolean) => void;
   setDebugPageRange: (start: number, end: number) => void;
+  setExtractChunkSize: (v: number) => void;
   clearError: () => void;
   setFontMappings: (mappings: Record<string, string>) => void;
   openFontMappingModal: () => void;
@@ -176,6 +184,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   isBatchProcessing: false,
   batchCancelled: false,
   batchCurrentPhaseMessage: null,
+  lastExtractStats: null,
+  extractChunkSize: parseInt(localStorage.getItem("extractChunkSize") || "0", 10) || 0,
   isExtractingForSemantic: false,
   extractSemanticError: null,
 
@@ -485,6 +495,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ noPreview: v });
   },
   setDebugPageRange: (start, end) => set({ debugStartPage: start, debugEndPage: end }),
+  setExtractChunkSize: (v) => {
+    localStorage.setItem("extractChunkSize", String(v));
+    set({ extractChunkSize: v });
+  },
   clearError: () => set({ error: null }),
   setFontMappings: (mappings) => set({ fontMappings: mappings }),
   openFontMappingModal: () => set({ showFontMappingModal: true }),
@@ -616,7 +630,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       );
 
       try {
-        const { debugStartPage, debugEndPage, perfMode } = get();
+        const { debugStartPage, debugEndPage, perfMode, extractChunkSize } = get();
         // 1. InDesign으로 추출 (디버그 페이지 범위가 있으면 일부만)
         const extractResult = await invoke<InddExtractResult>("extract_indd", {
           inddPath,
@@ -625,9 +639,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           startPage: debugStartPage,
           endPage: debugEndPage,
           perfMode,
+          chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
         });
 
         if (get().batchCancelled) break;
+
+        if (extractResult.extract_stats) {
+          set({ lastExtractStats: extractResult.extract_stats });
+        }
 
         // 상태 업데이트: converting + 변환 시작 시각
         const convertStartedAt = Date.now();
@@ -741,7 +760,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!jarPath) throw new Error("JAR 경로를 찾을 수 없습니다");
 
       // 1. InDesign ExtendScript로 추출
-      const { debugStartPage, debugEndPage, perfMode } = get();
+      const { debugStartPage, debugEndPage, perfMode, extractChunkSize } = get();
       const extractResult = await invoke<InddExtractResult>("extract_indd", {
         inddPath: path,
         jarPath,
@@ -749,6 +768,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         startPage: debugStartPage,
         endPage: debugEndPage,
         perfMode,
+        chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
       });
 
       // 2. AST 로드

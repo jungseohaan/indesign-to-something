@@ -48,6 +48,7 @@ pub struct InddExtractResult {
     pub resolved_json_path: Option<String>,
     pub preview_pdf_path: Option<String>,
     pub temp_dir: String,
+    pub extract_stats: Option<serde_json::Value>,
 }
 
 /// 추출 진행률 이벤트
@@ -124,11 +125,14 @@ fn app_name_from_path(app_path: &str) -> String {
 
 /// 추출용 임시 디렉토리를 생성한다.
 pub fn create_extraction_temp_dir() -> Result<PathBuf, String> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let temp = std::env::temp_dir().join(format!("indd-extract-{}", timestamp));
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp = std::env::temp_dir().join(format!("indd-extract-{}-{}", timestamp, seq));
     std::fs::create_dir_all(&temp)
         .map_err(|e| format!("임시 디렉토리 생성 실패: {}", e))?;
     Ok(temp)
@@ -147,6 +151,17 @@ struct DoneSignal {
 /// 프로세스 실행 여부와 무관하게, `using terms from` 블록으로 SDEF 로드 완료를
 /// 확인한다. InDesign 2026은 OSAScriptingDefinitionIsDynamic = true이므로 프로세스가
 /// 살아 있어도 SDEF가 준비되지 않으면 `do script`가 -2741로 실패한다.
+async fn launch_indesign(app_name: &str, output_dir: &Path) {
+    let prelaunch = format!("tell application \"{}\" to activate", app_name);
+    let prelaunch_file = output_dir.join("_prelaunch.applescript");
+    if std::fs::write(&prelaunch_file, &prelaunch).is_ok() {
+        let _ = tokio::process::Command::new("osascript")
+            .arg(&prelaunch_file)
+            .output()
+            .await;
+    }
+}
+
 async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
     let already_running = tokio::process::Command::new("pgrep")
         .args(["-x", app_name])
@@ -157,14 +172,7 @@ async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
 
     if !already_running {
         // 표준 Apple Event (SDEF 불필요) 로 InDesign 실행
-        let prelaunch = format!("tell application \"{}\" to activate", app_name);
-        let prelaunch_file = output_dir.join("_prelaunch.applescript");
-        if std::fs::write(&prelaunch_file, &prelaunch).is_ok() {
-            let _ = tokio::process::Command::new("osascript")
-                .arg(&prelaunch_file)
-                .output()
-                .await;
-        }
+        launch_indesign(app_name, output_dir).await;
         // 첫 기동은 SDEF 로드에 시간이 더 걸림 → 먼저 10초 대기
         tokio::time::sleep(Duration::from_secs(10)).await;
     }
@@ -189,8 +197,20 @@ async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
                 return;
             }
             // 프로브 실패: SDEF 미준비 또는 -609. 9초 대기 후 재시도.
-            let wait = if attempt == 0 { 5 } else { 9 };
-            tokio::time::sleep(Duration::from_secs(wait)).await;
+            // attempt 5 이후에는 hung 프로세스일 가능성 → killall 후 재기동
+            if attempt == 5 {
+                eprintln!("[ensure_indesign_running] probe 5회 실패 → hung 의심, killall 후 재기동");
+                let _ = tokio::process::Command::new("killall")
+                    .arg(app_name)
+                    .output()
+                    .await;
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                launch_indesign(app_name, output_dir).await;
+                tokio::time::sleep(Duration::from_secs(15)).await;
+            } else {
+                let wait = if attempt == 0 { 5 } else { 9 };
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+            }
         }
     }
 }
@@ -212,6 +232,7 @@ pub async fn run_extraction(
     spread_mode: bool,
     perf_mode: &str,
     skip_pdf: bool,
+    physical_range: bool,
 ) -> Result<InddExtractResult, String> {
     let app_name = app_name_from_path(indesign_app_path);
     // InDesign 2026 동적 SDEF: 컴파일 전에 앱이 실행 중이어야 `using terms from` 성공
@@ -244,7 +265,7 @@ pub async fn run_extraction(
     tell application "{app_name}"
         activate
         with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}"}}
+            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "full", "", "{physical_range_flag}"}}
         end timeout
     end tell
 end using terms from"#,
@@ -258,6 +279,7 @@ end using terms from"#,
         config_path = config_path,
         perf_mode = perf_mode,
         skip_pdf_flag = skip_pdf_flag,
+        physical_range_flag = if physical_range { "1" } else { "" },
     );
 
     // 진행률: 추출 실행 중
@@ -308,6 +330,15 @@ end using terms from"#,
         if elapsed > timeout_secs || stale > current_phase_stale {
             // osascript 프로세스 강제 종료
             let _ = child.kill().await;
+            // InDesign 자체도 종료 (hung 상태 유지 방지 — 다음 추출 시 -2741 오류 예방)
+            let app_name_for_kill = app_name.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                let _ = tokio::process::Command::new("killall")
+                    .arg(&app_name_for_kill)
+                    .output()
+                    .await;
+            });
             let last_step = if last_message.is_empty() {
                 "시작 중".to_string()
             } else {
@@ -335,7 +366,7 @@ end using terms from"#,
                 // SPEC-030 B.4: phase별 stale 타임아웃 갱신
                 current_phase_stale = match step {
                     "close_docs" => 60,
-                    "open" => 600,
+                    "open" => 1200,
                     "idml" => 120,
                     // PDF 내보내기는 48페이지 복잡한 파일에서 3~4분 소요 가능
                     "pdf" => 600,
@@ -477,6 +508,9 @@ end using terms from"#,
         let _ = window.set_focus();
     }
 
+    let extract_stats = std::fs::read_to_string(output_dir.join("_extract_stats.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
     Ok(InddExtractResult {
         idml_path: idml_path.to_string_lossy().to_string(),
         resolved_json_path: if resolved_json_path.exists() {
@@ -490,6 +524,7 @@ end using terms from"#,
             None
         },
         temp_dir: output_dir_str,
+        extract_stats,
     })
 }
 
@@ -566,6 +601,14 @@ end using terms from"#,
         let stale = last_progress_at.elapsed().as_secs();
         if elapsed > timeout_secs || stale > stale_secs {
             let _ = child.kill().await;
+            let app_name_for_kill2 = app_name.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                let _ = tokio::process::Command::new("killall")
+                    .arg(&app_name_for_kill2)
+                    .output()
+                    .await;
+            });
             return Err(format!(
                 "부분 추출 타임아웃. 마지막 단계: {}",
                 if last_message.is_empty() { "시작 중".to_string() } else { last_message.clone() }
@@ -618,6 +661,9 @@ end using terms from"#,
     let resolved_json_path = output_dir.join("resolved.json");
     let preview_pdf_path = output_dir.join("preview.pdf");
     emit_progress(app, "done", "부분 추출 완료");
+    let extract_stats = std::fs::read_to_string(output_dir.join("_extract_stats.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
     Ok(InddExtractResult {
         idml_path: idml_path.to_string_lossy().to_string(),
         resolved_json_path: if resolved_json_path.exists() {
@@ -631,6 +677,7 @@ end using terms from"#,
             None
         },
         temp_dir: output_dir_str,
+        extract_stats,
     })
 }
 
@@ -797,6 +844,203 @@ pub fn emit_progress_pub(app: &AppHandle, phase: &str, message: &str) {
 /// `find_bundled_config`의 공개 래퍼 (캐시 키 계산용).
 pub fn find_bundled_config_pub(app: &AppHandle) -> String {
     find_bundled_config(app)
+}
+
+/// 분할 추출(청크) 오케스트레이터.
+///
+/// 문서를 `chunk_size` 페이지 단위로 분할해 순차 추출한다.
+/// - 청크 1: 정상 추출 (IDML + 렌더링 + resolved.json)
+/// - 청크 2+: IDML 재내보내기 생략 (chunkMode=true) + resolved_START_END.json
+/// - 마지막: `extract_cache::merge_chunk_resolved_files()` 로 resolved.json 합산
+pub async fn run_extraction_chunked(
+    app: &AppHandle,
+    indd_path: &str,
+    output_dir: &Path,
+    jsx_path: &str,
+    indesign_app_path: &str,
+    spread_mode: bool,
+    perf_mode: &str,
+    skip_pdf: bool,
+    chunk_size: i32,
+) -> Result<InddExtractResult, String> {
+    // ── 청크 1: 정상 추출 (IDML + 렌더링 + resolved.json) ─────────────────
+    emit_progress(app, "chunk_1", &format!("청크 1 추출 중 (페이지 1..{})...", chunk_size));
+    let chunk1_result = run_extraction(
+        app, indd_path, output_dir, jsx_path, indesign_app_path,
+        1, chunk_size, spread_mode, perf_mode, skip_pdf, true,
+    ).await?;
+
+    // 청크 1 통계에서 total_page_count 읽기
+    let total_pages: i32 = chunk1_result
+        .extract_stats
+        .as_ref()
+        .and_then(|s| s.get("total_page_count"))
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32)
+        .unwrap_or(chunk_size);
+
+    if total_pages <= chunk_size {
+        // 단일 청크로 충분 — 그대로 반환
+        return Ok(chunk1_result);
+    }
+
+    // ── 청크 2+: 후속 페이지 범위 ─────────────────────────────────────────
+    let mut start = chunk_size + 1;
+    let mut chunk_idx = 2u32;
+    while start <= total_pages {
+        let end = (start + chunk_size - 1).min(total_pages);
+        emit_progress(
+            app, "chunk_n",
+            &format!("청크 {} 추출 중 (페이지 {}..{} / {})...", chunk_idx, start, end, total_pages),
+        );
+        run_extraction_followup_chunk(
+            app, indd_path, output_dir, jsx_path, indesign_app_path,
+            start, end, spread_mode, perf_mode, skip_pdf,
+        ).await?;
+        start = end + 1;
+        chunk_idx += 1;
+    }
+
+    // ── 청크 resolved.json 병합 ──────────────────────────────────────────
+    emit_progress(app, "chunk_merge", "청크 resolved.json 병합 중...");
+    match crate::extract_cache::merge_chunk_resolved_files(output_dir) {
+        Ok(n) => eprintln!("[chunked] {} 개 청크 resolved 병합 완료", n),
+        Err(e) => eprintln!("[chunked] resolved 병합 실패 (무시): {}", e),
+    }
+
+    // 최종 결과 구성
+    let extract_stats = std::fs::read_to_string(output_dir.join("_extract_stats.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    let resolved_json_path = output_dir.join("resolved.json");
+    let preview_pdf_path = output_dir.join("preview.pdf");
+    let output_dir_str = output_dir.to_string_lossy().to_string();
+    Ok(InddExtractResult {
+        idml_path: output_dir.join("output.idml").to_string_lossy().to_string(),
+        resolved_json_path: if resolved_json_path.exists() {
+            Some(resolved_json_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        preview_pdf_path: if preview_pdf_path.exists() {
+            Some(preview_pdf_path.to_string_lossy().to_string())
+        } else {
+            None
+        },
+        temp_dir: output_dir_str,
+        extract_stats,
+    })
+}
+
+/// 분할 추출 청크 2+ 실행 헬퍼 (chunkMode=true: IDML 생략, resolved_START_END.json 출력).
+async fn run_extraction_followup_chunk(
+    app: &AppHandle,
+    indd_path: &str,
+    output_dir: &Path,
+    jsx_path: &str,
+    indesign_app_path: &str,
+    start_page: i32,
+    end_page: i32,
+    spread_mode: bool,
+    perf_mode: &str,
+    skip_pdf: bool,
+) -> Result<(), String> {
+    let app_name = app_name_from_path(indesign_app_path);
+    ensure_indesign_running(&app_name, output_dir).await;
+    let output_dir_str = output_dir.to_string_lossy().to_string();
+    let spread_flag = if spread_mode { "1" } else { "0" };
+    let skip_pdf_flag = if skip_pdf { "1" } else { "0" };
+    let config_path = find_bundled_config(app);
+    // args[9]="" (no skip pages), args[10]="full", args[11]="1" (chunkMode), args[12]="1" (physicalRange)
+    let applescript = format!(
+        r#"using terms from application "{app_name}"
+    tell application "{app_name}"
+        activate
+        with timeout of 3600 seconds
+            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "1", "", "full", "1", "1"}}
+        end timeout
+    end tell
+end using terms from"#,
+        app_name = app_name,
+        jsx_path = jsx_path,
+        indd_path = indd_path,
+        output_dir = output_dir_str,
+        start_page = start_page,
+        end_page = end_page,
+        spread_flag = spread_flag,
+        config_path = config_path,
+        perf_mode = perf_mode,
+    );
+    let script_file = output_dir.join(format!("_extract_chunk_{}_{}.applescript", start_page, end_page));
+    std::fs::write(&script_file, &applescript)
+        .map_err(|e| format!("AppleScript 파일 쓰기 실패: {}", e))?;
+
+    // .done 파일 재사용을 막기 위해 이전 .done 삭제
+    let done_path = output_dir.join(".done");
+    let _ = std::fs::remove_file(&done_path);
+
+    let mut child = Command::new("osascript")
+        .arg(&script_file)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("osascript 실행 실패: {}", e))?;
+
+    let progress_path = output_dir.join(".progress");
+    let mut last_message = String::new();
+    let timeout_secs = 3600u64;
+    let stale_secs = 1800u64;
+    let started = std::time::Instant::now();
+    let mut last_progress_at = std::time::Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => break,
+        }
+        let elapsed = started.elapsed().as_secs();
+        let stale = last_progress_at.elapsed().as_secs();
+        if elapsed > timeout_secs || stale > stale_secs {
+            let _ = child.kill().await;
+            return Err(format!(
+                "청크 추출 타임아웃 ({}s 경과, 페이지 {}..{})",
+                elapsed, start_page, end_page
+            ));
+        }
+        // .progress 폴링
+        if let Ok(msg) = std::fs::read_to_string(&progress_path) {
+            if msg != last_message {
+                last_message = msg.clone();
+                last_progress_at = std::time::Instant::now();
+                let _ = app.emit(
+                    "indd-extraction-progress",
+                    ExtractionProgress {
+                        phase: "chunk_progress".to_string(),
+                        message: format!("[{}..{}] {}", start_page, end_page, msg.trim()),
+                    },
+                );
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let _ = child.wait().await;
+
+    // .done 확인
+    if done_path.exists() {
+        let done_content = std::fs::read_to_string(&done_path).unwrap_or_default();
+        if let Ok(sig) = serde_json::from_str::<DoneSignal>(&done_content) {
+            if sig.status == "error" {
+                return Err(format!(
+                    "청크 추출 실패 (페이지 {}..{}): {}",
+                    start_page, end_page,
+                    sig.message.unwrap_or_else(|| "알 수 없는 오류".to_string())
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// 추출 진행률 이벤트를 프론트엔드로 emit한다.

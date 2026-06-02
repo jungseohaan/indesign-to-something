@@ -26,6 +26,9 @@ pub async fn extract_indd(
     // skip_pdf = preview.pdf 생성 스킵 (기본 false; perf_mode="fast" 면 자동 true).
     perf_mode: Option<String>,
     skip_pdf: Option<bool>,
+    // 분할 추출: chunk_size > 0 이면 해당 페이지 수 단위로 청크 추출.
+    // debug page range(start_page/end_page)가 지정된 경우 무시.
+    chunk_size: Option<i32>,
 ) -> Result<crate::indesign::InddExtractResult, String> {
     let sp = start_page.unwrap_or(0);
     let ep = end_page.unwrap_or(0);
@@ -51,6 +54,7 @@ pub async fn extract_indd(
                     resolved_json_path: Some(sibling_resolved.to_string_lossy().to_string()),
                     preview_pdf_path: None,
                     temp_dir: indd_parent.to_string_lossy().to_string(),
+                    extract_stats: None,
                 });
             }
         }
@@ -133,6 +137,19 @@ pub async fn extract_indd(
     let result = if let Some(r) = partial_result {
         r
     } else {
+        // 분할 추출 모드: chunk_size > 0 이고 debug page range 없으면 청크 추출
+        let cs = chunk_size.unwrap_or(0);
+        if !debug_range && cs > 0 {
+            crate::indesign::run_extraction_chunked(
+                &app, &indd_path, &output_dir, &jsx_path, &indesign_app_path,
+                sm, &pm_normalized, sk, cs,
+            )
+            .await
+            .map_err(|e| {
+                let _ = std::fs::remove_dir_all(&output_dir);
+                e
+            })?
+        } else {
     crate::indesign::run_extraction(
         &app,
         &indd_path,
@@ -144,6 +161,7 @@ pub async fn extract_indd(
         sm,
         &pm_normalized,
         sk,
+        false,
     )
     .await
     .map_err(|e| {
@@ -151,6 +169,7 @@ pub async fn extract_indd(
         let _ = std::fs::remove_dir_all(&output_dir);
         e
     })?
+        }
     }; // end partial_result else branch
 
     // SPEC-030 B.1: 배치 export 크롭 매니페스트 처리 (sips)
@@ -285,9 +304,9 @@ async fn try_partial_extraction(
         return None;
     }
 
-    // 부분 재추출이 충분히 이득이 있을 때만 진행 (50% 이상 스킵 가능)
+    // pre_scan이 경량화(~2s)되었으므로 10% 이상 스킵 가능하면 부분 재추출 진행
     let total_pages = current_hashes.len();
-    if unchanged.len() * 2 < total_pages {
+    if unchanged.len() * 10 < total_pages {
         return None;
     }
 

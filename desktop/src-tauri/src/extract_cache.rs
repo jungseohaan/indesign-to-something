@@ -160,6 +160,9 @@ pub fn lookup(cache_key: &str) -> Option<InddExtractResult> {
         return None;
     }
     let preview = dir.join("preview.pdf");
+    let extract_stats = std::fs::read_to_string(dir.join("_extract_stats.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
     Some(InddExtractResult {
         idml_path: idml.to_string_lossy().to_string(),
         resolved_json_path: Some(resolved.to_string_lossy().to_string()),
@@ -169,6 +172,7 @@ pub fn lookup(cache_key: &str) -> Option<InddExtractResult> {
             None
         },
         temp_dir: dir.to_string_lossy().to_string(),
+        extract_stats,
     })
 }
 
@@ -215,6 +219,9 @@ pub fn store(
     let resolved = target.join("resolved.json");
     let preview = target.join("preview.pdf");
 
+    let extract_stats = std::fs::read_to_string(target.join("_extract_stats.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
     Ok(InddExtractResult {
         idml_path: idml.to_string_lossy().to_string(),
         resolved_json_path: if resolved.exists() {
@@ -228,6 +235,7 @@ pub fn store(
             None
         },
         temp_dir: target.to_string_lossy().to_string(),
+        extract_stats,
     })
 }
 
@@ -540,8 +548,10 @@ pub fn merge_resolved_json(
 
     let new_content = std::fs::read_to_string(new_path)
         .map_err(|e| format!("new resolved.json 읽기 실패: {}", e))?;
+    let new_content = sanitize_json_control_chars(&new_content);
     let cached_content = std::fs::read_to_string(&cached_path)
         .map_err(|e| format!("cached resolved.json 읽기 실패: {}", e))?;
+    let cached_content = sanitize_json_control_chars(&cached_content);
 
     let mut new_val: serde_json::Value = serde_json::from_str(&new_content)
         .map_err(|e| format!("new resolved.json 파싱 실패: {}", e))?;
@@ -652,4 +662,153 @@ pub fn merge_resolved_json(
 
     eprintln!("[SPEC-030] resolved.json 병합 완료 (캐시: {})", cached_cache_key);
     Ok(())
+}
+
+/// 청크 분할 추출 후 `resolved_START_END.json` 파일들을 `resolved.json`에 병합한다.
+///
+/// output_dir에서 `resolved_*.json` 패턴 파일을 찾아 base인 `resolved.json`에 순서대로 병합.
+/// 병합 후 청크 파일들은 삭제한다.
+pub fn merge_chunk_resolved_files(output_dir: &Path) -> Result<usize, String> {
+    let base_path = output_dir.join("resolved.json");
+    if !base_path.exists() {
+        return Err("resolved.json (청크1) 없음 — 청크 병합 불가".to_string());
+    }
+
+    // resolved_N_M.json 파일 수집 (숫자 기반 정렬)
+    let mut chunk_files: Vec<(i32, PathBuf)> = std::fs::read_dir(output_dir)
+        .map_err(|e| format!("output_dir 읽기 실패: {}", e))?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if !name.starts_with("resolved_") || !name.ends_with(".json") {
+                return None;
+            }
+            // resolved_START_END.json 에서 START 추출
+            let inner = &name["resolved_".len()..name.len() - ".json".len()];
+            let start: i32 = inner.split('_').next()?.parse().ok()?;
+            Some((start, e.path()))
+        })
+        .collect();
+
+    if chunk_files.is_empty() {
+        return Ok(0);
+    }
+    chunk_files.sort_by_key(|(s, _)| *s);
+
+    let base_content = std::fs::read_to_string(&base_path)
+        .map_err(|e| format!("resolved.json 읽기 실패: {}", e))?;
+    let base_content = sanitize_json_control_chars(&base_content);
+    let mut merged: serde_json::Value = serde_json::from_str(&base_content)
+        .map_err(|e| format!("resolved.json 파싱 실패: {}", e))?;
+
+    fn append_array(base: &mut serde_json::Value, other: &serde_json::Value, field: &str, id_key: &str) {
+        let base_arr = match base.get_mut(field).and_then(|v| v.as_array_mut()) {
+            Some(a) => a,
+            None => return,
+        };
+        let other_arr = match other.get(field).and_then(|v| v.as_array()) {
+            Some(a) => a,
+            None => return,
+        };
+        let existing_ids: std::collections::HashSet<String> = base_arr
+            .iter()
+            .filter_map(|item| item.get(id_key))
+            .filter_map(|v| match v {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .collect();
+        for item in other_arr {
+            let id = item.get(id_key).and_then(|v| match v {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            });
+            if id.map_or(true, |id| !existing_ids.contains(&id)) {
+                base_arr.push(item.clone());
+            }
+        }
+    }
+
+    fn append_pages(base: &mut serde_json::Value, other: &serde_json::Value) {
+        let base_arr = match base.get_mut("pages").and_then(|v| v.as_array_mut()) {
+            Some(a) => a,
+            None => return,
+        };
+        let other_arr = match other.get("pages").and_then(|v| v.as_array()) {
+            Some(a) => a,
+            None => return,
+        };
+        let existing: std::collections::HashSet<i64> = base_arr
+            .iter()
+            .filter_map(|item| item.get("index").and_then(|v| v.as_i64()))
+            .collect();
+        for item in other_arr {
+            if let Some(idx) = item.get("index").and_then(|v| v.as_i64()) {
+                if !existing.contains(&idx) {
+                    base_arr.push(item.clone());
+                }
+            }
+        }
+    }
+
+    let mut merged_count = 0usize;
+    for (_, chunk_path) in &chunk_files {
+        let content = match std::fs::read_to_string(chunk_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[chunk merge] {} 읽기 실패: {}", chunk_path.display(), e);
+                continue;
+            }
+        };
+        let content = sanitize_json_control_chars(&content);
+        let chunk_val: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[chunk merge] {} 파싱 실패: {}", chunk_path.display(), e);
+                continue;
+            }
+        };
+        append_array(&mut merged, &chunk_val, "stories", "id");
+        append_array(&mut merged, &chunk_val, "textFrames", "id");
+        append_array(&mut merged, &chunk_val, "pageItems", "id");
+        append_array(&mut merged, &chunk_val, "renderedTextFrames", "id");
+        append_array(&mut merged, &chunk_val, "renderedFloatingItems", "id");
+        append_array(&mut merged, &chunk_val, "renderedPdfFrames", "id");
+        append_array(&mut merged, &chunk_val, "renderedGraphicFrames", "id");
+        append_array(&mut merged, &chunk_val, "renderedImageFrames", "id");
+        append_pages(&mut merged, &chunk_val);
+        merged_count += 1;
+        eprintln!("[chunk merge] {} 병합 완료", chunk_path.display());
+    }
+
+    if merged_count > 0 {
+        let out = serde_json::to_string(&merged)
+            .map_err(|e| format!("병합 resolved.json 직렬화 실패: {}", e))?;
+        std::fs::write(&base_path, out)
+            .map_err(|e| format!("병합 resolved.json 쓰기 실패: {}", e))?;
+        // 청크 파일 삭제
+        for (_, chunk_path) in &chunk_files {
+            let _ = std::fs::remove_file(chunk_path);
+        }
+    }
+
+    Ok(merged_count)
+}
+
+/// ExtendScript JSON에 포함될 수 있는 제어 문자(0x00-0x1f, \t/\n/\r 제외)를
+/// 공백으로 대체해 serde_json이 파싱할 수 있게 한다.
+fn sanitize_json_control_chars(content: &str) -> String {
+    content
+        .chars()
+        .map(|c| {
+            let code = c as u32;
+            if code < 0x20 && c != '\t' && c != '\n' && c != '\r' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect()
 }

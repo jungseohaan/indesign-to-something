@@ -202,11 +202,24 @@ export interface CharacterRun {
 }
 
 // InDesign (.indd) Extraction Types
+export interface ExtractStats {
+  elapsed_ms: number;
+  page_count: number;
+  badge_count: number;
+  deco_group_count: number;
+  image_frame_count: number;
+  complex_frame_count: number;
+  shape_count: number;
+  master_graphic_count: number;
+  inline_object_count: number;
+}
+
 export interface InddExtractResult {
   idml_path: string;
   resolved_json_path: string | null;
   preview_pdf_path: string | null;
   temp_dir: string;
+  extract_stats: ExtractStats | null;
 }
 
 export interface InddExtractionProgress {

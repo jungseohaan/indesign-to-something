@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { save, ask, message } from "@tauri-apps/plugin-dialog";
 import { useAppStore } from "../stores/useAppStore";
 
 export function ConversionPanel() {
@@ -11,10 +11,7 @@ export function ConversionPanel() {
     progress,
     result,
     error,
-    spreadBased,
     vectorDpi,
-    layoutMode,
-    perfMode,
     conversionLogs,
     fontMappings,
     debugStartPage,
@@ -22,13 +19,13 @@ export function ConversionPanel() {
     setDebugPageRange,
     startConversion,
     noPreview,
-    setSpreadBased,
     setVectorDpi,
-    setLayoutMode,
-    setPerfMode,
     setNoPreview,
     clearError,
     openFontMappingModal,
+    lastExtractStats,
+    extractChunkSize,
+    setExtractChunkSize,
   } = useAppStore();
 
   const debugRangeEnabled = debugStartPage > 0 || debugEndPage > 0;
@@ -60,6 +57,36 @@ export function ConversionPanel() {
 
   const [showWarnings, setShowWarnings] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [cacheStats, setCacheStats] = useState<{ count: number; mb: number } | null>(null);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+
+  useEffect(() => {
+    invoke<[number, number]>("extract_cache_stats")
+      .then(([count, bytes]) => setCacheStats({ count, mb: Math.round(bytes / 1024 / 1024 * 10) / 10 }))
+      .catch(() => {});
+  }, []);
+
+  async function handleClearCache() {
+    if (isClearingCache) return;
+    const label = cacheStats
+      ? `캐시 ${cacheStats.count}개 (${cacheStats.mb} MB)를 삭제합니다.`
+      : "추출 캐시를 모두 삭제합니다.";
+    const yes = await ask(`${label}\n삭제하면 다음 추출 시 InDesign에서 다시 추출합니다.`, {
+      title: "캐시 삭제",
+      kind: "warning",
+    });
+    if (!yes) return;
+    setIsClearingCache(true);
+    try {
+      const [count] = await invoke<[number, number]>("clear_extract_cache");
+      setCacheStats(null);
+      await message(`캐시 ${count}개를 삭제했습니다.`, { title: "완료", kind: "info" });
+    } catch (e: any) {
+      await message(`캐시 삭제 실패: ${e}`, { title: "오류", kind: "error" });
+    } finally {
+      setIsClearingCache(false);
+    }
+  }
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new logs arrive
@@ -81,6 +108,53 @@ export function ConversionPanel() {
           >
             닫기
           </button>
+        </div>
+      )}
+
+      {/* Extract Stats */}
+      {lastExtractStats && (
+        <div className="mb-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-blue-600 font-semibold text-sm">추출 통계</span>
+            <span className="text-xs text-gray-400">
+              {lastExtractStats.page_count}p · {(lastExtractStats.elapsed_ms / 1000).toFixed(1)}s
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+            <span title="배지 PNG (배지 도형+텍스트 그룹)">
+              배지 <span className="font-semibold text-gray-800">{lastExtractStats.badge_count}</span>
+            </span>
+            <span className="text-gray-300">|</span>
+            <span title="통 이미지: 도형 그룹을 하나의 PNG로 렌더">
+              통 이미지 <span className="font-semibold text-blue-700">
+                {lastExtractStats.deco_group_count + lastExtractStats.complex_frame_count}
+              </span>
+              <span className="text-gray-400 ml-1">
+                (그룹 {lastExtractStats.deco_group_count} · 복합 {lastExtractStats.complex_frame_count})
+              </span>
+            </span>
+            <span className="text-gray-300">|</span>
+            <span title="개별 이미지: 도형·이미지 하나씩 PNG">
+              개별 <span className="font-semibold text-orange-600">
+                {lastExtractStats.shape_count + lastExtractStats.image_frame_count}
+              </span>
+              <span className="text-gray-400 ml-1">
+                (도형 {lastExtractStats.shape_count} · 이미지 {lastExtractStats.image_frame_count})
+              </span>
+            </span>
+            <span className="text-gray-300">|</span>
+            <span title="인라인 객체 (앵커된 이미지/도형)">
+              인라인 <span className="font-semibold text-gray-800">{lastExtractStats.inline_object_count}</span>
+            </span>
+            {lastExtractStats.master_graphic_count > 0 && (
+              <>
+                <span className="text-gray-300">|</span>
+                <span title="마스터 페이지 그래픽">
+                  마스터 <span className="font-semibold text-gray-800">{lastExtractStats.master_graphic_count}</span>
+                </span>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -188,15 +262,6 @@ export function ConversionPanel() {
         {/* Options */}
         <div className="flex items-center gap-4">
           <label className="flex items-center gap-1.5 text-sm">
-            <input
-              type="checkbox"
-              checked={spreadBased}
-              onChange={(e) => setSpreadBased(e.target.checked)}
-              className="rounded border-gray-300"
-            />
-            스프레드 모드
-          </label>
-          <label className="flex items-center gap-1.5 text-sm">
             DPI:
             <select
               value={vectorDpi}
@@ -205,32 +270,6 @@ export function ConversionPanel() {
             >
               <option value={96}>96</option>
               <option value={150}>150</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5 text-sm">
-            레이아웃:
-            <select
-              value={layoutMode}
-              onChange={(e) => setLayoutMode(e.target.value as "preserve" | "editable")}
-              className="border border-gray-300 rounded px-2 py-0.5 text-sm"
-            >
-              <option value="preserve">레이아웃 유지</option>
-              <option value="editable">편집 우선 (1단)</option>
-            </select>
-          </label>
-          <label
-            className="flex items-center gap-1.5 text-sm"
-            title="추출 속도: fast=PNG 150dpi+PDF 스킵, standard=220dpi+PDF, high=300dpi+PDF"
-          >
-            추출:
-            <select
-              value={perfMode}
-              onChange={(e) => setPerfMode(e.target.value as "fast" | "standard" | "high")}
-              className="border border-gray-300 rounded px-2 py-0.5 text-sm"
-            >
-              <option value="fast">빠름</option>
-              <option value="standard">표준</option>
-              <option value="high">고품질</option>
             </select>
           </label>
           <label className="flex items-center gap-1.5 text-sm">
@@ -251,6 +290,38 @@ export function ConversionPanel() {
               ? `폰트 (${Object.keys(fontMappings).length}개 변경)`
               : "폰트 매핑"}
           </button>
+          <button
+            onClick={handleClearCache}
+            disabled={isClearingCache}
+            className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-red-50 hover:border-red-300 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="추출 캐시를 삭제하면 다음 추출 시 InDesign에서 다시 추출합니다."
+          >
+            {isClearingCache
+              ? "삭제 중..."
+              : cacheStats
+              ? `캐시 삭제 (${cacheStats.count}개 · ${cacheStats.mb}MB)`
+              : "캐시 삭제"}
+          </button>
+          {/* 분할 추출: 긴 문서를 N페이지 단위로 나눠 InDesign 세션 분할 */}
+          <label
+            className="flex items-center gap-1.5 text-xs text-gray-500"
+            title="긴 문서에서 InDesign 연결이 끊기는 경우 N페이지 단위로 분할 추출. 0 = 단일 세션."
+          >
+            분할추출:
+            <select
+              value={extractChunkSize}
+              onChange={(e) => setExtractChunkSize(Number(e.target.value))}
+              className="border border-gray-300 rounded px-1 py-0.5 text-xs"
+            >
+              <option value={0}>끄기</option>
+              <option value={5}>5p</option>
+              <option value={10}>10p</option>
+              <option value={20}>20p</option>
+              <option value={30}>30p</option>
+              <option value={50}>50p</option>
+              <option value={100}>100p</option>
+            </select>
+          </label>
           {/* SPEC-011: 디버그 페이지 범위 추출 (다음 INDD 추출에 적용, 캐시 우회) */}
           <label className="flex items-center gap-1.5 text-xs text-gray-500" title="다음 INDD 추출 시에만 적용. 캐시를 우회한다.">
             <input
