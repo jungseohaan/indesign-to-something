@@ -738,6 +738,13 @@ function _runRenderPhases(doc, ctx, allItems) {
     for (var mgi = 0; mgi < renderedMasterGraphics.length; mgi++) renderedFloatingItems.push(renderedMasterGraphics[mgi]);
     try { $.gc(); } catch (e) {}
 
+    // 2.19. 타원형 TextFrame 윤곽선 렌더링 (비직사각형 stroke TF)
+    _marker(ctx.outputDir, "09c_ovalTFShapes");
+    var ovalTFFrames = exportOvalShapeTextFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage, badgeChildIds, decoChildIds, editableFrameIds, allItems);
+    addItemType(ovalTFFrames, "page_object");
+    for (var otfi = 0; otfi < ovalTFFrames.length; otfi++) renderedFloatingItems.push(ovalTFFrames[otfi]);
+    try { $.gc(); } catch (e) {}
+
     // 추출 통계 기록
     try {
         var _statsEndMs = (new Date()).getTime();
@@ -941,6 +948,145 @@ function main(args) {
 // TextFrame 분류 / 배지 판별 / 배경 탐색 / 레이어 검사
 // 원래 RENDER PIPELINE 뒤에 위치했으나 선언 호이스팅으로 동작 동일 — 가독성 위해 앞으로 이동
 // =============================================================================
+
+/**
+ * TextFrame의 경로가 타원형(oval)인지 확인한다.
+ *
+ * 1차: Bezier 핸들 비교 — 핸들이 앵커와 다르면 곡선
+ * 2차: 앵커 위치 비교 — 타원의 4개 앵커는 경계 상자의 각 변 중앙에 위치함
+ *      (직사각형 앵커는 코너에 위치하므로 구별 가능)
+ */
+function hasNonRectangularPath(item) {
+    try {
+        var paths = item.paths;
+        if (!paths || paths.length === 0) return false;
+        var path = paths[0];
+        if (!path) return false;
+        var pts = path.pathPoints;
+        if (!pts || pts.length === 0) return false;
+
+        // 1차: Bezier 핸들 비교
+        try {
+            for (var i = 0; i < pts.length; i++) {
+                var ap = pts[i].anchor;
+                var ld = pts[i].leftDirection;
+                var rd = pts[i].rightDirection;
+                if (ap && ld && (Math.abs(ld[0] - ap[0]) > 0.5 || Math.abs(ld[1] - ap[1]) > 0.5)) return true;
+                if (ap && rd && (Math.abs(rd[0] - ap[0]) > 0.5 || Math.abs(rd[1] - ap[1]) > 0.5)) return true;
+            }
+        } catch (e1) {}
+
+        // 2차: 앵커 위치로 판별 — 타원은 앵커 4개가 각 변 중앙에 위치
+        try {
+            if (pts.length === 4) {
+                var gb = item.geometricBounds; // [top, left, bottom, right]
+                var cx = (gb[1] + gb[3]) / 2;
+                var cy = (gb[0] + gb[2]) / 2;
+                var TOL = (gb[3] - gb[1]) * 0.05 + 1; // 폭의 5% 또는 최소 1pt
+                var extremeCount = 0;
+                for (var j = 0; j < 4; j++) {
+                    var a = pts[j].anchor; // [x, y]
+                    var onEdge =
+                        (Math.abs(a[1] - gb[0]) < TOL && Math.abs(a[0] - cx) < TOL) || // top
+                        (Math.abs(a[0] - gb[3]) < TOL && Math.abs(a[1] - cy) < TOL) || // right
+                        (Math.abs(a[1] - gb[2]) < TOL && Math.abs(a[0] - cx) < TOL) || // bottom
+                        (Math.abs(a[0] - gb[1]) < TOL && Math.abs(a[1] - cy) < TOL);   // left
+                    if (onEdge) extremeCount++;
+                }
+                if (extremeCount === 4) return true;
+            }
+        } catch (e2) {}
+
+    } catch (e) {}
+    return false;
+}
+
+/**
+ * editable TextFrame 중 가시적 stroke가 있는 것의 윤곽선만 PNG로 내보낸다.
+ * exportPageBackgrounds가 editable TF를 숨기므로 stroke가 배경 PNG에 누락됨.
+ * 복제본에서 텍스트를 비우고 윤곽선만 렌더링해 page_object로 추가.
+ */
+function exportOvalShapeTextFrames(doc, outputDir, startPage, endPage, badgeChildIds, decoChildIds, editableIds, allItems) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    var results = [];
+
+    for (var i = 0; i < allItems.length; i++) {
+        var item = allItems[i];
+        if (item.constructor.name !== "TextFrame") continue;
+
+        var domId = item.id;
+        if (isOnHiddenLayer(item)) continue;
+        if (badgeChildIds && badgeChildIds[domId]) continue;
+        if (decoChildIds && decoChildIds[domId]) continue;
+        // editable TF만 대상 — renderable TF는 exportRenderedTextFrames에서 이미 처리
+        if (!editableIds || !editableIds[domId]) continue;
+
+        // 가시적 stroke 확인
+        var hasStroke = false;
+        try {
+            var sc = item.strokeColor;
+            var sw = item.strokeWeight || 0;
+            hasStroke = sc && sc.name !== "None" && sc.name !== "[None]" && sw > 0;
+        } catch (e) {}
+        if (!hasStroke) continue;
+
+        // 비직사각형(타원/곡선) 경로 우선 확인, 실패하면 크기 조건으로 폴백
+        // (paths API가 TextFrame에서 접근 불가한 InDesign 버전 대응)
+        var isNonRect = hasNonRectangularPath(item);
+        if (!isNonRect) {
+            // 경로 판별 실패 또는 직사각형 → 크기가 충분히 크면 포함
+            // (배경 PNG에서 숨겨진 stroke를 복원하기 위해 대형 bordered TF도 대상)
+            try {
+                var gbb = item.geometricBounds;
+                var tfW = Math.abs(gbb[3] - gbb[1]);
+                var tfH = Math.abs(gbb[2] - gbb[0]);
+                if (tfW < 50 || tfH < 50) continue;  // 50pt 미만 소형은 스킵
+            } catch (e) { continue; }
+        }
+
+        var parentPage = null;
+        try { parentPage = item.parentPage; } catch (e) {}
+        if (!parentPage) continue;
+        var pgIdx = parentPage.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+
+        // 최소 크기 필터 (10pt 미만 무시)
+        try {
+            var gb = item.geometricBounds;
+            if ((gb[3] - gb[1]) < 10 && (gb[2] - gb[0]) < 10) continue;
+        } catch (e) {}
+
+        // 복제본에서 텍스트를 비우고 윤곽선만 PNG 내보내기
+        try {
+            var fileName = "oval_tf_" + domId + ".png";
+            var outFile = File(renderDir + "/" + fileName);
+
+            var dup = item.duplicate();
+            try {
+                dup.contents = "";
+                dup.exportFile(ExportFormat.PNG_FORMAT, outFile);
+            } finally {
+                try { dup.remove(); } catch (e2) {}
+            }
+
+            var bounds = null;
+            try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
+            if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
+            if (bounds) _toPageRelativeBounds(bounds, parentPage);
+
+            results.push({
+                id: domId,
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: parentPage.documentOffset
+            });
+        } catch (e) {}
+    }
+
+    return results;
+}
 
 /**
  * 아이템 또는 부모 체인에 숨김 레이어가 있는지 검사한다.
@@ -2622,6 +2768,37 @@ function restoreTextFrames(saved) {
 }
 
 /**
+ * renderTarget 자손 중 badge_group인 Group을 숨긴다.
+ * deco 그룹 렌더링 시 badge PNG가 이중으로 포함되지 않도록 하기 위함.
+ * badge_group 자체의 visible을 false로 설정하고 복원 정보를 반환.
+ */
+function hideBadgeGroupDescendants(renderTarget) {
+    var saved = [];
+    try {
+        var nested = renderTarget.allPageItems;
+        for (var i = 0; i < nested.length; i++) {
+            var item = nested[i];
+            if (item.constructor.name !== "Group") continue;
+            if (!isBadgeGroup(item)) continue;
+            try {
+                var wasVisible = item.visible;
+                item.visible = false;
+                saved.push({ item: item, wasVisible: wasVisible });
+            } catch (e) {}
+        }
+    } catch (e) {}
+    return saved;
+}
+
+function restoreBadgeGroupDescendants(saved) {
+    for (var i = 0; i < saved.length; i++) {
+        try {
+            saved[i].item.visible = saved[i].wasVisible;
+        } catch (e) {}
+    }
+}
+
+/**
  * 복합 장식 그래픽 프레임을 PNG로 렌더링한다.
  */
 function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems) {
@@ -3224,10 +3401,15 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
             if (kind === "mixedGroup") {
                 // TF를 숨기고 도형만 PNG로 렌더 — TF 텍스트는 기존 파이프라인이 처리
                 var savedTFs = hideTextFrames(grp);
+                var savedBadges = hideBadgeGroupDescendants(grp);
                 _decoRender(grp, grpPage, null);
                 restoreTextFrames(savedTFs);
+                restoreBadgeGroupDescendants(savedBadges);
             } else {
+                // badge_group 자손을 숨기고 렌더 — badge PNG는 별도 exportRenderedTextFrames에서 처리
+                var savedBadges = hideBadgeGroupDescendants(grp);
                 _decoRender(grp, grpPage, null);
+                restoreBadgeGroupDescendants(savedBadges);
             }
         } catch (e) {}
 
@@ -3385,155 +3567,198 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
 }
 
 /**
- * SPEC-025 하시라 보강: 마스터 스프레드의 그래픽 아이템(선, 원, 도형, 그룹)을
- * PNG로 렌더링하여 각 적용 content page에 renderedFloatingItems 엔트리를 생성한다.
- *
+ * 마스터 스프레드의 그래픽 아이템(선, 원, 도형, 그룹)을 아이템별로 PNG 렌더링.
  * TextFrame은 instanceMasterFrames가 처리하므로 여기서는 그래픽 아이템만.
  */
 function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
+    // 마스터 그래픽 통 렌더링 전략 (v4 — override + group export):
+    // - Spread/MasterSpread.exportFile(): 메서드 없음 (ReferenceError)
+    // - item.exportFile() on master items: fill 투명
+    // - doc.exportFile(PNG): 파일 생성 안 함 (원인 불명)
+    //
+    // 해결: masterItem.override(contentPage)로 콘텐츠 아이템으로 전환 후
+    //   tempGroup.exportFile()로 내보낸다. override된 아이템은 fill이 올바르게 렌더됨.
+    // 내보낸 후 override 아이템을 remove()하여 원복.
+
+    var debugLog = File(outputDir + "/_master_debug.log");
+    try { debugLog.open("w"); } catch (e) { debugLog = null; }
+    function dbg(msg) {
+        $.writeln("[exportMasterPageGraphics] " + msg);
+        if (debugLog) try { debugLog.writeln(msg); } catch (e) {}
+    }
+
+    dbg("START startPage=" + startPage + " endPage=" + endPage + " docPages=" + doc.pages.length);
+
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
-
     var results = [];
-    var exportedFiles = {}; // baseId → relPath (같은 master item의 PNG는 재사용)
 
-    // 페이지별 override set 사전 구축 (O(1) 조회용)
-    var mgOverrideMap = {};
-    try {
-        for (var mgOvPp = 0; mgOvPp < doc.pages.length; mgOvPp++) {
-            try {
-                var mgOvPgNum = mgOvPp + 1;
-                if (mgOvPgNum < startPage || mgOvPgNum > endPage) continue;
-                var mgOvItems = doc.pages[mgOvPp].allPageItems;
-                for (var mgOvI = 0; mgOvI < mgOvItems.length; mgOvI++) {
-                    try {
-                        var mgOvMpi = mgOvItems[mgOvI].masterPageItem;
-                        if (mgOvMpi) {
-                            if (!mgOverrideMap[mgOvPp]) mgOverrideMap[mgOvPp] = {};
-                            mgOverrideMap[mgOvPp][mgOvMpi.id.toString()] = true;
-                        }
-                    } catch (e) {}
-                }
-            } catch (e) {}
-        }
-    } catch (e) {}
-
-    // masterSpreadId → [{docIdx, side}, ...]
+    // masterSpreadId → [{docIdx}, ...]
     var masterToPages = {};
+    var masterToPagesCnt = 0;
     try {
         for (var pp = 0; pp < doc.pages.length; pp++) {
             try {
-                var pgNum = pp + 1; // 1-based
+                var pgNum = pp + 1;
                 if (pgNum < startPage || pgNum > endPage) continue;
                 var am = doc.pages[pp].appliedMaster;
                 if (!am) continue;
                 var mid = am.id.toString();
-                if (!masterToPages[mid]) masterToPages[mid] = [];
-                var pgSide = "SINGLE";
-                try { pgSide = doc.pages[pp].side.toString(); } catch (e) {}
-                masterToPages[mid].push({ docIdx: pp, side: pgSide });
+                if (!masterToPages[mid]) { masterToPages[mid] = []; masterToPagesCnt++; }
+                masterToPages[mid].push({ docIdx: pp });
             } catch (e) {}
         }
-    } catch (e) {}
+    } catch (e) { dbg("masterToPages build error: " + e); }
+    dbg("masterToPages: " + masterToPagesCnt + " unique masters");
+    for (var _k in masterToPages) {
+        if (!masterToPages.hasOwnProperty(_k)) continue;
+        dbg("  masterSpreadId=" + _k + " pages=" + masterToPages[_k].length);
+    }
+    if (masterToPagesCnt === 0) {
+        dbg("No master spreads → skip");
+        if (debugLog) try { debugLog.close(); } catch (e) {}
+        return results;
+    }
 
     var msArr = [];
     try { msArr = doc.masterSpreads.everyItem().getElements(); } catch (e) {}
+
+    // PNG 내보내기 설정 저장 및 설정
+    var savedRes, savedTransp, savedSpread;
+    try { savedRes = app.pngExportPreferences.exportResolution; } catch (e) {}
+    try { savedTransp = app.pngExportPreferences.transparentBackground; } catch (e) {}
+    try { savedSpread = app.pngExportPreferences.exportingSpread; } catch (e) {}
+    try { app.pngExportPreferences.exportResolution = 150; } catch (e) {}
+    try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
+    try { app.pngExportPreferences.exportingSpread = false; } catch (e) {}
+
+    // msId → { relPath, grpLeft, grpWidth }
+    var exportedMaster = {};
 
     for (var ms = 0; ms < msArr.length; ms++) {
         var mspread = msArr[ms];
         var msId = "";
         try { msId = mspread.id.toString(); } catch (e) { continue; }
         var appliedPages = masterToPages[msId] || [];
-        if (appliedPages.length === 0) continue;
+        dbg("masterSpread id=" + msId + " appliedPages=" + appliedPages.length);
+        if (appliedPages.length === 0) { dbg("  SKIP: no applied pages"); continue; }
+        if (exportedMaster[msId]) { dbg("  SKIP: already done"); continue; }
 
-        var msItems = [];
-        try { msItems = mspread.allPageItems; } catch (e) {}
-
-        for (var mi = 0; mi < msItems.length; mi++) {
-            var item = msItems[mi];
-            var cName = "";
-            try { cName = item.constructor.name; } catch (e) { continue; }
-
-            // TextFrame은 instanceMasterFrames에서 처리
-            if (cName === "TextFrame") continue;
-
-            // 렌더링 대상 그래픽 타입만
-            if (cName !== "Rectangle" && cName !== "Polygon"
-                && cName !== "Oval" && cName !== "GraphicLine" && cName !== "Group") continue;
-
-            // 숨김 레이어 제외
-            if (isOnHiddenLayer(item)) continue;
-
-            // 마스터 페이지 side 판별 (LEFT/RIGHT/SINGLE)
-            var itemSide = "SINGLE";
-            try { itemSide = item.parentPage.side.toString(); } catch (e) {}
-
-            var baseId = "";
-            try { baseId = item.id.toString(); } catch (e) { continue; }
-            var domId = 0;
-            try { domId = parseInt(baseId, 10); } catch (e) {}
-
-            // PNG 내보내기 (master item당 1회, 여러 페이지에서 재사용)
-            if (!exportedFiles[baseId]) {
+        // 그래픽 아이템(비-TF) 수집
+        var masterGraphicItems = [];
+        try {
+            var msAllItems = mspread.allPageItems;
+            dbg("  mspread.allPageItems: " + msAllItems.length);
+            for (var mti = 0; mti < msAllItems.length; mti++) {
                 try {
-                    var mFileName = "master_" + baseId + ".png";
-                    var mOutFile = File(renderDir + "/" + mFileName);
-                    item.exportFile(ExportFormat.PNG_FORMAT, mOutFile);
-                    exportedFiles[baseId] = "rendered_frames/" + mFileName;
-                } catch (eExp) {
-                    continue;
-                }
+                    if (msAllItems[mti].constructor.name !== "TextFrame")
+                        masterGraphicItems.push(msAllItems[mti]);
+                } catch (e) {}
             }
-            var pngRelPath = exportedFiles[baseId];
+        } catch (e) { dbg("  ERROR allPageItems: " + e); }
+        dbg("  masterGraphicItems: " + masterGraphicItems.length);
+        if (masterGraphicItems.length === 0) { dbg("  SKIP: no graphic items"); continue; }
 
-            // visibleBounds 우선, 없으면 geometricBounds
-            var itemBounds = null;
-            try { itemBounds = arrCopy(item.visibleBounds); } catch (e) {}
-            if (!itemBounds) { try { itemBounds = arrCopy(item.geometricBounds); } catch (e) {} }
-            if (!itemBounds) continue;
+        // 대표 콘텐츠 페이지 선택 (페이지 범위 내 첫 페이지)
+        var targetPage = null;
+        try { targetPage = doc.pages[appliedPages[0].docIdx]; } catch (e) {}
+        if (!targetPage) { dbg("  SKIP: no target page"); continue; }
+        dbg("  targetPage docIdx=" + appliedPages[0].docIdx);
 
-            var zOrd = 0;
-            try { zOrd = item.absoluteZOrderIndex; } catch (e) {}
+        // 마스터 그래픽 아이템을 콘텐츠 페이지에 override
+        var overrideList = [];
+        for (var mgi = 0; mgi < masterGraphicItems.length; mgi++) {
+            try {
+                var ov = masterGraphicItems[mgi].override(targetPage);
+                if (ov) overrideList.push(ov);
+            } catch (e) { dbg("  override error[" + mgi + "]: " + e); }
+        }
+        dbg("  overrideList: " + overrideList.length);
+        if (overrideList.length === 0) { dbg("  SKIP: no overrides succeeded"); continue; }
 
-            for (var ap = 0; ap < appliedPages.length; ap++) {
-                var pgEntry = appliedPages[ap];
-                // side 매칭: SINGLE은 무조건, LEFT/RIGHT는 같은 side만
-                if (itemSide !== "SINGLE" && pgEntry.side !== "SINGLE" && itemSide !== pgEntry.side) continue;
+        // 그룹 생성
+        var tempGroup = null;
+        try { tempGroup = doc.groups.add(overrideList); } catch (e) {
+            dbg("  GROUP ERROR: " + e);
+            for (var rr = 0; rr < overrideList.length; rr++) { try { overrideList[rr].remove(); } catch(e2) {} }
+            continue;
+        }
 
-                var docPgIdx = pgEntry.docIdx;
+        // 그룹 bounds (스프레드 좌표계)
+        var grpBnds = null;
+        try { grpBnds = tempGroup.geometricBounds; } catch (e) { dbg("  bounds error: " + e); }
+        if (grpBnds) dbg("  group.geometricBounds: [" + grpBnds[0]+","+grpBnds[1]+","+grpBnds[2]+","+grpBnds[3]+"]");
 
-                // 이 페이지에 override가 있으면 skip
-                if (mgOverrideMap[docPgIdx] && mgOverrideMap[docPgIdx][baseId]) continue;
+        // PNG 내보내기
+        var mFileName = "master_" + msId + ".png";
+        var mOutFile = File(renderDir + "/" + mFileName);
+        dbg("  exportFile → " + mOutFile.fsName);
+        try {
+            tempGroup.exportFile(ExportFormat.PNG_FORMAT, mOutFile, false);
+            dbg("  exportFile returned");
+        } catch (eExp) { dbg("  EXCEPTION: " + eExp); }
 
-                // 페이지 상대 좌표 계산
-                var relBounds = null;
-                try {
-                    var pgBounds = doc.pages[docPgIdx].bounds;
-                    relBounds = [
-                        itemBounds[0] - pgBounds[0],
-                        itemBounds[1] - pgBounds[1],
-                        itemBounds[2] - pgBounds[0],
-                        itemBounds[3] - pgBounds[1]
-                    ];
-                } catch (e) {
-                    relBounds = itemBounds;
-                }
+        // 정리: ungroup → remove (override 해제)
+        var ungrouped = [];
+        try { ungrouped = tempGroup.ungroup(); } catch (e) {
+            dbg("  ungroup error: " + e);
+            for (var rr2 = 0; rr2 < overrideList.length; rr2++) { try { overrideList[rr2].remove(); } catch(e2) {} }
+        }
+        for (var ui = 0; ui < ungrouped.length; ui++) {
+            try { ungrouped[ui].remove(); } catch (e) {}
+        }
 
-                results.push({
-                    id: domId,
-                    file: pngRelPath,
-                    bounds: relBounds,
-                    pageIndex: docPgIdx,
-                    zOrder: zOrd,
-                    isMasterGraphic: true
-                });
-            }
+        if (!mOutFile.exists) { dbg("  FAIL: file not created"); continue; }
+        dbg("  SUCCESS: " + mFileName + " (" + mOutFile.length + " bytes)");
+
+        exportedMaster[msId] = {
+            relPath: "rendered_frames/" + mFileName,
+            grpLeft:  grpBnds ? grpBnds[1] : 0,
+            grpRight: grpBnds ? grpBnds[3] : 0
+        };
+    }
+
+    // PNG 설정 복원
+    try { if (savedRes !== undefined) app.pngExportPreferences.exportResolution = savedRes; } catch (e) {}
+    try { if (savedTransp !== undefined) app.pngExportPreferences.transparentBackground = savedTransp; } catch (e) {}
+    try { if (savedSpread !== undefined) app.pngExportPreferences.exportingSpread = savedSpread; } catch (e) {}
+
+    // 결과 생성: 각 content 페이지 × 마스터
+    for (var msId2 in masterToPages) {
+        if (!masterToPages.hasOwnProperty(msId2)) continue;
+        var master = exportedMaster[msId2];
+        if (!master) continue;
+        var grpWidth = master.grpRight - master.grpLeft;
+        if (grpWidth <= 0) continue;
+
+        var pgList = masterToPages[msId2];
+        for (var pli = 0; pli < pgList.length; pli++) {
+            var pgEntry = pgList[pli];
+            var pgBnds = null;
+            try { pgBnds = doc.pages[pgEntry.docIdx].bounds; } catch (e) { continue; }
+            var pgH = pgBnds[2] - pgBnds[0];
+            var pgLeft = pgBnds[1]; // 스프레드 내 페이지 좌측 엣지
+
+            // 그룹 PNG의 스프레드 좌표를 이 페이지 상대 좌표로 변환
+            // (BackgroundInjector가 페이지 범위 밖 부분을 클리핑)
+            var relLeft = master.grpLeft - pgLeft;
+            var relRight = master.grpRight - pgLeft;
+            dbg("  result docIdx=" + pgEntry.docIdx + " pgLeft=" + pgLeft + " relLeft=" + relLeft + " relRight=" + relRight);
+
+            results.push({
+                id: parseInt(msId2, 10),
+                file: master.relPath,
+                bounds: [0, relLeft, pgH, relRight],
+                pageIndex: pgEntry.docIdx,
+                zOrder: 0,
+                isMasterGraphic: true
+            });
         }
     }
 
-    if (results.length > 0) {
-        $.writeln("[exportMasterPageGraphics] " + results.length + " master graphic entries");
-    }
+    dbg("DONE: " + results.length + " master graphic entries");
+    if (debugLog) try { debugLog.close(); } catch (e) {}
+    $.writeln("[exportMasterPageGraphics] " + results.length + " master graphic entries (override+group)");
     return results;
 }
 

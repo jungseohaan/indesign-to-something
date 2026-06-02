@@ -44,6 +44,9 @@ public final class FramePlacer {
                     if (inner.previousFrameId() != null) continue; // chain 후속 프레임 제외
                     if (inner.pageIndex() != outer.pageIndex()) continue;
                     if (inner.onHiddenLayer() || outer.onHiddenLayer()) continue;
+                    // outer에 가시 텍스트가 없으면 배경/장식 프레임 → 오버레이 패턴 아님
+                    String _outerVis = outer.frameVisibleText();
+                    if (_outerVis == null || _outerVis.trim().isEmpty()) continue;
                     double[] bGb = inner.geometricBounds();
                     if (bGb == null || bGb.length < 4) continue;
                     // inner가 outer bounds 안에 완전히 포함
@@ -862,6 +865,8 @@ public final class FramePlacer {
                         int badgePageZ = (badgePi != null && badgePi.zOrder() > 0) ? badgePi.zOrder() : 0;
                         int badgeHwpxZ = (badgePageZ > 0) ? Math.max(10000 - badgePageZ, 10) : 10;
                         tfZ = badgeHwpxZ + 1;
+                        // 배지 PNG 위에 텍스트 오버레이: hp:tbl(흰 배경)이 아닌 투명 hp:rect로 라우팅
+                        inlineToFloating = true;
                     }
                 }
             } catch (Exception e) {}
