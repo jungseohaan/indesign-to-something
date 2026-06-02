@@ -222,6 +222,9 @@ public final class StoryConverter {
         }
         System.err.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
 
+        // Phase 3 후처리: inner TF 오버레이 패턴 — inner story 런을 outer block 마지막 단락에 주입.
+        injectInnerStoryContents(ctx, sections);
+
         // Phase 3 후처리: AnchoredPosition="Anchored" + TextWrapMode="None" Group 들을
         // BEHIND_TEXT 위치-절대 ASTFigure 로 배치 (텍스트 겹침, 밀지 않음).
         placeDeferredAnchoredFloating(ctx, sections);
@@ -489,6 +492,83 @@ public final class StoryConverter {
         }
     }
 
+
+    /**
+     * inner TF 오버레이 패턴 후처리: innerFrameId가 설정된 모든 블록에 대해
+     * inner story의 첫 단락 런을 outer 블록 마지막 단락에 주입한다.
+     */
+    private static void injectInnerStoryContents(ResolvedBuildContext ctx, List<ASTSection> sections) {
+        for (ASTSection sec : sections) {
+            for (ASTBlock blk : sec.blocks()) {
+                if (!(blk instanceof ASTTextFrameBlock)) continue;
+                ASTTextFrameBlock block = (ASTTextFrameBlock) blk;
+                if (block.innerFrameId() == null) continue;
+                injectInnerFrameContent(ctx, block);
+            }
+        }
+    }
+
+    private static void injectInnerFrameContent(ResolvedBuildContext ctx, ASTTextFrameBlock block) {
+        ResolvedTextFrame innerTf = ctx.resolvedData.getTextFrame(block.innerFrameId());
+        if (innerTf == null || innerTf.storyId() == null) return;
+
+        ResolvedStory innerStory = ctx.resolvedData.getStory(innerTf.storyId());
+        if (innerStory == null || innerStory.paragraphs().isEmpty()) return;
+
+        List<ASTParagraph> outerParas = block.paragraphs();
+        if (outerParas.isEmpty()) return;
+        // 마지막 비어있지 않은 단락 찾기 (trailing 빈 단락은 건너뜀)
+        int lastNonEmptyIdx = outerParas.size() - 1;
+        while (lastNonEmptyIdx > 0) {
+            ASTParagraph p = outerParas.get(lastNonEmptyIdx);
+            boolean hasContent = false;
+            for (ASTInlineItem item : p.items()) {
+                if (!(item instanceof ASTTextRun)) { hasContent = true; break; }
+                String t = ((ASTTextRun) item).text();
+                if (t != null && !t.trim().isEmpty()) { hasContent = true; break; }
+            }
+            if (hasContent) break;
+            lastNonEmptyIdx--;
+        }
+        ASTParagraph lastPara = outerParas.get(lastNonEmptyIdx);
+
+        // 마지막 단락의 밑줄 공백 런 제거 (inner text가 대체하는 빈칸)
+        List<ASTInlineItem> items = lastPara.items();
+        String inheritedUnderlineColor = null;
+        while (!items.isEmpty()) {
+            ASTInlineItem last = items.get(items.size() - 1);
+            if (last instanceof ASTTextRun) {
+                ASTTextRun tr = (ASTTextRun) last;
+                String t = tr.text();
+                boolean blankRun = t == null || t.replace(" ", "").replace(" ", "").replace("\t", "").isEmpty();
+                if (blankRun && tr.underline()) {
+                    if (inheritedUnderlineColor == null && tr.underlineColor() != null) {
+                        inheritedUnderlineColor = tr.underlineColor();
+                    }
+                    items.remove(items.size() - 1);
+                    continue;
+                }
+            }
+            break;
+        }
+
+        // inner story를 완전히 변환 (배지 inline anchor 포함)해서 첫 단락 items 추가
+        List<ASTParagraph> innerParas = convertStoryParagraphs(ctx, innerStory);
+        if (innerParas.isEmpty()) return;
+        ASTParagraph innerFirstPara = innerParas.get(0);
+        for (ASTInlineItem item : innerFirstPara.items()) {
+            if (item instanceof ASTTextRun) {
+                ASTTextRun tr = (ASTTextRun) item;
+                tr.underline(true);
+                if (inheritedUnderlineColor != null && tr.underlineColor() == null) {
+                    tr.underlineColor(inheritedUnderlineColor);
+                }
+            }
+            lastPara.addItem(item);
+        }
+        System.err.println("[StoryConverter] inner 오버레이 주입: innerTF=" + block.innerFrameId()
+                + " story=" + innerTf.storyId() + " items=" + innerFirstPara.items().size());
+    }
 
     private static List<ASTParagraph> convertStoryParagraphs(ResolvedBuildContext ctx, ResolvedStory story) {
         List<ASTParagraph> paragraphs = new ArrayList<>();

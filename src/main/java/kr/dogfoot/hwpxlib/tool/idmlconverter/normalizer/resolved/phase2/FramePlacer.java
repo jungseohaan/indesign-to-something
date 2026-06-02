@@ -26,6 +26,74 @@ public final class FramePlacer {
     public static void placeTextFrames(ResolvedBuildContext ctx, List<ASTSection> sections) {
         List<ResolvedTextFrame> frames = ctx.resolvedData.textFrames();
 
+        // 공간 포함 감지: inner TF가 outer TF bounds 안에 완전히 들어가고 다른 story를 가진 경우.
+        // InDesign "밑줄 빈칸 + 예시 답안 오버레이" 패턴: inner TF는 outer TF의 마지막 단락에 주입.
+        // key=inner TF id (decimal), value=outer TF id (decimal)
+        java.util.Map<String, String> innerToOuterMap = new java.util.HashMap<>();
+        {
+            final double TOL = 1.0; // pt 허용 오차
+            // Pass 1: 각 inner TF에 대해 포함하는 outer TF 후보를 모두 수집
+            java.util.Map<String, java.util.List<ResolvedTextFrame>> innerCandidates = new java.util.HashMap<>();
+            for (ResolvedTextFrame outer : frames) {
+                if (outer.storyId() == null) continue;
+                double[] aGb = outer.geometricBounds();
+                if (aGb == null || aGb.length < 4) continue;
+                for (ResolvedTextFrame inner : frames) {
+                    if (inner == outer) continue;
+                    if (inner.storyId() == null || inner.storyId().equals(outer.storyId())) continue;
+                    if (inner.previousFrameId() != null) continue; // chain 후속 프레임 제외
+                    if (inner.pageIndex() != outer.pageIndex()) continue;
+                    if (inner.onHiddenLayer() || outer.onHiddenLayer()) continue;
+                    double[] bGb = inner.geometricBounds();
+                    if (bGb == null || bGb.length < 4) continue;
+                    // inner가 outer bounds 안에 완전히 포함
+                    if (bGb[0] >= aGb[0] - TOL && bGb[1] >= aGb[1] - TOL
+                            && bGb[2] <= aGb[2] + TOL && bGb[3] <= aGb[3] + TOL) {
+                        // badge_group_child는 Phase 7이 처리 → 포함 감지 제외
+                        int innerDomId = -1;
+                        try { innerDomId = Integer.parseInt(inner.id()); } catch (NumberFormatException e) {}
+                        boolean isBadgeChild = false;
+                        if (innerDomId >= 0) {
+                            for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                                if (rg.id() == innerDomId && "badge_group_child".equals(rg.itemType())) {
+                                    isBadgeChild = true; break;
+                                }
+                            }
+                        }
+                        if (!isBadgeChild) {
+                            innerCandidates.computeIfAbsent(inner.id(), k -> new java.util.ArrayList<>()).add(outer);
+                        }
+                    }
+                }
+            }
+            // Pass 2: 각 inner에 대해 가장 작은(가장 내부) outer 선택
+            for (java.util.Map.Entry<String, java.util.List<ResolvedTextFrame>> e : innerCandidates.entrySet()) {
+                ResolvedTextFrame bestOuter = null;
+                double minArea = Double.MAX_VALUE;
+                for (ResolvedTextFrame outer : e.getValue()) {
+                    double[] ob = outer.geometricBounds();
+                    double area = (ob[2] - ob[0]) * (ob[3] - ob[1]);
+                    if (area < minArea) { minArea = area; bestOuter = outer; }
+                }
+                if (bestOuter != null) innerToOuterMap.put(e.getKey(), bestOuter.id());
+            }
+            // Pass 3: outer 하나에 inner가 여러 개이면 오버레이 패턴이 아님 → 모두 제거
+            java.util.Map<String, Integer> outerInnerCount = new java.util.HashMap<>();
+            for (String outerId : innerToOuterMap.values()) {
+                outerInnerCount.merge(outerId, 1, Integer::sum);
+            }
+            innerToOuterMap.entrySet().removeIf(e -> outerInnerCount.getOrDefault(e.getValue(), 0) > 1);
+            // Pass 4: outer로 사용되는 프레임은 inner로 스킵하지 않음 (계층 유지)
+            java.util.Set<String> usedAsOuter = new java.util.HashSet<>(innerToOuterMap.values());
+            innerToOuterMap.keySet().removeIf(usedAsOuter::contains);
+            if (!innerToOuterMap.isEmpty()) {
+                for (java.util.Map.Entry<String, String> e : innerToOuterMap.entrySet()) {
+                    System.err.println("[FramePlacer] 공간 포함 오버레이: inner=" + e.getKey()
+                            + " ⊂ outer=" + e.getValue());
+                }
+            }
+        }
+
         for (ResolvedTextFrame tf : frames) {
             // badge_group_child: Phase 7의 hp:container가 텍스트 오버레이를 포함 → 인라인/비-인라인 무관하게 항상 스킵.
             // 단, editableTextFrameIds에 포함된 TF는 실제 텍스트 내용이 있으므로 스킵하지 않음.
@@ -37,6 +105,9 @@ public final class FramePlacer {
                         "u" + Integer.toHexString(_bcDomId)) != null
                         && !ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
             }
+            // 공간 포함 inner TF: outer TF 단락에 주입될 예정 → 독립 배치 스킵
+            if (innerToOuterMap.containsKey(tf.id())) continue;
+
             // 인라인 프레임은 Phase 3에서 처리
             // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
             boolean inlineToFloating = false;
@@ -916,6 +987,15 @@ public final class FramePlacer {
                 }
             }
             if (_skipBadgeChildInlineAnchor) continue;
+
+            // 공간 포함 outer TF: 자신 안에 포함된 inner TF id 기록 → StoryConverter가 inner story 주입
+            for (java.util.Map.Entry<String, String> _inner : innerToOuterMap.entrySet()) {
+                if (_inner.getValue().equals(tf.id())) {
+                    block.innerFrameId(_inner.getKey());
+                    break;
+                }
+            }
+
             section.addBlock(block);
         }
     }

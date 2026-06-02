@@ -37,6 +37,9 @@ public class ASTTextFrameBlock extends ASTBlock {
     private boolean fromGroup;
     private String storyId;
     private boolean distributed; // resolved 기반 문단 재배치 완료 → 연결 글상자 링크 해제
+    // 공간 포함 inner TF id: 이 TF의 밑줄 빈칸 위에 오버레이된 예시 답안 TF (다른 story).
+    // StoryConverter가 inner story 런을 이 블록의 마지막 단락에 주입.
+    private String innerFrameId;
     private double rotationAngle; // 프레임 회전 각도 (도 단위)
     private long narrowedWidth;   // side-by-side 이미지로 축소된 폭 (0 = 미적용)
     private long narrowedXOffset; // 왼쪽 side-by-side 이미지로 X 이동량 (0 = 미적용)
@@ -150,6 +153,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean distributed() { return distributed; }
     public void distributed(boolean v) { this.distributed = v; }
+
+    public String innerFrameId() { return innerFrameId; }
+    public void innerFrameId(String v) { this.innerFrameId = v; }
 
     public boolean inlineToFloating() { return inlineToFloating; }
     public void inlineToFloating(boolean v) { this.inlineToFloating = v; }

@@ -203,6 +203,11 @@ class ParagraphDistributor {
             java.util.List<String> frameTexts = (rtf != null) ? rtf.frameParaTexts() : null;
 
             if (frameTexts == null || frameTexts.isEmpty()) {
+                // paragraphStart/End 모두 -1 이고 lineCount==0: InDesign에서 내용 없는 continuation 프레임
+                // → 단락을 할당하지 않음 (중복 TF 방지)
+                if (rtf != null && rtf.paragraphStart() < 0 && rtf.paragraphEnd() < 0 && rtf.lineCount() == 0) {
+                    continue;
+                }
                 int start = (rtf != null) ? Math.max(0, rtf.paragraphStart()) : 0;
                 int end = (rtf != null && rtf.paragraphEnd() >= 0) ? rtf.paragraphEnd() : paragraphs.size() - 1;
                 start += Math.max(0, block.skipParagraphs());
