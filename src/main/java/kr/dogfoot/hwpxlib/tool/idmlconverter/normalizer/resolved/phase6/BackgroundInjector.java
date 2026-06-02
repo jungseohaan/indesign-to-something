@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -38,14 +39,15 @@ public final class BackgroundInjector {
             idToPage.put(rg.id(), rg.pageIndex());
         }
 
-        // badge_group ID 세트: renderedTextFrames의 badge_group 항목이 있으면 Phase 7이 처리 → Phase 6 skip
-        Set<Integer> badgeGroupIds = new HashSet<>();
-        for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
-            if (rt.isBadgeGroup()) badgeGroupIds.add(rt.id());
+        // 자체 page_object PNG를 가진 id 집합: 자식이라도 부모 그룹 PNG보다 더 정확하게 렌더링되므로
+        // childOfGroup에 추가하지 않고 독립적으로 배치함 (예: 부모 PNG에서 low-alpha로 렌더링되는 선분)
+        Set<Integer> hasOwnPageObjectPng = new HashSet<>();
+        for (RenderedGroup rg : floatingItems) {
+            if (isPageObject(rg)) hasOwnPageObjectPng.add(rg.id());
         }
 
         // Pass 1b: page_object 아이템의 childIds/childImageIds 중 부모와 같은 페이지의 자식만 수집
-        // 다른 페이지 자식은 그룹 PNG에 포함되지 않으므로 개별 렌더링 필요
+        // 단, 자체 PNG가 있는 자식은 제외 — 해당 자식은 독립적으로 배치
         Set<Integer> childOfGroup = new HashSet<>();
         for (RenderedGroup rg : floatingItems) {
             if (!isPageObject(rg)) continue;
@@ -53,13 +55,15 @@ public final class BackgroundInjector {
             if (rg.childIds() != null) {
                 for (int cid : rg.childIds()) {
                     Integer cp = idToPage.get(cid);
-                    if (cp != null && cp == parentPage) childOfGroup.add(cid);
+                    if (cp != null && cp == parentPage && !hasOwnPageObjectPng.contains(cid))
+                        childOfGroup.add(cid);
                 }
             }
             if (rg.childImageIds() != null) {
                 for (int cid : rg.childImageIds()) {
                     Integer cp = idToPage.get(cid);
-                    if (cp != null && cp == parentPage) childOfGroup.add(cid);
+                    if (cp != null && cp == parentPage && !hasOwnPageObjectPng.contains(cid))
+                        childOfGroup.add(cid);
                 }
             }
         }
@@ -70,8 +74,9 @@ public final class BackgroundInjector {
             if (!isPageObject(rg)) continue;
             // inline_object로 이미 처리된 ID는 Phase 3가 인라인으로 배치 → 중복 방지
             if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
-            // badge_group ID는 Phase 7이 badge PNG를 배치 → Phase 6 deco_/img_ 중복 방지
-            if (badgeGroupIds.contains(rg.id())) continue;
+            // badge_group 타입 항목은 Phase 7이 배치 → Phase 6 skip
+            // (같은 id가 page_object 타입으로 별도 등록된 경우는 Phase 6이 처리해야 하므로 타입으로만 판별)
+            if (rg.isBadgeGroup()) continue;
             // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
             if (childOfGroup.contains(rg.id())) continue;
             // 같은 (id, pageIndex) 쌍이 중복 추출된 경우만 스킵
@@ -248,6 +253,156 @@ public final class BackgroundInjector {
                 }
             }
         }
+
+        // Secondary pass: synthetic PNG for GraphicLine children of essentially-empty parent PNGs.
+        // When a Rectangle frame contains a pasted-inside GraphicLine, InDesign's exportFile()
+        // captures only the invisible frame shape — the child line is lost. Detect this by checking
+        // if the parent PNG file is < 1 KB but has non-trivial pixel dimensions, then generate a
+        // solid-color 1-row PNG from the child's pageItems stroke data.
+        injectSyntheticGraphicLines(ctx, sections);
+    }
+
+    private static void injectSyntheticGraphicLines(ResolvedBuildContext ctx, List<ASTSection> sections) {
+        if (ctx.resolvedData == null || ctx.resolvedData.pageItems() == null) return;
+        List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
+        if (floatingItems == null) return;
+
+        Set<Integer> syntheticDone = new HashSet<>();
+
+        for (RenderedGroup rg : floatingItems) {
+            if (!isPageObject(rg)) continue;
+            if (rg.childIds() == null || rg.childIds().length == 0) continue;
+            if (rg.file() == null) continue;
+
+            // Only process items whose PNG file is essentially empty (< 1 KB)
+            File pngFile = new File(ctx.basePath, rg.file());
+            if (!pngFile.exists() || pngFile.length() > 1000) continue;
+
+            // Confirm non-trivial pixel dimensions (large image but tiny file = transparent)
+            int[] dims = readPngDimensions(pngFile);
+            if (dims == null || dims[0] < 50 || dims[1] < 5) continue;
+
+            int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
+            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+            if (ctx.resolvedData.pages() == null || pageIdx >= ctx.resolvedData.pages().size()) continue;
+
+            double[] pgBounds = ctx.resolvedData.pages().get(pageIdx).bounds();
+            if (pgBounds == null || pgBounds.length < 4) continue;
+            double pagePtLeft = pgBounds[1];
+            double pagePtTop = pgBounds[0];
+            double pageWidthPt = pgBounds[3] - pgBounds[1];
+            double pageHeightPt = pgBounds[2] - pgBounds[0];
+
+            for (int cid : rg.childIds()) {
+                if (syntheticDone.contains(cid)) continue;
+                ResolvedPageItem pi = ctx.resolvedData.getPageItem(String.valueOf(cid));
+                if (pi == null || !"GraphicLine".equals(pi.type())) continue;
+                if (pi.strokeWeight() <= 0 || pi.strokeColorName() == null) continue;
+                if (pi.opacity() <= 0) continue;
+
+                double[] lineBounds = pi.geometricBounds();
+                if (lineBounds == null || lineBounds.length < 4) continue;
+
+                // Page-relative pt coordinates
+                double lineX1 = lineBounds[1] - pagePtLeft;
+                double lineX2 = lineBounds[3] - pagePtLeft;
+                double lineY1 = lineBounds[0] - pagePtTop;
+                double lineY2 = lineBounds[2] - pagePtTop;
+
+                // Clip to parent frame (paste-inside clipping)
+                if (pi.parentId() != null) {
+                    ResolvedPageItem parentPi = ctx.resolvedData.getPageItem(pi.parentId());
+                    if (parentPi != null && parentPi.geometricBounds() != null) {
+                        double[] fb = parentPi.geometricBounds();
+                        lineX1 = Math.max(lineX1, fb[1] - pagePtLeft);
+                        lineX2 = Math.min(lineX2, fb[3] - pagePtLeft);
+                        lineY1 = Math.max(lineY1, fb[0] - pagePtTop);
+                        lineY2 = Math.min(lineY2, fb[2] - pagePtTop);
+                    }
+                }
+
+                // Clip to page
+                lineX1 = Math.max(0.0, lineX1);
+                lineX2 = Math.min(lineX2, pageWidthPt);
+                if (lineX1 >= lineX2) continue;
+
+                // For a horizontal line, lineY1 ≈ lineY2; use strokeWeight for height.
+                // Enforce minimum 1 mm (2.835 pt) so HWP renders the line visibly.
+                double strokePt = Math.max(pi.strokeWeight(), 2.835);
+                double lineYCenter = (lineY1 + lineY2) / 2.0;
+                double visTop = Math.max(0.0, lineYCenter - strokePt / 2.0);
+                double visBottom = Math.min(lineYCenter + strokePt / 2.0, pageHeightPt);
+                if (visTop >= visBottom) continue;
+
+                byte[] imageData = generateSolidLinePng(pi, ctx);
+                if (imageData == null) continue;
+
+                long x = CoordinateConverter.pointsToHwpunits(lineX1);
+                long y = CoordinateConverter.pointsToHwpunits(visTop);
+                long w = CoordinateConverter.pointsToHwpunits(lineX2 - lineX1);
+                long h = CoordinateConverter.pointsToHwpunits(visBottom - visTop);
+                if (w <= 0 || h <= 0) continue;
+
+                ASTFigure fig = new ASTFigure();
+                fig.x(x);
+                fig.y(y);
+                fig.width(w);
+                fig.height(h);
+                fig.imageData(imageData);
+                fig.imageFormat("png");
+                fig.pixelWidth(100);
+                fig.pixelHeight(4);
+                fig.zOrder(1); // above default zOrder=0 page items
+                fig.fromGroup(true); // IN_FRONT_OF_TEXT
+                fig.sourceId("synth_line_" + cid);
+                sections.get(pageIdx).addBlock(fig);
+                syntheticDone.add(cid);
+                System.err.println("[BackgroundInjector] synthetic line id=" + cid
+                        + " x=" + String.format("%.1f", lineX1) + "pt y=" + String.format("%.1f", visTop)
+                        + "pt w=" + String.format("%.1f", lineX2 - lineX1) + "pt h=" + String.format("%.1f", visBottom - visTop)
+                        + "pt hwpW=" + w + " hwpH=" + h + " stroke=" + pi.strokeColorName());
+            }
+        }
+    }
+
+    /** Read PNG width/height from file header without decoding pixel data. */
+    private static int[] readPngDimensions(File pngFile) {
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(pngFile)) {
+            byte[] header = new byte[24];
+            if (fis.read(header) < 24) return null;
+            // PNG magic: 0x89 P N G \r \n 0x1a \n
+            if ((header[0] & 0xFF) != 0x89 || header[1] != 'P') return null;
+            int w = ((header[16] & 0xFF) << 24) | ((header[17] & 0xFF) << 16)
+                  | ((header[18] & 0xFF) << 8)  |  (header[19] & 0xFF);
+            int h = ((header[20] & 0xFF) << 24) | ((header[21] & 0xFF) << 16)
+                  | ((header[22] & 0xFF) << 8)  |  (header[23] & 0xFF);
+            return new int[]{w, h};
+        } catch (Exception e) { return null; }
+    }
+
+    /** Generate a 100×4 solid-color PNG from the pageItem's stroke color and opacity. */
+    private static byte[] generateSolidLinePng(ResolvedPageItem pi, ResolvedBuildContext ctx) {
+        String colorName = pi.strokeColorName();
+        int r = 128, g = 128, b = 128;
+        String hex = ctx.resolvedData.resolveColorHex(colorName);
+        if (hex != null && hex.startsWith("#") && hex.length() >= 7) {
+            try {
+                r = Integer.parseInt(hex.substring(1, 3), 16);
+                g = Integer.parseInt(hex.substring(3, 5), 16);
+                b = Integer.parseInt(hex.substring(5, 7), 16);
+            } catch (NumberFormatException ignored) {}
+        }
+        int alpha = (int) Math.round(255 * pi.opacity() / 100.0);
+        try {
+            BufferedImage img = new BufferedImage(100, 4, BufferedImage.TYPE_INT_ARGB);
+            int argb = (alpha << 24) | (r << 16) | (g << 8) | b;
+            for (int px = 0; px < 100; px++)
+                for (int py = 0; py < 4; py++)
+                    img.setRGB(px, py, argb);
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            ImageIO.write(img, "png", baos);
+            return baos.toByteArray();
+        } catch (Exception e) { return null; }
     }
 
     private static boolean isPageObject(RenderedGroup rg) {

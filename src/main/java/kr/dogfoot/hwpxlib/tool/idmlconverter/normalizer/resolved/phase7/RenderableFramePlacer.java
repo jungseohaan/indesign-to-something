@@ -522,6 +522,7 @@ public final class RenderableFramePlacer {
             } catch (Exception e2) { /* skip */ }
         }
 
+
         if (count > 0) {
             System.err.println("[ResolvedToASTBuilder] Phase 7: " + count + " renderable frames placed");
         }

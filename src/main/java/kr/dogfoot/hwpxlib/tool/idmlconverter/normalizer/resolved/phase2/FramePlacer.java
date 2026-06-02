@@ -805,8 +805,13 @@ public final class FramePlacer {
                         double _groupH = pbB - pbT;
                         double _tfTopRatio = (_groupH > 1.0) ? (y - pbT) / _groupH : 0.0;
                         if (editableChildCount == 1 && pbB > pbT && pbR > pbL && _tfTopRatio < 0.5) {
-                            x = pbL; y = pbT;
-                            w = pbR - pbL; h = pbB - pbT;
+                            // 세로: badge bounds로 확장 (vertAlign=CENTER 용)
+                            y = pbT; h = pbB - pbT;
+                            // 가로: TF가 배지 왼쪽보다 오른쪽에 있으면 원위치 유지 (배지 좌측 장식 영역 침범 방지)
+                            // TF가 배지 범위 바깥 왼쪽에 있는 경우에만 배지 left로 이동
+                            x = Math.max(x, pbL);
+                            w = pbR - x;
+                            if (w <= 0) { x = pbL; w = pbR - pbL; }
                         }
                         // 모든 editable 자식을 badge text child 로 표시 → Phase 3(InlineFrameHandler) 중복 처리 방지
                         if (cTfIdsAll != null) {
@@ -819,6 +824,31 @@ public final class FramePlacer {
                     }
                 }
             } catch (Exception eBadge) {}
+            // ￼ 로 시작하는 TF 첫줄에 inline TF가 좌측 가장자리를 공유하는 경우
+            // (예: 단락 번호 "1" TF가 본문 TF 왼쪽에 맞닿음) → x를 inline TF 너비만큼 오른쪽으로 이동
+            if (!_isBadgeChild) {
+                String _fvtInl = tf.frameVisibleText();
+                if (_fvtInl != null && _fvtInl.startsWith("￼")) {
+                    for (ResolvedTextFrame _itf : frames) {
+                        if (!_itf.isInline() || _itf.pageIndex() != tf.pageIndex()) continue;
+                        double[] _igb = _itf.geometricBounds();
+                        if (_igb == null || _igb.length < 4) continue;
+                        double _iWidth = _igb[3] - _igb[1];
+                        if (_iWidth < 8.5) continue; // 3mm 미만은 무시
+                        // 인라인 TF 왼쪽이 이 TF의 왼쪽 spread 좌표와 일치 (5pt 허용)
+                        if (Math.abs(_igb[1] - gb[1]) > 5.0) continue;
+                        // 인라인 TF top이 이 TF top보다 위 또는 거의 같고, bottom이 이 TF top 이하이면 무관
+                        double _iTfTop = gb[0] - pageTop;
+                        if (_igb[0] - pageTop > _iTfTop + 5.0) continue;
+                        if (_igb[2] - pageTop < _iTfTop) continue;
+                        double _origX = x;
+                        x += _iWidth;
+                        w -= _iWidth;
+                        if (w <= 0) { x = _origX; w = gb[3] - gb[1]; }
+                        break;
+                    }
+                }
+            }
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
