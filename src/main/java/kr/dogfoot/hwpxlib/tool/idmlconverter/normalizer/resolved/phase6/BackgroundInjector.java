@@ -38,6 +38,12 @@ public final class BackgroundInjector {
             idToPage.put(rg.id(), rg.pageIndex());
         }
 
+        // badge_group ID 세트: renderedTextFrames의 badge_group 항목이 있으면 Phase 7이 처리 → Phase 6 skip
+        Set<Integer> badgeGroupIds = new HashSet<>();
+        for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
+            if (rt.isBadgeGroup()) badgeGroupIds.add(rt.id());
+        }
+
         // Pass 1b: page_object 아이템의 childIds/childImageIds 중 부모와 같은 페이지의 자식만 수집
         // 다른 페이지 자식은 그룹 PNG에 포함되지 않으므로 개별 렌더링 필요
         Set<Integer> childOfGroup = new HashSet<>();
@@ -64,6 +70,8 @@ public final class BackgroundInjector {
             if (!isPageObject(rg)) continue;
             // inline_object로 이미 처리된 ID는 Phase 3가 인라인으로 배치 → 중복 방지
             if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
+            // badge_group ID는 Phase 7이 badge PNG를 배치 → Phase 6 deco_/img_ 중복 방지
+            if (badgeGroupIds.contains(rg.id())) continue;
             // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
             if (childOfGroup.contains(rg.id())) continue;
             // 같은 (id, pageIndex) 쌍이 중복 추출된 경우만 스킵
@@ -249,7 +257,8 @@ public final class BackgroundInjector {
         // 하위 호환: 구 캐시는 itemType 없음 → 파일명으로 추론
         String f = rg.file();
         return f != null && (f.contains("img_") || f.contains("deco_")
-                || f.contains("shape_") || f.contains("graphic_") || f.contains("master_"));
+                || f.contains("shape_") || f.contains("graphic_") || f.contains("master_")
+                || f.contains("haseera_"));
     }
 
     private static byte[] loadPng(ResolvedBuildContext ctx, RenderedGroup rg) {

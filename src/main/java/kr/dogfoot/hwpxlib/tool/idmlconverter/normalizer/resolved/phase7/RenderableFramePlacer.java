@@ -149,10 +149,13 @@ public final class RenderableFramePlacer {
                 double bh = visBottom - visTop;
 
                 // PNG 비율 보정 — 보정 후 가시 영역 중심을 유지하도록 x/y 재계산
+                // badge_group은 Phase 2의 TextFrameBlock과 정확히 같은 위치에 배치해야 하므로
+                // 비율 보정으로 y가 이동하면 텍스트와 배경이 어긋남 → badge_group은 보정 생략.
                 double bwOrig = bw, bhOrig = bh;
                 double pngRatio = (double) img.getWidth() / img.getHeight();
                 double boundsRatio = bw / bh;
-                if (Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
+                if (!rt.isBadgeGroup()
+                        && Math.abs(pngRatio - boundsRatio) / Math.max(pngRatio, boundsRatio) > 0.1) {
                     if (pngRatio < 1.0) { bw = bh * pngRatio; } else { bh = bw / pngRatio; }
                 }
 
