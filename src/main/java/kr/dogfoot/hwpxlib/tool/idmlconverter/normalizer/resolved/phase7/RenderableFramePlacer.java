@@ -3,7 +3,6 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import java.io.File;
@@ -24,70 +23,6 @@ public final class RenderableFramePlacer {
         // 같은 PNG 파일을 여러 ID로 등록한 경우 중복 배치 방지 (페이지+파일 단위)
         java.util.Set<String> placedKeys = new java.util.HashSet<>();
 
-        // Phase 7b: inline_object items that were suppressed from inline placement (Phase 3)
-        // and need to be re-placed as floating ASTFigures behind their inlineToFloating TF.
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (!"inline_object".equals(rg.itemType())) continue;
-            if (!ctx.isDisposed(rg.id(), FrameDisposition.PNG_CONVERT_TO_FLOATING)) continue;
-            if (rg.file() == null) continue;
-            String dedupKey2 = rg.pageIndex() + "|" + rg.file();
-            if (!placedKeys.add(dedupKey2)) continue;
-
-            File pngFile2 = new File(ctx.basePath, rg.file());
-            if (!pngFile2.exists()) continue;
-
-            // TF 의 pageIndex 를 우선 사용 (rg.pageIndex()는 앵커 텍스트 기준으로 TF 섹션과 다를 수 있음)
-            Integer tfPi = ctx.inlineObjectTfPageIndex.get(rg.id());
-            int pageIdx2 = ctx.toSectionIndex.applyAsInt(tfPi != null ? tfPi : rg.pageIndex());
-            if (pageIdx2 < 0 || pageIdx2 >= sections.size()) continue;
-
-            try {
-                byte[] imageData2 = java.nio.file.Files.readAllBytes(pngFile2.toPath());
-                java.awt.image.BufferedImage img2 = javax.imageio.ImageIO.read(pngFile2);
-                if (img2 == null || img2.getWidth() <= 2) continue;
-
-                double[] bounds2 = rg.bounds();
-                if (bounds2 == null || bounds2.length < 4) continue;
-                // renderedFloatingItems bounds는 normalizeToPoints() 미적용 (mm단위, spread 절대좌표)
-                // → TF 의 page offset(page bounds top/left)을 빼서 page-relative 로 변환 후 scaleFactor로 pt 환산
-                double sf2 = ctx.scaleFactor;
-                double pageTop2 = 0, pageLeft2 = 0;
-                int boundsPageIdx = tfPi != null ? tfPi : rg.pageIndex();
-                if (ctx.resolvedData.pages() != null
-                        && boundsPageIdx >= 0 && boundsPageIdx < ctx.resolvedData.pages().size()) {
-                    double[] pgB2 = ctx.resolvedData.pages().get(boundsPageIdx).bounds();
-                    if (pgB2 != null && pgB2.length >= 4) {
-                        pageTop2 = pgB2[0];
-                        pageLeft2 = pgB2[1];
-                    }
-                }
-                // bounds2는 mm (spread 절대), pages()는 pt (normalizeToPoints 적용됨)
-                // → bounds2를 pt로 변환 후 page offset(pt) 차감하여 page-relative pt 좌표로
-                double bw2 = Math.abs(bounds2[3] - bounds2[1]) * sf2;
-                double bh2 = Math.abs(bounds2[2] - bounds2[0]) * sf2;
-                if (bw2 <= 0 || bh2 <= 0) continue;
-                double x2 = bounds2[1] * sf2 - pageLeft2;
-                double y2 = bounds2[0] * sf2 - pageTop2;
-
-                ASTFigure fig2 = new ASTFigure();
-                fig2.sourceId("inline_float_" + rg.id());
-                fig2.x(CoordinateConverter.pointsToHwpunits(x2));
-                fig2.y(CoordinateConverter.pointsToHwpunits(y2));
-                fig2.width(CoordinateConverter.pointsToHwpunits(bw2));
-                fig2.height(CoordinateConverter.pointsToHwpunits(bh2));
-                fig2.imageData(imageData2);
-                fig2.imageFormat("png");
-                fig2.pixelWidth(img2.getWidth());
-                fig2.pixelHeight(img2.getHeight());
-                // inline_object는 inlineToFloating TF 의 배경 컨테이너 → TF 보다 뒤에 놓여야 함.
-                // InDesign z-order 는 inline anchor 기준이라 변환 불가 → 낮은 고정값 사용.
-                fig2.zOrder(10);
-                fig2.fromGroup(true);
-                sections.get(pageIdx2).addBlock(fig2);
-                count++;
-            } catch (Exception e2) { /* skip */ }
-        }
-
         // Phase 7c: page_object 항목 (스프레드 걸침 배경/장식 PNG) 배치
         // 주 페이지 가시 영역 + 좌/우 오버플로우를 인접 페이지에 크롭해서 배치
         for (RenderedGroup rg3 : ctx.resolvedData.allRenderedFloatingItems()) {
@@ -97,6 +32,8 @@ public final class RenderableFramePlacer {
             if (rg3.file() == null) continue;
             // Phase 6(BackgroundInjector)이 이미 배치한 항목은 중복 배치 방지
             if (ctx.phase6PlacedIds.contains(rg3.id())) continue;
+            // inline_object로도 등록된 ID는 Phase 3이 인라인으로 처리 → 플로팅 중복 방지
+            if (ctx.resolvedData.isInlineObjectId(rg3.id())) continue;
             String dedupKey3 = rg3.pageIndex() + "|" + rg3.file();
             if (!placedKeys.add(dedupKey3)) continue;
 
