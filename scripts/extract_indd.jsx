@@ -149,17 +149,9 @@ function _marker(outputDir, tag) {
 // SPEC-030: phase 타이밍 누적 상태 (extract 한 번에 하나).
 var _phaseTimingState = null;
 var _ctfCache = null;   // itemId → "editable"|"renderable"|"background"|null
-var _badgeCache = null; // itemId → true|false
 
 // --- 전역 설정 ---
 var CONFIG = null;
-
-// CONFIG.rendering.textFrame.spec025 에 대한 null-safe 접근자.
-// 파일 전역에서 반복되는 4단계 null 체크를 단일 호출로 대체한다.
-function _spec025() {
-    return CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame
-           && CONFIG.rendering.textFrame.spec025;
-}
 
 // item의 parentPage를 반환한다.
 // parentPage가 null인 인라인/스프레드 경계 아이템은 visibleBounds 중심점으로 doc.pages를 탐색한다.
@@ -203,7 +195,7 @@ function loadConversionConfig(configPath) {
             // SPEC-025: 텍스트 이미지 렌더링 제거 (Tier A/B). false면 기존 동작.
             // - masterPageEditable: 조건 5 (item.masterPageItem 오버라이드) → editable
             // - hashiraEditable: 조건 6 (margin + 하시라 paragraph/character style) → editable
-            // - rotationEditable: 회전 텍스트 (조건 8.5 / isRenderableTextFrame) → editable + HWPX rotation
+            // - rotationEditable: 회전 텍스트 (조건 8.5) → editable + HWPX rotation
             // - nonprintingEditable: 조건 3 (item.nonprinting) → editable. 마스터 헤더 케이스 (frame 3854 등)
             textFrame: { maxTextLength: 30,
                 decorativeLargeText: { enabled: true, minFontSize: 16, excludeBlack: true, blackThreshold: 0.90 },
@@ -276,50 +268,9 @@ function loadConversionConfig(configPath) {
     }
 }
 
-/**
- * 문자의 채움 색상이 검정(또는 검정 근사)인지 판별한다.
- * @param character InDesign Character 객체
- * @param blackThreshold 검정 판정 임계값 (0.90 = 90% 이상이면 검정)
- * @return true이면 검정색
- */
-function isBlackColor(character, blackThreshold) {
-    if (!blackThreshold) blackThreshold = 0.90;
-    try {
-        var color = character.fillColor;
-        if (!color) return true; // 색상 없으면 검정 취급
-
-        // 스와치 이름 검사
-        var name = color.name;
-        if (name === "Black" || name === "[Black]") return true;
-        if (name === "Registration") return true;
-
-        // 색상값 검사
-        var space = color.space;
-        if (space === ColorSpace.CMYK) {
-            var cv = color.colorValue;
-            // K >= blackThreshold*100% AND C+M+Y < 10%
-            if (cv[3] >= blackThreshold * 100 && (cv[0] + cv[1] + cv[2]) < 10) return true;
-        } else if (space === ColorSpace.RGB) {
-            var cv = color.colorValue;
-            // R, G, B 모두 25 이하이면 검정
-            var darkThreshold = (1.0 - blackThreshold) * 255;
-            if (cv[0] <= darkThreshold && cv[1] <= darkThreshold && cv[2] <= darkThreshold) return true;
-        }
-
-        // 틴트 검사: 검정 스와치에 높은 틴트
-        var tint = 100;
-        try { tint = character.fillTint; } catch (e2) {}
-        if ((name === "Black" || name === "[Black]") && tint >= blackThreshold * 100) return true;
-
-        return false;
-    } catch (e) {
-        return true; // 오류 시 검정 취급 (렌더링 안 함)
-    }
-}
-
 // =============================================================================
 // SECTION 2: PAGE UTILITIES
-// 페이지 해시 계산 / 아이템-페이지 맵 / 배지 배치 export
+// 페이지 해시 계산 / 아이템-페이지 맵
 // =============================================================================
 
 // --- SPEC-030 B.2: 페이지별 해시 + 아이템 맵 ---
@@ -450,109 +401,6 @@ function buildPageData(doc, startPage, endPage, allItems) {
     return { hashes: hashes, itemMap: itemMap };
 }
 
-// SPEC-030 B.1: 한 페이지의 단순 배지(데코/editable TF 없음)를 임시 그룹으로 묶어
-// 배치 export하고 crop 매니페스트 배열을 반환한다.
-// param: simpleBadges [{grp, grpDomId, grpPage, childIds, childTextFrameIds}]
-// return: [{rf: renderedFrames 엔트리, crop: {src,dst,x,y,w,h}}] — 실패 시 []
-function exportPageBadgesBatched(doc, page, simpleBadges, renderDir, dpi) {
-    if (simpleBadges.length < 2) return [];
-    var results = [];
-    var pgIdx0 = page.documentOffset; // 0-based
-    var batchFileName = "badge_batch_p" + (pgIdx0 + 1) + ".png";
-    var batchFile = File(renderDir + "/" + batchFileName);
-    var dups = [];
-    try {
-        for (var i = 0; i < simpleBadges.length; i++) {
-            dups.push(simpleBadges[i].grp.duplicate());
-        }
-        // PNG 배경만 추출: 각 복제본의 TextFrame 자식 숨기기 (내용 있는 TF만 — 빈 TF는 시각적 컨테이너)
-        for (var hi = 0; hi < dups.length; hi++) {
-            try {
-                var dupItems = dups[hi].allPageItems;
-                for (var hj = 0; hj < dupItems.length; hj++) {
-                    try {
-                        if (dupItems[hj].constructor.name !== "TextFrame" || !dupItems[hj].visible) continue;
-                        var _bTfCont = "";
-                        try { _bTfCont = (dupItems[hj].contents + "").replace(/[\s\r\n﻿￼]/g, ""); } catch (e) {}
-                        if (_bTfCont.length > 0) dupItems[hj].visible = false;
-                    } catch (eHj) {}
-                }
-            } catch (eHi) {}
-        }
-        var tempGroup = doc.groups.add(dups);
-        try {
-            tempGroup.exportFile(ExportFormat.PNG_FORMAT, batchFile);
-        } finally {
-            try { tempGroup.remove(); } catch (er) {}
-        }
-
-        // union bounds of all simple badges (pt)
-        var uVB = null;
-        for (var j = 0; j < simpleBadges.length; j++) {
-            try {
-                var bvb = simpleBadges[j].grp.visibleBounds;
-                if (!uVB) { uVB = [bvb[0], bvb[1], bvb[2], bvb[3]]; }
-                else {
-                    uVB[0] = Math.min(uVB[0], bvb[0]);
-                    uVB[1] = Math.min(uVB[1], bvb[1]);
-                    uVB[2] = Math.max(uVB[2], bvb[2]);
-                    uVB[3] = Math.max(uVB[3], bvb[3]);
-                }
-            } catch (e) {}
-        }
-        if (!uVB) return [];
-
-        // visibleBounds는 문서 측정 단위로 반환됨. 단위별로 px 변환 계수 계산.
-        var _hUnit = doc.viewPreferences.horizontalMeasurementUnits;
-        var pxPerPt;
-        if (_hUnit == MeasurementUnits.MILLIMETERS)   { pxPerPt = dpi / 25.4; }
-        else if (_hUnit == MeasurementUnits.INCHES)    { pxPerPt = dpi; }
-        else                                           { pxPerPt = dpi / 72.0; }
-        var pageBounds = page.bounds;
-
-        for (var k = 0; k < simpleBadges.length; k++) {
-            var sb = simpleBadges[k];
-            var ivb = null;
-            try { ivb = sb.grp.visibleBounds; } catch (e) {}
-            if (!ivb) continue;
-
-            var cX = Math.round((ivb[1] - uVB[1]) * pxPerPt);
-            var cY = Math.round((ivb[0] - uVB[0]) * pxPerPt);
-            var cW = Math.max(1, Math.round((ivb[3] - ivb[1]) * pxPerPt));
-            var cH = Math.max(1, Math.round((ivb[2] - ivb[0]) * pxPerPt));
-
-            var indivFileName = "badge_" + sb.grpDomId + ".png";
-            var relBounds = [
-                ivb[0] - pageBounds[0], ivb[1] - pageBounds[1],
-                ivb[2] - pageBounds[0], ivb[3] - pageBounds[1]
-            ];
-
-            results.push({
-                rf: {
-                    id: sb.grpDomId,
-                    file: "rendered_frames/" + indivFileName,
-                    bounds: relBounds,
-                    pageIndex: pgIdx0,
-                    type: "badge_group",
-                    childIds: sb.childIds,
-                    childTextFrameIds: sb.childTextFrameIds,
-                    textHiddenBeforeExport: true
-                },
-                crop: {
-                    src: "rendered_frames/" + batchFileName,
-                    dst: "rendered_frames/" + indivFileName,
-                    x: cX, y: cY, w: cW, h: cH
-                }
-            });
-        }
-    } catch (e) {
-        for (var dx = 0; dx < dups.length; dx++) {
-            try { dups[dx].remove(); } catch (er) {}
-        }
-        return [];
-    }
-    return results;
-}
 
 // =============================================================================
 // SECTION 3: MAIN ENTRY POINT
@@ -603,11 +451,6 @@ function _parseArgs(args) {
         cfgLog.writeln("perfMode=" + ctx.perfMode);
         cfgLog.writeln("skipPdf=" + ctx.skipPdf);
         cfgLog.writeln("pngExportResolution=" + CONFIG.rendering.pngExportResolution);
-        var _s25 = _spec025();
-        cfgLog.writeln("spec025=" + (_s25 ? ("masterPageEditable=" + _s25.masterPageEditable
-            + " hashiraEditable=" + _s25.hashiraEditable
-            + " rotationEditable=" + _s25.rotationEditable
-            + " nonprintingEditable=" + _s25.nonprintingEditable) : "MISSING"));
         cfgLog.close();
     } catch (e) {}
 
@@ -667,14 +510,12 @@ function _runRenderPhases(doc, ctx, allItems) {
         for (var _i = 0; _i < arr.length; _i++) arr[_i].type = type;
     }
 
-    // 03c. allItems 전체 분류 캐시 — classifyTextFrame/isBadgeGroup의 중복 DOM 호출 제거
-    _ctfCache = {}; _badgeCache = {};
+    // 03c. allItems 전체 분류 캐시 — classifyTextFrame의 중복 DOM 호출 제거
+    _ctfCache = {};
     for (var _pci = 0; _pci < allItems.length; _pci++) {
         try {
             var _pcIt = allItems[_pci];
-            var _pcCn = _pcIt.constructor.name;
-            if (_pcCn === "TextFrame") _ctfCache[_pcIt.id] = classifyTextFrame(_pcIt);
-            if (_pcCn === "Group")     _badgeCache[_pcIt.id] = isBadgeGroup(_pcIt);
+            if (_pcIt.constructor.name === "TextFrame") _ctfCache[_pcIt.id] = classifyTextFrame(_pcIt);
         } catch (e) {}
     }
     _marker(ctx.outputDir, "03c_preClassify");
@@ -692,13 +533,9 @@ function _runRenderPhases(doc, ctx, allItems) {
     }
     try { $.gc(); } catch (e) {}
 
-    // 2.13. 배지 그룹 + 장식 텍스트 프레임 렌더링
-    _marker(ctx.outputDir, "05_badgeRendering");
-    var rtfResult = exportRenderedTextFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage, allItems, editableFrameIds, ctx.skipRenderPagesMap);
-    var renderedFrames = rtfResult.frames;
-    var badgeChildIds  = rtfResult.badgeChildIds;
-    for (var ri = 0; ri < renderedFrames.length; ri++) renderedFloatingItems.push(renderedFrames[ri]);
-    try { $.gc(); } catch (e) {}
+    // 2.13. (SPEC-025: exportRenderedTextFrames 제거됨)
+    var renderedFrames = [];
+    var badgeChildIds  = {};
 
     // 2.14. 이미지 프레임 개별 렌더링 (Rectangle/Oval/Polygon에 place된 이미지)
     _marker(ctx.outputDir, "06_imgFrames");
@@ -786,6 +623,19 @@ function _runRenderPhases(doc, ctx, allItems) {
         else editableIdList.push(eid);
     }
     resolved.editableTextFrameIds = editableIdList;
+
+    // Safety: 모든 export 단계에서 예외/stale DOM으로 restore가 누락된 경우 대비.
+    // editableFrameIds TF를 강제 복원 (visible=true) — PDF 프리뷰 이전 최종 보정.
+    for (var _sri = 0; _sri < allItems.length; _sri++) {
+        try {
+            var _srItem = allItems[_sri];
+            if (_srItem.constructor.name === "TextFrame"
+                    && editableFrameIds[_srItem.id]
+                    && !_srItem.visible) {
+                _srItem.visible = true;
+            }
+        } catch (e) {}
+    }
 
     _marker(ctx.outputDir, "11_writeJson");
     // chunkMode=true(후속 청크)면 resolved_START_END.json으로 저장 (Rust가 나중에 병합)
@@ -1119,6 +969,7 @@ function isOnHiddenLayer(item) {
  * 모든 텍스트는 TF로 변환하는 원칙에 따라 그룹 배경(도형)은 PNG, 텍스트는 별도 TF로 처리.
  */
 function isBadgeGroup(group) {
+    return false;
     // 크기가 80mm 이상인 그룹은 배지가 아님 (스프레드 전체에 걸치는 장식 그룹 등)
     try {
         var _gb = group.geometricBounds;
@@ -1163,6 +1014,7 @@ function isBadgeGroup(group) {
  * 렌더링 단계에서 페어 외 형제를 임시 숨긴 뒤 부모 그룹을 exportFile 한다.
  */
 function findNestedBadgePattern(group) {
+    return null;
     var cfg = CONFIG.rendering.badge;
     if (!cfg.enabled || !cfg.nestedEnabled) return null;
 
@@ -1261,6 +1113,7 @@ function findNestedBadgePattern(group) {
  * 반환: 합쳐야 할 PageItem 배열 (없으면 빈 배열).
  */
 function findOverlappingDecorations(badgeGroup, allItems) {
+    return [];
     var cfg = CONFIG.rendering.badge;
     if (!cfg.decorationMergeEnabled) return [];
 
@@ -1498,404 +1351,19 @@ function findRenderableTextBackground(tf, candidates) {
     return best;
 }
 
-// --- classifyTextFrame 조건별 헬퍼 (H-3) ---
-
-function _isHashiraStyleName(n) {
-    if (!n) return false;
-    var nl = n.toLowerCase();
-    return n.indexOf("하시라") >= 0
-        || n.indexOf("페이지번호") >= 0
-        || n.indexOf("쪽수") >= 0
-        || n.indexOf("기둥") >= 0
-        || nl.indexOf("page number") >= 0
-        || nl.indexOf("running head") >= 0
-        || nl.indexOf("folio") >= 0;
-}
-
-// Tier A.5: 마스터 스프레드 본체 텍스트 → editable
-function _ctfCheckMasterBody(item, ovr) {
-    try {
-
-        if (ovr.masterEditable) {
-            var onMaster = false;
-            try {
-                var mp = item.parent; var hop = 0;
-                while (mp && hop < 10) {
-                    if (mp.constructor && mp.constructor.name === "MasterSpread") { onMaster = true; break; }
-                    mp = mp.parent; hop++;
-                }
-            } catch (e) {}
-            if (onMaster) {
-                var txt = "";
-                try { txt = String(item.contents).replace(/[\s﻿\r\n￼﻿]/g, ""); } catch (e) {}
-                if (txt.length > 0) return "editable";
-            }
-        }
-    } catch (e) {}
-    return null;
-}
-
-// 1.5: 비균일/축소 변환 → background (HWPX 스케일 재현 불가)
-function _ctfCheckScaled(item) {
-    try {
-        var sx = 1, sy = 1;
-        try { var ahs = item.absoluteHorizontalScale; if (typeof ahs === "number" && ahs > 0) sx = ahs / 100; } catch (e) {}
-        try { var avs = item.absoluteVerticalScale; if (typeof avs === "number" && avs > 0) sy = avs / 100; } catch (e) {}
-        if ((sx > 0 && (sx < 0.6 || sx > 1.6)) || (sy > 0 && (sy < 0.6 || sy > 1.6))) return "background";
-    } catch (e) {}
-    return null;
-}
-
-// Tier B: 회전 bypass 플래그 계산 (절대 회전각, 부모 Group 포함)
-function _ctfComputeRotBypass(item, ovr) {
-    try {
-
-        if (ovr.rotEditable) {
-            var rot = 0;
-            try { rot = item.absoluteRotationAngle; } catch (e) {}
-            if (!rot) { try { rot = item.rotationAngle; } catch (e) {} }
-            if (!rot) {
-                try {
-                    var par = item.parent;
-                    while (par && par.constructor && par.constructor.name === "Group") {
-                        var pRot = 0;
-                        try { pRot = par.absoluteRotationAngle; } catch (e) {}
-                        if (!pRot) { try { pRot = par.rotationAngle; } catch (e) {} }
-                        if (pRot) { rot = pRot; break; }
-                        par = par.parent;
-                    }
-                } catch (e) {}
-            }
-            if (Math.abs(rot) > 3.0) return true;
-        }
-    } catch (e) {}
-    return false;
-}
-
-// 2: 숨겨진 레이어 → background
-function _ctfCheckHidden(item) {
-    if (isOnHiddenLayer(item)) return "background";
-    return null;
-}
-
-// 3: 비인쇄 → background (spec025.nonprintingEditable 이면 editable 유지)
-// 단, 비인쇄 마스터 페이지 아이템은 플래그와 무관하게 항상 background.
-// (마스터에서 파생됐으나 Nonprinting=true인 아이템은 의도적으로 숨겨진 하시라/장식 요소)
-function _ctfCheckNonprinting(item, ovr) {
-    try {
-        if (item.nonprinting) {
-            var isMaster = false;
-            try { isMaster = !!item.masterPageItem; } catch (e) {}
-            // parentPage가 null이거나 TF top이 페이지 top 위 → off-canvas (pasteboard) → background 강제
-            var isOffCanvas = false;
-            try {
-                var ppg = item.parentPage;
-                if (!ppg) isOffCanvas = true;
-                else if (item.geometricBounds[0] < ppg.bounds[0]) isOffCanvas = true;
-            } catch (e) {}
-            if (isMaster || isOffCanvas || !ovr.nonprintEditable) return "background";
-        }
-    } catch (e) {}
-    return null;
-}
-
-// 4: 자동 페이지 번호 마커 → background
-function _ctfCheckAutoPageNumber(item) {
-    try {
-        if (item.parentStory.contents.indexOf("") >= 0) return "background";
-    } catch (e) {}
-    return null;
-}
-
-// 5: 마스터 페이지 오버라이드 → background (spec025.masterPageEditable 이면 editable 유지)
-function _ctfCheckMasterOverride(item, ovr) {
-    try {
-        if (item.masterPageItem) {
-
-            if (!ovr.masterEditable) return "background";
-        }
-    } catch (e) {}
-    return null;
-}
-
-// 6: 마진 영역 하시라/페이지번호 패턴 → background (spec025.hashiraEditable 이면 editable 유지)
-function _ctfCheckHashira(item, ovr) {
-    try {
-        var ppg = item.parentPage;
-        if (!ppg) return null;
-        var pgB = ppg.bounds;
-        var pgW = pgB[3] - pgB[1], pgH = pgB[2] - pgB[0];
-        var tfB = item.geometricBounds;
-        var tfTop = tfB[0] - pgB[0], tfBot = tfB[2] - pgB[0];
-        var tfLeft = tfB[1] - pgB[1], tfRight = tfB[3] - pgB[1];
-        var inMarginArea = (tfTop < pgH * 0.10 || tfBot > pgH * 0.90
-            || tfRight <= pgW * 0.25 || tfLeft >= pgW * 0.75);
-        var hasTable = false;
-        try {
-            hasTable = (item.parentStory && item.parentStory.tables.length > 0)
-                || (item.contents.indexOf("") >= 0);
-        } catch (e) {}
-        var hashiraStyle = false;
-        try {
-            var ps = null; var styleName = "";
-            try { ps = item.parentStory.paragraphs[0].appliedParagraphStyle; } catch (e) {}
-            try { styleName = ps ? (ps.name || "") : ""; } catch (e) {}
-            if (_isHashiraStyleName(styleName)) hashiraStyle = true;
-            if (!hashiraStyle) {
-                try {
-                    var trs = item.parentStory.textStyleRanges;
-                    for (var ti = 0; ti < trs.length; ti++) {
-                        var cs = null; var csName = "";
-                        try { cs = trs[ti].appliedCharacterStyle; } catch (e) {}
-                        try { csName = cs ? (cs.name || "") : ""; } catch (e) {}
-                        if (_isHashiraStyleName(csName)) { hashiraStyle = true; break; }
-                    }
-                } catch (e) {}
-            }
-        } catch (e) {}
-        if (hashiraStyle && inMarginArea && !hasTable) {
-            
-            if (!ovr.hashiraEditable) return "background";
-        }
-    } catch (e) {}
-    return null;
-}
-
-// 7: 인라인 객체 → background (spec025.inlineTextEditable + 짧은 텍스트이면 editable 유지)
-function _ctfCheckInline(item, ovr) {
-    if (!isInlineItem(item)) return null;
-    var inlineBypass = false;
-    try {
-        
-        if (ovr.inlineEditable) {
-            var cached = ""; try { cached = String(item.contents); } catch (e) {}
-            var trimmed = ""; try { trimmed = cached.replace(/[\s﻿￼]/g, ""); } catch (e) {}
-            var maxLen = ovr.inlineMaxLen;
-            if (trimmed.length > 0 && trimmed.length <= maxLen) inlineBypass = true;
-        }
-    } catch (e) {}
-    if (!inlineBypass) return "background";
-    return null;
-}
-
-// 8a: Group + 긴 텍스트(>10자) + 배경색 도형에 완전 포함 → null (editable bypass)
-// 배경 도형은 deco 그룹 PNG로, 텍스트는 HWPX 글상자로 각자 배치.
-// hideTextFrames()가 TF를 숨겨 "background" 반환 시 텍스트가 PNG에도, HWPX에도 미표시됨.
-function _ctfCheckGroupLongTextInContainer(item, rotBypass) {
-    try {
-        if (item.parent.constructor.name !== "Group") return null;
-        var groupText = item.contents.replace(/[\s﻿\r\n]/g, "");
-        var hasTable = false;
-        try { hasTable = item.parentStory && item.parentStory.tables.length > 0; } catch (e) {}
-        if (groupText.length <= 10 || hasTable || rotBypass || isBadgeGroup(item.parent)) return null;
-        var grpItems = [];
-        try { grpItems = item.parent.allPageItems; } catch (e) {}
-        for (var gi = 0; gi < grpItems.length; gi++) {
-            var gn = grpItems[gi];
-            var gnCn = gn.constructor.name;
-            if (gnCn !== "Rectangle" && gnCn !== "Oval" && gnCn !== "Polygon") continue;
-            try {
-                var gnFill = gn.fillColor;
-                if (!gnFill || gnFill.name === "None" || gnFill.name === "[None]") continue;
-                var cb = gn.geometricBounds;
-                var tfb = item.geometricBounds;
-                var TOL = 3.0;
-                if (tfb[0] >= cb[0]-TOL && tfb[1] >= cb[1]-TOL &&
-                    tfb[2] <= cb[2]+TOL && tfb[3] <= cb[3]+TOL) {
-                    return null; // editable 폴스루
-                }
-            } catch (e) {}
-        }
-    } catch (e) {}
-    return null;
-}
-
-// 8b: Group + 짧은 텍스트(≤10자) + 비검정 + 무스트로크 → background (장식 레이블)
-// 배지 그룹(isBadgeGroup) 및 spec025.groupShortTextEditable 플래그로 bypass 가능.
-function _ctfCheckGroupShortDeco(item, rotBypass, ovr) {
-    try {
-        if (item.parent.constructor.name !== "Group") return null;
-        var groupText = item.contents.replace(/[\s﻿\r\n]/g, "");
-        var hasTable = false;
-        try { hasTable = item.parentStory && item.parentStory.tables.length > 0; } catch (e) {}
-        if (groupText.length > 10 || hasTable) return null;
-        var isDeco = false;
-        try {
-            var fc = item.parentStory.characters[0].fillColor;
-            if (fc && fc.name && fc.name !== "Black" && fc.name !== "[Black]") isDeco = true;
-        } catch (e) { isDeco = true; }
-        var hasStroke = false;
-        try {
-            var ch = item.parentStory.characters[0];
-            var sc = ch.strokeColor; var sw = ch.strokeWeight;
-            if (sc && sc.name && sc.name !== "None" && sc.name !== "[None]" && sw && sw > 0) hasStroke = true;
-        } catch (e) {}
-        var groupShortBypass = false;
-        try {
-            
-            if (ovr.groupShortEdit) groupShortBypass = true;
-        } catch (e) {}
-        if (isDeco && !hasStroke && !rotBypass && !groupShortBypass) return "background";
-    } catch (e) {}
-    return null;
-}
-
-// 8.5/9(decorativeStyledText)/9.5 통합: 짧은 텍스트(≤maxLen) + [프레임 fill | stroke | 부모 fill] → renderable
-// Path A (fill): ovr.decoStyledEdit로 bypass. excludeBlack 컨픽 적용.
-// Path B (stroke): ovr.boxLabelEdit로 bypass. 색상 필터 없음.
-function _ctfCheckDecorativeShortText(item, rotBypass, ovr) {
-    if (rotBypass) return null;
-    try {
-        var trimmed = item.contents.replace(/[\s﻿\r\n￼]/g, "");
-        var dstCfg = CONFIG.rendering.textFrame.decorativeStyledText;
-        var maxLen = (dstCfg && dstCfg.enabled) ? dstCfg.maxTextLength : 10;
-        if (trimmed.length === 0 || trimmed.length > maxLen) return null;
-        var firstChar = null;
-        try { firstChar = item.parentStory.characters[0]; } catch (e) {}
-        // Path A: TF fill 또는 부모 fill (excludeBlack 필터 적용)
-        if (!ovr.decoStyledEdit) {
-            var hasFill = false;
-            try {
-                var fn = item.fillColor ? item.fillColor.name : "None";
-                if (fn !== "None" && fn !== "[None]") hasFill = true;
-            } catch (e) {}
-            if (!hasFill) {
-                try {
-                    var par = item.parent;
-                    var pn = par ? par.constructor.name : "null";
-                    if (par && pn !== "Story" && pn !== "Spread" && pn !== "Page") {
-                        var pf = par.fillColor ? par.fillColor.name : "None";
-                        if (pf !== "None" && pf !== "[None]") hasFill = true;
-                    }
-                } catch (e) {}
-            }
-            if (hasFill) {
-                var isBlk = dstCfg.excludeBlack && firstChar && isBlackColor(firstChar, dstCfg.blackThreshold);
-                if (!isBlk) return "renderable";
-            }
-        }
-        // Path B: TF stroke (excludeBlack 필터 없음 — 테두리만 있으면 렌더링)
-        if (!ovr.boxLabelEdit) {
-            try {
-                var sw = item.strokeWeight || 0;
-                if (sw > 0) {
-                    var sn = item.strokeColor ? item.strokeColor.name : "None";
-                    if (sn !== "None" && sn !== "[None]") return "renderable";
-                }
-            } catch (e) {}
-        }
-    } catch (e) {}
-    return null;
-}
-
-// 8.7: 같은 Group 안 동일 텍스트 형제 (멀티레이어 컴포지트) → background
-function _ctfCheckTextComposite(item) {
-    try {
-        var par = item.parent;
-        if (!par || par.constructor.name !== "Group" || !par.textFrames
-                || par.textFrames.length < 2 || par.textFrames.length > 10) return null;
-        var myText = ""; try { myText = (item.contents + "").replace(/\s/g, ""); } catch (e) {}
-        if (myText.length === 0 || myText.length > 30) return null;
-        for (var i = 0; i < par.textFrames.length; i++) {
-            var sib = par.textFrames[i];
-            if (sib.id === item.id) continue;
-            var sibText = ""; try { sibText = (sib.contents + "").replace(/\s/g, ""); } catch (e) {}
-            if (sibText === myText) return "background";
-        }
-    } catch (e) {}
-    return null;
-}
-
-
-// 10: 빈 TextFrame + fill/stroke 있음 → renderable(stroke) or background(fill-only)
-// fillColor="" (빈 문자열)은 실제 fill 없음으로 처리 ("None"/"[None]"과 동일하게 취급)
-// stroke 있는 빈 TF = 장식 테두리 → 개별 PNG 렌더 (페이지 배경 비활성화 시에도 표시)
-function _ctfCheckEmptyFilled(item) {
-    try {
-        var trimmed = item.contents.replace(/[\r\n\s￼]/g, "");
-        if (trimmed.length !== 0) return null;
-        var fc = "None", sc = "None", sw = 0;
-        try { fc = item.fillColor ? item.fillColor.name : "None"; } catch (e) {}
-        try { sc = item.strokeColor ? item.strokeColor.name : "None"; } catch (e) {}
-        try { sw = item.strokeWeight || 0; } catch (e) {}
-        var hasFill = (fc !== "None" && fc !== "[None]" && fc !== "");
-        var hasStroke = (sc !== "None" && sc !== "[None]") && sw > 0;
-        if (hasFill || hasStroke) {
-            if (hasStroke) return "renderable";
-            return "background";
-        }
-    } catch (e) {}
-    return null;
-}
-
-// 11: 실질적으로 빈 스토리 (공백/제어문자만) → background
-function _ctfCheckEmptyStory(item, rotBypass, ovr) {
-    try {
-        var storyText = item.parentStory.contents.replace(/[\s﻿￼\r\n]/g, "");
-        if (storyText.length > 1) return null;
-        var hasTables = false;
-        try { hasTables = item.parentStory.tables.length > 0; } catch (e) {}
-        var oneCharBypass = false;
-        try {
-            
-            if (ovr.oneCharEdit && storyText.length >= 1) oneCharBypass = true;
-        } catch (e) {}
-        if (!hasTables && !rotBypass && !oneCharBypass) return "background";
-    } catch (e) {}
-    return null;
-}
-
-// spec025 override 플래그를 한 번만 읽어 반환 (classifyTextFrame 진입 시 1회 호출)
-function _ctfBuildOverrides() {
-    var s25 = null;
-    try { s25 = _spec025(); } catch (e) {}
-    return {
-        masterEditable:   !!(s25 && s25.masterPageEditable),
-        nonprintEditable: !!(s25 && s25.nonprintingEditable),
-        hashiraEditable:  !!(s25 && s25.hashiraEditable),
-        inlineEditable:   !!(s25 && s25.inlineTextEditable),
-        inlineMaxLen:     (s25 && typeof s25.inlineTextMaxLen === "number") ? s25.inlineTextMaxLen : 3,
-        groupShortEdit:   !!(s25 && s25.groupShortTextEditable),
-        boxLabelEdit:     !!(s25 && s25.boxLabelEditable),
-        oneCharEdit:      !!(s25 && s25.oneCharEditable),
-        rotEditable:      !!(s25 && s25.rotationEditable),
-        decoLargeEdit:    !!(s25 && s25.decorativeLargeTextEditable),
-        decoStyledEdit:   !!(s25 && s25.decorativeStyledTextEditable),
-    };
-}
-
 /**
  * TextFrame을 분류한다.
  * @param {PageItem} item - allPageItems 항목
  * @return {string|null}
  *   "background" - 배경 PNG에 포함 (non-editable)
  *   "editable"   - 배경에서 숨기고 HWPX 글상자로 변환
- *   "renderable" - 배경에 포함 + 별도 장식 PNG 렌더링
  *   null         - TextFrame이 아님 (건너뜀)
  */
 function classifyTextFrame(item) {
     if (item.constructor.name !== "TextFrame") return null;
-
-    var ovr = _ctfBuildOverrides();
-    var r;
-    if ((r = _ctfCheckMasterBody(item, ovr)) !== null) return r;  // Tier A.5
-    if ((r = _ctfCheckScaled(item)) !== null) return r;       // 1.5
-
-    var rotBypass = _ctfComputeRotBypass(item, ovr);               // Tier B
-
-    if ((r = _ctfCheckHidden(item)) !== null) return r;           // 2
-    if ((r = _ctfCheckNonprinting(item, ovr)) !== null) return r;      // 3
-    if ((r = _ctfCheckAutoPageNumber(item)) !== null) return r;   // 4
-    if ((r = _ctfCheckMasterOverride(item, ovr)) !== null) return r;   // 5
-    if ((r = _ctfCheckHashira(item, ovr)) !== null) return r;          // 6
-    if ((r = _ctfCheckInline(item, ovr)) !== null) return r;           // 7
-    if ((r = _ctfCheckGroupLongTextInContainer(item, rotBypass)) !== null) return r;  // 8a
-    if ((r = _ctfCheckGroupShortDeco(item, rotBypass, ovr)) !== null) return r;            // 8b
-    if ((r = _ctfCheckDecorativeShortText(item, rotBypass, ovr)) !== null) return r;  // 8.5
-    if ((r = _ctfCheckTextComposite(item)) !== null) return r;    // 8.7
-    if (!rotBypass && isRenderableTextFrame(item, ovr)) return "renderable";    // 9
-    if ((r = _ctfCheckEmptyFilled(item)) !== null) return r;      // 10
-    if ((r = _ctfCheckEmptyStory(item, rotBypass, ovr)) !== null) return r;     // 11
+    if (isOnHiddenLayer(item)) return "background";
+    try { if (item.nonprinting) return "background"; } catch (e) {}
+    try { if (!item.parentPage) return "background"; } catch (e) {}
     return "editable";
 }
 
@@ -1907,851 +1375,14 @@ function classifyTextFrameCached(item) {
     return _ctfCache[id];
 }
 function isBadgeGroupCached(item) {
-    if (_badgeCache === null) return isBadgeGroup(item);
-    var id = item.id;
-    if (_badgeCache[id] === undefined) _badgeCache[id] = isBadgeGroup(item);
-    return _badgeCache[id];
+    return isBadgeGroup(item);
 }
 
-/**
- * TextFrame이 이미지 렌더링 대상인지 판별한다.
- * 회전, 스트로크, 그림자 등 HWPX에서 재현 불가한 효과가 있는 경우에만 렌더링.
- */
-function isRenderableTextFrame(tf, ovr) {
-    // 스레드된 프레임은 짧은 텍스트(< 30자)일 때만 여기까지 오므로 제외하지 않음
-    // (장식 텍스트가 스레드 체인에 포함될 수 있음)
-    try {
-        if (!tf.parentStory) return false;
-    } catch (e) { return false; }
-
-    // 인라인/앵커/표 셀 제외
-    try {
-        var pType = tf.parent.constructor.name;
-        if (pType === "Character" || pType === "InsertionPoint"
-            || pType === "Story" || pType === "Cell") return false;
-    } catch (e) {}
-
-    // Story의 텍스트 내용으로 판정
-    var text = "";
-    try { text = tf.parentStory.contents; } catch (e) { return false; }
-
-    // 제어문자나 앵커 객체 마커(U+FFFC)가 포함된 텍스트 제외
-    // 단, \t(0x09), \n(0x0A), \r(0x0D)은 정상적인 단락/줄 구분자이므로 허용
-    if (/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFC]/.test(text)) return false;
-
-    // 공백 제거 후 길이 판정: 1자 이상이면 효과 체크 진행
-    var trimmed = text.replace(/[\s\uFEFF]/g, "");
-    if (trimmed.length === 0) return false;
-
-    // 회전된 프레임 → 기본은 PNG 렌더링.
-    // SPEC-025 Tier B: spec025.rotationEditable=true이면 HWPX TextBox rotationInfo로 변환
-    // (FrameTransformations.convertRotatedFloatingBlock 경로). 텍스트 검색 가능.
-    // 회전이 부모 Group 에 걸려 있을 수 있으므로 absoluteRotationAngle 우선 사용.
-    try {
-        var rotR = 0;
-        try { rotR = tf.absoluteRotationAngle; } catch (e) {}
-        if (!rotR) { try { rotR = tf.rotationAngle; } catch (e) {} }
-        if (Math.abs(rotR) > 3.0) {
-            
-            if (!ovr.rotEditable) return true;
-        }
-    } catch (e) {}
-
-    // 텍스트에 효과가 적용된 경우 → 렌더링 (HWPX에서 재현 불가)
-    try {
-        var firstChar = tf.parentStory.characters[0];
-
-        // 텍스트 스트로크(외곽선) — strokeColor가 None이 아니면 렌더링
-        try {
-            if (firstChar.strokeWeight > 0) {
-                var _scName = "None";
-                try { _scName = firstChar.strokeColor ? firstChar.strokeColor.name : "None"; } catch (e) {}
-                if (_scName !== "None" && _scName !== "[None]") return true;
-            }
-        } catch (e) {}
-
-        // 드롭 섀도우
-        try {
-            var dss = tf.transparencySettings.dropShadowSettings;
-            if (dss.mode != ShadowMode.NONE) { return true; }
-        } catch (e) {}
-
-        // 외부 광선 (Outer Glow)
-        try {
-            if (tf.transparencySettings.outerGlowSettings.applied) { return true; }
-        } catch (e) {}
-
-        // 내부 광선 (Inner Glow)
-        try {
-            if (tf.transparencySettings.innerGlowSettings.applied) { return true; }
-        } catch (e) {}
-
-        // 베벨/엠보스
-        try {
-            if (tf.transparencySettings.bevelAndEmbossSettings.applied) { return true; }
-        } catch (e) {}
-
-        // 새틴 (Satin)
-        try {
-            if (tf.transparencySettings.satinSettings.applied) { return true; }
-        } catch (e) {}
-
-        // 프레임 투명도 (불투명도 < 100%)
-        try {
-            var opacity = tf.transparencySettings.blendingSettings.opacity;
-            if (opacity < 100) { return true; }
-        } catch (e) {}
-
-        // 텍스트 수준 드롭 섀도우 (문자에 직접 적용)
-        try {
-            var charDss = firstChar.transparencySettings.dropShadowSettings;
-            if (charDss.mode != ShadowMode.NONE) { return true; }
-        } catch (e) {}
-
-        // 텍스트 수준 투명도
-        try {
-            var charOpacity = firstChar.transparencySettings.blendingSettings.opacity;
-            if (charOpacity < 100) { return true; }
-        } catch (e) {}
-
-        // 장식 대형 컬러 텍스트: fontSize >= minFontSize AND 색상이 검정이 아님
-        // SPEC-025: decorativeLargeTextEditable=true 면 큰 단원 제목/장 제목도 editable 로 변환 (검색 가능)
-        try {
-            
-            if (!ovr.decoLargeEdit) {
-                var dltCfg = CONFIG.rendering.textFrame.decorativeLargeText;
-                if (dltCfg.enabled) {
-                    var fontSize = firstChar.pointSize;
-                   
-                    if (fontSize >= dltCfg.minFontSize) {
-                        if (!dltCfg.excludeBlack || !isBlackColor(firstChar, dltCfg.blackThreshold)) {
-                           
-                            return true;
-                        }
-                    }
-                }
-            }
-        } catch (e) { }
-
-
-    } catch (e) { }
-
-   
-    return false;
-}
-
-/**
- * 텍스트가 흰색 또는 희미한 색상인지 판별.
- * 배경이 없으면 보이지 않는 텍스트 → 렌더링 대상.
- */
-/**
- * TextFrame이 장식 스타일 텍스트 배지인지 판별.
- * 조건: 짧은 텍스트(≤maxTextLength) + 비검정 + Object Style(배경색/테두리/둥근모서리).
- */
-function isDecorativeStyledTextFrame(tf) {
-    var cfg = CONFIG.rendering.textFrame.decorativeStyledText;
-    if (!cfg || !cfg.enabled) return false;
-
-    try {
-        var text = tf.parentStory.contents;
-        var trimmed = text.replace(/[\s\uFEFF\r\n]/g, "");
-        if (trimmed.length === 0 || trimmed.length > cfg.maxTextLength) return false;
-
-        // 검정색 체크
-        if (cfg.excludeBlack) {
-            var firstChar = tf.parentStory.characters[0];
-            if (isBlackColor(firstChar, cfg.blackThreshold)) return false;
-        }
-
-        // Object Style 체크
-        if (cfg.requireObjectStyle) {
-            var hasStyle = false;
-            try {
-                var fillName = tf.fillColor ? tf.fillColor.name : "None";
-                if (fillName !== "None" && fillName !== "[None]") hasStyle = true;
-            } catch (e) {}
-            if (!hasStyle) {
-                try {
-                    if (tf.strokeWeight > 0) {
-                        var sName = tf.strokeColor ? tf.strokeColor.name : "None";
-                        if (sName !== "None" && sName !== "[None]") hasStyle = true;
-                    }
-                } catch (e) {}
-            }
-            if (!hasStyle) return false;
-        }
-
-        return true;
-    } catch (e) {
-        return false;
-    }
-}
-
-function isLightColoredText(tf) {
-    try {
-        var firstChar = tf.parentStory.characters[0];
-        var fillName = firstChar.fillColor.name;
-        // Paper = 흰색
-        if (fillName === "Paper" || fillName === "[Paper]") return true;
-        // tint가 매우 낮은 경우 (어떤 색이든 희미함)
-        try {
-            var tint = firstChar.fillTint;
-            if (tint >= 0 && tint <= 30) return true;
-        } catch (e) {}
-        // CMYK 밝은 색 판별 (잉크량 합계가 매우 낮음)
-        try {
-            var cv = firstChar.fillColor.colorValue;
-            var space = firstChar.fillColor.space;
-            if (space.toString() === "ColorSpace.CMYK") {
-                if (cv[0] + cv[1] + cv[2] + cv[3] <= 20) return true;
-            }
-        } catch (e) {}
-    } catch (e) {}
-    return false;
-}
 
 // =============================================================================
 // SECTION 5: RENDER PIPELINE
-// PNG export — 배지 / 텍스트프레임 / 복합 그래픽 / PDF / 이미지 / 데코 / 벡터
+// PNG export — 복합 그래픽 / PDF / 이미지 / 데코 / 벡터
 // =============================================================================
-
-
-/**
- * 짧은 텍스트 프레임(장식 텍스트)과 배지 그룹을 PNG로 렌더링한다.
- */
-function exportRenderedTextFrames(doc, outputDir, startPage, endPage, allItems, editableFrameIds, skipRenderPagesMap) {
-    if (!skipRenderPagesMap) skipRenderPagesMap = {};
-    var renderDir = Folder(outputDir + "/rendered_frames");
-    renderDir.create();
-
-    var renderedFrames = [];
-    var renderedIds = {};
-    var badgeGroupChildIds = {};
-    if (!editableFrameIds) editableFrameIds = {};
-
-
-
-    app.pngExportPreferences.exportResolution = CONFIG.rendering.pngExportResolution || 220;
-    app.pngExportPreferences.antiAlias = true;
-    app.pngExportPreferences.transparentBackground = true;
-    app.pngExportPreferences.pngQuality = PNGQualityEnum.MAXIMUM;
-
-    // SPEC-022 데코 후보 사전 필터 (큰 문서 O(N²) 회피)
-    var decoCandidatesPass1 = [];
-    if (CONFIG.rendering.badge.decorationMergeEnabled) {
-        for (var dcp1 = 0; dcp1 < allItems.length; dcp1++) {
-            try {
-                var dcIt = allItems[dcp1];
-                var dcCn = dcIt.constructor.name;
-                if (dcCn === "Polygon" || dcCn === "Group") decoCandidatesPass1.push(dcIt);
-            } catch (e) {}
-        }
-    }
-
-    // SPEC-023 배경 후보 사전 필터: fill 있는 Rectangle/Polygon/Oval
-    var bgCandidatesPass2 = [];
-    for (var bcp2 = 0; bcp2 < allItems.length; bcp2++) {
-        try {
-            var bcIt = allItems[bcp2];
-            var bcCn = bcIt.constructor.name;
-            if (bcCn !== "Rectangle" && bcCn !== "Polygon" && bcCn !== "Oval") continue;
-            var bcFc = null;
-            try { bcFc = bcIt.fillColor; } catch (e) {}
-            var bcFcName = "";
-            try { if (bcFc) bcFcName = bcFc.name; } catch (e) {}
-            if (!bcFcName || bcFcName === "None" || bcFcName === "[None]") continue;
-            bgCandidatesPass2.push(bcIt);
-        } catch (e) {}
-    }
-
-    // SPEC-030 B.4: 배지 총 개수 선집계 (진행 표시용). A.4: inline 배지는 PNG 미생성 → 카운트 제외
-    var _totalBadges = 0;
-    for (var _bc = 0; _bc < allItems.length; _bc++) {
-        if (allItems[_bc].constructor.name === "Group" && isBadgeGroupCached(allItems[_bc]) && !isInlineItem(allItems[_bc])) _totalBadges++;
-    }
-    var _renderedBadges = 0;
-
-    // SPEC-030 B.1: 단순 배지(데코/editable TF 없음)를 페이지별로 모아 배치 export
-    var _batchExportedIds = {};
-    var _cropManifest = [];
-    var _badgesByPage = {};
-    for (var _bgi = 0; _bgi < allItems.length; _bgi++) {
-        var _bgrp = allItems[_bgi];
-        if (_bgrp.constructor.name !== "Group") continue;
-        if (isOnHiddenLayer(_bgrp)) continue;
-        if (!isBadgeGroupCached(_bgrp)) continue;
-        // A.4: inline 배지는 Java가 INLINE_TEXT_FRAME으로 처리 → 배치 export 제외
-        if (isInlineItem(_bgrp)) continue;
-        var _bgrpPage = null;
-        try { _bgrpPage = _bgrp.parentPage; } catch (e) {}
-        if (!_bgrpPage) {
-            try {
-                var _bgvb = _bgrp.visibleBounds;
-                var _bgcy = (_bgvb[0] + _bgvb[2]) / 2;
-                var _bgcx = (_bgvb[1] + _bgvb[3]) / 2;
-                for (var _bpgi = 0; _bpgi < doc.pages.length; _bpgi++) {
-                    var _bpgo = doc.pages[_bpgi];
-                    var _bpgb = _bpgo.bounds;
-                    if (_bgcy >= _bpgb[0] && _bgcy <= _bpgb[2] && _bgcx >= _bpgb[1] && _bgcx <= _bpgb[3]) {
-                        _bgrpPage = _bpgo; break;
-                    }
-                }
-            } catch (e) {}
-        }
-        if (!_bgrpPage) continue;
-        var _bgrpPgIdx = _bgrpPage.documentOffset + 1;
-        if (_bgrpPgIdx < startPage || _bgrpPgIdx > endPage) continue;
-        if (skipRenderPagesMap[_bgrpPgIdx]) continue;
-        // 데코 있으면 배치 제외
-        if (decoCandidatesPass1.length > 0 && findOverlappingDecorations(_bgrp, decoCandidatesPass1).length > 0) continue;
-        // editable TF 자식 있으면 배치 제외
-        var _bHasEditable = false;
-        try {
-            var _bChk = _bgrp.allPageItems;
-            for (var _bei = 0; _bei < _bChk.length; _bei++) {
-                if (_bChk[_bei].constructor.name === "TextFrame" && classifyTextFrameCached(_bChk[_bei]) === "editable") {
-                    _bHasEditable = true; break;
-                }
-            }
-        } catch (e) {}
-        if (_bHasEditable) continue;
-        // 배치 후보 등록
-        var _bChildIds = [], _bChildTfIds = [];
-        try {
-            var _bChItems = _bgrp.allPageItems;
-            for (var _bci = 0; _bci < _bChItems.length; _bci++) {
-                _bChildIds.push(_bChItems[_bci].id);
-                if (_bChItems[_bci].constructor.name === "TextFrame") {
-                    _bChildTfIds.push(_bChItems[_bci].id);
-                    // PNG에서 텍스트를 숨기므로 HWPX 텍스트 오버레이가 필요 → editable로 승격
-                    var _bTfContents = "";
-                    try { _bTfContents = (_bChItems[_bci].contents + "").replace(/[\s﻿\r\n￼]/g, ""); } catch (e) {}
-                    if (_bTfContents.length > 0) editableFrameIds[_bChItems[_bci].id] = true;
-                }
-            }
-        } catch (e) {}
-        if (!_badgesByPage[_bgrpPgIdx]) _badgesByPage[_bgrpPgIdx] = [];
-        _badgesByPage[_bgrpPgIdx].push({ grp: _bgrp, grpDomId: _bgrp.id, grpPage: _bgrpPage, childIds: _bChildIds, childTextFrameIds: _bChildTfIds });
-    }
-    // 페이지당 2개 이상인 경우 배치 export
-    var _bDpi = CONFIG.rendering.pngExportResolution || 220;
-    for (var _bpKey in _badgesByPage) {
-        var _bpBadges = _badgesByPage[_bpKey];
-        if (_bpBadges.length < 2) continue;
-        var _bpPage = _bpBadges[0].grpPage;
-        var _bpResults = exportPageBadgesBatched(doc, _bpPage, _bpBadges, renderDir, _bDpi);
-        if (_bpResults.length === 0) continue; // 실패 → 개별 export로 폴백
-        for (var _bpr = 0; _bpr < _bpResults.length; _bpr++) {
-            var _bpEntry = _bpResults[_bpr];
-            _batchExportedIds[_bpEntry.rf.id] = true;
-            renderedIds[_bpEntry.rf.id] = _bpEntry.rf;
-            renderedFrames.push(_bpEntry.rf);
-            for (var _bptfi = 0; _bptfi < _bpEntry.rf.childTextFrameIds.length; _bptfi++) {
-                var _bptfId = _bpEntry.rf.childTextFrameIds[_bptfi];
-                renderedFrames.push({ id: _bptfId, file: _bpEntry.rf.file, bounds: _bpEntry.rf.bounds, pageIndex: _bpEntry.rf.pageIndex, type: "badge_group_child", badgeGroupId: _bpEntry.rf.id });
-                renderedIds[_bptfId] = _bpEntry.rf;
-            }
-            for (var _bgcid = 0; _bgcid < _bpEntry.rf.childIds.length; _bgcid++) {
-                badgeGroupChildIds[_bpEntry.rf.childIds[_bgcid]] = true;
-            }
-            _cropManifest.push(_bpEntry.crop);
-        }
-        // 배치 export 완료 배지는 개별 진행 카운트에서 제외
-        _totalBadges -= _bpResults.length;
-    }
-
-    // Pass 1: 배지 그룹 감지 및 렌더링
-    // 부모 그룹이 이미 렌더된 경우, 자식 그룹은 건너뜀 (중복 방지)
-    for (var gi = 0; gi < allItems.length; gi++) {
-        var grp = allItems[gi];
-        if (grp.constructor.name !== "Group") continue;
-        if (isOnHiddenLayer(grp)) continue;
-        if (!isBadgeGroupCached(grp)) continue;
-        // 이미 부모 배지의 childId로 등록된 그룹은 건너뜀
-        if (badgeGroupChildIds[grp.id]) continue;
-
-        // 인라인 Group은 parentPage가 null → visibleBounds로 페이지 매칭
-        var grpPage = _resolveParentPage(grp, doc);
-        if (!grpPage) continue;
-        var grpPgIdx = grpPage.documentOffset + 1;
-        if (grpPgIdx < startPage || grpPgIdx > endPage) continue;
-        if (skipRenderPagesMap[grpPgIdx]) continue; // SPEC-030 B.2
-
-        var grpDomId = grp.id;
-        if (renderedIds[grpDomId]) continue;
-        if (_batchExportedIds[grpDomId]) continue; // SPEC-030 B.1: 배치 export 완료
-
-        var childIds = [];
-        var childTextFrameIds = [];
-        try {
-            var grpItems = grp.allPageItems;
-            for (var ci = 0; ci < grpItems.length; ci++) {
-                var child = grpItems[ci];
-                childIds.push(child.id);
-                badgeGroupChildIds[child.id] = true;
-                if (child.constructor.name === "TextFrame") {
-                    childTextFrameIds.push(child.id);
-                }
-            }
-        } catch (e) {}
-
-        // A.4: inline 배지 PNG 스킵 — Java가 tryInlineGroupAsSingleBadge / tryInlineGroupAsBoxList로 처리.
-        // AboveLine 앵커(floating) 배지만 PNG 필요. AnchorPosition 조회 실패 시 안전하게 export 유지.
-        if (isInlineItem(grp)) {
-            var _isAboveLine = false;
-            try {
-                var _as = grp.anchoredObjectSettings;
-                _isAboveLine = (_as.anchorPosition === AnchorPosition.ABOVE_LINE);
-            } catch (e) {}
-            if (!_isAboveLine) {
-                // child TF 텍스트 수집 유지 (editable 등록)
-                for (var _a4i = 0; _a4i < childTextFrameIds.length; _a4i++) {
-                    editableFrameIds[childTextFrameIds[_a4i]] = true;
-                }
-                continue;
-            }
-        }
-
-        var grpFileName = "badge_" + grpDomId + ".png";
-        var grpOutFile = File(renderDir + "/" + grpFileName);
-        // SPEC-030 B.4: 배지별 진행 정보
-        _renderedBadges++;
-        writeProgress(outputDir, "render_badge", _renderedBadges, _totalBadges, "p" + grpPgIdx + "_" + grpDomId);
-
-        // SPEC-022: 뱃지와 시각적으로 한 덩어리지만 별개 그룹인 외곽선 데코 (예: outlined "Step 1")
-        // 를 찾아서 합성 PNG 로 export
-        var overlappingDecos = decoCandidatesPass1.length > 0
-                ? findOverlappingDecorations(grp, decoCandidatesPass1)
-                : [];
-
-        // 합성 bounds — 뱃지 + 데코의 union
-        var combinedVB = null;
-        try { combinedVB = arrCopy(grp.visibleBounds); } catch (e) {}
-        if (!combinedVB) {
-            try { combinedVB = arrCopy(grp.geometricBounds); } catch (e) {}
-        }
-        for (var di = 0; di < overlappingDecos.length; di++) {
-            try {
-                var dvb = overlappingDecos[di].visibleBounds;
-                if (combinedVB) {
-                    combinedVB[0] = Math.min(combinedVB[0], dvb[0]);
-                    combinedVB[1] = Math.min(combinedVB[1], dvb[1]);
-                    combinedVB[2] = Math.max(combinedVB[2], dvb[2]);
-                    combinedVB[3] = Math.max(combinedVB[3], dvb[3]);
-                }
-            } catch (e) {}
-        }
-
-        // 데코를 badgeGroupChildIds 에 미리 등록 → page_bg 에서 숨김
-        for (var di2 = 0; di2 < overlappingDecos.length; di2++) {
-            var deco = overlappingDecos[di2];
-            childIds.push(deco.id);
-            badgeGroupChildIds[deco.id] = true;
-            // 데코가 Group이면 자손도 포함
-            if (deco.constructor.name === "Group") {
-                try {
-                    var decoChildren = deco.allPageItems;
-                    for (var dci = 0; dci < decoChildren.length; dci++) {
-                        badgeGroupChildIds[decoChildren[dci].id] = true;
-                    }
-                } catch (e) {}
-            }
-        }
-
-        // 배지 그룹 내 non-inline TextFrame 은 HWPX 가 별도 텍스트 오버레이로 배치 → PNG 에서 제외.
-        // inline TF(배지 안 "가"/"나" 같은 Paper 흰색 텍스트)는 제외 대상에서 제외:
-        //   transparentBackground=true 에서 흰색 픽셀이 alpha=0(투명 구멍)이 되어
-        //   HWPX 흰 배경 위에서 배경색과 대비되어 텍스트가 보이게 된다.
-        // classifyTextFrame 체크 제거: "editable" 이외 분류(renderable 등)도 non-inline 이면 숨겨야 함.
-        var hiddenForExport = [];
-        try {
-            var __grpItemsForHide = grp.allPageItems;
-            for (var __hi = 0; __hi < __grpItemsForHide.length; __hi++) {
-                var __hItem = __grpItemsForHide[__hi];
-                try {
-                    if (__hItem.constructor.name !== "TextFrame") continue;
-                    if (!__hItem.visible) continue;
-                    // 빈 TF(시각적 컨테이너)는 숨기지 않음 — 내용 있는 TF만 숨겨야 배경 그래픽이 보임
-                    var __hCont = "";
-                    try { __hCont = (__hItem.contents + "").replace(/[\s\r\n﻿￼]/g, ""); } catch (eC) {}
-                    if (__hCont.length === 0) continue;
-                    __hItem.visible = false;
-                    hiddenForExport.push(__hItem);
-                } catch (eH) {}
-            }
-        } catch (eH2) {}
-
-        try {
-            if (overlappingDecos.length === 0) {
-                // 데코 없음 — 기존 단일 그룹 export
-                grp.exportFile(ExportFormat.PNG_FORMAT, grpOutFile);
-            } else {
-                // SPEC-022: duplicate → 임시 그룹 → export → 제거 (SPEC-021 패턴 재사용)
-                var dups = [];
-                var grpDup = null;
-                try {
-                    grpDup = grp.duplicate();
-                    dups.push(grpDup);
-                    for (var di3 = 0; di3 < overlappingDecos.length; di3++) {
-                        dups.push(overlappingDecos[di3].duplicate());
-                    }
-                    var tempCombined = doc.groups.add(dups);
-                    try {
-                        tempCombined.exportFile(ExportFormat.PNG_FORMAT, grpOutFile);
-                    } finally {
-                        try { tempCombined.remove(); } catch (er) {}
-                    }
-                } catch (eDup) {
-                    // 합성 실패 시 fallback: 원본 그룹만 export
-                    for (var dx = 0; dx < dups.length; dx++) {
-                        try { dups[dx].remove(); } catch (er) {}
-                    }
-                    grp.exportFile(ExportFormat.PNG_FORMAT, grpOutFile);
-                    combinedVB = null;
-                    try { combinedVB = arrCopy(grp.visibleBounds); } catch (e) {}
-                }
-            }
-
-            var grpBounds = combinedVB;
-            if (!grpBounds) {
-                try { grpBounds = arrCopy(grp.visibleBounds); } catch (e) {}
-            }
-            if (!grpBounds) {
-                try { grpBounds = arrCopy(grp.geometricBounds); } catch (e) {}
-            }
-
-            if (grpBounds) {
-                var grpPageBounds = grpPage.bounds;
-                grpBounds[0] -= grpPageBounds[0];
-                grpBounds[1] -= grpPageBounds[1];
-                grpBounds[2] -= grpPageBounds[0];
-                grpBounds[3] -= grpPageBounds[1];
-            }
-
-            var grpEntry = {
-                id: grpDomId,
-                file: "rendered_frames/" + grpFileName,
-                bounds: grpBounds,
-                pageIndex: grpPage.documentOffset,
-                type: "badge_group",
-                childIds: childIds,
-                childTextFrameIds: childTextFrameIds,
-                textHiddenBeforeExport: hiddenForExport.length > 0
-            };
-            renderedFrames.push(grpEntry);
-            renderedIds[grpDomId] = grpEntry;
-
-            for (var ti = 0; ti < childTextFrameIds.length; ti++) {
-                var tfChildId = childTextFrameIds[ti];
-                renderedFrames.push({
-                    id: tfChildId,
-                    file: "rendered_frames/" + grpFileName,
-                    bounds: grpBounds,
-                    pageIndex: grpPage.documentOffset,
-                    type: "badge_group_child",
-                    badgeGroupId: grpDomId
-                });
-                renderedIds[tfChildId] = grpEntry;
-            }
-        } catch (e) {}
-        // SPEC-025: PNG export 가 끝났으므로 임시로 숨긴 editable TF 가시성 복원.
-        for (var __rh = 0; __rh < hiddenForExport.length; __rh++) {
-            try { hiddenForExport[__rh].visible = true; } catch (eR) {}
-        }
-    }
-
-    // Pass 1.5: 중첩 뱃지 패턴 감지 및 렌더링 (SPEC-021)
-    // 그룹 전체가 isBadgeGroup 을 통과하지 못했지만 내부에 (도형+짧은 숫자 TF) 페어가
-    // 있는 경우 (예: Q2~Q6 번호 뱃지). 페어만 duplicate 후 임시 그룹으로 묶어 exportFile.
-    var nbMatched = 0;
-    for (var ngi = 0; ngi < allItems.length; ngi++) {
-        var nGrp = allItems[ngi];
-        if (nGrp.constructor.name !== "Group") continue;
-        if (isOnHiddenLayer(nGrp)) continue;
-        if (renderedIds[nGrp.id]) continue;           // 이미 isBadgeGroup 통과
-        if (badgeGroupChildIds[nGrp.id]) continue;    // 상위 뱃지의 자식
-
-        var pattern = findNestedBadgePattern(nGrp);
-        if (!pattern) continue;
-
-        var nBadgeShape = pattern.shape;
-        var nBadgeTf = pattern.textFrame;
-
-        // 페이지 결정 (인라인 Group은 parentPage null → visibleBounds 폴백)
-        var nGrpPage = _resolveParentPage(nGrp, doc);
-        if (!nGrpPage) continue;
-        var nPgIdx = nGrpPage.documentOffset + 1;
-        if (nPgIdx < startPage || nPgIdx > endPage) continue;
-        if (skipRenderPagesMap[nPgIdx]) continue; // SPEC-030 B.2
-
-        var nGrpId = nGrp.id;
-        var nFileName = "badge_" + nGrpId + ".png";
-        var nOutFile = File(renderDir + "/" + nFileName);
-
-        // 원본 페어를 duplicate → 새 임시 그룹으로 묶고 export → 임시 그룹 삭제.
-        // duplicate 는 원본과 겹쳐 생성되므로 페어 크기만큼의 PNG를 얻을 수 있음.
-        // (직접 groups.add(원본페어) 는 "매개변수 잘못됨" 에러 발생 — 이미 다른 그룹 소속이기 때문)
-        var nDupShape = null, nDupTf = null, nTempGrp = null;
-        var nRealBounds = null;
-        try {
-            var origShapeB = nBadgeShape.visibleBounds || nBadgeShape.geometricBounds;
-            var origTfB = nBadgeTf.visibleBounds || nBadgeTf.geometricBounds;
-            nRealBounds = [
-                Math.min(origShapeB[0], origTfB[0]),
-                Math.min(origShapeB[1], origTfB[1]),
-                Math.max(origShapeB[2], origTfB[2]),
-                Math.max(origShapeB[3], origTfB[3])
-            ];
-            nDupShape = nBadgeShape.duplicate();
-            nDupTf = nBadgeTf.duplicate();
-            nTempGrp = doc.groups.add([nDupShape, nDupTf]);
-        } catch (eGrp) {
-            try { if (nDupShape) nDupShape.remove(); } catch (e) {}
-            try { if (nDupTf) nDupTf.remove(); } catch (e) {}
-            continue;
-        }
-
-        try {
-            // 배경만 추출: TF 복제본 숨기고 도형만 export
-            try { nDupTf.visible = false; } catch (eHide) {}
-            nTempGrp.exportFile(ExportFormat.PNG_FORMAT, nOutFile);
-
-            var nBounds = nRealBounds;
-            if (nBounds) {
-                var nPageB = nGrpPage.bounds;
-                nBounds = [
-                    nBounds[0] - nPageB[0],
-                    nBounds[1] - nPageB[1],
-                    nBounds[2] - nPageB[0],
-                    nBounds[3] - nPageB[1]
-                ];
-            }
-
-            var nEntry = {
-                id: nGrpId,
-                file: "rendered_frames/" + nFileName,
-                bounds: nBounds,
-                pageIndex: nGrpPage.documentOffset,
-                type: "badge_group",
-                childIds: [nBadgeShape.id, nBadgeTf.id],
-                childTextFrameIds: [nBadgeTf.id],
-                textHiddenBeforeExport: true
-            };
-            renderedFrames.push(nEntry);
-            renderedIds[nGrpId] = nEntry;
-            badgeGroupChildIds[nBadgeShape.id] = true;
-            badgeGroupChildIds[nBadgeTf.id] = true;
-
-            renderedFrames.push({
-                id: nBadgeTf.id,
-                file: "rendered_frames/" + nFileName,
-                bounds: nBounds,
-                pageIndex: nGrpPage.documentOffset,
-                type: "badge_group_child",
-                badgeGroupId: nGrpId
-            });
-            renderedIds[nBadgeTf.id] = nEntry;
-            nbMatched++;
-        } catch (eExp) {}
-
-        // 임시 그룹 및 duplicated 페어 삭제 → 원본은 보존됨
-        try { nTempGrp.remove(); } catch (eR) {}
-    }
-    $.writeln("[SPEC-021] nested badge pass: matched=" + nbMatched);
-
-    // Pass 2: 개별 TextFrame / TextPath 렌더링
-    for (var i = 0; i < allItems.length; i++) {
-        var item = allItems[i];
-
-        var isTextFrame = (item.constructor.name === "TextFrame");
-        var hasTextPath = false;
-        try { hasTextPath = item.textPaths && item.textPaths.length > 0; } catch (e) {}
-
-        if (!isTextFrame && !hasTextPath) continue;
-        if (isOnHiddenLayer(item)) continue;
-        if (badgeGroupChildIds[item.id]) continue;
-
-        var parentPage = null;
-        try { parentPage = item.parentPage; } catch (e) {}
-        if (!parentPage && isTextFrame) {
-            try {
-                var _story = item.parentStory;
-                var _text = _story.contents.replace(/[\s\uFEFF]/g, "");
-                var _fontSize = _story.characters[0].pointSize;
-                if (_text.length > 0 && _text.length < 30 && _fontSize >= 16) {
-                    var _vb = item.visibleBounds;
-                    var _cy = (_vb[0] + _vb[2]) / 2;
-                    var _cx = (_vb[1] + _vb[3]) / 2;
-                    for (var pi = 0; pi < doc.pages.length; pi++) {
-                        var _pg = doc.pages[pi];
-                        var _pb = _pg.bounds;
-                        if (_cy >= _pb[0] && _cy <= _pb[2] && _cx >= _pb[1] && _cx <= _pb[3]) {
-                            parentPage = _pg;
-                            break;
-                        }
-                    }
-                }
-            } catch (e) {}
-        }
-        if (!parentPage) continue;
-        var pgIdx = parentPage.documentOffset + 1;
-        if (pgIdx < startPage || pgIdx > endPage) continue;
-        if (skipRenderPagesMap[pgIdx]) continue; // SPEC-030 B.2
-
-        if (isTextFrame && classifyTextFrameCached(item) !== "renderable") continue;
-
-        var renderTarget = item;
-        var parentItem = null;
-        try {
-            parentItem = item.parent;
-            var pName = parentItem ? parentItem.constructor.name : "";
-            if (parentItem && parentItem.id
-                && (pName === "Rectangle" || pName === "Polygon"
-                    || pName === "GraphicLine" || pName === "Oval")) {
-                renderTarget = parentItem;
-            }
-            if (hasTextPath && pName === "Group" && parentItem && parentItem.id) {
-                renderTarget = parentItem;
-            }
-        } catch (e) {}
-
-        var domId = renderTarget.id;
-        if (renderedIds[domId]) {
-            if (renderTarget !== item) {
-                renderedFrames.push({
-                    id: item.id,
-                    file: renderedIds[domId].file,
-                    bounds: renderedIds[domId].bounds,
-                    pageIndex: renderedIds[domId].pageIndex
-                });
-            }
-            continue;
-        }
-        var fileName = "frame_" + domId + ".png";
-        var outFile = File(renderDir + "/" + fileName);
-
-        // SPEC-023: renderable TextFrame 의 배경 도형 검색
-        // (renderTarget 이 이미 부모 컨테이너로 바뀐 경우는 건너뜀 — 컨테이너에 이미 배경이 포함됨)
-        var bgItem = null;
-        if (isTextFrame && renderTarget === item) {
-            bgItem = findRenderableTextBackground(item, bgCandidatesPass2);
-        }
-
-        // renderTarget이 컨테이너(부모)이면 그 안의 editable TextFrame을
-        // 임시로 숨겨서 PNG에 본문 텍스트가 중복 캡처되는 것을 방지.
-        var hiddenEditable = [];
-        if (renderTarget !== item) {
-            try {
-                var nestedItems = renderTarget.allPageItems;
-                for (var nei = 0; nei < nestedItems.length; nei++) {
-                    var nItem = nestedItems[nei];
-                    try {
-                        if (nItem.constructor.name === "TextFrame"
-                            && editableFrameIds[nItem.id]
-                            && nItem.visible) {
-                            nItem.visible = false;
-                            hiddenEditable.push(nItem);
-                        }
-                    } catch (eHide) {}
-                }
-            } catch (eHideAll) {}
-        }
-        // renderTarget !== item: non-editable TF 가 부모 컨테이너로 렌더링되는 경우
-        // Java 파이프라인이 이 TF 를 텍스트박스로 재배치 → 부모 PNG 에 텍스트 중복 방지를 위해 숨김.
-        if (renderTarget !== item && isTextFrame && !editableFrameIds[item.id]) {
-            try {
-                if (item.visible) {
-                    item.visible = false;
-                    hiddenEditable.push(item);
-                }
-            } catch (eRotHide) {}
-        }
-
-        try {
-            // SPEC-023: 배경 도형이 있으면 별도 PNG 로 추가 render
-            // (TF 와 bg 를 한 PNG 로 합치는 방식은 Read 같은 케이스에서 텍스트가 누락되어 비신뢰)
-            // → 두 개의 floating 이미지로 등록, z-order 로 자연스럽게 겹침.
-            if (bgItem) {
-                var bgFileName = "frame_" + bgItem.id + ".png";
-                var bgOutFile = File(renderDir + "/" + bgFileName);
-                if (!renderedIds[bgItem.id]) {
-                    try {
-                        bgItem.exportFile(ExportFormat.PNG_FORMAT, bgOutFile);
-                        var bgVbBounds = null;
-                        try { bgVbBounds = arrCopy(bgItem.visibleBounds); } catch (e) {}
-                        if (!bgVbBounds) { try { bgVbBounds = arrCopy(bgItem.geometricBounds); } catch (e) {} }
-                        if (bgVbBounds) _toPageRelativeBounds(bgVbBounds, parentPage);
-                        // bg 의 실제 allItems index 를 찾아 정확한 z-order 할당
-                        var bgIndex = i + 100;
-                        for (var bii = i + 1; bii < allItems.length; bii++) {
-                            if (allItems[bii] && allItems[bii].id === bgItem.id) { bgIndex = bii; break; }
-                        }
-                        var bgEntry = {
-                            id: bgItem.id,
-                            file: "rendered_frames/" + bgFileName,
-                            bounds: bgVbBounds,
-                            pageIndex: parentPage.documentOffset,
-                            zOrder: bgIndex
-                        };
-                        renderedFrames.push(bgEntry);
-                        renderedIds[bgItem.id] = bgEntry;
-                    } catch (eBgEx) {}
-                }
-                // page_bg 에서 bg 도형 숨김
-                badgeGroupChildIds[bgItem.id] = true;
-            }
-
-            renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
-
-            var bounds = null;
-            try { bounds = arrCopy(renderTarget.visibleBounds); } catch (e) {}
-            if (!bounds) {
-                try { bounds = arrCopy(renderTarget.geometricBounds); } catch (e) {}
-            }
-
-            if (bounds) _toPageRelativeBounds(bounds, parentPage);
-
-            // InDesign allPageItems 순서: index 0 = 맨 앞. 큰 값일수록 뒤.
-            // HWPX zOrder와 방향이 반대이므로 Phase7에서 역매핑.
-            var entry = {
-                id: domId,
-                file: "rendered_frames/" + fileName,
-                bounds: bounds,
-                pageIndex: parentPage.documentOffset,
-                zOrder: i
-            };
-            renderedFrames.push(entry);
-            renderedIds[domId] = entry;
-
-            if (renderTarget !== item) {
-                renderedFrames.push({
-                    id: item.id,
-                    file: "rendered_frames/" + fileName,
-                    bounds: bounds,
-                    pageIndex: parentPage.documentOffset,
-                    zOrder: i
-                });
-            }
-        } catch (e) {}
-
-        // 숨긴 editable TextFrame 복원
-        for (var rh = 0; rh < hiddenEditable.length; rh++) {
-            try { hiddenEditable[rh].visible = true; } catch (eR) {}
-        }
-    }
-
-    // SPEC-030 B.1: crop manifest 저장 (Rust 측 sips 크롭 대상 목록)
-    if (_cropManifest.length > 0) {
-        try {
-            var _cmFile = File(outputDir + "/_crop_manifest.json");
-            _cmFile.open("w");
-            _cmFile.write(JSON.stringify(_cropManifest));
-            _cmFile.close();
-        } catch (eCm) {}
-    }
-
-    return { frames: renderedFrames, badgeChildIds: badgeGroupChildIds };
-}
 
 // --- 렌더링 시 TextFrame 텍스트 제거 헬퍼 ---
 
@@ -2911,6 +1542,8 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
             try { restoreTextFrames(hiddenTFs); } catch (e) {}
         } catch (e) {
             try { _gExportOk = outFile.exists; } catch (e2) {}
+            // outer catch: inner try-catch를 우회한 예외가 있어도 TF 복원
+            try { if (hiddenTFs && hiddenTFs.length > 0) restoreTextFrames(hiddenTFs); } catch (e3) {}
         }
 
         if (_gExportOk) {
@@ -3169,6 +1802,11 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
             try { $.gc(); } catch (gcErr) {}  // 아이템별 GC: 누적 메모리 해제
         } catch (e) {
             try { _imgExportOk = outFile.exists; } catch (e2) {}
+            // outer catch: inner try-catch를 우회한 예외가 있어도 TF/bgPolygon 복원
+            try { if (hiddenTFs && hiddenTFs.length > 0) restoreTextFrames(hiddenTFs); } catch (e3) {}
+            for (var _brf = 0; _brf < _imgBgPolygons.length; _brf++) {
+                try { _imgBgPolygons[_brf].visible = true; } catch (e3) {}
+            }
         }
 
         // push는 try 블록 밖에서 실행 — restore/gc 예외가 발생해도 반드시 등록.
@@ -3270,7 +1908,16 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
     function _decoRender(item, page, childIdMap) {
         var domId = item.id;
         var fileName = "deco_" + domId + ".png";
-        item.exportFile(ExportFormat.PNG_FORMAT, File(renderDir + "/" + fileName));
+        var _outFile = File(renderDir + "/" + fileName);
+        // exportFile을 독립 try로 감싸 InDesign 2026 예외가 push를 건너뛰지 않도록 보호
+        var _exportOk = false;
+        try {
+            item.exportFile(ExportFormat.PNG_FORMAT, _outFile);
+            _exportOk = true;
+        } catch (eExp) {
+            try { _exportOk = _outFile.exists; } catch (e2) {}
+        }
+        if (!_exportOk) return [];
 
         var bounds = null;
         try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
@@ -3288,7 +1935,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
             }
         } catch (e) {}
 
-        var entry = { id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: page.documentOffset, zOrder: getItemZOrder(item) };
+        var _z = 0;
+        try { _z = getItemZOrder(item); } catch (e) {}
+        var entry = { id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: page.documentOffset, zOrder: _z };
         if (childIds.length > 0) entry.childIds = childIds;
         results.push(entry);
         renderedIds[domId] = true;
@@ -3569,6 +2218,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
         if (!grpPage) continue;
         if (grpPage.documentOffset + 1 < startPage || grpPage.documentOffset + 1 > endPage) continue;
 
+        var _savedTFsForCatch = null;
         try {
             // hexGrid: 자신의 자식이 이전 Pass에서 개별 렌더된 경우 results에서 제거
             if (kind === "hexGrid") {
@@ -3588,9 +2238,11 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
             if (kind === "mixedGroup") {
                 // TF를 숨기고 도형만 PNG로 렌더 — TF 텍스트는 기존 파이프라인이 처리
                 var savedTFs = hideTextFrames(grp);
+                _savedTFsForCatch = savedTFs;
                 var savedBadges = hideBadgeGroupDescendants(grp);
                 _decoRender(grp, grpPage, null);
                 restoreTextFrames(savedTFs);
+                _savedTFsForCatch = null;
                 restoreBadgeGroupDescendants(savedBadges);
                 // Color/Paper (흰색) 획 도형은 투명배경 PNG에서 소실 → 검은색으로 임시 변환 후 개별 추출
                 _exportPaperStrokeShapes(grp, grpPage);
@@ -3600,7 +2252,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
                 _decoRender(grp, grpPage, null);
                 restoreBadgeGroupDescendants(savedBadges);
             }
-        } catch (e) {}
+        } catch (e) {
+            // outer catch: 예외가 발생해도 숨겼던 TF 복원
+            try { if (_savedTFsForCatch && _savedTFsForCatch.length > 0) restoreTextFrames(_savedTFsForCatch); } catch (e2) {}
+        }
 
         // pureShape + renderSiblings: 부모 그룹의 형제 도형을 개별 렌더
         if (renderSiblings) {
@@ -3661,15 +2316,25 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
 
     // 도형 1개 개별 export 헬퍼
     function _exportSingleShape(item, domId, parentPage) {
+        var fileName = "shape_" + domId + ".png";
+        var outFile = File(renderDir + "/" + fileName);
+        // exportFile을 독립 try로 감싸 InDesign 2026 예외가 push를 건너뛰지 않도록 보호
+        var _exportOk = false;
         try {
-            var fileName = "shape_" + domId + ".png";
-            var outFile = File(renderDir + "/" + fileName);
             item.exportFile(ExportFormat.PNG_FORMAT, outFile);
+            _exportOk = true;
+        } catch (eExp) {
+            try { _exportOk = outFile.exists; } catch (e2) {}
+        }
+        if (!_exportOk) return;
+        try {
             var bounds = null;
             try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
             if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
             if (bounds) _toPageRelativeBounds(bounds, parentPage);
-            results.push({ id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: parentPage.documentOffset, zOrder: getItemZOrder(item) });
+            var _z = 0;
+            try { _z = getItemZOrder(item); } catch (e) {}
+            results.push({ id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: parentPage.documentOffset, zOrder: _z });
             renderedIds[domId] = true;
         } catch (e) {}
     }
@@ -5948,9 +4613,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
  */
 function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, editableIds) {
     if (!editableIds) editableIds = {};
-    var s25 = null;
-    try { s25 = _spec025(); } catch (e) {}
-    if (!s25 || !(s25.masterPageEditable || s25.nonprintingEditable || s25.hashiraEditable)) return;
+    var s25 = CONFIG && CONFIG.rendering && CONFIG.rendering.textFrame && CONFIG.rendering.textFrame.spec025;
 
     // 1) 페이지 → 적용된 마스터 매핑 (side 정보 포함)
     var masterToPages = {};  // masterSpreadId → [{docIdx, side, spreadPageIdx}, ...]
@@ -6036,7 +4699,6 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             var cls = null;
             try { cls = classifyTextFrameCached(mtf); } catch (e) {}
             // hashiraEditable=true 로 "editable" 분류된 마스터 TF 중 textvar 패턴은 skip
-            // (_ctfCheckHashira 가 hashiraEditable=true 시 null 반환 → editable 경로로 빠짐)
             if (cls === "editable" && s25 && s25.hashiraEditable) {
                 try {
                     var tvInstE = mtf.parentStory.textVariableInstances;

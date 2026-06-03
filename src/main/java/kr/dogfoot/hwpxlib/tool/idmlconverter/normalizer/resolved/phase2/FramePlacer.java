@@ -284,6 +284,11 @@ public final class FramePlacer {
                             } catch (NumberFormatException ignored) {}
                         }
                     }
+                    // inline+editable TF가 floating으로 배치될 예정 → Phase 3 중복 방지
+                    // (tryInlineTextFrameAsRun이 TEXT_BLOCK_PLACED 미설정 시 인라인 런도 생성 → 텍스트 2회 출력)
+                    if (domIdInlineEd >= 0) {
+                        ctx.setDisposition(domIdInlineEd, FrameDisposition.TEXT_BLOCK_PLACED);
+                    }
                     inlineToFloating = true;
                 }
             }
