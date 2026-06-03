@@ -1082,19 +1082,12 @@ function exportOvalShapeTextFrames(doc, outputDir, startPage, endPage, badgeChil
             if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
             if (bounds) _toPageRelativeBounds(bounds, parentPage);
 
-            var _entry = {
+            results.push({
                 id: domId,
                 file: "rendered_frames/" + fileName,
                 bounds: bounds,
                 pageIndex: parentPage.documentOffset
-            };
-            // 빈 비-편집 TF: allItems 인덱스를 z-order로 사용해 배경 위에 쌓이게 함
-            if (!_tfIsEditable) {
-                var stackIdx = -1;
-                try { for (var _si = 0; _si < allItems.length; _si++) { if (allItems[_si].id === domId) { stackIdx = _si; break; } } } catch (e) {}
-                if (stackIdx >= 0) _entry.zOrder = stackIdx;
-            }
-            results.push(_entry);
+            });
         } catch (e) {}
     }
 
