@@ -1513,10 +1513,10 @@ function _isHashiraStyleName(n) {
 }
 
 // Tier A.5: 마스터 스프레드 본체 텍스트 → editable
-function _ctfCheckMasterBody(item) {
+function _ctfCheckMasterBody(item, ovr) {
     try {
-        var s25 = _spec025();
-        if (s25 && s25.masterPageEditable) {
+
+        if (ovr.masterEditable) {
             var onMaster = false;
             try {
                 var mp = item.parent; var hop = 0;
@@ -1547,10 +1547,10 @@ function _ctfCheckScaled(item) {
 }
 
 // Tier B: 회전 bypass 플래그 계산 (절대 회전각, 부모 Group 포함)
-function _ctfComputeRotBypass(item) {
+function _ctfComputeRotBypass(item, ovr) {
     try {
-        var s25 = _spec025();
-        if (s25 && s25.rotationEditable) {
+
+        if (ovr.rotEditable) {
             var rot = 0;
             try { rot = item.absoluteRotationAngle; } catch (e) {}
             if (!rot) { try { rot = item.rotationAngle; } catch (e) {} }
@@ -1579,11 +1579,11 @@ function _ctfCheckHidden(item) {
 }
 
 // 3: 비인쇄 → background (spec025.nonprintingEditable 이면 editable 유지)
-function _ctfCheckNonprinting(item) {
+function _ctfCheckNonprinting(item, ovr) {
     try {
         if (item.nonprinting) {
-            var s25 = _spec025();
-            if (!(s25 && s25.nonprintingEditable)) return "background";
+
+            if (!ovr.nonprintEditable) return "background";
         }
     } catch (e) {}
     return null;
@@ -1598,18 +1598,18 @@ function _ctfCheckAutoPageNumber(item) {
 }
 
 // 5: 마스터 페이지 오버라이드 → background (spec025.masterPageEditable 이면 editable 유지)
-function _ctfCheckMasterOverride(item) {
+function _ctfCheckMasterOverride(item, ovr) {
     try {
         if (item.masterPageItem) {
-            var s25 = _spec025();
-            if (!(s25 && s25.masterPageEditable)) return "background";
+
+            if (!ovr.masterEditable) return "background";
         }
     } catch (e) {}
     return null;
 }
 
 // 6: 마진 영역 하시라/페이지번호 패턴 → background (spec025.hashiraEditable 이면 editable 유지)
-function _ctfCheckHashira(item) {
+function _ctfCheckHashira(item, ovr) {
     try {
         var ppg = item.parentPage;
         if (!ppg) return null;
@@ -1644,23 +1644,23 @@ function _ctfCheckHashira(item) {
             }
         } catch (e) {}
         if (hashiraStyle && inMarginArea && !hasTable) {
-            var s25 = _spec025();
-            if (!(s25 && s25.hashiraEditable)) return "background";
+            
+            if (!ovr.hashiraEditable) return "background";
         }
     } catch (e) {}
     return null;
 }
 
 // 7: 인라인 객체 → background (spec025.inlineTextEditable + 짧은 텍스트이면 editable 유지)
-function _ctfCheckInline(item) {
+function _ctfCheckInline(item, ovr) {
     if (!isInlineItem(item)) return null;
     var inlineBypass = false;
     try {
-        var s25 = _spec025();
-        if (s25 && s25.inlineTextEditable) {
+        
+        if (ovr.inlineEditable) {
             var cached = ""; try { cached = String(item.contents); } catch (e) {}
             var trimmed = ""; try { trimmed = cached.replace(/[\s﻿￼]/g, ""); } catch (e) {}
-            var maxLen = (typeof s25.inlineTextMaxLen === "number") ? s25.inlineTextMaxLen : 3;
+            var maxLen = ovr.inlineMaxLen;
             if (trimmed.length > 0 && trimmed.length <= maxLen) inlineBypass = true;
         }
     } catch (e) {}
@@ -1702,7 +1702,7 @@ function _ctfCheckGroupLongTextInContainer(item, rotBypass) {
 
 // 8b: Group + 짧은 텍스트(≤10자) + 비검정 + 무스트로크 → background (장식 레이블)
 // 배지 그룹(isBadgeGroup) 및 spec025.groupShortTextEditable 플래그로 bypass 가능.
-function _ctfCheckGroupShortDeco(item, rotBypass) {
+function _ctfCheckGroupShortDeco(item, rotBypass, ovr) {
     try {
         if (item.parent.constructor.name !== "Group") return null;
         var groupText = item.contents.replace(/[\s﻿\r\n]/g, "");
@@ -1722,8 +1722,8 @@ function _ctfCheckGroupShortDeco(item, rotBypass) {
         } catch (e) {}
         var groupShortBypass = false;
         try {
-            var s25 = _spec025();
-            if (s25 && s25.groupShortTextEditable) groupShortBypass = true;
+            
+            if (ovr.groupShortEdit) groupShortBypass = true;
         } catch (e) {}
         if (isDeco && !hasStroke && !rotBypass && !groupShortBypass) return "background";
     } catch (e) {}
@@ -1766,7 +1766,7 @@ function _ctfCheckTextComposite(item) {
 }
 
 // 9.5: 박스 라벨 (짧은 텍스트 + 테두리) → renderable
-function _ctfCheckBoxLabel(item, rotBypass) {
+function _ctfCheckBoxLabel(item, rotBypass, ovr) {
     try {
         var trimmed = ""; try { trimmed = item.contents.replace(/[\r\n\s]/g, ""); } catch (e) {}
         if (trimmed.length === 0 || trimmed.length > 10) return null;
@@ -1774,7 +1774,7 @@ function _ctfCheckBoxLabel(item, rotBypass) {
         try { sc = item.strokeColor ? item.strokeColor.name : "None"; } catch (e) {}
         try { sw = item.strokeWeight || 0; } catch (e) {}
         var hasStroke = (sc !== "None" && sc !== "[None]") && sw > 0;
-        var s25 = _spec025(); var skipBoxLabel = (s25 && s25.boxLabelEditable);
+        var skipBoxLabel = ovr.boxLabelEdit;
         if (hasStroke && !rotBypass && !skipBoxLabel) return "renderable";
     } catch (e) {}
     return null;
@@ -1802,7 +1802,7 @@ function _ctfCheckEmptyFilled(item) {
 }
 
 // 11: 실질적으로 빈 스토리 (공백/제어문자만) → background
-function _ctfCheckEmptyStory(item, rotBypass) {
+function _ctfCheckEmptyStory(item, rotBypass, ovr) {
     try {
         var storyText = item.parentStory.contents.replace(/[\s﻿￼\r\n]/g, "");
         if (storyText.length > 1) return null;
@@ -1810,12 +1810,31 @@ function _ctfCheckEmptyStory(item, rotBypass) {
         try { hasTables = item.parentStory.tables.length > 0; } catch (e) {}
         var oneCharBypass = false;
         try {
-            var s25 = _spec025();
-            if (s25 && s25.oneCharEditable && storyText.length >= 1) oneCharBypass = true;
+            
+            if (ovr.oneCharEdit && storyText.length >= 1) oneCharBypass = true;
         } catch (e) {}
         if (!hasTables && !rotBypass && !oneCharBypass) return "background";
     } catch (e) {}
     return null;
+}
+
+// spec025 override 플래그를 한 번만 읽어 반환 (classifyTextFrame 진입 시 1회 호출)
+function _ctfBuildOverrides() {
+    var s25 = null;
+    try { s25 = _spec025(); } catch (e) {}
+    return {
+        masterEditable:   !!(s25 && s25.masterPageEditable),
+        nonprintEditable: !!(s25 && s25.nonprintingEditable),
+        hashiraEditable:  !!(s25 && s25.hashiraEditable),
+        inlineEditable:   !!(s25 && s25.inlineTextEditable),
+        inlineMaxLen:     (s25 && typeof s25.inlineTextMaxLen === "number") ? s25.inlineTextMaxLen : 3,
+        groupShortEdit:   !!(s25 && s25.groupShortTextEditable),
+        boxLabelEdit:     !!(s25 && s25.boxLabelEditable),
+        oneCharEdit:      !!(s25 && s25.oneCharEditable),
+        rotEditable:      !!(s25 && s25.rotationEditable),
+        decoLargeEdit:    !!(s25 && s25.decorativeLargeTextEditable),
+        decoStyledEdit:   !!(s25 && s25.decorativeStyledTextEditable),
+    };
 }
 
 /**
@@ -1830,26 +1849,27 @@ function _ctfCheckEmptyStory(item, rotBypass) {
 function classifyTextFrame(item) {
     if (item.constructor.name !== "TextFrame") return null;
 
+    var ovr = _ctfBuildOverrides();
     var r;
-    if ((r = _ctfCheckMasterBody(item)) !== null) return r;  // Tier A.5
+    if ((r = _ctfCheckMasterBody(item, ovr)) !== null) return r;  // Tier A.5
     if ((r = _ctfCheckScaled(item)) !== null) return r;       // 1.5
 
-    var rotBypass = _ctfComputeRotBypass(item);               // Tier B
+    var rotBypass = _ctfComputeRotBypass(item, ovr);               // Tier B
 
     if ((r = _ctfCheckHidden(item)) !== null) return r;           // 2
-    if ((r = _ctfCheckNonprinting(item)) !== null) return r;      // 3
+    if ((r = _ctfCheckNonprinting(item, ovr)) !== null) return r;      // 3
     if ((r = _ctfCheckAutoPageNumber(item)) !== null) return r;   // 4
-    if ((r = _ctfCheckMasterOverride(item)) !== null) return r;   // 5
-    if ((r = _ctfCheckHashira(item)) !== null) return r;          // 6
-    if ((r = _ctfCheckInline(item)) !== null) return r;           // 7
+    if ((r = _ctfCheckMasterOverride(item, ovr)) !== null) return r;   // 5
+    if ((r = _ctfCheckHashira(item, ovr)) !== null) return r;          // 6
+    if ((r = _ctfCheckInline(item, ovr)) !== null) return r;           // 7
     if ((r = _ctfCheckGroupLongTextInContainer(item, rotBypass)) !== null) return r;  // 8a
-    if ((r = _ctfCheckGroupShortDeco(item, rotBypass)) !== null) return r;            // 8b
+    if ((r = _ctfCheckGroupShortDeco(item, rotBypass, ovr)) !== null) return r;            // 8b
     if ((r = _ctfCheckParentFill(item, rotBypass)) !== null) return r;     // 8.5
     if ((r = _ctfCheckTextComposite(item)) !== null) return r;    // 8.7
-    if (!rotBypass && isRenderableTextFrame(item)) return "renderable";    // 9
-    if ((r = _ctfCheckBoxLabel(item, rotBypass)) !== null) return r;       // 9.5
+    if (!rotBypass && isRenderableTextFrame(item, ovr)) return "renderable";    // 9
+    if ((r = _ctfCheckBoxLabel(item, rotBypass, ovr)) !== null) return r;       // 9.5
     if ((r = _ctfCheckEmptyFilled(item)) !== null) return r;      // 10
-    if ((r = _ctfCheckEmptyStory(item, rotBypass)) !== null) return r;     // 11
+    if ((r = _ctfCheckEmptyStory(item, rotBypass, ovr)) !== null) return r;     // 11
     return "editable";
 }
 
@@ -1871,7 +1891,7 @@ function isBadgeGroupCached(item) {
  * TextFrame이 이미지 렌더링 대상인지 판별한다.
  * 회전, 스트로크, 그림자 등 HWPX에서 재현 불가한 효과가 있는 경우에만 렌더링.
  */
-function isRenderableTextFrame(tf) {
+function isRenderableTextFrame(tf, ovr) {
     // 스레드된 프레임은 짧은 텍스트(< 30자)일 때만 여기까지 오므로 제외하지 않음
     // (장식 텍스트가 스레드 체인에 포함될 수 있음)
     try {
@@ -1906,8 +1926,8 @@ function isRenderableTextFrame(tf) {
         try { rotR = tf.absoluteRotationAngle; } catch (e) {}
         if (!rotR) { try { rotR = tf.rotationAngle; } catch (e) {} }
         if (Math.abs(rotR) > 3.0) {
-            var s25rot = _spec025();
-            if (!(s25rot && s25rot.rotationEditable)) return true;
+            
+            if (!ovr.rotEditable) return true;
         }
     } catch (e) {}
 
@@ -1971,8 +1991,8 @@ function isRenderableTextFrame(tf) {
         // 장식 대형 컬러 텍스트: fontSize >= minFontSize AND 색상이 검정이 아님
         // SPEC-025: decorativeLargeTextEditable=true 면 큰 단원 제목/장 제목도 editable 로 변환 (검색 가능)
         try {
-            var s25dlt = _spec025();
-            if (!(s25dlt && s25dlt.decorativeLargeTextEditable)) {
+            
+            if (!ovr.decoLargeEdit) {
                 var dltCfg = CONFIG.rendering.textFrame.decorativeLargeText;
                 if (dltCfg.enabled) {
                     var fontSize = firstChar.pointSize;
@@ -1990,8 +2010,8 @@ function isRenderableTextFrame(tf) {
         // 장식 스타일 텍스트: 짧은 텍스트(≤10자) + 비검정 + Object Style(배경색/테두리/둥근모서리)
         // SPEC-025: decorativeStyledTextEditable=true 면 장식 라벨/배지도 editable 로
         try {
-            var s25dst = _spec025();
-            if (s25dst && s25dst.decorativeStyledTextEditable) throw new Error("skip-by-spec025");
+            
+            if (ovr.decoStyledEdit) throw new Error("skip-by-spec025");
             var dstCfg = CONFIG.rendering.textFrame.decorativeStyledText;
             if (dstCfg.enabled && trimmed.length <= dstCfg.maxTextLength) {
                 var hasObjStyle = false;
