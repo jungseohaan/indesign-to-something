@@ -116,10 +116,6 @@ public class ResolvedToASTBuilder {
         FramePlacer.placeTextFrames(this.ctx, sections);
         tagPhase(sections, "Phase2.placeTextFrames");
 
-        // Phase 2.5 pre-scan: inline anchor 중 짧은 단문(≤3자) renderable 항목을 미리 등록
-        // → Phase 3의 loadInlineObject가 건너뛰어 Phase 7 TextFrameBlock과 중복 렌더링 방지
-        RenderableFramePlacer.preRegisterInlineShortTextItems(this.ctx);
-
         // Phase 3: Story→단락→런 변환
         StoryConverter.convertStories(this.ctx, sections);
         tagPhase(sections, "Phase3.convertStories");
