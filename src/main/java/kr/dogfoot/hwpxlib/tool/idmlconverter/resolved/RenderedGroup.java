@@ -77,6 +77,5 @@ public class RenderedGroup {
     public boolean isWhiteStroke() { return whiteStroke; }
     public void whiteStroke(boolean v) { this.whiteStroke = v; }
 
-    public boolean isBadgeGroupChild() { return "badge_group_child".equals(type); }
     public boolean isPageBackground() { return "page_background".equals(type); }
 }

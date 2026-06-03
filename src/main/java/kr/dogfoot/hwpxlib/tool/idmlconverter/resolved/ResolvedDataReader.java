@@ -95,16 +95,6 @@ public class ResolvedDataReader {
             }
         }
 
-        // renderedTextFrames
-        if (root.has("renderedTextFrames")) {
-            for (JsonElement e : root.getAsJsonArray("renderedTextFrames")) {
-                RenderedGroup rg = parseRenderedGroup(e.getAsJsonObject());
-                // badge_group_child는 부모 badge_group에서 처리하므로 개별 등록 불필요
-                if (rg.isBadgeGroupChild()) continue;
-                data.addRenderedTextFrame(rg);
-            }
-        }
-
         // renderedPdfFrames (PDF 배치 프레임을 InDesign에서 직접 래스터화한 PNG)
         if (root.has("renderedPdfFrames")) {
             for (JsonElement e : root.getAsJsonArray("renderedPdfFrames")) {

@@ -983,15 +983,8 @@ public class InlineFrameHandler {
         }
         if (!tf.isInline()) return null;
 
-        // rendered된 TF(badge_group 등)는 PNG로 이미 배치됨 → 텍스트 런 변환 안 함
-        // 단, itemType=null 인 inline TF 는 Phase 7 이 continue 로 skip → 여기서 처리해야 함.
-        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) {
-            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rtCheck =
-                    ctx.resolvedData.getRenderedTextFrameByDomId(String.valueOf(anchoredObjectId));
-            boolean isNullTypeInlineTf = rtCheck != null && rtCheck.itemType() == null && tf.isInline();
-            if (!isNullTypeInlineTf) return null;
-            // null-type inline TF: Phase 7 는 건너뜀 → 여기서 ASTTextRun 으로 변환 진행.
-        }
+        // 렌더 PDF 프레임으로 이미 배치된 경우 텍스트 런 변환 안 함
+        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
         // SPEC-025: IDML Story 우선 + 중첩 인라인 앵커 재귀 처리
         // (예: 페이지 10 frame 15359 의 anchored Group 안에 frame 15568 "예" 가 있음 →
         //  Java 가 ORC 를 만나면 anchored 객체의 텍스트를 재귀로 가져와 inline 위치에 임베드)

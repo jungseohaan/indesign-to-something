@@ -21,7 +21,6 @@ public class ResolvedData {
     private final Map<String, ResolvedPageItem> pageItemMap = new HashMap<>();  // DOM id → pageItem
     private final List<ResolvedPage> pages = new ArrayList<>();
     private final Map<String, ResolvedPage> pageByName = new HashMap<>();  // page name ("240") → page
-    private final Map<String, RenderedGroup> renderedTextFrameMap = new HashMap<>();  // DOM id → rendered TextFrame
     private final Map<String, RenderedGroup> renderedPdfFrameMap = new HashMap<>();  // DOM id → rendered PDF frame
     private final Map<String, RenderedGroup> renderedGraphicFrameMap = new LinkedHashMap<>();  // DOM id → rendered complex graphic (순서 보존)
     private final Map<String, RenderedGroup> renderedImageFrameMap = new HashMap<>();  // DOM id → rendered image frame (PSD, AI 등)
@@ -294,34 +293,6 @@ public class ResolvedData {
         return fontMetricMap.get(family);
     }
 
-    // --- RenderedTextFrame ---
-
-    public void addRenderedTextFrame(RenderedGroup frame) {
-        renderedTextFrameMap.put(String.valueOf(frame.id()), frame);
-    }
-
-    /**
-     * IDML hex ID ("u1735") → DOM decimal ID ("5941") 변환 후 렌더링된 텍스트 프레임 조회.
-     */
-    public RenderedGroup getRenderedTextFrameByIdmlId(String idmlId) {
-        if (idmlId == null || idmlId.length() < 2 || idmlId.charAt(0) != 'u') return null;
-        try {
-            String decimalId = String.valueOf(Integer.parseInt(idmlId.substring(1), 16));
-            return renderedTextFrameMap.get(decimalId);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    /** DOM decimal ID로 렌더링된 텍스트 프레임 조회 */
-    public RenderedGroup getRenderedTextFrameByDomId(String domId) {
-        return renderedTextFrameMap.get(domId);
-    }
-
-    public java.util.Collection<RenderedGroup> allRenderedTextFrames() {
-        return renderedTextFrameMap.values();
-    }
-
     // --- RenderedPdfFrame ---
 
     public void addRenderedPdfFrame(RenderedGroup frame) {
@@ -364,13 +335,9 @@ public class ResolvedData {
         return renderedGraphicFrameMap.values();
     }
 
-    /**
-     * DOM decimal ID가 렌더 텍스트 프레임 또는 렌더 PDF 프레임에도 등록되어 있는지 확인한다.
-     * 이미 다른 경로로 처리된 프레임을 중복 주입하지 않기 위함.
-     */
+    /** 렌더 PDF 프레임에 등록된 DOM ID인지 확인한다 (중복 주입 방지용). */
     public boolean isRenderedByOtherChannel(int domId) {
-        String key = String.valueOf(domId);
-        return renderedTextFrameMap.containsKey(key) || renderedPdfFrameMap.containsKey(key);
+        return renderedPdfFrameMap.containsKey(String.valueOf(domId));
     }
 
     /**
@@ -504,10 +471,6 @@ public class ResolvedData {
                 }
             }
         }
-        // renderedTextFrames: bounds
-        for (RenderedGroup rt : renderedTextFrameMap.values()) {
-            scaleDoubleArray(rt.bounds(), s);
-        }
         // renderedPdfFrames: bounds
         for (RenderedGroup rt : renderedPdfFrameMap.values()) {
             scaleDoubleArray(rt.bounds(), s);
@@ -592,23 +555,7 @@ public class ResolvedData {
             }
         }
 
-        // 3. renderedTextFrame: 프레임 자체 + badge childIds + badge childTextFrameIds
-        for (RenderedGroup rg : renderedTextFrameMap.values()) {
-            if (rg.file() == null) continue;  // 렌더 실패한 항목은 건너뜀
-            renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
-            if (rg.childIds() != null) {
-                for (int childId : rg.childIds()) {
-                    renderedExtIdmlIds.add("u" + Integer.toHexString(childId));
-                }
-            }
-            if (rg.childTextFrameIds() != null) {
-                for (int childId : rg.childTextFrameIds()) {
-                    renderedExtIdmlIds.add("u" + Integer.toHexString(childId));
-                }
-            }
-        }
-
-        // 4. renderedFloatingItems: 통합 플로팅 그래픽
+        // 3. renderedFloatingItems: 통합 플로팅 그래픽
         for (RenderedGroup rg : renderedFloatingItems) {
             renderedExtIdmlIds.add("u" + Integer.toHexString(rg.id()));
             if (rg.childIds() != null) {
