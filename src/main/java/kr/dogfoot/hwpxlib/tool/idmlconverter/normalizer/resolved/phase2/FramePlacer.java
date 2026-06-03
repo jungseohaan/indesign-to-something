@@ -44,6 +44,9 @@ public final class FramePlacer {
                     if (inner.previousFrameId() != null) continue; // chain 후속 프레임 제외
                     if (inner.pageIndex() != outer.pageIndex()) continue;
                     if (inner.onHiddenLayer() || outer.onHiddenLayer()) continue;
+                    // inline TF는 Phase 3 인라인 앵커 처리 대상 → 공간 포함 inner 집계에서 제외
+                    // (inline TF가 count를 올려 Pass 3에서 실제 텍스트 inner TF까지 제거되는 문제 방지)
+                    if (inner.isInline()) continue;
                     // outer에 가시 텍스트가 없으면 배경/장식 프레임 → 오버레이 패턴 아님
                     String _outerVis = outer.frameVisibleText();
                     if (_outerVis == null || _outerVis.trim().isEmpty()) continue;
