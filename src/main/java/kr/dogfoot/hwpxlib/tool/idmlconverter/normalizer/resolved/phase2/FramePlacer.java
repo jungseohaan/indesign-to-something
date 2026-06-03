@@ -811,6 +811,24 @@ public final class FramePlacer {
                             // TF가 배지 범위 바깥 왼쪽에 있는 경우에만 배지 left로 이동
                             x = Math.max(x, pbL);
                             w = pbR - x;
+                            // 배지 공간 내에 다른 editable sibling TF가 있으면 오른쪽으로 확장 금지
+                            // (예: badge_group_child 오른쪽에 별도 editable TF가 인접한 경우)
+                            double _clampedRight = pbR;
+                            for (ResolvedTextFrame _sib : frames) {
+                                if (_sib == tf) continue;
+                                if (_sib.pageIndex() != tf.pageIndex()) continue;
+                                if (!ctx.resolvedData.isEditableTextFrame(_sib.id())) continue;
+                                double[] _sibGb = _sib.geometricBounds();
+                                if (_sibGb == null || _sibGb.length < 4) continue;
+                                double _sibLeft = (_sibGb[1] < pageLeft) ? _sibGb[1] : (_sibGb[1] - pageLeft);
+                                double _sibTop = _sibGb[0] - pageTop;
+                                double _sibBot = _sibGb[2] - pageTop;
+                                if (_sibLeft > x + 4.0 && _sibLeft < pbR - 2.0
+                                        && _sibBot > y + 2.0 && _sibTop < y + h - 2.0) {
+                                    if (_sibLeft < _clampedRight) _clampedRight = _sibLeft;
+                                }
+                            }
+                            if (_clampedRight < pbR) w = _clampedRight - x;
                             if (w <= 0) { x = pbL; w = pbR - pbL; }
                         }
                         // 모든 editable 자식을 badge text child 로 표시 → Phase 3(InlineFrameHandler) 중복 처리 방지
