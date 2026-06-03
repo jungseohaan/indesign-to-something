@@ -2877,38 +2877,52 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
         var domId = item.id;
         var fileName = "graphic_" + domId + ".png";
         var outFile = File(renderDir + "/" + fileName);
+        var _gPageIdx  = parentPage.documentOffset;  // 단순 정수, 이미 검증됨
+        var _gZOrder   = 0;   // try 블록 안에서 갱신
+        var _gBounds   = null;
+        var _gExportOk = false;
+        var _gChildIds = [];
 
         try {
-            var hiddenTFs = hideTextFrames(item);
-            item.exportFile(ExportFormat.PNG_FORMAT, outFile);
-            restoreTextFrames(hiddenTFs);
+            // bounds를 try 안에서 계산 (visibleBounds/geometricBounds도 예외 가능)
+            try { _gBounds = arrCopy(item.visibleBounds); } catch (e) {}
+            if (!_gBounds) { try { _gBounds = arrCopy(item.geometricBounds); } catch (e) {} }
+            if (_gBounds) _toPageRelativeBounds(_gBounds, parentPage);
 
-            var bounds = null;
-            try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
-            if (!bounds) {
-                try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
+            var hiddenTFs = hideTextFrames(item);
+            try {
+                item.exportFile(ExportFormat.PNG_FORMAT, outFile);
+                _gExportOk = true;
+            } catch (eExp) {
+                try { _gExportOk = outFile.exists; } catch (e2) {}
             }
 
-            if (bounds) _toPageRelativeBounds(bounds, parentPage);
+            // zOrder/childIds를 restore 전에 저장 — restore 예외가 push를 막지 않도록.
+            if (_gExportOk) {
+                try { _gZOrder = getItemZOrder(item); } catch (e) {}
+                try {
+                    var allNested = item.allPageItems;
+                    for (var ci = 0; ci < allNested.length; ci++) {
+                        _gChildIds.push(allNested[ci].id);
+                    }
+                } catch (e2) {}
+            }
 
-            // 자식 ID 수집 (IDML 파이프라인에서 중복 배치 방지)
-            var childIds = [];
-            try {
-                var allNested = item.allPageItems;
-                for (var ci = 0; ci < allNested.length; ci++) {
-                    childIds.push(allNested[ci].id);
-                }
-            } catch (e2) {}
+            try { restoreTextFrames(hiddenTFs); } catch (e) {}
+        } catch (e) {
+            try { _gExportOk = outFile.exists; } catch (e2) {}
+        }
 
+        if (_gExportOk) {
             renderedGraphicFrames.push({
                 id: domId,
                 file: "rendered_frames/" + fileName,
-                bounds: bounds,
-                pageIndex: parentPage.documentOffset,
-                childIds: childIds.length > 0 ? childIds : undefined,
-                zOrder: getItemZOrder(item)
+                bounds: _gBounds,
+                pageIndex: _gPageIdx,
+                childIds: _gChildIds.length > 0 ? _gChildIds : undefined,
+                zOrder: _gZOrder
             });
-        } catch (e) {}
+        }
     }
 
     return renderedGraphicFrames;
@@ -3083,6 +3097,12 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
         // 그룹 렌더링 또는 exportFile fallback
         var fileName = "img_" + domId + ".png";
         var outFile = File(renderDir + "/" + fileName);
+        // pageIndex를 try 블록 밖에서 미리 저장 (단순 정수, 이미 검증됨).
+        var _imgPageIdx  = parentPage.documentOffset;
+        var _imgZOrder   = 0;   // try 블록 안에서 갱신
+        var _imgChildIds = null;
+        var _imgExportOk = false;
+        var _imgBgPolygons = [];
         try {
             _marker(outputDir, "08_img_" + domId + "_hide");
             var hiddenTFs = isGroupRender ? hideTextFrames(renderTarget) : [];
@@ -3091,7 +3111,6 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
             // 그룹 PNG 내보내기 전 임시 숨김. 배경 폴리곤을 이미지와 합성하면
             // S자 밴드 등 선명한 경계가 이미지 콘텐츠에 묻혀 소실될 수 있음.
             // 이후 폴리곤을 개별 PNG로 내보내 BackgroundInjector에서 그룹 뒤에 배치.
-            var bgPolygons = [];
             if (isGroupRender) {
                 try {
                     var directChildren = renderTarget.pageItems;
@@ -3111,35 +3130,49 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
                             bgHasFill = bgFc && bgFc.name && bgFc.name !== "None";
                         } catch (e2) {}
                         if (!bgHasFill) continue;
-                        bgPolygons.push(bgChild);
+                        _imgBgPolygons.push(bgChild);
                         try { bgChild.visible = false; } catch (e2) {}
                     }
                 } catch (e) {}
             }
 
             _marker(outputDir, "08_img_" + domId + "_export");
-            renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
+            try {
+                renderTarget.exportFile(ExportFormat.PNG_FORMAT, outFile);
+                _imgExportOk = true;
+            } catch (eExp) {
+                try { _imgExportOk = outFile.exists; } catch (e2) {}
+            }
             _marker(outputDir, "08_img_" + domId + "_restore");
-            if (hiddenTFs.length > 0) restoreTextFrames(hiddenTFs);
+
+            // zOrder/childIds를 restore 전에 저장 — restore 예외가 push를 막지 않도록.
+            if (_imgExportOk) {
+                try { _imgZOrder = getItemZOrder(renderTarget); } catch (e) {}
+                if (isGroupRender) {
+                    _imgChildIds = [];
+                    try {
+                        var nested = renderTarget.allPageItems;
+                        for (var ci = 0; ci < nested.length; ci++) {
+                            _imgChildIds.push(nested[ci].id);
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            try { if (hiddenTFs.length > 0) restoreTextFrames(hiddenTFs); } catch (e) {}
 
             // 배경 폴리곤 가시성 복원
-            for (var bri = 0; bri < bgPolygons.length; bri++) {
-                try { bgPolygons[bri].visible = true; } catch (e2) {}
+            for (var bri = 0; bri < _imgBgPolygons.length; bri++) {
+                try { _imgBgPolygons[bri].visible = true; } catch (e2) {}
             }
 
             try { $.gc(); } catch (gcErr) {}  // 아이템별 GC: 누적 메모리 해제
+        } catch (e) {
+            try { _imgExportOk = outFile.exists; } catch (e2) {}
+        }
 
-            var childIds = null;
-            if (isGroupRender) {
-                childIds = [];
-                try {
-                    var nested = renderTarget.allPageItems;
-                    for (var ci = 0; ci < nested.length; ci++) {
-                        childIds.push(nested[ci].id);
-                    }
-                } catch (e) {}
-            }
-
+        // push는 try 블록 밖에서 실행 — restore/gc 예외가 발생해도 반드시 등록.
+        if (_imgExportOk) {
             // 그룹 항목을 배경 폴리곤보다 먼저 등록
             // BackgroundInjector.addBlockAtFront 특성상 나중 등록 항목이 XML 앞에 위치 →
             // 그룹(일러스트)이 폴리곤(S자 밴드) 위에 렌더링됨
@@ -3147,14 +3180,14 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
                 id: domId,
                 file: "rendered_frames/" + fileName,
                 bounds: bounds,
-                pageIndex: parentPage.documentOffset,
-                childImageIds: childIds,
-                zOrder: getItemZOrder(renderTarget)
+                pageIndex: _imgPageIdx,
+                childImageIds: _imgChildIds,
+                zOrder: _imgZOrder
             });
 
             // 배경 폴리곤 개별 PNG 내보내기 및 등록
-            for (var bei = 0; bei < bgPolygons.length; bei++) {
-                var bgPoly = bgPolygons[bei];
+            for (var bei = 0; bei < _imgBgPolygons.length; bei++) {
+                var bgPoly = _imgBgPolygons[bei];
                 var bgPolyDomId = bgPoly.id;
                 var bgPolyFileName = "shape_" + bgPolyDomId + ".png";
                 var bgPolyOutFile = File(renderDir + "/" + bgPolyFileName);
@@ -3168,13 +3201,13 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
                         id: bgPolyDomId,
                         file: "rendered_frames/" + bgPolyFileName,
                         bounds: bgPolyBounds,
-                        pageIndex: parentPage.documentOffset,
+                        pageIndex: _imgPageIdx,
                         childImageIds: null,
                         zOrder: getItemZOrder(bgPoly)
                     });
                 } catch (e2) {}
             }
-        } catch (e) {}
+        }
     }
 
     return renderedImageFrames;
