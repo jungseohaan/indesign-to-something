@@ -136,6 +136,12 @@ public final class BackgroundInjector {
                     }
                     img.flush();
                     img = inv;
+                    // imageData를 반전 이미지로 업데이트 (crop 없을 때도 흰색이 적용되도록)
+                    try {
+                        java.io.ByteArrayOutputStream invBaos = new java.io.ByteArrayOutputStream();
+                        ImageIO.write(img, "png", invBaos);
+                        imageData = invBaos.toByteArray();
+                    } catch (Exception ignored2) {}
                 }
                 if (img != null) {
                     boolean needsCrop = fullW > 1.0 && fullH > 1.0
@@ -169,6 +175,28 @@ public final class BackgroundInjector {
                     img.flush();
                 }
             } catch (Exception ignored) {}
+
+            // whiteStroke PNG는 exportFile이 visibleBounds보다 큰 영역을 내보낼 수 있음.
+            // arc 스트로크는 PNG 중앙에 위치하므로 중앙 기준으로 bounds를 확장.
+            if (rg.isWhiteStroke() && !((fullW > 1.0 && fullH > 1.0)
+                    && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
+                        || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5))
+                    && pixelW > 0 && pixelH > 0) {
+                double pngWidthMm = pixelW * 25.4 / 220.0;
+                double pngHeightMm = pixelH * 25.4 / 220.0;
+                double storedW = visRight - visLeft;
+                double storedH = visBottom - visTop;
+                if (pngWidthMm > storedW + 1.0) {
+                    double extraX = (pngWidthMm - storedW) / 2.0;
+                    visLeft -= extraX;
+                    visRight += extraX;
+                }
+                if (pngHeightMm > storedH + 1.0) {
+                    double extraY = (pngHeightMm - storedH) / 2.0;
+                    visTop -= extraY;
+                    visBottom += extraY;
+                }
+            }
 
             long x = CoordinateConverter.pointsToHwpunits(visLeft * ctx.scaleFactor);
             long y = CoordinateConverter.pointsToHwpunits(visTop * ctx.scaleFactor);

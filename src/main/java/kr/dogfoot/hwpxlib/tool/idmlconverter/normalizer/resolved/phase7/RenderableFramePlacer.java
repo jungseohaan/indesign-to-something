@@ -59,6 +59,8 @@ public final class RenderableFramePlacer {
             // Phase 2 가 텍스트 글상자로 배치한 TF → PNG 건너뜀 (dedupKey 선점 전에 체크).
             // 부모 Rectangle 항목은 별도로 같은 PNG 를 배치 → 배경 도형으로 남음.
             if (ctx.isDisposed(rt.id(), FrameDisposition.TEXT_BLOCK_PLACED)) continue;
+            // Phase 6(BackgroundInjector)이 동일 id를 whiteStroke 버전으로 이미 배치 → 원본 PNG 중복 금지
+            if (ctx.phase6PlacedIds.contains(rt.id())) continue;
             String dedupKey = rt.pageIndex() + "|" + rt.file();
             if (!placedKeys.add(dedupKey)) {
                 continue; // 이미 배치된 동일 파일/페이지

@@ -1586,7 +1586,14 @@ function _ctfCheckNonprinting(item, ovr) {
         if (item.nonprinting) {
             var isMaster = false;
             try { isMaster = !!item.masterPageItem; } catch (e) {}
-            if (isMaster || !ovr.nonprintEditable) return "background";
+            // parentPage가 null이거나 TF top이 페이지 top 위 → off-canvas (pasteboard) → background 강제
+            var isOffCanvas = false;
+            try {
+                var ppg = item.parentPage;
+                if (!ppg) isOffCanvas = true;
+                else if (item.geometricBounds[0] < ppg.bounds[0]) isOffCanvas = true;
+            } catch (e) {}
+            if (isMaster || isOffCanvas || !ovr.nonprintEditable) return "background";
         }
     } catch (e) {}
     return null;
@@ -2808,6 +2815,10 @@ function restoreBadgeGroupDescendants(saved) {
     }
 }
 
+function getItemZOrder(item) {
+    try { return item.absoluteZOrderIndex; } catch(e) { return 0; }
+}
+
 /**
  * 복합 장식 그래픽 프레임을 PNG로 렌더링한다.
  */
@@ -2894,7 +2905,8 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
                 file: "rendered_frames/" + fileName,
                 bounds: bounds,
                 pageIndex: parentPage.documentOffset,
-                childIds: childIds.length > 0 ? childIds : undefined
+                childIds: childIds.length > 0 ? childIds : undefined,
+                zOrder: getItemZOrder(item)
             });
         } catch (e) {}
     }
@@ -3136,7 +3148,8 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
                 file: "rendered_frames/" + fileName,
                 bounds: bounds,
                 pageIndex: parentPage.documentOffset,
-                childImageIds: childIds
+                childImageIds: childIds,
+                zOrder: getItemZOrder(renderTarget)
             });
 
             // 배경 폴리곤 개별 PNG 내보내기 및 등록
@@ -3156,7 +3169,8 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
                         file: "rendered_frames/" + bgPolyFileName,
                         bounds: bgPolyBounds,
                         pageIndex: parentPage.documentOffset,
-                        childImageIds: null
+                        childImageIds: null,
+                        zOrder: getItemZOrder(bgPoly)
                     });
                 } catch (e2) {}
             }
@@ -3241,7 +3255,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
             }
         } catch (e) {}
 
-        var entry = { id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: page.documentOffset };
+        var entry = { id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: page.documentOffset, zOrder: getItemZOrder(item) };
         if (childIds.length > 0) entry.childIds = childIds;
         results.push(entry);
         renderedIds[domId] = true;
@@ -3447,7 +3461,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
                         file: "rendered_frames/" + _wFile,
                         bounds: _wBounds,
                         pageIndex: grpPage.documentOffset,
-                        whiteStroke: true
+                        whiteStroke: true,
+                        zOrder: getItemZOrder(_sh)
                     });
                 } catch(_e2) {}
 
@@ -3621,7 +3636,7 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
             try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
             if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
             if (bounds) _toPageRelativeBounds(bounds, parentPage);
-            results.push({ id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: parentPage.documentOffset });
+            results.push({ id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: parentPage.documentOffset, zOrder: getItemZOrder(item) });
             renderedIds[domId] = true;
         } catch (e) {}
     }
@@ -5905,7 +5920,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
     if (!s25 || !(s25.masterPageEditable || s25.nonprintingEditable || s25.hashiraEditable)) return;
 
     // 1) 페이지 → 적용된 마스터 매핑 (side 정보 포함)
-    var masterToPages = {};  // masterSpreadId → [{docIdx, side}, ...]
+    var masterToPages = {};  // masterSpreadId → [{docIdx, side, spreadPageIdx}, ...]
     try {
         for (var pp = 0; pp < doc.pages.length; pp++) {
             try {
@@ -5917,7 +5932,16 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                 if (!masterToPages[mid]) masterToPages[mid] = [];
                 var pgSide = "SINGLE";
                 try { pgSide = doc.pages[pp].side.toString(); } catch (e) {}
-                masterToPages[mid].push({ docIdx: pp, side: pgSide });
+                // 스프레드 내 페이지 인덱스 (0=LEFT, 1=RIGHT) — side 문자열보다 신뢰성 높음
+                var pgSpreadPageIdx = -1;
+                try {
+                    var pgSprd = doc.pages[pp].parent;
+                    var pgSprdPgs = pgSprd.pages.everyItem().getElements();
+                    for (var spI = 0; spI < pgSprdPgs.length; spI++) {
+                        if (pgSprdPgs[spI].id === doc.pages[pp].id) { pgSpreadPageIdx = spI; break; }
+                    }
+                } catch (e) {}
+                masterToPages[mid].push({ docIdx: pp, side: pgSide, spreadPageIdx: pgSpreadPageIdx });
             } catch (e) {}
         }
     } catch (e) {}
@@ -5960,6 +5984,14 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
         try { msId = mspread.id.toString(); } catch (e) { continue; }
         var appliedPages = masterToPages[msId] || [];
         if (appliedPages.length === 0) continue;
+        // 마스터 스프레드 페이지 인덱스 맵: masterPageId → 스프레드 내 순서(0=LEFT,1=RIGHT)
+        var mspPageIdxMap = {};
+        try {
+            var mspPgs = mspread.pages.everyItem().getElements();
+            for (var mspI = 0; mspI < mspPgs.length; mspI++) {
+                mspPageIdxMap[mspPgs[mspI].id.toString()] = mspI;
+            }
+        } catch (e) {}
         var msItems = [];
         try { msItems = mspread.allPageItems; } catch (e) {}
         for (var mi = 0; mi < msItems.length; mi++) {
@@ -5970,6 +6002,18 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             // hashiraEditable=true 일 때 인스턴스화 → 하시라/페이지번호 변환 지원.
             var cls = null;
             try { cls = classifyTextFrameCached(mtf); } catch (e) {}
+            // hashiraEditable=true 로 "editable" 분류된 마스터 TF 중 textvar 패턴은 skip
+            // (_ctfCheckHashira 가 hashiraEditable=true 시 null 반환 → editable 경로로 빠짐)
+            if (cls === "editable" && s25 && s25.hashiraEditable) {
+                try {
+                    var tvInstE = mtf.parentStory.textVariableInstances;
+                    if (tvInstE && tvInstE.length > 0) {
+                        var tvStripE = "";
+                        try { tvStripE = mtf.parentStory.contents.replace(/﻿/g, "").replace(/￼/g, "").replace(//g, "").replace(//g, "").replace(/[\s\r\n]/g, ""); } catch (e) {}
+                        if (tvStripE.length === 0) continue; // textvar running header → skip
+                    }
+                } catch (e) {}
+            }
             var hashiraSpecialType = null; // "pagenum" | "textvar"
             var hashiraTextVarResolved = null;
             if (cls !== "editable") {
@@ -6007,8 +6051,12 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                 if (!hashiraSpecialType) continue;
             }
             var baseId = ""; try { baseId = mtf.id.toString(); } catch (e) { continue; }
-            // SPEC-025: 마스터 TF 가 위치한 master page (LEFT/RIGHT) 식별 →
-            // 동일 side 의 doc page 에만 인스턴스 생성 (반대편 페이지로의 잘못된 복제 방지).
+            // SPEC-025: 마스터 TF 가 위치한 master page 의 스프레드 내 인덱스(0=LEFT,1=RIGHT) →
+            // 동일 인덱스의 content page 에만 인스턴스 생성 (반대편 페이지로의 잘못된 복제 방지).
+            // side.toString() 은 InDesign 버전마다 반환값이 달라 신뢰하지 않음 → 인덱스 비교로 대체.
+            var mtfSpreadPageIdx = -1;
+            try { mtfSpreadPageIdx = mspPageIdxMap[mtf.parentPage.id.toString()]; if (mtfSpreadPageIdx === undefined) mtfSpreadPageIdx = -1; } catch (e) {}
+            // 구 side 필드는 fallback 용으로만 유지
             var mtfSide = "SINGLE";
             try { mtfSide = mtf.parentPage.side.toString(); } catch (e) {}
             var origStoryId = null;
@@ -6080,8 +6128,13 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
             // 적용 페이지마다 frame + story clone 추가
             for (var ap = 0; ap < appliedPages.length; ap++) {
                 var pgEntry = appliedPages[ap];
-                // side 매칭: SINGLE 마스터/페이지는 무조건 통과, LEFT/RIGHT 는 동일 side 만.
-                if (mtfSide !== "SINGLE" && pgEntry.side !== "SINGLE" && mtfSide !== pgEntry.side) continue;
+                // side 매칭: 스프레드 내 페이지 인덱스 기준 (0=LEFT, 1=RIGHT)
+                // 인덱스를 구할 수 없는 경우(-1) → side 문자열 폴백 → SINGLE이면 무조건 통과
+                if (mtfSpreadPageIdx >= 0 && pgEntry.spreadPageIdx >= 0) {
+                    if (mtfSpreadPageIdx !== pgEntry.spreadPageIdx) continue;
+                } else if (mtfSide !== "SINGLE" && pgEntry.side !== "SINGLE" && mtfSide !== pgEntry.side) {
+                    continue;
+                }
                 var docPgIdx = pgEntry.docIdx;
                 // 이 페이지에 baseId 마스터 TF 의 override 가 있으면 clone 불필요
                 if (pageOverrideMap[docPgIdx] && pageOverrideMap[docPgIdx][baseId]) continue;
