@@ -2592,7 +2592,10 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                     }
                 } catch (eWalk) {}
                 try {
+                    // 인라인 객체는 배경 위에 얹히므로 투명 배경 필요
+                    try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
                     inItem.exportFile(ExportFormat.PNG_FORMAT, inOutFile);
+                    try { app.pngExportPreferences.transparentBackground = false; } catch (e) {}
                     if (inOutFile.exists) {
                         var inBounds = null;
                         try {
