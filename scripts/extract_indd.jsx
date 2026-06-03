@@ -6009,7 +6009,7 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                     var tvInstE = mtf.parentStory.textVariableInstances;
                     if (tvInstE && tvInstE.length > 0) {
                         var tvStripE = "";
-                        try { tvStripE = mtf.parentStory.contents.replace(/﻿/g, "").replace(/￼/g, "").replace(/\u0016/g, "").replace(/\u0018/g, "").replace(/[\s\r\n]/g, ""); } catch (e) {}
+                        try { tvStripE = mtf.parentStory.contents.replace(/\uFEFF/g, "").replace(/\uFFFC/g, "").replace(/\u0016/g, "").replace(/\u0018/g, "").replace(/[\s\r\n]/g, ""); } catch (e) {}
                         if (tvStripE.length === 0) continue; // textvar running header → skip
                     }
                 } catch (e) {}
