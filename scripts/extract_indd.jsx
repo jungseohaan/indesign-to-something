@@ -1668,38 +1668,46 @@ function _ctfCheckInline(item) {
     return null;
 }
 
-// 8: Group 안 짧은 장식 텍스트 (10자 이하, 비검정, 무스트로크) → background
-function _ctfCheckGroupDecoText(item, rotBypass) {
+// 8a: Group + 긴 텍스트(>10자) + 배경색 도형에 완전 포함 → null (editable bypass)
+// 배경 도형은 deco 그룹 PNG로, 텍스트는 HWPX 글상자로 각자 배치.
+// hideTextFrames()가 TF를 숨겨 "background" 반환 시 텍스트가 PNG에도, HWPX에도 미표시됨.
+function _ctfCheckGroupLongTextInContainer(item, rotBypass) {
     try {
         if (item.parent.constructor.name !== "Group") return null;
         var groupText = item.contents.replace(/[\s﻿\r\n]/g, "");
         var hasTable = false;
         try { hasTable = item.parentStory && item.parentStory.tables.length > 0; } catch (e) {}
-        // 긴 텍스트(>10자) + 컨테이너 배경색 도형 안 → null (editable 폴스루)
-        // 이전: "background"를 반환하여 textComposite PNG에 포함 기대.
-        // 그러나 deco 그룹 렌더 시 hideTextFrames()가 TF를 숨겨 PNG에도 미포함,
-        // editableIds에도 미추가 → 텍스트 완전 소실. → null로 변경, editable로 처리.
-        if (groupText.length > 10 && !hasTable && !rotBypass && !isBadgeGroup(item.parent)) {
-            var _grpItems = [];
-            try { _grpItems = item.parent.allPageItems; } catch (e) {}
-            for (var _gi2 = 0; _gi2 < _grpItems.length; _gi2++) {
-                var _gn = _grpItems[_gi2];
-                var _gnCn = _gn.constructor.name;
-                if (_gnCn !== "Rectangle" && _gnCn !== "Oval" && _gnCn !== "Polygon") continue;
-                try {
-                    var _gnFill = _gn.fillColor;
-                    if (!_gnFill || _gnFill.name === "None" || _gnFill.name === "[None]") continue;
-                    var _cb = _gn.geometricBounds;
-                    var _tfb = item.geometricBounds;
-                    var _TOL2 = 3.0;
-                    if (_tfb[0] >= _cb[0]-_TOL2 && _tfb[1] >= _cb[1]-_TOL2 &&
-                        _tfb[2] <= _cb[2]+_TOL2 && _tfb[3] <= _cb[3]+_TOL2) {
-                        return null; // editable 폴스루: 배경 도형은 그룹 PNG, 텍스트는 HWPX 글상자
-                    }
-                } catch (e) {}
-            }
+        if (groupText.length <= 10 || hasTable || rotBypass || isBadgeGroup(item.parent)) return null;
+        var grpItems = [];
+        try { grpItems = item.parent.allPageItems; } catch (e) {}
+        for (var gi = 0; gi < grpItems.length; gi++) {
+            var gn = grpItems[gi];
+            var gnCn = gn.constructor.name;
+            if (gnCn !== "Rectangle" && gnCn !== "Oval" && gnCn !== "Polygon") continue;
+            try {
+                var gnFill = gn.fillColor;
+                if (!gnFill || gnFill.name === "None" || gnFill.name === "[None]") continue;
+                var cb = gn.geometricBounds;
+                var tfb = item.geometricBounds;
+                var TOL = 3.0;
+                if (tfb[0] >= cb[0]-TOL && tfb[1] >= cb[1]-TOL &&
+                    tfb[2] <= cb[2]+TOL && tfb[3] <= cb[3]+TOL) {
+                    return null; // editable 폴스루
+                }
+            } catch (e) {}
         }
+    } catch (e) {}
+    return null;
+}
 
+// 8b: Group + 짧은 텍스트(≤10자) + 비검정 + 무스트로크 → background (장식 레이블)
+// 배지 그룹(isBadgeGroup) 및 spec025.groupShortTextEditable 플래그로 bypass 가능.
+function _ctfCheckGroupShortDeco(item, rotBypass) {
+    try {
+        if (item.parent.constructor.name !== "Group") return null;
+        var groupText = item.contents.replace(/[\s﻿\r\n]/g, "");
+        var hasTable = false;
+        try { hasTable = item.parentStory && item.parentStory.tables.length > 0; } catch (e) {}
         if (groupText.length > 10 || hasTable) return null;
         var isDeco = false;
         try {
@@ -1721,7 +1729,6 @@ function _ctfCheckGroupDecoText(item, rotBypass) {
     } catch (e) {}
     return null;
 }
-
 // 8.5: 부모에 배경색이 있는 짧은 텍스트 → renderable (배지)
 function _ctfCheckParentFill(item, rotBypass) {
     try {
@@ -1835,7 +1842,8 @@ function classifyTextFrame(item) {
     if ((r = _ctfCheckMasterOverride(item)) !== null) return r;   // 5
     if ((r = _ctfCheckHashira(item)) !== null) return r;          // 6
     if ((r = _ctfCheckInline(item)) !== null) return r;           // 7
-    if ((r = _ctfCheckGroupDecoText(item, rotBypass)) !== null) return r;  // 8
+    if ((r = _ctfCheckGroupLongTextInContainer(item, rotBypass)) !== null) return r;  // 8a
+    if ((r = _ctfCheckGroupShortDeco(item, rotBypass)) !== null) return r;            // 8b
     if ((r = _ctfCheckParentFill(item, rotBypass)) !== null) return r;     // 8.5
     if ((r = _ctfCheckTextComposite(item)) !== null) return r;    // 8.7
     if (!rotBypass && isRenderableTextFrame(item)) return "renderable";    // 9
