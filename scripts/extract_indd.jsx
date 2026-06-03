@@ -212,7 +212,7 @@ function loadConversionConfig(configPath) {
                 // - inlineTextEditable: 조건 7 (isInlineItem) 에서 텍스트 콘텐츠가 있으면 editable 로
                 // - groupShortTextEditable: 조건 8 (Group 안 짧은 장식) 도 editable 로 (콘텐츠 텍스트 보존)
                 // - oneCharEditable: 조건 11 (≤1자 빈 프레임) 에서 실제 1자가 있으면 editable 로
-                spec025: { masterPageEditable: true, hashiraEditable: true, rotationEditable: true,
+                spec025: { masterPageEditable: true, hashiraEditable: false, rotationEditable: true,
                     // inlineTextEditable: 인라인 앵커 TextFrame 을 editable 로 승격.
                     // inlineTextMaxLen 이하 짧은 텍스트만 (배지/라벨 케이스). 긴 인라인은 부모 flow 의
                     // ORC embedding 과 중복되므로 background 로 유지.
@@ -1729,19 +1729,50 @@ function _ctfCheckGroupShortDeco(item, rotBypass, ovr) {
     } catch (e) {}
     return null;
 }
-// 8.5: 부모에 배경색이 있는 짧은 텍스트 → renderable (배지)
-function _ctfCheckParentFill(item, rotBypass) {
+
+// 8.5/9(decorativeStyledText)/9.5 통합: 짧은 텍스트(≤maxLen) + [프레임 fill | stroke | 부모 fill] → renderable
+// Path A (fill): ovr.decoStyledEdit로 bypass. excludeBlack 컨픽 적용.
+// Path B (stroke): ovr.boxLabelEdit로 bypass. 색상 필터 없음.
+function _ctfCheckDecorativeShortText(item, rotBypass, ovr) {
+    if (rotBypass) return null;
     try {
         var trimmed = item.contents.replace(/[\s﻿\r\n￼]/g, "");
-        if (trimmed.length > 0 && trimmed.length <= 10) {
-            var par = item.parent;
-            if (par && par.constructor.name !== "Story"
-                    && par.constructor.name !== "Spread"
-                    && par.constructor.name !== "Page") {
-                var pFill = "None";
-                try { pFill = par.fillColor ? par.fillColor.name : "None"; } catch (e) {}
-                if (pFill !== "None" && pFill !== "[None]" && !rotBypass) return "renderable";
+        var dstCfg = CONFIG.rendering.textFrame.decorativeStyledText;
+        var maxLen = (dstCfg && dstCfg.enabled) ? dstCfg.maxTextLength : 10;
+        if (trimmed.length === 0 || trimmed.length > maxLen) return null;
+        var firstChar = null;
+        try { firstChar = item.parentStory.characters[0]; } catch (e) {}
+        // Path A: TF fill 또는 부모 fill (excludeBlack 필터 적용)
+        if (!ovr.decoStyledEdit) {
+            var hasFill = false;
+            try {
+                var fn = item.fillColor ? item.fillColor.name : "None";
+                if (fn !== "None" && fn !== "[None]") hasFill = true;
+            } catch (e) {}
+            if (!hasFill) {
+                try {
+                    var par = item.parent;
+                    var pn = par ? par.constructor.name : "null";
+                    if (par && pn !== "Story" && pn !== "Spread" && pn !== "Page") {
+                        var pf = par.fillColor ? par.fillColor.name : "None";
+                        if (pf !== "None" && pf !== "[None]") hasFill = true;
+                    }
+                } catch (e) {}
             }
+            if (hasFill) {
+                var isBlk = dstCfg.excludeBlack && firstChar && isBlackColor(firstChar, dstCfg.blackThreshold);
+                if (!isBlk) return "renderable";
+            }
+        }
+        // Path B: TF stroke (excludeBlack 필터 없음 — 테두리만 있으면 렌더링)
+        if (!ovr.boxLabelEdit) {
+            try {
+                var sw = item.strokeWeight || 0;
+                if (sw > 0) {
+                    var sn = item.strokeColor ? item.strokeColor.name : "None";
+                    if (sn !== "None" && sn !== "[None]") return "renderable";
+                }
+            } catch (e) {}
         }
     } catch (e) {}
     return null;
@@ -1765,20 +1796,6 @@ function _ctfCheckTextComposite(item) {
     return null;
 }
 
-// 9.5: 박스 라벨 (짧은 텍스트 + 테두리) → renderable
-function _ctfCheckBoxLabel(item, rotBypass, ovr) {
-    try {
-        var trimmed = ""; try { trimmed = item.contents.replace(/[\r\n\s]/g, ""); } catch (e) {}
-        if (trimmed.length === 0 || trimmed.length > 10) return null;
-        var sc = "None", sw = 0;
-        try { sc = item.strokeColor ? item.strokeColor.name : "None"; } catch (e) {}
-        try { sw = item.strokeWeight || 0; } catch (e) {}
-        var hasStroke = (sc !== "None" && sc !== "[None]") && sw > 0;
-        var skipBoxLabel = ovr.boxLabelEdit;
-        if (hasStroke && !rotBypass && !skipBoxLabel) return "renderable";
-    } catch (e) {}
-    return null;
-}
 
 // 10: 빈 TextFrame + fill/stroke 있음 → renderable(stroke) or background(fill-only)
 // fillColor="" (빈 문자열)은 실제 fill 없음으로 처리 ("None"/"[None]"과 동일하게 취급)
@@ -1864,10 +1881,9 @@ function classifyTextFrame(item) {
     if ((r = _ctfCheckInline(item, ovr)) !== null) return r;           // 7
     if ((r = _ctfCheckGroupLongTextInContainer(item, rotBypass)) !== null) return r;  // 8a
     if ((r = _ctfCheckGroupShortDeco(item, rotBypass, ovr)) !== null) return r;            // 8b
-    if ((r = _ctfCheckParentFill(item, rotBypass)) !== null) return r;     // 8.5
+    if ((r = _ctfCheckDecorativeShortText(item, rotBypass, ovr)) !== null) return r;  // 8.5
     if ((r = _ctfCheckTextComposite(item)) !== null) return r;    // 8.7
     if (!rotBypass && isRenderableTextFrame(item, ovr)) return "renderable";    // 9
-    if ((r = _ctfCheckBoxLabel(item, rotBypass, ovr)) !== null) return r;       // 9.5
     if ((r = _ctfCheckEmptyFilled(item)) !== null) return r;      // 10
     if ((r = _ctfCheckEmptyStory(item, rotBypass, ovr)) !== null) return r;     // 11
     return "editable";
@@ -2007,58 +2023,7 @@ function isRenderableTextFrame(tf, ovr) {
             }
         } catch (e) { }
 
-        // 장식 스타일 텍스트: 짧은 텍스트(≤10자) + 비검정 + Object Style(배경색/테두리/둥근모서리)
-        // SPEC-025: decorativeStyledTextEditable=true 면 장식 라벨/배지도 editable 로
-        try {
-            
-            if (ovr.decoStyledEdit) throw new Error("skip-by-spec025");
-            var dstCfg = CONFIG.rendering.textFrame.decorativeStyledText;
-            if (dstCfg.enabled && trimmed.length <= dstCfg.maxTextLength) {
-                var hasObjStyle = false;
-                if (dstCfg.requireObjectStyle) {
-                    // 배경색 체크
-                    try {
-                        var fillName = tf.fillColor ? tf.fillColor.name : "None";
-                       
-                        if (fillName !== "None" && fillName !== "[None]") hasObjStyle = true;
-                    } catch (e) {}
-                    // 테두리 체크
-                    if (!hasObjStyle) {
-                        try {
-                            var sw95b = tf.strokeWeight || 0;
-                            if (sw95b > 0) {
-                                var sName = tf.strokeColor ? tf.strokeColor.name : "None";
-                               
-                                if (sName !== "None" && sName !== "[None]") hasObjStyle = true;
-                            }
-                        } catch (e) {}
-                    }
-                    // 부모 객체의 배경색 체크 (TextFrame이 Rectangle 안에 있는 경우)
-                    if (!hasObjStyle) {
-                        try {
-                            var parent = tf.parent;
-                            var pName = parent ? parent.constructor.name : "null";
-                           
-                            if (parent && pName !== "Story" && pName !== "Spread" && pName !== "Page") {
-                                var pFill = parent.fillColor ? parent.fillColor.name : "None";
-                               
-                                if (pFill !== "None" && pFill !== "[None]") hasObjStyle = true;
-                            }
-                        } catch (e) {}
-                    }
-                } else {
-                    hasObjStyle = true; // requireObjectStyle=false이면 무조건 통과
-                }
 
-               
-                if (hasObjStyle) {
-                    if (!dstCfg.excludeBlack || !isBlackColor(firstChar, dstCfg.blackThreshold)) {
-                       
-                        return true;
-                    }
-                }
-            }
-        } catch (e) { }
     } catch (e) { }
 
    
