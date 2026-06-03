@@ -3736,7 +3736,9 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
     renderDir.create();
     var results = [];
 
-    // masterSpreadId → [{docIdx}, ...] 빌드
+    // masterSpreadId → [{docIdx, masterPageIdx}, ...] 빌드
+    // masterPageIdx: 마스터 스프레드 내 페이지 인덱스 (0=좌, 1=우)
+    // 문서 페이지가 스프레드 내 몇 번째 페이지인지로 결정
     var masterToPages = {};
     var masterToPagesCnt = 0;
     try {
@@ -3747,8 +3749,17 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
                 var am = doc.pages[pp].appliedMaster;
                 if (!am) continue;
                 var mid = am.id.toString();
+                var masterPageIdx = 0;
+                try {
+                    var docPageObj = doc.pages[pp];
+                    var parentSprd = docPageObj.parent;
+                    var sprdPgs = parentSprd.pages;
+                    for (var spi2 = 0; spi2 < sprdPgs.length; spi2++) {
+                        if (sprdPgs[spi2].id === docPageObj.id) { masterPageIdx = spi2; break; }
+                    }
+                } catch (eSide) {}
                 if (!masterToPages[mid]) { masterToPages[mid] = []; masterToPagesCnt++; }
-                masterToPages[mid].push({ docIdx: pp });
+                masterToPages[mid].push({ docIdx: pp, masterPageIdx: masterPageIdx });
             } catch (e) {}
         }
     } catch (e) { dbg("masterToPages build error: " + e); }
@@ -3770,21 +3781,18 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
     try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
     try { app.pngExportPreferences.exportingSpread = false; } catch (e) {}
 
-    // msId → { relPath, relTop, relLeft, relBottom, relRight } (페이지 상대 좌표)
-    var exportedMaster = {};
+    // msId + "_" + masterPageIdx → { relPath, relTop, relLeft, relBottom, relRight }
+    // 마스터 스프레드의 좌/우 페이지별로 분리 export
+    var exportedMasterByPage = {};
 
     for (var ms = 0; ms < msArr.length; ms++) {
         var mspread = msArr[ms];
         var msId = "";
         try { msId = mspread.id.toString(); } catch (e) { continue; }
         if (!masterToPages[msId] || masterToPages[msId].length === 0) continue;
-        if (exportedMaster[msId] !== undefined) continue;
 
         dbg("masterSpread id=" + msId);
 
-        // v8: tmpPage/override 불필요 — 마스터 스프레드 아이템을 직접 수집해 export
-        // 이유: override() 접근은 auto-overridden 아이템(퍼플바 등)을 수집 불가.
-        //       마스터 스프레드 아이템은 그 자체로 exportFile() 가능.
         var masterGraphicItems = [];
         try {
             var msAllItems = mspread.allPageItems;
@@ -3793,10 +3801,7 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
                 try {
                     var mItem = msAllItems[mti];
                     if (mItem.constructor.name === "TextFrame") continue;
-                    // Group 자체 제외: doc.groups.add()에 Group을 넣으면 "잘못된 매개변수" 에러
-                    // Group의 자식 도형들은 allPageItems에 flat하게 나오므로 별도 처리 불필요
                     if (mItem.constructor.name === "Group") continue;
-                    // 중첩 TF 검사 (페이지번호 배지의 자식 도형 등 제외)
                     var mHasTF = false;
                     try {
                         var mSubs = mItem.allPageItems;
@@ -3804,66 +3809,75 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
                             if (mSubs[msi].constructor.name === "TextFrame") { mHasTF = true; break; }
                         }
                     } catch (eMSub) {}
-                    if (mHasTF) { dbg("  mItem skipped (nested TF): " + mItem.constructor.name); continue; }
+                    if (mHasTF) continue;
                     masterGraphicItems.push(mItem);
                 } catch (e) {}
             }
         } catch (e) { dbg("  ERROR allPageItems: " + e); }
-        dbg("  masterGraphicItems (non-TF, no-Group, no-nested-TF): " + masterGraphicItems.length);
-        if (masterGraphicItems.length === 0) { exportedMaster[msId] = null; continue; }
+        dbg("  masterGraphicItems: " + masterGraphicItems.length);
+        if (masterGraphicItems.length === 0) continue;
 
-        // 마스터 페이지[0] bounds → 콘텐츠 페이지 기준 상대 좌표 계산용 기준점
-        var mPageBnds = null;
-        try { mPageBnds = mspread.pages[0].bounds; } catch (e) {}
-        dbg("  mPageBnds: " + (mPageBnds ? "["+mPageBnds.join(",")+"]" : "null"));
+        // 마스터 스프레드 내 각 페이지별로 아이템 분리 → 페이지별 PNG export
+        var mspreadPagesCount = 0;
+        try { mspreadPagesCount = mspread.pages.length; } catch (e) {}
+        if (mspreadPagesCount === 0) continue;
 
-        var grpBnds = null;
-        var mFileName = "master_" + msId + ".png";
-        var mOutFile = File(renderDir + "/" + mFileName);
+        for (var mpIdx = 0; mpIdx < mspreadPagesCount; mpIdx++) {
+            var masterKey = msId + "_" + mpIdx;
+            if (exportedMasterByPage[masterKey] !== undefined) continue;
 
-        // MasterPage.exportFile / doc.groups.add 모두 마스터 스프레드에 불가
-        // 전략: masterGraphicItems 중 가장 큰 아이템(퍼플 바)을 직접 exportFile
-        // 개별 아이템(Rectangle 등)의 exportFile은 마스터 스프레드에서도 작동
-        var bestItem = null, bestArea = 0;
-        for (var li = 0; li < masterGraphicItems.length; li++) {
-            try {
-                var lb = masterGraphicItems[li].geometricBounds;
-                var la = Math.abs((lb[2] - lb[0]) * (lb[3] - lb[1]));
-                dbg("  item[" + li + "] " + masterGraphicItems[li].constructor.name +
-                    " bounds=[" + lb.join(",") + "] area=" + la.toFixed(1));
-                if (la > bestArea) { bestArea = la; bestItem = masterGraphicItems[li]; grpBnds = lb; }
-            } catch (eLi) {}
+            var mpBnds = null;
+            try { mpBnds = mspread.pages[mpIdx].bounds; } catch (e) { continue; }
+            if (!mpBnds || mpBnds.length < 4) continue;
+            dbg("  masterPage[" + mpIdx + "] bounds=[" + mpBnds.join(",") + "]");
+
+            // 이 마스터 페이지에 속하는 아이템: 아이템 중심 X가 페이지 left~right 범위 내
+            var pageItems = [];
+            for (var pii = 0; pii < masterGraphicItems.length; pii++) {
+                try {
+                    var pib = masterGraphicItems[pii].geometricBounds;
+                    var centerX = (pib[1] + pib[3]) / 2;
+                    if (centerX >= mpBnds[1] - 5 && centerX <= mpBnds[3] + 5) {
+                        pageItems.push({ item: masterGraphicItems[pii], bounds: pib });
+                    }
+                } catch (e) {}
+            }
+            dbg("  masterPage[" + mpIdx + "] items: " + pageItems.length);
+            if (pageItems.length === 0) { exportedMasterByPage[masterKey] = null; continue; }
+
+            var bestItem = null, bestArea = 0, grpBnds = null;
+            for (var li = 0; li < pageItems.length; li++) {
+                try {
+                    var lb = pageItems[li].bounds;
+                    var la = Math.abs((lb[2] - lb[0]) * (lb[3] - lb[1]));
+                    dbg("  item[" + li + "] " + pageItems[li].item.constructor.name +
+                        " bounds=[" + lb.join(",") + "] area=" + la.toFixed(1));
+                    if (la > bestArea) { bestArea = la; bestItem = pageItems[li].item; grpBnds = lb; }
+                } catch (eLi) {}
+            }
+            if (!bestItem) { exportedMasterByPage[masterKey] = null; continue; }
+
+            var mFileName = "master_" + msId + "_" + mpIdx + ".png";
+            var mOutFile = File(renderDir + "/" + mFileName);
+            try { bestItem.exportFile(ExportFormat.PNG_FORMAT, mOutFile, false); } catch (eExp) {
+                dbg("  export error: " + eExp);
+            }
+            if (!mOutFile.exists) {
+                dbg("  FAIL: " + mFileName + " not created");
+                exportedMasterByPage[masterKey] = null;
+                continue;
+            }
+            dbg("  SUCCESS: " + mFileName + " (" + mOutFile.length + " bytes)");
+            exportedMasterByPage[masterKey] = {
+                relPath:   "rendered_frames/" + mFileName,
+                relTop:    grpBnds[0] - mpBnds[0],
+                relLeft:   grpBnds[1] - mpBnds[1],
+                relBottom: grpBnds[2] - mpBnds[0],
+                relRight:  grpBnds[3] - mpBnds[1]
+            };
+            dbg("  relBounds: ["+exportedMasterByPage[masterKey].relTop+","+exportedMasterByPage[masterKey].relLeft+
+                ","+exportedMasterByPage[masterKey].relBottom+","+exportedMasterByPage[masterKey].relRight+"]");
         }
-        if (bestItem) {
-            try {
-                bestItem.exportFile(ExportFormat.PNG_FORMAT, mOutFile, false);
-                dbg("  bestItem exportFile → " + mFileName + " area=" + bestArea.toFixed(1));
-            } catch (eExp) { dbg("  bestItem export error: " + eExp); }
-        }
-
-        if (!mOutFile.exists) {
-            dbg("  FAIL: file not created");
-            exportedMaster[msId] = null;
-            continue;
-        }
-        dbg("  SUCCESS: " + mFileName + " (" + mOutFile.length + " bytes)");
-
-        if (!grpBnds || grpBnds.length < 4 || !mPageBnds || mPageBnds.length < 4) {
-            dbg("  SKIP: no bounds");
-            exportedMaster[msId] = null;
-            continue;
-        }
-
-        // 마스터 페이지[0] 기준 상대 좌표 (동일 마스터 모든 콘텐츠 페이지 공유)
-        exportedMaster[msId] = {
-            relPath:   "rendered_frames/" + mFileName,
-            relTop:    grpBnds[0] - mPageBnds[0],
-            relLeft:   grpBnds[1] - mPageBnds[1],
-            relBottom: grpBnds[2] - mPageBnds[0],
-            relRight:  grpBnds[3] - mPageBnds[1]
-        };
-        dbg("  relBounds: [" + exportedMaster[msId].relTop+","+exportedMaster[msId].relLeft+
-            ","+exportedMaster[msId].relBottom+","+exportedMaster[msId].relRight+"]");
     }
 
     // PNG 설정 복원
@@ -3871,17 +3885,17 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
     try { if (savedTransp !== undefined) app.pngExportPreferences.transparentBackground = savedTransp; } catch (e) {}
     try { if (savedSpread !== undefined) app.pngExportPreferences.exportingSpread = savedSpread; } catch (e) {}
 
-    // 결과 생성: 각 콘텐츠 페이지 × 마스터
+    // 결과 생성: 각 콘텐츠 페이지 × 해당 마스터 페이지 인덱스
     for (var msId2 in masterToPages) {
         if (!masterToPages.hasOwnProperty(msId2)) continue;
-        var master = exportedMaster[msId2];
-        if (!master) continue;
-        if ((master.relRight - master.relLeft) <= 0) continue;
-
         var pgList = masterToPages[msId2];
         for (var pli = 0; pli < pgList.length; pli++) {
             var pgEntry = pgList[pli];
-            dbg("  result docIdx=" + pgEntry.docIdx +
+            var masterKey2 = msId2 + "_" + pgEntry.masterPageIdx;
+            var master = exportedMasterByPage[masterKey2];
+            if (!master) continue;
+            if ((master.relRight - master.relLeft) <= 0) continue;
+            dbg("  result docIdx=" + pgEntry.docIdx + " masterPageIdx=" + pgEntry.masterPageIdx +
                 " rel=["+master.relTop+","+master.relLeft+","+master.relBottom+","+master.relRight+"]");
             results.push({
                 id: parseInt(msId2, 10),
