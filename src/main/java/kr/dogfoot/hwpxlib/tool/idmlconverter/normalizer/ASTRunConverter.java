@@ -229,34 +229,7 @@ public class ASTRunConverter {
             try { domId = Integer.parseInt(ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId(), 16); } catch (Exception e) {}
         }
 
-        // 1순위: badge_group PNG (텍스트 포함, 항상 inline_object보다 우선)
-        if (resolvedData != null && domId > 0) {
-            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup badgeRg =
-                    resolvedData.getBadgeGroupByDomId(domId);
-            // 중첩 Group(외부 래퍼 → 내부 배지) 폴백
-            if (badgeRg == null && ig.childGraphics() != null) {
-                for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
-                    if (child.selfId() == null) continue;
-                    int childDomId = -1;
-                    try { childDomId = Integer.parseInt(child.selfId().startsWith("u") ? child.selfId().substring(1) : child.selfId(), 16); } catch (Exception e) {}
-                    if (childDomId > 0) {
-                        badgeRg = resolvedData.getBadgeGroupByDomId(childDomId);
-                        if (badgeRg != null) break;
-                    }
-                }
-            }
-            // textHiddenBeforeExport=true → 배지 PNG에 텍스트가 없음 (신 파이프라인 InlineFrameHandler가
-            // 처리해야 하지만, 테이블 셀은 ASTTableConverter 경유로 여기 도달.
-            // 이 경우 badge PNG 대신 inline_object PNG(텍스트 포함)를 사용하도록 스킵.
-            if (badgeRg != null && badgeRg.file() != null && !badgeRg.isTextHiddenBeforeExport()) {
-                ASTInlineObject badgeObj = loadBadgeImage(ig, badgeRg, resolvedData);
-                if (badgeObj != null) {
-                    para.addItem(badgeObj);
-                    return;
-                }
-            }
-        }
-        // 2순위: inline_object PNG (badge_group 없는 경우, imageLoader 불필요)
+        // inline_object PNG (imageLoader 불필요)
         if (resolvedData != null && domId > 0) {
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
                 if (rg.id() == domId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
@@ -893,55 +866,6 @@ public class ASTRunConverter {
     }
 
     /**
-     * 배지 그룹의 PNG 이미지를 로드하여 ASTInlineObject(IMAGE)로 변환.
-     */
-    private static ASTInlineObject loadBadgeImage(
-            IDMLCharacterRun.InlineGraphic ig,
-            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup badgeRg,
-            ResolvedData resolvedData) {
-        String basePath = resolvedData.basePath();
-        if (basePath == null) return null;
-
-        java.io.File pngFile = new java.io.File(basePath, badgeRg.file());
-        if (!pngFile.exists()) return null;
-
-        try {
-            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
-            if (img == null) return null;
-
-            ASTInlineObject obj = new ASTInlineObject();
-            obj.sourceId(ig.selfId());
-            obj.kind(ASTInlineObject.ObjectKind.IMAGE);
-            obj.imageData(imageData);
-            obj.imageFormat("png");
-            obj.pixelWidth(img.getWidth());
-            obj.pixelHeight(img.getHeight());
-
-            // 인라인 크기: resolved bounds 사용 (normalizeToPoints 후 points 단위)
-            double[] bounds = badgeRg.bounds();
-            if (bounds != null && bounds.length >= 4) {
-                double wPt = bounds[3] - bounds[1];
-                double hPt = bounds[2] - bounds[0];
-                obj.width(CoordinateConverter.pointsToHwpunits(wPt));
-                obj.height(CoordinateConverter.pointsToHwpunits(hPt));
-            } else {
-                obj.width(CoordinateConverter.pointsToHwpunits(ig.widthPoints()));
-                obj.height(CoordinateConverter.pointsToHwpunits(ig.heightPoints()));
-            }
-
-            // 앵커/래핑 속성 복사
-            obj.anchoredPosition(ig.anchoredPosition());
-            obj.textWrapMode(ig.textWrapMode());
-            obj.keepInline(true); // 테이블 셀에서 floating 추출 금지 (inline에 유지)
-
-            System.out.println("[InlineBadge] " + ig.selfId() + " → " + badgeRg.file());
-            return obj;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
     /**
      * 그룹 자체가 renderedGraphicFrame으로 통째 렌더링된 경우,
      * 해당 PNG를 인라인 이미지로 로드하여 반환.

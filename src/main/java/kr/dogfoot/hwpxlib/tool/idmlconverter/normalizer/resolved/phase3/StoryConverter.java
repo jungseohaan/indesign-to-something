@@ -400,10 +400,6 @@ public final class StoryConverter {
                 }
             }
         }
-        // AboveLine 배지를 inlineLinkedBadgeGroupIds에서 제거 (pi.isInline() 오분류 정정)
-        if (!ctx.aboveLineAnchoredIds.isEmpty() && ctx.resolvedData != null) {
-            ctx.resolvedData.refineInlineLinkedBadgeGroups(ctx.aboveLineAnchoredIds);
-        }
         if (found > 0) {
             System.err.println("[ResolvedToASTBuilder] Phase 3 사전 스캔: "
                     + found + "개 anchored+none Group 등록 (stories=" + storiesScanned + ")");

@@ -602,25 +602,6 @@ public class InlineFrameHandler {
             if (!regularInRow.isEmpty()) regularRowGroups.add(regularInRow);
         }
 
-        // 섹션 배지에 badge_group PNG가 있으면 imageFillData 설정
-        if (!sectionBadgeIndices.isEmpty()) {
-            RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
-            boolean hasBgPng = badgeRg != null && badgeRg.file() != null;
-            if (hasBgPng) {
-                byte[] pngBytes = null;
-                try {
-                    File bgFile = new File(ctx.basePath, badgeRg.file());
-                    if (bgFile.exists()) pngBytes = java.nio.file.Files.readAllBytes(bgFile.toPath());
-                } catch (Exception ignored) {}
-                if (pngBytes != null && pngBytes.length > 0) {
-                    for (int ri : sectionBadgeIndices) {
-                        result.get(ri).imageFillData(pngBytes);
-                        result.get(ri).strokeColor(null); // PNG가 배경을 담당 → Java stroke 불필요
-                    }
-                }
-            }
-        }
-
         // 모든 항목이 섹션 배지로 분류된 경우 (regularRowGroups 비어 있음) → flat 반환
         if (regularRowGroups.isEmpty()) return result;
 
@@ -723,10 +704,6 @@ public class InlineFrameHandler {
             return null;
         }
 
-        // badge_group PNG가 있으면 자식 TF 텍스트 길이 제한을 적용하지 않는다.
-        RenderedGroup badgeRg = ctx.resolvedData.getBadgeGroupByDomId(anchoredObjectId);
-        boolean hasBadgePng = badgeRg != null && badgeRg.file() != null;
-
         // anchorId 후손 ID 집합 — 아래 세 루프 모두 재사용
         java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 5);
 
@@ -743,9 +720,7 @@ public class InlineFrameHandler {
             if (vt == null) continue;
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) continue;
-            // badge PNG 없는 경우: 단일 라인이면 길이 무관(배지 레이블), 다중 라인이면 제외
-            // badge PNG 있는 경우: 길이 무제한 (ExtendScript 확인됨)
-            if (!hasBadgePng && tf.lineCount() != 1 && cleaned.length() >= 4) return null;
+            if (tf.lineCount() != 1 && cleaned.length() >= 4) return null;
             if (childTf != null) return null; // 2 개 이상 → tryInlineGroupAsBoxList 가 처리
             childTf = tf;
         }
@@ -929,7 +904,6 @@ public class InlineFrameHandler {
         if (tf == null) return null;
         if (!tf.isInline()) return null;
         if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
-        if (ctx.resolvedData.isSimpleBadgeChild(domId)) return null;
 
         // 텍스트가 있으면 적용 안 함 (tryInlineTextFrameAsRun 이 처리)
         String visText = tf.frameVisibleText();
@@ -992,21 +966,6 @@ public class InlineFrameHandler {
             // 그러나 다중 1자 자손 (예: jamo 배지 ㅍㅎ, ㅂㅅ) 은 결합 텍스트가 의미 있으므로 합쳐서 임베드.
             java.util.List<ResolvedTextFrame> inlineDescs = findInlineEditableDescendants(ctx, domId);
             if (!inlineDescs.isEmpty()) {
-                // Badge group children are placed as floating overlay textboxes by Phase 2 — do not inline them
-                java.util.Iterator<ResolvedTextFrame> _remIt = inlineDescs.iterator();
-                while (_remIt.hasNext()) {
-                    ResolvedTextFrame _d = _remIt.next();
-                    int _did;
-                    try { _did = Integer.parseInt(_d.id()); } catch (NumberFormatException e) { continue; }
-                    for (RenderedGroup _rg : ctx.resolvedData.allRenderedTextFrames()) {
-                        if (!_rg.isBadgeGroup()) continue;
-                        int[] _cids = _rg.childTextFrameIds();
-                        if (_cids == null) continue;
-                        boolean _found = false;
-                        for (int _cid : _cids) if (_cid == _did) { _found = true; break; }
-                        if (_found) { _remIt.remove(); break; }
-                    }
-                }
                 StringBuilder _sb = new StringBuilder();
                 for (ResolvedTextFrame d : inlineDescs) {
                     String t = d.frameVisibleText();
@@ -1033,9 +992,6 @@ public class InlineFrameHandler {
             if (!isNullTypeInlineTf) return null;
             // null-type inline TF: Phase 7 는 건너뜀 → 여기서 ASTTextRun 으로 변환 진행.
         }
-        // SPEC-025: 단순 배지 자식 (Phase 2 가 별도 글상자로 배치) → 인라인 임베드 중복 방지.
-        if (ctx.resolvedData.isSimpleBadgeChild(domId)) return null;
-
         // SPEC-025: IDML Story 우선 + 중첩 인라인 앵커 재귀 처리
         // (예: 페이지 10 frame 15359 의 anchored Group 안에 frame 15568 "예" 가 있음 →
         //  Java 가 ORC 를 만나면 anchored 객체의 텍스트를 재귀로 가져와 inline 위치에 임베드)
@@ -1368,17 +1324,9 @@ public class InlineFrameHandler {
             if (ctx.resolvedData.isEditableTextFrame(childTf.id())) {
                 return null;
             }
-            // inline + non-editable: 부모가 badge_group(PNG에 시각이 이미 포함됨)이면 계속 사용.
-            // 아닐 경우 Phase 3 가 이 child TF 를 별도로 처리할 수 있으므로 PNG 폐기.
+            // inline + non-editable: Phase 3 가 이 child TF 를 별도로 처리할 수 있으므로 PNG 폐기.
             if (childTf.isInline()) {
-                boolean parentIsBadgeGroup = false;
-                for (RenderedGroup cand : ctx.resolvedData.allRenderedTextFrames()) {
-                    if (cand.id() == anchoredObjectId && cand.isBadgeGroup()) {
-                        parentIsBadgeGroup = true;
-                        break;
-                    }
-                }
-                if (!parentIsBadgeGroup) return null;
+                return null;
             }
         }
 
@@ -1622,8 +1570,6 @@ public class InlineFrameHandler {
             if (tf == null || tf.parentStoryId() == null) return "";
             // SPEC-025: 앵커 TF 가 별도 PNG 로 렌더되는 경우 (예: 번호 마커 "1") 인라인 임베드는 중복 → 스킵.
             if (isRenderedAsImage(ctx, tf.selfId())) return "";
-            // SPEC-025: 앵커 TF 가 단순 배지 자식 (Phase 2 가 별도 글상자로 배치) 인 경우도 인라인 임베드 스킵 → 중복 방지.
-            if (isSimpleBadgeChild(ctx, tf.selfId())) return "";
             IDMLStory childStory = ctx.loadIDMLStory.apply(tf.parentStoryId());
             return extractTextRecursive(ctx, childStory, depth);
         }
@@ -1681,15 +1627,6 @@ public class InlineFrameHandler {
     }
 
     /** 주어진 anchoredId 그룹의 자손 중 첫 inline+editable TF (텍스트 길이 ≥ 1) 를 찾는다. */
-    /** IDML selfId 의 TextFrame 이 단순 scribble 배지 자식 (Phase 2 가 글상자로 배치) 인지 확인. */
-    private static boolean isSimpleBadgeChild(ResolvedBuildContext ctx, String idmlSelfId) {
-        if (ctx == null || ctx.resolvedData == null || idmlSelfId == null) return false;
-        if (!idmlSelfId.startsWith("u")) return false;
-        int domId;
-        try { domId = Integer.parseInt(idmlSelfId.substring(1), 16); }
-        catch (NumberFormatException e) { return false; }
-        return ctx.resolvedData.isSimpleBadgeChild(String.valueOf(domId));
-    }
 
     /** InlineGraphic(Group/Rectangle/Polygon) 내부의 모든 TextFrame 텍스트를 재귀로 합쳐 반환. */
     private static String extractGraphicText(ResolvedBuildContext ctx, IDMLCharacterRun.InlineGraphic ig, int depth) {

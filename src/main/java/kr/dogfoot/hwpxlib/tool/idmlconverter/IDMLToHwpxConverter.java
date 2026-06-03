@@ -106,8 +106,6 @@ public class IDMLToHwpxConverter {
             // Phase 1.6b: ExtendScript 렌더 ID 통합 인덱스 빌드
             if (resolvedData != null) {
                 resolvedData.buildRenderedIdSet();
-                // 배지 그룹 인덱스 + inlineObjectDomIds 빌드 (Phase 6/7 중복 방지에 필요)
-                resolvedData.buildBadgeGroupIndex();
             }
 
             // Phase 2: AST 빌드

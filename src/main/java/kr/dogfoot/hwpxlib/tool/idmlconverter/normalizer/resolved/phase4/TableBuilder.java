@@ -465,26 +465,16 @@ public final class TableBuilder {
         // Step 1: 부모 그룹 직접 등록
         for (int id : groupIds) ctx.setDisposition(id, FrameDisposition.TEXT_BLOCK_PLACED);
 
-        // Step 2: 배지 PNG 파일 공유 TF 억제
-        Set<String> badgeFiles = new HashSet<>();
-        for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
-            if (groupIds.contains(rt.id()) && rt.file() != null) {
-                badgeFiles.add(rt.file());
-            }
-        }
+        // Step 2: 공유 PNG 파일로 렌더된 floating 항목 억제
+        Set<String> sharedFiles = new HashSet<>();
         for (RenderedGroup rt : ctx.resolvedData.allRenderedFloatingItems()) {
             if (groupIds.contains(rt.id()) && rt.file() != null) {
-                badgeFiles.add(rt.file());
+                sharedFiles.add(rt.file());
             }
         }
-        if (!badgeFiles.isEmpty()) {
-            for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
-                if (rt.file() != null && badgeFiles.contains(rt.file())) {
-                    ctx.setDisposition(rt.id(), FrameDisposition.TEXT_BLOCK_PLACED);
-                }
-            }
+        if (!sharedFiles.isEmpty()) {
             for (RenderedGroup rt : ctx.resolvedData.allRenderedFloatingItems()) {
-                if (rt.file() != null && badgeFiles.contains(rt.file())) {
+                if (rt.file() != null && sharedFiles.contains(rt.file())) {
                     ctx.setDisposition(rt.id(), FrameDisposition.TEXT_BLOCK_PLACED);
                 }
             }

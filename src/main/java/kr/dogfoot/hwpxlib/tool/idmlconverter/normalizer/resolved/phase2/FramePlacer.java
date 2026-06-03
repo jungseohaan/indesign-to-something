@@ -101,16 +101,6 @@ public final class FramePlacer {
         }
 
         for (ResolvedTextFrame tf : frames) {
-            // badge_group_child: Phase 7의 hp:container가 텍스트 오버레이를 포함 → 인라인/비-인라인 무관하게 항상 스킵.
-            // 단, editableTextFrameIds에 포함된 TF는 실제 텍스트 내용이 있으므로 스킵하지 않음.
-            // (예: 단원 도비라 전체 스프레드 그룹이 badge_group으로 오분류 → 내부 editable TF가 스킵되는 문제)
-            {
-                int _bcDomId = -1;
-                try { _bcDomId = Integer.parseInt(tf.id()); } catch (NumberFormatException ignored) {}
-                if (_bcDomId >= 0 && ctx.resolvedData.getBadgeGroupByChildTextFrameIdmlId(
-                        "u" + Integer.toHexString(_bcDomId)) != null
-                        && !ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
-            }
             // 공간 포함 inner TF: outer TF 단락에 주입될 예정 → 독립 배치 스킵
             if (innerToOuterMap.containsKey(tf.id())) continue;
 
@@ -214,45 +204,8 @@ public final class FramePlacer {
                     // - 단일 1자 라벨 (예: "1", "예"): Phase 3 가 PNG 임베드 (텍스트 누락) → 플로팅으로 검색 가능 텍스트 보강
                     int domIdInlineEd = -1;
                     try { domIdInlineEd = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
-                    boolean inAnyBadge = false;
-                    boolean inMultiChildBadge = false;
-                    int badgeGroupId = -1;
+                    // 부모 Group이 inline_object이면 inline PNG가 시각적 배지 전체를 포함 → floating 불필요.
                     if (domIdInlineEd >= 0) {
-                        // O(1): badgeChildTextFrameMap(TF domId → 부모 badge_group) 직접 조회
-                        RenderedGroup parentBadge = ctx.resolvedData.getBadgeGroupByChildTextFrameIdmlId(
-                                "u" + Integer.toHexString(domIdInlineEd));
-                        if (parentBadge != null) {
-                            inAnyBadge = true;
-                            badgeGroupId = parentBadge.id();
-                            int[] cTfIds = parentBadge.childTextFrameIds();
-                            if (cTfIds != null) {
-                                int editableSiblings = 0;
-                                for (int cid : cTfIds) {
-                                    if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) editableSiblings++;
-                                }
-                                if (editableSiblings >= 2) inMultiChildBadge = true;
-                            }
-                        }
-                    }
-                    boolean badgeAlsoInlineObject = badgeGroupId >= 0
-                            && ctx.resolvedData.isBadgeGroupAlsoInline(badgeGroupId); // O(1)
-                    // 인라인 앵커 배지: Phase 3가 INLINE_TEXT_FRAME으로 처리 → floating text 불필요.
-                    // 인라인 배지: Phase 3이 INLINE_TEXT_FRAME으로 처리.
-                    // 비-인라인 배지: Phase 7이 badge PNG + 텍스트 오버레이를 hp:container로 묶어 처리 → 항상 스킵.
-                    if (inAnyBadge && badgeAlsoInlineObject) {
-                        String vt0 = tf.frameVisibleText();
-                        String cleaned0 = vt0 == null ? "" : vt0.replace("￼", "").replace("\r", "").replace("\n", "").trim();
-                        if (cleaned0.length() >= 1 || inMultiChildBadge) {
-                            continue;
-                        }
-                    } else if (inAnyBadge) {
-                        // 비-인라인 배지: Phase 7의 hp:container가 텍스트 오버레이를 포함 → 별도 글상자 불필요.
-                        continue;
-                    }
-                    // 부모 Group이 badge_group 없이 inline_object만 있으면
-                    // → inline PNG가 텍스트 포함 전체 배지 → floating 불필요.
-                    // (badge_group도 있는 경우는 inAnyBadge=true 경로에서 처리됨)
-                    if (!inAnyBadge && domIdInlineEd >= 0) {
                         ResolvedPageItem _tfi2 = ctx.resolvedData.getPageItem(tf.id());
                         if (_tfi2 != null && _tfi2.parentId() != null) {
                             try {
