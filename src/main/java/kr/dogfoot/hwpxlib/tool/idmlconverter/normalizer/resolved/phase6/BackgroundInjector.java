@@ -168,7 +168,14 @@ public final class BackgroundInjector {
             fig.imageFormat((fmt != null && !fmt.isEmpty()) ? fmt : "png");
             fig.pixelWidth(pixelW);
             fig.pixelHeight(pixelH);
-            fig.zOrder(Math.max(rg.zOrder(), 0));
+            // 페이지 전체를 덮는 배경 항목 → zOrder=0 (최하단 레이어)
+            // 기준: rawLeft≤1mm, rawTop≤1mm, rawBottom≥(pageHeight-1mm) — 페이지 전체 커버
+            // 장식/부분 항목 → zOrder=5 (배경 위에 표시)
+            boolean isFullPageBg = rg.zOrder() <= 0
+                    && rawLeft <= 1.0
+                    && rawTop <= 1.0
+                    && rawBottom >= pageHeightMm - 1.0;
+            fig.zOrder(isFullPageBg ? 0 : Math.max(rg.zOrder(), 5));
             fig.fromGroup(true);   // IN_FRONT_OF_TEXT — z-order로 텍스트TF와의 순서 결정
             fig.sourceId("page_obj_" + rg.id());
 
@@ -245,7 +252,7 @@ public final class BackgroundInjector {
                             fig2.imageFormat((fmt2 != null && !fmt2.isEmpty()) ? fmt2 : "png");
                             fig2.pixelWidth(ovPixelW);
                             fig2.pixelHeight(ovPixelH);
-                            fig2.zOrder(Math.max(rg.zOrder(), 0));
+                            fig2.zOrder(0); // 오버플로우 배경은 항상 최하단 레이어
                             fig2.fromGroup(true);
                             fig2.sourceId("page_obj_" + rg.id() + "_ov");
                             sections.get(nextPageIdx).addBlockAtFront(fig2);

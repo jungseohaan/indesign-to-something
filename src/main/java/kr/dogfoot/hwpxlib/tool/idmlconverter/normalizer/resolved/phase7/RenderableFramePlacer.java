@@ -708,19 +708,11 @@ public final class RenderableFramePlacer {
                                 sections.get(prevSec).addBlock(figLeft);
                                 count++;
                                 placedKeys.add(prevPi + "|" + rg3.file());
-                                if (rg3.file().contains("deco_3317"))
-                                    System.err.println("[Phase7c] deco_3317 left-ov placed on sec=" + prevSec + " x=" + ovLeft2 + " w=" + (ovRight2-ovLeft2) + " pxW=" + leftImg.getWidth());
-                            } catch (Exception lvEx) {
-                                if (rg3.file().contains("deco_3317"))
-                                    System.err.println("[Phase7c] deco_3317 left-ov EXCEPTION: " + lvEx);
-                            }
+                            } catch (Exception lvEx) { /* skip */ }
                         }
                     }
                 }
-            } catch (Exception e3) {
-                if (rg3.file() != null && rg3.file().contains("deco_3317"))
-                    System.err.println("[Phase7c] deco_3317 OUTER EXCEPTION: " + e3);
-            }
+            } catch (Exception e3) { /* skip */ }
         }
 
         if (count > 0) {
