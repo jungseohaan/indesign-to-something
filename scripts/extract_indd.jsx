@@ -216,7 +216,6 @@ function loadConversionConfig(configPath) {
                     // 9.5 박스 라벨 (테두리+짧은 텍스트 → renderable) 도 editable 로.
                     boxLabelEditable: true }
             },
-            badge: { enabled: true, maxSize: 50, maxTextLength: 20, requireShape: true, allowImage: false, badgeDpi: 600, maxAspectRatio: 4.5, nestedEnabled: true, nestedMaxTextLength: 6, decorationMergeEnabled: true, decorationMergeMinOverlap: 0.5, decorationMergeAdjacency: 20 },
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
             rotation: { minAngle: 0.1 },
             pngExportResolution: 220
@@ -245,10 +244,6 @@ function loadConversionConfig(configPath) {
             _mergeKeys(defaults.rendering.textFrame.decorativeStyledText,
                 r.textFrame && r.textFrame.decorativeStyledText,
                 ["enabled", "maxTextLength", "excludeBlack", "blackThreshold", "requireObjectStyle"]);
-            _mergeKeys(defaults.rendering.badge, r.badge,
-                ["enabled", "maxSize", "maxTextLength", "requireShape", "allowImage", "badgeDpi",
-                 "maxAspectRatio", "nestedEnabled", "nestedMaxTextLength",
-                 "decorationMergeEnabled", "decorationMergeMinOverlap", "decorationMergeAdjacency"]);
             _mergeKeys(defaults.rendering.transparency, r.transparency,
                 ["opacityThreshold", "tintThreshold"]);
             _mergeKeys(defaults.rendering.rotation, r.rotation,
@@ -533,10 +528,6 @@ function _runRenderPhases(doc, ctx, allItems) {
     }
     try { $.gc(); } catch (e) {}
 
-    // 2.13. (SPEC-025: exportRenderedTextFrames 제거됨)
-    var renderedFrames = [];
-    var badgeChildIds  = {};
-
     // 2.14. 이미지 프레임 개별 렌더링 (Rectangle/Oval/Polygon에 place된 이미지)
     _marker(ctx.outputDir, "06_imgFrames");
     var renderedImageFrames = exportImagePlacedFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage, allItems);
@@ -548,7 +539,7 @@ function _runRenderPhases(doc, ctx, allItems) {
     var imgRenderedIds = {};
     for (var iri = 0; iri < renderedImageFrames.length; iri++) imgRenderedIds[renderedImageFrames[iri].id] = true;
     _marker(ctx.outputDir, "07_decoGroups");
-    var decoResult  = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage, badgeChildIds, allItems, imgRenderedIds);
+    var decoResult  = exportDecorationGroups(doc, ctx.outputDir, ctx.startPage, ctx.endPage, allItems, imgRenderedIds);
     var decoChildIds = decoResult.childIds || {};
     addItemType(decoResult.frames, "page_object");
     for (var di = 0; di < decoResult.frames.length; di++) renderedFloatingItems.push(decoResult.frames[di]);
@@ -563,7 +554,7 @@ function _runRenderPhases(doc, ctx, allItems) {
 
     // 2.17. 벡터 도형 렌더링
     _marker(ctx.outputDir, "09_shapeFrames");
-    var renderedVectorFrames = exportVectorShapeFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage, badgeChildIds, decoChildIds, allItems);
+    var renderedVectorFrames = exportVectorShapeFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage, decoChildIds, allItems);
     addItemType(renderedVectorFrames, "page_object");
     for (var vi = 0; vi < renderedVectorFrames.length; vi++) renderedFloatingItems.push(renderedVectorFrames[vi]);
     try { $.gc(); } catch (e) {}
@@ -577,7 +568,7 @@ function _runRenderPhases(doc, ctx, allItems) {
 
     // 2.19. 타원형 TextFrame 윤곽선 렌더링 (비직사각형 stroke TF)
     _marker(ctx.outputDir, "09c_ovalTFShapes");
-    var ovalTFFrames = exportOvalShapeTextFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage, badgeChildIds, decoChildIds, editableFrameIds, allItems);
+    var ovalTFFrames = exportOvalShapeTextFrames(doc, ctx.outputDir, ctx.startPage, ctx.endPage, decoChildIds, editableFrameIds, allItems);
     addItemType(ovalTFFrames, "page_object");
     for (var otfi = 0; otfi < ovalTFFrames.length; otfi++) renderedFloatingItems.push(ovalTFFrames[otfi]);
     try { $.gc(); } catch (e) {}
@@ -594,7 +585,7 @@ function _runRenderPhases(doc, ctx, allItems) {
             elapsed_ms: _statsEndMs - _statsStartMs,
             total_page_count: ctx.pageCount,
             page_count: ctx.rangePageCount,
-            badge_count: renderedFrames.length,
+
             deco_group_count: decoResult.frames.length,
             image_frame_count: renderedImageFrames.length,
             complex_frame_count: renderedGraphicFrames.length,
@@ -610,7 +601,7 @@ function _runRenderPhases(doc, ctx, allItems) {
     _marker(ctx.outputDir, "10_collectResolved");
     writeProgress(ctx.outputDir, "resolved", 0, ctx.rangePageCount);
     var resolved = collectResolved(doc, ctx.outputDir, ctx.rangePageCount, ctx.startPage, ctx.endPage, editableFrameIds, ctx.skipRenderPagesMap);
-    resolved.renderedTextFrames    = renderedFrames;
+    resolved.renderedTextFrames    = [];
     resolved.renderedPdfFrames     = [];
     resolved.renderedGraphicFrames = renderedGraphicFrames;
     resolved.renderedImageFrames   = renderedImageFrames;
@@ -856,7 +847,7 @@ function hasNonRectangularPath(item) {
  * exportPageBackgrounds가 editable TF를 숨기므로 stroke가 배경 PNG에 누락됨.
  * 복제본에서 텍스트를 비우고 윤곽선만 렌더링해 page_object로 추가.
  */
-function exportOvalShapeTextFrames(doc, outputDir, startPage, endPage, badgeChildIds, decoChildIds, editableIds, allItems) {
+function exportOvalShapeTextFrames(doc, outputDir, startPage, endPage, decoChildIds, editableIds, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -868,7 +859,6 @@ function exportOvalShapeTextFrames(doc, outputDir, startPage, endPage, badgeChil
 
         var domId = item.id;
         if (isOnHiddenLayer(item)) continue;
-        if (badgeChildIds && badgeChildIds[domId]) continue;
         if (decoChildIds && decoChildIds[domId]) continue;
         // editable TF이거나 빈 TF(텍스트 없음)인 경우 처리.
         // 내용 있는 비-편집 TF는 exportRenderedTextFrames에서 이미 처리됨.
@@ -979,36 +969,6 @@ function isBadgeGroup(group) {
  * 감지되면 (badgeShape, badgeTextFrame) 페어를 반환. 없으면 null.
  * 렌더링 단계에서 페어 외 형제를 임시 숨긴 뒤 부모 그룹을 exportFile 한다.
  */
-function findNestedBadgePattern(group) {
-    return null;
-}
-
-/**
- * 매칭된 뱃지 그룹과 시각적으로 한 덩어리를 이루지만 구조적으로는 별개인 외곽선 데코
- * (주로 폰트가 폴리곤으로 변환된 라벨 — 예: "Step 1") 를 찾는다 (SPEC-022).
- *
- * 조건:
- *  - 직속 부모가 Spread 또는 Page 인 최상위 아이템
- *  - Polygon 또는 Polygon만 들어있는 Group
- *  - visibleBounds 가 뱃지 visibleBounds 와 50% 이상 겹치거나, 위/아래로 5pt 이내 인접
- *  - 짧은 변(minDim) ≤ 뱃지 maxDim × 1.5 (너무 큰 데코는 제외)
- *
- * 반환: 합쳐야 할 PageItem 배열 (없으면 빈 배열).
- */
-function findOverlappingDecorations(badgeGroup, allItems) {
-    return [];
-}
-
-/**
- * SPEC-023: renderable TextFrame 의 라운드 사각형 배경 도형 검색.
- * Pass 2 에서 외곽선 텍스트 배지(예: "Read", "Write On") 가 별개 PageItem 으로 존재하는
- * 배경 도형 위에 놓여 있을 때, 배경을 함께 export 대상에 포함하기 위해 호출한다.
- *
- * @param {TextFrame} tf - renderable TextFrame
- * @param {Array} candidates - 후보 PageItem 배열 (사전 필터된 Rectangle/Polygon/Oval)
- * @return {PageItem|null} 매칭된 배경 도형 또는 null
- */
-
 /**
  * TextFrame을 분류한다.
  * @param {PageItem} item - allPageItems 항목
@@ -1075,31 +1035,6 @@ function restoreTextFrames(saved) {
  * deco 그룹 렌더링 시 badge PNG가 이중으로 포함되지 않도록 하기 위함.
  * badge_group 자체의 visible을 false로 설정하고 복원 정보를 반환.
  */
-function hideBadgeGroupDescendants(renderTarget) {
-    var saved = [];
-    try {
-        var nested = renderTarget.allPageItems;
-        for (var i = 0; i < nested.length; i++) {
-            var item = nested[i];
-            if (item.constructor.name !== "Group") continue;
-            if (!isBadgeGroup(item)) continue;
-            try {
-                var wasVisible = item.visible;
-                item.visible = false;
-                saved.push({ item: item, wasVisible: wasVisible });
-            } catch (e) {}
-        }
-    } catch (e) {}
-    return saved;
-}
-
-function restoreBadgeGroupDescendants(saved) {
-    for (var i = 0; i < saved.length; i++) {
-        try {
-            saved[i].item.visible = saved[i].wasVisible;
-        } catch (e) {}
-    }
-}
 
 function getItemZOrder(item) {
     try { return item.absoluteZOrderIndex; } catch(e) { return 0; }
@@ -1219,57 +1154,6 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
 /**
  * PDF 배치 프레임을 PNG로 렌더링한다.
  */
-function exportPdfPlacedFrames(doc, outputDir, startPage, endPage, allItems) {
-    var renderDir = Folder(outputDir + "/rendered_frames");
-    renderDir.create();
-
-    var renderedPdfFrames = [];
-
-    for (var i = 0; i < allItems.length; i++) {
-        var item = allItems[i];
-        var cName = item.constructor.name;
-
-        if (cName !== "Rectangle" && cName !== "Oval"
-            && cName !== "Polygon" && cName !== "GraphicLine") continue;
-        if (isOnHiddenLayer(item)) continue;
-
-        var hasPdf = false;
-        try { hasPdf = item.pdfs && item.pdfs.length > 0; } catch (e) {}
-        if (!hasPdf) continue;
-
-        var parentPage = null;
-        try { parentPage = item.parentPage; } catch (e) {}
-        if (!parentPage) continue;
-        var pgIdx = parentPage.documentOffset + 1;
-        if (pgIdx < startPage || pgIdx > endPage) continue;
-
-        var domId = item.id;
-        var fileName = "pdf_" + domId + ".png";
-        var outFile = File(renderDir + "/" + fileName);
-
-        try {
-            item.exportFile(ExportFormat.PNG_FORMAT, outFile);
-
-            var bounds = null;
-            try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
-            if (!bounds) {
-                try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
-            }
-
-            if (bounds) _toPageRelativeBounds(bounds, parentPage);
-
-            renderedPdfFrames.push({
-                id: domId,
-                file: "rendered_frames/" + fileName,
-                bounds: bounds,
-                pageIndex: parentPage.documentOffset
-            });
-        } catch (e) {}
-    }
-
-    return renderedPdfFrames;
-}
-
 /**
  * 이미지 배치 프레임을 처리한다.
  *
@@ -1512,13 +1396,6 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
  * InDesign이 특정 이미지 프레임의 exportFile에서 C++ 크래시(SIGSEGV)를 일으키는
  * 문서에 대한 폴백으로, Java 변환기가 IDML 링크에서 직접 이미지를 처리하게 한다.
  */
-function exportImagePlacedFramesSafe(doc, outputDir, startPage, endPage, allItems) {
-    // InDesign이 특정 이미지 프레임의 .images 접근에서 C++ 크래시(SIGSEGV)를
-    // 일으키는 문서가 있으므로, 이미지 프레임 렌더링은 건너뛴다.
-    // Java 변환기가 IDML 링크에서 직접 이미지를 처리한다.
-    return [];
-}
-
 /**
  * 도형만으로 구성된 장식 그룹(클리핑 Oval/Rect 포함)을 그룹 단위로 PNG 렌더링한다.
  * 개별 도형 렌더링(exportVectorShapeFrames) 전에 호출하여 중복 방지.
@@ -1529,7 +1406,7 @@ function exportImagePlacedFramesSafe(doc, outputDir, startPage, endPage, allItem
  *
  * @return {{ frames: Array, childIds: Object }}
  */
-function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildIds, allItems, imgRenderedIds) {
+function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, imgRenderedIds) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -1550,7 +1427,6 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
     function _decoGroupSkip(id, item) {
         if (renderedIds[id]) return true;
         if (decoChildIds[id]) return true;
-        if (badgeChildIds && badgeChildIds[id]) return true;
         if (imgRenderedIds && imgRenderedIds[id]) return true;
         try {
             var par = item.parent;
@@ -1718,14 +1594,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
                         if (nested[kt].constructor.name !== "TextFrame") continue;
                         try { if (nested[kt].parentStory.tables.length > 0) { noTableInTfs = false; break; } } catch (e) {}
                     }
-                    // 내부에 배지 그룹이 있으면 배지 렌더링 경로가 따로 처리 → textComposite 금지
-                    var hasBadgeChild = false;
-                    for (var kb = 0; kb < nested.length; kb++) {
-                        if (nested[kb].constructor.name === "Group" && isBadgeGroup(nested[kb])) {
-                            hasBadgeChild = true; break;
-                        }
-                    }
-                    if (noTableInTfs && !hasBadgeChild) return "textComposite";
+                    if (noTableInTfs) return "textComposite";
                 }
             }
         }
@@ -1822,7 +1691,6 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
 
         var domId = item.id;
         if (renderedIds[domId]) continue;
-        if (badgeChildIds && badgeChildIds[domId]) continue;
 
         var hasNested = false;
         try { hasNested = item.allPageItems && item.allPageItems.length > 0; } catch (e) {}
@@ -1857,8 +1725,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
         if (kind === "pureShape") {
             try {
                 var par = grp.parent;
-                if (par && par.constructor.name === "Group"
-                        && !renderedIds[par.id] && !(badgeChildIds && badgeChildIds[par.id])) {
+                if (par && par.constructor.name === "Group" && !renderedIds[par.id]) {
                     if (isAllShapeChildren(par)) {
                         grp = par; grpId = par.id;  // 부모로 승격
                     } else {
@@ -1894,18 +1761,13 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
                 // TF를 숨기고 도형만 PNG로 렌더 — TF 텍스트는 기존 파이프라인이 처리
                 var savedTFs = hideTextFrames(grp);
                 _savedTFsForCatch = savedTFs;
-                var savedBadges = hideBadgeGroupDescendants(grp);
                 _decoRender(grp, grpPage, null);
                 restoreTextFrames(savedTFs);
                 _savedTFsForCatch = null;
-                restoreBadgeGroupDescendants(savedBadges);
                 // Color/Paper (흰색) 획 도형은 투명배경 PNG에서 소실 → 검은색으로 임시 변환 후 개별 추출
                 _exportPaperStrokeShapes(grp, grpPage);
             } else {
-                // badge_group 자손을 숨기고 렌더 — badge PNG는 별도 exportRenderedTextFrames에서 처리
-                var savedBadges = hideBadgeGroupDescendants(grp);
                 _decoRender(grp, grpPage, null);
-                restoreBadgeGroupDescendants(savedBadges);
             }
         } catch (e) {
             // outer catch: 예외가 발생해도 숨겼던 TF 복원
@@ -1962,7 +1824,7 @@ function isAllShapeChildren(item) {
 /**
  * 벡터 도형을 PNG로 렌더링한다.
  */
-function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildIds, decoChildIds, allItems) {
+function exportVectorShapeFrames(doc, outputDir, startPage, endPage, decoChildIds, allItems) {
     var renderDir = Folder(outputDir + "/rendered_frames");
     renderDir.create();
 
@@ -2007,7 +1869,6 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, badgeChildI
         var domId = item.id;
         if (renderedIds[domId]) continue;
         if (isOnHiddenLayer(item)) continue;
-        if (badgeChildIds && badgeChildIds[domId]) continue;
         if (decoChildIds && decoChildIds[domId]) continue;
 
         var hasPlaced = false;
