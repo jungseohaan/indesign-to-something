@@ -1675,8 +1675,10 @@ function _ctfCheckGroupDecoText(item, rotBypass) {
         var groupText = item.contents.replace(/[\s﻿\r\n]/g, "");
         var hasTable = false;
         try { hasTable = item.parentStory && item.parentStory.tables.length > 0; } catch (e) {}
-        // 긴 텍스트(>10자)라도 컨테이너 배경색 도형 안에 완전히 들어오면 → "background"
-        // exportComplexGraphicFrames가 textComposite PNG로 통 렌더 → Java는 TF를 별도 배치하지 않음
+        // 긴 텍스트(>10자) + 컨테이너 배경색 도형 안 → null (editable 폴스루)
+        // 이전: "background"를 반환하여 textComposite PNG에 포함 기대.
+        // 그러나 deco 그룹 렌더 시 hideTextFrames()가 TF를 숨겨 PNG에도 미포함,
+        // editableIds에도 미추가 → 텍스트 완전 소실. → null로 변경, editable로 처리.
         if (groupText.length > 10 && !hasTable && !rotBypass && !isBadgeGroup(item.parent)) {
             var _grpItems = [];
             try { _grpItems = item.parent.allPageItems; } catch (e) {}
@@ -1692,7 +1694,7 @@ function _ctfCheckGroupDecoText(item, rotBypass) {
                     var _TOL2 = 3.0;
                     if (_tfb[0] >= _cb[0]-_TOL2 && _tfb[1] >= _cb[1]-_TOL2 &&
                         _tfb[2] <= _cb[2]+_TOL2 && _tfb[3] <= _cb[3]+_TOL2) {
-                        return "background"; // 그룹 PNG에 포함됨 → editable 배치 불필요
+                        return null; // editable 폴스루: 배경 도형은 그룹 PNG, 텍스트는 HWPX 글상자
                     }
                 } catch (e) {}
             }
@@ -3409,7 +3411,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
                 var _cn;
                 try { _cn = _sh.constructor.name; } catch(_e) { continue; }
                 if (_cn !== "Polygon" && _cn !== "Oval" && _cn !== "GraphicLine"
-                        && _cn !== "Rectangle") continue;
+                        && _cn !== "Rectangle" && _cn !== "TextFrame") continue;
 
                 var _sName = "";
                 try { _sName = _sh.strokeColor.name; } catch(_e) {}
@@ -3428,6 +3430,15 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
                 }
                 if (!_colored) continue;
 
+                // TextFrame: 텍스트 컨텐츠를 숨겨 테두리(stroke)만 내보내기
+                var _savedContentOp = null;
+                if (_cn === "TextFrame") {
+                    try {
+                        _savedContentOp = _sh.contentTransparencySettings.blendingSettings.opacity;
+                        _sh.contentTransparencySettings.blendingSettings.opacity = 0;
+                    } catch(_e) { _savedContentOp = null; }
+                }
+
                 try {
                     var _wFile = "white_shape_" + _sh.id + ".png";
                     _sh.exportFile(ExportFormat.PNG_FORMAT, File(renderDir + "/" + _wFile));
@@ -3445,6 +3456,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, badgeChildId
                 } catch(_e2) {}
 
                 if (_origStroke) try { _sh.strokeColor = _origStroke; } catch(_e) {}
+                // TextFrame: 컨텐츠 opacity 복원
+                if (_savedContentOp !== null) {
+                    try { _sh.contentTransparencySettings.blendingSettings.opacity = _savedContentOp; } catch(_e) {}
+                }
             }
         } catch(_e) {}
     }
