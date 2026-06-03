@@ -153,6 +153,11 @@ public final class ResolvedBuildContext {
      */
     public java.util.Set<Integer> aboveLineAnchoredIds = new java.util.HashSet<>();
 
+    /**
+     * Phase 6(BackgroundInjector)이 배치한 page_object DOM ID 집합.
+     * Phase 7c가 동일 항목을 중복 배치하지 않도록 건너뛰는 데 사용.
+     */
+    public java.util.Set<Integer> phase6PlacedIds = new java.util.HashSet<>();
 
     public ResolvedBuildContext() {
     }

@@ -174,6 +174,7 @@ public final class BackgroundInjector {
 
             // BEHIND_TEXT 항목은 XML 순서상 앞에 올수록 더 아래 레이어 → addBlockAtFront
             sections.get(pageIdx).addBlockAtFront(fig);
+            ctx.phase6PlacedIds.add(rg.id());
 
             // 스프레드를 가로질러 다음 페이지로 넘치는 경우: 우측 반을 다음 페이지에 별도 배치
             boolean overflowsRight = rawRight > pageWidthMm + 10.0 && pageIdx + 1 < sections.size();
@@ -327,8 +328,8 @@ public final class BackgroundInjector {
                 if (lineX1 >= lineX2) continue;
 
                 // For a horizontal line, lineY1 ≈ lineY2; use strokeWeight for height.
-                // Enforce minimum 1 mm (2.835 pt) so HWP renders the line visibly.
-                double strokePt = Math.max(pi.strokeWeight(), 2.835);
+                // Minimum 1 pt so sub-point lines are still rendered.
+                double strokePt = Math.max(pi.strokeWeight(), 1.0);
                 double lineYCenter = (lineY1 + lineY2) / 2.0;
                 double visTop = Math.max(0.0, lineYCenter - strokePt / 2.0);
                 double visBottom = Math.min(lineYCenter + strokePt / 2.0, pageHeightPt);
@@ -355,7 +356,7 @@ public final class BackgroundInjector {
                 fig.zOrder(1); // above default zOrder=0 page items
                 fig.fromGroup(true); // IN_FRONT_OF_TEXT
                 fig.sourceId("synth_line_" + cid);
-                sections.get(pageIdx).addBlock(fig);
+                sections.get(pageIdx).addBlockAtFront(fig);
                 syntheticDone.add(cid);
                 System.err.println("[BackgroundInjector] synthetic line id=" + cid
                         + " x=" + String.format("%.1f", lineX1) + "pt y=" + String.format("%.1f", visTop)

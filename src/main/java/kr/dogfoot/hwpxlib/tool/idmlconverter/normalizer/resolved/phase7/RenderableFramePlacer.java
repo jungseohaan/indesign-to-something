@@ -525,8 +525,12 @@ public final class RenderableFramePlacer {
         // Phase 7c: page_object 항목 (스프레드 걸침 배경/장식 PNG) 배치
         // 주 페이지 가시 영역 + 좌/우 오버플로우를 인접 페이지에 크롭해서 배치
         for (RenderedGroup rg3 : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (!"page_object".equals(rg3.itemType())) continue;
+            if (!"page_object".equals(rg3.itemType())) {
+                continue;
+            }
             if (rg3.file() == null) continue;
+            // Phase 6(BackgroundInjector)이 이미 배치한 항목은 중복 배치 방지
+            if (ctx.phase6PlacedIds.contains(rg3.id())) continue;
             String dedupKey3 = rg3.pageIndex() + "|" + rg3.file();
             if (!placedKeys.add(dedupKey3)) continue;
 
@@ -540,30 +544,31 @@ public final class RenderableFramePlacer {
                 double[] bounds3 = rg3.bounds();
                 if (bounds3 == null || bounds3.length < 4) continue;
 
-                // renderedFloatingItems bounds: mm 단위 spread 절대좌표 → sf 곱해 pt, pageOffset 빼서 page-relative
+                // renderedFloatingItems(page_object) bounds: page-relative mm → sf 곱해 page-relative pt
                 double sf3 = ctx.scaleFactor;
-                double pageTop3 = 0, pageLeft3 = 0, pageWidthPt3 = 1e9, pageHeightPt3 = 1e9;
+                double pageWidthPt3 = 1e9, pageHeightPt3 = 1e9;
+                double currPageLeftSpread3 = 0;
                 if (ctx.resolvedData.pages() != null
                         && rg3.pageIndex() >= 0
                         && rg3.pageIndex() < ctx.resolvedData.pages().size()) {
                     double[] pgB3 = ctx.resolvedData.pages().get(rg3.pageIndex()).bounds();
                     if (pgB3 != null && pgB3.length >= 4) {
-                        pageTop3    = pgB3[0];
-                        pageLeft3   = pgB3[1];
-                        pageWidthPt3  = pgB3[3] - pgB3[1];
-                        pageHeightPt3 = pgB3[2] - pgB3[0];
+                        pageWidthPt3      = pgB3[3] - pgB3[1];
+                        pageHeightPt3     = pgB3[2] - pgB3[0];
+                        currPageLeftSpread3 = pgB3[1];
                     }
                 }
-                double rawLeft3   = bounds3[1] * sf3 - pageLeft3;
-                double rawTop3    = bounds3[0] * sf3 - pageTop3;
-                double rawRight3  = bounds3[3] * sf3 - pageLeft3;
-                double rawBottom3 = bounds3[2] * sf3 - pageTop3;
+                double rawLeft3   = bounds3[1] * sf3;
+                double rawTop3    = bounds3[0] * sf3;
+                double rawRight3  = bounds3[3] * sf3;
+                double rawBottom3 = bounds3[2] * sf3;
                 double fullW3 = rawRight3 - rawLeft3;
                 double fullH3 = rawBottom3 - rawTop3;
                 if (fullW3 <= 0 || fullH3 <= 0) continue;
 
                 java.awt.image.BufferedImage origImg3 = javax.imageio.ImageIO.read(pngFile3);
                 if (origImg3 == null || origImg3.getWidth() <= 2) continue;
+
 
                 // 주 페이지 가시 영역 크롭
                 double visLeft3   = Math.max(0.0, rawLeft3);
@@ -656,24 +661,18 @@ public final class RenderableFramePlacer {
                     int prevSec = ctx.toSectionIndex.applyAsInt(prevPi);
                     if (prevSec >= 0 && prevSec < sections.size()
                             && !placedKeys.contains(prevPi + "|" + rg3.file())) {
-                        double prevPageLeftSpread = 0, currPageLeftSpread = 0;
+                        double prevPageLeftSpread = 0;
                         double prevPageW = 1e9, prevPageH = 1e9;
-                        if (ctx.resolvedData.pages() != null) {
-                            if (prevPi < ctx.resolvedData.pages().size()) {
-                                double[] ppB = ctx.resolvedData.pages().get(prevPi).bounds();
-                                if (ppB != null && ppB.length >= 4) {
-                                    prevPageLeftSpread = ppB[1];
-                                    prevPageW = ppB[3] - ppB[1];
-                                    prevPageH = ppB[2] - ppB[0];
-                                }
-                            }
-                            if (rg3.pageIndex() < ctx.resolvedData.pages().size()) {
-                                double[] cpB = ctx.resolvedData.pages().get(rg3.pageIndex()).bounds();
-                                if (cpB != null && cpB.length >= 4) currPageLeftSpread = cpB[1];
+                        if (ctx.resolvedData.pages() != null && prevPi < ctx.resolvedData.pages().size()) {
+                            double[] ppB = ctx.resolvedData.pages().get(prevPi).bounds();
+                            if (ppB != null && ppB.length >= 4) {
+                                prevPageLeftSpread = ppB[1];
+                                prevPageW = ppB[3] - ppB[1];
+                                prevPageH = ppB[2] - ppB[0];
                             }
                         }
                         // item의 스프레드 기준 절대 left, 이전 페이지 기준 상대 x
-                        double itemSpreadLeft = currPageLeftSpread + rawLeft3;
+                        double itemSpreadLeft = currPageLeftSpread3 + rawLeft3;
                         double ovXonPrev = itemSpreadLeft - prevPageLeftSpread;
                         double ovLeft2  = Math.max(0.0, ovXonPrev);
                         double ovRight2 = Math.min(prevPageW, ovXonPrev + (-rawLeft3));
@@ -709,11 +708,19 @@ public final class RenderableFramePlacer {
                                 sections.get(prevSec).addBlock(figLeft);
                                 count++;
                                 placedKeys.add(prevPi + "|" + rg3.file());
-                            } catch (Exception lvEx) { /* skip */ }
+                                if (rg3.file().contains("deco_3317"))
+                                    System.err.println("[Phase7c] deco_3317 left-ov placed on sec=" + prevSec + " x=" + ovLeft2 + " w=" + (ovRight2-ovLeft2) + " pxW=" + leftImg.getWidth());
+                            } catch (Exception lvEx) {
+                                if (rg3.file().contains("deco_3317"))
+                                    System.err.println("[Phase7c] deco_3317 left-ov EXCEPTION: " + lvEx);
+                            }
                         }
                     }
                 }
-            } catch (Exception e3) { /* skip */ }
+            } catch (Exception e3) {
+                if (rg3.file() != null && rg3.file().contains("deco_3317"))
+                    System.err.println("[Phase7c] deco_3317 OUTER EXCEPTION: " + e3);
+            }
         }
 
         if (count > 0) {

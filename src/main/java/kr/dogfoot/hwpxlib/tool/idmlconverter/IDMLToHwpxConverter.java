@@ -981,6 +981,8 @@ public class IDMLToHwpxConverter {
             // DOM ID → IDML hex ID 변환하여 이미 사용된 것인지 확인
             String idmlHexId = "u" + Integer.toHexString(rg.id());
             if (usedSourceIds.contains(idmlHexId)) continue;
+            // BackgroundInjector가 page_obj_N 형식으로 이미 배치한 항목 스킵
+            if (usedSourceIds.contains("page_obj_" + rg.id())) continue;
 
             // 배지 그룹 자식 도형 건너뜀 (배지 통째 렌더링에서 처리)
             if (resolvedData.isShapeInBadgeGroup(idmlHexId)) continue;
@@ -1280,6 +1282,8 @@ public class IDMLToHwpxConverter {
 
             String idmlHexId = "u" + Integer.toHexString(rg.id());
             if (usedSourceIds.contains(idmlHexId)) continue;
+            // BackgroundInjector가 page_obj_N 형식으로 이미 배치한 항목 스킵
+            if (usedSourceIds.contains("page_obj_" + rg.id())) continue;
 
             // 자식 이미지가 이미 사용되었거나 상위 그룹에 의해 커버됨
             if (rg.childImageIds() != null) {
