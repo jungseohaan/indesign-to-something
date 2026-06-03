@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase0.InfraSetup;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.MasterPageNumberPlacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.PageLayoutBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2.FramePlacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
@@ -111,6 +112,9 @@ public class ResolvedToASTBuilder {
         for (ASTSection sec : sections) {
             doc.addSection(sec);
         }
+
+        // Phase 1.5: 마스터 페이지 쪽 번호 배치
+        MasterPageNumberPlacer.place(this.ctx, sections);
 
         // Phase 2: TextFrame 분류 및 배치
         FramePlacer.placeTextFrames(this.ctx, sections);
