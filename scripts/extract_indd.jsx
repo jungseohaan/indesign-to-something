@@ -527,6 +527,9 @@ function _runRenderPhases(doc, ctx, allItems) {
             renderedFloatingItems.push(bgResult.tableInlineRendered[tir]);
     }
     try { $.gc(); } catch (e) {}
+    // exportPageBackgrounds가 transparentBackground=false로 설정하고 복원하지 않으므로,
+    // 이후 deco/graphic/vector 내보내기는 다시 true로 복원해야 배경이 투명하게 렌더됨.
+    try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
 
     // 2.14. 이미지 프레임 개별 렌더링 (Rectangle/Oval/Polygon에 place된 이미지)
     _marker(ctx.outputDir, "06_imgFrames");

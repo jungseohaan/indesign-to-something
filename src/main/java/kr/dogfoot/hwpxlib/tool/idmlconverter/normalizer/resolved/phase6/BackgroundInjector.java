@@ -39,15 +39,9 @@ public final class BackgroundInjector {
             idToPage.put(rg.id(), rg.pageIndex());
         }
 
-        // 자체 page_object PNG를 가진 id 집합: 자식이라도 부모 그룹 PNG보다 더 정확하게 렌더링되므로
-        // childOfGroup에 추가하지 않고 독립적으로 배치함 (예: 부모 PNG에서 low-alpha로 렌더링되는 선분)
-        Set<Integer> hasOwnPageObjectPng = new HashSet<>();
-        for (RenderedGroup rg : floatingItems) {
-            if (isPageObject(rg)) hasOwnPageObjectPng.add(rg.id());
-        }
-
-        // Pass 1b: page_object 아이템의 childIds/childImageIds 중 부모와 같은 페이지의 자식만 수집
-        // 단, 자체 PNG가 있는 자식은 제외 — 해당 자식은 독립적으로 배치
+        // Pass 1b: page_object 아이템의 모든 자식(childIds/childImageIds)을 childOfGroup에 수집.
+        // 부모 그룹 PNG에 자식 내용이 이미 포함되어 있으므로 자식을 독립 배치하지 않는다.
+        // 같은 페이지의 자식만 수집 (다른 페이지 자식은 독립 배치 허용).
         Set<Integer> childOfGroup = new HashSet<>();
         for (RenderedGroup rg : floatingItems) {
             if (!isPageObject(rg)) continue;
@@ -55,18 +49,21 @@ public final class BackgroundInjector {
             if (rg.childIds() != null) {
                 for (int cid : rg.childIds()) {
                     Integer cp = idToPage.get(cid);
-                    if (cp != null && cp == parentPage && !hasOwnPageObjectPng.contains(cid))
+                    if (cp != null && cp == parentPage)
                         childOfGroup.add(cid);
                 }
             }
             if (rg.childImageIds() != null) {
                 for (int cid : rg.childImageIds()) {
                     Integer cp = idToPage.get(cid);
-                    if (cp != null && cp == parentPage && !hasOwnPageObjectPng.contains(cid))
+                    if (cp != null && cp == parentPage)
                         childOfGroup.add(cid);
                 }
             }
         }
+
+        // childOfGroup 항목은 Phase 7c도 배치하지 않도록 phase6PlacedIds에 선제 등록
+        ctx.phase6PlacedIds.addAll(childOfGroup);
 
         Set<String> processedKeys = new HashSet<>();
 
@@ -470,6 +467,7 @@ public final class BackgroundInjector {
                 || f.contains("shape_") || f.contains("graphic_") || f.contains("master_")
                 || f.contains("haseera_"));
     }
+
 
     private static byte[] loadPng(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (rg.file() == null) return null;
