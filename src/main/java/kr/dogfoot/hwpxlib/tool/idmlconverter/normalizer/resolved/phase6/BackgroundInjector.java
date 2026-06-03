@@ -215,10 +215,15 @@ public final class BackgroundInjector {
             // 페이지 전체를 덮는 배경 항목 → zOrder=0 (최하단 레이어)
             // 기준: rawLeft≤1mm, rawTop≤1mm, rawBottom≥(pageHeight-1mm) — 페이지 전체 커버
             // 장식/부분 항목 → zOrder=5 (배경 위에 표시)
+            // 페이지 배경 판별: 블리드 여유(최대 10mm) 허용 + 면적이 페이지 30% 이상이면 배경으로 간주.
+            // graphic_3357처럼 페이지 높이의 일부만 덮는 스프레드 배경 이미지도 포함하기 위해 면적 조건 추가.
+            boolean coversPageByArea = pageWidthMm < 1e9 && pageHeightMm < 1e9
+                    && (rawRight - rawLeft) * (rawBottom - rawTop)
+                        >= 0.3 * pageWidthMm * pageHeightMm;
             boolean isFullPageBg = rg.zOrder() <= 0
-                    && rawLeft <= 1.0
-                    && rawTop <= 1.0
-                    && rawBottom >= pageHeightMm - 1.0;
+                    && rawLeft <= 10.0
+                    && rawTop <= 10.0
+                    && (rawBottom >= pageHeightMm - 1.0 || coversPageByArea);
             fig.zOrder(isFullPageBg ? 0 : Math.max(rg.zOrder(), 5));
             fig.fromGroup(true);   // IN_FRONT_OF_TEXT — z-order로 텍스트TF와의 순서 결정
             fig.sourceId("page_obj_" + rg.id());
