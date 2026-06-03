@@ -1,67 +1,7 @@
 {
   "_comment": "IDML→HWPX 변환 통합 설정. ExtendScript + Java CLI 공용.",
   "rendering": {
-    "_comment": "ExtendScript 렌더링 설정 — 텍스트 프레임/배지를 PNG로 렌더링할 조건",
-    "textFrame": {
-      "_comment": "편집 가능 텍스트 프레임 vs 장식 텍스트 판별 기준",
-      "maxTextLength": 30,
-      "_comment_maxTextLength": "이 글자 수 이하인 TextFrame은 장식으로 판별하여 배경 PNG에 포함",
-      "decorativeLargeText": {
-        "_comment": "큰 폰트의 장식 텍스트를 PNG로 렌더링할 조건",
-        "enabled": true,
-        "minFontSize": 16,
-        "_comment_minFontSize": "이 크기 이상인 텍스트를 장식으로 판별",
-        "excludeBlack": true,
-        "_comment_excludeBlack": "검정색 텍스트는 장식이 아닌 본문으로 판별",
-        "blackThreshold": 0.9
-      },
-      "decorativeStyledText": {
-        "_comment": "배경색/테두리가 있는 짧은 텍스트를 장식으로 판별 (Object Style + 텍스트 조건 동시 만족)",
-        "enabled": true,
-        "maxTextLength": 10,
-        "_comment_maxTextLength": "이 글자 수 이하인 TextFrame만 대상",
-        "excludeBlack": true,
-        "_comment_excludeBlack": "검정색 텍스트는 제외",
-        "blackThreshold": 0.9,
-        "requireObjectStyle": true,
-        "_comment_requireObjectStyle": "배경색, 테두리, 둥근 모서리 중 하나 이상 필요"
-      }
-    },
-    "badge": {
-      "_comment": "배지 그룹 (도형+짧은 텍스트 조합) 감지 기준. 인라인 배지는 고해상도(badgeDpi)로 렌더",
-      "enabled": true,
-      "maxSize": 50,
-      "_comment_maxSize": "짧은 변 기준 최대 크기 (pt). 이보다 크면 배지 아님",
-      "maxTextLength": 20,
-      "_comment_maxTextLength": "그룹 내 전체 텍스트 최대 글자 수. 이보다 길면 배지 아님",
-      "requireShape": true,
-      "_comment_requireShape": "도형(Rectangle/Polygon/Oval) 1개 이상 필수",
-      "allowImage": false,
-      "_comment_allowImage": "이미지 포함 시 배지로 인정할지",
-      "badgeDpi": 600,
-      "_comment_badgeDpi": "배지 렌더 해상도. 텍스트 선명도 확보용",
-      "maxAspectRatio": 4.5,
-      "_comment_maxAspectRatio": "배지 종횡비 상한 (길이/짧이). 이보다 크면 배너로 간주. 말풍선 태그 수용을 위해 4.5",
-      "nestedEnabled": true,
-      "_comment_nestedEnabled": "그룹 전체가 배지 조건에 안 맞아도 내부에 (도형+짧은 번호 TF) 패턴이 있으면 페어만 별도 PNG 추출 (SPEC-021)",
-      "nestedMaxTextLength": 3,
-      "_comment_nestedMaxTextLength": "중첩 뱃지 TF 최대 글자 수 (번호/짧은 라벨 한정)",
-      "decorationMergeEnabled": true,
-      "_comment_decorationMergeEnabled": "뱃지와 시각적으로 한 덩어리지만 별개 그룹인 외곽선 데코(폰트→폴리곤 변환된 라벨)를 합성 PNG로 추출 (SPEC-022)",
-      "decorationMergeMinOverlap": 0.5,
-      "_comment_decorationMergeMinOverlap": "데코가 뱃지와 겹쳐야 할 최소 비율 (데코 면적 기준)",
-      "decorationMergeAdjacency": 20,
-      "_comment_decorationMergeAdjacency": "위/아래 인접 데코 허용 거리 (pt). 가로 50% 이상 겹쳐야 함. 'Step 1' 같은 외부 라벨까지 잡으려면 ~20pt(7mm) 권장"
-    },
-    "transparency": {
-      "_comment": "투명도 기반 렌더링 대상 판별 (미사용 — 향후 구현 예정)",
-      "opacityThreshold": 100,
-      "tintThreshold": 30
-    },
-    "rotation": {
-      "_comment": "회전된 객체 렌더링 최소 각도 (미사용 — 향후 구현 예정)",
-      "minAngle": 0.1
-    },
+    "_comment": "ExtendScript 렌더링 설정",
     "pngExportResolution": 220,
     "_comment_pngExportResolution": "ExtendScript PNG 내보내기 해상도 (DPI). 페이지 배경은 PDF 파이프라인 사용"
   },
