@@ -110,6 +110,9 @@ pub async fn convert_idml(
     println!("Convert args: {:?}", args);
     println!("spread_based option: {}", options.spread_based);
 
+    let kill = app.state::<crate::ProcessKillHandle>();
+    kill.reset();
+
     let java = find_java();
     let mut child = Command::new(&java)
         .args(&args)
@@ -117,6 +120,10 @@ pub async fn convert_idml(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start Java process: {}", e))?;
+
+    if let Some(pid) = child.id() {
+        kill.register_pid(pid);
+    }
 
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
@@ -187,6 +194,11 @@ pub async fn convert_idml(
     }
 
     let status = child.wait().await.map_err(|e| e.to_string())?;
+    kill.deregister_pid();
+
+    if kill.is_cancelled() {
+        return Err("변환이 취소되었습니다.".to_string());
+    }
 
     if !status.success() {
         let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());

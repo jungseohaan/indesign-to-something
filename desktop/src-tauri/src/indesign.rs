@@ -289,12 +289,19 @@ end using terms from"#,
     let script_file = output_dir.join("_extract.applescript");
     std::fs::write(&script_file, &applescript)
         .map_err(|e| format!("AppleScript 파일 쓰기 실패: {}", e))?;
+    let kill = app.state::<crate::ProcessKillHandle>();
+    kill.reset();
+
     let mut child = Command::new("osascript")
         .arg(&script_file)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("osascript 실행 실패: {}", e))?;
+
+    if let Some(pid) = child.id() {
+        kill.register_pid(pid);
+    }
 
     // .progress 파일 폴링
     // - 절대 타임아웃: 3600초 (1시간)
@@ -322,6 +329,13 @@ end using terms from"#,
             Ok(Some(_)) => break,
             Ok(None) => {} // 아직 실행 중
             Err(_) => break,
+        }
+
+        // 취소 확인
+        if kill.is_cancelled() {
+            let _ = child.kill().await;
+            kill.deregister_pid();
+            return Err("추출이 취소되었습니다.".to_string());
         }
 
         // 타임아웃 확인 (절대 또는 정체)
@@ -428,6 +442,8 @@ end using terms from"#,
 
         sleep(Duration::from_millis(300)).await;
     }
+
+    kill.deregister_pid();
 
     // osascript 결과 수집
     let output = child.wait_with_output().await

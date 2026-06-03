@@ -5,10 +5,85 @@ mod indesign;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
 
+/// 실행 중인 subprocess의 PID + 취소 플래그.
+/// `app.manage(ProcessKillHandle::new())`로 등록, 커맨드에서 `State<ProcessKillHandle>`로 접근.
+pub struct ProcessKillHandle {
+    pub cancelled: std::sync::atomic::AtomicBool,
+    pub pid: std::sync::Mutex<Option<u32>>,
+}
+
+impl ProcessKillHandle {
+    pub fn new() -> Self {
+        Self {
+            cancelled: std::sync::atomic::AtomicBool::new(false),
+            pid: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// 새 프로세스 시작 전 상태 초기화
+    pub fn reset(&self) {
+        self.cancelled
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut g) = self.pid.lock() {
+            *g = None;
+        }
+    }
+
+    /// 프로세스 PID 등록
+    pub fn register_pid(&self, pid: u32) {
+        if let Ok(mut g) = self.pid.lock() {
+            *g = Some(pid);
+        }
+    }
+
+    /// PID 해제 (프로세스 종료 후)
+    pub fn deregister_pid(&self) {
+        if let Ok(mut g) = self.pid.lock() {
+            *g = None;
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// 취소 플래그 설정 + 현재 프로세스 SIGKILL
+    pub fn cancel_and_kill(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(g) = self.pid.lock() {
+            if let Some(pid) = *g {
+                #[cfg(unix)]
+                {
+                    let _ = std::process::Command::new("kill")
+                        .args(["-9", &pid.to_string()])
+                        .output();
+                }
+                #[cfg(windows)]
+                {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/PID", &pid.to_string(), "/F"])
+                        .output();
+                }
+            }
+        }
+    }
+}
+
+/// 현재 실행 중인 subprocess를 즉시 종료한다.
+#[tauri::command]
+async fn cancel_current(app: tauri::AppHandle) -> Result<(), String> {
+    let kill = app.state::<ProcessKillHandle>();
+    kill.cancel_and_kill();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(ProcessKillHandle::new())
         .menu(|handle| create_menu(handle))
         .on_menu_event(|app, event| {
             // SPEC-019 M1: 메뉴 ID → 프론트엔드 이벤트 단순 라우팅.
@@ -58,6 +133,7 @@ pub fn run() {
             commands::list_user_schemas,
             commands::save_user_schema,
             commands::delete_user_schema,
+            cancel_current,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -798,7 +798,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     batchCurrentPhaseMessage: null,
   }),
 
-  cancelBatch: () => set({ batchCancelled: true }),
+  cancelBatch: () => {
+    set({ batchCancelled: true });
+    invoke("cancel_current").catch(() => {});
+  },
 }));
 
 // 폴더 목록을 스캔하여 기존 batchScanResult에 병합하는 헬퍼
