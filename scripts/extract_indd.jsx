@@ -212,7 +212,7 @@ function loadConversionConfig(configPath) {
                 // - inlineTextEditable: 조건 7 (isInlineItem) 에서 텍스트 콘텐츠가 있으면 editable 로
                 // - groupShortTextEditable: 조건 8 (Group 안 짧은 장식) 도 editable 로 (콘텐츠 텍스트 보존)
                 // - oneCharEditable: 조건 11 (≤1자 빈 프레임) 에서 실제 1자가 있으면 editable 로
-                spec025: { masterPageEditable: true, hashiraEditable: false, rotationEditable: true,
+                spec025: { masterPageEditable: true, hashiraEditable: true, rotationEditable: true,
                     // inlineTextEditable: 인라인 앵커 TextFrame 을 editable 로 승격.
                     // inlineTextMaxLen 이하 짧은 텍스트만 (배지/라벨 케이스). 긴 인라인은 부모 flow 의
                     // ORC embedding 과 중복되므로 background 로 유지.
@@ -1579,11 +1579,14 @@ function _ctfCheckHidden(item) {
 }
 
 // 3: 비인쇄 → background (spec025.nonprintingEditable 이면 editable 유지)
+// 단, 비인쇄 마스터 페이지 아이템은 플래그와 무관하게 항상 background.
+// (마스터에서 파생됐으나 Nonprinting=true인 아이템은 의도적으로 숨겨진 하시라/장식 요소)
 function _ctfCheckNonprinting(item, ovr) {
     try {
         if (item.nonprinting) {
-
-            if (!ovr.nonprintEditable) return "background";
+            var isMaster = false;
+            try { isMaster = !!item.masterPageItem; } catch (e) {}
+            if (isMaster || !ovr.nonprintEditable) return "background";
         }
     } catch (e) {}
     return null;
@@ -5999,6 +6002,8 @@ function instanceMasterFrames(doc, startPage, endPage, textFrames, stories, edit
                         } catch (eHTF) {}
                     }
                 }
+                // textvar(running header)는 자동 페이지번호(pagenum)와 중복 → skip
+                if (hashiraSpecialType === "textvar") continue;
                 if (!hashiraSpecialType) continue;
             }
             var baseId = ""; try { baseId = mtf.id.toString(); } catch (e) { continue; }
