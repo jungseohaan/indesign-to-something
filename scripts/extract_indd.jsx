@@ -956,14 +956,6 @@ function isOnHiddenLayer(item) {
     return false;
 }
 
-/**
- * 벡터 도형(>=1) + 비어있지 않은 텍스트 TF(>=1)를 포함하는 그룹이면 true.
- * 글자 수, 크기, 종횡비 조건 없음.
- * 모든 텍스트는 TF로 변환하는 원칙에 따라 그룹 배경(도형)은 PNG, 텍스트는 별도 TF로 처리.
- */
-function isBadgeGroup(group) {
-    return false;
-}
 
 /**
  * 그룹 전체는 뱃지 조건에 안 맞지만 내부에 뱃지 패턴(도형 + 짧은 숫자 TF)이

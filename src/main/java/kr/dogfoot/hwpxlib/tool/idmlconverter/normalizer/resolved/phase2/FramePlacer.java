@@ -204,32 +204,6 @@ public final class FramePlacer {
                     if (rpi != null && rpi.parentId() != null) hasParent = true;
                     if (hasText && !rendered && !sharedWithEditable && hasParent) {
                         inlineToFloating = true;
-                    } else if (!hasText && rendered && domIdInt >= 0) {
-                        // null-type inline TF(renderedTextFrames에 있음) + 큰 폰트 → floating text box 승격.
-                        // Phase 3이 인라인 텍스트 런으로 병합하면 첫 줄 행간이 팽창하므로 단독 글상자로 배치.
-                        boolean _isNullTypeRt = false;
-                        for (RenderedGroup _rt : ctx.resolvedData.allRenderedTextFrames()) {
-                            if (_rt.id() == domIdInt && _rt.itemType() == null) {
-                                _isNullTypeRt = true;
-                                break;
-                            }
-                        }
-                        if (_isNullTypeRt && tf.storyId() != null) {
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory _inlS =
-                                    ctx.resolvedData.getStory(tf.storyId());
-                            if (_inlS != null && !_inlS.paragraphs().isEmpty()) {
-                                java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun> _inlRuns =
-                                        _inlS.paragraphs().get(0).runs();
-                                if (_inlRuns != null && !_inlRuns.isEmpty()) {
-                                    Double _inlFs = _inlRuns.get(0).fontSize();
-                                    if (_inlFs != null && _inlFs > 16.0) {
-                                        ctx.setDisposition(domIdInt, FrameDisposition.TEXT_BLOCK_PLACED);
-                                        inlineToFloating = true;
-                                    }
-                                }
-                            }
-                        }
-                        if (!inlineToFloating) continue;
                     } else {
                         continue;
                     }
@@ -342,22 +316,10 @@ public final class FramePlacer {
                             }
                         }
                     }
-                    // itemType=null인 renderedTextFrames 항목: ExtendScript 장식 휴리스틱이
-                    // 잘못 분류한 경우(예: 큰 제목 텍스트를 renderable로 분류) → 텍스트로 승격
-                    boolean _noItemTypeRendered = false;
-                    if (!_parentIsRotatedRect && _hasOwnText && _isRendered && !tf.isInline()) {
-                        for (RenderedGroup rt : ctx.resolvedData.allRenderedTextFrames()) {
-                            // badge_group_child 항목은 itemType()=null 이어도 부모 PNG 가 텍스트를 포함 → 승격 제외
-                            if (rt.id() == _domId && rt.itemType() == null && !rt.isBadgeGroupChild()) {
-                                _noItemTypeRendered = true;
-                                break;
-                            }
-                        }
-                    }
                     // PNG 렌더링 없이 자기 스토리에 텍스트만 있는 non-editable TF:
                     // 조상 Group에 PNG가 없는 경우 텍스트 글상자로 배치 (예: "새로운 단어가..." 글상자)
                     boolean _nonRenderedWithText = false;
-                    if (!_parentIsRotatedRect && !_noItemTypeRendered && _hasOwnText && !_isRendered
+                    if (!_parentIsRotatedRect && _hasOwnText && !_isRendered
                             && tf.storyId() != null && !tf.isInline()) {
                         boolean _ancestorHasPng = false;
                         ResolvedPageItem _anPi = ctx.resolvedData.getPageItem(tf.id());
@@ -369,11 +331,6 @@ public final class FramePlacer {
                                 for (RenderedGroup _rg : ctx.resolvedData.allRenderedFloatingItems()) {
                                     if (_rg.id() == _anPidInt && _rg.file() != null) { _ancestorHasPng = true; break; }
                                 }
-                                if (!_ancestorHasPng) {
-                                    for (RenderedGroup _rg : ctx.resolvedData.allRenderedTextFrames()) {
-                                        if (_rg.id() == _anPidInt && _rg.file() != null) { _ancestorHasPng = true; break; }
-                                    }
-                                }
                             } catch (NumberFormatException ignored) {}
                             if (!_ancestorHasPng) {
                                 ResolvedPageItem _anParPi = ctx.resolvedData.getPageItem(_anPid);
@@ -382,7 +339,7 @@ public final class FramePlacer {
                         }
                         _nonRenderedWithText = !_ancestorHasPng;
                     }
-                    if (_parentIsRotatedRect || _noItemTypeRendered) {
+                    if (_parentIsRotatedRect) {
                         ctx.setDisposition(_domId, FrameDisposition.TEXT_BLOCK_PLACED);
                         // fall through → 글상자로 배치
                     } else if (_nonRenderedWithText) {
@@ -615,77 +572,6 @@ public final class FramePlacer {
                 }
             } catch (Exception eTOPre) {}
 
-            // 배지 그룹과 같은 baseline에서 X 좌표가 겹치면 배지 우측으로 이동.
-            // InDesign은 zOrder/textWrap 으로 배지 위로 텍스트가 흐르지 않게 처리하지만,
-            // HWPX 글상자는 절대좌표 배치라 시각적 충돌 → 텍스트 좌측을 배지 우측+여백으로 보정.
-            for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
-                if (!rg.isBadgeGroup()) continue;
-                if (rg.pageIndex() != tf.pageIndex()) continue;
-                double[] bb = rg.bounds();
-                if (bb == null || bb.length < 4) continue;
-                // 배지 자식은 자기 자신이 배지이므로 제외
-                int[] childIds = rg.childTextFrameIds();
-                boolean selfChild = false;
-                if (childIds != null) {
-                    int tfIdInt;
-                    try { tfIdInt = Integer.parseInt(tf.id()); } catch (NumberFormatException e) { tfIdInt = -1; }
-                    for (int cid : childIds) { if (cid == tfIdInt) { selfChild = true; break; } }
-                }
-                if (selfChild) continue;
-                // 배지 bounds 를 page-relative 로 변환 (RenderedGroup.bounds 는 이미 page-relative pt)
-                double bT = bb[0], bL = bb[1], bB = bb[2], bR = bb[3];
-                // Y 겹침 비율
-                double yOvStart = Math.max(y, bT);
-                double yOvEnd = Math.min(y + h, bB);
-                double yOv = yOvEnd - yOvStart;
-                if (yOv <= 0) continue;
-                double tfYExtent = h;
-                double badgeYExtent = bB - bT;
-                double yOvRatio = yOv / Math.min(tfYExtent, badgeYExtent);
-                if (yOvRatio < 0.5) continue;
-                // X 겹침: 배지가 TF 의 좌측 끝(첫 20%) 영역과 겹칠 때만 shift
-                // (배지가 TF 안쪽 깊숙이 있는 경우 — 예: 줄 끝 inline 배지 — 는 shift 금지)
-                // 보정 후 너비가 너무 작아지면 스킵
-                if (bR > x && bL < x + w * 0.2 && bR < x + w) {
-                    // SPEC-025: 인라인 앵커된 작은 배지는 frame 안에 임베드되므로 shift 하지 않음.
-                    // 배지가 frame 의 텍스트 흐름 내부에 anchor 되어 있는지 확인.
-                    boolean badgeIsInlineAnchored = false;
-                    if (childIds != null && tf.storyId() != null) {
-                        // 배지의 자식 TextFrame 의 parentStory 가 우리 frame 의 story 또는 그 자식 story 인지 확인
-                        for (int cid : childIds) {
-                            ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(String.valueOf(cid));
-                            if (childTf == null) continue;
-                            if (childTf.isInline()) { badgeIsInlineAnchored = true; break; }
-                        }
-                    }
-                    if (badgeIsInlineAnchored) continue;
-                    // textwrap 케이스: composedLines에 wrapIndentRight > frameW*0.3 이면
-                    // InDesign textwrap이 이미 레이아웃을 제어 → badge-shift 금지.
-                    // (예: 정의 박스 상단에 배지가 걸쳐 있을 때)
-                    boolean hasTextwrapRight = false;
-                    boolean hasTextwrapLeft = false;
-                    if (tf.composedLines() != null) {
-                        double[] tfGb = tf.geometricBounds();
-                        double tfW = (tfGb != null && tfGb.length >= 4) ? (tfGb[3] - tfGb[1]) : 0;
-                        for (ResolvedTextFrame.ComposedLine cl : tf.composedLines()) {
-                            if (tfW > 0 && cl.wrapIndentRight() > tfW * 0.30) { hasTextwrapRight = true; }
-                            if (tfW > 0 && cl.wrapIndentLeft() > tfW * 0.20) { hasTextwrapLeft = true; }
-                            if (hasTextwrapRight && hasTextwrapLeft) break;
-                        }
-                    }
-                    if (hasTextwrapRight) continue;
-                    if (hasTextwrapLeft) continue;
-                    double margin = 4.0; // pt
-                    double newX = bR + margin;
-                    double delta = newX - x;
-                    double remainW = w - delta;
-                    if (delta > 0 && remainW > w * 0.2 && remainW > 20.0) {
-                        x = newX;
-                        w = remainW;
-                    }
-                }
-            }
-
             // 같은 부모 Group 안의 형제 도형(fill 있는 Rectangle/Polygon/Oval) 과
             // 동일 baseline 에 있을 때 형제 우측으로 이동. (예: page 17 Theme 라벨 + 한국어 TF)
             try {
@@ -778,81 +664,9 @@ public final class FramePlacer {
                 _srcId = "u" + tf.id();  // 그대로 prefix 만 붙임 (Phase 3 가 sourceId parse 시 분기 처리)
             }
             block.sourceId(_srcId);
-            // badge_group_child: 텍스트+배경도형이 그룹된 배지의 editable TF 자식.
-            // 원칙: 분류(simple/decorative/illustrated) 없이 항상 텍스트 블록으로 변환.
-            // Phase 7 이 badge PNG(장식) 를 배치하고, Phase 2 는 텍스트를 그 위에 오버레이.
-            RenderedGroup _parentBadge = null;
-            boolean _isBadgeChild = false;
-            boolean _skipBadgeChildInlineAnchor = false;
-            try {
-                int domIdInt5 = -1;
-                try { domIdInt5 = Integer.parseInt(tf.id()); } catch (NumberFormatException e) {}
-                if (domIdInt5 >= 0) {
-                    for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
-                        if (!rg.isBadgeGroup()) continue;
-                        int[] cTfIds = rg.childTextFrameIds();
-                        if (cTfIds == null) continue;
-                        for (int cid : cTfIds) {
-                            if (cid == domIdInt5) { _parentBadge = rg; break; }
-                        }
-                        if (_parentBadge != null) break;
-                    }
-                    if (_parentBadge != null && _parentBadge.bounds() != null && _parentBadge.bounds().length >= 4) {
-                        _isBadgeChild = true;
-                        double[] pb = _parentBadge.bounds();
-                        double pbT = pb[0], pbL = pb[1], pbB = pb[2], pbR = pb[3];
-                        // 단일 editable child → 그룹 bounds 로 확장 (배지 장식 영역 시각적으로 흡수)
-                        int[] cTfIdsAll = _parentBadge.childTextFrameIds();
-                        int editableChildCount = 0;
-                        if (cTfIdsAll != null) {
-                            for (int cid : cTfIdsAll) {
-                                if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) editableChildCount++;
-                            }
-                        }
-                        // TF가 그룹 하단부(50% 이하)에만 있으면 이미지 캡션 — 그룹 bounds 확장 금지.
-                        double _groupH = pbB - pbT;
-                        double _tfTopRatio = (_groupH > 1.0) ? (y - pbT) / _groupH : 0.0;
-                        if (editableChildCount == 1 && pbB > pbT && pbR > pbL && _tfTopRatio < 0.5) {
-                            // 세로: badge bounds로 확장 (vertAlign=CENTER 용)
-                            y = pbT; h = pbB - pbT;
-                            // 가로: TF가 배지 왼쪽보다 오른쪽에 있으면 원위치 유지 (배지 좌측 장식 영역 침범 방지)
-                            // TF가 배지 범위 바깥 왼쪽에 있는 경우에만 배지 left로 이동
-                            x = Math.max(x, pbL);
-                            w = pbR - x;
-                            // 배지 공간 내에 다른 editable sibling TF가 있으면 오른쪽으로 확장 금지
-                            // (예: badge_group_child 오른쪽에 별도 editable TF가 인접한 경우)
-                            double _clampedRight = pbR;
-                            for (ResolvedTextFrame _sib : frames) {
-                                if (_sib == tf) continue;
-                                if (_sib.pageIndex() != tf.pageIndex()) continue;
-                                if (!ctx.resolvedData.isEditableTextFrame(_sib.id())) continue;
-                                double[] _sibGb = _sib.geometricBounds();
-                                if (_sibGb == null || _sibGb.length < 4) continue;
-                                double _sibLeft = (_sibGb[1] < pageLeft) ? _sibGb[1] : (_sibGb[1] - pageLeft);
-                                double _sibTop = _sibGb[0] - pageTop;
-                                double _sibBot = _sibGb[2] - pageTop;
-                                if (_sibLeft > x + 4.0 && _sibLeft < pbR - 2.0
-                                        && _sibBot > y + 2.0 && _sibTop < y + h - 2.0) {
-                                    if (_sibLeft < _clampedRight) _clampedRight = _sibLeft;
-                                }
-                            }
-                            if (_clampedRight < pbR) w = _clampedRight - x;
-                            if (w <= 0) { x = pbL; w = pbR - pbL; }
-                        }
-                        // 모든 editable 자식을 badge text child 로 표시 → Phase 3(InlineFrameHandler) 중복 처리 방지
-                        if (cTfIdsAll != null) {
-                            for (int cid : cTfIdsAll) {
-                                if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
-                                    ctx.resolvedData.markSimpleBadgeChild(String.valueOf(cid));
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (Exception eBadge) {}
             // ￼ 로 시작하는 TF 첫줄에 inline TF가 좌측 가장자리를 공유하는 경우
             // (예: 단락 번호 "1" TF가 본문 TF 왼쪽에 맞닿음) → x를 inline TF 너비만큼 오른쪽으로 이동
-            if (!_isBadgeChild) {
+            {
                 String _fvtInl = tf.frameVisibleText();
                 if (_fvtInl != null && _fvtInl.startsWith("￼")) {
                     for (ResolvedTextFrame _itf : frames) {
@@ -882,51 +696,7 @@ public final class FramePlacer {
             // 부모 Group이 Phase7 렌더 PNG로 배치되면 그 위에 올라가야 함.
             // Phase7은 zOrder=10000-pageItemIdx 로 역매핑하므로 동일한 방식으로 계산하여
             // 부모 PNG 바로 위에 배치한다.
-            int tfZ = tf.zOrder();
-            try {
-                ResolvedPageItem tfPi = ctx.resolvedData.getPageItem(tf.id());
-                String parentId = (tfPi != null) ? tfPi.parentId() : null;
-                if (parentId != null) {
-                    ResolvedPageItem parentPi = ctx.resolvedData.getPageItem(parentId);
-                    if (parentPi != null && "Group".equals(parentPi.type())) {
-                        boolean parentRenderedAsFrame = false;
-                        for (RenderedGroup rg : ctx.resolvedData.allRenderedTextFrames()) {
-                            if (String.valueOf(rg.id()).equals(parentId) && !rg.isBadgeGroup()) {
-                                parentRenderedAsFrame = true;
-                                break;
-                            }
-                        }
-                        if (parentRenderedAsFrame) {
-                            int parentHwpxZ = (parentPi.zOrder() > 0)
-                                    ? Math.max(10000 - parentPi.zOrder(), 10) : 10;
-                            tfZ = parentHwpxZ + 1; // 부모 PNG 바로 위
-                        }
-                    }
-                }
-                // badge_group_child → Phase 7 PNG 위에 텍스트 오버레이.
-                // inline_object 로 앵커된 배지는 PNG 가 body TF 내 inline 으로 배치되므로 z-override 금지.
-                if (_isBadgeChild && _parentBadge != null) {
-                    boolean badgeIsInlineAnchored = false;
-                    for (RenderedGroup rg2 : ctx.resolvedData.allRenderedFloatingItems()) {
-                        if (rg2.id() == _parentBadge.id() && "inline_object".equals(rg2.itemType())) {
-                            badgeIsInlineAnchored = true;
-                            break;
-                        }
-                    }
-                    // inlineToFloating=true: Phase 2가 floating text 배치를 명시적으로 결정 → skip 금지.
-                    if (badgeIsInlineAnchored && !inlineToFloating) {
-                        _skipBadgeChildInlineAnchor = true;
-                    } else {
-                        ResolvedPageItem badgePi = ctx.resolvedData.getPageItem(String.valueOf(_parentBadge.id()));
-                        int badgePageZ = (badgePi != null && badgePi.zOrder() > 0) ? badgePi.zOrder() : 0;
-                        int badgeHwpxZ = (badgePageZ > 0) ? Math.max(10000 - badgePageZ, 10) : 10;
-                        tfZ = badgeHwpxZ + 1;
-                        // 배지 PNG 위에 텍스트 오버레이: hp:tbl(흰 배경)이 아닌 투명 hp:rect로 라우팅
-                        inlineToFloating = true;
-                    }
-                }
-            } catch (Exception e) {}
-            block.zOrder(tfZ);
+            block.zOrder(tf.zOrder());
             block.columnCount(tf.columnCount() > 0 ? tf.columnCount() : 1);
             block.columnGutter(CoordinateConverter.pointsToHwpunits(tf.columnGutter() * ctx.scaleFactor));
 
@@ -957,12 +727,6 @@ public final class FramePlacer {
                     block.verticalJustification("CENTER_ALIGN");
                 }
             }
-            // SPEC-025: 배지 자식 (badge_group child) 텍스트는 HWPX cell-height vs fontSize 의 좁은 여유 때문에
-            // BOTTOM_ALIGN 적용 시 텍스트가 셀 밖으로 밀려나는 현상 발생 → CENTER_ALIGN 으로 강제하여 안정 배치.
-            if (_isBadgeChild) {
-                block.verticalJustification("CENTER_ALIGN");
-            }
-
             if (tf.rotationAngle() != 0) {
                 block.rotationAngle(tf.rotationAngle());
             }
@@ -1047,8 +811,6 @@ public final class FramePlacer {
                     }
                 }
             }
-            if (_skipBadgeChildInlineAnchor) continue;
-
             // 공간 포함 outer TF: 자신 안에 포함된 inner TF id 기록 → StoryConverter가 inner story 주입
             for (java.util.Map.Entry<String, String> _inner : innerToOuterMap.entrySet()) {
                 if (_inner.getValue().equals(tf.id())) {
