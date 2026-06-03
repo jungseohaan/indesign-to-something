@@ -71,9 +71,6 @@ public final class BackgroundInjector {
             if (!isPageObject(rg)) continue;
             // inline_object로 이미 처리된 ID는 Phase 3가 인라인으로 배치 → 중복 방지
             if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
-            // badge_group 타입 항목은 Phase 7이 배치 → Phase 6 skip
-            // (같은 id가 page_object 타입으로 별도 등록된 경우는 Phase 6이 처리해야 하므로 타입으로만 판별)
-            if (rg.isBadgeGroup()) continue;
             // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
             if (childOfGroup.contains(rg.id())) continue;
             // 같은 (id, pageIndex) 쌍이 중복 추출된 경우만 스킵

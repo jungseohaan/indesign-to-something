@@ -473,16 +473,9 @@ public class IDMLToHwpxConverter {
 
                 // 같은 페이지에 이미 주입된 orphan에 포함되는 자식 건너뜀
                 // (부모 그룹의 렌더 이미지가 자식을 포함하므로 자식은 중복)
-                // 단, 배지 그룹이 이미 배치된 orphan의 자식이 아니면 독립 배치 허용
-                // (배경 사각형 위에 배지가 있는 경우: 배경은 배지를 포함하지 않음)
                 boolean containedByOrphan = false;
-                boolean isBadge = rg.isBadgeGroup();
-                if (isBadge && placedOrphanChildIds.contains(rg.id())) {
-                    // 이미 배치된 orphan이 이 배지를 자식으로 포함 → 중복이므로 건너뜀
-                    containedByOrphan = true;
-                }
                 java.util.List<long[]> existingOrphans = pageOrphanBounds.get(pageIdx);
-                if (!isBadge && existingOrphans != null && figArea > 0) {
+                if (existingOrphans != null && figArea > 0) {
                     for (long[] ob : existingOrphans) {
                         long obW = ob[2] - ob[0];
                         long obH = ob[3] - ob[1];
