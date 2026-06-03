@@ -54,7 +54,7 @@ public class ASTTextFrameBlock extends ASTBlock {
     // 겹침 감지: SQUARE textWrap 적용 플래그
     private boolean textWrapSquare;
 
-    // Phase 2가 badge_group 단일-child를 플로팅 글상자로 전환한 경우 true.
+    // Phase 2가 non-editable inline TF를 플로팅 글상자로 전환한 경우 true.
     // HwpxTextBoxBuilder가 이 플래그를 보고 투명 DrawText 경로(hp:rect)로 라우팅.
     private boolean inlineToFloating;
 

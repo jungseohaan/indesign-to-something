@@ -492,9 +492,6 @@ public class ResolvedDataReader {
         if (o.has("childIds") && !o.get("childIds").isJsonNull()) {
             group.childIds(parseIntArray(o.getAsJsonArray("childIds")));
         }
-        if (o.has("childTextFrameIds") && !o.get("childTextFrameIds").isJsonNull()) {
-            group.childTextFrameIds(parseIntArray(o.getAsJsonArray("childTextFrameIds")));
-        }
         group.badgeGroupId(getInt(o, "badgeGroupId", 0));
         if (o.has("childImageIds") && !o.get("childImageIds").isJsonNull()) {
             group.childImageIds(parseIntArray(o.getAsJsonArray("childImageIds")));

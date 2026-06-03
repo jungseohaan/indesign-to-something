@@ -26,6 +26,26 @@ public final class FramePlacer {
     public static void placeTextFrames(ResolvedBuildContext ctx, List<ASTSection> sections) {
         List<ResolvedTextFrame> frames = ctx.resolvedData.textFrames();
 
+        // allRenderedFloatingItems O(N) 스캔 반복 제거: 사전 인덱스 구성
+        java.util.Set<Integer> badgeChildDomIds = new java.util.HashSet<>();
+        java.util.Map<Integer, Integer> badgeChildToParentId = new java.util.HashMap<>();
+        java.util.Map<Integer, int[]> inlineObjectChildIdsMap = new java.util.HashMap<>();
+        java.util.Set<Integer> childrenOfInlineObjects = new java.util.HashSet<>();
+        java.util.Set<Integer> inlineFileGroupIds = new java.util.HashSet<>();
+        for (RenderedGroup _rgi : ctx.resolvedData.allRenderedFloatingItems()) {
+            if ("badge_group_child".equals(_rgi.itemType())) {
+                badgeChildDomIds.add(_rgi.id());
+                badgeChildToParentId.put(_rgi.id(), _rgi.badgeGroupId());
+            }
+            if ("inline_object".equals(_rgi.itemType()) && _rgi.childIds() != null) {
+                inlineObjectChildIdsMap.put(_rgi.id(), _rgi.childIds());
+                for (int cid : _rgi.childIds()) childrenOfInlineObjects.add(cid);
+            }
+            if (_rgi.file() != null && _rgi.file().contains("inline_")) {
+                inlineFileGroupIds.add(_rgi.id());
+            }
+        }
+
         // 공간 포함 감지: inner TF가 outer TF bounds 안에 완전히 들어가고 다른 story를 가진 경우.
         // InDesign "밑줄 빈칸 + 예시 답안 오버레이" 패턴: inner TF는 outer TF의 마지막 단락에 주입.
         // key=inner TF id (decimal), value=outer TF id (decimal)
@@ -58,14 +78,7 @@ public final class FramePlacer {
                         // badge_group_child는 Phase 7이 처리 → 포함 감지 제외
                         int innerDomId = -1;
                         try { innerDomId = Integer.parseInt(inner.id()); } catch (NumberFormatException e) {}
-                        boolean isBadgeChild = false;
-                        if (innerDomId >= 0) {
-                            for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                                if (rg.id() == innerDomId && "badge_group_child".equals(rg.itemType())) {
-                                    isBadgeChild = true; break;
-                                }
-                            }
-                        }
+                        boolean isBadgeChild = innerDomId >= 0 && badgeChildDomIds.contains(innerDomId);
                         if (!isBadgeChild) {
                             innerCandidates.computeIfAbsent(inner.id(), k -> new java.util.ArrayList<>()).add(outer);
                         }
@@ -116,38 +129,23 @@ public final class FramePlacer {
                     boolean rendered = domIdInt >= 0 && ctx.resolvedData.isRenderedByOtherChannel(domIdInt);
                     // badge_group_child: 부모 inline_object의 childIds에 포함된 경우에만 PNG에 텍스트가 있음.
                     // childIds가 비어있으면 inline PNG는 배경만 캡처 → 텍스트 TF는 별도 플로팅 배치 필요.
-                    if (rendered && domIdInt >= 0) {
-                        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                            if (rg.id() == domIdInt && "badge_group_child".equals(rg.itemType())) {
-                                int parentBadgeId = rg.badgeGroupId();
-                                boolean inInlinePng = false;
-                                for (RenderedGroup prg : ctx.resolvedData.allRenderedFloatingItems()) {
-                                    if (prg.id() == parentBadgeId && "inline_object".equals(prg.itemType())) {
-                                        int[] pChildIds = prg.childIds();
-                                        if (pChildIds != null) {
-                                            for (int pcid : pChildIds) {
-                                                if (pcid == domIdInt) { inInlinePng = true; break; }
-                                            }
-                                        }
-                                        break;
-                                    }
+                    if (rendered && domIdInt >= 0 && badgeChildDomIds.contains(domIdInt)) {
+                        Integer parentBadgeId = badgeChildToParentId.get(domIdInt);
+                        boolean inInlinePng = false;
+                        if (parentBadgeId != null) {
+                            int[] pChildIds = inlineObjectChildIdsMap.get(parentBadgeId);
+                            if (pChildIds != null) {
+                                for (int pcid : pChildIds) {
+                                    if (pcid == domIdInt) { inInlinePng = true; break; }
                                 }
-                                if (!inInlinePng) rendered = false; // inline PNG에 텍스트 없음 → 플로팅 배치 허용
-                                break;
                             }
                         }
+                        if (!inInlinePng) rendered = false;
                     }
                     // inline_object의 childIds 에 포함된 TextFrame 은 부모 PNG 에 시각적으로
                     // 이미 텍스트가 포함됨 → 플로팅 텍스트 배치 건너뜀 (예: "After You Read" 버튼).
                     if (!rendered && domIdInt >= 0) {
-                        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                            if ("inline_object".equals(rg.itemType()) && rg.childIds() != null) {
-                                for (int cid : rg.childIds()) {
-                                    if (cid == domIdInt) { rendered = true; break; }
-                                }
-                                if (rendered) break;
-                            }
-                        }
+                        rendered = childrenOfInlineObjects.contains(domIdInt);
                     }
                     // 부모/조상 Group이 inline_object 이거나 inline PNG로 캡처된 경우
                     // → Phase 3가 INLINE_TEXT_FRAME으로 처리 → floating 불필요.
@@ -163,14 +161,9 @@ public final class FramePlacer {
                                 }
                             } catch (NumberFormatException ignored) {}
                             if (!rendered) {
-                                // allRenderedFloatingItems 에 inline_ 파일로 등록된 Group → 인라인 앵커 Group
-                                for (RenderedGroup _rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                                    if (String.valueOf(_rg.id()).equals(_curParentId)
-                                            && _rg.file() != null && _rg.file().contains("inline_")) {
-                                        rendered = true;
-                                        break;
-                                    }
-                                }
+                                try {
+                                    if (inlineFileGroupIds.contains(Integer.parseInt(_curParentId))) rendered = true;
+                                } catch (NumberFormatException ignored) {}
                             }
                             if (!rendered) {
                                 ResolvedPageItem _nextPi = ctx.resolvedData.getPageItem(_curParentId);

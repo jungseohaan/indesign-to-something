@@ -9,8 +9,7 @@ import java.io.File;
 import java.util.List;
 
 /**
- * Phase 7: inline_object / page_object PNG를 ASTFigure로 배치.
- * renderedFloatingItems 중 inline_object(7b) + page_object(7c) 항목을 처리한다.
+ * Phase 7: page_object PNG를 ASTFigure로 배치 (스프레드 걸침 오버플로우 포함).
  */
 public final class RenderableFramePlacer {
 

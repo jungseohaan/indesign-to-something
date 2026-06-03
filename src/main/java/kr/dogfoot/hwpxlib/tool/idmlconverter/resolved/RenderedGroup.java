@@ -13,7 +13,6 @@ public class RenderedGroup {
                                         // geometricBounds → visibleBounds 보정 비율
     private String type;         // null(기존 text_frame) | "badge_group" | "badge_group_child"
     private int[] childIds;      // 배지 그룹 자식 DOM ID 목록 (type=badge_group일 때)
-    private int[] childTextFrameIds;  // 배지 그룹 자식 TextFrame DOM ID (type=badge_group일 때)
     private int badgeGroupId;    // 배지 그룹 부모 DOM ID (type=badge_group_child일 때)
     private int[] childImageIds; // 그룹 렌더링 시 자식 이미지 프레임 DOM ID 목록
     private int zOrder;          // ExtendScript 할당 z-order (renderedFloatingItems)
@@ -41,9 +40,6 @@ public class RenderedGroup {
 
     public int[] childIds() { return childIds; }
     public void childIds(int[] v) { this.childIds = v; }
-
-    public int[] childTextFrameIds() { return childTextFrameIds; }
-    public void childTextFrameIds(int[] v) { this.childTextFrameIds = v; }
 
     public int badgeGroupId() { return badgeGroupId; }
     public void badgeGroupId(int v) { this.badgeGroupId = v; }
