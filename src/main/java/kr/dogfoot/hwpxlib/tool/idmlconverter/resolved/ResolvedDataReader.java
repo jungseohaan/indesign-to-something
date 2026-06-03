@@ -142,6 +142,7 @@ public class ResolvedDataReader {
                     rg.itemType(obj.get("type").getAsString());
                 }
                 if (obj.has("imageFormat") && !obj.get("imageFormat").isJsonNull()) rg.imageFormat(obj.get("imageFormat").getAsString());
+                if (obj.has("whiteStroke") && obj.get("whiteStroke").getAsBoolean()) rg.whiteStroke(true);
                 data.addRenderedFloatingItem(rg);
             }
         }

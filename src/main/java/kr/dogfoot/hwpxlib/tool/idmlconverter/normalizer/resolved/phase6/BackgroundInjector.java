@@ -118,6 +118,25 @@ public final class BackgroundInjector {
             try {
                 File pngFile = new File(ctx.basePath, rg.file());
                 BufferedImage img = ImageIO.read(pngFile);
+                // whiteStroke: PNG가 흑색 획으로 내보낸 것 → 흰색으로 반전
+                if (img != null && rg.isWhiteStroke()) {
+                    BufferedImage inv = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
+                    for (int iy = 0; iy < img.getHeight(); iy++) {
+                        for (int ix = 0; ix < img.getWidth(); ix++) {
+                            int argb = img.getRGB(ix, iy);
+                            int a = (argb >> 24) & 0xFF;
+                            if (a > 0) {
+                                int r = (argb >> 16) & 0xFF;
+                                int g = (argb >> 8) & 0xFF;
+                                int b = argb & 0xFF;
+                                argb = (a << 24) | ((255 - r) << 16) | ((255 - g) << 8) | (255 - b);
+                            }
+                            inv.setRGB(ix, iy, argb);
+                        }
+                    }
+                    img.flush();
+                    img = inv;
+                }
                 if (img != null) {
                     boolean needsCrop = fullW > 1.0 && fullH > 1.0
                             && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5

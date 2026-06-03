@@ -72,6 +72,11 @@ public class RenderedGroup {
     public String imageFormat() { return imageFormat; }
     public void imageFormat(String v) { this.imageFormat = v; }
 
+    private boolean whiteStroke; // true: 획이 흰색(Paper)이었던 PNG → 검은 픽셀을 흰색으로 반전 필요
+
+    public boolean isWhiteStroke() { return whiteStroke; }
+    public void whiteStroke(boolean v) { this.whiteStroke = v; }
+
     public boolean isBadgeGroup() { return "badge_group".equals(type); }
     public boolean isBadgeGroupChild() { return "badge_group_child".equals(type); }
     public boolean isPageBackground() { return "page_background".equals(type); }
