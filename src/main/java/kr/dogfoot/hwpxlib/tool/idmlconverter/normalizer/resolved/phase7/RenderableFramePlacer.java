@@ -15,6 +15,14 @@ public final class RenderableFramePlacer {
 
     private RenderableFramePlacer() {}
 
+    private static int[] clamp(int x, int y, int w, int h, int imgW, int imgH) {
+        x = Math.max(0, Math.min(x, imgW - 1));
+        y = Math.max(0, Math.min(y, imgH - 1));
+        w = Math.max(1, Math.min(imgW - x, w));
+        h = Math.max(1, Math.min(imgH - y, h));
+        return new int[]{x, y, w, h};
+    }
+
     public static void place(ResolvedBuildContext ctx, List<ASTSection> sections) {
         if (ctx.basePath == null) return;
         if (ctx.resolvedData == null) return;
@@ -33,6 +41,17 @@ public final class RenderableFramePlacer {
             if (ctx.phase6PlacedIds.contains(rg3.id())) continue;
             // inline_object로도 등록된 ID는 Phase 3이 인라인으로 처리 → 플로팅 중복 방지
             if (ctx.resolvedData.isInlineObjectId(rg3.id())) continue;
+            // 자식 TF가 editableTextFrame인 그룹은 Phase 3이 텍스트로 배치 → 그룹 PNG 중복 방지
+            if (rg3.childIds() != null) {
+                boolean hasEditableTfChild = false;
+                for (int childId : rg3.childIds()) {
+                    if (ctx.resolvedData.isEditableTextFrame(String.valueOf(childId))) {
+                        hasEditableTfChild = true;
+                        break;
+                    }
+                }
+                if (hasEditableTfChild) continue;
+            }
             String dedupKey3 = rg3.pageIndex() + "|" + rg3.file();
             if (!placedKeys.add(dedupKey3)) continue;
 
@@ -83,10 +102,8 @@ public final class RenderableFramePlacer {
                     int pxY3 = (int) Math.round((visTop3 - rawTop3) / fullH3 * origImg3.getHeight());
                     int pxW3 = (int) Math.round((visRight3 - rawLeft3) / fullW3 * origImg3.getWidth()) - pxX3;
                     int pxH3 = (int) Math.round((visBottom3 - rawTop3) / fullH3 * origImg3.getHeight()) - pxY3;
-                    pxX3 = Math.max(0, Math.min(pxX3, origImg3.getWidth()  - 1));
-                    pxY3 = Math.max(0, Math.min(pxY3, origImg3.getHeight() - 1));
-                    pxW3 = Math.max(1, Math.min(origImg3.getWidth()  - pxX3, pxW3));
-                    pxH3 = Math.max(1, Math.min(origImg3.getHeight() - pxY3, pxH3));
+                    int[] c3 = clamp(pxX3, pxY3, pxW3, pxH3, origImg3.getWidth(), origImg3.getHeight());
+                    pxX3 = c3[0]; pxY3 = c3[1]; pxW3 = c3[2]; pxH3 = c3[3];
                     java.awt.image.BufferedImage img3 = origImg3.getSubimage(pxX3, pxY3, pxW3, pxH3);
                     java.io.ByteArrayOutputStream baos3 = new java.io.ByteArrayOutputStream();
                     javax.imageio.ImageIO.write(img3, "png", baos3);
@@ -129,10 +146,8 @@ public final class RenderableFramePlacer {
                             int pxYov = (int) Math.round((ovTop - rawTop3) / fullH3 * origImg3.getHeight());
                             int pxWov = (int) Math.round((rawRight3 - rawLeft3) / fullW3 * origImg3.getWidth()) - pxXov;
                             int pxHov = (int) Math.round((ovBot - rawTop3) / fullH3 * origImg3.getHeight()) - pxYov;
-                            pxXov = Math.max(0, Math.min(pxXov, origImg3.getWidth()  - 1));
-                            pxYov = Math.max(0, Math.min(pxYov, origImg3.getHeight() - 1));
-                            pxWov = Math.max(1, Math.min(origImg3.getWidth()  - pxXov, pxWov));
-                            pxHov = Math.max(1, Math.min(origImg3.getHeight() - pxYov, pxHov));
+                            int[] cov = clamp(pxXov, pxYov, pxWov, pxHov, origImg3.getWidth(), origImg3.getHeight());
+                            pxXov = cov[0]; pxYov = cov[1]; pxWov = cov[2]; pxHov = cov[3];
                             try {
                                 java.awt.image.BufferedImage ovImg = origImg3.getSubimage(pxXov, pxYov, pxWov, pxHov);
                                 java.io.ByteArrayOutputStream baosOv = new java.io.ByteArrayOutputStream();
@@ -187,10 +202,8 @@ public final class RenderableFramePlacer {
                             int pxYleft = (int) Math.round((ovTop2 - rawTop3) / fullH3 * origImg3.getHeight());
                             int pxWleft = (int) Math.round((-rawLeft3 - itemRelStart) / fullW3 * origImg3.getWidth());
                             int pxHleft = (int) Math.round((ovBot2 - rawTop3) / fullH3 * origImg3.getHeight()) - pxYleft;
-                            pxXleft = Math.max(0, Math.min(pxXleft, origImg3.getWidth()  - 1));
-                            pxYleft = Math.max(0, Math.min(pxYleft, origImg3.getHeight() - 1));
-                            pxWleft = Math.max(1, Math.min(origImg3.getWidth()  - pxXleft, pxWleft));
-                            pxHleft = Math.max(1, Math.min(origImg3.getHeight() - pxYleft, pxHleft));
+                            int[] cleft = clamp(pxXleft, pxYleft, pxWleft, pxHleft, origImg3.getWidth(), origImg3.getHeight());
+                            pxXleft = cleft[0]; pxYleft = cleft[1]; pxWleft = cleft[2]; pxHleft = cleft[3];
                             try {
                                 java.awt.image.BufferedImage leftImg = origImg3.getSubimage(pxXleft, pxYleft, pxWleft, pxHleft);
                                 java.io.ByteArrayOutputStream baosLeft = new java.io.ByteArrayOutputStream();
