@@ -69,27 +69,36 @@ public final class BackgroundInjector {
 
         for (RenderedGroup rg : floatingItems) {
             if (!isPageObject(rg)) continue;
-            // inline_object로 이미 처리된 ID는 Phase 3가 인라인으로 배치 → 중복 방지
-            if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
             // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
             if (childOfGroup.contains(rg.id())) continue;
-            // childIds 중 editableTextFrame이 있으면 Phase 3가 텍스트로 배치 → 그룹 PNG 중복 방지
-            if (rg.childIds() != null) {
-                boolean hasEditableTfChild = false;
+            // 같은 ID가 inline_object로도 등록된 경우: Phase 3가 인라인으로 처리하므로 floating 중복 금지.
+            if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
+            // childIds 검사
+            if (rg.childIds() != null && rg.childIds().length > 0) {
+                boolean allChildrenAreEditableTf = true;
+                boolean anyChildIsInlineObject = false;
                 for (int cid : rg.childIds()) {
-                    if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
-                        hasEditableTfChild = true;
+                    if (ctx.resolvedData.isInlineObjectId(cid)) {
+                        anyChildIsInlineObject = true;
                         break;
                     }
+                    if (!ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
+                        allChildrenAreEditableTf = false;
+                    }
                 }
-                if (hasEditableTfChild) {
-                    ctx.phase6PlacedIds.add(rg.id()); // Phase 7c도 중복 배치 안 하도록 등록
+                // 자식 중 inline_object가 있으면 → Phase 3가 인라인 처리 → floating 중복 금지
+                if (anyChildIsInlineObject) {
+                    ctx.phase6PlacedIds.add(rg.id());
+                    continue;
+                }
+                // 자식 모두가 ETF이면 → 순수 텍스트 컨테이너 → floating 불필요
+                if (allChildrenAreEditableTf) {
+                    ctx.phase6PlacedIds.add(rg.id());
                     continue;
                 }
             }
-            // 같은 (id, pageIndex) 쌍이 중복 추출된 경우만 스킵
-            // (master page item은 동일 id가 여러 page에 나타날 수 있으므로 pageIndex 포함)
-            if (!processedKeys.add(rg.id() + ":" + rg.pageIndex())) continue;
+            // 같은 파일이 중복 추출된 경우만 스킵 (id가 같아도 deco/graphic 등 파일이 다르면 둘 다 배치)
+            if (!processedKeys.add(rg.file() != null ? rg.file() : rg.id() + ":" + rg.pageIndex())) continue;
 
             int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
