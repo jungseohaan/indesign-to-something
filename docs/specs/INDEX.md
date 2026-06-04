@@ -20,6 +20,8 @@
 | **[SPEC-030](SPEC-030-indesign-extraction-performance.md)** | InDesign 추출 속도 개선 | **신규(2026-05-22)**. P0. 4단계 플랜 (측정 → Tier A 즉시 → 페이지캐시/range → 대규모 리팩토링) |
 | [SPEC-desktop-app](SPEC-desktop-app.md) | Desktop App 아키텍처 | Tauri 2.0 + React 18 — 상시 참조 |
 | **[SPEC-032](SPEC-032-windows-cross-platform.md)** | Windows 크로스 플랫폼 지원 | **신규(2026-05-27)**. osascript→PowerShell COM, sips→image crate, Java/open 분기. Draft |
+| **[SPEC-markdown](SPEC-markdown-export.md)** | AST → Markdown 내보내기 | **신규(2026-06-04)**. 계층 구조 파악 목적. 글/이미지 블럭 Y순 배치 + 단락 스타일 이름 주석 보존 |
+| **[SPEC-034](SPEC-034-llm-semantic-extraction.md)** | LLM 기반 시멘틱 구조 추출 | **신규(2026-06-04)**. GROQ/Anthropic API로 SemanticNode 분류 보강 + 계층형 JSON 출력. M1~M3 단계 |
 
 ## Pending (제안/검토 대기)
 

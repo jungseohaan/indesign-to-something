@@ -111,57 +111,16 @@ public class IDMLToHwpxConverter {
             // Phase 2: AST 빌드
             reporter.reportProgress(5, 100, "AST 빌드 중...");
             ASTDocument astDoc;
-            // IDML-Free 파이프라인: resolved.json에 renderedFloatingItems가 있으면 새 빌더 사용
-            if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) {
+            boolean isNewPipeline = resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty();
+            if (isNewPipeline) {
                 astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(resolvedData, idmlDoc.tempDir(), options.config().pngExportResolution())
                         .debugAst(options.debugAst())
                         .tableQualityGate(options.config().tableQualityGate())
                         .build();
             } else {
-                // 레거시: IDML 기반 4단계 정규화
+                // 레거시: IDML 기반 4단계 정규화 + Resolved 보강
                 astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
-            }
-
-            // Phase 2.5: Resolved 텍스트/스타일 보강 (레거시 파이프라인만)
-            boolean isNewPipeline = resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty();
-            if (resolvedData != null && !isNewPipeline) {
-                try {
-                    reporter.reportProgress(8, 100, "resolved 데이터 병합 중...");
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedMerger.enrich(
-                            astDoc, resolvedData);
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedFrameDistributor.distribute(
-                            astDoc, resolvedData);
-                } catch (Exception e) {
-                    System.err.println("Warning: resolved.json 병합 실패 (무시): " + e.getMessage());
-                    earlyWarnings.add("[Resolved] resolved.json 병합 실패: " + e.getMessage());
-                }
-            }
-
-            // Phase 2.6: Resolved 오버레이 좌표 보강 (레거시만)
-            if (resolvedData != null && !isNewPipeline) {
-                try {
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedOverlayEnricher.enrich(
-                            astDoc, resolvedData);
-                } catch (Exception e) {
-                    System.err.println("Warning: resolved overlay 보강 실패 (무시): " + e.getMessage());
-                    earlyWarnings.add("[Resolved] overlay 보강 실패: " + e.getMessage());
-                }
-            }
-
-            // Phase 2.7~2.8: 레거시 후처리 (새 파이프라인에서는 건너뜀)
-            java.util.Set<String> inlineReplacedTexts = java.util.Collections.emptySet();
-            if (!isNewPipeline) {
-                // Phase 2.7: 플로팅 이미지 → 인라인 머지 (textWrap 자리차지)
-                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy.FloatingImageMerger.merge(astDoc);
-
-                // Phase 2.8: 인라인 앵커 텍스트 프레임 → 렌더 이미지 교체
-            }
-
-            // Phase 2.10: orphan 렌더 그래픽 주입 (레거시 파이프라인 전용)
-            if (!isNewPipeline) {
-                if (resolvedData != null) {
-                    injectOrphanRenderedGraphics(astDoc, resolvedData, options);
-                }
+                runLegacyPostProcessing(astDoc, resolvedData, options, earlyWarnings, reporter);
             }
 
             // 정규화 완료 summary
@@ -247,6 +206,55 @@ public class IDMLToHwpxConverter {
     }
 
     /**
+     * IDML 파일로부터 ASTDocument만 빌드한다 (HWPX 변환 없음).
+     * Markdown 내보내기 등 non-HWPX 출력 경로에서 사용.
+     */
+    public static ASTDocument buildAst(String idmlPath, ConvertOptions options,
+                                        ProgressReporter reporter) throws ConvertException {
+        IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
+        try {
+            String sourceFileName = new File(idmlPath).getName();
+
+            ResolvedData resolvedData = null;
+            if (options.resolvedJsonPath() != null) {
+                try {
+                    resolvedData = ResolvedDataReader.read(options.resolvedJsonPath());
+                    resolvedData.basePath(getResolvedDir(options));
+                    applyCropManifest(resolvedData.basePath());
+                } catch (Exception e) {
+                    System.err.println("Warning: resolved.json 로드 실패 (무시): " + e.getMessage());
+                }
+            }
+
+            if (resolvedData != null) {
+                List<IDMLPage> idmlPages = idmlDoc.getAllPages();
+                if (!idmlPages.isEmpty()) {
+                    resolvedData.normalizeToPoints(idmlPages.get(0).widthPoints());
+                }
+                resolvedData.buildRenderedIdSet();
+            }
+
+            boolean isNewPipeline = resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty();
+            ASTDocument astDoc;
+            if (isNewPipeline) {
+                astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(
+                        resolvedData, idmlDoc.tempDir(), options.config().pngExportResolution())
+                        .debugAst(options.debugAst())
+                        .tableQualityGate(options.config().tableQualityGate())
+                        .build();
+            } else {
+                List<String> earlyWarnings = new ArrayList<>();
+                astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
+                runLegacyPostProcessing(astDoc, resolvedData, options, earlyWarnings, reporter);
+            }
+
+            return astDoc;
+        } finally {
+            idmlDoc.cleanup();
+        }
+    }
+
+    /**
      * IDML 파일을 HWPXFile 객체로 변환한다 (파일 저장 없이).
      *
      * @param idmlPath IDML 파일 경로
@@ -284,6 +292,35 @@ public class IDMLToHwpxConverter {
         }
     }
 
+
+    private static void runLegacyPostProcessing(
+            ASTDocument astDoc, ResolvedData resolvedData, ConvertOptions options,
+            List<String> earlyWarnings, ProgressReporter reporter) {
+        // Phase 2.5: Resolved 텍스트/스타일 보강
+        if (resolvedData != null) {
+            try {
+                reporter.reportProgress(8, 100, "resolved 데이터 병합 중...");
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedMerger.enrich(astDoc, resolvedData);
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedFrameDistributor.distribute(astDoc, resolvedData);
+            } catch (Exception e) {
+                System.err.println("Warning: resolved.json 병합 실패 (무시): " + e.getMessage());
+                earlyWarnings.add("[Resolved] resolved.json 병합 실패: " + e.getMessage());
+            }
+            // Phase 2.6: Resolved 오버레이 좌표 보강
+            try {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedOverlayEnricher.enrich(astDoc, resolvedData);
+            } catch (Exception e) {
+                System.err.println("Warning: resolved overlay 보강 실패 (무시): " + e.getMessage());
+                earlyWarnings.add("[Resolved] overlay 보강 실패: " + e.getMessage());
+            }
+        }
+        // Phase 2.7: 플로팅 이미지 → 인라인 머지
+        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy.FloatingImageMerger.merge(astDoc);
+        // Phase 2.10: orphan 렌더 그래픽 주입
+        if (resolvedData != null) {
+            injectOrphanRenderedGraphics(astDoc, resolvedData, options);
+        }
+    }
 
     private static void collectInlineSourceIds(
             java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph> paragraphs,

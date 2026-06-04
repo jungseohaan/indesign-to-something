@@ -27,6 +27,8 @@ export function InddBatchModal() {
     batchCurrentPhaseMessage,
     noPreview,
     setNoPreview,
+    outputFormat,
+    setOutputFormat,
     closeBatchModal,
     startBatch,
     cancelBatch,
@@ -328,6 +330,24 @@ export function InddBatchModal() {
                 />
                 변환 후 열지 않음
               </label>
+              <div className="flex items-center gap-1 text-xs text-gray-600">
+                <label className="flex items-center gap-0.5 cursor-pointer">
+                  <input type="radio" name="batchOutputFormat" value="hwpx"
+                    checked={outputFormat === "hwpx"}
+                    onChange={() => setOutputFormat("hwpx")}
+                    className="w-3 h-3"
+                  />
+                  HWPX
+                </label>
+                <label className="flex items-center gap-0.5 cursor-pointer">
+                  <input type="radio" name="batchOutputFormat" value="md"
+                    checked={outputFormat === "md"}
+                    onChange={() => setOutputFormat("md")}
+                    className="w-3 h-3"
+                  />
+                  MD
+                </label>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button

@@ -42,6 +42,13 @@ import java.util.List;
 public class ConverterCLI {
 
     public static void main(String[] args) {
+        // .env 파일 자동 로드 (JAR 디렉토리 → CWD 순)
+        kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader env =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.load();
+        if (!env.isEmpty()) {
+            System.out.println("[CLI] .env 로드 완료: " + env.size() + "개 키");
+        }
+
         if (args.length < 2) {
             printUsage();
             System.exit(1);
@@ -112,6 +119,12 @@ public class ConverterCLI {
 
         ConvertOptions options = ConvertOptions.defaults();
         ProgressReporter reporter = ProgressReporter.NONE;
+
+        // --teach 관련 옵션
+        String teachPromptPath  = null;
+        String teachExtraPath   = null;
+        String teachDir         = null;
+        String textbookId       = null;
 
         // Parse additional options
         for (int i = 3; i < args.length; i++) {
@@ -190,6 +203,18 @@ public class ConverterCLI {
                         options = options.semanticOutput(args[++i]);
                     }
                     break;
+                case "--teach":
+                    if (i + 1 < args.length) teachPromptPath = args[++i];
+                    break;
+                case "--teach-extra":
+                    if (i + 1 < args.length) teachExtraPath = args[++i];
+                    break;
+                case "--teach-dir":
+                    if (i + 1 < args.length) teachDir = args[++i];
+                    break;
+                case "--textbook-id":
+                    if (i + 1 < args.length) textbookId = args[++i];
+                    break;
                 default:
                     System.err.println("Unknown option: " + arg);
             }
@@ -214,6 +239,46 @@ public class ConverterCLI {
                     break;
                 }
             }
+        }
+
+        // --teach → 교수자료 JSON 생성
+        boolean isTeachMode = teachPromptPath != null || teachDir != null;
+        if (isTeachMode && outputPath.toLowerCase().endsWith(".json")) {
+            ASTDocument teachAst = IDMLToHwpxConverter.buildAst(inputPath, options, reporter);
+            kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader envR =
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.load();
+            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig llmCfg =
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig.builder()
+                            .groqApiKey(envR.getOrEnv(
+                                    kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.GROQ_API_KEY))
+                            .anthropicApiKey(envR.getOrEnv(
+                                    kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.ANTHROPIC_API_KEY))
+                            .build();
+            String resolvedPrompt = teachDir != null
+                    ? kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
+                            .loadFromDir(teachDir, textbookId)
+                    : kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
+                            .load(teachPromptPath, teachExtraPath);
+            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterial material =
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialGenerator
+                            .generate(teachAst, resolvedPrompt, llmCfg);
+            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialWriter
+                    .write(material, outputPath);
+            System.out.println("Teaching material 생성 완료: " + outputPath);
+            return;
+        }
+
+        // .md 확장자 감지 → Markdown 내보내기
+        if (outputPath.toLowerCase().endsWith(".md")) {
+            ASTDocument mdAst = IDMLToHwpxConverter.buildAst(inputPath, options, reporter);
+            try {
+                new kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToMarkdownConverter()
+                        .convert(mdAst, new java.io.File(outputPath));
+            } catch (java.io.IOException e) {
+                throw new RuntimeException("Markdown 내보내기 실패: " + e.getMessage(), e);
+            }
+            System.out.println("Markdown export completed: " + outputPath);
+            return;
         }
 
         // .hwp 확장자 감지

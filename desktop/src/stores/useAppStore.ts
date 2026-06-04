@@ -63,6 +63,8 @@ interface AppState {
   spreadBased: boolean;
   vectorDpi: 96 | 150;
   layoutMode: "preserve" | "editable";
+  outputFormat: "hwpx" | "md";
+  lastOutputPath: string | null;
   // SPEC-030: InDesign 추출 성능 모드. fast=150dpi+pdf skip, standard=220dpi+pdf, high=300dpi+pdf
   perfMode: "fast" | "standard" | "high";
   // SPEC-011: 디버그용 페이지 범위 추출 (0=전체)
@@ -110,6 +112,7 @@ interface AppState {
   selectMaster: (master: MasterSpreadInfo) => void;
   clearSelection: () => void;
   startConversion: () => Promise<void>;
+  setOutputFormat: (v: "hwpx" | "md") => void;
   setSpreadBased: (v: boolean) => void;
   setVectorDpi: (v: 96 | 150) => void;
   setLayoutMode: (v: "preserve" | "editable") => void;
@@ -164,6 +167,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   spreadBased: false,
   vectorDpi: 150,
   layoutMode: "preserve",
+  outputFormat: "hwpx",
+  lastOutputPath: null,
   perfMode: (localStorage.getItem("perfMode") as "fast" | "standard" | "high") || "standard",
   noPreview: localStorage.getItem("noPreview") === "true",
   debugStartPage: 0,
@@ -396,18 +401,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   startConversion: async () => {
-    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, inddPath, resolvedJsonPath, fontMappings } = get();
+    const { idmlPath, jarPath, spreadBased, vectorDpi, layoutMode, inddPath, resolvedJsonPath, fontMappings, outputFormat } = get();
     if (!idmlPath) return;
 
-    // 기본 파일명: 원본 파일명에서 확장자를 .hwpx로 변경
+    // 기본 파일명: 원본 파일명에서 확장자를 선택 형식으로 변경
     const sourcePath = inddPath || idmlPath;
+    const ext = outputFormat === "md" ? ".md" : ".hwpx";
     const defaultName = sourcePath
-      ? sourcePath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, ".hwpx")
+      ? sourcePath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, ext)
       : undefined;
 
     const outputPath = await save({
       defaultPath: defaultName,
-      filters: [{ name: "HWPX", extensions: ["hwpx"] }],
+      filters: [
+        { name: "HWP 문서", extensions: ["hwpx"] },
+        { name: "Markdown", extensions: ["md"] },
+      ],
     });
     if (!outputPath) return;
 
@@ -445,34 +454,38 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
         jarPath,
       });
-      set({ result, isConverting: false });
+      set({ result, isConverting: false, lastOutputPath: outputPath });
 
-      // 변환 완료 후: preview PDF를 HWPX와 같은 폴더에 복사
-      const { previewPdfPath } = get();
-      const outputDir = outputPath.replace(/[/\\][^/\\]+$/, "");
-      const outputBaseName = outputPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
-      let copiedPdfPath: string | null = null;
+      const isMarkdown = outputPath.toLowerCase().endsWith(".md");
 
-      if (previewPdfPath) {
-        try {
-          copiedPdfPath = `${outputDir}/${outputBaseName}.pdf`;
-          await invoke("copy_file", { src: previewPdfPath, dst: copiedPdfPath });
-        } catch {
-          copiedPdfPath = null;
-        }
-      }
+      if (!isMarkdown) {
+        // 변환 완료 후: preview PDF를 HWPX와 같은 폴더에 복사
+        const { previewPdfPath } = get();
+        const outputDir = outputPath.replace(/[/\\][^/\\]+$/, "");
+        const outputBaseName = outputPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
+        let copiedPdfPath: string | null = null;
 
-      // HWPX / PDF 파일 열기 (noPreview 모드 시 건너뜀)
-      if (!get().noPreview) {
-        try {
-          await invoke("open_file", { path: outputPath });
-        } catch {
-          // 열기 실패해도 변환 자체는 성공
-        }
-        if (copiedPdfPath) {
+        if (previewPdfPath) {
           try {
-            await invoke("open_file", { path: copiedPdfPath });
-          } catch {}
+            copiedPdfPath = `${outputDir}/${outputBaseName}.pdf`;
+            await invoke("copy_file", { src: previewPdfPath, dst: copiedPdfPath });
+          } catch {
+            copiedPdfPath = null;
+          }
+        }
+
+        // HWPX / PDF 파일 열기 (noPreview 모드 시 건너뜀)
+        if (!get().noPreview) {
+          try {
+            await invoke("open_file", { path: outputPath });
+          } catch {
+            // 열기 실패해도 변환 자체는 성공
+          }
+          if (copiedPdfPath) {
+            try {
+              await invoke("open_file", { path: copiedPdfPath });
+            } catch {}
+          }
         }
       }
     } catch (e: any) {
@@ -483,6 +496,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  setOutputFormat: (v) => set({ outputFormat: v }),
   setSpreadBased: (v) => set({ spreadBased: v }),
   setVectorDpi: (v) => set({ vectorDpi: v }),
   setLayoutMode: (v) => set({ layoutMode: v }),
@@ -673,13 +687,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         await invoke("create_dir", { path: outputSubdir });
 
         const inddFilename = inddPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
-        const hwpxOutputPath = `${outputSubdir}/${inddFilename}.hwpx`;
+        const batchFormat = get().outputFormat;
+        const batchExt = batchFormat === "md" ? ".md" : ".hwpx";
+        const batchOutputPath = `${outputSubdir}/${inddFilename}${batchExt}`;
 
-        // 3. HWPX 변환
+        // 3. 변환 (HWPX 또는 Markdown)
         const batchLinksDir = inddPath.replace(/[/\\][^/\\]+$/, "") + "/Links";
         await invoke<ConvertResult>("convert_idml", {
           inputPath: extractResult.idml_path,
-          outputPath: hwpxOutputPath,
+          outputPath: batchOutputPath,
           options: {
             spread_based: spreadBased,
             vector_dpi: vectorDpi,
@@ -692,9 +708,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           jarPath,
         });
 
-        // 4. preview PDF 복사
+        // 4. preview PDF 복사 (HWPX 변환 시에만)
         let pdfOutputPath: string | null = null;
-        if (extractResult.preview_pdf_path) {
+        if (batchFormat !== "md" && extractResult.preview_pdf_path) {
           try {
             pdfOutputPath = `${outputSubdir}/${inddFilename}.pdf`;
             await invoke("copy_file", { src: extractResult.preview_pdf_path, dst: pdfOutputPath });
@@ -711,9 +727,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           batchCurrentPhaseMessage: null,
         }));
 
-        // 변환된 파일을 즉시 열기 (noPreview 모드 시 건너뜀)
-        if (!get().noPreview) {
-          try { await invoke("open_file", { path: hwpxOutputPath }); } catch {}
+        // 변환된 파일을 즉시 열기 (noPreview 모드 시 건너뜀, markdown은 건너뜀)
+        if (!get().noPreview && batchFormat !== "md") {
+          try { await invoke("open_file", { path: batchOutputPath }); } catch {}
           if (pdfOutputPath) {
             try { await invoke("open_file", { path: pdfOutputPath }); } catch {}
           }
