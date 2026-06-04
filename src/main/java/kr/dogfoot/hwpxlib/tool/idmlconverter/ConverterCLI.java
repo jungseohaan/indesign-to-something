@@ -49,12 +49,28 @@ public class ConverterCLI {
             System.out.println("[CLI] .env 로드 완료: " + env.size() + "개 키");
         }
 
-        if (args.length < 2) {
+        if (args.length < 1) {
             printUsage();
             System.exit(1);
         }
 
         String command = args[0];
+
+        // 인수 없이 단독 실행 가능한 커맨드
+        if ("--test-llm".equals(command)) {
+            try {
+                runTestLlm(env);
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+            }
+            return;
+        }
+
+        if (args.length < 2) {
+            printUsage();
+            System.exit(1);
+        }
 
         try {
             if ("--analyze".equals(command)) {
@@ -1452,6 +1468,40 @@ public class ConverterCLI {
             System.out.println(gson.toJson(java.util.Collections.singletonMap("fonts", analyses)));
         } finally {
             idmlDoc.cleanup();
+        }
+    }
+
+    private static void runTestLlm(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader env) {
+        String groqKey  = env.getOrEnv(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.GROQ_API_KEY);
+        String claudeKey = env.getOrEnv(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.ANTHROPIC_API_KEY);
+
+        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig cfg =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig.builder()
+                        .groqApiKey(groqKey)
+                        .anthropicApiKey(claudeKey)
+                        .readTimeoutMs(15_000)
+                        .build();
+
+        if (!cfg.hasAnyKey()) {
+            System.err.println("[test-llm] API 키 없음. .env에 GROQ_API_KEY 또는 ANTHROPIC_API_KEY를 설정하세요.");
+            System.exit(1);
+        }
+
+        System.out.println("[test-llm] provider=" + cfg.activeProvider());
+        String masked = groqKey != null && groqKey.length() > 12
+                ? groqKey.substring(0, 8) + "****" + groqKey.substring(groqKey.length() - 4)
+                : "(비어있음)";
+        if (cfg.hasGroq()) System.out.println("[test-llm] GROQ key: " + masked);
+
+        try {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.GroqClient client =
+                    new kr.dogfoot.hwpxlib.tool.idmlconverter.llm.GroqClient(cfg);
+            String result = client.ping();
+            System.out.println("[test-llm] 응답: " + result);
+            System.out.println("[test-llm] 연결 성공");
+        } catch (kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMException e) {
+            System.err.println("[test-llm] 실패: " + e.getMessage());
+            System.exit(1);
         }
     }
 
