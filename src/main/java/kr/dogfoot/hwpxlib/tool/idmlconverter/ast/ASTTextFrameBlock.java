@@ -74,6 +74,8 @@ public class ASTTextFrameBlock extends ASTBlock {
     private long[] pathPointsX; // null이면 사각형
     private long[] pathPointsY;
 
+    private boolean suppressParaLeftIndent; // ORC+inline 패턴: 단락 leftIndent 무시
+
     private List<ASTParagraph> paragraphs;
 
     public ASTTextFrameBlock() {
@@ -159,6 +161,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean inlineToFloating() { return inlineToFloating; }
     public void inlineToFloating(boolean v) { this.inlineToFloating = v; }
+
+    public boolean suppressParaLeftIndent() { return suppressParaLeftIndent; }
+    public void suppressParaLeftIndent(boolean v) { this.suppressParaLeftIndent = v; }
 
     public double rotationAngle() { return rotationAngle; }
     public void rotationAngle(double v) { this.rotationAngle = v; }

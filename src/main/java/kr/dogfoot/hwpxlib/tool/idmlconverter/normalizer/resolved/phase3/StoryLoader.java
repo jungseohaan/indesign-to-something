@@ -38,7 +38,7 @@ class StoryLoader {
      * IDML의 단락 구조는 정확 (중복 없음, <Br/> 기반 분리).
      * 단락 속성(leading, indent)은 resolved에서 보강.
      */
-    static List<ASTParagraph> convertStoryFromIDML(ResolvedBuildContext ctx, String storyId) {
+    static List<ASTParagraph> convertStoryFromIDML(ResolvedBuildContext ctx, String storyId, boolean suppressLeftIndent) {
         if (ctx.idmlDir == null) return null;
         // storyId(DOM decimal) → IDML hex → Story_u{hex}.xml
         String hexId;
@@ -139,7 +139,9 @@ class StoryLoader {
                 if (rp.spaceAfter() != null && rp.spaceAfter() > 0) {
                     para.spaceAfter(CoordinateConverter.pointsToHwpunits(rp.spaceAfter()));
                 }
-                if (rp.leftIndent() != null && rp.leftIndent() != 0) {
+                if (suppressLeftIndent) {
+                    para.leftMargin(0L); // 스타일 폴백 차단: baseStyle.leftMargin() 우선순위를 명시적 0으로 덮어씀
+                } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
                     para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
                 }
                 if (rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {

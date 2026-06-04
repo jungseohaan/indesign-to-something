@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
@@ -207,8 +208,25 @@ public final class FramePlacer {
                             } catch (NumberFormatException ignored) {}
                         }
                     }
-                    // inline+editable TF가 floating으로 배치될 예정 → Phase 3 중복 방지
-                    // (tryInlineTextFrameAsRun이 TEXT_BLOCK_PLACED 미설정 시 인라인 런도 생성 → 텍스트 2회 출력)
+                    // inline+editable TF가 어떤 렌더 채널에도 없으면 Phase 3 인라인 런으로 처리.
+                    // (어휘 숫자 superscript "1"/"2"/"3" 등 — PNG 없이 IDML 스토리 텍스트만 존재)
+                    // 렌더된 경우에만 floating 배치 + TEXT_BLOCK_PLACED 설정.
+                    boolean _isRenderedInline = false;
+                    if (domIdInlineEd >= 0) {
+                        if (ctx.resolvedData.isRenderedByOtherChannel(domIdInlineEd)) {
+                            _isRenderedInline = true;
+                        }
+                        if (!_isRenderedInline) {
+                            for (RenderedGroup _rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                                if (_rg.id() == domIdInlineEd) { _isRenderedInline = true; break; }
+                            }
+                        }
+                    }
+                    if (!_isRenderedInline) {
+                        // 렌더 없음 → Phase 3 가 IDML 스토리에서 인라인 텍스트 런으로 처리
+                        continue;
+                    }
+                    // 렌더 있음 → floating 배치 + Phase 3 중복 방지
                     if (domIdInlineEd >= 0) {
                         ctx.setDisposition(domIdInlineEd, FrameDisposition.TEXT_BLOCK_PLACED);
                     }
@@ -603,15 +621,10 @@ public final class FramePlacer {
 
             ASTTextFrameBlock block = new ASTTextFrameBlock();
             // SPEC-025: master instance clones use synthetic ids like "2453_pi20" — not pure numeric.
-            String _srcId;
-            try {
-                _srcId = "u" + Integer.toHexString(Integer.parseInt(tf.id()));
-            } catch (NumberFormatException nfe) {
-                _srcId = "u" + tf.id();  // 그대로 prefix 만 붙임 (Phase 3 가 sourceId parse 시 분기 처리)
-            }
-            block.sourceId(_srcId);
-            // ￼ 로 시작하는 TF 첫줄에 inline TF가 좌측 가장자리를 공유하는 경우
-            // (예: 단락 번호 "1" TF가 본문 TF 왼쪽에 맞닿음) → x를 inline TF 너비만큼 오른쪽으로 이동
+            block.sourceId(ParagraphTextHelpers.domIdToSourceId(tf.id()));
+            // ￼ 로 시작하는 TF에 inline TF가 좌측 가장자리를 공유하는 경우
+            // (예: 단락 번호 "1" TF가 본문 TF 왼쪽에 맞닿음)
+            // → x는 이동하지 않고, inline TF top이 더 위에 있으면 y를 그 위치로 올림
             {
                 String _fvtInl = tf.frameVisibleText();
                 if (_fvtInl != null && _fvtInl.startsWith("￼")) {
@@ -627,10 +640,15 @@ public final class FramePlacer {
                         double _iTfTop = gb[0] - pageTop;
                         if (_igb[0] - pageTop > _iTfTop + 5.0) continue;
                         if (_igb[2] - pageTop < _iTfTop) continue;
-                        double _origX = x;
-                        x += _iWidth;
-                        w -= _iWidth;
-                        if (w <= 0) { x = _origX; w = gb[3] - gb[1]; }
+                        // 인라인 TF top이 부모 TF top보다 위에 있으면 y를 그 위치로 올림
+                        double _inlineTop = _igb[0] - pageTop;
+                        if (_inlineTop < y) {
+                            h += (y - _inlineTop);
+                            y = _inlineTop;
+                        }
+                        // Phase 3가 이 인라인 TF를 텍스트 런으로 내장하므로 단락 leftIndent 무시
+                        block.suppressParaLeftIndent(true);
+                        System.err.println("[FramePlacer] ORC+inline 감지 → suppressParaLeftIndent: tf=" + tf.id() + " storyId=" + tf.storyId() + " inlineTf=" + _itf.id());
                         break;
                     }
                 }
@@ -941,12 +959,7 @@ public final class FramePlacer {
         }
         groups.add(lines.subList(from, lines.size()));
 
-        String sourceIdBase;
-        try {
-            sourceIdBase = "u" + Integer.toHexString(Integer.parseInt(tf.id()));
-        } catch (NumberFormatException nfe) {
-            sourceIdBase = "u" + tf.id();
-        }
+        String sourceIdBase = ParagraphTextHelpers.domIdToSourceId(tf.id());
         int n = groups.size();
         int tfParaStart = tf.paragraphStart();
         double[] tfGb = tf.geometricBounds();

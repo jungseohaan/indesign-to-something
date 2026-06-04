@@ -132,7 +132,8 @@ public final class StoryConverter {
             List<ASTTextFrameBlock> blocks = entry.getValue();
 
             // 1차: IDML Story XML에서 단락 파싱 (정확한 단락 구조)
-            List<ASTParagraph> paragraphs = StoryLoader.convertStoryFromIDML(ctx, storyId);
+            boolean suppressLeftInd = blocks.stream().anyMatch(b -> b.suppressParaLeftIndent());
+            List<ASTParagraph> paragraphs = StoryLoader.convertStoryFromIDML(ctx, storyId, suppressLeftInd);
             boolean useIdml = paragraphs != null && !paragraphs.isEmpty();
 
             // IDML-SHORT/PARA-MISMATCH 감지: resolved fallback 전환 조건
@@ -191,7 +192,7 @@ public final class StoryConverter {
                 if (story == null) {
                     continue;
                 }
-                paragraphs = convertStoryParagraphs(ctx, story);
+                paragraphs = convertStoryParagraphs(ctx, story, suppressLeftInd);
                 resolvedCount++;
             }
             totalParas += paragraphs.size();
@@ -549,7 +550,7 @@ public final class StoryConverter {
         }
 
         // inner story를 완전히 변환 (배지 inline anchor 포함)해서 첫 단락 items 추가
-        List<ASTParagraph> innerParas = convertStoryParagraphs(ctx, innerStory);
+        List<ASTParagraph> innerParas = convertStoryParagraphs(ctx, innerStory, false);
         if (innerParas.isEmpty()) return;
         ASTParagraph innerFirstPara = innerParas.get(0);
         for (ASTInlineItem item : innerFirstPara.items()) {
@@ -566,7 +567,7 @@ public final class StoryConverter {
                 + " story=" + innerTf.storyId() + " items=" + innerFirstPara.items().size());
     }
 
-    private static List<ASTParagraph> convertStoryParagraphs(ResolvedBuildContext ctx, ResolvedStory story) {
+    private static List<ASTParagraph> convertStoryParagraphs(ResolvedBuildContext ctx, ResolvedStory story, boolean suppressLeftIndent) {
         List<ASTParagraph> paragraphs = new ArrayList<>();
 
         if (story.paragraphs() == null) return paragraphs;
@@ -633,7 +634,9 @@ public final class StoryConverter {
             if (rp.spaceAfter() != null && rp.spaceAfter() > 0) {
                 para.spaceAfter(CoordinateConverter.pointsToHwpunits(rp.spaceAfter()));
             }
-            if (rp.leftIndent() != null && rp.leftIndent() != 0) {
+            if (suppressLeftIndent) {
+                para.leftMargin(0L);
+            } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
                 para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
             }
             if (rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
