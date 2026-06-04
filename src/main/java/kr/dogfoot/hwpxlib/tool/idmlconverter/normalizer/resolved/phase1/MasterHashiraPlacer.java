@@ -317,7 +317,10 @@ public final class MasterHashiraPlacer {
                             double oRelRight = (oSpreadRight - sb[1]) / PT_PER_MM;
                             double oRelTop   = (oSpreadTop   - sb[0]) / PT_PER_MM;
                             double oRelBot   = (oSpreadBottom - sb[0]) / PT_PER_MM;
-                            ovalBoundsPerPage[mpi].add(new double[]{oRelLeft, oRelRight, oRelTop, oRelBot});
+                            // 페이지 배경 사각형 등 큰 도형은 무시 — 작은 장식 원점(빨강점 등)만 처리
+                            if (oRelRight - oRelLeft <= 20.0 && oRelBot - oRelTop <= 20.0) {
+                                ovalBoundsPerPage[mpi].add(new double[]{oRelLeft, oRelRight, oRelTop, oRelBot});
+                            }
                             break;
                         }
                     }
