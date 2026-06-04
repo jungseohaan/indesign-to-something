@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase0.InfraSetup;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.MasterHashiraPlacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.MasterPageNumberPlacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.PageLayoutBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2.FramePlacer;
@@ -115,6 +116,9 @@ public class ResolvedToASTBuilder {
 
         // Phase 1.5: 마스터 페이지 쪽 번호 배치
         MasterPageNumberPlacer.place(this.ctx, sections);
+
+        // Phase 1.6: 마스터 페이지 하시라(러닝 헤더) 배치
+        MasterHashiraPlacer.place(this.ctx, sections);
 
         // Phase 2: TextFrame 분류 및 배치
         FramePlacer.placeTextFrames(this.ctx, sections);
