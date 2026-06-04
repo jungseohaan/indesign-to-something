@@ -91,7 +91,14 @@ public final class StoryConverter {
                     // composedLines 경로에서 이미 단락이 생성된 블록은 건너뜀
                     if (tfb.paragraphs() != null && !tfb.paragraphs().isEmpty()) continue;
                     String sourceId = tfb.sourceId();
-                    if (sourceId == null) continue;
+                    if (sourceId == null) {
+                        // domId=None TF: sourceId 없지만 Phase 2가 storyId를 직접 설정했으면 사용
+                        String directStoryId = tfb.storyId();
+                        if (directStoryId != null) {
+                            storyToBlocks.computeIfAbsent(directStoryId, k -> new ArrayList<>()).add(tfb);
+                        }
+                        continue;
+                    }
                     // sourceId → DOM decimal → textFrame → storyId
                     // SPEC-025: master instance ("_pi" 접미사) 도 처리
                     String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
@@ -130,7 +137,6 @@ public final class StoryConverter {
         for (Map.Entry<String, List<ASTTextFrameBlock>> entry : storyToBlocks.entrySet()) {
             String storyId = entry.getKey();
             List<ASTTextFrameBlock> blocks = entry.getValue();
-
             // 1차: IDML Story XML에서 단락 파싱 (정확한 단락 구조)
             boolean suppressLeftInd = blocks.stream().anyMatch(b -> b.suppressParaLeftIndent());
             List<ASTParagraph> paragraphs = StoryLoader.convertStoryFromIDML(ctx, storyId, suppressLeftInd);
@@ -220,6 +226,13 @@ public final class StoryConverter {
 
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
             ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, storyId);
+            // 다중 블록 스토리는 ParagraphDistributor가 각 블록에 단락을 직접 배분했으므로
+            // HWP 연결 글상자 링크(overflow) 불필요 → distributed=true로 linkListIDRef=0 보장
+            if (blocks.size() > 1) {
+                for (ASTTextFrameBlock b : blocks) {
+                    b.distributed(true);
+                }
+            }
         }
         System.err.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
 
