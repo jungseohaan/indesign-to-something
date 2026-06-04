@@ -26,6 +26,9 @@ export function ConversionPanel() {
     lastExtractStats,
     extractChunkSize,
     setExtractChunkSize,
+    outputFormat,
+    setOutputFormat,
+    lastOutputPath,
   } = useAppStore();
 
   const debugRangeEnabled = debugStartPage > 0 || debugEndPage > 0;
@@ -61,9 +64,13 @@ export function ConversionPanel() {
   const [isClearingCache, setIsClearingCache] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     invoke<[number, number]>("extract_cache_stats")
-      .then(([count, bytes]) => setCacheStats({ count, mb: Math.round(bytes / 1024 / 1024 * 10) / 10 }))
+      .then(([count, bytes]) => {
+        if (!cancelled) setCacheStats({ count, mb: Math.round(bytes / 1024 / 1024 * 10) / 10 });
+      })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   async function handleClearCache() {
@@ -163,6 +170,20 @@ export function ConversionPanel() {
         <div className="mb-2 px-3 py-2 bg-green-50 border border-green-200 rounded">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-green-600 font-semibold text-sm">변환 완료</span>
+            {lastOutputPath?.toLowerCase().endsWith(".md") && (
+              <button
+                onClick={() => {
+                  const dir = lastOutputPath.replace(/[/\\][^/\\]+$/, "");
+                  const base = lastOutputPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
+                  invoke("open_file", { path: `${dir}/${base}_images` }).catch(() =>
+                    invoke("open_file", { path: dir })
+                  );
+                }}
+                className="px-2 py-0.5 text-xs border border-green-400 text-green-700 rounded hover:bg-green-100"
+              >
+                폴더 열기
+              </button>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
             <span>
@@ -372,12 +393,30 @@ export function ConversionPanel() {
           >
             {isExportingAst ? "AST 저장 중..." : "AST JSON 저장"}
           </button>
+          <div className="flex items-center gap-1 text-xs text-gray-600">
+            <label className="flex items-center gap-0.5 cursor-pointer">
+              <input type="radio" name="outputFormat" value="hwpx"
+                checked={outputFormat === "hwpx"}
+                onChange={() => setOutputFormat("hwpx")}
+                className="w-3 h-3"
+              />
+              HWPX
+            </label>
+            <label className="flex items-center gap-0.5 cursor-pointer">
+              <input type="radio" name="outputFormat" value="md"
+                checked={outputFormat === "md"}
+                onChange={() => setOutputFormat("md")}
+                className="w-3 h-3"
+              />
+              MD
+            </label>
+          </div>
           <button
             onClick={startConversion}
             disabled={!idmlPath || isConverting}
             className="px-6 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isConverting ? "변환 중..." : "HWPX 변환"}
+            {isConverting ? "변환 중..." : outputFormat === "md" ? "Markdown 변환" : "HWPX 변환"}
           </button>
         </div>
       </div>

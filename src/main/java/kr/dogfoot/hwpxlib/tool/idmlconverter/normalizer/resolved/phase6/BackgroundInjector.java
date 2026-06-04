@@ -73,6 +73,20 @@ public final class BackgroundInjector {
             if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
             // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
             if (childOfGroup.contains(rg.id())) continue;
+            // childIds 중 editableTextFrame이 있으면 Phase 3가 텍스트로 배치 → 그룹 PNG 중복 방지
+            if (rg.childIds() != null) {
+                boolean hasEditableTfChild = false;
+                for (int cid : rg.childIds()) {
+                    if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
+                        hasEditableTfChild = true;
+                        break;
+                    }
+                }
+                if (hasEditableTfChild) {
+                    ctx.phase6PlacedIds.add(rg.id()); // Phase 7c도 중복 배치 안 하도록 등록
+                    continue;
+                }
+            }
             // 같은 (id, pageIndex) 쌍이 중복 추출된 경우만 스킵
             // (master page item은 동일 id가 여러 page에 나타날 수 있으므로 pageIndex 포함)
             if (!processedKeys.add(rg.id() + ":" + rg.pageIndex())) continue;

@@ -19,6 +19,7 @@ import javax.imageio.ImageIO;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
@@ -212,6 +213,19 @@ public class InlineFrameHandler {
         // anchorId 후손 ID 집합 — Phase A/B/C 세 루프 모두 재사용해 O(P×depth) → O(1) 조회
         java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 5);
 
+        // Phase B/C O(P×T) → O(1): parentId 인덱스 한 번 빌드
+        java.util.Map<String, java.util.List<ResolvedPageItem>> pageItemsByParent = new java.util.HashMap<>();
+        for (ResolvedPageItem _pi : ctx.resolvedData.pageItems()) {
+            if (_pi == null || _pi.parentId() == null) continue;
+            pageItemsByParent.computeIfAbsent(_pi.parentId(), k -> new java.util.ArrayList<>()).add(_pi);
+        }
+        java.util.Map<String, java.util.List<ResolvedTextFrame>> textFramesByParent = new java.util.HashMap<>();
+        for (ResolvedTextFrame _tf : ctx.resolvedData.textFrames()) {
+            ResolvedPageItem _tpi = ctx.resolvedData.getPageItem(_tf.id());
+            if (_tpi == null || _tpi.parentId() == null) continue;
+            textFramesByParent.computeIfAbsent(_tpi.parentId(), k -> new java.util.ArrayList<>()).add(_tf);
+        }
+
         // Group 후손 중 stroke/fill 있는 Rectangle 수집
         java.util.List<ResolvedPageItem> rectangles = new java.util.ArrayList<>();
         for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
@@ -257,11 +271,7 @@ public class InlineFrameHandler {
             obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
             obj.width(CoordinateConverter.pointsToHwpunits(w));
             obj.height(CoordinateConverter.pointsToHwpunits(h));
-            try {
-                obj.sourceId("u" + Integer.toHexString(Integer.parseInt(childTf.id())));
-            } catch (NumberFormatException nfe) {
-                obj.sourceId("u" + childTf.id());
-            }
+            obj.sourceId(ParagraphTextHelpers.domIdToSourceId(childTf.id()));
 
             if (matchedRect != null) {
                 String strokeName = matchedRect.strokeColorName();
@@ -337,9 +347,8 @@ public class InlineFrameHandler {
             double rh = Math.abs(rectBounds[2] - rectBounds[0]);
             if (rw <= 0 || rh <= 0) continue;
 
-            for (ResolvedTextFrame nestedTf : ctx.resolvedData.textFrames()) {
-                ResolvedPageItem nestedPi = ctx.resolvedData.getPageItem(nestedTf.id());
-                if (nestedPi == null || !rectPi.id().equals(nestedPi.parentId())) continue;
+            java.util.List<ResolvedTextFrame> childTfCandidates = textFramesByParent.getOrDefault(rectPi.id(), java.util.Collections.<ResolvedTextFrame>emptyList());
+            for (ResolvedTextFrame nestedTf : childTfCandidates) {
                 String vt = nestedTf.frameVisibleText();
                 if (vt == null) continue;
                 String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
@@ -349,11 +358,7 @@ public class InlineFrameHandler {
                 obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
                 obj.width(CoordinateConverter.pointsToHwpunits(rw));
                 obj.height(CoordinateConverter.pointsToHwpunits(rh));
-                try {
-                    obj.sourceId("u" + Integer.toHexString(Integer.parseInt(nestedTf.id())));
-                } catch (NumberFormatException nfe) {
-                    obj.sourceId("u" + nestedTf.id());
-                }
+                obj.sourceId(ParagraphTextHelpers.domIdToSourceId(nestedTf.id()));
 
                 String strokeName = rectPi.strokeColorName();
                 if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)) {
@@ -437,9 +442,7 @@ public class InlineFrameHandler {
             if (cleaned.isEmpty()) continue;
 
             // 이미 Phase A/B 에서 처리된 TF 이면 skip
-            String tfSourceId;
-            try { tfSourceId = "u" + Integer.toHexString(Integer.parseInt(tf.id())); }
-            catch (NumberFormatException e) { tfSourceId = "u" + tf.id(); }
+            String tfSourceId = ParagraphTextHelpers.domIdToSourceId(tf.id());
             if (coveredSourceIds.contains(tfSourceId)) continue;
 
             // 같은 부모 Group 안에서 가장 잘 겹치는 Rect/Oval 찾기
@@ -447,8 +450,9 @@ public class InlineFrameHandler {
             if (tfBounds == null || tfBounds.length < 4) continue;
             ResolvedPageItem bestSibling = null;
             double bestOverlap = 0;
-            for (ResolvedPageItem sibling : ctx.resolvedData.pageItems()) {
-                if (sibling == null || !tfParentId.equals(sibling.parentId())) continue;
+            java.util.List<ResolvedPageItem> siblings = pageItemsByParent.getOrDefault(tfParentId, java.util.Collections.<ResolvedPageItem>emptyList());
+            for (ResolvedPageItem sibling : siblings) {
+                if (sibling == null) continue;
                 String st = sibling.type();
                 boolean isGeoShape = "Rectangle".equals(st) || "Oval".equals(st) || "Polygon".equals(st);
                 boolean isBorderedTf = "TextFrame".equals(st) && sibling.strokeColorName() != null

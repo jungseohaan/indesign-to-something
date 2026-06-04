@@ -47,6 +47,16 @@ public final class ParagraphTextHelpers {
         }
     }
 
+    /** decimal DOM ID 문자열을 IDML sourceId("u" + hex)로 변환. 파싱 실패 시 "u" + 원본 반환. */
+    public static String domIdToSourceId(String decimalId) {
+        if (decimalId == null) return null;
+        try {
+            return "u" + Integer.toHexString(Integer.parseInt(decimalId));
+        } catch (NumberFormatException e) {
+            return "u" + decimalId;
+        }
+    }
+
     /** ASTParagraph의 전체 plain text를 반환. */
     public static String getParaPlainText(ASTParagraph para) {
         StringBuilder sb = new StringBuilder();

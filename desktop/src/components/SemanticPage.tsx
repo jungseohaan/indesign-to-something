@@ -33,16 +33,18 @@ export function SemanticPage() {
 
   // 내장 스키마 로드 (SPEC-018 M1: @its/semantic-schemas SSOT 패키지)
   useEffect(() => {
+    let cancelled = false;
     try {
       import("@its/semantic-schemas/schemas/common.schema.json").then(
-        (m) => loadSchema(m.default ?? m),
-        () => {} // 없으면 무시
+        (m) => { if (!cancelled) loadSchema(m.default ?? m); },
+        () => {}
       );
       import("@its/semantic-schemas/schemas/math-reference.schema.json").then(
-        (m) => loadSchema(m.default ?? m),
-        () => {} // 없으면 무시
+        (m) => { if (!cancelled) loadSchema(m.default ?? m); },
+        () => {}
       );
     } catch { /* 무시 */ }
+    return () => { cancelled = true; };
   }, [loadSchema]);
 
   const handleExtract = () => {

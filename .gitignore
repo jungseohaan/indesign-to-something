@@ -54,6 +54,9 @@ dependency-reduced-pom.xml
 ### Test data (paths are machine-specific) ###
 test-data/cases.json
 
+### API 키 (절대 커밋 금지) ###
+.env
+
 ### Temporary files ###
 extract_err.log
 physics_items.json

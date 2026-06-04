@@ -26,6 +26,9 @@ final class CharPrFactory {
     /** HwpxParagraphBuilder가 단락 처리 시작 시 세팅 — DSL char rule에서 para style 참조용 (SPEC-031) */
     String currentParaStyleRef = null;
 
+    /** isEquationFont() 결과 캐시 — 수식 교과서는 동일 폰트명이 수천 번 반복되므로 런당 중복 판별 방지 */
+    private final java.util.HashMap<String, Boolean> eqFontCache = new java.util.HashMap<>();
+
     CharPrFactory(HwpxConverterContext ctx) {
         this.ctx = ctx;
     }
@@ -60,7 +63,7 @@ final class CharPrFactory {
         }
 
         // 수식 폰트(NP_, BT수식, GREP 해석) → 밑줄 + 초록색 스타일
-        if (isEquationFont(textRun.fontFamily()) || textRun.grepMathFont()) {
+        if (isEquationFontCached(textRun.fontFamily()) || textRun.grepMathFont()) {
             charPrId = createEquationFontCharPr(textRun, charPrId);
         }
 
@@ -128,7 +131,8 @@ final class CharPrFactory {
             ulShape = LineType3.fromString(textRun.underlineShape());
         }
 
-        // horizontalScale를 spaceRatio()로 강제 오버라이드
+        // horizontalScale=null로 build 후 ratio를 spaceRatio()로 직접 덮어쓴다.
+        // fontRatio(한글 글리프 폭 보정)는 공백 폭과 무관하므로 중복 적용 방지.
         CharPrBuilder.build(charPr, newId, height, textColor,
                 textRun.fontFamily(), textRun.fontStyle(), ctx.fontRegistry,
                 textRun.letterSpacing(),
@@ -140,10 +144,13 @@ final class CharPrFactory {
                         ? (textRun.underlineColor() != null ? textRun.underlineColor() : textColor)
                         : "#000000",
                 ulShape,
-                spaceRatio(),  // 공백 장평 축소
+                null,  // horizontalScale: build에 맡기지 않고 아래에서 직접 덮어씀
                 textRun.strikeThrough(),
                 textRun.verticalScale(),
                 textRun.baselineShift());
+        // spaceCondenseRatio를 절대 목표값으로 직접 적용 (fontRatio와 독립)
+        short sr = spaceRatio();
+        charPr.ratio().set(sr, sr, sr, sr, sr, sr, sr);
 
         ctx.charPrCache.put(cacheKey, newId);
         return newId;
@@ -324,6 +331,15 @@ final class CharPrFactory {
         if (fontStyle == null || fontStyle.isEmpty()) return false;
         String lower = fontStyle.toLowerCase();
         return lower.matches(".*\\b(italic|oblique)\\b.*");
+    }
+
+    private boolean isEquationFontCached(String fontFamily) {
+        if (fontFamily == null) return false;
+        Boolean cached = eqFontCache.get(fontFamily);
+        if (cached != null) return cached;
+        boolean result = isEquationFont(fontFamily);
+        eqFontCache.put(fontFamily, result);
+        return result;
     }
 
     static boolean isEquationFont(String fontFamily) {

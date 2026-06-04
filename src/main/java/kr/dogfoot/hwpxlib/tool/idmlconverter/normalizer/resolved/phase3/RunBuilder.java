@@ -49,6 +49,16 @@ class RunBuilder {
             text = text.replace("\u2002", " ");  // En Space → 공백 (단어 구분자 보존)
             text = text.replace("\u2003", " ");  // Em Space → 공백 (단어 구분자 보존)
             text = text.replace("\u200A", "");   // Hair Space 제거 (타이포 조정용, 시각상 무의미)
+            text = text.replace("\u200B", "");   // Zero Width Space 제거
+            text = text.replace("\u200C", "");   // Zero Width Non-Joiner 제거
+            text = text.replace("\u200D", "");   // Zero Width Joiner 제거
+            text = text.replace("\u200E", "");   // Left-to-Right Mark 제거 (HWPX BiDi 미지원)
+            text = text.replace("\u200F", "");   // Right-to-Left Mark 제거
+            text = text.replace("\u202A", "");   // LRE 제거
+            text = text.replace("\u202B", "");   // RLE 제거
+            text = text.replace("\u202C", "");   // PDF(Pop Directional Formatting) 제거
+            text = text.replace("\u202D", "");   // LRO 제거
+            text = text.replace("\u202E", "");   // RLO 제거
             text = text.replace("\uFFE3", "~");  // Fullwidth Macron → 물결 (한글 호환)
             // Yoon 폰트 (윤명조/윤고딕) 의 PUA 글리프 → 안전한 유니코드 치환
             // U+E287 = 빈 정답 칸 (□). 매핑 폰트에서 잘못된 글자 (예: 늣) 로 렌더링되는 회귀 방지.

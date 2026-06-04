@@ -28,7 +28,7 @@ if (typeof JSON === "undefined") {
 }
 if (typeof JSON.stringify !== "function") {
     // 최대 재귀 깊이 (InDesign DOM 객체 순환 참조 방지)
-    var _JSON_MAX_DEPTH = 30;
+    var _JSON_MAX_DEPTH = 60;
 
     JSON.stringify = function (val, replacer, space) {
         var indent = "";
@@ -46,11 +46,18 @@ if (typeof JSON.stringify !== "function") {
         var result = '"';
         for (var i = 0; i < str.length; i++) {
             var c = str.charAt(i);
+            var code = str.charCodeAt(i);
             if (c === '"') result += '\\"';
             else if (c === '\\') result += '\\\\';
             else if (c === '\n') result += '\\n';
             else if (c === '\r') result += '\\r';
             else if (c === '\t') result += '\\t';
+            // InDesign 고유 제어 문자 — JSON 파서 오류 방지
+            else if (code === 0xFFFD || code === 0xFFFC || code === 0xFEFF ||
+                     code === 0x0016 || code === 0x0018 || code === 0x0003 ||
+                     (code < 0x0020 && code !== 0x0009)) {
+                result += '\\u' + ('0000' + code.toString(16)).slice(-4);
+            }
             else result += c;
         }
         return result + '"';
@@ -148,7 +155,8 @@ function _marker(outputDir, tag) {
 
 // SPEC-030: phase 타이밍 누적 상태 (extract 한 번에 하나).
 var _phaseTimingState = null;
-var _ctfCache = null;   // itemId → "editable"|"renderable"|"background"|null
+var _ctfCache = null;          // itemId → "editable"|"renderable"|"background"|null
+var _hiddenLayerCache = null;  // itemId → boolean (isOnHiddenLayer 결과 캐시)
 
 // --- 전역 설정 ---
 var CONFIG = null;
@@ -507,6 +515,7 @@ function _runRenderPhases(doc, ctx, allItems) {
 
     // 03c. allItems 전체 분류 캐시 — classifyTextFrame의 중복 DOM 호출 제거
     _ctfCache = {};
+    _hiddenLayerCache = {};  // isOnHiddenLayer 캐시 리셋 (새 allItems 기준)
     for (var _pci = 0; _pci < allItems.length; _pci++) {
         try {
             var _pcIt = allItems[_pci];
@@ -527,8 +536,7 @@ function _runRenderPhases(doc, ctx, allItems) {
             renderedFloatingItems.push(bgResult.tableInlineRendered[tir]);
     }
     try { $.gc(); } catch (e) {}
-    // exportPageBackgrounds가 transparentBackground=false로 설정하고 복원하지 않으므로,
-    // 이후 deco/graphic/vector 내보내기는 다시 true로 복원해야 배경이 투명하게 렌더됨.
+    // exportPageBackgrounds의 finally 블록이 true로 복원하지만, 예외 전파 등 만일의 경우를 대비한 안전망.
     try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
 
     // 2.14. 이미지 프레임 개별 렌더링 (Rectangle/Oval/Polygon에 place된 이미지)
@@ -603,7 +611,7 @@ function _runRenderPhases(doc, ctx, allItems) {
     // 3. resolved 속성 수집
     _marker(ctx.outputDir, "10_collectResolved");
     writeProgress(ctx.outputDir, "resolved", 0, ctx.rangePageCount);
-    var resolved = collectResolved(doc, ctx.outputDir, ctx.rangePageCount, ctx.startPage, ctx.endPage, editableFrameIds, ctx.skipRenderPagesMap);
+    var resolved = collectResolved(doc, ctx.outputDir, ctx.rangePageCount, ctx.startPage, ctx.endPage, editableFrameIds, ctx.skipRenderPagesMap, allItems);
     resolved.renderedTextFrames    = [];
     resolved.renderedPdfFrames     = [];
     resolved.renderedGraphicFrames = renderedGraphicFrames;
@@ -942,16 +950,21 @@ function exportOvalShapeTextFrames(doc, outputDir, startPage, endPage, decoChild
  */
 function isOnHiddenLayer(item) {
     try {
+        var itemId = item.id;
+        if (_hiddenLayerCache && _hiddenLayerCache[itemId] !== undefined) return _hiddenLayerCache[itemId];
+        var result = false;
         var cur = item;
         while (cur) {
             try {
-                if (cur.itemLayer && !cur.itemLayer.visible) return true;
+                if (cur.itemLayer && !cur.itemLayer.visible) { result = true; break; }
             } catch (e) {}
             try { cur = cur.parent; } catch (e) { break; }
             if (!cur || cur.constructor.name === "Spread"
                 || cur.constructor.name === "Page"
                 || cur.constructor.name === "Document") break;
         }
+        if (_hiddenLayerCache) _hiddenLayerCache[itemId] = result;
+        return result;
     } catch (e) {}
     return false;
 }
@@ -2147,7 +2160,7 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
 // resolved.json 수집 — 스토리 / TF / 마스터 인스턴스화 / 페이지 / 아이템
 // =============================================================================
 
-function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableIds, skipRenderPagesMap) {
+function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems) {
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
 
     writeProgress(outputDir, "resolved_styles", 0, rangePageCount);
@@ -2247,7 +2260,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     var stories = collectStories(doc, outputDir, rangePageCount, rangeStoryIds);
 
     writeProgress(outputDir, "resolved_frames", 0, rangePageCount);
-    var textFrames = collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPagesMap);
+    var textFrames = collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems);
 
     // SPEC-025 Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화 (frame + story clone)
     // 증분 추출에서도 실행 (마스터 인스턴스는 경량 연산)
@@ -2255,7 +2268,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
 
     writeProgress(outputDir, "resolved_items", 0, rangePageCount);
     var pages = collectPages(doc, startPage, endPage, skipRenderPagesMap);
-    var pageItems = collectPageItems(doc, startPage, endPage, skipRenderPagesMap);
+    var pageItems = collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems);
 
     var fontMetrics = measureFontMetrics(doc);
 
@@ -2378,6 +2391,9 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
     var TABLE_INLINE_RATIO = 0.7;
     var TABLE_TEXT_CELL_FLOOR = 4; // 본문 텍스트 셀이 이 수 이상이면 fallback 안 함
     var tableInlineRendered = [];  // { id, file, bounds, pageIndex, type }
+    var inlineObjects = [];  // { id, file, parentStoryId, bounds, pageIndex }
+    var processedStoryIds = {};  // Story 중복 방지
+    try {
     for (var ti = 0; ti < editableFrames.length; ti++) {
         var tTf = editableFrames[ti];
         try {
@@ -2443,8 +2459,6 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
     }
 
     // 인라인 객체 추출: 편집 TextFrame의 Story에 앵커된 그래픽을 개별 PNG로 렌더
-    var inlineObjects = [];  // { id, file, parentStoryId, bounds, pageIndex }
-    var processedStoryIds = {};  // Story 중복 방지
     for (var ei = 0; ei < editableFrames.length; ei++) {
         var eTf = editableFrames[ei];
         try {
@@ -2622,22 +2636,22 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
             }
         } catch (eInline) {}
     }
-
-    // localDisplaySetting 복원
-    for (var ri = 0; ri < savedLocalSettings.length; ri++) {
-        try { savedLocalSettings[ri].item.localDisplaySetting = savedLocalSettings[ri].setting; } catch (e) {}
-    }
-
-    // Display Performance 복원
-    if (savedDisplayPerf !== null) {
-        try { doc.viewPreferences.displayPerformance = savedDisplayPerf; } catch (e) {}
+    } finally {
+        // localDisplaySetting 복원
+        for (var ri = 0; ri < savedLocalSettings.length; ri++) {
+            try { savedLocalSettings[ri].item.localDisplaySetting = savedLocalSettings[ri].setting; } catch (e) {}
+        }
+        // Display Performance 복원
+        if (savedDisplayPerf !== null) {
+            try { doc.viewPreferences.displayPerformance = savedDisplayPerf; } catch (e) {}
+        }
+        // transparentBackground 복원 — inline render가 false로 두고 예외 탈출할 경우 대비
+        try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
     }
 
     // 인라인 객체를 결과에 추가
     for (var ioi = 0; ioi < inlineObjects.length; ioi++) {
         results.push(inlineObjects[ioi]);
-    }
-    if (inlineObjects.length > 0) {
     }
 
     return { items: results, editableFrameIds: editableFrameIds, tableInlineRendered: tableInlineRendered };
@@ -2776,29 +2790,6 @@ function collectParagraphStyles(doc) {
             });
         } catch (e) {
             try { styles.push({ name: ps.name, justification: "LEFT_ALIGN" }); } catch (e2) {}
-        }
-    }
-    return styles;
-}
-
-function collectCharacterStyles(doc) {
-    var styles = [];
-    for (var i = 0; i < doc.allCharacterStyles.length; i++) {
-        var cs = doc.allCharacterStyles[i];
-        try {
-            var data = {
-                name: cs.name,
-                basedOn: cs.basedOn ? cs.basedOn.name : null,
-                fontFamily: null,
-                fontStyle: cs.fontStyle,
-                fontSize: cs.pointSize,
-                underline: cs.underline,
-                strikeThru: cs.strikeThru
-            };
-            try { data.fontFamily = cs.appliedFont ? cs.appliedFont.fontFamily : null; } catch (e) {}
-            styles.push(data);
-        } catch (e) {
-            styles.push({ name: cs.name, error: e.message });
         }
     }
     return styles;
@@ -3018,25 +3009,6 @@ function splitRunByStoryChars(story, rng, runData, para) {
             var ngs = para.appliedParagraphStyle.nestedGrepStyles;
             if (ngs && ngs.length > 0) hasGrepStyles = true;
         } catch (e3) {}
-        // 디버그
-        if (runText.indexOf("2x-3y") >= 0) {
-            var dbgFile2 = File(Folder.temp + "/grep_dbg.txt");
-            dbgFile2.open("w");
-            dbgFile2.write("hasGrepStyles=" + hasGrepStyles + "\n");
-            try {
-                var ps2 = para.appliedParagraphStyle;
-                dbgFile2.write("styleName=" + ps2.name + "\n");
-                dbgFile2.write("nestedGrepStyles exists=" + (ps2.nestedGrepStyles != undefined) + "\n");
-                dbgFile2.write("nestedGrepStyles length=" + ps2.nestedGrepStyles.length + "\n");
-                for (var gi = 0; gi < Math.min(3, ps2.nestedGrepStyles.length); gi++) {
-                    dbgFile2.write("  grep[" + gi + "] pattern=" + ps2.nestedGrepStyles[gi].grepExpression + "\n");
-                }
-            } catch (e4) {
-                dbgFile2.write("error: " + e4.message + "\n");
-            }
-            dbgFile2.close();
-        }
-
         var firstProps = getCharProps(rngStart);
         var allSame = false;
         if (!hasGrepStyles) {
@@ -3650,7 +3622,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
 
 // --- 텍스트 프레임 수집 (오버플로/줄 수) ---
 
-function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPagesMap) {
+function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems) {
     if (!editableIds) editableIds = {};
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var frames = [];
@@ -3660,10 +3632,10 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
     try {
         // doc.textFrames는 페이지 소속 프레임만 포함할 수 있으므로
         // allPageItems에서 TextFrame을 수집하여 Spread 직속 프레임도 포함
-        var allItems = doc.allPageItems;
+        var srcItems = cachedAllItems || doc.allPageItems;
         var tfs = [];
-        for (var ai = 0; ai < allItems.length; ai++) {
-            if (allItems[ai].constructor.name === "TextFrame") tfs.push(allItems[ai]);
+        for (var ai = 0; ai < srcItems.length; ai++) {
+            if (srcItems[ai].constructor.name === "TextFrame") tfs.push(srcItems[ai]);
         }
         // Pass 1: 페이지 범위 내 프레임 수집
         for (var i = 0; i < tfs.length; i++) {
@@ -4411,10 +4383,10 @@ function collectPages(doc, startPage, endPage, skipRenderPagesMap) {
 
 // --- 페이지 아이템 수집 (벡터/이미지/그룹 속성 평탄화) ---
 
-function collectPageItems(doc, startPage, endPage, skipRenderPagesMap) {
+function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems) {
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
     var items = [];
-    var allItems = doc.allPageItems;
+    var allItems = cachedAllItems || doc.allPageItems;
     for (var i = 0; i < allItems.length; i++) {
         var pi = allItems[i];
 

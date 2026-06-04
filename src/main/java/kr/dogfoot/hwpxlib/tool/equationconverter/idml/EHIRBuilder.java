@@ -40,10 +40,38 @@ public class EHIRBuilder {
             case FRACTION_NUMERATOR:
                 return processFraction(tokens, pos, out);
 
-            case FRACTION_DENOMINATOR:
-                // 분자 없이 분모만 → 텍스트로 처리
+            case FRACTION_DENOMINATOR: {
+                // standalone 분모: 연속 토큰 수집 → decodeFractionInner로 분수 조립
+                StringBuilder fracRaw = new StringBuilder();
+                fracRaw.append(token.text());
+                int fi = pos + 1;
+                while (fi < tokens.size()) {
+                    EHToken ft = tokens.get(fi);
+                    if (ft.type() == EHToken.Type.FRACTION_DENOMINATOR) {
+                        fracRaw.append(ft.text());
+                        fi++;
+                    } else if (ft.type() == EHToken.Type.SUP_BASE_TEXT
+                            || ft.type() == EHToken.Type.BASE_TEXT) {
+                        fracRaw.append(ft.text());
+                        fi++;
+                    } else if (ft.type() == EHToken.Type.SKIP) {
+                        fi++;
+                    } else {
+                        break;
+                    }
+                }
+                String[] parts = EHFontGlyphMap.decodeFractionInner(fracRaw.toString());
+                if (parts != null && (parts[0].length() > 0 || parts[1].length() > 0)) {
+                    EHNode.Fraction frac = new EHNode.Fraction();
+                    if (parts[0].length() > 0) frac.numerator().add(new EHNode.Text(parts[0]));
+                    if (parts[1].length() > 0) frac.denominator().add(new EHNode.Text(parts[1]));
+                    out.add(frac);
+                    return fi;
+                }
+                // decodeFractionInner 실패 → 텍스트 폴백
                 out.add(new EHNode.Text(token.text()));
                 return pos + 1;
+            }
 
             case SUPERSCRIPT_GLYPH:
                 return processSuperscriptGlyphs(tokens, pos, out);

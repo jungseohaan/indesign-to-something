@@ -28,6 +28,8 @@ public class HwpxTableBuilder {
     // ── 플로팅 테이블 변환 ──
 
     public void convertTable(Para framePara, ASTTable astTable) {
+        if (astTable.rowCount() < 1 || astTable.colCount() < 1) return;
+
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
 
