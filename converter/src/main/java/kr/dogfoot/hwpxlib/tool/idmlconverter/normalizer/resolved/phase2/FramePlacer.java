@@ -37,6 +37,10 @@ public final class FramePlacer {
     private static final double CONTAINMENT_TOL_PT = 1.0;
     /** occlusion 감지 bounds 여유 (pt) */
     private static final double OCCLUSION_BOUNDS_TOL_PT = 1.0;
+    /** 연결 글상자 체인 병합: Y 간격이 행 높이의 이 배수 이내면 동일 체인으로 간주 */
+    private static final double CHAIN_GAP_RATIO     = 0.5;
+    /** 연결 글상자 체인 병합: X 겹침 비율이 이 값 이상이어야 같은 컬럼으로 간주 */
+    private static final double CHAIN_X_OVERLAP_MIN = 0.5;
     // -----------------------------------------------------------------------
 
     public static void placeTextFrames(ResolvedBuildContext ctx, List<ASTSection> sections) {
@@ -88,20 +92,14 @@ public final class FramePlacer {
                     // 부모/조상 Group이 inline_object 이거나 inline PNG로 캡처된 경우
                     // → Phase 3가 INLINE_TEXT_FRAME으로 처리 → floating 불필요.
                     // 5 hop 조상 체인을 검사하여 중첩 Group(예: Group18498 → Group18558 → TF18579) 도 처리.
+                    ResolvedPageItem _inlPi = ctx.resolvedData.getPageItem(tf.id());
                     if (!rendered && tfDomId >= 0) {
-                        ResolvedPageItem _inlPi = ctx.resolvedData.getPageItem(tf.id());
                         String _curParentId = (_inlPi != null) ? _inlPi.parentId() : null;
                         for (int _h = 0; _h < 5 && _curParentId != null && !rendered; _h++) {
-                            try {
-                                int _pid = Integer.parseInt(_curParentId);
-                                if (ctx.resolvedData.isInlineObjectId(_pid)) {
-                                    rendered = true;
-                                }
-                            } catch (NumberFormatException ignored) {}
-                            if (!rendered) {
-                                try {
-                                    if (idx.inlineFileGroupIds.contains(Integer.parseInt(_curParentId))) rendered = true;
-                                } catch (NumberFormatException ignored) {}
+                            int _pid = parseDomIdOrNeg(_curParentId);
+                            if (_pid >= 0) {
+                                if (ctx.resolvedData.isInlineObjectId(_pid)) rendered = true;
+                                if (!rendered && idx.inlineFileGroupIds.contains(_pid)) rendered = true;
                             }
                             if (!rendered) {
                                 ResolvedPageItem _nextPi = ctx.resolvedData.getPageItem(_curParentId);
@@ -112,9 +110,7 @@ public final class FramePlacer {
                     }
                     boolean sharedWithEditable = tf.storyId() != null && idx.editableStoryIds.contains(tf.storyId());
                     // parentId가 있으면 다른 객체 안에 중첩 → 배경에서 부모와 함께 숨겨짐
-                    boolean hasParent = false;
-                    ResolvedPageItem rpi = ctx.resolvedData.getPageItem(tf.id());
-                    if (rpi != null && rpi.parentId() != null) hasParent = true;
+                    boolean hasParent = _inlPi != null && _inlPi.parentId() != null;
                     if (hasText && !rendered && !sharedWithEditable && hasParent) {
                         inlineToFloatingReason = InlineToFloatingReason.NON_EDITABLE_WITH_TEXT;
                     } else {
@@ -129,10 +125,8 @@ public final class FramePlacer {
                     if (tfDomId >= 0) {
                         ResolvedPageItem _tfi2 = ctx.resolvedData.getPageItem(tf.id());
                         if (_tfi2 != null && _tfi2.parentId() != null) {
-                            try {
-                                int parentDomId = Integer.parseInt(_tfi2.parentId());
-                                if (ctx.resolvedData.isInlineObjectId(parentDomId)) continue; // O(1)
-                            } catch (NumberFormatException ignored) {}
+                            int parentDomId = parseDomIdOrNeg(_tfi2.parentId());
+                            if (parentDomId >= 0 && ctx.resolvedData.isInlineObjectId(parentDomId)) continue; // O(1)
                         }
                     }
                     // inline+editable TF가 어떤 렌더 채널에도 없으면 Phase 3 인라인 런으로 처리.
@@ -180,15 +174,15 @@ public final class FramePlacer {
                     // (예: 오느른/운느라/싸인 — 부모 Rectangle이 비스듬히 기울어진 TF)
                     // Phase 7 PNG 는 이후 ctx.frameDispositions(TEXT_BLOCK_PLACED) 확인 시 건너뜀.
                     String _vis = tf.frameVisibleText();
-                    String _visCleaned = (_vis == null) ? "" : _vis.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+                    String _visCleaned = (_vis == null) ? "" : _vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
                     boolean _hasOwnText = _visCleaned.length() >= 2;
                     boolean _isRendered = tfDomId >= 0 && ctx.resolvedData.isRenderedByOtherChannel(tfDomId);
                     // 부모 Rectangle이 실제로 회전된 경우에만 텍스트 배치 (VectorShape/TextPath 는 제외)
                     boolean _parentIsRotatedRect = false;
+                    ResolvedPageItem _tfPi = ctx.resolvedData.getPageItem(tf.id());
                     if (_hasOwnText && _isRendered && !tf.isInline()) {
-                        ResolvedPageItem _tfi = ctx.resolvedData.getPageItem(tf.id());
-                        if (_tfi != null && _tfi.parentId() != null) {
-                            ResolvedPageItem _parent = ctx.resolvedData.getPageItem(_tfi.parentId());
+                        if (_tfPi != null && _tfPi.parentId() != null) {
+                            ResolvedPageItem _parent = ctx.resolvedData.getPageItem(_tfPi.parentId());
                             if (_parent != null && "Rectangle".equals(_parent.type())
                                     && Math.abs(_parent.absoluteRotationAngle()) > 0.5) {
                                 _parentIsRotatedRect = true;
@@ -201,13 +195,14 @@ public final class FramePlacer {
                     if (!_parentIsRotatedRect && _hasOwnText && !_isRendered
                             && tf.storyId() != null && !tf.isInline()) {
                         boolean _ancestorHasPng = false;
-                        ResolvedPageItem _anPi = ctx.resolvedData.getPageItem(tf.id());
-                        String _anPid = (_anPi != null) ? _anPi.parentId() : null;
+                        String _anPid = (_tfPi != null) ? _tfPi.parentId() : null;
                         for (int _d = 0; _d < 5 && _anPid != null && !_ancestorHasPng; _d++) {
                             try {
                                 int _anPidInt = Integer.parseInt(_anPid);
                                 if (ctx.resolvedData.isInlineObjectId(_anPidInt)) { _ancestorHasPng = true; break; }
-                                if (idx.renderedItemWithFileIds.contains(_anPidInt)) { _ancestorHasPng = true; break; }
+                                // inline_* 파일을 가진 그룹(배지)만 텍스트 포함 PNG로 간주.
+                                // deco_*/shape_* 등 page_object 타입은 텍스트 TF 내용이 PNG에 캡처되지 않음.
+                                if (idx.inlineFileGroupIds.contains(_anPidInt)) { _ancestorHasPng = true; break; }
                             } catch (NumberFormatException ignored) {}
                             if (!_ancestorHasPng) {
                                 ResolvedPageItem _anParPi = ctx.resolvedData.getPageItem(_anPid);
@@ -259,8 +254,8 @@ public final class FramePlacer {
                     double curW = cgb[3] - cgb[1];
                     double xOverlapRatio = (xOvEnd > xOvStart && prevW > 0 && curW > 0)
                             ? (xOvEnd - xOvStart) / Math.min(prevW, curW) : 0;
-                    // gap<0 (역방향) 또는 gap>lineH*0.5 또는 다른 컬럼(X 겹침 <50%)이면 독립 배치
-                    if (diffPage || gap < 0 || gap > lineH * 0.5 || xOverlapRatio < 0.5) {
+                    // gap<0 (역방향) 또는 gap>lineH*CHAIN_GAP_RATIO 또는 다른 컬럼이면 독립 배치
+                    if (diffPage || gap < 0 || gap > lineH * CHAIN_GAP_RATIO || xOverlapRatio < CHAIN_X_OVERLAP_MIN) {
                         // 병합하지 않고 독립 배치 → continue하지 않음
                     } else {
                         continue; // 인접 → 병합 (첫 프레임에서 처리)
@@ -307,8 +302,8 @@ public final class FramePlacer {
                     double nextW = ngb[3] - ngb[1];
                     double xOverlapRatio = (xOvEnd > xOvStart && curW > 0 && nextW > 0)
                             ? (xOvEnd - xOvStart) / Math.min(curW, nextW) : 0;
-                    // gap<0 (역방향) 또는 gap>lineH*0.5 또는 다른 컬럼이면 병합 중단
-                    if (gap < 0 || gap > lineH * 0.5 || xOverlapRatio < 0.5) break;
+                    // gap<0 (역방향) 또는 gap>lineH*CHAIN_GAP_RATIO 또는 다른 컬럼이면 병합 중단
+                    if (gap < 0 || gap > lineH * CHAIN_GAP_RATIO || xOverlapRatio < CHAIN_X_OVERLAP_MIN) break;
                     if (ngb[0] < gb[0]) gb[0] = ngb[0];
                     if (ngb[1] < gb[1]) gb[1] = ngb[1];
                     if (ngb[2] > gb[2]) gb[2] = ngb[2];
@@ -405,7 +400,7 @@ public final class FramePlacer {
                             if (_xOv / _otherW < 0.8) continue;
                             String _otherText = _other.frameVisibleText();
                             if (_otherText == null || _otherText.isEmpty()) continue;
-                            String _otherClean = _otherText.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+                            String _otherClean = _otherText.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
                             if (_otherClean.length() < 3) continue;
                             if (paraText.contains(_otherClean)
                                     && _otherClean.length() * 2 >= paraText.length()) {
@@ -530,12 +525,12 @@ public final class FramePlacer {
             // SPEC-025: master instance clones use synthetic ids like "2453_pi20" — not pure numeric.
             block.sourceId(ParagraphTextHelpers.domIdToSourceId(tf.id()));
             block.storyId(tf.storyId());
-            // ￼ 로 시작하는 TF에 inline TF가 좌측 가장자리를 공유하는 경우
+            // \uFFFC 로 시작하는 TF에 inline TF가 좌측 가장자리를 공유하는 경우
             // (예: 단락 번호 "1" TF가 본문 TF 왼쪽에 맞닿음)
             // → x는 이동하지 않고, inline TF top이 더 위에 있으면 y를 그 위치로 올림
             {
                 String _fvtInl = tf.frameVisibleText();
-                if (_fvtInl != null && _fvtInl.startsWith("￼")) {
+                if (_fvtInl != null && _fvtInl.startsWith("\uFFFC")) {
                     for (ResolvedTextFrame _itf : frames) {
                         if (!_itf.isInline() || _itf.pageIndex() != tf.pageIndex()) continue;
                         double[] _igb = _itf.geometricBounds();
@@ -816,8 +811,7 @@ public final class FramePlacer {
                 if (bGb == null || bGb.length < 4) continue;
                 if (bGb[0] >= aGb[0] - TOL && bGb[1] >= aGb[1] - TOL
                         && bGb[2] <= aGb[2] + TOL && bGb[3] <= aGb[3] + TOL) {
-                    int innerDomId = -1;
-                    try { innerDomId = Integer.parseInt(inner.id()); } catch (NumberFormatException e) {}
+                    int innerDomId = parseDomIdOrNeg(inner.id());
                     boolean isBadgeChild = innerDomId >= 0 && badgeChildDomIds.contains(innerDomId);
                     if (!isBadgeChild) {
                         innerCandidates.computeIfAbsent(inner.id(), k -> new java.util.ArrayList<>()).add(outer);
