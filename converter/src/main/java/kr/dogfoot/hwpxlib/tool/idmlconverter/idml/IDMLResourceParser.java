@@ -161,6 +161,10 @@ public class IDMLResourceParser {
         def.tracking(parseDoubleAttr(styleElem, "Tracking"));
         def.baselineShift(parseDoubleAttr(styleElem, "BaselineShift"));
         def.capitalization(getAttrOrNull(styleElem, "Capitalization"));
+        def.underlineWeight(parseDoubleAttr(styleElem, "UnderlineWeight"));
+        def.underlineOffset(parseDoubleAttr(styleElem, "UnderlineOffset"));
+        def.ruleAboveLineWeight(parseDoubleAttr(styleElem, "RuleAboveLineWeight"));
+        def.ruleBelowLineWeight(parseDoubleAttr(styleElem, "RuleBelowLineWeight"));
 
         // 밑줄 / 취소선
         String underline = getAttrOrNull(styleElem, "Underline");
@@ -203,6 +207,8 @@ public class IDMLResourceParser {
             if (ulType != null) {
                 def.underlineType(ulType);
             }
+            def.ruleAboveColor(getPropertyText(props, "RuleAboveColor"));
+            def.ruleBelowColor(getPropertyText(props, "RuleBelowColor"));
 
             // Leading (행간)
             String leadingText = getPropertyText(props, "Leading");

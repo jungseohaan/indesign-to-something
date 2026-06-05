@@ -30,6 +30,36 @@ public class HwpxImageBuilder {
     /** 이미지 크기가 0 이하일 때 사용하는 기본 크기 (HWPUNIT) */
     private static final long DEFAULT_IMAGE_DIMENSION = 1000;
 
+    private static boolean isPaperLikeRaster(byte[] imageData) {
+        if (imageData == null || imageData.length == 0) return false;
+        try {
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(imageData));
+            if (img == null) return false;
+            int stepX = Math.max(1, img.getWidth() / 80);
+            int stepY = Math.max(1, img.getHeight() / 80);
+            int opaque = 0;
+            int paper = 0;
+            for (int y = 0; y < img.getHeight(); y += stepY) {
+                for (int x = 0; x < img.getWidth(); x += stepX) {
+                    int argb = img.getRGB(x, y);
+                    int a = (argb >>> 24) & 0xff;
+                    if (a < 220) continue;
+                    opaque++;
+                    int r = (argb >>> 16) & 0xff;
+                    int g = (argb >>> 8) & 0xff;
+                    int b = argb & 0xff;
+                    if (r >= 245 && g >= 245 && b >= 245) {
+                        paper++;
+                    }
+                }
+            }
+            img.flush();
+            return opaque > 0 && paper >= opaque * 0.95;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     /**
      * Picture 객체의 공통 geometry 속성을 초기화한다.
      * (offset, orgSz, curSz, flip, rotationInfo, renderingInfo, sz)
@@ -172,6 +202,8 @@ public class HwpxImageBuilder {
                     .horzOffset(0L);
         } else {
             // 인라인 (글자처럼 취급, 줄간격 확장 허용)
+            boolean smallMarker = isSmallMarkerImage(displayW, displayH);
+            long inlineVertOffset = smallMarker ? -Math.max(120L, Math.round(displayH * 0.45)) : 0L;
             pic.pos().treatAsCharAnd(true)
                     .affectLSpacingAnd(true)
                     .flowWithTextAnd(true)
@@ -181,7 +213,7 @@ public class HwpxImageBuilder {
                     .horzRelToAnd(HorzRelTo.PARA)
                     .vertAlignAnd(VertAlign.BOTTOM)
                     .horzAlignAnd(HorzAlign.LEFT)
-                    .vertOffsetAnd(0L)
+                    .vertOffsetAnd(inlineVertOffset)
                     .horzOffset(0L);
         }
 
@@ -222,6 +254,90 @@ public class HwpxImageBuilder {
                 .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
 
         ctx.imagesConverted++;
+    }
+
+    void addPageLevelInlineImage(Para para, ASTInlineObject obj) {
+        byte[] imageData = obj.imageData();
+        if (imageData == null || imageData.length == 0) return;
+        if (obj.resolvedPageX() < 0 || obj.resolvedPageY() < 0) return;
+
+        String format = obj.imageFormat() != null ? obj.imageFormat() : "png";
+        String itemId = ImageInserter.registerImage(ctx.hwpxFile, imageData, format);
+
+        long displayW = obj.width() > 0 ? obj.width() : DEFAULT_IMAGE_DIMENSION;
+        long displayH = obj.height() > 0 ? obj.height() : DEFAULT_IMAGE_DIMENSION;
+        if (obj.height() <= 0 && obj.width() > 0
+                && obj.pixelWidth() > 0 && obj.pixelHeight() > 0) {
+            displayH = Math.max(1, Math.round((double) obj.width() * obj.pixelHeight() / obj.pixelWidth()));
+        } else if (obj.width() <= 0 && obj.height() > 0
+                && obj.pixelWidth() > 0 && obj.pixelHeight() > 0) {
+            displayW = Math.max(1, Math.round((double) obj.height() * obj.pixelWidth() / obj.pixelHeight()));
+        }
+
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+        Picture pic = run.addNewPicture();
+        String picId = HwpxUtil.nextShapeId();
+
+        pic.idAnd(picId)
+                .zOrderAnd(1000)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(DropCapStyle.None)
+                .reverseAnd(false);
+
+        pic.hrefAnd("");
+        pic.groupLevelAnd((short) 0);
+        pic.instidAnd(HwpxUtil.nextShapeId());
+        setupPictureGeometry(pic, displayW, displayH, false, false, (short) 0);
+
+        pic.createPos();
+        pic.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(obj.resolvedPageY())
+                .horzOffset(obj.resolvedPageX());
+
+        pic.createOutMargin();
+        pic.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        pic.createImgRect();
+        pic.imgRect().createPt0();
+        pic.imgRect().pt0().set(0L, 0L);
+        pic.imgRect().createPt1();
+        pic.imgRect().pt1().set(displayW, 0L);
+        pic.imgRect().createPt2();
+        pic.imgRect().pt2().set(displayW, displayH);
+        pic.imgRect().createPt3();
+        pic.imgRect().pt3().set(0L, displayH);
+
+        pic.createImgClip();
+        pic.imgClip().leftAnd(0L).rightAnd(displayW).topAnd(0L).bottomAnd(displayH);
+
+        pic.createInMargin();
+        pic.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        pic.createImgDim();
+        pic.imgDim().dimwidthAnd(displayW).dimheightAnd(displayH);
+
+        pic.createImg();
+        pic.img().binaryItemIDRefAnd(itemId)
+                .brightAnd(0).contrastAnd(0)
+                .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
+
+        ctx.imagesConverted++;
+    }
+
+    private static boolean isSmallMarkerImage(long displayW, long displayH) {
+        return displayW > 0 && displayH > 0 && displayW <= 700 && displayH <= 700;
     }
 
     // ── 인라인 배지 그룹 (PNG 배경 + 텍스트 글상자, 글자처럼 취급) ──
@@ -313,6 +429,12 @@ public class HwpxImageBuilder {
         pic.img().binaryItemIDRefAnd(itemId).brightAnd(0).contrastAnd(0)
                 .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
 
+        boolean hasOverlayText = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
+        if (!hasOverlayText) {
+            ctx.imagesConverted++;
+            return;
+        }
+
         // ── 자식2: Rectangle + DrawText (텍스트 오버레이) ──
         Rectangle rect = container.addNewRectangle();
         rect.idAnd(HwpxUtil.nextShapeId())
@@ -342,7 +464,7 @@ public class HwpxImageBuilder {
         SubList subList = dt.subList();
         VerticalAlign2 vAlign = HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification());
         subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
-                .lineWrapAnd(LineWrapMethod.BREAK).vertAlignAnd(vAlign)
+                .lineWrapAnd(HwpxTextBoxBuilder.inlineTextFrameLineWrap(obj)).vertAlignAnd(vAlign)
                 .linkListIDRefAnd("0").linkListNextIDRefAnd("0")
                 .textWidthAnd(0).textHeightAnd(0)
                 .hasTextRefAnd(false).hasNumRefAnd(false);
@@ -615,16 +737,21 @@ public class HwpxImageBuilder {
         // fromGroup=true → IN_FRONT_OF_TEXT (호출자가 명시적으로 지정)
         // fromGroup=false → BEHIND_TEXT (배경 이미지)
         // 단, 면적이 크고 z-order가 낮은 항목은 배경으로 판단 → BEHIND_TEXT
-        TextWrapMethod figWrap = TextWrapMethod.IN_FRONT_OF_TEXT;
         long figAreaHwp = (long) figure.width() * figure.height();
-        boolean isLargeBackground = figAreaHwp > 500_000_000L && figure.zOrder() <= 5;
+        boolean isLargePaperLikeRaster = !figure.fromGroup()
+                && figAreaHwp > 500_000_000L
+                && isPaperLikeRaster(figure.imageData());
+        boolean isLargeBackground = (!figure.fromGroup() && figAreaHwp > 500_000_000L && figure.zOrder() <= 5)
+                || isLargePaperLikeRaster;
+        TextWrapMethod figWrap = TextWrapMethod.IN_FRONT_OF_TEXT;
         if (!figure.fromGroup() || isLargeBackground) {
             figWrap = TextWrapMethod.BEHIND_TEXT;
         }
+        int outputZOrder = isLargePaperLikeRaster ? 1 : (isLargeBackground ? 0 : figure.zOrder());
 
         // ShapeObject
         pic.idAnd(picId)
-                .zOrderAnd(figure.zOrder())
+                .zOrderAnd(outputZOrder)
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(figWrap)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)

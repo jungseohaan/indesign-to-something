@@ -13,37 +13,10 @@ import java.util.List;
  * HwpxTextBoxBuilder의 단락/열 분배 헬퍼 (W4 Step A).
  * - 단락 높이 추정 + 수직 공간 균등 분배
  * - 다단(컬럼) 너비 계산 + 단락 분배
- * - adjustHeightByFontMetrics만 ctx 필요, 나머지는 ctx 불필요
  */
 final class TextBoxLayoutHelpers {
 
     private TextBoxLayoutHelpers() {}
-
-    static long adjustHeightByFontMetrics(HwpxConverterContext ctx, long h, java.util.List<ASTParagraph> paragraphs) {
-        if (paragraphs == null || paragraphs.isEmpty()) return h;
-        if (ctx.fontRegistry.fontMapper() == null) return h;
-
-        double maxScale = 1.0;
-        for (ASTParagraph para : paragraphs) {
-            if (para.items() == null) continue;
-            for (ASTInlineItem item : para.items()) {
-                if (!(item instanceof ASTTextRun)) continue;
-                ASTTextRun run = (ASTTextRun) item;
-                if (run.fontFamily() == null) continue;
-                // resolveFontIdPair를 호출하면 캐시된 MappingResult에서 heightScale을 가져올 수 있음
-                ctx.fontRegistry.resolveFontIdPair(run.fontFamily(), run.fontStyle());
-                double scale = ctx.fontRegistry.lastHeightScale();
-                if (scale > maxScale) {
-                    maxScale = scale;
-                }
-            }
-        }
-
-        if (maxScale > 1.0) {
-            h = (long) Math.ceil(h * maxScale);
-        }
-        return h;
-    }
 
     /**
      * JustifyAlign 시뮬레이션: 프레임 높이에 맞게 문단 간 간격을 균등 분배.

@@ -299,22 +299,17 @@ public class ASTToHwpxConverter {
             ctx.framesConverted++;
         }
 
-        // 3) TABLE 플로팅 처리
-        for (ASTBlock block : otherBlocks) {
-            if (block.blockType() == ASTBlock.BlockType.TABLE) {
-                ASTTable table = (ASTTable) block;
-                tableBuilder.convertTable(secPrPara, table);
-                ctx.framesConverted++;
-            }
-        }
-
-        // 일반 플로팅 텍스트 프레임 + 그룹 내부 FIGURE: z-order 순으로 인터리빙
-        // (동일 그룹 내 텍스트 프레임과 벡터 셰이프 간 올바른 겹침 순서 보장)
+        // 일반 플로팅 텍스트 프레임 + TABLE + 그룹 내부 FIGURE: z-order 순으로 인터리빙
+        // TABLE도 플로팅 객체이므로 먼저 모두 배치하면 뒤늦게 나온 그림이 표 텍스트를 덮을 수 있다.
         List<ASTBlock> inFrontBlocks = new ArrayList<>();
         for (ASTTextFrameBlock block : floatingBlocks) {
             inFrontBlocks.add(block);
         }
         for (ASTBlock block : otherBlocks) {
+            if (block.blockType() == ASTBlock.BlockType.TABLE) {
+                inFrontBlocks.add(block);
+                continue;
+            }
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 ASTFigure fig = (ASTFigure) block;
                 if (fig.fromGroup()) {
@@ -331,6 +326,8 @@ public class ASTToHwpxConverter {
         for (ASTBlock block : inFrontBlocks) {
             if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
                 textBoxBuilder.convertTextFrameBlock(secPrPara, (ASTTextFrameBlock) block);
+            } else if (block.blockType() == ASTBlock.BlockType.TABLE) {
+                tableBuilder.convertTable(secPrPara, (ASTTable) block);
             } else if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 imageBuilder.convertFigure(secPrPara, (ASTFigure) block);
             }
@@ -354,6 +351,7 @@ public class ASTToHwpxConverter {
     private static int zOrderOf(ASTBlock block) {
         if (block instanceof ASTTextFrameBlock) return ((ASTTextFrameBlock) block).zOrder();
         if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
+        if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
         return 0;
     }
 

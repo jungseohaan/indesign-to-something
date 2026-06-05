@@ -38,7 +38,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CASES_FILE="$SCRIPT_DIR/test-data/cases.json"
-JAR="$SCRIPT_DIR/target/idml-to-something-1.0.9-cli.jar"
+JAR="$SCRIPT_DIR/converter/target/idml-to-something-1.0.9-cli.jar"
 JAVA="/opt/homebrew/opt/openjdk/bin/java"
 JSX="$SCRIPT_DIR/scripts/extract_indd.jsx"
 

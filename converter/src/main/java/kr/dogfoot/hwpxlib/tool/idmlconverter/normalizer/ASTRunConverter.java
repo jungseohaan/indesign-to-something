@@ -203,6 +203,7 @@ public class ASTRunConverter {
                 kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
                         new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();
                 tmpCtx.resolvedData = resolvedData;
+                tmpCtx.basePath = resolvedData.basePath();
                 tmpCtx.scaleFactor = resolvedData.scaleFactor();
                 java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject> boxList =
                         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler

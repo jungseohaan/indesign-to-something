@@ -189,14 +189,14 @@ public class FontMapper {
         if (dsl != null) {
             String ko = dsl.getKoFont() != null ? dsl.getKoFont() : DEFAULT_HWPX_FONT;
             String en = dsl.getEnFont() != null ? dsl.getEnFont() : ko;
-            result = new MappingResult(ko, en, dsl.getSpacing(), dsl.getScaleAdjust(), 1.0, dsl.getRatio());
+            result = new MappingResult(ko, en, dsl.getSpacing(), dsl.getScaleAdjust(), dsl.getRatio());
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ko + "\" (DSL)" + (dsl.getRatio() != 1.0 ? " 장평=" + dsl.getRatio() : ""));
         }
         // [1] 외부 JSON 명시적 매핑
         else {
             MappingEntry ext = externalMappings.get(idmlFontFamily);
             if (ext != null) {
-                result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, 1.0, ext.ratio);
+                result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, ext.ratio);
                 System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
             }
             // [2] 카테고리/키워드 폴백 (이름 기반)
@@ -206,28 +206,8 @@ public class FontMapper {
             }
         }
 
-        // heightScale 미설정 시 HWPX 메트릭에서 계산 (ratio는 반드시 보존)
-        if (result.heightScale == 1.0 && !hwpxMetrics.isEmpty()) {
-            double hs = computeHwpxHeightScale(result.koFont);
-            if (hs > 1.0) {
-                result = new MappingResult(result.koFont, result.enFont,
-                        result.spacingAdjustPercent, result.scaleAdjust, hs, result.ratio);
-            }
-        }
-
         cache.put(cacheKey, result);
         return result;
-    }
-
-    /** HWPX 폰트 메트릭만으로 heightScale 계산: (ascent+descent) / testSize(10pt) */
-    private static final double METRIC_TEST_SIZE = 10.0;
-
-    private double computeHwpxHeightScale(String hwpxFontName) {
-        HwpxMetric hm = hwpxMetrics.get(hwpxFontName);
-        if (hm == null || hm.ascent <= 0 || hm.descent <= 0) return 1.0;
-        double total = hm.ascent + hm.descent;
-        double scale = total / METRIC_TEST_SIZE;
-        return Math.max(1.0, scale);
     }
 
     /**
@@ -277,18 +257,6 @@ public class FontMapper {
         double idmlKorWidthPt = idmlInfo.korWidth() * scaleFactor;
         boolean isReliableMetric = isReliableIdmlMetric(idmlInfo.korWidth());
 
-        // 높이 보정: HWPX 폰트의 (ascent+descent) / IDML 폰트의 (ascent+descent)
-        double heightScale = 1.0;
-        if (hwpxInfo != null && hwpxInfo.ascent > 0 && hwpxInfo.descent > 0
-                && idmlInfo.ascent() > 0 && idmlInfo.descent() > 0) {
-            double hwpxTotal = hwpxInfo.ascent + hwpxInfo.descent;
-            double idmlTotal = idmlInfo.ascent() + idmlInfo.descent();
-            double scale = hwpxTotal / idmlTotal;
-            if (scale > 1.0) {
-                heightScale = scale;
-            }
-        }
-
         // 장평 비율: InDesign 한글폭(mm→pt) / HWPX 한글폭(pt)
         double fontRatio = 1.0;
         if (isReliableMetric && hwpxInfo != null && hwpxInfo.korWidth > 0 && idmlKorWidthPt > 0) {
@@ -296,10 +264,10 @@ public class FontMapper {
             if (fontRatio > 0.95 && fontRatio < 1.05) fontRatio = 1.0; // 5% 이내면 무시
         }
 
-        System.out.printf("[FontMap] \"%s\" → ko=\"%s\"(%.3f) en=\"%s\"(%.3f) 자간=%+d%% 높이=%.3f 장평=%.3f\n",
-                idmlFont, bestKoFont, bestKoScore, bestEnFont, bestEnScore, spacing, heightScale, fontRatio);
+        System.out.printf("[FontMap] \"%s\" → ko=\"%s\"(%.3f) en=\"%s\"(%.3f) 자간=%+d%% 장평=%.3f\n",
+                idmlFont, bestKoFont, bestKoScore, bestEnFont, bestEnScore, spacing, fontRatio);
 
-        return new MappingResult(bestKoFont, bestEnFont, spacing, 0, heightScale, fontRatio);
+        return new MappingResult(bestKoFont, bestEnFont, spacing, 0, fontRatio);
     }
 
     /**
@@ -452,7 +420,7 @@ public class FontMapper {
         if (lower.startsWith("hu") || lower.startsWith("rix") || lower.startsWith("sd ")
                 || lower.contains("상상토끼") || lower.contains("둘기마요")) {
             System.out.println("[FontMap] \"" + idmlFontFamily + "\" → ko=\"" + configSansKo + "\" (카테고리폴백: korean-decorative, ratio=0.9)");
-            return new MappingResult(configSansKo, configSansKo, 0, 0, 1.0, 0.9);
+            return new MappingResult(configSansKo, configSansKo, 0, 0, 0.9);
         }
 
         // 서양 폰트 기본 → 산세리프
@@ -616,29 +584,22 @@ public class FontMapper {
         public final int spacingAdjustPercent;
         /** horizontalScale 보정값 (예: 5 → IDML 95% → HWPX 100%) */
         public final int scaleAdjust;
-        /** 세로 높이 비율: HWPX 폰트 (ascent+descent) / IDML 폰트 (ascent+descent). 1.0 이상이면 글상자 확장 필요 */
-        public final double heightScale;
         /** 장평 비율: 원본 폰트 대비 HWPX 폰트의 폭 비율. 1.0 미만이면 글자 폭 축소 필요 (예: 0.82 → 82%) */
         public final double ratio;
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent) {
-            this(koFont, enFont, spacingAdjustPercent, 0, 1.0, 1.0);
+            this(koFont, enFont, spacingAdjustPercent, 0, 1.0);
         }
 
         public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust) {
-            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, 1.0, 1.0);
+            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, 1.0);
         }
 
-        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double heightScale) {
-            this(koFont, enFont, spacingAdjustPercent, scaleAdjust, heightScale, 1.0);
-        }
-
-        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double heightScale, double ratio) {
+        public MappingResult(String koFont, String enFont, int spacingAdjustPercent, int scaleAdjust, double ratio) {
             this.koFont = koFont;
             this.enFont = enFont;
             this.spacingAdjustPercent = spacingAdjustPercent;
             this.scaleAdjust = scaleAdjust;
-            this.heightScale = heightScale;
             this.ratio = ratio;
         }
     }

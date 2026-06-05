@@ -18,7 +18,10 @@
   "stories": [{...}],
   "textFrames": [{...}],
   "pages": [{...}],
-  "pageItems": [{...}]
+  "pageItems": [{...}],
+  "renderedFloatingItems": [{...}],
+  "renderedGraphicFrames": [{...}],
+  "renderedImageFrames": [{...}]
 }
 ```
 
@@ -262,6 +265,72 @@
 | `gradientFeather` | 그라디언트 페더 {applied, angle, length, type} |
 | `dropShadow` | 드롭 섀도우 {angle, distance, size, opacity, colorName} |
 | `cornerRadius` | 모서리 반경 (pt) |
+
+---
+
+## 10. rendered items — InDesign 렌더 항목 Ownership
+
+`renderedFloatingItems`, `renderedGraphicFrames`, `renderedImageFrames`의 항목은 InDesign이 추출한 PNG/PDF 조각을 나타낸다. Java는 이 항목을 다시 해석하기보다 ownership 메타데이터를 우선하여 중복 배치를 방지한다.
+
+### 기본 필드
+
+| 필드 | 설명 |
+|---|---|
+| `id` | InDesign DOM 10진수 id |
+| `file` | `rendered_frames/` 하위 파일 경로 |
+| `itemType` | `page_object`, `inline_object` 등 렌더 종류 |
+| `pageIndex` | 0 기반 페이지 인덱스 |
+| `bounds` | `[top, left, bottom, right]` 페이지 상대 좌표 |
+| `childIds` | 렌더 대상에 포함된 자식 DOM id |
+| `childImageIds` | 이미지 프레임/클리핑 그룹의 자식 이미지 id |
+| `zOrder` | IDML Spread XML 기준 z-depth |
+
+### Ownership 필드
+
+| 필드 | 값 | 설명 |
+|---|---|---|
+| `visualOwner` | `indesign_png` / `hwpx_shape` / `none` | 시각 그래픽을 소유하는 경로 |
+| `textOwner` | `hwpx_tf` / `indesign_png` / `hidden_semantic` / `none` | 텍스트를 소유하는 경로 |
+| `containsText` | boolean | 렌더 PNG에 텍스트 픽셀이 포함될 가능성 |
+| `containsEditableText` | boolean | HWPX TextFrame으로 배치할 텍스트가 PNG에 포함되는지 |
+| `editableTextFrameIds` | number/string[] | HWPX TextFrame으로 배치해야 하는 TextFrame id |
+| `visualOnlyChildIds` | number[] | 텍스트 없이 시각 그래픽으로만 필요한 자식 id |
+| `tfInlineVisualIds` | number[] | editable TextFrame Story에 앵커되어 TF가 소유하는 시각 객체 id. 부모 PNG export에서는 숨기고 `visualOnlyChildIds`에서도 제외한다. |
+| `sourceObjectIds` | number[] | 이 렌더 항목에 포함된 원본 DOM id 전체 |
+| `placementAllowed` | boolean | Java가 이 PNG를 직접 배치해도 되는지 |
+| `overlapPolicy` | `behind_text` / `in_front_of_text` / `inline` / `clipped_to_frame` | HWPX 배치 정책 |
+| `reason` | string | 추출기가 ownership을 판정한 사유 |
+
+### Java 배치 규칙
+
+1. `placementAllowed == false`이면 PNG를 배치하지 않는다.
+2. `containsEditableText == true`이고 `textOwner != "indesign_png"`이면 PNG를 배치하지 않는다.
+3. `editableTextFrameIds`는 HWPX TextFrame으로 배치한다.
+4. `tfInlineVisualIds`는 Story 변환의 inline object로 배치한다. 부모 PNG의 중복 소유로 판단하지 않는다.
+5. `visualOnlyChildIds`의 별도 렌더 항목이 있으면 그것만 배치한다.
+6. ownership 필드가 없으면 기존 휴리스틱을 fallback으로 사용한다.
+
+예시:
+
+```json
+{
+  "id": 5092,
+  "file": "rendered_frames/deco_5092.png",
+  "itemType": "page_object",
+  "pageIndex": 2,
+  "zOrder": 27,
+  "visualOwner": "indesign_png",
+  "textOwner": "hwpx_tf",
+  "containsText": true,
+  "containsEditableText": true,
+  "editableTextFrameIds": [5114],
+  "visualOnlyChildIds": [5117, 5094],
+  "sourceObjectIds": [5092, 5117, 5093, 5114, 5094],
+  "placementAllowed": false,
+  "overlapPolicy": "in_front_of_text",
+  "reason": "mixed_group_contains_editable_tf"
+}
+```
 
 ---
 

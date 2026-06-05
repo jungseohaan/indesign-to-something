@@ -17,7 +17,8 @@ public final class TeachingMaterialWriter {
     private TeachingMaterialWriter() {}
 
     public static void write(TeachingMaterial material, File outputFile) throws IOException {
-        outputFile.getParentFile().mkdirs();
+        File parent = outputFile.getParentFile();
+        if (parent != null) parent.mkdirs();
         try (Writer w = new OutputStreamWriter(
                 new FileOutputStream(outputFile), StandardCharsets.UTF_8)) {
             GSON.toJson(material, w);

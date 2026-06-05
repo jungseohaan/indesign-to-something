@@ -184,6 +184,7 @@ public class ASTDeserializer {
         if (o.has("fillTint")) tf.fillTint(getDouble(o, "fillTint"));
         if (o.has("strokeTint")) tf.strokeTint(getDouble(o, "strokeTint"));
         tf.fromGroup(getBool(o, "fromGroup"));
+        tf.noAutoLineWrap(getBool(o, "noAutoLineWrap"));
 
         if (o.has("paragraphs")) {
             for (JsonElement e : o.getAsJsonArray("paragraphs")) {
@@ -421,6 +422,7 @@ public class ASTDeserializer {
         obj.strokeWeight(getDouble(o, "strokeWeight"));
         if (o.has("strokeTint")) obj.strokeTint(getDouble(o, "strokeTint"));
         obj.cornerRadius(getDouble(o, "cornerRadius"));
+        obj.noAutoLineWrap(getBool(o, "noAutoLineWrap"));
 
         obj.textMarginTop(getLong(o, "textMarginTop"));
         obj.textMarginLeft(getLong(o, "textMarginLeft"));

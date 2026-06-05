@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedDataReader;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedZOrderNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.FontMapper;
@@ -86,6 +87,7 @@ public class IDMLToHwpxConverter {
                     reporter.reportProgress(3, 100, "resolved 데이터 로딩 중...");
                     resolvedData = ResolvedDataReader.read(options.resolvedJsonPath());
                     resolvedData.basePath(getResolvedDir(options));
+                    ResolvedZOrderNormalizer.applyFromIdml(resolvedData, idmlDoc);
                     applyCropManifest(resolvedData.basePath());
                 } catch (Exception e) {
                     System.err.println("Warning: resolved.json 로드 실패 (무시): " + e.getMessage());
@@ -220,6 +222,7 @@ public class IDMLToHwpxConverter {
                 try {
                     resolvedData = ResolvedDataReader.read(options.resolvedJsonPath());
                     resolvedData.basePath(getResolvedDir(options));
+                    ResolvedZOrderNormalizer.applyFromIdml(resolvedData, idmlDoc);
                     applyCropManifest(resolvedData.basePath());
                 } catch (Exception e) {
                     System.err.println("Warning: resolved.json 로드 실패 (무시): " + e.getMessage());
@@ -338,6 +341,64 @@ public class IDMLToHwpxConverter {
         }
     }
 
+    private static java.util.Set<Integer> collectRenderedCoverageForUsedSources(
+            ResolvedData resolvedData, java.util.Set<String> usedSourceIds) {
+        java.util.Set<Integer> coveredIds = new java.util.HashSet<>();
+        if (resolvedData == null || usedSourceIds == null || usedSourceIds.isEmpty()) {
+            return coveredIds;
+        }
+
+        java.util.List<RenderedGroup> groups = new java.util.ArrayList<>();
+        groups.addAll(resolvedData.allRenderedFloatingItems());
+        groups.addAll(resolvedData.allRenderedGraphicFrames());
+        groups.addAll(resolvedData.allRenderedImageFrames());
+        groups.addAll(resolvedData.allRenderedPdfFrames());
+
+        boolean changed;
+        do {
+            int before = coveredIds.size();
+            for (RenderedGroup rg : groups) {
+                if (rg == null) continue;
+                if (isRenderedSourceUsed(rg, usedSourceIds) || coveredIds.contains(rg.id())) {
+                    addRenderedCoverageIds(rg, coveredIds);
+                }
+            }
+            changed = coveredIds.size() != before;
+        } while (changed);
+        return coveredIds;
+    }
+
+    private static boolean isRenderedSourceUsed(
+            RenderedGroup rg, java.util.Set<String> usedSourceIds) {
+        if (rg == null || usedSourceIds == null) return false;
+        return usedSourceIds.contains("u" + Integer.toHexString(rg.id()))
+                || usedSourceIds.contains("page_obj_" + rg.id());
+    }
+
+    private static void addRenderedCoverageIds(
+            RenderedGroup rg, java.util.Set<Integer> coveredIds) {
+        if (rg == null || coveredIds == null) return;
+        coveredIds.add(rg.id());
+        addAllIds(rg.sourceObjectIds(), coveredIds);
+        addAllIds(rg.childIds(), coveredIds);
+        addAllIds(rg.childImageIds(), coveredIds);
+        addAllIds(rg.visualOnlyChildIds(), coveredIds);
+        addAllIds(rg.tfInlineVisualIds(), coveredIds);
+    }
+
+    private static void addAllIds(int[] ids, java.util.Set<Integer> target) {
+        if (ids == null || target == null) return;
+        for (int id : ids) {
+            target.add(id);
+        }
+    }
+
+    private static boolean isRenderedCoveredByUsedSource(
+            RenderedGroup rg, java.util.Set<Integer> coveredIds) {
+        if (rg == null || coveredIds == null || coveredIds.isEmpty()) return false;
+        return coveredIds.contains(rg.id());
+    }
+
     /**
      * VectorShape로 등록되지 않은 렌더 그래픽 프레임을 AST에 주입한다.
      * 깊이 중첩된 IDML 구조(TextFrame 내부 Oval 등)는 VectorShape 풀에 등록되지 않아
@@ -374,6 +435,8 @@ public class IDMLToHwpxConverter {
                 }
             }
         }
+        java.util.Set<Integer> usedRenderedCoverageIds =
+                collectRenderedCoverageForUsedSources(resolvedData, usedSourceIds);
 
         // 페이지 bounds 캐시 (pageIndex → resolvedPage)
         List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection> sections = astDoc.sections();
@@ -432,6 +495,7 @@ public class IDMLToHwpxConverter {
             if (usedSourceIds.contains(idmlHexId)) continue;
             // BackgroundInjector가 page_obj_N 형식으로 이미 배치한 항목 스킵
             if (usedSourceIds.contains("page_obj_" + rg.id())) continue;
+            if (isRenderedCoveredByUsedSource(rg, usedRenderedCoverageIds)) continue;
 
             // vectorShapes 처리 대상 및 클리핑 자식 건너뜀 (중복 주입 방지)
             if (astDoc.orphanExcludeIds().contains(idmlHexId)) continue;
@@ -574,7 +638,10 @@ public class IDMLToHwpxConverter {
                 // (AST 텍스트 프레임과 동일한 스케일 → inFrontBlocks 정렬에서 올바른 스태킹)
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection section = sections.get(pageIdx);
                 java.util.Map<String, Integer> zMap = astDoc.idmlZOrders();
-                Integer idmlZ = (zMap != null) ? zMap.get(idmlHexId) : null;
+                Integer idmlZ = rg.zOrderKnown() ? rg.zOrder() : null;
+                if (idmlZ == null) {
+                    idmlZ = (zMap != null) ? zMap.get(idmlHexId) : null;
+                }
                 if (idmlZ == null) {
                     // 폴백: 순차 카운터
                     Integer orphanZ = pageOrphanZCounter.get(pageIdx);
@@ -715,6 +782,7 @@ public class IDMLToHwpxConverter {
             if (usedSourceIds.contains(idmlHexId)) continue;
             // BackgroundInjector가 page_obj_N 형식으로 이미 배치한 항목 스킵
             if (usedSourceIds.contains("page_obj_" + rg.id())) continue;
+            if (isRenderedCoveredByUsedSource(rg, usedRenderedCoverageIds)) continue;
 
             // 자식 이미지가 이미 사용되었거나 상위 그룹에 의해 커버됨
             if (rg.childImageIds() != null) {

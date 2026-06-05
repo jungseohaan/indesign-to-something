@@ -31,8 +31,12 @@ public final class FramePlacer {
     private FramePlacer() {}
 
     // ---- 튜닝 상수 --------------------------------------------------------
+    /** 임시 비활성화: occlusion 오탐이 많아 TF 누락을 유발하므로 필터를 끈다. */
+    private static final boolean ENABLE_OCCLUSION_FILTER = false;
     /** TOP_ALIGN → CENTER_ALIGN 보정: 텍스트가 프레임 높이의 이 비율 이상 아래에 있을 때 */
     private static final double TOP_ALIGN_OFFSET_RATIO = 0.15;
+    /** 원본에서 한 줄인 라벨/제목형 짧은 문장은 HWP 폰트폭 차이로 두 줄이 되지 않도록 SQUEEZE를 적용한다. */
+    private static final int SHORT_SINGLE_LINE_NO_WRAP_CHARS = 32;
     /** isOccludedByOpaqueShape: shape 크기가 텍스트 영역의 이 배수 미만이면 배경 도형으로 간주 */
     private static final double OCCLUDER_SIZE_RATIO = 1.2;
     /** isOccludedByOpaqueShape: Polygon/Oval AABB 면적이 텍스트 면적의 이 배수 초과이면 스크리블 */
@@ -171,9 +175,10 @@ public final class FramePlacer {
                 }
             }
             boolean inlineToFloating = inlineToFloatingReason != InlineToFloatingReason.NONE;
+            boolean hasRenderedVisualShell = hasRenderedVisualShell(ctx, tfDomId);
 
-            // 숨김 레이어 TF (onHiddenLayer=true) → 변환 불필요
-            if (tf.onHiddenLayer()) { continue; }
+            // 숨김/비인쇄 TF → 변환 불필요
+            if (tf.onHiddenLayer() || tf.nonprinting()) { continue; }
 
             // 마스터 인스턴스 TF가 composed되지 않은 경우 (lineCount=0) → 해당 페이지에서 override됨 → skip
             if (tf.isMasterInstance() && tf.lineCount() == 0) { continue; }
@@ -193,10 +198,11 @@ public final class FramePlacer {
                     && tfDomId >= 0 && idx.badgeChildDomIds.contains(tfDomId);
             if (skipAsBadgeChild) { continue; }
 
-            // SPEC-025 occlusion: editable 로 승격됐지만 앞쪽(zOrder 작은) 불투명 도형에 가려져
-            // PDF 에 안 보이는 TextFrame 은 HWPX 에도 배치하지 않음 (시각 중복 방지).
-            // inlineToFloating 프레임은 배지 배경 타원/도형이 같은 그룹 안에 있어 occluder 오탐 가능 → 스킵.
-            if (!inlineToFloating && ctx.resolvedData.isEditableTextFrame(tf.id()) && isOccludedByOpaqueShape(ctx, tf)) {
+            // SPEC-025 occlusion: 오탐으로 인한 TF 누락이 많아 임시로 비활성화.
+            // 나중에 zOrder/group/background 판정을 재설계한 뒤 ENABLE_OCCLUSION_FILTER를 다시 켠다.
+            if (ENABLE_OCCLUSION_FILTER && !inlineToFloating
+                    && ctx.resolvedData.isEditableTextFrame(tf.id())
+                    && isOccludedByOpaqueShape(ctx, tf)) {
                 continue;
             }
 
@@ -205,6 +211,13 @@ public final class FramePlacer {
             if (tf.previousFrameId() != null) {
                 ResolvedTextFrame prevTf = ctx.resolvedData.getTextFrame(tf.previousFrameId());
                 if (prevTf != null && prevTf.geometricBounds() != null && tf.geometricBounds() != null) {
+                    int prevDomId = parseDomIdOrNeg(prevTf.id());
+                    boolean prevHasRenderedVisualShell = hasRenderedVisualShell(ctx, prevDomId);
+                    if (hasRenderedVisualShell || prevHasRenderedVisualShell) {
+                        // A rendered visual shell is an independent visual unit
+                        // (for example, a checkbox/underline frame). Do not merge
+                        // or suppress it only because the story is threaded.
+                    } else {
                     double[] pgb = prevTf.geometricBounds();
                     double[] cgb = tf.geometricBounds();
                     boolean diffPage = prevTf.pageIndex() != tf.pageIndex();
@@ -219,6 +232,7 @@ public final class FramePlacer {
                         // 병합하지 않고 독립 배치 → continue하지 않음
                     } else {
                         continue; // 인접 → 병합 (첫 프레임에서 처리)
+                    }
                     }
                 } else {
                     continue;
@@ -252,6 +266,8 @@ public final class FramePlacer {
                 while (nextId != null) {
                     ResolvedTextFrame next = ctx.resolvedData.getTextFrame(nextId);
                     if (next == null || next.geometricBounds() == null) break;
+                    int nextDomId = parseDomIdOrNeg(next.id());
+                    if (hasRenderedVisualShell || hasRenderedVisualShell(ctx, nextDomId)) break;
                     double[] ngb = next.geometricBounds();
                     // 다른 페이지이거나 Y 간격이 한 줄 높이의 50% 이상이면 합산 중단
                     if (next.pageIndex() != tf.pageIndex()) { hasNextPageChain = true; break; }
@@ -544,7 +560,6 @@ public final class FramePlacer {
             if (tf.rotationAngle() != 0) {
                 block.rotationAngle(tf.rotationAngle());
             }
-
             // 시각 속성: TF 의 fillColor / cornerRadius 를 글상자에 적용.
             // (배경 PNG 에 같은 색이 있으면 같은 색으로 덧칠되므로 시각 차이 없음.
             //  배경 PNG 에 없는 경우 — 예: page 23 cutter/stopper 같은 단어 박스 — 글상자 fill 로 표시.)
@@ -578,12 +593,18 @@ public final class FramePlacer {
             } catch (Exception eFill) {
                 System.err.println("[FramePlacer] fill/stroke 속성 적용 오류 tf=" + tf.id() + ": " + eFill);
             }
+            if (!hasRenderedVisualShell) {
+                applyGroupBackgroundShapeStyle(ctx, tf, block);
+            }
 
             // overflow 감지용 텍스트 길이 저장
             String visText = tf.frameVisibleText();
             if (visText != null) {
+                block.frameVisibleText(visText);
                 block.frameVisibleTextLength(visText.replace("\uFFFC", "").replace("\n", "").replace("\r", "").length());
             }
+            block.noAutoLineWrap(shouldUseNoAutoLineWrap(tf, block)
+                    || shouldUseVisualShellNoAutoLineWrap(hasRenderedVisualShell, tf, block));
             // storyTotalTextLength는 convertStories()에서 설정
 
             // 타이틀 오버레이로 첫 N 단락 숨김 + 본문 중간의 제외 인덱스 적용
@@ -626,12 +647,39 @@ public final class FramePlacer {
                     }
                 }
             }
+            if (hasRenderedVisualShell && block.fillColor() == null && block.strokeColor() == null) {
+                // The parent InDesign PNG owns the visual shell. Route this as a
+                // transparent text overlay so the 1x1 table fallback does not cover it.
+                block.inlineToFloating(true);
+            }
             // 공간 포함 outer TF: 자신 안에 포함된 inner TF id 기록 → StoryConverter가 inner story 주입
             String _innerFrameId = cm.outerToInner.get(tf.id());
             if (_innerFrameId != null) block.innerFrameId(_innerFrameId);
 
             section.addBlock(block);
         }
+    }
+
+    private static boolean hasRenderedVisualShell(ResolvedBuildContext ctx, int tfDomId) {
+        if (ctx == null || ctx.resolvedData == null || tfDomId < 0) return false;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        String tfId = String.valueOf(tfDomId);
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
+            if (!"page_object".equals(rg.type())) continue;
+            if (Boolean.FALSE.equals(rg.placementAllowed())) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if (!rg.hasEditableTextHiddenFromPng()) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null) continue;
+            for (String editableId : editableIds) {
+                if (tfId.equals(editableId)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -642,8 +690,8 @@ public final class FramePlacer {
     private static boolean shouldSkipNonEditableTf(
             ResolvedBuildContext ctx, ResolvedTextFrame tf, int tfDomId, FrameIndex idx) {
         // domId=None TF: ExtendScript가 domId를 얻지 못해 editability 확인 불가.
-        // storyId가 있고 비-숨김 레이어이면 IDML에 실제 내용이 있을 수 있으므로 배치 허용.
-        if (tf.id() == null && tf.storyId() != null && !tf.onHiddenLayer()) return false;
+        // storyId가 있고 비-숨김/비인쇄이면 IDML에 실제 내용이 있을 수 있으므로 배치 허용.
+        if (tf.id() == null && tf.storyId() != null && !tf.onHiddenLayer() && !tf.nonprinting()) return false;
 
         boolean sharedWithEditable = tf.storyId() != null && idx.editableStoryIds.contains(tf.storyId());
         if (sharedWithEditable) return false;
@@ -712,6 +760,74 @@ public final class FramePlacer {
     private static int parseDomIdOrNeg(String id) {
         if (id == null) return -1;
         try { return Integer.parseInt(id); } catch (NumberFormatException e) { return -1; }
+    }
+
+    /**
+     * editable TF가 배경 Rectangle/Oval/Polygon과 한 그룹 안에 있을 때, 그룹 PNG 대신
+     * 검색 가능한 TF 자체에 도형의 fill/stroke를 복사한다. 말풍선처럼 "도형+텍스트"가
+     * 한 그룹 PNG로 중복 렌더링되는 경우 이미지 텍스트를 제거하면서 도형은 유지한다.
+     */
+    private static void applyGroupBackgroundShapeStyle(
+            ResolvedBuildContext ctx, ResolvedTextFrame tf, ASTTextFrameBlock block) {
+        ResolvedPageItem tfItem = ctx.resolvedData.getPageItem(tf.id());
+        if (tfItem == null || tfItem.parentId() == null || tf.geometricBounds() == null) return;
+
+        ResolvedPageItem best = null;
+        double bestScore = 0.0;
+        double[] tfb = tf.geometricBounds();
+        for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
+            if (pi == null || pi.id() == null || pi.id().equals(tf.id())) continue;
+            if (!tfItem.parentId().equals(pi.parentId())) continue;
+            String t = pi.type();
+            if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t)) continue;
+            double[] pb = pi.geometricBounds();
+            if (pb == null || pb.length < 4) continue;
+            double score = overlapRatio(tfb, pb);
+            if (score > bestScore) {
+                bestScore = score;
+                best = pi;
+            }
+        }
+        if (best == null || bestScore < 0.75) return;
+
+        String fillName = best.fillColorName();
+        if ((block.fillColor() == null || block.fillColor().isEmpty())
+                && fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
+            String fillHex = ctx.resolvedData.resolveColorHex(fillName);
+            if (fillHex != null) {
+                block.fillColor(fillHex);
+                block.fillTint(best.fillTint() > 0 && best.fillTint() <= 100 ? best.fillTint() : 100);
+            }
+        }
+
+        String strokeName = best.strokeColorName();
+        if ((block.strokeColor() == null || block.strokeColor().isEmpty())
+                && strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)
+                && best.strokeWeight() > 0) {
+            String strokeHex = ctx.resolvedData.resolveColorHex(strokeName);
+            if (strokeHex != null) {
+                block.strokeColor(strokeHex);
+                block.strokeWeight(best.strokeWeight());
+                block.strokeTint(best.strokeTint() > 0 && best.strokeTint() <= 100 ? best.strokeTint() : 100);
+            }
+        }
+
+        if (block.cornerRadius() <= 0 && best.cornerRadius() > 0) {
+            block.cornerRadius(best.cornerRadius());
+        }
+    }
+
+    private static double overlapRatio(double[] a, double[] b) {
+        double y1 = Math.max(a[0], b[0]);
+        double x1 = Math.max(a[1], b[1]);
+        double y2 = Math.min(a[2], b[2]);
+        double x2 = Math.min(a[3], b[3]);
+        if (y2 <= y1 || x2 <= x1) return 0.0;
+        double overlap = (y2 - y1) * (x2 - x1);
+        double areaA = Math.max(0.0, (a[2] - a[0]) * (a[3] - a[1]));
+        double areaB = Math.max(0.0, (b[2] - b[0]) * (b[3] - b[1]));
+        double denom = Math.min(areaA, areaB);
+        return denom > 0 ? overlap / denom : 0.0;
     }
 
     /** 줄 텍스트가 공백/CR/LF/U+FFFC 이외의 내용을 가지는지 판단 (placeByYGapSplit 내 2회 반복 조건). */
@@ -829,7 +945,7 @@ public final class FramePlacer {
                 if (inner.storyId() == null || inner.storyId().equals(outer.storyId())) continue;
                 if (inner.previousFrameId() != null) continue;
                 if (inner.pageIndex() != outer.pageIndex()) continue;
-                if (inner.onHiddenLayer() || outer.onHiddenLayer()) continue;
+                if (inner.onHiddenLayer() || outer.onHiddenLayer() || inner.nonprinting() || outer.nonprinting()) continue;
                 if (inner.isInline()) continue;
                 String _outerVis = outer.frameVisibleText();
                 if (_outerVis == null || _outerVis.trim().isEmpty()) continue;
@@ -928,6 +1044,13 @@ public final class FramePlacer {
             if (pi.zOrder() <= selfZ) continue;  // 같거나 뒤쪽 도형은 가릴 수 없음 (InDesign: 큰 zOrder = 앞)
             // ancestor 도형은 자식 TextFrame 의 컨테이너 — 가린다고 보지 않음
             if (pi.id() != null && ancestorIds.contains(pi.id())) continue;
+            // 같은 그룹 묶음의 도형은 말풍선/라벨 배경인 경우가 많다.
+            // InDesign 그룹 내부 zOrder만 보고 occluder로 처리하면, Paper 배경 Rectangle 위의
+            // editable TextFrame이 "가려진 텍스트"로 오탐되어 HWPX에서 누락된다.
+            if (isGroupedBackgroundShape(ctx, tf, selfPi, pi, ancestorIds)) continue;
+            // TF는 그룹 밖에 있고 배경 도형만 별도 그룹으로 묶인 말풍선도 있다.
+            // 이 경우 텍스트 라인 폭보다 배경이 넓어도, TF 프레임 bounds와 거의 같으면 배경으로 본다.
+            if (isNearbyFrameBackgroundShape(ctx, tf, pi)) continue;
             String t = pi.type();
             // 불투명 도형: Rectangle/Polygon/Oval + fillColor 가 None 이 아님
             if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t)) continue;
@@ -937,13 +1060,16 @@ public final class FramePlacer {
             if (pi.opacity() <= 50) continue;
             // fillTint 50 미만 → 매우 연한 색 → 실질적 가림 아님
             if (pi.fillTint() >= 0 && pi.fillTint() < 50) continue;
-            // 10도 이상 회전된 도형은 AABB가 실제 채움 영역보다 크게 과대평가 → occluder 제외
-            if (Math.abs(pi.absoluteRotationAngle()) > 10) continue;
             double[] sb = pi.geometricBounds();
             if (sb == null || sb.length < 4) continue;
             // bounds 가 텍스트 영역을 포함하는지 확인 (1pt 여유)
             if (sb[0] <= textTop + OCCLUSION_BOUNDS_TOL_PT && sb[1] <= textLeft + OCCLUSION_BOUNDS_TOL_PT
                     && sb[2] >= textBottom - OCCLUSION_BOUNDS_TOL_PT && sb[3] >= textRight - OCCLUSION_BOUNDS_TOL_PT) {
+                // 제목 색바/라벨처럼 별도 도형 위에 TextFrame이 올라가는 패턴은
+                // 도형이 텍스트 영역을 포함해도 occluder가 아니라 배경이다.
+                if (hasFrameLikeBackgroundBounds(tf, pi, 8.0, 0.85, 4.0)) {
+                    continue;
+                }
                 // 같은 크기의 배경 도형(말풍선 등)은 occluder 가 아니라 텍스트의 배경 → 제외.
                 // shape 의 너비/높이가 텍스트 영역의 1.2 배 이상일 때만 진짜 occluder 로 간주.
                 double shapeW = sb[3] - sb[1];
@@ -989,6 +1115,75 @@ public final class FramePlacer {
             }
         }
         return false;
+    }
+
+    private static boolean isGroupedBackgroundShape(
+            ResolvedBuildContext ctx, ResolvedTextFrame textFrame,
+            ResolvedPageItem textFrameItem, ResolvedPageItem candidate,
+            java.util.Set<String> textFrameAncestorIds) {
+        if (textFrameItem == null || candidate == null) return false;
+        String parentId = textFrameItem.parentId();
+        String candidateParentId = candidate.parentId();
+        if (parentId == null || candidateParentId == null) return false;
+        boolean sameGroup = parentId.equals(candidateParentId)
+                || (textFrameAncestorIds != null && textFrameAncestorIds.contains(candidateParentId));
+        if (!sameGroup) return false;
+        String t = candidate.type();
+        if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t)) return false;
+        String fc = candidate.fillColorName();
+        if (fc == null || "None".equals(fc) || "[None]".equals(fc)) return false;
+
+        // Paper/white shapes inside the same group cluster are usually speech-bubble backgrounds.
+        if ("Paper".equals(fc) || "White".equals(fc)) return true;
+        String hex = ctx.resolvedData.resolveColorHex(fc);
+        if ("#FFFFFF".equalsIgnoreCase(hex)) return true;
+
+        // 색상이 있는 타이틀 배지/말풍선도 같은 그룹 안에서는 TF와 거의 같은 bounds를 가진 배경일 수 있다.
+        return hasFrameLikeBackgroundBounds(textFrame, candidate, 5.0, 0.90, 2.25);
+    }
+
+    private static boolean isNearbyFrameBackgroundShape(
+            ResolvedBuildContext ctx, ResolvedTextFrame textFrame, ResolvedPageItem candidate) {
+        if (textFrame == null || candidate == null) return false;
+        String t = candidate.type();
+        if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t)) return false;
+        String fc = candidate.fillColorName();
+        if (!isPaperOrWhite(ctx, fc)) return false;
+        return hasFrameLikeBackgroundBounds(textFrame, candidate, 4.0, 0.90, 1.50);
+    }
+
+    private static boolean hasFrameLikeBackgroundBounds(
+            ResolvedTextFrame textFrame, ResolvedPageItem candidate,
+            double edgeTol, double minOverlapRatio, double maxAreaRatio) {
+        double[] tfb = textFrame.geometricBounds();
+        double[] cb = candidate.geometricBounds();
+        if (tfb == null || tfb.length < 4 || cb == null || cb.length < 4) return false;
+
+        double tfW = tfb[3] - tfb[1];
+        double tfH = tfb[2] - tfb[0];
+        double cW = cb[3] - cb[1];
+        double cH = cb[2] - cb[0];
+        if (tfW <= 0 || tfH <= 0 || cW <= 0 || cH <= 0) return false;
+
+        double overlapW = Math.min(tfb[3], cb[3]) - Math.max(tfb[1], cb[1]);
+        double overlapH = Math.min(tfb[2], cb[2]) - Math.max(tfb[0], cb[0]);
+        if (overlapW <= 0 || overlapH <= 0) return false;
+        double tfArea = tfW * tfH;
+        double overlapRatio = (overlapW * overlapH) / tfArea;
+        double areaRatio = (cW * cH) / tfArea;
+
+        boolean aligned = Math.abs(cb[0] - tfb[0]) <= edgeTol
+                && Math.abs(cb[1] - tfb[1]) <= edgeTol
+                && Math.abs(cb[2] - tfb[2]) <= edgeTol
+                && Math.abs(cb[3] - tfb[3]) <= edgeTol;
+        return aligned && overlapRatio >= minOverlapRatio && areaRatio <= maxAreaRatio;
+    }
+
+    private static boolean isPaperOrWhite(ResolvedBuildContext ctx, String colorName) {
+        if (colorName == null || "None".equals(colorName) || "[None]".equals(colorName)) return false;
+        if ("Paper".equals(colorName) || "White".equals(colorName)) return true;
+        String hex = ctx.resolvedData.resolveColorHex(colorName);
+        return "#FFFFFF".equalsIgnoreCase(hex);
     }
 
     private static boolean isNestedInTextFrame(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
@@ -1130,6 +1325,7 @@ public final class FramePlacer {
             block.distributed(true);
             block.frameVisibleTextLength(groupCharCount);
             block.frameVisibleText(groupText.toString());
+            block.noAutoLineWrap(shouldUseNoAutoLineWrap(group, false, groupText.toString()));
             if (absParaStarts[gi] != Integer.MAX_VALUE) {
                 block.composedCharStart(absParaStarts[gi]);
                 block.composedCharEnd(absParaEnds[gi]);
@@ -1145,5 +1341,64 @@ public final class FramePlacer {
         }
 
         return true;
+    }
+
+    private static boolean shouldUseNoAutoLineWrap(ResolvedTextFrame tf, ASTTextFrameBlock block) {
+        if (tf == null) return false;
+        boolean suppressLeftIndent = block != null && block.suppressParaLeftIndent();
+        if (suppressLeftIndent) return false;
+        if (isShortSingleLineTextFrame(tf)) return true;
+        return shouldUseNoAutoLineWrap(tf.composedLines(), false, tf.frameVisibleText());
+    }
+
+    private static boolean shouldUseVisualShellNoAutoLineWrap(
+            boolean hasRenderedVisualShell,
+            ResolvedTextFrame tf,
+            ASTTextFrameBlock block) {
+        if (!hasRenderedVisualShell || tf == null) return false;
+        if (block != null && block.suppressParaLeftIndent()) return false;
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines == null || lines.size() != 1) return false;
+        String visibleText = tf.frameVisibleText();
+        if (visibleText == null || visibleText.indexOf('\n') >= 0 || visibleText.indexOf('\r') >= 0) {
+            return false;
+        }
+        return tf.paragraphStart() == tf.paragraphEnd();
+    }
+
+    private static boolean shouldUseNoAutoLineWrap(
+            List<ResolvedTextFrame.ComposedLine> lines,
+            boolean suppressLeftIndent,
+            String visibleText) {
+        if (suppressLeftIndent || lines == null || lines.size() < 2) return false;
+        if (visibleText != null && visibleText.startsWith("\uFFFC")) return false;
+
+        Set<Integer> paragraphIndices = new HashSet<>();
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null) return false;
+            int paraIndex = line.paraIndex();
+            if (paraIndex < 0 || !paragraphIndices.add(paraIndex)) {
+                return false;
+            }
+        }
+        return paragraphIndices.size() == lines.size();
+    }
+
+    private static boolean isShortSingleLineTextFrame(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines == null || lines.size() != 1) return false;
+        String visibleText = tf.frameVisibleText();
+        if (visibleText == null || visibleText.startsWith("\uFFFC")) return false;
+        if (visibleText.indexOf('\n') >= 0 || visibleText.indexOf('\r') >= 0) return false;
+        if (tf.paragraphStart() != tf.paragraphEnd()) return false;
+        if (tf.frameParaTexts() != null && tf.frameParaTexts().size() != 1) return false;
+
+        String normalized = visibleText
+                .replace("\uFFFC", "")
+                .replace("\u0007", "")
+                .replaceAll("\\s+", "")
+                .trim();
+        return !normalized.isEmpty() && normalized.length() <= SHORT_SINGLE_LINE_NO_WRAP_CHARS;
     }
 }

@@ -43,7 +43,7 @@ public class LLMConfig {
         private String anthropicApiKey;
         private int connectTimeoutMs = 5_000;
         private int readTimeoutMs    = 60_000;
-        private int chunkDelayMs     = 1_000;
+        private int chunkDelayMs     = 6_000; // GROQ 12,000 TPM 제한 대비 (청크당 ~1000 tokens)
 
         public Builder groqApiKey(String v)       { this.groqApiKey = v; return this; }
         public Builder anthropicApiKey(String v)  { this.anthropicApiKey = v; return this; }

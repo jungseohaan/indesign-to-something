@@ -3,12 +3,15 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.VisualSourcePolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -27,6 +30,8 @@ import java.util.Set;
 public final class BackgroundInjector {
 
     private BackgroundInjector() {}
+    private static final double TF_INLINE_VISUAL_UNION_MAX_RATIO = 1.25;
+    private static final int TF_INLINE_VISUAL_MAX_CANVAS_PIXELS = 25_000_000;
 
     public static void inject(ResolvedBuildContext ctx, List<ASTSection> sections) {
         if (ctx.resolvedData == null) return;
@@ -44,7 +49,7 @@ public final class BackgroundInjector {
         // 같은 페이지의 자식만 수집 (다른 페이지 자식은 독립 배치 허용).
         Set<Integer> childOfGroup = new HashSet<>();
         for (RenderedGroup rg : floatingItems) {
-            if (!isPageObject(rg)) continue;
+            if (!canSuppressChildren(ctx, sections, rg)) continue;
             int parentPage = rg.pageIndex();
             if (rg.childIds() != null) {
                 for (int cid : rg.childIds()) {
@@ -65,37 +70,30 @@ public final class BackgroundInjector {
         // childOfGroup 항목은 Phase 7c도 배치하지 않도록 phase6PlacedIds에 선제 등록
         ctx.phase6PlacedIds.addAll(childOfGroup);
 
+        Set<Integer> coveredByInlineObjects = collectInlineObjectCoverage(floatingItems);
+        ctx.phase6PlacedIds.addAll(coveredByInlineObjects);
+
         Set<String> processedKeys = new HashSet<>();
 
         for (RenderedGroup rg : floatingItems) {
             if (!isPageObject(rg)) continue;
+            if (ctx.isDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) {
+                ctx.phase6PlacedIds.add(rg.id());
+                continue;
+            }
             // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
             if (childOfGroup.contains(rg.id())) continue;
+            if (isCoveredByInlineObject(rg, coveredByInlineObjects)) continue;
             // 같은 ID가 inline_object로도 등록된 경우: Phase 3가 인라인으로 처리하므로 floating 중복 금지.
             if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
+            if (rg.shouldSkipByOwnership()) {
+                ctx.phase6PlacedIds.add(rg.id());
+                continue;
+            }
             // childIds 검사
-            if (rg.childIds() != null && rg.childIds().length > 0) {
-                boolean allChildrenAreEditableTf = true;
-                boolean anyChildIsInlineObject = false;
-                for (int cid : rg.childIds()) {
-                    if (ctx.resolvedData.isInlineObjectId(cid)) {
-                        anyChildIsInlineObject = true;
-                        break;
-                    }
-                    if (!ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
-                        allChildrenAreEditableTf = false;
-                    }
-                }
-                // 자식 중 inline_object가 있으면 → Phase 3가 인라인 처리 → floating 중복 금지
-                if (anyChildIsInlineObject) {
-                    ctx.phase6PlacedIds.add(rg.id());
-                    continue;
-                }
-                // 자식 모두가 ETF이면 → 순수 텍스트 컨테이너 → floating 불필요
-                if (allChildrenAreEditableTf) {
-                    ctx.phase6PlacedIds.add(rg.id());
-                    continue;
-                }
+            if (shouldSkipByChildPolicy(ctx, rg)) {
+                ctx.phase6PlacedIds.add(rg.id());
+                continue;
             }
             // 같은 파일이 중복 추출된 경우만 스킵 (id가 같아도 deco/graphic 등 파일이 다르면 둘 다 배치)
             if (!processedKeys.add(rg.file() != null ? rg.file() : rg.id() + ":" + rg.pageIndex())) continue;
@@ -105,6 +103,9 @@ public final class BackgroundInjector {
 
             double[] bounds = rg.bounds();
             if (bounds == null || bounds.length < 4) continue;
+            bounds = shouldCompositeTfInlineVisuals(rg)
+                    ? boundsWithTfInlineVisuals(ctx, rg, bounds)
+                    : bounds;
 
             byte[] imageData = loadPng(ctx, rg);
             if (imageData == null) continue;
@@ -133,8 +134,10 @@ public final class BackgroundInjector {
 
             int pixelW = 0, pixelH = 0;
             try {
-                File pngFile = new File(ctx.basePath, rg.file());
-                BufferedImage img = ImageIO.read(pngFile);
+                BufferedImage img = loadImageForPlacement(ctx, rg);
+                if (img != null && shouldCompositeTfInlineVisuals(rg)) {
+                    imageData = encodePng(img);
+                }
                 // whiteStroke: PNG가 흑색 획으로 내보낸 것 → 흰색으로 반전
                 if (img != null && rg.isWhiteStroke()) {
                     BufferedImage inv = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
@@ -237,15 +240,19 @@ public final class BackgroundInjector {
             // 장식/부분 항목 → zOrder=5 (배경 위에 표시)
             // 페이지 배경 판별: 블리드 여유(최대 10mm) 허용 + 면적이 페이지 30% 이상이면 배경으로 간주.
             // graphic_3357처럼 페이지 높이의 일부만 덮는 스프레드 배경 이미지도 포함하기 위해 면적 조건 추가.
+            boolean isTextFrameVisualShell = "editable_textframe_visual_shell".equals(rg.reason());
             boolean coversPageByArea = pageWidthMm < 1e9 && pageHeightMm < 1e9
                     && (rawRight - rawLeft) * (rawBottom - rawTop)
                         >= 0.3 * pageWidthMm * pageHeightMm;
-            boolean isFullPageBg = rg.zOrder() <= 0
-                    && rawLeft <= 10.0
+            boolean isFullPageBg = rawLeft <= 10.0
                     && rawTop <= 10.0
                     && (rawBottom >= pageHeightMm - 1.0 || coversPageByArea);
-            fig.zOrder(isFullPageBg ? 0 : Math.max(rg.zOrder(), 5));
-            fig.fromGroup(true);   // IN_FRONT_OF_TEXT — z-order로 텍스트TF와의 순서 결정
+            boolean isBackgroundLike = isFullPageBg || (isTextFrameVisualShell && coversPageByArea);
+            int resolvedZ = isBackgroundLike
+                    ? 0
+                    : (rg.zOrderKnown() ? rg.zOrder() : Math.max(rg.zOrder(), 5));
+            fig.zOrder(resolvedZ);
+            fig.fromGroup(!isBackgroundLike);
             fig.sourceId("page_obj_" + rg.id());
 
             // BEHIND_TEXT 항목은 XML 순서상 앞에 올수록 더 아래 레이어 → addBlockAtFront
@@ -322,7 +329,7 @@ public final class BackgroundInjector {
                             fig2.pixelWidth(ovPixelW);
                             fig2.pixelHeight(ovPixelH);
                             fig2.zOrder(0); // 오버플로우 배경은 항상 최하단 레이어
-                            fig2.fromGroup(true);
+                            fig2.fromGroup(false);
                             fig2.sourceId("page_obj_" + rg.id() + "_ov");
                             sections.get(nextPageIdx).addBlockAtFront(fig2);
                         }
@@ -340,6 +347,7 @@ public final class BackgroundInjector {
     }
 
     private static void injectSyntheticGraphicLines(ResolvedBuildContext ctx, List<ASTSection> sections) {
+        if (!VisualSourcePolicy.useJavaSyntheticGraphicPngs()) return;
         if (ctx.resolvedData == null || ctx.resolvedData.pageItems() == null) return;
         List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
         if (floatingItems == null) return;
@@ -493,6 +501,101 @@ public final class BackgroundInjector {
                 || f.contains("haseera_"));
     }
 
+    private static boolean canSuppressChildren(
+            ResolvedBuildContext ctx, List<ASTSection> sections, RenderedGroup rg) {
+        if (!isPageObject(rg)) return false;
+        if (ctx.resolvedData.isInlineObjectId(rg.id())) return false;
+        if (rg.shouldSkipByOwnership()) return false;
+        if (shouldSkipByChildPolicy(ctx, rg)) return false;
+        if (rg.bounds() == null || rg.bounds().length < 4) return false;
+        int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
+        if (pageIdx < 0 || pageIdx >= sections.size()) return false;
+        return hasRenderablePng(ctx, rg);
+    }
+
+    private static boolean shouldSkipByChildPolicy(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (rg.childIds() == null || rg.childIds().length == 0) return false;
+
+        boolean allChildrenAreEditableTf = true;
+        boolean hasEditableTfChild = false;
+        boolean anyChildIsInlineObject = false;
+        for (int cid : rg.childIds()) {
+            if (ctx.resolvedData.isInlineObjectId(cid)) {
+                anyChildIsInlineObject = true;
+                allChildrenAreEditableTf = false;
+                continue;
+            }
+            if (ctx.resolvedData.isEditableTextFrame(String.valueOf(cid))) {
+                hasEditableTfChild = true;
+            } else {
+                allChildrenAreEditableTf = false;
+            }
+        }
+
+        // 자식 중 inline_object가 있어도, extractor가 TF 텍스트를 숨긴 visual-only
+        // PNG라고 명시한 경우는 배치한다. 예: 제목 배경 그룹 안에 inline badge가
+        // 함께 묶인 케이스에서 그룹 전체를 스킵하면 배경 그래픽까지 사라진다.
+        if (anyChildIsInlineObject && !rg.hasEditableTextHiddenFromPng()) return true;
+
+        // editable TF를 포함한 장식 그룹 PNG는 기본적으로 텍스트 중복 위험이 있다.
+        // 단, extractor가 텍스트를 숨긴 visual-only PNG라고 명시한 경우는 배치한다.
+        if (hasEditableTfChild && !rg.hasEditableTextHiddenFromPng()) return true;
+
+        // 자식 모두가 ETF이면 → 순수 텍스트 컨테이너 → floating 불필요
+        return allChildrenAreEditableTf;
+    }
+
+    private static Set<Integer> collectInlineObjectCoverage(List<RenderedGroup> floatingItems) {
+        Set<Integer> coveredIds = new HashSet<>();
+        if (floatingItems == null || floatingItems.isEmpty()) return coveredIds;
+
+        boolean changed;
+        do {
+            int before = coveredIds.size();
+            for (RenderedGroup rg : floatingItems) {
+                if (rg == null) continue;
+                if ("inline_object".equals(rg.itemType()) || "inline_object".equals(rg.type())
+                        || coveredIds.contains(rg.id())) {
+                    addCoverageIds(rg, coveredIds);
+                }
+            }
+            changed = coveredIds.size() != before;
+        } while (changed);
+        return coveredIds;
+    }
+
+    private static void addCoverageIds(RenderedGroup rg, Set<Integer> coveredIds) {
+        if (rg == null || coveredIds == null) return;
+        coveredIds.add(rg.id());
+        addAll(rg.sourceObjectIds(), coveredIds);
+        addAll(rg.childIds(), coveredIds);
+        addAll(rg.childImageIds(), coveredIds);
+        addAll(rg.visualOnlyChildIds(), coveredIds);
+        addAll(rg.tfInlineVisualIds(), coveredIds);
+    }
+
+    private static void addAll(int[] ids, Set<Integer> target) {
+        if (ids == null || target == null) return;
+        for (int id : ids) {
+            target.add(id);
+        }
+    }
+
+    private static boolean isCoveredByInlineObject(RenderedGroup rg, Set<Integer> coveredIds) {
+        if (rg == null || coveredIds == null || coveredIds.isEmpty()) return false;
+        return coveredIds.contains(rg.id());
+    }
+
+    private static boolean hasRenderablePng(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (rg.file() == null) return false;
+        try {
+            File pngFile = new File(ctx.basePath, rg.file());
+            return pngFile.exists() && pngFile.length() > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
 
     private static byte[] loadPng(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (rg.file() == null) return null;
@@ -504,5 +607,161 @@ public final class BackgroundInjector {
             System.err.println("[BackgroundInjector] PNG 로드 실패: " + e.getMessage());
             return null;
         }
+    }
+
+    private static BufferedImage loadImageForPlacement(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || rg == null || rg.file() == null) return null;
+        try {
+            File pngFile = new File(ctx.basePath, rg.file());
+            if (!pngFile.exists()) return null;
+            BufferedImage base = ImageIO.read(pngFile);
+            if (base == null || !shouldCompositeTfInlineVisuals(rg)) return base;
+            BufferedImage merged = compositeTfInlineVisuals(ctx, rg, base);
+            return merged != null ? merged : base;
+        } catch (Exception e) {
+            System.err.println("[BackgroundInjector] PNG 합성 실패: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean hasTfInlineVisuals(RenderedGroup rg) {
+        return rg != null && rg.tfInlineVisualIds() != null && rg.tfInlineVisualIds().length > 0;
+    }
+
+    private static boolean shouldCompositeTfInlineVisuals(RenderedGroup rg) {
+        if (!hasTfInlineVisuals(rg)) return false;
+        // If the text frame remains editable in HWPX, its inline visuals must stay
+        // in the text flow instead of being baked into the floating visual shell.
+        return !"hwpx_tf".equals(rg.textOwner());
+    }
+
+    private static double[] boundsWithTfInlineVisuals(
+            ResolvedBuildContext ctx, RenderedGroup rg, double[] fallback) {
+        if (!hasTfInlineVisuals(rg) || fallback == null || fallback.length < 4) return fallback;
+        double[] union = new double[] { fallback[0], fallback[1], fallback[2], fallback[3] };
+        for (int id : rg.tfInlineVisualIds()) {
+            RenderedGroup child = findRenderedGroup(ctx, id);
+            if (child == null || child.bounds() == null || child.bounds().length < 4) continue;
+            double[] b = child.bounds();
+            union[0] = Math.min(union[0], b[0]);
+            union[1] = Math.min(union[1], b[1]);
+            union[2] = Math.max(union[2], b[2]);
+            union[3] = Math.max(union[3], b[3]);
+        }
+        double parentW = fallback[3] - fallback[1];
+        double parentH = fallback[2] - fallback[0];
+        double unionW = union[3] - union[1];
+        double unionH = union[2] - union[0];
+        if (parentW <= 0 || parentH <= 0 || unionW <= 0 || unionH <= 0) return fallback;
+        double maxRatio = Math.max(unionW / parentW, unionH / parentH);
+        if (maxRatio > TF_INLINE_VISUAL_UNION_MAX_RATIO) return fallback;
+        return union;
+    }
+
+    private static BufferedImage compositeTfInlineVisuals(
+            ResolvedBuildContext ctx, RenderedGroup parent, BufferedImage base) {
+        if (ctx == null || parent == null || base == null || parent.bounds() == null
+                || parent.bounds().length < 4 || !hasTfInlineVisuals(parent)) {
+            return null;
+        }
+        double[] parentBounds = parent.bounds();
+        double[] union = boundsWithTfInlineVisuals(ctx, parent, parentBounds);
+        double unionW = union[3] - union[1];
+        double unionH = union[2] - union[0];
+        double parentW = parentBounds[3] - parentBounds[1];
+        double parentH = parentBounds[2] - parentBounds[0];
+        if (unionW <= 0 || unionH <= 0 || parentW <= 0 || parentH <= 0) return null;
+        double maxRatio = Math.max(unionW / parentW, unionH / parentH);
+        if (maxRatio > TF_INLINE_VISUAL_UNION_MAX_RATIO) return null;
+
+        int canvasW = Math.max(1, (int) Math.round(base.getWidth() * unionW / parentW));
+        int canvasH = Math.max(1, (int) Math.round(base.getHeight() * unionH / parentH));
+        if ((long) canvasW * (long) canvasH > TF_INLINE_VISUAL_MAX_CANVAS_PIXELS) return null;
+        BufferedImage canvas = new BufferedImage(canvasW, canvasH, BufferedImage.TYPE_INT_ARGB);
+        drawAtBounds(canvas, base, parentBounds, union);
+
+        for (int id : parent.tfInlineVisualIds()) {
+            RenderedGroup child = findRenderedGroup(ctx, id);
+            if (child == null || child.file() == null || child.bounds() == null
+                    || child.bounds().length < 4) {
+                continue;
+            }
+            try {
+                File childFile = new File(ctx.basePath, child.file());
+                if (!childFile.exists()) continue;
+                BufferedImage childImg = ImageIO.read(childFile);
+                if (childImg == null) continue;
+                drawAtBounds(canvas, childImg, child.bounds(), union);
+                childImg.flush();
+            } catch (Exception ignored) {
+            }
+        }
+        return canvas;
+    }
+
+    private static void drawAtBounds(
+            BufferedImage canvas, BufferedImage image, double[] bounds, double[] union) {
+        int canvasW = canvas.getWidth();
+        int canvasH = canvas.getHeight();
+        double unionW = union[3] - union[1];
+        double unionH = union[2] - union[0];
+        int x = (int) Math.round((bounds[1] - union[1]) / unionW * canvasW);
+        int y = (int) Math.round((bounds[0] - union[0]) / unionH * canvasH);
+        int w = Math.max(1, (int) Math.round((bounds[3] - bounds[1]) / unionW * canvasW));
+        int h = Math.max(1, (int) Math.round((bounds[2] - bounds[0]) / unionH * canvasH));
+        int x0 = Math.max(0, x);
+        int y0 = Math.max(0, y);
+        int x1 = Math.min(canvasW, x + w);
+        int y1 = Math.min(canvasH, y + h);
+        if (x0 >= x1 || y0 >= y1) return;
+        for (int dy = y0; dy < y1; dy++) {
+            int sy = Math.max(0, Math.min(image.getHeight() - 1,
+                    (int) Math.floor((dy - y) * (double) image.getHeight() / h)));
+            for (int dx = x0; dx < x1; dx++) {
+                int sx = Math.max(0, Math.min(image.getWidth() - 1,
+                        (int) Math.floor((dx - x) * (double) image.getWidth() / w)));
+                int src = image.getRGB(sx, sy);
+                int sa = (src >>> 24) & 0xFF;
+                if (sa == 0) continue;
+                if (sa == 255) {
+                    canvas.setRGB(dx, dy, src);
+                    continue;
+                }
+                int dst = canvas.getRGB(dx, dy);
+                int da = (dst >>> 24) & 0xFF;
+                int outA = sa + da * (255 - sa) / 255;
+                if (outA == 0) {
+                    canvas.setRGB(dx, dy, 0);
+                    continue;
+                }
+                int sr = (src >> 16) & 0xFF;
+                int sg = (src >> 8) & 0xFF;
+                int sb = src & 0xFF;
+                int dr = (dst >> 16) & 0xFF;
+                int dg = (dst >> 8) & 0xFF;
+                int db = dst & 0xFF;
+                int outR = (sr * sa + dr * da * (255 - sa) / 255) / outA;
+                int outG = (sg * sa + dg * da * (255 - sa) / 255) / outA;
+                int outB = (sb * sa + db * da * (255 - sa) / 255) / outA;
+                canvas.setRGB(dx, dy, (outA << 24) | (outR << 16) | (outG << 8) | outB);
+            }
+        }
+    }
+
+    private static RenderedGroup findRenderedGroup(ResolvedBuildContext ctx, int id) {
+        if (ctx == null || ctx.resolvedData == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg != null && rg.id() == id) return rg;
+        }
+        return null;
+    }
+
+    private static byte[] encodePng(BufferedImage image) throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", baos);
+        return baos.toByteArray();
     }
 }

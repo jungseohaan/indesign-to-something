@@ -229,7 +229,11 @@ class ASTFigureBuilder {
             figure.pixelHeight(result.pixelHeight);
             figure.imagePath(decodeURI(imgFrame.linkResourceURI()));
             figure.sourceId(imgFrame.selfId());
-            figure.fromGroup(imgFrame.fromGroup());
+            boolean pageBackgroundLike = isLargePageBackground(wHwp, hHwp, page);
+            if (pageBackgroundLike) {
+                figure.zOrder(0);
+            }
+            figure.fromGroup(pageBackgroundLike ? false : imgFrame.fromGroup());
             return figure;
         }
 
@@ -320,7 +324,11 @@ class ASTFigureBuilder {
         double visibleFracH = 1.0 - figure.cropTopFraction() - figure.cropBottomFraction();
         if (visibleFracW < 0.10 || visibleFracH < 0.10) return null;
 
-        figure.fromGroup(imgFrame.fromGroup());
+        boolean pageBackgroundLike = isLargePageBackground(wHwp, hHwp, page);
+        if (pageBackgroundLike) {
+            figure.zOrder(0);
+        }
+        figure.fromGroup(pageBackgroundLike ? false : imgFrame.fromGroup());
         figure.sourceId(imgFrame.selfId());
         return figure;
     }
@@ -418,12 +426,13 @@ class ASTFigureBuilder {
                     fig.y(figY);
                     fig.width(figW);
                     fig.height(figH);
-                    fig.zOrder(shape.zOrder());
+                    boolean pageBackgroundLike = isLargePageBackground(figW, figH, page);
+                    fig.zOrder(pageBackgroundLike ? 0 : shape.zOrder());
                     fig.imageData(imgResult.imageData);
                     fig.imageFormat(imgResult.format);
                     fig.pixelWidth(imgResult.pixelWidth);
                     fig.pixelHeight(imgResult.pixelHeight);
-                    fig.fromGroup(shape.fromGroup());
+                    fig.fromGroup(pageBackgroundLike ? false : shape.fromGroup());
                     fig.parentGroupId(shape.parentGroupId());
                     fig.sourceId(shape.selfId());
                     fig.fallbackRendered(true);  // Java 폴백 렌더링 표시
@@ -466,10 +475,11 @@ class ASTFigureBuilder {
                     fig.y(figY);
                     fig.width(figW);
                     fig.height(figH);
-                    fig.zOrder(shape.zOrder());
+                    boolean pageBackgroundLike = isLargePageBackground(figW, figH, page);
+                    fig.zOrder(pageBackgroundLike ? 0 : shape.zOrder());
                     fig.imageData(solidPng);
                     fig.imageFormat("png");
-                    fig.fromGroup(shape.fromGroup());
+                    fig.fromGroup(pageBackgroundLike ? false : shape.fromGroup());
                     fig.parentGroupId(shape.parentGroupId());
                     fig.sourceId(shape.selfId());
                     fig.fallbackRendered(true);  // Java 폴백 렌더링 표시
@@ -479,6 +489,16 @@ class ASTFigureBuilder {
         }
 
         return null;
+    }
+
+    private static boolean isLargePageBackground(long figW, long figH, IDMLPage page) {
+        if (figW <= 0 || figH <= 0 || page == null || page.geometricBounds() == null) return false;
+        double[] pageBox = IDMLGeometry.getTransformedBoundingBox(
+                page.geometricBounds(), page.itemTransform());
+        long pageW = CoordinateConverter.pointsToHwpunits(pageBox[2] - pageBox[0]);
+        long pageH = CoordinateConverter.pointsToHwpunits(pageBox[3] - pageBox[1]);
+        if (pageW <= 0 || pageH <= 0) return false;
+        return (double) figW * (double) figH >= 0.3 * (double) pageW * (double) pageH;
     }
 
     /**

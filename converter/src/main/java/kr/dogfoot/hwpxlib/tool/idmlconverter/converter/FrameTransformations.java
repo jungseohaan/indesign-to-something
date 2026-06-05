@@ -109,7 +109,7 @@ final class FrameTransformations {
         dt.createSubList();
         SubList subList = dt.subList();
         subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(LineWrapMethod.BREAK)
+                .lineWrapAnd(HwpxTextBoxBuilder.textFrameLineWrap(block))
                 .vertAlignAnd(cellVAlign);
         subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
 
@@ -232,7 +232,7 @@ final class FrameTransformations {
         dt.createSubList();
         SubList subList = dt.subList();
         subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(LineWrapMethod.BREAK)
+                .lineWrapAnd(HwpxTextBoxBuilder.textFrameLineWrap(block))
                 .vertAlignAnd(cellVAlign);
         subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
 

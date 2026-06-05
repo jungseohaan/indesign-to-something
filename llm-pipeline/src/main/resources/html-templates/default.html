@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>교수자료</title>
+<style>
+:root {
+  --bg: #0f172a;
+  --slide-bg: #1e293b;
+  --accent: #6366f1;
+  --accent-light: rgba(99,102,241,0.15);
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --border: #334155;
+  --radius: 14px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
+  font-family: 'Apple SD Gothic Neo', 'Pretendard', 'Noto Sans KR', sans-serif; }
+
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── 슬라이드 영역 ── */
+#slide-area {
+  flex: 1; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 28px 36px;
+}
+.slide {
+  background: var(--slide-bg);
+  border-radius: var(--radius);
+  width: 100%; max-width: 900px;
+  min-height: 440px;
+  padding: 44px 52px;
+  display: flex; flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+  overflow-y: auto;
+}
+
+/* ── title 레이아웃 ── */
+.layout-title { justify-content: center; align-items: center; text-align: center; gap: 18px; }
+.unit-badge {
+  font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--accent); background: var(--accent-light);
+  padding: 5px 14px; border-radius: 20px; display: inline-block;
+}
+.layout-title h1 { font-size: 2.4rem; font-weight: 800; color: var(--text); line-height: 1.25; }
+.layout-title .subtitle { font-size: 1.05rem; color: var(--text-muted); margin-top: 4px; }
+
+/* ── bullets 레이아웃 ── */
+.slide-heading { font-size: 1.4rem; font-weight: 700; color: var(--accent); margin-bottom: 24px; }
+.bullet-list { list-style: none; display: flex; flex-direction: column; gap: 13px; }
+.bullet-list li {
+  display: flex; align-items: flex-start; gap: 12px;
+  font-size: 1.05rem; color: var(--text); line-height: 1.55;
+}
+.bullet-list li::before { content: "▸"; color: var(--accent); flex-shrink: 0; padding-top: 2px; }
+
+/* ── vocabulary 레이아웃 ── */
+.vocab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.vocab-card {
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+}
+.vocab-word { font-size: 1rem; font-weight: 700; color: var(--text); }
+.vocab-meaning { font-size: 0.85rem; color: var(--accent); margin: 5px 0 0; }
+.vocab-example { font-size: 0.8rem; color: var(--text-muted); font-style: italic; margin-top: 4px; }
+
+/* ── qa 레이아웃 ── */
+.qa-list { display: flex; flex-direction: column; gap: 14px; }
+.qa-card {
+  background: rgba(255,255,255,0.04); border-left: 3px solid var(--accent);
+  border-radius: 0 10px 10px 0; padding: 16px 18px;
+}
+.qa-question { font-size: 1rem; font-weight: 600; color: var(--text); }
+.qa-answer {
+  font-size: 0.9rem; color: var(--text-muted); margin-top: 8px;
+  overflow: hidden; max-height: 0; transition: max-height 0.3s ease;
+}
+.qa-answer.open { max-height: 200px; }
+.qa-toggle {
+  margin-top: 8px; font-size: 0.8rem; color: var(--accent);
+  background: none; border: 1px solid var(--accent); border-radius: 6px;
+  padding: 3px 10px; cursor: pointer; transition: background 0.15s;
+}
+.qa-toggle:hover { background: var(--accent-light); }
+
+/* ── 교사 노트 패널 ── */
+#notes-panel {
+  display: none; position: fixed; bottom: 64px; left: 50%; transform: translateX(-50%);
+  max-width: 700px; width: calc(100% - 48px);
+  background: #1a1a2e; border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 18px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.6;
+  z-index: 50; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+#notes-panel.open { display: block; }
+#notes-label {
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 6px;
+}
+
+/* ── 컨트롤 바 ── */
+#controls {
+  display: flex; align-items: center; justify-content: center; gap: 16px;
+  padding: 12px 24px; background: rgba(0,0,0,0.35); border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.ctrl-btn {
+  background: rgba(255,255,255,0.07); border: 1px solid var(--border);
+  color: var(--text); border-radius: 8px; width: 38px; height: 38px;
+  font-size: 1rem; cursor: pointer; transition: background 0.15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.ctrl-btn:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+.ctrl-btn:disabled { opacity: 0.25; cursor: default; }
+#counter { font-size: 0.9rem; color: var(--text-muted); min-width: 72px; text-align: center; }
+#unit-label { font-size: 0.8rem; color: var(--text-muted); max-width: 240px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+#notes-btn {
+  margin-left: 8px; background: none; border: 1px solid var(--border);
+  color: var(--text-muted); border-radius: 6px; padding: 4px 10px;
+  font-size: 0.75rem; cursor: pointer; transition: all 0.15s;
+}
+#notes-btn:hover { border-color: var(--accent); color: var(--accent); }
+#notes-btn.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="slide-area">
+    <div id="slide-display"></div>
+  </div>
+  <div id="notes-panel"><div id="notes-label">교사 노트</div><div id="notes-text"></div></div>
+  <div id="controls">
+    <button class="ctrl-btn" id="btn-first" title="처음 (Home)">⇤</button>
+    <button class="ctrl-btn" id="btn-prev"  title="이전 (←)">←</button>
+    <span id="counter">- / -</span>
+    <button class="ctrl-btn" id="btn-next"  title="다음 (→)">→</button>
+    <button class="ctrl-btn" id="btn-last"  title="끝 (End)">⇥</button>
+    <span id="unit-label"></span>
+    <button id="notes-btn" title="교사 노트 (N)">노트</button>
+  </div>
+</div>
+<script>
+// ────────────────────────────────────────────────────────────
+// 데이터 주입 — HtmlSlideGenerator가 아래 플레이스홀더를 교체
+// ────────────────────────────────────────────────────────────
+const TEACHING_DATA = /*__TEACHING_DATA__*/null/*__END__*/;
+
+// ── 슬라이드 평탄화 ──
+const slides = [];
+if (TEACHING_DATA && TEACHING_DATA.units) {
+  TEACHING_DATA.units.forEach(function(unit) {
+    (unit.slides || []).forEach(function(slide) {
+      slides.push(Object.assign({}, slide, {
+        _unitTitle: unit.unitTitle,
+        _unitIndex: unit.unitIndex
+      }));
+    });
+  });
+}
+
+let idx = 0;
+let notesOpen = false;
+
+// ── 렌더러 ──
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderTitle(s) {
+  return '<div class="slide layout-title">'
+    + '<span class="unit-badge">' + esc(s._unitIndex) + '단원</span>'
+    + '<h1>' + esc(s.title) + '</h1>'
+    + (s.subtitle ? '<p class="subtitle">' + esc(s.subtitle) + '</p>' : '')
+    + '</div>';
+}
+
+function renderBullets(s) {
+  var items = (s.bullets || []).map(function(b) {
+    return '<li>' + esc(b) + '</li>';
+  }).join('');
+  return '<div class="slide">'
+    + '<div class="slide-heading">' + esc(s.title) + '</div>'
+    + '<ul class="bullet-list">' + items + '</ul>'
+    + '</div>';
+}
+
+function renderVocabulary(s) {
+  var cards = (s.items || []).map(function(item) {
+    return '<div class="vocab-card">'
+      + '<div class="vocab-word">' + esc(item.word) + '</div>'
+      + '<div class="vocab-meaning">' + esc(item.meaning) + '</div>'
+      + (item.example ? '<div class="vocab-example">' + esc(item.example) + '</div>' : '')
+      + '</div>';
+  }).join('');
+  return '<div class="slide">'
+    + '<div class="slide-heading">' + esc(s.title) + '</div>'
+    + '<div class="vocab-grid">' + cards + '</div>'
+    + '</div>';
+}
+
+function renderQA(s) {
+  var qaItems = (s.items || []).map(function(item, i) {
+    return '<div class="qa-card">'
+      + '<div class="qa-question">' + esc(item.question) + '</div>'
+      + '<div class="qa-answer" id="qa-ans-' + i + '">' + esc(item.answer) + '</div>'
+      + '<button class="qa-toggle" onclick="toggleQA(' + i + ')">답 보기</button>'
+      + '</div>';
+  }).join('');
+  return '<div class="slide">'
+    + '<div class="slide-heading">' + esc(s.title) + '</div>'
+    + '<div class="qa-list">' + qaItems + '</div>'
+    + '</div>';
+}
+
+function toggleQA(i) {
+  var el = document.getElementById('qa-ans-' + i);
+  var btn = el.nextElementSibling;
+  if (el.classList.contains('open')) {
+    el.classList.remove('open'); btn.textContent = '답 보기';
+  } else {
+    el.classList.add('open'); btn.textContent = '숨기기';
+  }
+}
+
+function show(newIdx) {
+  if (slides.length === 0) return;
+  idx = Math.max(0, Math.min(newIdx, slides.length - 1));
+  var s = slides[idx];
+  var html;
+  switch (s.layout) {
+    case 'title':      html = renderTitle(s);      break;
+    case 'bullets':    html = renderBullets(s);    break;
+    case 'vocabulary': html = renderVocabulary(s); break;
+    case 'qa':         html = renderQA(s);         break;
+    default:           html = renderBullets(s);
+  }
+  document.getElementById('slide-display').innerHTML = html;
+  document.getElementById('counter').textContent = (idx + 1) + ' / ' + slides.length;
+  document.getElementById('unit-label').textContent = s._unitIndex + '단원 · ' + s._unitTitle;
+  document.getElementById('btn-prev').disabled  = idx === 0;
+  document.getElementById('btn-first').disabled = idx === 0;
+  document.getElementById('btn-next').disabled  = idx === slides.length - 1;
+  document.getElementById('btn-last').disabled  = idx === slides.length - 1;
+  // 노트
+  document.getElementById('notes-text').textContent = s.notes || '(노트 없음)';
+  document.getElementById('notes-panel').className = notesOpen ? 'open' : '';
+}
+
+function toggleNotes() {
+  notesOpen = !notesOpen;
+  document.getElementById('notes-panel').className = notesOpen ? 'open' : '';
+  document.getElementById('notes-btn').className = notesOpen ? 'active' : '';
+}
+
+// ── 이벤트 ──
+document.getElementById('btn-prev').addEventListener('click', function() { show(idx - 1); });
+document.getElementById('btn-next').addEventListener('click', function() { show(idx + 1); });
+document.getElementById('btn-first').addEventListener('click', function() { show(0); });
+document.getElementById('btn-last').addEventListener('click', function() { show(slides.length - 1); });
+document.getElementById('notes-btn').addEventListener('click', toggleNotes);
+
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown') show(idx + 1);
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp'   || e.key === 'PageUp')   show(idx - 1);
+  if (e.key === 'Home') show(0);
+  if (e.key === 'End')  show(slides.length - 1);
+  if (e.key === 'n' || e.key === 'N') toggleNotes();
+});
+
+// ── 초기화 ──
+if (slides.length > 0) show(0);
+else document.getElementById('slide-display').innerHTML =
+  '<div class="slide layout-title"><h1 style="color:#64748b">슬라이드 없음</h1></div>';
+</script>
+</body>
+</html>

@@ -22,6 +22,7 @@ public class ConvertResult {
     private int imagesAiConverted;
     private int imagesTiffConverted;
     private int stylesConverted;
+    private String htmlPath;
 
     public ConvertResult() {
         this.warnings = new ArrayList<String>();
@@ -153,6 +154,14 @@ public class ConvertResult {
 
     public void stylesConverted(int count) {
         this.stylesConverted = count;
+    }
+
+    public String htmlPath() {
+        return htmlPath;
+    }
+
+    public void htmlPath(String path) {
+        this.htmlPath = path;
     }
 
     public String summary() {

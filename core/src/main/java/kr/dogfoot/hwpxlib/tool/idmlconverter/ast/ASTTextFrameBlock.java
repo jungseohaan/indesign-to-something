@@ -75,6 +75,8 @@ public class ASTTextFrameBlock extends ASTBlock {
     private long[] pathPointsY;
 
     private boolean suppressParaLeftIndent; // ORC+inline 패턴: 단락 leftIndent 무시
+    // 원본 InDesign 조판에서 각 composed line이 별도 문단인 경우 HWP 자동 줄감기 금지.
+    private boolean noAutoLineWrap;
 
     private List<ASTParagraph> paragraphs;
 
@@ -164,6 +166,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean suppressParaLeftIndent() { return suppressParaLeftIndent; }
     public void suppressParaLeftIndent(boolean v) { this.suppressParaLeftIndent = v; }
+
+    public boolean noAutoLineWrap() { return noAutoLineWrap; }
+    public void noAutoLineWrap(boolean v) { this.noAutoLineWrap = v; }
 
     public double rotationAngle() { return rotationAngle; }
     public void rotationAngle(double v) { this.rotationAngle = v; }

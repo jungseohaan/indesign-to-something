@@ -59,6 +59,7 @@ public final class TableBuilder {
         int wholeTablePngRendered;      // 표 전체 PNG (rendered_frames에서 발견)
         int wholeTablePngForced;        // 중첩 테이블 등 정책상 강제 PNG
         int pngMissingFallback;         // 인라인 있지만 PNG 없어서 ASTTable로 떨어진 케이스 (배지 중복 위험)
+        int cellBackgroundsAbsorbed;    // 별도 page_object → 실제 셀 fill로 흡수한 수
         int total;
     }
 
@@ -77,8 +78,11 @@ public final class TableBuilder {
             IDMLStory idmlStory = ctx.loadIDMLStory.apply(storyId);
             if (idmlStory == null || !idmlStory.hasTables()) continue;
 
-            if (tf.isInline() && ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
-            if (!tf.isInline() && !ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
+            if (tf.onHiddenLayer() || tf.nonprinting()) continue;
+            boolean editableTextFrame = ctx.resolvedData.isEditableTextFrame(tf.id());
+            boolean tableAnchorOnlyFrame = isTableAnchorOnlyFrame(tf);
+            if (tf.isInline() && editableTextFrame) continue;
+            if (!tf.isInline() && !editableTextFrame && !tableAnchorOnlyFrame) continue;
 
             int pageIdx = ctx.toSectionIndex.applyAsInt(tf.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) continue;
@@ -216,6 +220,8 @@ public final class TableBuilder {
                 ASTTable expandedTable = tryExpandInlineGroupColumns(ctx, astTable, idmlTable);
                 if (expandedTable != null) astTable = expandedTable;
 
+                report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(ctx, astTable, pageIdx);
+
                 section.addBlock(astTable);
 
                 // 분기 3a: cell-level 모드 — 트리거 셀의 인라인 객체를 floating으로 추출
@@ -239,6 +245,20 @@ public final class TableBuilder {
         }
 
         printReport(report);
+    }
+
+    private static boolean isTableAnchorOnlyFrame(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        String text = tf.frameVisibleText();
+        if (text == null || text.isEmpty()) return true;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (Character.isWhitespace(ch)) continue;
+            if (Character.isISOControl(ch)) continue;
+            if (ch == '\uFFFC') continue; // Object Replacement Character
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -450,6 +470,191 @@ public final class TableBuilder {
     }
 
     /**
+     * 편집 우선 테이블 정책:
+     * 표 셀 영역을 거의 덮는 별도 page_object 사각형은 PNG로 다시 얹지 않고
+     * HWP 셀 배경색으로 흡수한다. 셀 내부 라벨/부분 장식은 그대로 둔다.
+     */
+    private static int absorbCellBackgroundPageObjects(
+            ResolvedBuildContext ctx,
+            ASTTable table,
+            int pageIdx) {
+        if (ctx == null || ctx.resolvedData == null || table == null) return 0;
+
+        Map<Integer, ResolvedPageItem> pageItemById = new HashMap<>();
+        for (ResolvedPageItem item : ctx.resolvedData.pageItems()) {
+            if (item == null || item.id() == null) continue;
+            try {
+                pageItemById.put(Integer.parseInt(item.id()), item);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (pageItemById.isEmpty()) return 0;
+
+        double sf = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double tableLeftMm = CoordinateConverter.hwpunitsToPoints(table.x()) / sf;
+        double tableTopMm = CoordinateConverter.hwpunitsToPoints(table.y()) / sf;
+
+        long[] colLeft = buildColumnOffsets(table.columnWidths());
+        long[] rowTop = buildRowOffsets(table.rows());
+
+        int absorbed = 0;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (!"page_object".equals(rg.itemType())) continue;
+            int rgPageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
+            if (rgPageIdx != pageIdx) continue;
+            if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
+            if (ctx.isDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) continue;
+
+            ResolvedPageItem item = pageItemById.get(rg.id());
+            if (!isAbsorbableCellBackground(item)) continue;
+
+            double[] b = rg.bounds();
+            if (b == null || b.length < 4) continue;
+            double rectTop = b[0], rectLeft = b[1], rectBottom = b[2], rectRight = b[3];
+            if (rectRight <= rectLeft || rectBottom <= rectTop) continue;
+
+            String fill = resolveFillHex(ctx, item);
+            if (fill == null) continue;
+
+            ASTTableCell matched = findCoveredCell(
+                    table, colLeft, rowTop, tableLeftMm, tableTopMm, sf,
+                    rectLeft, rectTop, rectRight, rectBottom);
+            if (matched == null) continue;
+
+            matched.fillColor(fill);
+            markPageObjectHandled(ctx, rg);
+            absorbed++;
+            if (ctx.debugAst) {
+                table.debugOrNew().note("cell background absorbed: page_object " + rg.id()
+                        + " -> r=" + matched.rowIndex() + " c=" + matched.columnIndex());
+            }
+        }
+        return absorbed;
+    }
+
+    private static long[] buildColumnOffsets(List<Long> widths) {
+        int n = widths == null ? 0 : widths.size();
+        long[] offsets = new long[n + 1];
+        for (int i = 0; i < n; i++) offsets[i + 1] = offsets[i] + widths.get(i);
+        return offsets;
+    }
+
+    private static long[] buildRowOffsets(List<ASTTableRow> rows) {
+        int n = rows == null ? 0 : rows.size();
+        long[] offsets = new long[n + 1];
+        for (int i = 0; i < n; i++) offsets[i + 1] = offsets[i] + rows.get(i).rowHeight();
+        return offsets;
+    }
+
+    private static boolean isAbsorbableCellBackground(ResolvedPageItem item) {
+        if (item == null) return false;
+        if (!"Rectangle".equals(item.type()) && !"TextFrame".equals(item.type())) return false;
+        String fill = item.fillColorName();
+        if (fill == null || fill.contains("None")) return false;
+        if (item.opacity() > 0 && item.opacity() < 95.0) return false;
+        if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
+        if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
+        if (item.hasDropShadow()) return false;
+        if (item.gradientFeatherApplied()) return false;
+        return true;
+    }
+
+    private static String resolveFillHex(ResolvedBuildContext ctx, ResolvedPageItem item) {
+        String hex = ctx.resolvedData.resolveColorHex(item.fillColorName());
+        if (hex == null) return null;
+        double tint = item.fillTint();
+        if (tint > 0 && tint < 100) {
+            hex = blendColorWithWhite(hex, tint / 100.0);
+        }
+        return hex;
+    }
+
+    private static ASTTableCell findCoveredCell(
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftMm,
+            double tableTopMm,
+            double sf,
+            double rectLeft,
+            double rectTop,
+            double rectRight,
+            double rectBottom) {
+        ASTTableCell best = null;
+        double bestScore = 0;
+        for (ASTTableRow row : table.rows()) {
+            for (ASTTableCell cell : row.cells()) {
+                int c0 = cell.columnIndex();
+                int c1 = Math.min(c0 + Math.max(1, cell.columnSpan()), colLeft.length - 1);
+                int r0 = cell.rowIndex();
+                int r1 = Math.min(r0 + Math.max(1, cell.rowSpan()), rowTop.length - 1);
+                if (c0 < 0 || c0 >= colLeft.length || r0 < 0 || r0 >= rowTop.length) continue;
+
+                double cellLeft = tableLeftMm + CoordinateConverter.hwpunitsToPoints(colLeft[c0]) / sf;
+                double cellRight = tableLeftMm + CoordinateConverter.hwpunitsToPoints(colLeft[c1]) / sf;
+                double cellTop = tableTopMm + CoordinateConverter.hwpunitsToPoints(rowTop[r0]) / sf;
+                double cellBottom = tableTopMm + CoordinateConverter.hwpunitsToPoints(rowTop[r1]) / sf;
+                double score = fullCellCoverScore(
+                        rectLeft, rectTop, rectRight, rectBottom,
+                        cellLeft, cellTop, cellRight, cellBottom);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = cell;
+                }
+            }
+        }
+        return bestScore >= 0.82 ? best : null;
+    }
+
+    private static double fullCellCoverScore(
+            double rectLeft, double rectTop, double rectRight, double rectBottom,
+            double cellLeft, double cellTop, double cellRight, double cellBottom) {
+        double ix = Math.max(0, Math.min(rectRight, cellRight) - Math.max(rectLeft, cellLeft));
+        double iy = Math.max(0, Math.min(rectBottom, cellBottom) - Math.max(rectTop, cellTop));
+        double intersection = ix * iy;
+        double rectArea = Math.max(0, rectRight - rectLeft) * Math.max(0, rectBottom - rectTop);
+        double cellArea = Math.max(0, cellRight - cellLeft) * Math.max(0, cellBottom - cellTop);
+        if (intersection <= 0 || rectArea <= 0 || cellArea <= 0) return 0;
+
+        double rectCoverage = intersection / rectArea;
+        double cellCoverage = intersection / cellArea;
+        double edgeToleranceMm = 1.4;
+        boolean aligned = Math.abs(rectLeft - cellLeft) <= edgeToleranceMm
+                && Math.abs(rectRight - cellRight) <= edgeToleranceMm
+                && Math.abs(rectTop - cellTop) <= edgeToleranceMm
+                && Math.abs(rectBottom - cellBottom) <= edgeToleranceMm;
+        if (!aligned) return 0;
+        return Math.min(rectCoverage, cellCoverage);
+    }
+
+    private static void markPageObjectHandled(ResolvedBuildContext ctx, RenderedGroup rg) {
+        ctx.setDisposition(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+        ctx.phase6PlacedIds.add(rg.id());
+        Set<Integer> ids = new HashSet<>();
+        ids.add(rg.id());
+        suppressAllDescendantsFromPhase7(ctx, ids);
+    }
+
+    private static String blendColorWithWhite(String hex, double fraction) {
+        if (hex == null || !hex.startsWith("#") || hex.length() < 7) return hex;
+        try {
+            int rgb = Integer.parseInt(hex.substring(1, 7), 16);
+            int r = (rgb >> 16) & 0xFF;
+            int g = (rgb >> 8) & 0xFF;
+            int b = rgb & 0xFF;
+            r = (int) Math.round(255 + (r - 255) * fraction);
+            g = (int) Math.round(255 + (g - 255) * fraction);
+            b = (int) Math.round(255 + (b - 255) * fraction);
+            return String.format("#%02X%02X%02X",
+                    Math.max(0, Math.min(255, r)),
+                    Math.max(0, Math.min(255, g)),
+                    Math.max(0, Math.min(255, b)));
+        } catch (Exception e) {
+            return hex;
+        }
+    }
+
+    /**
      * 그룹 ID 집합과 그 모든 자손을 Phase 7에서 처리하지 않도록 등록.
      *
      * 처리 순서:
@@ -648,22 +853,25 @@ public final class TableBuilder {
         int domId;
         try { domId = Integer.parseInt(tfDomId); } catch (NumberFormatException e) { return null; }
 
-        File directFile = new File(ctx.basePath, "rendered_frames/table_" + domId + ".png");
         File pngFile = null;
         double[] rgBounds = null;
-        if (directFile.exists()) {
-            pngFile = directFile;
-        }
-        if (pngFile == null) {
-            for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-                if (rg.id() == domId && rg.file() != null) {
-                    File f = new File(ctx.basePath, rg.file());
-                    if (f.exists()) {
-                        pngFile = f;
-                        rgBounds = rg.bounds();
-                        break;
-                    }
+        boolean hasRenderedMetadata = false;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg.id() == domId && rg.file() != null) {
+                hasRenderedMetadata = true;
+                if (rg.shouldSkipByOwnership()) return null;
+                File f = new File(ctx.basePath, rg.file());
+                if (f.exists()) {
+                    pngFile = f;
+                    rgBounds = rg.bounds();
+                    break;
                 }
+            }
+        }
+        if (pngFile == null && !hasRenderedMetadata) {
+            File directFile = new File(ctx.basePath, "rendered_frames/table_" + domId + ".png");
+            if (directFile.exists()) {
+                pngFile = directFile;
             }
         }
         if (pngFile == null) return null;
@@ -795,6 +1003,10 @@ public final class TableBuilder {
         }
         if (r.wholeTablePngForced > 0) {
             System.err.println("  · " + r.wholeTablePngForced + " → whole-table PNG fallback (nested forced)");
+        }
+        if (r.cellBackgroundsAbsorbed > 0) {
+            System.err.println("  · " + r.cellBackgroundsAbsorbed
+                    + " page_object backgrounds absorbed into table cells");
         }
         if (r.pngMissingFallback > 0) {
             System.err.println("  · WARNING: " + r.pngMissingFallback

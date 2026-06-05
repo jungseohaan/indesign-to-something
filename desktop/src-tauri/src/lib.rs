@@ -105,6 +105,7 @@ pub fn run() {
             commands::analyze_idml,
             commands::convert_idml,
             commands::convert_hwpx_to_idml,
+            commands::generate_teaching,
             commands::get_jar_path,
             commands::generate_preview,
             commands::generate_image_preview,
@@ -124,15 +125,6 @@ pub fn run() {
             commands::create_dir,
             commands::scan_indd_folder,
             commands::read_file_base64,
-            // Semantic Layer
-            commands::save_semantic_layer,
-            commands::load_semantic_layer,
-            commands::save_pptx,
-            commands::save_schema,
-            commands::load_schema_file,
-            commands::list_user_schemas,
-            commands::save_user_schema,
-            commands::delete_user_schema,
             cancel_current,
         ])
         .run(tauri::generate_context!())
@@ -173,13 +165,11 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
 
     // Export 서브메뉴
     let export_hwpx = MenuItem::with_id(handle, "export-hwpx", "HWPX...", true, Some("CmdOrCtrl+E"))?;
-    let export_semantic_json = MenuItem::with_id(handle, "export-semantic-json", "Semantic JSON...", true, Some("CmdOrCtrl+Shift+E"))?;
-    let export_pptx = MenuItem::with_id(handle, "export-pptx", "PowerPoint (PPTX)...", true, None::<&str>)?;
     let export_submenu = Submenu::with_items(
         handle,
         "Export",
         true,
-        &[&export_hwpx, &export_semantic_json, &export_pptx],
+        &[&export_hwpx],
     )?;
 
     let clear_cache = MenuItem::with_id(handle, "clear-extract-cache", "Clear Extract Cache", true, None::<&str>)?;
@@ -225,31 +215,6 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         ],
     )?;
 
-    // ────────────────────────────────────────────────────────────
-    // Semantic 메뉴 (SPEC-019 M1, 신설)
-    // ────────────────────────────────────────────────────────────
-    let semantic_extract = MenuItem::with_id(handle, "semantic-extract", "Extract from AST", true, Some("CmdOrCtrl+R"))?;
-    let semantic_reclassify = MenuItem::with_id(handle, "semantic-reclassify", "Re-classify", true, Some("CmdOrCtrl+Shift+R"))?;
-    let semantic_schema_edit = MenuItem::with_id(handle, "semantic-schema-edit", "Edit Active Schema...", true, Some("CmdOrCtrl+Shift+M"))?;
-    let semantic_schema_generate = MenuItem::with_id(handle, "semantic-schema-generate", "Generate from AST", true, None::<&str>)?;
-    let schema_submenu = Submenu::with_items(
-        handle,
-        "Schema",
-        true,
-        &[&semantic_schema_edit, &semantic_schema_generate],
-    )?;
-    let semantic_menu = Submenu::with_items(
-        handle,
-        "Semantic",
-        true,
-        &[
-            &semantic_extract,
-            &semantic_reclassify,
-            &PredefinedMenuItem::separator(handle)?,
-            &schema_submenu,
-        ],
-    )?;
-
     // Edit 메뉴 (기본 편집 기능)
     let edit_menu = Submenu::with_items(
         handle,
@@ -270,11 +235,10 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     // View 메뉴 (SPEC-019 M1)
     // ────────────────────────────────────────────────────────────
     let tab_converter = MenuItem::with_id(handle, "tab-converter", "HWPX Converter Tab", true, Some("CmdOrCtrl+1"))?;
-    let tab_semantic = MenuItem::with_id(handle, "tab-semantic", "Semantic Layer Tab", true, Some("CmdOrCtrl+2"))?;
+    let tab_teaching = MenuItem::with_id(handle, "tab-teaching", "Teaching Material Tab", true, Some("CmdOrCtrl+2"))?;
 
     #[cfg(debug_assertions)]
     let view_menu = {
-        // ⌘⇧I → DevTools 단독 사용 (Open InDesign은 ⌘⌥I로 이동)
         let devtools = MenuItem::with_id(handle, "devtools", "Toggle DevTools", true, Some("CmdOrCtrl+Shift+I"))?;
         Submenu::with_items(
             handle,
@@ -282,7 +246,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
             true,
             &[
                 &tab_converter,
-                &tab_semantic,
+                &tab_teaching,
                 &PredefinedMenuItem::separator(handle)?,
                 &PredefinedMenuItem::fullscreen(handle, Some("Toggle Fullscreen"))?,
                 &PredefinedMenuItem::separator(handle)?,
@@ -298,7 +262,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
         true,
         &[
             &tab_converter,
-            &tab_semantic,
+            &tab_teaching,
             &PredefinedMenuItem::separator(handle)?,
             &PredefinedMenuItem::fullscreen(handle, Some("Toggle Fullscreen"))?,
         ],
@@ -334,13 +298,13 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     #[cfg(target_os = "macos")]
     let menu = Menu::with_items(
         handle,
-        &[&app_menu, &file_menu, &edit_menu, &view_menu, &semantic_menu, &window_menu],
+        &[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu],
     )?;
 
     #[cfg(not(target_os = "macos"))]
     let menu = Menu::with_items(
         handle,
-        &[&file_menu, &edit_menu, &view_menu, &semantic_menu, &help_menu],
+        &[&file_menu, &edit_menu, &view_menu, &help_menu],
     )?;
 
     Ok(menu)

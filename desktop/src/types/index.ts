@@ -132,6 +132,7 @@ export interface ConvertResult {
   images_ai: number;
   images_tiff: number;
   warnings: string[];
+  html_path?: string | null;
 }
 
 export interface ProgressEvent {

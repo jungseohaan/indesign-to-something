@@ -129,7 +129,7 @@ final class PageOverlayBuilder {
         SubList subList = tc.subList();
         VerticalAlign2 vAlign = HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification());
         subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
-                .lineWrapAnd(LineWrapMethod.BREAK)
+                .lineWrapAnd(HwpxTextBoxBuilder.inlineTextFrameLineWrap(obj))
                 .vertAlignAnd(vAlign)
                 .linkListIDRefAnd("0").linkListNextIDRefAnd("0");
 
@@ -161,7 +161,8 @@ final class PageOverlayBuilder {
 
         // 테두리
         String stroke = obj.strokeColor();
-        boolean hasStroke = stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0;
+        boolean hasStroke = HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled()
+                && stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0;
 
         LineType2 lineType = LineType2.NONE;
         LineWidth lineWidth = LineWidth.MM_0_1;
@@ -187,7 +188,8 @@ final class PageOverlayBuilder {
 
         // 배경 채우기 (fillTint는 색상 농도로 RGB에 적용, 불투명 처리)
         String fill = obj.fillColor();
-        if (fill != null && fill.startsWith("#")) {
+        if (HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled()
+                && fill != null && fill.startsWith("#")) {
             String tinted = HwpxTextBoxBuilder.blendColorWithWhite(fill, obj.fillTint() / 100.0);
             bf.createFillBrush();
             bf.fillBrush().createWinBrush();

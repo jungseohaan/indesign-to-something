@@ -345,6 +345,7 @@ public class ASTStoryConverter {
                 && items.get(items.size() - 1).itemType() == ASTInlineItem.ItemType.BREAK) {
             items.remove(items.size() - 1);
         }
+        applyTrailingPageNumberLeader(para, idmlPara, idmlDoc);
 
         // 분수 수식(FRACTION_FRAME) 포함 단락: 줄간격을 PERCENT로 변경하고 여백 추가
         // 고정 줄간격에서 분수 수식이 다음 텍스트와 겹치는 것을 방지
@@ -357,6 +358,101 @@ public class ASTStoryConverter {
         }
 
         return para;
+    }
+
+    private static void applyTrailingPageNumberLeader(ASTParagraph para,
+                                                      IDMLParagraph idmlPara,
+                                                      IDMLDocument idmlDoc) {
+        if (para == null || para.items() == null || para.items().size() < 2) return;
+        if (!hasVisibleText(para)) return;
+
+        List<ASTInlineItem> items = para.items();
+        for (int i = items.size() - 1; i >= 0; i--) {
+            ASTInlineItem item = items.get(i);
+            if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
+            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                String text = ((ASTTextRun) item).text();
+                if (text == null || text.trim().isEmpty()) continue;
+                if (!isPageNumberText(text)) return;
+            } else if (item.itemType() == ASTInlineItem.ItemType.INLINE_OBJECT) {
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) return;
+                if (!isPageNumberInlineObject(obj)) return;
+            } else {
+                return;
+            }
+
+            if (i > 0 && items.get(i - 1) instanceof ASTTextRun) {
+                String prev = ((ASTTextRun) items.get(i - 1)).text();
+                if ("\t".equals(prev)) return;
+            }
+            if (!enableRightmostDotLeader(para, idmlPara, idmlDoc)) return;
+
+            ASTTextRun tabRun = new ASTTextRun();
+            tabRun.text("\t");
+            tabRun.textColor("#000000");
+            items.add(i, tabRun);
+            return;
+        }
+    }
+
+    private static boolean hasVisibleText(ASTParagraph para) {
+        if (para.items() == null) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (item == null || item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text != null && !text.trim().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private static boolean isPageNumberInlineObject(ASTInlineObject obj) {
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return false;
+        StringBuilder sb = new StringBuilder();
+        for (ASTParagraph p : obj.paragraphs()) {
+            if (p.items() == null) continue;
+            for (ASTInlineItem item : p.items()) {
+                if (item != null && item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null) sb.append(text);
+                }
+            }
+        }
+        return isPageNumberText(sb.toString());
+    }
+
+    private static boolean isPageNumberText(String text) {
+        if (text == null) return false;
+        String cleaned = text.replace("\r", "").replace("\n", "").trim();
+        return cleaned.matches("\\d{1,4}");
+    }
+
+    private static boolean enableRightmostDotLeader(ASTParagraph para,
+                                                   IDMLParagraph idmlPara,
+                                                   IDMLDocument idmlDoc) {
+        if ((para.tabStops() == null || para.tabStops().size() < 2)
+                && idmlPara != null && idmlDoc != null) {
+            IDMLStyleDef style = resolveStyle(idmlPara.appliedParagraphStyle(), idmlDoc.paraStyles());
+            if (style != null && style.tabStops() != null) {
+                for (IDMLStyleDef.TabStop ts : style.tabStops()) {
+                    if (ts == null || ts.position() <= 0) continue;
+                    long posHwpunits = CoordinateConverter.pointsToHwpunits(ts.position());
+                    para.addTabStop(new ASTTabStop(posHwpunits, mapTabAlignment(ts.alignment()), ts.leader()));
+                }
+            }
+        }
+        if (para.tabStops() == null || para.tabStops().size() < 2) return false;
+
+        ASTTabStop rightmost = null;
+        for (ASTTabStop stop : para.tabStops()) {
+            if (stop == null || stop.position() <= 0) continue;
+            if (rightmost == null || stop.position() > rightmost.position()) {
+                rightmost = stop;
+            }
+        }
+        if (rightmost == null) return false;
+        rightmost.leader(".");
+        return true;
     }
 
     /**
@@ -464,6 +560,8 @@ public class ASTStoryConverter {
         merged.tracking(style.tracking() != null ? style.tracking() : parent.tracking());
         merged.underline(style.underline() != null ? style.underline() : parent.underline());
         merged.underlineType(style.underlineType() != null ? style.underlineType() : parent.underlineType());
+        merged.underlineWeight(style.underlineWeight() != null ? style.underlineWeight() : parent.underlineWeight());
+        merged.underlineOffset(style.underlineOffset() != null ? style.underlineOffset() : parent.underlineOffset());
         merged.strikeThrough(style.strikeThrough() != null ? style.strikeThrough() : parent.strikeThrough());
         merged.leading(style.leading() != null ? style.leading() : parent.leading());
         merged.leadingType(style.leadingType() != null ? style.leadingType() : parent.leadingType());
@@ -485,6 +583,10 @@ public class ASTStoryConverter {
         merged.keepLinesTogether(style.keepLinesTogether() != null ? style.keepLinesTogether() : parent.keepLinesTogether());
         merged.pageBreakBefore(style.pageBreakBefore() != null ? style.pageBreakBefore() : parent.pageBreakBefore());
         merged.ruleBelowOn(style.ruleBelowOn() != null ? style.ruleBelowOn() : parent.ruleBelowOn());
+        merged.ruleAboveLineWeight(style.ruleAboveLineWeight() != null ? style.ruleAboveLineWeight() : parent.ruleAboveLineWeight());
+        merged.ruleBelowLineWeight(style.ruleBelowLineWeight() != null ? style.ruleBelowLineWeight() : parent.ruleBelowLineWeight());
+        merged.ruleAboveColor(style.ruleAboveColor() != null ? style.ruleAboveColor() : parent.ruleAboveColor());
+        merged.ruleBelowColor(style.ruleBelowColor() != null ? style.ruleBelowColor() : parent.ruleBelowColor());
         // 두문자
         merged.dropCapLines(style.dropCapLines() != null ? style.dropCapLines() : parent.dropCapLines());
         merged.dropCapCharacters(style.dropCapCharacters() != null ? style.dropCapCharacters() : parent.dropCapCharacters());

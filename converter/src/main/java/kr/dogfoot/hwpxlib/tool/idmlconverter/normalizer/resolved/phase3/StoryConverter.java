@@ -27,7 +27,14 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow;
 
 /**
  * SPEC-013 Stage 9: Phase 3 — Story → Paragraph → Run 변환.
@@ -43,11 +50,21 @@ public final class StoryConverter {
 
     static final String BULLET_CHARS = "●•◆◇▶▷■□";
 
+    // IDML/resolved fallback 전환 임계값
+    /** resolved 텍스트 길이가 이 값 초과일 때만 IDML 짧음 판정을 적용 */
+    private static final int    FALLBACK_RESOLVED_MIN_LEN   = 10;
+    /** IDML 텍스트가 resolved의 이 비율 미만이면 IDML 짧음으로 판단 → resolved fallback */
+    private static final double FALLBACK_IDML_SHORT_RATIO   = 0.3;
+    /** IDML 단락 수가 이 값 이하이면서 resolved가 FALLBACK_RESOLVED_PARA_MIN 이상이면 단락 구조 불일치 */
+    private static final int    FALLBACK_IDML_PARA_MAX      = 2;
+    /** resolved 단락 수가 이 값 이상이면 단락 구조 불일치로 판단 → resolved fallback */
+    private static final int    FALLBACK_RESOLVED_PARA_MIN  = 5;
+
     // scanTextPathStorySubstitutions 전용 — 메서드 호출마다 재컴파일 방지
-    private static final java.util.regex.Pattern TEXT_FRAME_PATTERN =
-            java.util.regex.Pattern.compile("<TextFrame\\s+Self=\"u([0-9a-f]+)\"");
-    private static final java.util.regex.Pattern TEXT_PATH_PATTERN =
-            java.util.regex.Pattern.compile("<TextPath\\s+Self=\"[^\"]+\"\\s+ParentStory=\"u([0-9a-f]+)\"");
+    private static final Pattern TEXT_FRAME_PATTERN =
+            Pattern.compile("<TextFrame\\s+Self=\"u([0-9a-f]+)\"");
+    private static final Pattern TEXT_PATH_PATTERN =
+            Pattern.compile("<TextPath\\s+Self=\"[^\"]+\"\\s+ParentStory=\"u([0-9a-f]+)\"");
 
     private StoryConverter() {}
 
@@ -79,7 +96,7 @@ public final class StoryConverter {
 
         // PRE: Spread XML 에서 TextPath 매핑 (TF id → TextPath storyId) 미리 추출.
         // curved text 가 부모 TF 의 빈 콘텐츠를 채우도록 한다 (직선으로 그대로 표시).
-        java.util.Map<String, String> textPathStorySub = scanTextPathStorySubstitutions(ctx);
+        Map<String, String> textPathStorySub = scanTextPathStorySubstitutions(ctx);
 
         // TextFrameBlock에 Story 텍스트 연결
         // storyId → TextFrameBlock 매핑
@@ -109,7 +126,7 @@ public final class StoryConverter {
                         // IDML story에 테이블이 있으면 Phase 4가 ASTTable로 처리 → Phase 3 skip
                         // (동일 TF에 대해 1×1 래퍼 TextBox 중복 생성 방지)
                         if (ctx.loadIDMLStory != null) {
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory _chk =
+                            IDMLStory _chk =
                                     ctx.loadIDMLStory.apply(storyId);
                             if (_chk != null && _chk.hasTables()) continue;
                         }
@@ -147,43 +164,20 @@ public final class StoryConverter {
             // 2) IDML 단락 수가 resolved의 50% 미만 (강제 줄바꿈이 단락으로 처리되지 않는 경우)
             // 단, EH/BT/NP 수식 폰트가 포함된 story는 fallback하지 않음 (IDML 수식 변환이 우수)
             if (useIdml) {
-                boolean hasEHMathFont = false;
-                for (ASTParagraph p : paragraphs) {
-                    for (Object item : p.items()) {
-                        if (item instanceof kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTEquation) {
-                            hasEHMathFont = true;
-                            break;
-                        }
-                        if (item instanceof ASTTextRun) {
-                            String ff = ((ASTTextRun) item).fontFamily();
-                            if (ff != null && (EHFontGlyphMap.isEHFontFamily(ff)
-                                    || ff.contains("BT수식") || ff.contains("NP"))) {
-                                hasEHMathFont = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (hasEHMathFont) break;
-                }
-
-                if (!hasEHMathFont) {
+                if (!hasEquationFont(paragraphs)) {
                     ResolvedStory rs = ctx.resolvedData.getStory(storyId);
                     if (rs != null) {
                         int idmlLen = 0;
                         for (ASTParagraph p : paragraphs)
                             for (Object item : p.items())
                                 if (item instanceof ASTTextRun) idmlLen += ((ASTTextRun) item).text() != null ? ((ASTTextRun) item).text().length() : 0;
-                        int resolvedLen = 0;
-                        for (ResolvedParagraph rp : rs.paragraphs())
-                            if (rp.runs() != null)
-                                for (ResolvedRun r : rp.runs())
-                                    resolvedLen += r.text() != null ? r.text().length() : 0;
-                        if (resolvedLen > 10 && idmlLen < resolvedLen * 0.3) {
+                        int resolvedLen = resolvedStoryTextLength(rs);
+                        if (resolvedLen > FALLBACK_RESOLVED_MIN_LEN && idmlLen < resolvedLen * FALLBACK_IDML_SHORT_RATIO) {
                             useIdml = false; // 텍스트 길이 부족 → resolved fallback
                         }
-                        // 단락 수 불일치: IDML 1~2개 단락인데 resolved 5개 이상이면 강제 줄바꿈 누락
+                        // 단락 수 불일치: IDML 단락 수 적고 resolved 단락 수 많으면 강제 줄바꿈 누락
                         int resolvedParaCount = rs.paragraphs().size();
-                        if (paragraphs.size() <= 2 && resolvedParaCount >= 5) {
+                        if (paragraphs.size() <= FALLBACK_IDML_PARA_MAX && resolvedParaCount >= FALLBACK_RESOLVED_PARA_MIN) {
                             useIdml = false; // 단락 구조 불일치 → resolved fallback
                         }
                     }
@@ -226,6 +220,10 @@ public final class StoryConverter {
 
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
             ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, storyId);
+            restoreTfInlineVisuals(ctx, blocks);
+            normalizeDotLeaderPageNumberTabs(blocks);
+            expandBlocksForDotLeaderTabs(blocks);
+            forceSingleLineJustifiedFramesLeft(ctx, blocks);
             // 다중 블록 스토리는 ParagraphDistributor가 각 블록에 단락을 직접 배분했으므로
             // HWP 연결 글상자 링크(overflow) 불필요 → distributed=true로 linkListIDRef=0 보장
             if (blocks.size() > 1) {
@@ -245,33 +243,404 @@ public final class StoryConverter {
     }
 
     /**
+     * Reinsert visual-only inline objects that belong to an editable TF.
+     *
+     * <p>The extractor records these objects on the rendered visual shell as
+     * tfInlineVisualIds. They should remain editable-flow inline images in HWPX
+     * when the shell says textOwner=hwpx_tf; otherwise the checkbox/badge is
+     * baked into a floating PNG and can no longer travel with the text.</p>
+     */
+    private static void restoreTfInlineVisuals(
+            ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null) return;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
+            String visibleText = block.frameVisibleText();
+            if (visibleText == null || visibleText.indexOf('\uFFFC') < 0) continue;
+            String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+            RenderedGroup owner = findTfInlineVisualOwner(ctx, domId);
+            if (owner == null || owner.tfInlineVisualIds() == null || owner.tfInlineVisualIds().length == 0) continue;
+
+            int idIdx = 0;
+            int searchPara = 0;
+            int searchOffset = 0;
+            for (int i = 0; i < visibleText.length() && idIdx < owner.tfInlineVisualIds().length; i++) {
+                if (visibleText.charAt(i) != '\uFFFC') continue;
+                int inlineId = owner.tfInlineVisualIds()[idIdx++];
+                if (containsInlineSource(block, inlineId)) continue;
+                ASTInlineObject inline = loadTfInlineVisual(ctx, inlineId);
+                if (inline == null) continue;
+
+                String lookup = nextTextTokenAfterObject(visibleText, i + 1);
+                InsertPoint point = findInlineInsertPoint(
+                        block.paragraphs(), lookup, searchPara, searchOffset);
+                if (point == null) {
+                    int prefixLen = textLengthBeforeObject(visibleText, i);
+                    point = findInsertPointByGlobalOffset(block.paragraphs(), prefixLen);
+                }
+                if (point == null) continue;
+                insertInlineAtTextOffset(point.para, point.offset, inline);
+                searchPara = point.paraIndex;
+                searchOffset = point.offset + (lookup != null ? lookup.length() : 0);
+            }
+        }
+    }
+
+    private static RenderedGroup findTfInlineVisualOwner(ResolvedBuildContext ctx, String domId) {
+        if (ctx == null || ctx.resolvedData == null || domId == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.tfInlineVisualIds() == null || rg.tfInlineVisualIds().length == 0) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            String[] tfIds = rg.editableTextFrameIds();
+            if (tfIds == null) continue;
+            for (String tfId : tfIds) {
+                if (domId.equals(tfId)) return rg;
+            }
+        }
+        return null;
+    }
+
+    private static ASTInlineObject loadTfInlineVisual(ResolvedBuildContext ctx, int inlineId) {
+        RenderedGroup rg = findRenderedGroup(ctx, inlineId);
+        if (rg == null || rg.file() == null || ctx.basePath == null) return null;
+        File pngFile = new File(ctx.basePath, rg.file());
+        if (!pngFile.exists()) return null;
+        try {
+            byte[] data = Files.readAllBytes(pngFile.toPath());
+            BufferedImage img = ImageIO.read(pngFile);
+            if (img == null || img.getWidth() <= 1 || img.getHeight() <= 1) return null;
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+            obj.sourceId("u" + Integer.toHexString(inlineId));
+            obj.imageData(data);
+            obj.imageFormat("png");
+            obj.pixelWidth(img.getWidth());
+            obj.pixelHeight(img.getHeight());
+            obj.keepInline(true);
+            double[] b = rg.bounds();
+            if (b != null && b.length >= 4) {
+                obj.boundsX(b[1]);
+                double bw = Math.abs(b[3] - b[1]) * ctx.scaleFactor;
+                double bh = Math.abs(b[2] - b[0]) * ctx.scaleFactor;
+                if (bw > 0 && bh > 0) {
+                    obj.width(CoordinateConverter.pointsToHwpunits(bw));
+                    obj.height(CoordinateConverter.pointsToHwpunits(bh));
+                }
+            }
+            if (obj.width() <= 0 || obj.height() <= 0) {
+                double dpi = ctx.pngExportDpi > 0 ? ctx.pngExportDpi : 220.0;
+                obj.width(CoordinateConverter.pointsToHwpunits(img.getWidth() * 72.0 / dpi));
+                obj.height(CoordinateConverter.pointsToHwpunits(img.getHeight() * 72.0 / dpi));
+            }
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static RenderedGroup findRenderedGroup(ResolvedBuildContext ctx, int id) {
+        if (ctx == null || ctx.resolvedData == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg != null && rg.id() == id) return rg;
+        }
+        return null;
+    }
+
+    private static boolean containsInlineSource(ASTTextFrameBlock block, int inlineId) {
+        if (block == null || block.paragraphs() == null) return false;
+        String sourceId = "u" + Integer.toHexString(inlineId);
+        for (ASTParagraph para : block.paragraphs()) {
+            if (para == null || para.items() == null) continue;
+            for (ASTInlineItem item : para.items()) {
+                if (item instanceof ASTInlineObject) {
+                    ASTInlineObject obj = (ASTInlineObject) item;
+                    if (sourceId.equals(obj.sourceId())) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String nextTextTokenAfterObject(String text, int start) {
+        if (text == null) return null;
+        int i = start;
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            if (c == '\uFFFC' || c == '\r' || c == '\n' || Character.isWhitespace(c)
+                    || isLookupPunctuation(c)) {
+                i++;
+                continue;
+            }
+            break;
+        }
+        int s = i;
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            if (!Character.isLetterOrDigit(c) && !isHangulChar(c)) break;
+            i++;
+        }
+        return i > s ? text.substring(s, i) : null;
+    }
+
+    private static boolean isLookupPunctuation(char c) {
+        return "()[]{}<>/,:;.!?\"'“”‘’·".indexOf(c) >= 0;
+    }
+
+    private static boolean isHangulChar(char c) {
+        return (c >= 0xAC00 && c <= 0xD7AF) || (c >= 0x3130 && c <= 0x318F);
+    }
+
+    private static int textLengthBeforeObject(String text, int objectIndex) {
+        int len = 0;
+        for (int i = 0; i < objectIndex && i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\uFFFC' || c == '\r' || c == '\n') continue;
+            len++;
+        }
+        return len;
+    }
+
+    private static InsertPoint findInlineInsertPoint(
+            List<ASTParagraph> paragraphs, String lookup, int startPara, int startOffset) {
+        if (paragraphs == null || paragraphs.isEmpty() || lookup == null || lookup.isEmpty()) return null;
+        for (int pi = Math.max(0, startPara); pi < paragraphs.size(); pi++) {
+            ASTParagraph para = paragraphs.get(pi);
+            String text = ParagraphTextHelpers.getParaPlainText(para);
+            if (text == null) continue;
+            int from = (pi == startPara) ? Math.min(Math.max(0, startOffset), text.length()) : 0;
+            int found = text.indexOf(lookup, from);
+            if (found >= 0) return new InsertPoint(pi, para, found);
+        }
+        return null;
+    }
+
+    private static InsertPoint findInsertPointByGlobalOffset(
+            List<ASTParagraph> paragraphs, int globalOffset) {
+        if (paragraphs == null || paragraphs.isEmpty()) return null;
+        int remaining = Math.max(0, globalOffset);
+        for (int pi = 0; pi < paragraphs.size(); pi++) {
+            ASTParagraph para = paragraphs.get(pi);
+            String text = ParagraphTextHelpers.getParaPlainText(para);
+            int len = text != null ? text.length() : 0;
+            if (remaining <= len) return new InsertPoint(pi, para, remaining);
+            remaining -= len;
+        }
+        ASTParagraph last = paragraphs.get(paragraphs.size() - 1);
+        String text = ParagraphTextHelpers.getParaPlainText(last);
+        return new InsertPoint(paragraphs.size() - 1, last, text != null ? text.length() : 0);
+    }
+
+    private static void insertInlineAtTextOffset(ASTParagraph para, int offset, ASTInlineObject inline) {
+        if (para == null || inline == null || para.items() == null) return;
+        int remaining = Math.max(0, offset);
+        List<ASTInlineItem> items = para.items();
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) {
+                if (remaining == 0) {
+                    items.add(i, inline);
+                    return;
+                }
+                continue;
+            }
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            int len = text != null ? text.length() : 0;
+            if (remaining > len) {
+                remaining -= len;
+                continue;
+            }
+            if (remaining == 0) {
+                items.add(i, inline);
+                return;
+            }
+            if (remaining == len) {
+                items.add(i + 1, inline);
+                return;
+            }
+            ASTTextRun before = copyTextRun(run, text.substring(0, remaining));
+            ASTTextRun after = copyTextRun(run, text.substring(remaining));
+            items.set(i, before);
+            items.add(i + 1, inline);
+            items.add(i + 2, after);
+            return;
+        }
+        items.add(inline);
+    }
+
+    private static ASTTextRun copyTextRun(ASTTextRun source, String text) {
+        ASTTextRun copy = new ASTTextRun();
+        copy.characterStyleRef(source.characterStyleRef());
+        copy.text(text);
+        copy.fontFamily(source.fontFamily());
+        copy.fontStyle(source.fontStyle());
+        copy.fontSizeHwpunits(source.fontSizeHwpunits());
+        copy.textColor(source.textColor());
+        copy.letterSpacing(source.letterSpacing());
+        copy.subscript(source.subscript());
+        copy.superscript(source.superscript());
+        copy.grepMathFont(source.grepMathFont());
+        copy.underline(source.underline());
+        copy.underlineColor(source.underlineColor());
+        copy.underlineShape(source.underlineShape());
+        copy.strikeThrough(source.strikeThrough());
+        copy.horizontalScale(source.horizontalScale());
+        copy.verticalScale(source.verticalScale());
+        copy.baselineShift(source.baselineShift());
+        copy.grepStyleApplied(source.grepStyleApplied());
+        return copy;
+    }
+
+    private static final class InsertPoint {
+        final int paraIndex;
+        final ASTParagraph para;
+        final int offset;
+
+        InsertPoint(int paraIndex, ASTParagraph para, int offset) {
+            this.paraIndex = paraIndex;
+            this.para = para;
+            this.offset = offset;
+        }
+    }
+
+    /**
+     * InDesign 의 LEFT_JUSTIFIED 는 마지막 줄을 왼쪽으로 두지만, HWPX JUSTIFY 는
+     * 단일행 글상자에서도 공백을 벌려 원본보다 오른쪽으로 밀려 보일 수 있다.
+     * 원본에서 한 줄로 조판된 1문단 TF는 HWPX 에서는 left alignment 로 둔다.
+     */
+    private static void forceSingleLineJustifiedFramesLeft(
+            ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null) return;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null || block.paragraphs().size() != 1) continue;
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(
+                    ParagraphTextHelpers.domIdFromSourceId(block.sourceId()));
+            if (!isResolvedSingleLine(tf)) continue;
+            ASTParagraph para = block.paragraphs().get(0);
+            String alignment = para.alignment();
+            if (alignment == null) continue;
+            String lower = alignment.toLowerCase(Locale.ROOT);
+            if (lower.contains("justified") || lower.contains("justify")) {
+                para.alignment("left");
+            }
+        }
+    }
+
+    private static void expandBlocksForDotLeaderTabs(List<ASTTextFrameBlock> blocks) {
+        if (blocks == null) return;
+        final long SAFETY_PAD = 500L; // 5pt: HWP tab leader/right edge clipping guard.
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null) continue;
+            long requiredInnerWidth = 0;
+            for (ASTParagraph para : block.paragraphs()) {
+                if (para == null || para.tabStops() == null) continue;
+                long paraRight = para.rightMargin() != null ? Math.max(0L, para.rightMargin()) : 0L;
+                for (ASTTabStop stop : para.tabStops()) {
+                    if (stop == null || stop.position() <= 0) continue;
+                    if (!".".equals(stop.leader())) continue;
+                    requiredInnerWidth = Math.max(requiredInnerWidth, stop.position() + paraRight);
+                }
+            }
+            if (requiredInnerWidth <= 0) continue;
+            long requiredOuterWidth = block.insetLeft() + requiredInnerWidth + block.insetRight() + SAFETY_PAD;
+            if (requiredOuterWidth > block.width()) {
+                block.width(requiredOuterWidth);
+            }
+        }
+    }
+
+    private static void normalizeDotLeaderPageNumberTabs(List<ASTTextFrameBlock> blocks) {
+        if (blocks == null) return;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null) continue;
+            for (ASTParagraph para : block.paragraphs()) {
+                if (para == null || !para.hasTabStops()) continue;
+                if (!hasTabRun(para) || !endsWithPageNumber(para)) continue;
+                ASTTabStop rightmost = rightmostPositiveTabStop(para);
+                if (rightmost != null) {
+                    rightmost.leader(".");
+                }
+            }
+        }
+    }
+
+    private static boolean hasTabRun(ASTParagraph para) {
+        if (para == null || para.items() == null) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (item == null || item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text != null && text.indexOf('\t') >= 0) return true;
+        }
+        return false;
+    }
+
+    private static boolean endsWithPageNumber(ASTParagraph para) {
+        if (para == null || para.items() == null) return false;
+        for (int i = para.items().size() - 1; i >= 0; i--) {
+            ASTInlineItem item = para.items().get(i);
+            if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
+            if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) return false;
+            String text = ((ASTTextRun) item).text();
+            if (text == null || text.trim().isEmpty()) continue;
+            return isPageNumberText(text);
+        }
+        return false;
+    }
+
+    private static ASTTabStop rightmostPositiveTabStop(ASTParagraph para) {
+        if (para == null || para.tabStops() == null) return null;
+        ASTTabStop rightmost = null;
+        for (ASTTabStop stop : para.tabStops()) {
+            if (stop == null || stop.position() <= 0) continue;
+            if (rightmost == null || stop.position() > rightmost.position()) {
+                rightmost = stop;
+            }
+        }
+        return rightmost;
+    }
+
+    private static boolean isResolvedSingleLine(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        if (tf.composedLines() != null && !tf.composedLines().isEmpty()) {
+            return tf.composedLines().size() == 1;
+        }
+        return tf.lineCount() == 1;
+    }
+
+    /**
      * Spread XML 들을 스캔해 TextPath 가 있는 TextFrame 에 대해 TF id → TextPath story id 매핑을 만든다.
      * 부모 TF 의 본문이 비어있으면 TextPath 스토리로 대체하여 curved text 가 빠지지 않도록 한다.
      * 반환 map: key=TF decimal id (string), value=TextPath story decimal id (string).
      */
-    private static java.util.Map<String, String> scanTextPathStorySubstitutions(ResolvedBuildContext ctx) {
-        java.util.Map<String, String> map = new java.util.HashMap<>();
+    private static Map<String, String> scanTextPathStorySubstitutions(ResolvedBuildContext ctx) {
+        Map<String, String> map = new HashMap<>();
         if (ctx.idmlDir == null) return map;
-        java.io.File spreadsDir = new java.io.File(ctx.idmlDir, "Spreads");
+        File spreadsDir = new File(ctx.idmlDir, "Spreads");
         if (!spreadsDir.isDirectory()) return map;
-        java.util.regex.Pattern tfPattern = TEXT_FRAME_PATTERN;
-        java.util.regex.Pattern tpPattern = TEXT_PATH_PATTERN;
-        for (java.io.File f : spreadsDir.listFiles()) {
+        File[] spreadFiles = spreadsDir.listFiles();
+        if (spreadFiles == null) return map;
+        for (File f : spreadFiles) {
             if (!f.getName().endsWith(".xml")) continue;
             try {
-                String txt = new String(java.nio.file.Files.readAllBytes(f.toPath()),
-                        java.nio.charset.StandardCharsets.UTF_8);
+                String txt = new String(Files.readAllBytes(f.toPath()),
+                        StandardCharsets.UTF_8);
                 // 각 <TextFrame Self="..."> 와 그 뒤 가장 가까운 <TextPath ParentStory="..."> 매칭.
                 // depth 추적 없이 위치 기반 단순 매칭 — 실제 IDML 에서 TextPath 는 TF 의 직속 자식이므로 안전.
-                java.util.regex.Matcher tfM = tfPattern.matcher(txt);
+                Matcher tfM = TEXT_FRAME_PATTERN.matcher(txt);
                 while (tfM.find()) {
                     String tfHex = tfM.group(1);
                     int tfEnd = tfM.end();
                     // 다음 TextFrame 까지의 범위 안에서 첫 TextPath 검색
                     int nextTfStart = txt.length();
-                    java.util.regex.Matcher nextTfM = tfPattern.matcher(txt);
+                    Matcher nextTfM = TEXT_FRAME_PATTERN.matcher(txt);
                     if (nextTfM.find(tfEnd)) nextTfStart = nextTfM.start();
-                    java.util.regex.Matcher tpM = tpPattern.matcher(txt.substring(tfEnd, nextTfStart));
+                    Matcher tpM = TEXT_PATH_PATTERN.matcher(txt.substring(tfEnd, nextTfStart));
                     if (tpM.find()) {
                         String tpHex = tpM.group(1);
                         try {
@@ -290,33 +659,37 @@ public final class StoryConverter {
         return map;
     }
 
+    private static int resolvedStoryTextLength(ResolvedStory rs) {
+        if (rs == null || rs.paragraphs() == null) return 0;
+        int total = 0;
+        for (ResolvedParagraph rp : rs.paragraphs()) {
+            if (rp.runs() == null) continue;
+            for (ResolvedRun r : rp.runs()) {
+                if (r.text() != null) total += r.text().length();
+            }
+        }
+        return total;
+    }
+
     /** Story 의 총 문자 길이 (resolved 우선, 없으면 IDML XML 에서 fallback). */
     private static int storyTextLength(ResolvedBuildContext ctx, String storyId) {
         if (storyId == null) return 0;
-        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs = ctx.resolvedData.getStory(storyId);
-        if (rs != null && rs.paragraphs() != null) {
-            int total = 0;
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph rp : rs.paragraphs()) {
-                if (rp.runs() == null) continue;
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun r : rp.runs()) {
-                    if (r.text() != null) total += r.text().length();
-                }
-            }
-            if (total > 0) return total;
-        }
+        ResolvedStory rs = ctx.resolvedData.getStory(storyId);
+        int total = resolvedStoryTextLength(rs);
+        if (total > 0) return total;
         // Fallback: IDML 스토리 (TextPath 스토리는 resolved 에 없음)
         if (ctx.loadIDMLStory == null) return 0;
         try {
-            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory ids = ctx.loadIDMLStory.apply(storyId);
+            IDMLStory ids = ctx.loadIDMLStory.apply(storyId);
             if (ids == null || ids.paragraphs() == null) return 0;
-            int total = 0;
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph ip : ids.paragraphs()) {
+            int idmlTotal = 0;
+            for (IDMLParagraph ip : ids.paragraphs()) {
                 if (ip.characterRuns() == null) continue;
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : ip.characterRuns()) {
-                    if (run.content() != null) total += run.content().length();
+                for (IDMLCharacterRun run : ip.characterRuns()) {
+                    if (run.content() != null) idmlTotal += run.content().length();
                 }
             }
-            return total;
+            return idmlTotal;
         } catch (Exception e) {
             return 0;
         }
@@ -325,11 +698,11 @@ public final class StoryConverter {
     /** Story 가 비어있는지 (paragraphs 가 없거나 모든 텍스트가 공백) 확인. */
     private static boolean isStoryEmpty(ResolvedBuildContext ctx, String storyId) {
         if (storyId == null) return true;
-        kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs = ctx.resolvedData.getStory(storyId);
+        ResolvedStory rs = ctx.resolvedData.getStory(storyId);
         if (rs == null || rs.paragraphs() == null || rs.paragraphs().isEmpty()) return true;
-        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph rp : rs.paragraphs()) {
+        for (ResolvedParagraph rp : rs.paragraphs()) {
             if (rp.runs() == null) continue;
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun r : rp.runs()) {
+            for (ResolvedRun r : rp.runs()) {
                 String t = r.text();
                 if (t != null && !t.trim().isEmpty()) return false;
             }
@@ -344,36 +717,42 @@ public final class StoryConverter {
      */
     private static void prepopulateAnchoredFloatingIds(ResolvedBuildContext ctx) {
         if (ctx.resolvedData == null || ctx.loadIDMLStory == null) return;
+        // C1: inline_object+file IDs를 루프 밖에서 미리 수집 (O(N) → O(1) 조회)
+        Set<Integer> inlineObjectWithFileIds = new HashSet<>();
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if ("inline_object".equals(rg.itemType()) && rg.file() != null)
+                inlineObjectWithFileIds.add(rg.id());
+        }
         int found = 0;
         int storiesScanned = 0;
-        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory rs : ctx.resolvedData.stories()) {
+        for (ResolvedStory rs : ctx.resolvedData.stories()) {
             if (rs == null || rs.id() == null) continue;
             storiesScanned++;
-            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory ids;
+            IDMLStory ids;
             try {
                 ids = ctx.loadIDMLStory.apply(rs.id());
             } catch (Exception e) { continue; }
             if (ids == null) continue;
             // Story 본문 단락 + 테이블 셀 단락 모두 검사
-            java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph> allParas =
-                    new java.util.ArrayList<>();
+            List<IDMLParagraph> allParas =
+                    new ArrayList<>();
             if (ids.paragraphs() != null) allParas.addAll(ids.paragraphs());
             if (ids.tables() != null) {
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable tbl : ids.tables()) {
+                for (IDMLTable tbl : ids.tables()) {
                     if (tbl.rows() == null) continue;
-                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row : tbl.rows()) {
+                    for (IDMLTableRow row : tbl.rows()) {
                         if (row.cells() == null) continue;
-                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell : row.cells()) {
+                        for (IDMLTableCell cell : row.cells()) {
                             if (cell.paragraphs() != null) allParas.addAll(cell.paragraphs());
                         }
                     }
                 }
             }
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph ip : allParas) {
+            for (IDMLParagraph ip : allParas) {
                 if (ip.characterRuns() == null) continue;
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : ip.characterRuns()) {
+                for (IDMLCharacterRun run : ip.characterRuns()) {
                     if (run.inlineGraphics() == null) continue;
-                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
+                    for (IDMLCharacterRun.InlineGraphic ig : run.inlineGraphics()) {
                         String anchorPos = ig.anchoredPosition();
                         // AboveLine 앵커 수집 (badge 오분류 정정용)
                         if ("AboveLine".equals(anchorPos)) {
@@ -393,18 +772,7 @@ public final class StoryConverter {
                             int domId = Integer.parseInt(selfId.substring(1), 16);
                             // inline_object PNG가 있는 anchored 그룹은 loadInlineObject가 인라인 배치 담당.
                             // deferredAnchoredFloating은 PNG 없이 page coords만 있는 highlight 전용.
-                            boolean hasInlinePng = false;
-                            if (ctx.resolvedData != null) {
-                                for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
-                                        : ctx.resolvedData.allRenderedFloatingItems()) {
-                                    if (rg.id() == domId && "inline_object".equals(rg.itemType())
-                                            && rg.file() != null) {
-                                        hasInlinePng = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (hasInlinePng) {
+                            if (inlineObjectWithFileIds.contains(domId)) {
                                 ctx.customAnchoredInlineIds.add(domId);
                             } else if (ctx.deferredAnchoredFloatingIds.add(domId)) {
                                 found++;
@@ -432,10 +800,16 @@ public final class StoryConverter {
     private static void placeDeferredAnchoredFloating(ResolvedBuildContext ctx, List<ASTSection> sections) {
         if (ctx.deferredAnchoredFloatingIds == null || ctx.deferredAnchoredFloatingIds.isEmpty()) return;
         if (ctx.basePath == null) return;
+        // C2: inline_object 항목을 루프 밖에서 미리 Map으로 수집 (O(N) → O(1) 조회)
+        Map<Integer, RenderedGroup> inlineObjectById = new HashMap<>();
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if ("inline_object".equals(rg.itemType()))
+                inlineObjectById.put(rg.id(), rg);
+        }
         int placed = 0;
         for (Integer domId : ctx.deferredAnchoredFloatingIds) {
             // pageItem 조회 (페이지 인덱스 + bounds)
-            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem pi =
+            ResolvedPageItem pi =
                     ctx.resolvedData.getPageItem(String.valueOf(domId));
             if (pi == null) continue;
             int pageIdx = pi.pageIndex();
@@ -459,31 +833,26 @@ public final class StoryConverter {
             if (w <= 0 || h <= 0) continue;
 
             // inline_NNN.png 가 있으면 이미지로, 없으면 일반 fill 도형으로 처리
-            java.io.File pngFile = null;
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
-                    : ctx.resolvedData.allRenderedFloatingItems()) {
-                if (rg.id() == domId.intValue() && "inline_object".equals(rg.itemType())) {
-                    if (rg.file() != null) pngFile = new java.io.File(ctx.basePath, rg.file());
-                    break;
-                }
-            }
+            File pngFile = null;
+            RenderedGroup matchedRg = inlineObjectById.get(domId.intValue());
+            if (matchedRg != null && matchedRg.file() != null)
+                pngFile = new File(ctx.basePath, matchedRg.file());
             if (pngFile == null || !pngFile.exists()) continue;
             try {
-                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+                byte[] imageData = Files.readAllBytes(pngFile.toPath());
+                BufferedImage img = ImageIO.read(pngFile);
                 if (img == null) continue;
 
-                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure fig =
-                        new kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure();
-                fig.kind(kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure.FigureKind.IMAGE);
+                ASTFigure fig = new ASTFigure();
+                fig.kind(ASTFigure.FigureKind.IMAGE);
                 fig.imageData(imageData);
                 fig.imageFormat("png");
                 fig.pixelWidth(img.getWidth());
                 fig.pixelHeight(img.getHeight());
-                fig.x(kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter.pointsToHwpunits(x));
-                fig.y(kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter.pointsToHwpunits(y));
-                fig.width(kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter.pointsToHwpunits(w));
-                fig.height(kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter.pointsToHwpunits(h));
+                fig.x(CoordinateConverter.pointsToHwpunits(x));
+                fig.y(CoordinateConverter.pointsToHwpunits(y));
+                fig.width(CoordinateConverter.pointsToHwpunits(w));
+                fig.height(CoordinateConverter.pointsToHwpunits(h));
                 // BEHIND_TEXT: 텍스트 뒤에 겹쳐서 표시, 텍스트 흐름에 영향 없음
                 fig.textWrapMode("None");
                 // zOrder 작게 (텍스트 뒤로) — pageItem zOrder 기반
@@ -647,22 +1016,28 @@ public final class StoryConverter {
             if (rp.spaceAfter() != null && rp.spaceAfter() > 0) {
                 para.spaceAfter(CoordinateConverter.pointsToHwpunits(rp.spaceAfter()));
             }
-            if (suppressLeftIndent) {
+            boolean neutralHangingIndent = StoryLoader.isNeutralHangingIndent(rp.leftIndent(), rp.firstLineIndent());
+            if (neutralHangingIndent) {
+                para.leftMargin(0L);
+                para.firstLineIndent(0L);
+            } else if (suppressLeftIndent) {
                 para.leftMargin(0L);
             } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
                 para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
             }
-            if (rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
+            if (!neutralHangingIndent && rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
                 para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
             }
 
             // 런 변환 (ResolvedParagraph → runs 직접)
             boolean stopAfterThisRun = false;
+            boolean firstTextRunAfterLeadingAnchor = false;
             // SPEC-025: ACE 7 (IndentToHere) 감지 — 첫 inline anchor 의 너비를 paragraph leftMargin 으로
             // 적용해 InDesign 의 "1 ←여기부터 내려쓰기" 효과 재현 (예: 페이지 32 "가 같은 사건을..." 발문)
-            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame firstAnchorTf = null;
-            if (rp.runs() != null) {
-                for (ResolvedRun run : rp.runs()) {
+            ResolvedTextFrame firstAnchorTf = null;
+            List<ResolvedRun> runs = rp.runs();
+            if (runs != null) {
+                for (ResolvedRun run : runs) {
                     if (run.isInlineAnchor()) {
                         Integer aid = run.anchoredObjectId();
                         if (aid != null) firstAnchorTf = ctx.resolvedData.getTextFrame(String.valueOf(aid));
@@ -672,13 +1047,16 @@ public final class StoryConverter {
                     if (t != null && !t.isEmpty()) break; // 텍스트 먼저 나오면 anchor 패턴 아님
                 }
             }
-            if (rp.runs() != null) {
-                for (ResolvedRun run : rp.runs()) {
+            if (runs != null) {
+                for (ResolvedRun run : runs) {
                     if (stopAfterThisRun) break;
                     // inline_anchor: 인라인 그래픽 → ASTInlineObject로 변환
                     if (run.isInlineAnchor()) {
                         Integer anchoredId = run.anchoredObjectId();
                         if (anchoredId != null) {
+                            if (!hasVisibleText(para)) {
+                                firstTextRunAfterLeadingAnchor = true;
+                            }
                             // AnchoredPosition="Anchored" + TextWrapMode="None" Group:
                             // 인라인 배치 건너뛰고 후처리가 BEHIND_TEXT floating 으로 배치.
                             if (ctx.deferredAnchoredFloatingIds.contains(anchoredId)) {
@@ -691,11 +1069,12 @@ public final class StoryConverter {
                             // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
                             ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, anchoredId);
                             if (textRun != null) {
+                                maybeInsertDecorativeLeaderTab(ctx, rp, anchoredId, para);
                                 para.addItem(textRun);
                                 continue;
                             }
                             // 다수 박스(예: ㅍ ㅎ ㅂ ㅅ 자모 배지) → 각 TF 를 박스 스타일 INLINE_TEXT_FRAME 으로 분해
-                            java.util.List<ASTInlineObject> boxList =
+                            List<ASTInlineObject> boxList =
                                     InlineFrameHandler.tryInlineGroupAsBoxList(ctx, anchoredId);
                             if (boxList != null && !boxList.isEmpty()) {
                                 for (ASTInlineObject box : boxList) para.addItem(box);
@@ -735,6 +1114,9 @@ public final class StoryConverter {
                     }
                     // 특수 제어 문자 제거 (IDML 경로와 동일)
                     if (runText != null) {
+                        if (firstTextRunAfterLeadingAnchor) {
+                            runText = stripLeadingAnchorLayoutSpaces(runText);
+                        }
                         // SPEC-025: ACE 7 (IndentToHere, \u0007 or \u0008) 감지 — 첫 inline anchor 이후
                         // 처음 등장한 위치에서 후속 줄 좌측 들여쓰기를 위해 paragraph leftMargin 적용
                         if (firstAnchorTf != null && para.leftMargin() == null) {
@@ -750,6 +1132,7 @@ public final class StoryConverter {
                                 }
                             }
                         }
+                        runText = runText.replace("\u0003", "");
                         runText = runText.replace("\u0007", "");
                         runText = runText.replace("\t\u0008", "");
                         runText = runText.replace("\u0008", "");
@@ -765,6 +1148,7 @@ public final class StoryConverter {
                             runText = runText.replace("\t", " ");
                         }
                     }
+                    firstTextRunAfterLeadingAnchor = false;
                     textRun.text(runText);
                     textRun.fontFamily(run.fontFamily());
                     if (run.fontSize() != null && run.fontSize() > 0) {
@@ -796,6 +1180,7 @@ public final class StoryConverter {
             // 인라인 객체 boundsX 기반 재정렬
             ASTTableConverter.reorderInlineObjectsByBoundsX(para);
 
+            applyTrailingPageNumberLeader(para, rp);
             paragraphs.add(para);
         }
 
@@ -819,6 +1204,189 @@ public final class StoryConverter {
             }
         }
         return null;
+    }
+
+    private static void maybeInsertDecorativeLeaderTab(ResolvedBuildContext ctx,
+                                                       ResolvedParagraph rp,
+                                                       int anchoredId,
+                                                       ASTParagraph para) {
+        if (ctx == null || rp == null || para == null) return;
+        if (!hasVisibleText(para)) return;
+        if (!isResolvedPageNumberFrame(ctx, anchoredId)) return;
+        if (!hasDecorativeResolvedParagraphRule(ctx, rp)) return;
+        if (!enableRightmostDotLeader(para, rp)) return;
+
+        ASTTextRun tabRun = new ASTTextRun();
+        tabRun.text("\t");
+        tabRun.textColor("#000000");
+        para.addItem(tabRun);
+    }
+
+    private static void applyTrailingPageNumberLeader(ASTParagraph para, ResolvedParagraph rp) {
+        if (para == null || para.items() == null || para.items().size() < 2) return;
+        if (!hasVisibleText(para)) return;
+
+        List<ASTInlineItem> items = para.items();
+        for (int i = items.size() - 1; i >= 0; i--) {
+            ASTInlineItem item = items.get(i);
+            if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
+            if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) return;
+
+            String text = ((ASTTextRun) item).text();
+            if (text == null || text.trim().isEmpty()) continue;
+            if (!isPageNumberText(text)) return;
+            if (i > 0 && items.get(i - 1) instanceof ASTTextRun) {
+                String prev = ((ASTTextRun) items.get(i - 1)).text();
+                if ("\t".equals(prev)) return;
+            }
+            if (!enableRightmostDotLeader(para, rp)) return;
+
+            ASTTextRun tabRun = new ASTTextRun();
+            tabRun.text("\t");
+            tabRun.textColor("#000000");
+            items.add(i, tabRun);
+            return;
+        }
+    }
+
+    static String stripLeadingAnchorLayoutSpaces(String text) {
+        if (text == null || text.isEmpty()) return text;
+
+        int i = 0;
+        while (i < text.length()) {
+            char ch = text.charAt(i);
+            if (ch == ' ' || ch == '\t' || ch == '\u00A0') {
+                i++;
+            } else {
+                break;
+            }
+        }
+        if (i == 0 || i >= text.length()) return text;
+
+        if (isAnchorLayoutControl(text.charAt(i))) {
+            int j = i;
+            while (j < text.length()) {
+                char ch = text.charAt(j);
+                if (isAnchorLayoutControl(ch) || ch == ' ' || ch == '\t' || ch == '\u00A0') {
+                    j++;
+                } else {
+                    break;
+                }
+            }
+            return " " + text.substring(j);
+        }
+        return text;
+    }
+
+    private static boolean isAnchorLayoutControl(char ch) {
+        return ch == '\u0003' || ch == '\u0007' || ch == '\u0008' || ch == '\n';
+    }
+
+    private static boolean isPageNumberText(String text) {
+        if (text == null) return false;
+        String cleaned = text.replace("\r", "").replace("\n", "").trim();
+        return cleaned.matches("\\d{1,4}");
+    }
+
+    private static boolean hasVisibleText(ASTParagraph para) {
+        if (para.items() == null) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (item == null || item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text != null && !text.trim().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private static boolean isResolvedPageNumberFrame(ResolvedBuildContext ctx, int anchoredId) {
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredId));
+        if (tf == null) return false;
+        String text = tf.frameVisibleText();
+        if ((text == null || text.trim().isEmpty()) && tf.storyId() != null) {
+            ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+            if (story != null) {
+                StringBuilder sb = new StringBuilder();
+                for (ResolvedParagraph rp : story.paragraphs()) {
+                    if (rp.runs() == null) continue;
+                    for (ResolvedRun rr : rp.runs()) {
+                        if (rr.text() != null) sb.append(rr.text());
+                    }
+                }
+                text = sb.toString();
+            }
+        }
+        if (text == null) return false;
+        String cleaned = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+        if (!cleaned.matches("\\d{1,4}")) return false;
+        double[] gb = tf.geometricBounds();
+        if (gb == null || gb.length < 4) return true;
+        double w = Math.abs(gb[3] - gb[1]);
+        double h = Math.abs(gb[2] - gb[0]);
+        return w <= 40.0 && h <= 25.0;
+    }
+
+    private static boolean hasDecorativeResolvedParagraphRule(ResolvedBuildContext ctx, ResolvedParagraph rp) {
+        if (ctx.styleResolver == null || rp.styleName() == null) return rp.hasTabStops();
+        IDMLStyleDef style = ctx.styleResolver.getResolvedParagraphStyle(rp.styleName());
+        if (style == null) style = ctx.styleResolver.getResolvedParagraphStyle("ParagraphStyle/" + rp.styleName());
+        if (style == null) return rp.hasTabStops();
+        if (positive(style.ruleAboveLineWeight()) || positive(style.ruleBelowLineWeight())) return true;
+        return positive(style.underlineWeight()) && positive(style.underlineOffset());
+    }
+
+    private static boolean positive(Double value) {
+        return value != null && value > 0.0;
+    }
+
+    private static boolean enableRightmostDotLeader(ASTParagraph para, ResolvedParagraph rp) {
+        if (!para.hasTabStops() && rp.hasTabStops()) {
+            double leftPt = (rp.leftIndent() != null ? rp.leftIndent() : 0);
+            for (ResolvedTabStop rts : rp.tabStops()) {
+                if (rts.position() == null || rts.position() <= 0) continue;
+                double posPt = rts.position() - leftPt;
+                if (posPt < 0) posPt = 0;
+                para.addTabStop(new ASTTabStop(
+                        CoordinateConverter.pointsToHwpunits(posPt),
+                        mapResolvedTabAlignment(rts.alignment()),
+                        null));
+            }
+        }
+        if (!para.hasTabStops() || para.tabStops().size() < 2) return false;
+        ASTTabStop rightmost = null;
+        for (ASTTabStop stop : para.tabStops()) {
+            if (stop == null || stop.position() <= 0) continue;
+            if (rightmost == null || stop.position() > rightmost.position()) {
+                rightmost = stop;
+            }
+        }
+        if (rightmost == null) return false;
+        rightmost.leader(".");
+        return true;
+    }
+
+    private static String mapResolvedTabAlignment(String alignment) {
+        if (alignment == null) return "left";
+        String a = alignment.toLowerCase();
+        if (a.contains("center")) return "center";
+        if (a.contains("right")) return "right";
+        if (a.contains("decimal")) return "decimal";
+        return "left";
+    }
+
+    private static boolean hasEquationFont(List<ASTParagraph> paragraphs) {
+        for (ASTParagraph p : paragraphs) {
+            for (Object item : p.items()) {
+                if (item instanceof ASTEquation) return true;
+                if (item instanceof ASTTextRun) {
+                    String ff = ((ASTTextRun) item).fontFamily();
+                    if (ff != null && (EHFontGlyphMap.isEHFontFamily(ff)
+                            || ff.contains("BT수식") || ff.contains("NP"))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
 

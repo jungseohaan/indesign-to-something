@@ -35,6 +35,9 @@ public class JsonProgressReporter implements ProgressReporter {
         sb.append("\"images_psd\": ").append(result.imagesPsdConverted()).append(", ");
         sb.append("\"images_ai\": ").append(result.imagesAiConverted()).append(", ");
         sb.append("\"images_tiff\": ").append(result.imagesTiffConverted()).append(", ");
+        if (result.htmlPath() != null) {
+            sb.append("\"html_path\": ").append(jsonString(result.htmlPath())).append(", ");
+        }
         sb.append("\"warnings\": [");
         boolean first = true;
         for (String warning : result.warnings()) {

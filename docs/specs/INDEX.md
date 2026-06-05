@@ -1,7 +1,7 @@
 # SPEC 인덱스
 
 > SPEC 문서들의 상태별 인덱스. 새 SPEC 시작/완료 시 이 파일을 갱신한다.
-> 최종 동기화: 2026-05-20
+> 최종 동기화: 2026-06-05
 
 ## Active / WIP (작업 중)
 
@@ -22,6 +22,7 @@
 | **[SPEC-032](SPEC-032-windows-cross-platform.md)** | Windows 크로스 플랫폼 지원 | **신규(2026-05-27)**. osascript→PowerShell COM, sips→image crate, Java/open 분기. Draft |
 | **[SPEC-markdown](SPEC-markdown-export.md)** | AST → Markdown 내보내기 | **신규(2026-06-04)**. 계층 구조 파악 목적. 글/이미지 블럭 Y순 배치 + 단락 스타일 이름 주석 보존 |
 | **[SPEC-034](SPEC-034-llm-semantic-extraction.md)** | LLM 기반 시멘틱 구조 추출 | **신규(2026-06-04)**. GROQ/Anthropic API로 SemanticNode 분류 보강 + 계층형 JSON 출력. M1~M3 단계 |
+| **[SPEC-035](SPEC-035-indesign-render-ownership.md)** | InDesign 렌더 Ownership 기반 중복 방지 | **신규(2026-06-05)**. 텍스트 포함 PNG 기본 배치 금지, source id 기반 ownership gating, composedLines 줄 보존 |
 
 ## Pending (제안/검토 대기)
 

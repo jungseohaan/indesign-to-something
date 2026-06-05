@@ -1,13 +1,11 @@
 mod preview;
 mod conversion;
 mod extract;
-mod semantic;
 
 // Re-export all commands for lib.rs
 pub use preview::*;
 pub use conversion::*;
 pub use extract::*;
-pub use semantic::*;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -284,6 +282,8 @@ pub struct ConvertResult {
     #[serde(default)]
     pub images_tiff: i32,
     pub warnings: Vec<String>,
+    #[serde(default)]
+    pub html_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -333,10 +333,14 @@ pub async fn get_jar_path(app: AppHandle) -> Result<String, String> {
     let current_dir = std::env::current_dir().map_err(|e| e.to_string())?;
 
     // Try from desktop/src-tauri (when running cargo directly)
+    // After multi-module split, converter JAR lives in converter/target/
     let paths_to_try = [
-        current_dir.join("../../target"),  // from src-tauri
-        current_dir.join("../target"),     // from desktop
-        current_dir.join("target"),        // from project root
+        current_dir.join("../../converter/target"),  // from src-tauri (multi-module)
+        current_dir.join("../converter/target"),     // from desktop (multi-module)
+        current_dir.join("converter/target"),        // from project root (multi-module)
+        current_dir.join("../../target"),            // from src-tauri (legacy)
+        current_dir.join("../target"),               // from desktop (legacy)
+        current_dir.join("target"),                  // from project root (legacy)
     ];
 
     for base_path in &paths_to_try {
@@ -353,10 +357,13 @@ pub async fn get_jar_path(app: AppHandle) -> Result<String, String> {
 
     // Also try absolute path for development (use $HOME to avoid hardcoding username)
     if let Ok(home) = std::env::var("HOME") {
-        let absolute_path = std::path::PathBuf::from(&home)
-            .join("works/indesign-to-something/target/idml-to-something-1.0.9-cli.jar");
-        if absolute_path.exists() {
-            return Ok(absolute_path.to_string_lossy().to_string());
+        let base = std::path::PathBuf::from(&home).join("works/indesign-to-something");
+        // multi-module path first, legacy path as fallback
+        for sub in &["converter/target", "target"] {
+            let path = base.join(sub).join("idml-to-something-1.0.9-cli.jar");
+            if path.exists() {
+                return Ok(path.to_string_lossy().to_string());
+            }
         }
     }
 

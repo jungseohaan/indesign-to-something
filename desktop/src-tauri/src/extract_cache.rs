@@ -57,6 +57,38 @@ fn hash_file_meta(hasher: &mut Sha256, label: &str, path: &Path) {
     hasher.update(b"|");
 }
 
+fn file_meta_fingerprint(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut hasher = Sha256::new();
+    hasher.update(path.to_string_lossy().as_bytes());
+    hasher.update(b"|");
+    hasher.update(mtime.to_le_bytes());
+    hasher.update(b"|");
+    hasher.update(meta.len().to_le_bytes());
+    Some(format!("{:x}", hasher.finalize()))
+}
+
+pub fn write_extractor_fingerprint(cache_key: &str, jsx_path: &Path) {
+    let Some(fingerprint) = file_meta_fingerprint(jsx_path) else { return };
+    let Ok(dir) = cache_entry_dir(cache_key) else { return };
+    let _ = std::fs::write(dir.join("_extractor_fingerprint.txt"), fingerprint);
+}
+
+pub fn is_extractor_fingerprint_current(cache_key: &str, jsx_path: &Path) -> bool {
+    let Some(current) = file_meta_fingerprint(jsx_path) else { return false };
+    let Ok(dir) = cache_entry_dir(cache_key) else { return false };
+    let Ok(cached) = std::fs::read_to_string(dir.join("_extractor_fingerprint.txt")) else {
+        return false;
+    };
+    cached.trim() == current
+}
+
 /// Links 폴더의 매니페스트(파일별 mtime+size 정렬 목록)를 해시 입력에 추가.
 fn hash_links_dir(hasher: &mut Sha256, links_dir: &Path) {
     hasher.update(b"links_dir:");

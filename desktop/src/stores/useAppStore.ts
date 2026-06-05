@@ -63,7 +63,7 @@ interface AppState {
   spreadBased: boolean;
   vectorDpi: 96 | 150;
   layoutMode: "preserve" | "editable";
-  outputFormat: "hwpx" | "md";
+  outputFormat: "hwpx";
   lastOutputPath: string | null;
   // SPEC-030: InDesign 추출 성능 모드. fast=150dpi+pdf skip, standard=220dpi+pdf, high=300dpi+pdf
   perfMode: "fast" | "standard" | "high";
@@ -94,6 +94,7 @@ interface AppState {
   isBatchProcessing: boolean;
   batchCancelled: boolean;
   batchCurrentPhaseMessage: string | null; // 현재 phase 진행 메시지 (heartbeat 포함)
+  batchError: string | null;
 
   // Extract Stats
   lastExtractStats: ExtractStats | null;
@@ -112,7 +113,7 @@ interface AppState {
   selectMaster: (master: MasterSpreadInfo) => void;
   clearSelection: () => void;
   startConversion: () => Promise<void>;
-  setOutputFormat: (v: "hwpx" | "md") => void;
+  setOutputFormat: (v: "hwpx") => void;
   setSpreadBased: (v: boolean) => void;
   setVectorDpi: (v: 96 | 150) => void;
   setLayoutMode: (v: "preserve" | "editable") => void;
@@ -130,10 +131,6 @@ interface AppState {
   startBatch: (selectedPaths: string[]) => Promise<void>;
   closeBatchModal: () => void;
   cancelBatch: () => void;
-  // 시멘틱 레이어: INDD → 추출 → AST 로드만
-  extractForSemantic: () => Promise<void>;
-  isExtractingForSemantic: boolean;
-  extractSemanticError: string | null;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -189,10 +186,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   isBatchProcessing: false,
   batchCancelled: false,
   batchCurrentPhaseMessage: null,
+  batchError: null,
   lastExtractStats: null,
   extractChunkSize: parseInt(localStorage.getItem("extractChunkSize") || "0", 10) || 0,
-  isExtractingForSemantic: false,
-  extractSemanticError: null,
 
   initJarPath: async () => {
     try {
@@ -406,16 +402,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     // 기본 파일명: 원본 파일명에서 확장자를 선택 형식으로 변경
     const sourcePath = inddPath || idmlPath;
-    const ext = outputFormat === "md" ? ".md" : ".hwpx";
     const defaultName = sourcePath
-      ? sourcePath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, ext)
+      ? sourcePath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, ".hwpx")
       : undefined;
 
     const outputPath = await save({
       defaultPath: defaultName,
       filters: [
         { name: "HWP 문서", extensions: ["hwpx"] },
-        { name: "Markdown", extensions: ["md"] },
       ],
     });
     if (!outputPath) return;
@@ -456,36 +450,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       set({ result, isConverting: false, lastOutputPath: outputPath });
 
-      const isMarkdown = outputPath.toLowerCase().endsWith(".md");
+      // 변환 완료 후: preview PDF를 HWPX와 같은 폴더에 복사
+      const { previewPdfPath } = get();
+      const outputDir = outputPath.replace(/[/\\][^/\\]+$/, "");
+      const outputBaseName = outputPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
+      let copiedPdfPath: string | null = null;
 
-      if (!isMarkdown) {
-        // 변환 완료 후: preview PDF를 HWPX와 같은 폴더에 복사
-        const { previewPdfPath } = get();
-        const outputDir = outputPath.replace(/[/\\][^/\\]+$/, "");
-        const outputBaseName = outputPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
-        let copiedPdfPath: string | null = null;
-
-        if (previewPdfPath) {
-          try {
-            copiedPdfPath = `${outputDir}/${outputBaseName}.pdf`;
-            await invoke("copy_file", { src: previewPdfPath, dst: copiedPdfPath });
-          } catch {
-            copiedPdfPath = null;
-          }
+      if (previewPdfPath) {
+        try {
+          copiedPdfPath = `${outputDir}/${outputBaseName}.pdf`;
+          await invoke("copy_file", { src: previewPdfPath, dst: copiedPdfPath });
+        } catch {
+          copiedPdfPath = null;
         }
+      }
 
-        // HWPX / PDF 파일 열기 (noPreview 모드 시 건너뜀)
-        if (!get().noPreview) {
+      // HWPX / PDF 파일 열기 (noPreview 모드 시 건너뜀)
+      if (!get().noPreview) {
+        try {
+          await invoke("open_file", { path: outputPath });
+        } catch {
+          // 열기 실패해도 변환 자체는 성공
+        }
+        if (copiedPdfPath) {
           try {
-            await invoke("open_file", { path: outputPath });
-          } catch {
-            // 열기 실패해도 변환 자체는 성공
-          }
-          if (copiedPdfPath) {
-            try {
-              await invoke("open_file", { path: copiedPdfPath });
-            } catch {}
-          }
+            await invoke("open_file", { path: copiedPdfPath });
+          } catch {}
         }
       }
     } catch (e: any) {
@@ -573,8 +563,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   startBatch: async (selectedPaths: string[]) => {
     if (selectedPaths.length === 0) return;
 
+    // jarPath 확인 먼저 (폴더 다이얼로그 전) — 없으면 한 번 재탐색
+    let { jarPath: jarPathCheck, lastExportDir } = get();
+    if (!jarPathCheck) {
+      await get().initJarPath();
+      jarPathCheck = get().jarPath;
+    }
+    if (!jarPathCheck) {
+      set({ batchError: "변환기 JAR 파일을 찾을 수 없습니다. mvn clean package 후 앱을 재시작해 주세요." });
+      return;
+    }
+    set({ batchError: null });
+
     // 출력 폴더 선택
-    const { lastExportDir } = get();
     const outputDir = await open({
       directory: true,
       title: "내보내기 폴더 선택",
@@ -583,13 +584,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!outputDir) return;
 
     localStorage.setItem("lastExportDir", outputDir as string);
-    set({ lastExportDir: outputDir as string });
+    set({ lastExportDir: outputDir as string, batchError: null });
 
     const { jarPath, batchBasePath, spreadBased, vectorDpi, layoutMode, fontMappings } = get();
-    if (!jarPath) {
-      set({ error: "JAR 파일을 찾을 수 없습니다." });
-      return;
-    }
 
     const results: BatchFileResult[] = selectedPaths.map((p) => ({
       path: p,
@@ -687,9 +684,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         await invoke("create_dir", { path: outputSubdir });
 
         const inddFilename = inddPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
-        const batchFormat = get().outputFormat;
-        const batchExt = batchFormat === "md" ? ".md" : ".hwpx";
-        const batchOutputPath = `${outputSubdir}/${inddFilename}${batchExt}`;
+        const batchOutputPath = `${outputSubdir}/${inddFilename}.hwpx`;
 
         // 3. 변환 (HWPX 또는 Markdown)
         const batchLinksDir = inddPath.replace(/[/\\][^/\\]+$/, "") + "/Links";
@@ -708,9 +703,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           jarPath,
         });
 
-        // 4. preview PDF 복사 (HWPX 변환 시에만)
+        // 4. preview PDF 복사
         let pdfOutputPath: string | null = null;
-        if (batchFormat !== "md" && extractResult.preview_pdf_path) {
+        if (extractResult.preview_pdf_path) {
           try {
             pdfOutputPath = `${outputSubdir}/${inddFilename}.pdf`;
             await invoke("copy_file", { src: extractResult.preview_pdf_path, dst: pdfOutputPath });
@@ -727,8 +722,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           batchCurrentPhaseMessage: null,
         }));
 
-        // 변환된 파일을 즉시 열기 (noPreview 모드 시 건너뜀, markdown은 건너뜀)
-        if (!get().noPreview && batchFormat !== "md") {
+        // 변환된 파일을 즉시 열기 (noPreview 모드 시 건너뜀)
+        if (!get().noPreview) {
           try { await invoke("open_file", { path: batchOutputPath }); } catch {}
           if (pdfOutputPath) {
             try { await invoke("open_file", { path: pdfOutputPath }); } catch {}
@@ -759,52 +754,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ isBatchProcessing: false, batchCurrentIndex: -1 });
   },
 
-  extractForSemantic: async () => {
-    const { lastOpenDir } = get();
-    const path = await open({
-      filters: [{ name: "InDesign", extensions: ["indd"] }],
-      defaultPath: lastOpenDir ?? undefined,
-    });
-    if (!path) return;
-
-    const parentDir = path.substring(0, path.lastIndexOf("/"));
-    localStorage.setItem("lastOpenDir", parentDir);
-    set({ lastOpenDir: parentDir, isExtractingForSemantic: true, extractSemanticError: null, inddPath: path });
-
-    try {
-      const jarPath = get().jarPath;
-      if (!jarPath) throw new Error("JAR 경로를 찾을 수 없습니다");
-
-      // 1. InDesign ExtendScript로 추출
-      const { debugStartPage, debugEndPage, perfMode, extractChunkSize } = get();
-      const extractResult = await invoke<InddExtractResult>("extract_indd", {
-        inddPath: path,
-        jarPath,
-        spreadMode: false,
-        startPage: debugStartPage,
-        endPage: debugEndPage,
-        perfMode,
-        chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
-      });
-
-      // 2. AST 로드
-      await useAstStore.getState().loadAST(extractResult.idml_path, jarPath);
-
-      // 3. Resolved 사이드카 로드
-      if (extractResult.resolved_json_path) {
-        await useAstStore.getState().loadResolved(extractResult.resolved_json_path);
-      }
-
-      set({
-        idmlPath: extractResult.idml_path,
-        resolvedJsonPath: extractResult.resolved_json_path ?? null,
-        isExtractingForSemantic: false,
-      });
-    } catch (e: any) {
-      set({ isExtractingForSemantic: false, extractSemanticError: String(e) });
-    }
-  },
-
   closeBatchModal: () => set({
     showBatchModal: false,
     batchScanResult: null,
@@ -812,6 +761,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     batchResults: [],
     isBatchProcessing: false,
     batchCurrentPhaseMessage: null,
+    batchError: null,
   }),
 
   cancelBatch: () => {
@@ -878,7 +828,9 @@ async function _mergeFoldersIntoBatch(
     showBatchModal: true,
     batchScanResult: merged,
     selectedFolderPaths: baseFolderPaths,
-    batchBasePath: baseFolderPaths[0] ?? null,
+    batchBasePath: baseFolderPaths[0]
+      ? baseFolderPaths[0].substring(0, baseFolderPaths[0].lastIndexOf("/"))
+      : null,
     batchResults: [],
     batchCurrentIndex: -1,
     isBatchProcessing: false,

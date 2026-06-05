@@ -34,12 +34,13 @@ class RunBuilder {
         }
         ASTTextRun tr = new ASTTextRun();
         // 특수 제어 문자 제거
-        // \u0008 = Indent to Here (ACE 7) — HWPX에 대응 없음
-        // \n = Frame Break (ACE 3) — 같은 글상자 안에서 의미 없음
+        // \u0003/\n = Frame Break (ACE 3), \u0007/\u0008 = Indent to Here (ACE 7) — HWPX에 대응 없음
         // \t + \u0008 패턴: 인라인 아이콘 앞 탭+IndentToHere → 둘 다 제거
         // 단독 \t: tabStop이 있으면 유지 (HwpxParagraphBuilder가 <hp:tab>으로 변환), 없으면 공백 치환
         if (text != null) {
             text = text.replace("\t\u0008", ""); // \t + IndentToHere 조합 제거
+            text = text.replace("\u0003", "");   // Frame Break 제거
+            text = text.replace("\u0007", "");   // IndentToHere 제거
             text = text.replace("\u0008", "");   // 단독 IndentToHere 제거
             text = text.replace("\n", "");       // Frame Break 제거
             if (!sc.hasTabStops) {

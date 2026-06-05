@@ -172,7 +172,7 @@ final class InlineFrameBuilder {
         SubList subList = dt.subList();
         VerticalAlign2 inlineVAlign = HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification());
         subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
-                .lineWrapAnd(LineWrapMethod.BREAK)
+                .lineWrapAnd(HwpxTextBoxBuilder.inlineTextFrameLineWrap(obj))
                 .vertAlignAnd(inlineVAlign)
                 .linkListIDRefAnd("0")
                 .linkListNextIDRefAnd("0")

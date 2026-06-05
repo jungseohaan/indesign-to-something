@@ -25,6 +25,7 @@ export function InddBatchModal() {
     isBatchProcessing,
     batchCurrentIndex,
     batchCurrentPhaseMessage,
+    batchError,
     noPreview,
     setNoPreview,
     outputFormat,
@@ -260,6 +261,13 @@ export function InddBatchModal() {
             </button>
           </div>
 
+          {/* Error Banner */}
+          {batchError && (
+            <div className="mx-5 mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+              {batchError}
+            </div>
+          )}
+
           {/* File List */}
           <div className="px-5 py-2 flex-1 min-h-0 max-h-[360px] overflow-y-auto border-y">
             {/* 직접 하위 파일 */}
@@ -338,14 +346,6 @@ export function InddBatchModal() {
                     className="w-3 h-3"
                   />
                   HWPX
-                </label>
-                <label className="flex items-center gap-0.5 cursor-pointer">
-                  <input type="radio" name="batchOutputFormat" value="md"
-                    checked={outputFormat === "md"}
-                    onChange={() => setOutputFormat("md")}
-                    className="w-3 h-3"
-                  />
-                  MD
                 </label>
               </div>
             </div>

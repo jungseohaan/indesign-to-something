@@ -270,6 +270,7 @@ public class ResolvedDataReader {
         }
 
         tf.onHiddenLayer(getBool(o, "onHiddenLayer", false));
+        tf.nonprinting(getBool(o, "nonprinting", false));
         tf.isMasterInstance(getBool(o, "isMasterInstance", false));
 
         return tf;
@@ -424,12 +425,16 @@ public class ResolvedDataReader {
         item.absoluteHorizontalScale(getDouble(o, "absoluteHorizontalScale", 100));
         item.absoluteVerticalScale(getDouble(o, "absoluteVerticalScale", 100));
 
-        // 채우기
-        item.fillColorName(getString(o, "fillColorName"));
+        // 채우기: ExtendScript 캐시 포맷에 따라 fillColorName 또는 fillColor가 온다.
+        String fillColorName = getString(o, "fillColorName");
+        if (fillColorName == null) fillColorName = getString(o, "fillColor");
+        item.fillColorName(fillColorName);
         item.fillTint(getDouble(o, "fillTint", 100));
 
-        // 스트로크
-        item.strokeColorName(getString(o, "strokeColorName"));
+        // 스트로크: 구/신 포맷 모두 허용.
+        String strokeColorName = getString(o, "strokeColorName");
+        if (strokeColorName == null) strokeColorName = getString(o, "strokeColor");
+        item.strokeColorName(strokeColorName);
         item.strokeTint(getDouble(o, "strokeTint", 100));
         item.strokeWeight(getDouble(o, "strokeWeight", 0));
         item.strokeAlignment(getString(o, "strokeAlignment"));
@@ -501,9 +506,31 @@ public class ResolvedDataReader {
         group.pdfPageIndex(getInt(o, "pdfPageIndex", -1));
         // z-order (InDesign allPageItems 인덱스: 0=앞, 큰 값=뒤)
         group.zOrder(getInt(o, "zOrder", 0));
+        group.itemType(getString(o, "itemType"));
+        group.imageFormat(getString(o, "imageFormat"));
+        group.whiteStroke(getBool(o, "whiteStroke", false));
         // badge_group: PNG 내보내기 전 TF 텍스트를 숨겼는지 여부
         if (o.has("textHiddenBeforeExport") && !o.get("textHiddenBeforeExport").isJsonNull()) {
             group.textHiddenBeforeExport(o.get("textHiddenBeforeExport").getAsBoolean());
+        }
+        group.visualOwner(getString(o, "visualOwner"));
+        group.textOwner(getString(o, "textOwner"));
+        group.containsText(getBoxedBool(o, "containsText"));
+        group.containsEditableText(getBoxedBool(o, "containsEditableText"));
+        group.placementAllowed(getBoxedBool(o, "placementAllowed"));
+        group.overlapPolicy(getString(o, "overlapPolicy"));
+        group.reason(getString(o, "reason"));
+        if (o.has("editableTextFrameIds") && !o.get("editableTextFrameIds").isJsonNull()) {
+            group.editableTextFrameIds(parseStringArray(o.getAsJsonArray("editableTextFrameIds")));
+        }
+        if (o.has("visualOnlyChildIds") && !o.get("visualOnlyChildIds").isJsonNull()) {
+            group.visualOnlyChildIds(parseIntArray(o.getAsJsonArray("visualOnlyChildIds")));
+        }
+        if (o.has("tfInlineVisualIds") && !o.get("tfInlineVisualIds").isJsonNull()) {
+            group.tfInlineVisualIds(parseIntArray(o.getAsJsonArray("tfInlineVisualIds")));
+        }
+        if (o.has("sourceObjectIds") && !o.get("sourceObjectIds").isJsonNull()) {
+            group.sourceObjectIds(parseIntArray(o.getAsJsonArray("sourceObjectIds")));
         }
         return group;
     }
@@ -513,6 +540,15 @@ public class ResolvedDataReader {
         for (int i = 0; i < arr.size(); i++) {
             JsonElement el = arr.get(i);
             result[i] = (el == null || el.isJsonNull()) ? 0 : el.getAsInt();
+        }
+        return result;
+    }
+
+    private static String[] parseStringArray(JsonArray arr) {
+        String[] result = new String[arr.size()];
+        for (int i = 0; i < arr.size(); i++) {
+            JsonElement el = arr.get(i);
+            result[i] = (el == null || el.isJsonNull()) ? null : el.getAsString();
         }
         return result;
     }

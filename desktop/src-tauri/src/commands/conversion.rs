@@ -305,3 +305,128 @@ pub async fn convert_hwpx_to_idml(
     final_result.ok_or_else(|| "No result received".to_string())
 }
 
+/// LLM 교수자료 생성: IDML → teaching_material.json
+#[tauri::command]
+pub async fn generate_teaching(
+    app: AppHandle,
+    input_path: String,
+    output_path: String,
+    prompt_path: String,
+    extra_prompt_path: Option<String>,
+    jar_path: String,
+    resolved_json_path: Option<String>,
+    links_directory: Option<String>,
+    html_template_path: Option<String>,
+) -> Result<ConvertResult, String> {
+    let mut args = vec![
+        "-jar".to_string(),
+        jar_path,
+        "--convert".to_string(),
+        input_path,
+        output_path,
+        "--teach".to_string(),
+        prompt_path,
+        "--progress".to_string(),
+    ];
+
+    if let Some(extra) = extra_prompt_path {
+        if !extra.is_empty() {
+            args.push("--teach-extra".to_string());
+            args.push(extra);
+        }
+    }
+
+    if let Some(tmpl) = html_template_path {
+        if !tmpl.is_empty() {
+            args.push("--html-template".to_string());
+            args.push(tmpl);
+        }
+    }
+
+    if let Some(resolved) = resolved_json_path {
+        args.push("--resolved".to_string());
+        args.push(resolved);
+    }
+
+    if let Some(links) = links_directory {
+        args.push("--links-directory".to_string());
+        args.push(links);
+    }
+
+    println!("Generate teaching args: {:?}", args);
+
+    let java = find_java();
+    let mut child = Command::new(&java)
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start Java process: {}", e))?;
+
+    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+
+    let mut stdout_reader = BufReader::new(stdout).lines();
+    let mut stderr_reader = BufReader::new(stderr).lines();
+
+    let app_clone = app.clone();
+    let stderr_task = tokio::spawn(async move {
+        while let Ok(Some(line)) = stderr_reader.next_line().await {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            let _ = app_clone.emit("teaching-log", super::LogEvent {
+                message: line,
+                timestamp,
+            });
+        }
+    });
+
+    let mut final_result: Option<ConvertResult> = None;
+
+    while let Some(line) = stdout_reader.next_line().await.map_err(|e| e.to_string())? {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+            if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
+                match msg_type {
+                    "progress" => {
+                        if let (Some(current), Some(total), Some(message)) = (
+                            json.get("current").and_then(|v| v.as_i64()),
+                            json.get("total").and_then(|v| v.as_i64()),
+                            json.get("message").and_then(|v| v.as_str()),
+                        ) {
+                            let _ = app.emit("teaching-progress", super::ProgressEvent {
+                                current: current as i32,
+                                total: total as i32,
+                                message: message.to_string(),
+                            });
+                        }
+                    }
+                    "complete" => {
+                        if let Some(result) = json.get("result") {
+                            final_result = serde_json::from_value(result.clone()).ok();
+                        }
+                    }
+                    "error" => {
+                        if let Some(msg) = json.get("message").and_then(|v| v.as_str()) {
+                            return Err(msg.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let _ = stderr_task.await;
+
+    let status = child.wait().await.map_err(|e| e.to_string())?;
+
+    if !status.success() {
+        let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
+        return Err(format!("Teaching material generation failed (exit code {})", code));
+    }
+
+    final_result.ok_or_else(|| "No result received".to_string())
+}
+

@@ -100,14 +100,15 @@ public final class DocumentChunker {
     }
 
     private static boolean isUnitTitle(String style, String text) {
+        // 텍스트 패턴 우선: "1단원", "Unit 1", "Chapter 1" 형태만 신뢰
+        if (text.matches("^[0-9]+단원.*")) return true;
+        if (text.matches("(?i)^(Unit|Chapter)\\s+[0-9]+.*")) return true;
+        // 스타일명은 정확 일치 또는 접두사만 허용 (contains는 "학습단원목표" 같은 오탐 위험)
         if (style == null) return false;
-        String lower = style.toLowerCase();
-        // 스타일명 기반 감지
-        if (lower.contains("제목1") || lower.contains("heading1") || lower.contains("h1")) return true;
-        if (lower.contains("단원") || lower.contains("unit") || lower.contains("chapter")) return true;
-        // 텍스트 패턴 기반 보조 감지 (숫자 단원 제목: "1단원", "Unit 1", "Chapter 1")
-        if (text.matches("^[0-9]+단원.*") || text.matches("(?i)^(Unit|Chapter)\\s+[0-9]+.*")) return true;
-        return false;
+        String lower = style.toLowerCase().trim();
+        return lower.equals("제목1") || lower.startsWith("제목1_")
+            || lower.equals("heading 1") || lower.equals("heading1")
+            || lower.equals("h1");
     }
 
     private static void appendParagraph(StringBuilder sb, String style, String text) {

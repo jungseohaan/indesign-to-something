@@ -34,6 +34,10 @@ final class InlineItemDispatcher {
     // ── 인라인 객체 디스패치 ──
 
     void addInlineObject(Para para, ASTInlineObject obj) {
+        addInlineObject(para, obj, true);
+    }
+
+    void addInlineObject(Para para, ASTInlineObject obj, boolean hasMeaningfulFollowingContent) {
         if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP) {
             paragraphBuilder.imageBuilder.addInlineBadgeGroup(para, obj,
                     paragraphBuilder.textBoxBuilder, paragraphBuilder);
@@ -58,12 +62,23 @@ final class InlineItemDispatcher {
         } else if (obj.kind() == ASTInlineObject.ObjectKind.IMAGE) {
             if (obj.overlayFrames() != null && !obj.overlayFrames().isEmpty()) {
                 paragraphBuilder.imageBuilder.addInlineImageWithOverlays(para, obj, paragraphBuilder.textBoxBuilder, paragraphBuilder);
+            } else if (!hasMeaningfulFollowingContent && isNonFlowHorizontalLine(obj)) {
+                paragraphBuilder.imageBuilder.addPageLevelInlineImage(para, obj);
             } else {
                 paragraphBuilder.imageBuilder.addInlineImage(para, obj);
             }
         } else if (obj.kind() == ASTInlineObject.ObjectKind.SPACER_RECT) {
             paragraphBuilder.textBoxBuilder.addSpacerRect(para, obj);
         }
+    }
+
+    private boolean isNonFlowHorizontalLine(ASTInlineObject obj) {
+        return obj.imageData() != null
+                && obj.width() > 8000
+                && obj.height() > 0
+                && obj.height() <= 250
+                && obj.resolvedPageX() >= 0
+                && obj.resolvedPageY() >= 0;
     }
 
     // ── 인라인 TextFrame 펼침 (단순 구조일 때 hp:rect 없이 부모 문단에 직접 삽입) ──
@@ -129,7 +144,8 @@ final class InlineItemDispatcher {
             }
         }
 
-        for (ASTInlineItem item : innerPara.items()) {
+        for (int i = 0; i < innerPara.items().size(); i++) {
+            ASTInlineItem item = innerPara.items().get(i);
             switch (item.itemType()) {
                 case TEXT_RUN:
                     ASTTextRun textRun = (ASTTextRun) item;
@@ -137,7 +153,8 @@ final class InlineItemDispatcher {
                     paragraphBuilder.addTextRun(para, textRun, "0");
                     break;
                 case INLINE_OBJECT:
-                    addInlineObject(para, (ASTInlineObject) item);
+                    addInlineObject(para, (ASTInlineObject) item,
+                            hasMeaningfulFollowingInlineContent(innerPara.items(), i + 1));
                     break;
                 case BREAK:
                     addBreak(para, (ASTBreak) item);
@@ -147,6 +164,21 @@ final class InlineItemDispatcher {
                     break;
             }
         }
+    }
+
+    private static boolean hasMeaningfulFollowingInlineContent(java.util.List<ASTInlineItem> items, int startIndex) {
+        if (items == null) return false;
+        for (int i = startIndex; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
+            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !text.trim().isEmpty()) return true;
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 
 

@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.List;
@@ -103,6 +104,10 @@ public final class SingleLineExpander {
         // resolved 의 composedLines 가 1줄인지 확인 (원본 1줄 검증)
         if (!isSingleLineInResolved(ctx, tfb)) return Outcome.NOT_CANDIDATE;
 
+        // InDesign PNG가 visual shell을 소유하고 HWPX TF가 텍스트만 얹는 경우,
+        // 텍스트 박스 폭을 늘리면 배경 PNG bounds와 어긋난다.
+        if (hasRenderedVisualShell(ctx, tfb)) return Outcome.NOT_CANDIDATE;
+
         // 장식 도형 (Polygon/Oval/Rectangle with fill) 안에 포함된 textbox 는 확장 금지.
         // 확장하면 도형 경계를 넘어가 시각적으로 깨짐. (예: page 30 "계획 세우기" 가 dark pill 안)
         if (isInsideDecorativeShape(ctx, tfb)) return Outcome.NOT_CANDIDATE;
@@ -140,14 +145,8 @@ public final class SingleLineExpander {
      * 포함된 경우 확장하면 도형 경계를 넘어가 시각적으로 깨짐 → 확장 금지.
      */
     private static boolean isInsideDecorativeShape(ResolvedBuildContext ctx, ASTTextFrameBlock tfb) {
-        String src = tfb.sourceId();
-        if (src == null || !src.startsWith("u")) return false;
-        String hexPart = src.substring(1);
-        int us = hexPart.indexOf('_');
-        if (us >= 0) hexPart = hexPart.substring(0, us);
-        int tfDomId;
-        try { tfDomId = Integer.parseInt(hexPart, 16); }
-        catch (NumberFormatException e) { return false; }
+        int tfDomId = sourceDomId(tfb);
+        if (tfDomId < 0) return false;
         ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(String.valueOf(tfDomId));
         if (rtf == null) return false;
         double[] tfBounds = rtf.geometricBounds();
@@ -172,16 +171,47 @@ public final class SingleLineExpander {
         return false;
     }
 
-    private static boolean isSingleLineInResolved(ResolvedBuildContext ctx, ASTTextFrameBlock tfb) {
+    private static boolean hasRenderedVisualShell(ResolvedBuildContext ctx, ASTTextFrameBlock tfb) {
+        if (ctx == null || ctx.resolvedData == null || tfb == null) return false;
+        int tfDomId = sourceDomId(tfb);
+        if (tfDomId < 0) return false;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            if (!rg.hasEditableTextHiddenFromPng()) continue;
+            if (!containsId(rg.editableTextFrameIds(), tfDomId)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean containsId(String[] ids, int id) {
+        if (ids == null) return false;
+        String expected = String.valueOf(id);
+        for (String candidate : ids) {
+            if (expected.equals(candidate)) return true;
+        }
+        return false;
+    }
+
+    private static int sourceDomId(ASTTextFrameBlock tfb) {
+        if (tfb == null) return -1;
         String src = tfb.sourceId();
-        if (src == null || !src.startsWith("u")) return false;
+        if (src == null || !src.startsWith("u")) return -1;
         String hexPart = src.substring(1);
         int us = hexPart.indexOf('_');
         if (us >= 0) hexPart = hexPart.substring(0, us);
-        String domId;
-        try { domId = String.valueOf(Integer.parseInt(hexPart, 16)); }
-        catch (NumberFormatException e) { return false; }
-        ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
+        try { return Integer.parseInt(hexPart, 16); }
+        catch (NumberFormatException e) { return -1; }
+    }
+
+    private static boolean isSingleLineInResolved(ResolvedBuildContext ctx, ASTTextFrameBlock tfb) {
+        int tfDomId = sourceDomId(tfb);
+        if (tfDomId < 0) return false;
+        ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(String.valueOf(tfDomId));
         if (rtf == null) {
             // 마스터 인스턴스 등 composedLines 가 없는 TF — paragraphs 가 1개이고 \r 없는 단순 텍스트로 추정
             // 호출 측이 이미 paragraphs.size()==1 + \n/\r 없음을 확인했으므로 통과시킴.

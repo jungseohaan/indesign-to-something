@@ -16,9 +16,21 @@ public class RenderedGroup {
     private int badgeGroupId;    // 배지 그룹 부모 DOM ID (type=badge_group_child일 때)
     private int[] childImageIds; // 그룹 렌더링 시 자식 이미지 프레임 DOM ID 목록
     private int zOrder;          // ExtendScript 할당 z-order (renderedFloatingItems)
+    private boolean zOrderKnown; // true: IDML z-order normalizer가 실제 원본 순서를 확인함
     private String itemType;     // "vector" | "group" | "text_decoration" | "image" | "other"
     private boolean textHiddenBeforeExport; // true: PNG 내보내기 전 TF 텍스트를 숨겼음 → PNG는 텍스트 없음
     private String imageFormat;   // "jpg", "jpeg", "png" 등 (소스 파일 직접 복사 시 설정)
+    private String visualOwner;   // "indesign_png" | "hwpx_shape" | ...
+    private String textOwner;     // "hwpx_tf" | "indesign_png" | "hidden_semantic" | "none"
+    private Boolean containsText;
+    private Boolean containsEditableText;
+    private Boolean placementAllowed;
+    private String[] editableTextFrameIds;
+    private int[] visualOnlyChildIds;
+    private int[] tfInlineVisualIds;
+    private int[] sourceObjectIds;
+    private String overlapPolicy;
+    private String reason;
 
     public int id() { return id; }
     public void id(int v) { this.id = v; }
@@ -50,6 +62,9 @@ public class RenderedGroup {
     public int zOrder() { return zOrder; }
     public void zOrder(int v) { this.zOrder = v; }
 
+    public boolean zOrderKnown() { return zOrderKnown; }
+    public void zOrderKnown(boolean v) { this.zOrderKnown = v; }
+
     public String itemType() { return itemType; }
     public void itemType(String v) { this.itemType = v; }
 
@@ -68,10 +83,57 @@ public class RenderedGroup {
     public String imageFormat() { return imageFormat; }
     public void imageFormat(String v) { this.imageFormat = v; }
 
+    public String visualOwner() { return visualOwner; }
+    public void visualOwner(String v) { this.visualOwner = v; }
+
+    public String textOwner() { return textOwner; }
+    public void textOwner(String v) { this.textOwner = v; }
+
+    public Boolean containsText() { return containsText; }
+    public void containsText(Boolean v) { this.containsText = v; }
+
+    public Boolean containsEditableText() { return containsEditableText; }
+    public void containsEditableText(Boolean v) { this.containsEditableText = v; }
+
+    public Boolean placementAllowed() { return placementAllowed; }
+    public void placementAllowed(Boolean v) { this.placementAllowed = v; }
+
+    public String[] editableTextFrameIds() { return editableTextFrameIds; }
+    public void editableTextFrameIds(String[] v) { this.editableTextFrameIds = v; }
+
+    public int[] visualOnlyChildIds() { return visualOnlyChildIds; }
+    public void visualOnlyChildIds(int[] v) { this.visualOnlyChildIds = v; }
+
+    public int[] tfInlineVisualIds() { return tfInlineVisualIds; }
+    public void tfInlineVisualIds(int[] v) { this.tfInlineVisualIds = v; }
+
+    public int[] sourceObjectIds() { return sourceObjectIds; }
+    public void sourceObjectIds(int[] v) { this.sourceObjectIds = v; }
+
+    public String overlapPolicy() { return overlapPolicy; }
+    public void overlapPolicy(String v) { this.overlapPolicy = v; }
+
+    public String reason() { return reason; }
+    public void reason(String v) { this.reason = v; }
+
     private boolean whiteStroke; // true: 획이 흰색(Paper)이었던 PNG → 검은 픽셀을 흰색으로 반전 필요
 
     public boolean isWhiteStroke() { return whiteStroke; }
     public void whiteStroke(boolean v) { this.whiteStroke = v; }
 
     public boolean isPageBackground() { return "page_background".equals(type); }
+
+    public boolean shouldSkipByOwnership() {
+        if (Boolean.FALSE.equals(placementAllowed)) return true;
+        if (Boolean.TRUE.equals(containsEditableText)) {
+            return !"indesign_png".equals(textOwner);
+        }
+        return false;
+    }
+
+    public boolean hasEditableTextHiddenFromPng() {
+        return "hwpx_tf".equals(textOwner)
+                && (Boolean.TRUE.equals(textHiddenBeforeExport)
+                    || Boolean.FALSE.equals(containsText));
+    }
 }

@@ -257,11 +257,14 @@ public class TextFrameGridMerger {
         cell.marginLeft(block.insetLeft());
         cell.marginRight(block.insetRight());
 
-        // 배경색
-        cell.fillColor(block.fillColor());
+        // Visuals are owned by InDesign PNGs; keep HWP table cells as text containers.
+        if (HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled()) {
+            cell.fillColor(block.fillColor());
+        }
 
         // 테두리
-        if (block.strokeColor() != null && block.strokeWeight() > 0) {
+        if (HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled()
+                && block.strokeColor() != null && block.strokeWeight() > 0) {
             ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
             border.color(block.strokeColor());
             border.weight(block.strokeWeight());
@@ -337,9 +340,12 @@ public class TextFrameGridMerger {
         cell.marginBottom(block.insetBottom());
         cell.marginLeft(block.insetLeft());
         cell.marginRight(block.insetRight());
-        cell.fillColor(block.fillColor());
+        if (HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled()) {
+            cell.fillColor(block.fillColor());
+        }
 
-        if (block.strokeColor() != null && block.strokeWeight() > 0) {
+        if (HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled()
+                && block.strokeColor() != null && block.strokeWeight() > 0) {
             ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
             border.color(block.strokeColor());
             border.weight(block.strokeWeight());

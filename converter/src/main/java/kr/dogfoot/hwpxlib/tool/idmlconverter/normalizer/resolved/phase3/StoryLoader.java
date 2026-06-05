@@ -7,6 +7,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
@@ -19,6 +21,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTabStop;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Map;
@@ -139,12 +142,16 @@ class StoryLoader {
                 if (rp.spaceAfter() != null && rp.spaceAfter() > 0) {
                     para.spaceAfter(CoordinateConverter.pointsToHwpunits(rp.spaceAfter()));
                 }
-                if (suppressLeftIndent) {
+                boolean neutralHangingIndent = isNeutralHangingIndent(rp.leftIndent(), rp.firstLineIndent());
+                if (neutralHangingIndent) {
+                    para.leftMargin(0L);
+                    para.firstLineIndent(0L);
+                } else if (suppressLeftIndent) {
                     para.leftMargin(0L); // 스타일 폴백 차단: baseStyle.leftMargin() 우선순위를 명시적 0으로 덮어씀
                 } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
                     para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
                 }
-                if (rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
+                if (!neutralHangingIndent && rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
                     para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
                 }
                 // 탭 스톱
@@ -231,6 +238,7 @@ class StoryLoader {
             List<IDMLCharacterRun> mathGroup = new ArrayList<>();
             List<IDMLCharacterRun> npMathGroup = new ArrayList<>();
             List<IDMLCharacterRun> ehMathGroup = new ArrayList<>();
+            boolean firstTextRunAfterLeadingAnchor = false;
 
             boolean paraHasBTRuns = false;
             boolean paraHasNPStructuralRuns = false;
@@ -394,6 +402,10 @@ class StoryLoader {
                         for (int pi = 0; pi < parts.length; pi++) {
                             // 인라인 앵커 직전 텍스트의 후행 공백 제거 (위치 조정용 공백)
                             String partText = parts[pi];
+                            if (firstTextRunAfterLeadingAnchor && !partText.isEmpty()) {
+                                partText = StoryConverter.stripLeadingAnchorLayoutSpaces(partText);
+                                firstTextRunAfterLeadingAnchor = false;
+                            }
                             if (pi < parts.length - 1 && partText.endsWith("  ")) {
                                 partText = partText.replaceAll("\\s+$", " "); // 후행 다중 공백 → 단일 공백
                             }
@@ -428,6 +440,7 @@ class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
+                                    maybeInsertDecorativeLeaderTab(ctx, ip, run, inlineHexId, partText, para);
                                     // SPEC-025: Group 앵커가 다수의 박스(예: 자모 배지 ㅍㅎㅂㅅ) 면 각 자식 TF 를
                                     // 박스 스타일 inline TextFrame 으로 개별 분해 → 검색 가능 + 시각 박스 보존.
                                     java.util.List<ASTInlineObject> boxList =
@@ -466,10 +479,17 @@ class StoryLoader {
                                         }
                                     }
                                 } catch (Exception e) { /* skip */ }
+                                if (!hasVisibleText(para)) {
+                                    firstTextRunAfterLeadingAnchor = true;
+                                }
                                 anchorIdx++;
                             }
                         }
                     } else {
+                        if (firstTextRunAfterLeadingAnchor) {
+                            text = StoryConverter.stripLeadingAnchorLayoutSpaces(text);
+                            firstTextRunAfterLeadingAnchor = false;
+                        }
                         // GREP 스타일 분할: IDML 단일 런이 resolved에서 여러 런(다른 색상/폰트)으로 분할된 경우
                         // resolved 런 경계에서 IDML 런을 분할하여 각각의 색상을 적용
                         boolean splitByResolved = false;
@@ -495,6 +515,7 @@ class StoryLoader {
             }
             // 단락 끝 잔여 수식 그룹 flush
             MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
+            applyTrailingPageNumberLeader(ctx, ip, para);
 
             // 패턴 감지: 행잉 인덴트 + 인라인 아이콘 + 탭
             // InDesign에서 인라인 아이콘이 마진 밖(-indent 영역)에 배치되지만
@@ -526,5 +547,219 @@ class StoryLoader {
         }
 
         return paragraphs;
+    }
+
+    private static void applyTrailingPageNumberLeader(ResolvedBuildContext ctx,
+                                                      IDMLParagraph paragraph,
+                                                      ASTParagraph para) {
+        if (para == null || para.items() == null || para.items().size() < 2) return;
+        if (!hasVisibleText(para)) return;
+
+        List<ASTInlineItem> items = para.items();
+        for (int i = items.size() - 1; i >= 0; i--) {
+            ASTInlineItem item = items.get(i);
+            if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
+            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                String text = ((ASTTextRun) item).text();
+                if (text == null || text.trim().isEmpty()) continue;
+                if (isPageNumberText(text)) {
+                    if (i > 0 && items.get(i - 1) instanceof ASTTextRun) {
+                        String prev = ((ASTTextRun) items.get(i - 1)).text();
+                        if ("\t".equals(prev)) return;
+                    }
+                    if (!enableRightmostDotLeader(ctx, paragraph, para)) return;
+
+                    ASTTextRun tabRun = new ASTTextRun();
+                    tabRun.text("\t");
+                    tabRun.textColor("#000000");
+                    items.add(i, tabRun);
+                    return;
+                }
+                return;
+            }
+            if (item.itemType() != ASTInlineItem.ItemType.INLINE_OBJECT) return;
+
+            ASTInlineObject obj = (ASTInlineObject) item;
+            if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) return;
+            if (!isPageNumberInlineObject(obj)) return;
+            if (i > 0 && items.get(i - 1) instanceof ASTTextRun) {
+                String prev = ((ASTTextRun) items.get(i - 1)).text();
+                if ("\t".equals(prev)) return;
+            }
+            if (!enableRightmostDotLeader(ctx, paragraph, para)) return;
+
+            ASTTextRun tabRun = new ASTTextRun();
+            tabRun.text("\t");
+            tabRun.textColor("#000000");
+            items.add(i, tabRun);
+            return;
+        }
+    }
+
+    private static boolean isPageNumberText(String text) {
+        if (text == null) return false;
+        String cleaned = text.replace("\r", "").replace("\n", "").trim();
+        return cleaned.matches("\\d{1,4}");
+    }
+
+    private static boolean isPageNumberInlineObject(ASTInlineObject obj) {
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return false;
+        StringBuilder sb = new StringBuilder();
+        for (ASTParagraph p : obj.paragraphs()) {
+            if (p.items() == null) continue;
+            for (ASTInlineItem item : p.items()) {
+                if (item != null && item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null) sb.append(text);
+                }
+            }
+        }
+        return isPageNumberText(sb.toString());
+    }
+
+    private static void maybeInsertDecorativeLeaderTab(ResolvedBuildContext ctx,
+                                                       IDMLParagraph paragraph,
+                                                       IDMLCharacterRun run,
+                                                       String inlineHexId,
+                                                       String precedingText,
+                                                       ASTParagraph astPara) {
+        if (ctx == null || paragraph == null || run == null || astPara == null) return;
+        if ((precedingText == null || precedingText.trim().isEmpty()) && !hasVisibleText(astPara)) return;
+        if (!hasDecorativeParagraphRule(ctx, paragraph)) return;
+        if (!isInlinePageNumberFrame(ctx, run, inlineHexId)) return;
+        if (!enableRightmostDotLeader(ctx, paragraph, astPara)) return;
+
+        ASTTextRun tabRun = new ASTTextRun();
+        tabRun.text("\t");
+        tabRun.textColor("#000000");
+        astPara.addItem(tabRun);
+    }
+
+    private static boolean hasVisibleText(ASTParagraph para) {
+        if (para.items() == null) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (item == null || item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text != null && !text.trim().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasDecorativeParagraphRule(ResolvedBuildContext ctx, IDMLParagraph paragraph) {
+        if (paragraph.ruleBelowOn()) return true;
+        if (ctx.styleResolver == null) return false;
+        IDMLStyleDef style = ctx.styleResolver.getResolvedParagraphStyle(paragraph.appliedParagraphStyle());
+        if (style == null) return false;
+        if (positive(style.ruleAboveLineWeight()) || positive(style.ruleBelowLineWeight())) return true;
+        return positive(style.underlineWeight()) && positive(style.underlineOffset());
+    }
+
+    private static boolean positive(Double value) {
+        return value != null && value > 0.0;
+    }
+
+    private static boolean enableRightmostDotLeader(ResolvedBuildContext ctx, IDMLParagraph paragraph, ASTParagraph para) {
+        if ((para.tabStops() == null || para.tabStops().size() < 2)
+                && ctx.styleResolver != null && paragraph.appliedParagraphStyle() != null) {
+            IDMLStyleDef style = ctx.styleResolver.getResolvedParagraphStyle(paragraph.appliedParagraphStyle());
+            if (style != null && style.tabStops() != null) {
+                for (IDMLStyleDef.TabStop ts : style.tabStops()) {
+                    if (ts == null || ts.position() <= 0) continue;
+                    para.addTabStop(new ASTTabStop(
+                            CoordinateConverter.pointsToHwpunits(ts.position()),
+                            mapTabAlignment(ts.alignment()),
+                            ts.leader()));
+                }
+            }
+        }
+        if ((para.tabStops() == null || para.tabStops().size() < 2)
+                && ctx.astDocument != null && ctx.astDocument.paragraphStyles() != null
+                && paragraph.appliedParagraphStyle() != null) {
+            String styleRef = paragraph.appliedParagraphStyle();
+            String cleanStyleRef = styleRef.contains("/")
+                    ? styleRef.substring(styleRef.lastIndexOf('/') + 1) : styleRef;
+            for (ASTStyleDef style : ctx.astDocument.paragraphStyles()) {
+                if (style == null || style.tabStops() == null) continue;
+                if (!styleRef.equals(style.styleId()) && !cleanStyleRef.equals(style.styleName())) continue;
+                for (ASTTabStop ts : style.tabStops()) {
+                    if (ts == null || ts.position() <= 0) continue;
+                    para.addTabStop(new ASTTabStop(ts.position(), ts.alignment(), ts.leader()));
+                }
+                break;
+            }
+        }
+        if (para.tabStops() == null || para.tabStops().size() < 2) return false;
+        ASTTabStop rightmost = null;
+        for (ASTTabStop stop : para.tabStops()) {
+            if (stop == null || stop.position() <= 0) continue;
+            if (rightmost == null || stop.position() > rightmost.position()) {
+                rightmost = stop;
+            }
+        }
+        if (rightmost == null) return false;
+        rightmost.leader(".");
+        return true;
+    }
+
+    private static String mapTabAlignment(String alignment) {
+        if (alignment == null) return "left";
+        String a = alignment.toLowerCase();
+        if (a.contains("center")) return "center";
+        if (a.contains("right")) return "right";
+        if (a.contains("decimal")) return "decimal";
+        return "left";
+    }
+
+    private static boolean isInlinePageNumberFrame(ResolvedBuildContext ctx, IDMLCharacterRun run, String inlineHexId) {
+        IDMLTextFrame inlineFrame = findInlineFrame(run, inlineHexId);
+        if (inlineFrame != null && inlineFrame.appliedObjectStyle() != null
+                && inlineFrame.appliedObjectStyle().contains("쪽수")) {
+            return true;
+        }
+
+        int domId;
+        try {
+            domId = Integer.parseInt(inlineHexId.substring(1), 16);
+        } catch (Exception e) {
+            return false;
+        }
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(domId));
+        if (tf == null) return false;
+        String text = tf.frameVisibleText();
+        if ((text == null || text.trim().isEmpty()) && tf.storyId() != null) {
+            ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+            if (story != null) {
+                StringBuilder sb = new StringBuilder();
+                for (ResolvedParagraph rp : story.paragraphs()) {
+                    if (rp.runs() == null) continue;
+                    for (ResolvedRun rr : rp.runs()) {
+                        if (rr.text() != null) sb.append(rr.text());
+                    }
+                }
+                text = sb.toString();
+            }
+        }
+        if (text == null) return false;
+        String cleaned = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+        if (!cleaned.matches("\\d{1,4}")) return false;
+        double[] gb = tf.geometricBounds();
+        if (gb == null || gb.length < 4) return true;
+        double w = Math.abs(gb[3] - gb[1]);
+        double h = Math.abs(gb[2] - gb[0]);
+        return w <= 40.0 && h <= 25.0;
+    }
+
+    private static IDMLTextFrame findInlineFrame(IDMLCharacterRun run, String inlineHexId) {
+        if (run.inlineFrames() == null || inlineHexId == null) return null;
+        for (IDMLTextFrame frame : run.inlineFrames()) {
+            if (frame != null && inlineHexId.equals(frame.selfId())) return frame;
+        }
+        return null;
+    }
+
+    static boolean isNeutralHangingIndent(Double leftIndent, Double firstLineIndent) {
+        if (leftIndent == null || firstLineIndent == null) return false;
+        return leftIndent > 0 && firstLineIndent < 0
+                && Math.abs(leftIndent + firstLineIndent) < 0.01;
     }
 }

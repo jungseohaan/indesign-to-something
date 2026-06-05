@@ -60,8 +60,8 @@ public class HwpxTableBuilder {
                 .borderFillIDRefAnd("1")
                 .noAdjustAnd(false);
 
-        // ShapeSize — 높이 0: 콘텐츠에 맞게 자동 확장
-        long tableHeight = 0;
+        // ShapeSize — floating table은 IDML 행 높이 합산값을 명시해야 셀선이 안정적으로 렌더된다.
+        long tableHeight = astTable.height();
         table.createSZ();
         table.sz().widthAnd(totalWidth).widthRelToAnd(WidthRelTo.ABSOLUTE)
                 .heightAnd(tableHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
@@ -236,14 +236,12 @@ public class HwpxTableBuilder {
                 long preservedHeight = astCell.height() > 0 ? astCell.height() : 0L;
                 tc.cellSz().widthAnd(astCell.width()).heightAnd(preservedHeight);
 
-                // 셀 여백
+                // 셀 여백 — 원본/AST margin 값을 그대로 사용한다.
                 tc.createCellMargin();
-                // 하단 인셋 최소 5pt (500 HWPUNIT) 보장 — 밑줄 등이 잘리지 않도록
-                long bottomMargin = Math.max(astCell.marginBottom(), 500L);
                 tc.cellMargin().leftAnd(astCell.marginLeft())
                         .rightAnd(astCell.marginRight())
                         .topAnd(astCell.marginTop())
-                        .bottomAnd(bottomMargin);
+                        .bottomAnd(astCell.marginBottom());
 
                 // 셀 내부 SubList
                 tc.createSubList();

@@ -261,6 +261,9 @@ public class ASTSerializer {
         if (tf.fromGroup()) {
             first = writeBooleanField(sb, "fromGroup", true, first);
         }
+        if (tf.noAutoLineWrap()) {
+            first = writeBooleanField(sb, "noAutoLineWrap", true, first);
+        }
 
         // paragraphs
         if (tf.paragraphs() != null && !tf.paragraphs().isEmpty()) {
@@ -641,6 +644,7 @@ public class ASTSerializer {
         if (obj.strokeWeight() != 0.0) first = writeDoubleField(sb, "strokeWeight", obj.strokeWeight(), first);
         if (obj.strokeTint() != 100.0) first = writeDoubleField(sb, "strokeTint", obj.strokeTint(), first);
         if (obj.cornerRadius() != 0.0) first = writeDoubleField(sb, "cornerRadius", obj.cornerRadius(), first);
+        if (obj.noAutoLineWrap()) first = writeBooleanField(sb, "noAutoLineWrap", true, first);
 
         if (obj.textWrapTop() != 0) first = writeLongField(sb, "textWrapTop", obj.textWrapTop(), first);
         if (obj.textWrapLeft() != 0) first = writeLongField(sb, "textWrapLeft", obj.textWrapLeft(), first);

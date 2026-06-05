@@ -108,6 +108,8 @@ public class ConverterCLI {
                 runExtractAst(args);
             } else if ("--convert-ast".equals(command)) {
                 runConvertAst(args);
+            } else if ("--teach-ast".equals(command)) {
+                runTeachAst(args);
             } else if ("--diagnose".equals(command)) {
                 runDiagnose(args);
             } else if ("--analyze-fonts".equals(command)) {
@@ -141,6 +143,7 @@ public class ConverterCLI {
         String teachExtraPath   = null;
         String teachDir         = null;
         String textbookId       = null;
+        String htmlTemplatePath = null;
 
         // Parse additional options
         for (int i = 3; i < args.length; i++) {
@@ -231,6 +234,9 @@ public class ConverterCLI {
                 case "--textbook-id":
                     if (i + 1 < args.length) textbookId = args[++i];
                     break;
+                case "--html-template":
+                    if (i + 1 < args.length) htmlTemplatePath = args[++i];
+                    break;
                 default:
                     System.err.println("Unknown option: " + arg);
             }
@@ -280,22 +286,27 @@ public class ConverterCLI {
                             .generate(teachAst, resolvedPrompt, llmCfg);
             kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialWriter
                     .write(material, outputPath);
-            System.out.println("Teaching material 생성 완료: " + outputPath);
+
+            // JSON 옆에 HTML 프레젠테이션도 함께 생성
+            String htmlPath = outputPath.substring(0, outputPath.length() - 5) + ".html";
+            java.io.File htmlTemplateFile = htmlTemplatePath != null ? new java.io.File(htmlTemplatePath) : null;
+            try {
+                kr.dogfoot.hwpxlib.tool.idmlconverter.llm.HtmlSlideGenerator
+                        .write(material, htmlTemplateFile, new java.io.File(htmlPath));
+                System.err.println("[HTML] 프레젠테이션 생성 완료: " + htmlPath);
+            } catch (Exception htmlEx) {
+                System.err.println("[HTML] 프레젠테이션 생성 실패: " + htmlEx.getMessage());
+                htmlPath = null;
+            }
+
+            int teachPages = (teachAst != null && teachAst.sections() != null) ? teachAst.sections().size() : 0;
+            ConvertResult teachResult = new ConvertResult();
+            teachResult.pagesConverted(teachPages);
+            if (htmlPath != null) teachResult.htmlPath(htmlPath);
+            reporter.reportComplete(teachResult);
             return;
         }
 
-        // .md 확장자 감지 → Markdown 내보내기
-        if (outputPath.toLowerCase().endsWith(".md")) {
-            ASTDocument mdAst = IDMLToHwpxConverter.buildAst(inputPath, options, reporter);
-            try {
-                new kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToMarkdownConverter()
-                        .convert(mdAst, new java.io.File(outputPath));
-            } catch (java.io.IOException e) {
-                throw new RuntimeException("Markdown 내보내기 실패: " + e.getMessage(), e);
-            }
-            System.out.println("Markdown export completed: " + outputPath);
-            return;
-        }
 
         // .hwp 확장자 감지
         boolean exportHwp = outputPath.toLowerCase().endsWith(".hwp");
@@ -1469,6 +1480,68 @@ public class ConverterCLI {
         } finally {
             idmlDoc.cleanup();
         }
+    }
+
+    /**
+     * --teach-ast &lt;ast-dir&gt; &lt;output.json&gt; --teach &lt;base_prompt.txt&gt; [--teach-extra ...] [--teach-dir ...]
+     *
+     * 미리 내보낸 AST 번들(--export-ast 결과)을 입력으로 받아 교수자료 JSON을 생성한다.
+     * IDML 파싱을 건너뛰므로 프롬프트 조정 시 반복 실행이 빠르다.
+     */
+    private static void runTeachAst(String[] args) throws Exception {
+        if (args.length < 3) {
+            System.err.println("Usage: --teach-ast <ast-dir> <output.json> --teach <base_prompt.txt> [options]");
+            System.exit(1);
+        }
+        String astDir    = args[1];
+        String outputPath = args[2];
+
+        String teachPromptPath = null;
+        String teachExtraPath  = null;
+        String teachDir        = null;
+        String textbookId      = null;
+
+        for (int i = 3; i < args.length; i++) {
+            switch (args[i]) {
+                case "--teach":       if (i + 1 < args.length) teachPromptPath = args[++i]; break;
+                case "--teach-extra": if (i + 1 < args.length) teachExtraPath  = args[++i]; break;
+                case "--teach-dir":   if (i + 1 < args.length) teachDir        = args[++i]; break;
+                case "--textbook-id": if (i + 1 < args.length) textbookId      = args[++i]; break;
+                default: System.err.println("Unknown option: " + args[i]);
+            }
+        }
+
+        if (teachPromptPath == null && teachDir == null) {
+            System.err.println("Error: --teach <base_prompt.txt> 또는 --teach-dir <dir> 가 필요합니다.");
+            System.exit(1);
+        }
+
+        System.out.println("[teach-ast] AST 로드 중: " + astDir);
+        ASTDocument doc = kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBundleReader.read(
+                new java.io.File(astDir));
+
+        kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader envR =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.load();
+        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig llmCfg =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig.builder()
+                        .groqApiKey(envR.getOrEnv(
+                                kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.GROQ_API_KEY))
+                        .anthropicApiKey(envR.getOrEnv(
+                                kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.ANTHROPIC_API_KEY))
+                        .build();
+
+        String resolvedPrompt = teachDir != null
+                ? kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
+                        .loadFromDir(teachDir, textbookId)
+                : kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
+                        .load(teachPromptPath, teachExtraPath);
+
+        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterial material =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialGenerator
+                        .generate(doc, resolvedPrompt, llmCfg);
+        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialWriter
+                .write(material, outputPath);
+        System.out.println("Teaching material 생성 완료: " + outputPath);
     }
 
     private static void runTestLlm(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader env) {

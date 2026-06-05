@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useAstStore } from "../stores/useAstStore";
+import { useAppStore } from "../stores/useAppStore";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -596,6 +597,183 @@ function countItems(para: any): string {
   return parts.join(" ");
 }
 
+function fileName(path: string | null | undefined): string {
+  if (!path) return "-";
+  return path.replace(/^.*[/\\]/, "");
+}
+
+function pathStatus(path: string | null | undefined): "ok" | "missing" {
+  return path ? "ok" : "missing";
+}
+
+function StatusPill({ status }: { status: "ok" | "warn" | "error" | "missing" | "running" }) {
+  const styles: Record<typeof status, string> = {
+    ok: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    warn: "border-amber-200 bg-amber-50 text-amber-700",
+    error: "border-red-200 bg-red-50 text-red-700",
+    missing: "border-gray-200 bg-gray-50 text-gray-500",
+    running: "border-blue-200 bg-blue-50 text-blue-700",
+  };
+  const labels: Record<typeof status, string> = {
+    ok: "OK",
+    warn: "WARN",
+    error: "ERROR",
+    missing: "MISSING",
+    running: "RUNNING",
+  };
+  return (
+    <span className={`inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-medium ${styles[status]}`}>
+      {labels[status]}
+    </span>
+  );
+}
+
+function DiagnosticRow({
+  label,
+  value,
+  status,
+}: {
+  label: string;
+  value: React.ReactNode;
+  status: "ok" | "warn" | "error" | "missing" | "running";
+}) {
+  return (
+    <div className="flex items-start gap-2 rounded border border-gray-200 bg-white px-2 py-1.5">
+      <StatusPill status={status} />
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-medium text-gray-700">{label}</div>
+        <div className="mt-0.5 truncate text-[11px] text-gray-500" title={typeof value === "string" ? value : undefined}>
+          {value}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function explainAstError(error: string | null): string {
+  if (!error) return "AST preview가 아직 로드되지 않았습니다.";
+  if (error.includes("expected value at line 1 column 2")) {
+    return "AST JSON 대신 로그, 빈 응답, 또는 비JSON 텍스트가 반환된 상태입니다.";
+  }
+  if (error.toLowerCase().includes("ast export failed")) {
+    return "AST export CLI 단계가 실패했습니다.";
+  }
+  return "AST preview 로드 단계에서 오류가 발생했습니다.";
+}
+
+function ConversionDiagnosticsPanel({
+  astError,
+  isAstLoading,
+}: {
+  astError: string | null;
+  isAstLoading: boolean;
+}) {
+  const {
+    sourceType,
+    inddPath,
+    idmlPath,
+    resolvedJsonPath,
+    previewPdfPath,
+    lastOutputPath,
+    result,
+    error: conversionError,
+    isConverting,
+    isExtracting,
+    extractionPhase,
+    extractionMessage,
+    lastExtractStats,
+    conversionLogs,
+  } = useAppStore();
+
+  const recentLogs = conversionLogs.slice(-4);
+  const astStatus = isAstLoading ? "running" : astError ? "error" : "missing";
+  const conversionStatus = isConverting ? "running" : conversionError ? "error" : result ? "ok" : "missing";
+  const extractStatus = isExtracting ? "running" : idmlPath && resolvedJsonPath ? "ok" : pathStatus(idmlPath);
+
+  return (
+    <div className="h-full overflow-auto bg-gray-50 p-3 text-xs text-gray-700">
+      <div className="mx-auto flex max-w-xl flex-col gap-3">
+        <div>
+          <div className="text-sm font-semibold text-gray-800">변환 진단</div>
+          <div className="mt-1 text-[11px] text-gray-500">
+            {explainAstError(astError)}
+          </div>
+        </div>
+
+        {astError && (
+          <div className="rounded border border-red-200 bg-red-50 p-2">
+            <div className="text-[11px] font-medium text-red-700">AST preview 오류</div>
+            <div className="mt-1 break-words font-mono text-[11px] leading-4 text-red-600">
+              {astError}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-1.5">
+          <DiagnosticRow
+            label="InDesign 추출"
+            status={extractStatus}
+            value={isExtracting ? `${extractionPhase || "extract"} · ${extractionMessage || ""}` : fileName(idmlPath)}
+          />
+          <DiagnosticRow
+            label="resolved.json"
+            status={pathStatus(resolvedJsonPath)}
+            value={fileName(resolvedJsonPath)}
+          />
+          <DiagnosticRow
+            label="HWPX 변환"
+            status={conversionStatus}
+            value={
+              result
+                ? `${result.pages_converted}p · ${result.frames_converted} frames · ${result.images_converted} images`
+                : conversionError || fileName(lastOutputPath)
+            }
+          />
+          <DiagnosticRow
+            label="AST preview"
+            status={astStatus}
+            value={isAstLoading ? "로드 중" : astError ? "로드 실패" : "대기 중"}
+          />
+        </div>
+
+        <div className="rounded border border-gray-200 bg-white p-2">
+          <div className="mb-1.5 text-[11px] font-medium text-gray-700">아티팩트</div>
+          <div className="space-y-1 font-mono text-[11px] text-gray-500">
+            <div className="truncate" title={inddPath || undefined}>INDD: {sourceType === "indd" ? fileName(inddPath) : "-"}</div>
+            <div className="truncate" title={idmlPath || undefined}>IDML: {idmlPath || "-"}</div>
+            <div className="truncate" title={resolvedJsonPath || undefined}>resolved: {resolvedJsonPath || "-"}</div>
+            <div className="truncate" title={lastOutputPath || undefined}>HWPX: {lastOutputPath || "-"}</div>
+            <div className="truncate" title={previewPdfPath || undefined}>PDF: {previewPdfPath || "-"}</div>
+          </div>
+        </div>
+
+        {(lastExtractStats || recentLogs.length > 0 || result?.warnings?.length) && (
+          <div className="rounded border border-gray-200 bg-white p-2">
+            <div className="mb-1.5 text-[11px] font-medium text-gray-700">최근 상태</div>
+            {lastExtractStats && (
+              <div className="mb-1 text-[11px] text-gray-500">
+                Extract: {lastExtractStats.page_count}p · {lastExtractStats.image_frame_count} images · {lastExtractStats.deco_group_count} deco
+              </div>
+            )}
+            {result?.warnings?.length ? (
+              <div className="mb-1 text-[11px] text-amber-700">
+                Warnings: {result.warnings.length}
+              </div>
+            ) : null}
+            <div className="space-y-1">
+              {recentLogs.map((log, idx) => (
+                <div key={`${log.timestamp}-${idx}`} className="truncate font-mono text-[10px] text-gray-500" title={log.message}>
+                  {log.message}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Panel ─────────────────────────────────────────────────────
 
 export function ASTTreePanel() {
@@ -622,19 +800,13 @@ export function ASTTreePanel() {
 
   if (!astDoc) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+      <div className="h-full text-gray-400 text-sm">
         {isLoading ? (
-          <div className="text-center">
-            <div className="mb-2">AST 로딩 중...</div>
-            <div className="text-xs">IDML 정규화 진행 중</div>
-          </div>
+          <ConversionDiagnosticsPanel astError={null} isAstLoading={true} />
         ) : error ? (
-          <div className="text-center text-red-400">
-            <div className="mb-1">AST 로드 실패</div>
-            <div className="text-xs">{error}</div>
-          </div>
+          <ConversionDiagnosticsPanel astError={error} isAstLoading={false} />
         ) : (
-          "인디자인 문서 (INDD) 또는 폴더를 열어주세요"
+          <ConversionDiagnosticsPanel astError={null} isAstLoading={false} />
         )}
       </div>
     );

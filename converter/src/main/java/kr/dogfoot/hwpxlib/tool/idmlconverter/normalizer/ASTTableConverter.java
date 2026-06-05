@@ -110,6 +110,8 @@ public class ASTTableConverter {
             }
         }
 
+        clearHorizontalInsetsForEmptyColumns(table);
+
         // 빈 스페이서 행을 위 행에 여백으로 흡수
         ASTTableSpacerMerger.merge(table);
         return table;
@@ -278,8 +280,69 @@ public class ASTTableConverter {
             }
         }
 
+        clearHorizontalInsetsForEmptyColumns(table);
         ASTTableSpacerMerger.merge(table);
         return table;
+    }
+
+    /**
+     * IDML에는 얇은 빈 컬럼을 시각적 간격/분리선 용도로 넣는 경우가 있다.
+     * HWP 셀은 내용이 없어도 margin이 폭 계산에 영향을 줄 수 있으므로,
+     * 컬럼 전체가 비어 있으면 해당 컬럼 셀의 좌우 inset을 제거한다.
+     */
+    private static void clearHorizontalInsetsForEmptyColumns(ASTTable table) {
+        if (table == null || table.colCount() <= 0 || table.rows() == null || table.rows().isEmpty()) return;
+        boolean[] emptyColumn = new boolean[table.colCount()];
+        boolean[] seenColumn = new boolean[table.colCount()];
+        java.util.Arrays.fill(emptyColumn, true);
+
+        for (ASTTableRow row : table.rows()) {
+            for (ASTTableCell cell : row.cells()) {
+                int start = Math.max(0, cell.columnIndex());
+                int end = Math.min(table.colCount(), start + Math.max(1, cell.columnSpan()));
+                boolean empty = isCellEmptyForColumnPolicy(cell);
+                for (int c = start; c < end; c++) {
+                    seenColumn[c] = true;
+                    if (!empty) emptyColumn[c] = false;
+                }
+            }
+        }
+
+        for (int c = 0; c < emptyColumn.length; c++) {
+            if (!seenColumn[c]) emptyColumn[c] = false;
+        }
+
+        for (ASTTableRow row : table.rows()) {
+            for (ASTTableCell cell : row.cells()) {
+                int start = Math.max(0, cell.columnIndex());
+                int end = Math.min(table.colCount(), start + Math.max(1, cell.columnSpan()));
+                boolean allCoveredColumnsEmpty = true;
+                for (int c = start; c < end; c++) {
+                    if (!emptyColumn[c]) {
+                        allCoveredColumnsEmpty = false;
+                        break;
+                    }
+                }
+                if (allCoveredColumnsEmpty && isCellEmptyForColumnPolicy(cell)) {
+                    cell.marginLeft(0);
+                    cell.marginRight(0);
+                }
+            }
+        }
+    }
+
+    private static boolean isCellEmptyForColumnPolicy(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null || cell.paragraphs().isEmpty()) return true;
+        for (ASTParagraph p : cell.paragraphs()) {
+            if (p.items() == null || p.items().isEmpty()) continue;
+            for (ASTInlineItem item : p.items()) {
+                if (item == null) continue;
+                if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) return false;
+                ASTTextRun run = (ASTTextRun) item;
+                if (run.text() != null && !run.text().trim().isEmpty()) return false;
+            }
+        }
+        return true;
     }
 
     /**

@@ -195,6 +195,10 @@ pub async fn extract_indd(
     }
     match extract_cache::store(&cache_key, &indd_path, &output_dir) {
         Ok(moved) => {
+            extract_cache::write_extractor_fingerprint(
+                &cache_key,
+                std::path::Path::new(&jsx_path),
+            );
             // 캐시 이동 성공 시 Links 링크 다시 연결
             if let Some(src_links) = links_dir.as_deref() {
                 let target_links = std::path::Path::new(&moved.temp_dir).join("Links");
@@ -246,8 +250,49 @@ pub async fn export_ast(idml_path: String, jar_path: String) -> Result<serde_jso
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse AST JSON: {}", e))
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    parse_ast_json_from_stdout(&stdout, &stderr)
+}
+
+fn parse_ast_json_from_stdout(stdout: &str, stderr: &str) -> Result<serde_json::Value, String> {
+    let trimmed = stdout.trim_start_matches('\u{feff}').trim_start();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if is_ast_json(&value) {
+            return Ok(value);
+        }
+    }
+
+    for (idx, ch) in stdout.char_indices() {
+        if ch != '{' {
+            continue;
+        }
+        let candidate = &stdout[idx..];
+        let mut stream = serde_json::Deserializer::from_str(candidate).into_iter::<serde_json::Value>();
+        if let Some(Ok(value)) = stream.next() {
+            if is_ast_json(&value) {
+                return Ok(value);
+            }
+        }
+    }
+
+    let stdout_preview = preview_text(stdout);
+    let stderr_preview = preview_text(stderr);
+    Err(format!(
+        "Failed to parse AST JSON: JSON object with AST fields was not found. stdout_prefix={:?}, stderr_prefix={:?}",
+        stdout_preview, stderr_preview
+    ))
+}
+
+fn is_ast_json(value: &serde_json::Value) -> bool {
+    value
+        .as_object()
+        .map(|obj| obj.contains_key("sections") || obj.contains_key("stories") || obj.contains_key("sourceFormat"))
+        .unwrap_or(false)
+}
+
+fn preview_text(text: &str) -> String {
+    let normalized = text.replace('\n', "\\n").replace('\r', "\\r");
+    normalized.chars().take(500).collect()
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -271,6 +316,13 @@ async fn try_partial_extraction(
     // 1. 이전 캐시 키 조회
     let indd = std::path::Path::new(indd_path);
     let prev_key = extract_cache::lookup_previous_cache_key(indd)?;
+    if !extract_cache::is_extractor_fingerprint_current(
+        &prev_key,
+        std::path::Path::new(jsx_path),
+    ) {
+        eprintln!("[B.2] extractor 변경 감지 → 부분 캐시 재사용 생략");
+        return None;
+    }
     let cached_hashes = extract_cache::load_page_hashes(&prev_key)?;
     let cached_item_map = extract_cache::load_page_item_map(&prev_key)?;
 

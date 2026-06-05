@@ -39,9 +39,9 @@ public class GroqClient {
         }
     }
 
-    /** ping 테스트: 짧은 "hello" 호출로 API 연결 확인 */
+    /** ping 테스트: 짧은 호출로 API 연결 확인 */
     public String ping() throws LLMException {
-        return complete("Respond with exactly: {\"ok\":true}", "ping");
+        return complete("You must respond with valid json only. Reply: {\"ok\":true}", "ping test");
     }
 
     // -------------------------------------------------------
@@ -50,10 +50,24 @@ public class GroqClient {
 
     private String callGroq(String systemPrompt, String userContent) throws LLMException {
         String body = buildOpenAIBody(LLMConfig.MODEL_GROQ_LLAMA, systemPrompt, userContent);
-        String raw = post(GROQ_URL, body,
-                "Authorization", "Bearer " + config.groqApiKey(),
-                "Content-Type", "application/json");
-        return extractOpenAIContent(raw);
+        // 429 rate-limit 시 최대 3회 재시도 (5s → 10s → 20s)
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                String raw = post(GROQ_URL, body,
+                        "Authorization", "Bearer " + config.groqApiKey(),
+                        "Content-Type", "application/json");
+                return extractOpenAIContent(raw);
+            } catch (LLMException e) {
+                if (e.getMessage().contains("HTTP 429") && attempt < 2) {
+                    int waitSec = 5 * (1 << attempt); // 5s, 10s
+                    System.err.println("[LLM] rate-limit 429, " + waitSec + "초 대기 후 재시도...");
+                    try { Thread.sleep(waitSec * 1000L); } catch (InterruptedException ignored) {}
+                } else {
+                    throw e;
+                }
+            }
+        }
+        throw new LLMException("GROQ rate-limit 재시도 3회 초과");
     }
 
     private String buildOpenAIBody(String model, String system, String user) {

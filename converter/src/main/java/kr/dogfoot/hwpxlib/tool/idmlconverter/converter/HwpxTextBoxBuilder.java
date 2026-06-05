@@ -38,6 +38,22 @@ public class HwpxTextBoxBuilder {
         this.frameTransformations = new FrameTransformations(ctx, paragraphBuilder, this);
     }
 
+    public static boolean nativeTextBoxGraphicsEnabled() {
+        return VisualSourcePolicy.useHwpNativeTextBoxGraphics();
+    }
+
+    static LineWrapMethod textFrameLineWrap(ASTTextFrameBlock block) {
+        return block != null && block.noAutoLineWrap()
+                ? LineWrapMethod.SQUEEZE
+                : LineWrapMethod.BREAK;
+    }
+
+    static LineWrapMethod inlineTextFrameLineWrap(ASTInlineObject obj) {
+        return obj != null && obj.noAutoLineWrap()
+                ? LineWrapMethod.SQUEEZE
+                : LineWrapMethod.BREAK;
+    }
+
     /** addPageLevelOverlay delegate — 외부 호출자(ASTToHwpxConverter, FlatToHwpxConverter) 호환 유지. */
     public void addPageLevelOverlay(Para anchorPara, ASTInlineObject obj, long pageX, long pageY) {
         overlayBuilder.addPageLevelOverlay(anchorPara, obj, pageX, pageY);
@@ -129,7 +145,7 @@ public class HwpxTextBoxBuilder {
         VerticalAlign2 vAlign = mapVerticalJustification(block.verticalJustification());
 
         subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(LineWrapMethod.BREAK)
+                .lineWrapAnd(textFrameLineWrap(block))
                 .vertAlignAnd(vAlign)
                 .linkListIDRefAnd("0")
                 .linkListNextIDRefAnd("0")
@@ -200,7 +216,8 @@ public class HwpxTextBoxBuilder {
     void setupTextBoxLineShape(Rectangle rect, String strokeColor, double strokeWeightPt,
                                 String strokeType, double strokeTint) {
         rect.createLineShape();
-        boolean hasStroke = strokeColor != null && strokeColor.startsWith("#") && strokeWeightPt > 0;
+        boolean hasStroke = nativeTextBoxGraphicsEnabled()
+                && strokeColor != null && strokeColor.startsWith("#") && strokeWeightPt > 0;
 
         if (hasStroke) {
             // points → hwpunit (1pt = 약 100 hwpunit for line width)
@@ -232,6 +249,7 @@ public class HwpxTextBoxBuilder {
      * fillTint는 색상 농도(흰색 블렌딩)로 처리하고, alpha=0(불투명)으로 설정.
      */
     void setupTextBoxFillBrush(Rectangle rect, String fillColor, double fillTint) {
+        if (!nativeTextBoxGraphicsEnabled()) return;
         if (fillColor != null && fillColor.startsWith("#")) {
             String tinted = blendColorWithWhite(fillColor, fillTint / 100.0);
             rect.createFillBrush();
@@ -249,6 +267,7 @@ public class HwpxTextBoxBuilder {
      * @return 등록 성공 여부
      */
     boolean setupTextBoxImgBrush(Rectangle rect, byte[] pngData) {
+        if (!nativeTextBoxGraphicsEnabled()) return false;
         if (pngData == null || pngData.length == 0) return false;
         try {
             String itemId = ImageInserter.registerImage(ctx.hwpxFile, pngData, "png");
@@ -316,8 +335,10 @@ public class HwpxTextBoxBuilder {
         // 라운드 코너 + 유효 fill/stroke가 있는 단일 컬럼 블록은 Rectangle(DrawTextBox)로 변환
         int colCount = Math.max(block.columnCount(), 1);
         if (colCount <= 1 && block.cornerRadius() > 0) {
-            boolean hasFill = block.fillColor() != null && block.fillColor().startsWith("#");
-            boolean hasStroke = block.strokeColor() != null && block.strokeColor().startsWith("#")
+            boolean hasFill = nativeTextBoxGraphicsEnabled()
+                    && block.fillColor() != null && block.fillColor().startsWith("#");
+            boolean hasStroke = nativeTextBoxGraphicsEnabled()
+                    && block.strokeColor() != null && block.strokeColor().startsWith("#")
                     && block.strokeWeight() > 0;
             if (hasFill || hasStroke) {
                 frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
@@ -327,9 +348,11 @@ public class HwpxTextBoxBuilder {
 
         if (colCount <= 1) {
             // 래퍼 fill 또는 프레임 자체 fill이 있으면 배경 사각형 추가
-            boolean hasOwnVisibleFill = block.fillColor() != null
+            boolean hasOwnVisibleFill = nativeTextBoxGraphicsEnabled()
+                    && block.fillColor() != null
                     && block.fillColor().startsWith("#") && !block.fillColor().equals("#FFFFFF");
-            boolean hasWrapper = block.hasWrapperFill() || hasOwnVisibleFill;
+            boolean hasWrapper = nativeTextBoxGraphicsEnabled()
+                    && (block.hasWrapperFill() || hasOwnVisibleFill);
             // 둥근 모서리 래퍼: Table 대신 Rectangle+DrawText 단일 객체 사용
             // (Table은 사각형이라 래퍼 Rectangle의 둥근 모서리를 덮어버림)
             if (hasWrapper && block.cornerRadius() > 0) {
@@ -366,10 +389,12 @@ public class HwpxTextBoxBuilder {
                     TextBoxLayoutHelpers.distributeParagraphs(block.paragraphs(), colCount);
 
             // 다단 프레임에 테두리/라운드코너가 있으면 전체를 감싸는 배경 사각형 추가
-            boolean hasFrameBorder = block.strokeColor() != null
+            boolean hasFrameBorder = nativeTextBoxGraphicsEnabled()
+                    && block.strokeColor() != null
                     && block.strokeColor().startsWith("#")
                     && block.strokeWeight() > 0;
-            boolean hasFrameStyle = hasFrameBorder || block.cornerRadius() > 0;
+            boolean hasFrameStyle = nativeTextBoxGraphicsEnabled()
+                    && (hasFrameBorder || block.cornerRadius() > 0);
             if (hasFrameStyle) {
                 addMultiColumnFrameBorder(framePara, block, w, h);
             }
@@ -391,6 +416,8 @@ public class HwpxTextBoxBuilder {
      */
     private void addMultiColumnFrameBorder(Para framePara, ASTTextFrameBlock block,
                                             long w, long h) {
+        if (!nativeTextBoxGraphicsEnabled()) return;
+
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
 
@@ -473,6 +500,8 @@ public class HwpxTextBoxBuilder {
      */
     private void addWrapperRoundedRect(Para framePara, ASTTextFrameBlock block,
                                         long w, long h) {
+        if (!nativeTextBoxGraphicsEnabled()) return;
+
         // 배경 fill: 래퍼 fill → 프레임 자체 fill → 없음
         String bgColor = null;
         double bgTint = 100;
@@ -643,7 +672,7 @@ public class HwpxTextBoxBuilder {
         dt.createSubList();
         SubList subList = dt.subList();
         subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(LineWrapMethod.BREAK)
+                .lineWrapAnd(textFrameLineWrap(block))
                 .vertAlignAnd(cellVAlign);
         subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
 
@@ -797,7 +826,7 @@ public class HwpxTextBoxBuilder {
 
         bf.idAnd(bfId)
                 .threeDAnd(false)
-                .shadowAnd(block.dropShadow())
+                .shadowAnd(nativeTextBoxGraphicsEnabled() && block.dropShadow())
                 .centerLineAnd(CenterLineSort.NONE)
                 .breakCellSeparateLine(false);
 
@@ -808,7 +837,8 @@ public class HwpxTextBoxBuilder {
 
         // 테두리 — 텍스트 프레임의 strokeColor/strokeWeight 반영
         String stroke = block.strokeColor();
-        boolean hasStroke = stroke != null && stroke.startsWith("#") && block.strokeWeight() > 0;
+        boolean hasStroke = nativeTextBoxGraphicsEnabled()
+                && stroke != null && stroke.startsWith("#") && block.strokeWeight() > 0;
 
         LineType2 lineType = LineType2.NONE;
         LineWidth lineWidth = LineWidth.MM_0_1;
@@ -834,7 +864,7 @@ public class HwpxTextBoxBuilder {
 
         // 배경 채우기 (fillTint는 색상 농도로 RGB에 적용, 불투명 처리)
         String fill = block.fillColor();
-        if (fill != null && fill.startsWith("#")) {
+        if (nativeTextBoxGraphicsEnabled() && fill != null && fill.startsWith("#")) {
             String tinted = blendColorWithWhite(fill, block.fillTint() / 100.0);
             bf.createFillBrush();
             bf.fillBrush().createWinBrush();
@@ -1015,6 +1045,7 @@ public class HwpxTextBoxBuilder {
      * 가로세로 비율이 1.5:1 이상일 때 ratio를 제한하여 라운드 사각형 유지.
      */
     static short computeCornerRatio(double cornerRadiusPts, long widthHwp, long heightHwp) {
+        if (!nativeTextBoxGraphicsEnabled()) return 0;
         if (cornerRadiusPts <= 0) return 0;
         long minSide = Math.min(widthHwp, heightHwp);
         long maxSide = Math.max(widthHwp, heightHwp);

@@ -13,7 +13,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 
+import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import javax.imageio.ImageIO;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
@@ -21,12 +23,15 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Phase 3 인라인 객체 / 글상자 체인 / 외부 위치 검사 (W3 Step E).
@@ -47,8 +52,10 @@ public class InlineFrameHandler {
 
     private InlineFrameHandler() {}
 
-
-
+    /** 원본에서 한 줄인 라벨/제목형 짧은 문장은 HWP 폰트폭 차이로 두 줄이 되지 않도록 SQUEEZE를 적용한다. */
+    private static final int SHORT_SINGLE_LINE_NO_WRAP_CHARS = 32;
+    private static final double INLINE_VECTOR_UNIT_MAX_SIZE_PT = 24.0;
+    private static final double INLINE_VECTOR_UNIT_OVERLAP_RATIO = 0.25;
 
     /**
      * 스레드 체인 순서로 블록 정렬: previousFrameId=null인 첫 번째 프레임부터 순서대로.
@@ -272,6 +279,7 @@ public class InlineFrameHandler {
             obj.width(CoordinateConverter.pointsToHwpunits(w));
             obj.height(CoordinateConverter.pointsToHwpunits(h));
             obj.sourceId(ParagraphTextHelpers.domIdToSourceId(childTf.id()));
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
 
             if (matchedRect != null) {
                 String strokeName = matchedRect.strokeColorName();
@@ -359,6 +367,7 @@ public class InlineFrameHandler {
                 obj.width(CoordinateConverter.pointsToHwpunits(rw));
                 obj.height(CoordinateConverter.pointsToHwpunits(rh));
                 obj.sourceId(ParagraphTextHelpers.domIdToSourceId(nestedTf.id()));
+                obj.noAutoLineWrap(shouldUseNoAutoLineWrap(nestedTf));
 
                 String strokeName = rectPi.strokeColorName();
                 if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)) {
@@ -480,6 +489,7 @@ public class InlineFrameHandler {
             obj.width(CoordinateConverter.pointsToHwpunits(rw));
             obj.height(CoordinateConverter.pointsToHwpunits(rh));
             obj.sourceId(tfSourceId);
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(tf));
 
             String strokeName = bestSibling.strokeColorName();
             if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)) {
@@ -824,12 +834,18 @@ public class InlineFrameHandler {
             }
         }
 
-        // INLINE_TEXT_FRAME: fill color 기반 (hp:container PNG 오버레이는 HWP에서 텍스트 미표시 문제로 사용 안 함)
+        ASTInlineObject renderedBadge = loadRenderedInlineBadge(ctx, anchoredObjectId, w, h, childTf);
+        if (renderedBadge != null) {
+            return renderedBadge;
+        }
+
+        // Fallback: rendered PNG가 없으면 투명 HWP rect + 텍스트로 공간만 보존한다.
         ASTInlineObject obj = new ASTInlineObject();
         obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
         obj.width(CoordinateConverter.pointsToHwpunits(w));
         obj.height(CoordinateConverter.pointsToHwpunits(hForInline));
         obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+        obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
 
         // 배경 fill 색 (없으면 stroke 색 적용)
         String fillName = bgShape.fillColorName();
@@ -866,6 +882,79 @@ public class InlineFrameHandler {
         obj.verticalJustification("CenterAlign");
 
         return obj;
+    }
+
+    private static ASTInlineObject loadRenderedInlineBadge(
+            ResolvedBuildContext ctx, int anchoredObjectId,
+            double widthPt, double heightPt, ResolvedTextFrame childTf) {
+        if (ctx.basePath == null || childTf == null) return null;
+
+        File pngFile = null;
+        RenderedGroup matched = null;
+        if (ctx.resolvedData != null && ctx.resolvedData.allRenderedFloatingItems() != null) {
+            for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+                if (rg == null || rg.id() != anchoredObjectId || rg.file() == null) continue;
+                File candidate = new File(ctx.basePath, rg.file());
+                if (candidate.exists()) {
+                    pngFile = candidate;
+                    matched = rg;
+                    break;
+                }
+            }
+        }
+        if (pngFile == null) {
+            File candidate = new File(ctx.basePath, "rendered_frames/inline_" + anchoredObjectId + ".png");
+            if (candidate.exists()) pngFile = candidate;
+        }
+        if (pngFile == null) return null;
+
+        try {
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            BufferedImage img = ImageIO.read(pngFile);
+            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+            if (matched != null && "hwpx_tf".equals(matched.textOwner())
+                    && !matched.hasEditableTextHiddenFromPng()) {
+                return null;
+            }
+
+            double bw = widthPt;
+            double bh = heightPt;
+            if (matched != null && matched.bounds() != null && matched.bounds().length >= 4) {
+                double[] b = matched.bounds();
+                bw = Math.abs(b[3] - b[1]) * ctx.scaleFactor;
+                bh = Math.abs(b[2] - b[0]) * ctx.scaleFactor;
+            }
+            if (bw <= 0 || bh <= 0) return null;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP);
+            obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+            obj.imageData(imageData);
+            obj.imageFormat("png");
+            obj.pixelWidth(img.getWidth());
+            obj.pixelHeight(img.getHeight());
+            obj.width(CoordinateConverter.pointsToHwpunits(bw));
+            obj.height(CoordinateConverter.pointsToHwpunits(bh));
+            obj.keepInline(true);
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
+            obj.verticalJustification("CenterAlign");
+            if (shouldOverlayRenderedBadgeText(matched)) {
+                buildBadgeParagraph(ctx, childTf, obj);
+            }
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean shouldOverlayRenderedBadgeText(RenderedGroup matched) {
+        if (matched == null) return true;
+        if (matched.hasEditableTextHiddenFromPng()) return true;
+        if (Boolean.TRUE.equals(matched.containsEditableText())
+                && "indesign_png".equals(matched.textOwner())) {
+            return false;
+        }
+        return true;
     }
 
     /** 배지 텍스트 단락 빌드 (CENTER 정렬, 폰트 속성 복사). INLINE_TEXT_FRAME/INLINE_BADGE_GROUP 공용. */
@@ -931,6 +1020,7 @@ public class InlineFrameHandler {
         obj.width(CoordinateConverter.pointsToHwpunits(w));
         obj.height(CoordinateConverter.pointsToHwpunits(h));
         obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+        obj.noAutoLineWrap(shouldUseNoAutoLineWrap(tf));
 
         String fillHex = ctx.resolvedData.resolveColorHex(fillName);
         if (fillHex != null) {
@@ -1275,6 +1365,202 @@ public class InlineFrameHandler {
         return isNoneColor(tf.fillColor()) && isNoneColor(tf.strokeColor());
     }
 
+    private static boolean isOwnedByPlacedVisualRender(ResolvedBuildContext ctx, int objectId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(objectId));
+        String itemType = item != null ? item.type() : null;
+        if (!"Polygon".equals(itemType) && !"Rectangle".equals(itemType)) {
+            return false;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() == objectId) continue;
+            if (rg.file() == null || rg.file().isEmpty()) continue;
+            if (Boolean.FALSE.equals(rg.placementAllowed())) continue;
+            if (!containsId(rg.visualOnlyChildIds(), objectId)
+                    && !containsId(rg.tfInlineVisualIds(), objectId)) continue;
+
+            String type = rg.type();
+            if (type != null && !"page_object".equals(type)) continue;
+
+            String visualOwner = rg.visualOwner();
+            if (visualOwner != null && !"indesign_png".equals(visualOwner)) continue;
+
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean containsId(int[] ids, int id) {
+        if (ids == null) return false;
+        for (int candidate : ids) {
+            if (candidate == id) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 원본에서는 하나의 시각 단위인 vector-only inline 조각들이 별도 Polygon/Rectangle으로
+     * 흩어진 경우 하나의 PNG로 합성한다. 예: 체크박스 외곽 + 체크 표시.
+     */
+    private static ASTInlineObject loadMergedInlineVectorUnit(ResolvedBuildContext ctx, int anchoredObjectId) {
+        RenderedGroup anchor = findInlineRenderedGroup(ctx, anchoredObjectId);
+        if (!isMergeableInlineVector(ctx, anchor)) return null;
+
+        List<RenderedGroup> parts = new ArrayList<RenderedGroup>();
+        parts.add(anchor);
+        double[] union = copyBounds(anchor.bounds());
+        if (union == null) return null;
+
+        for (RenderedGroup candidate : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (candidate == null || candidate.id() == anchoredObjectId) continue;
+            if (!isMergeableInlineVector(ctx, candidate)) continue;
+            if (ctx.isDisposed(candidate.id(), FrameDisposition.TEXT_BLOCK_PLACED)) continue;
+            if (candidate.pageIndex() != anchor.pageIndex()) continue;
+            if (!boundsOverlapEnough(anchor.bounds(), candidate.bounds())) continue;
+            parts.add(candidate);
+            union = unionBounds(union, candidate.bounds());
+        }
+        if (parts.size() <= 1) return null;
+
+        try {
+            BufferedImage merged = renderMergedInlineParts(ctx, parts, union);
+            if (merged == null) return null;
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            ImageIO.write(merged, "png", out);
+
+            for (RenderedGroup part : parts) {
+                if (part.id() != anchoredObjectId) {
+                    ctx.setDisposition(part.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+                }
+            }
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+            obj.imageData(out.toByteArray());
+            obj.imageFormat("png");
+            obj.pixelWidth(merged.getWidth());
+            obj.pixelHeight(merged.getHeight());
+            obj.boundsX(union[1]);
+
+            double[] pageRelative = toPageRelativeRenderedBounds(ctx, anchor, union);
+            obj.resolvedPageX(CoordinateConverter.pointsToHwpunits(pageRelative[0] * ctx.scaleFactor));
+            obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(pageRelative[1] * ctx.scaleFactor));
+            obj.width(CoordinateConverter.pointsToHwpunits(Math.abs(union[3] - union[1]) * ctx.scaleFactor));
+            obj.height(CoordinateConverter.pointsToHwpunits(Math.abs(union[2] - union[0]) * ctx.scaleFactor));
+            obj.sourceId("u" + Integer.toHexString(anchoredObjectId) + "_vector_unit");
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static RenderedGroup findInlineRenderedGroup(ResolvedBuildContext ctx, int id) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) return null;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg != null && rg.id() == id && isInlineRenderedGroupType(rg)) return rg;
+        }
+        return null;
+    }
+
+    private static boolean isMergeableInlineVector(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || rg == null || !isInlineRenderedGroupType(rg)) return false;
+        if (rg.file() == null || rg.file().isEmpty()) return false;
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        if (w <= 0 || h <= 0 || w > INLINE_VECTOR_UNIT_MAX_SIZE_PT || h > INLINE_VECTOR_UNIT_MAX_SIZE_PT) return false;
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(rg.id()));
+        if (item == null) return false;
+        String type = item.type();
+        return "Polygon".equals(type) || "Rectangle".equals(type) || "Oval".equals(type) || "GraphicLine".equals(type);
+    }
+
+    private static boolean isInlineRenderedGroupType(RenderedGroup rg) {
+        if (rg == null) return false;
+        return "inline_object".equals(rg.itemType()) || "inline_object".equals(rg.type());
+    }
+
+    private static BufferedImage renderMergedInlineParts(
+            final ResolvedBuildContext ctx, List<RenderedGroup> parts, double[] union) throws Exception {
+        if (parts == null || parts.isEmpty() || union == null || union.length < 4) return null;
+
+        List<RenderedGroup> sorted = new ArrayList<RenderedGroup>(parts);
+        sorted.sort(new java.util.Comparator<RenderedGroup>() {
+            @Override
+            public int compare(RenderedGroup a, RenderedGroup b) {
+                ResolvedPageItem ia = ctx.resolvedData.getPageItem(String.valueOf(a.id()));
+                ResolvedPageItem ib = ctx.resolvedData.getPageItem(String.valueOf(b.id()));
+                int za = ia != null ? ia.zOrder() : a.zOrder();
+                int zb = ib != null ? ib.zOrder() : b.zOrder();
+                return Integer.compare(za, zb);
+            }
+        });
+
+        double scale = pixelsPerPoint(ctx, sorted.get(0));
+        int width = Math.max(1, (int) Math.ceil(Math.abs(union[3] - union[1]) * scale));
+        int height = Math.max(1, (int) Math.ceil(Math.abs(union[2] - union[0]) * scale));
+        BufferedImage merged = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = merged.createGraphics();
+        try {
+            for (RenderedGroup part : sorted) {
+                File file = new File(ctx.basePath, part.file());
+                BufferedImage img = ImageIO.read(file);
+                if (img == null) continue;
+                double[] b = part.bounds();
+                int x = (int) Math.round((b[1] - union[1]) * scale);
+                int y = (int) Math.round((b[0] - union[0]) * scale);
+                int w = Math.max(1, (int) Math.round(Math.abs(b[3] - b[1]) * scale));
+                int h = Math.max(1, (int) Math.round(Math.abs(b[2] - b[0]) * scale));
+                g.drawImage(img, x, y, w, h, null);
+            }
+        } finally {
+            g.dispose();
+        }
+        return merged;
+    }
+
+    private static double pixelsPerPoint(ResolvedBuildContext ctx, RenderedGroup rg) throws Exception {
+        if (ctx != null && ctx.pngExportDpi > 0) return ctx.pngExportDpi / 72.0;
+        if (ctx == null || rg == null || rg.file() == null || rg.bounds() == null) return 4.0;
+        BufferedImage img = ImageIO.read(new File(ctx.basePath, rg.file()));
+        double wPt = Math.abs(rg.bounds()[3] - rg.bounds()[1]);
+        if (img != null && wPt > 0) return img.getWidth() / wPt;
+        return 4.0;
+    }
+
+    private static boolean boundsOverlapEnough(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
+        double top = Math.max(a[0], b[0]);
+        double left = Math.max(a[1], b[1]);
+        double bottom = Math.min(a[2], b[2]);
+        double right = Math.min(a[3], b[3]);
+        double iw = right - left;
+        double ih = bottom - top;
+        if (iw <= 0 || ih <= 0) return false;
+        double overlap = iw * ih;
+        double areaA = Math.abs((a[2] - a[0]) * (a[3] - a[1]));
+        double areaB = Math.abs((b[2] - b[0]) * (b[3] - b[1]));
+        double smaller = Math.min(areaA, areaB);
+        return smaller > 0 && overlap / smaller >= INLINE_VECTOR_UNIT_OVERLAP_RATIO;
+    }
+
+    private static double[] copyBounds(double[] b) {
+        if (b == null || b.length < 4) return null;
+        return new double[]{b[0], b[1], b[2], b[3]};
+    }
+
+    private static double[] unionBounds(double[] a, double[] b) {
+        return new double[]{
+                Math.min(a[0], b[0]),
+                Math.min(a[1], b[1]),
+                Math.max(a[2], b[2]),
+                Math.max(a[3], b[3])
+        };
+    }
+
     /**
      * renderedFloatingItems에서 인라인 객체 PNG를 로드하여 ASTInlineObject로 변환.
      */
@@ -1286,6 +1572,14 @@ public class InlineFrameHandler {
         if (ctx.isDisposed(anchoredObjectId, FrameDisposition.PNG_CONVERT_TO_FLOATING)) return null;
         // Phase 2 가 floating text box 로 승격한 inline TF → inline PNG 도 억제 (28pt PNG가 행간 팽창하는 것 방지).
         if (ctx.isDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+
+        // 부모 rendered PNG가 이미 소유한 visual-only 인라인 그래픽은 Story 흐름에 다시 넣지 않는다.
+        // 예: 말풍선 curly-brace, 답안 밑줄, 작은 bullet/badge 배경.
+        // 이 객체들은 부모 PNG의 원본 좌표가 정답이고, 인라인으로 중복 배치하면 줄바꿈/수직정렬 문제가 생긴다.
+        if (isOwnedByPlacedVisualRender(ctx, anchoredObjectId)) return null;
+
+        ASTInlineObject mergedVectorUnit = loadMergedInlineVectorUnit(ctx, anchoredObjectId);
+        if (mergedVectorUnit != null) return mergedVectorUnit;
 
         // 자식/자손 TextFrame이 플로팅 텍스트박스로 배치될 예정이면
         // inline_object PNG를 로드하지 않는다 (이미지 + 글상자 중복 방지).
@@ -1316,7 +1610,7 @@ public class InlineFrameHandler {
             // inline+editable 배지 자식: Phase 3가 INLINE_TEXT_FRAME으로 전담 처리 →
             // 이 TF의 텍스트는 INLINE_TEXT_FRAME 내부에 포함됨 → loadInlineObject PNG 폐기.
             if (childTf.isInline() && ctx.resolvedData.isEditableTextFrame(childTf.id())) {
-                continue;
+                return null;
             }
             if (ctx.resolvedData.isEditableTextFrame(childTf.id())) {
                 return null;
@@ -1364,10 +1658,12 @@ public class InlineFrameHandler {
                     double[] bounds = rg.bounds();
                     if (bounds != null && bounds.length >= 4) {
                         obj.boundsX(bounds[1]); // rendered X 좌표 (인라인 정렬용)
-                        // SPEC-020: 페이지 절대 좌표 기록 — 같은 셀에 여러 인라인이 있을 때
+                        // SPEC-020: 페이지 상대 좌표 기록 — 같은 셀에 여러 인라인이 있을 때
                         // cellX/cellY fallback 으로 겹치는 문제를 막는다.
-                        double pxPt = bounds[1] * ctx.scaleFactor;
-                        double pyPt = bounds[0] * ctx.scaleFactor;
+                        // rendered bounds는 spread 좌표일 수 있으므로 page bounds를 빼서 HWP PAPER 좌표로 정규화한다.
+                        double[] pageRelative = toPageRelativeRenderedBounds(ctx, rg, bounds);
+                        double pxPt = pageRelative[0] * ctx.scaleFactor;
+                        double pyPt = pageRelative[1] * ctx.scaleFactor;
                         obj.resolvedPageX(CoordinateConverter.pointsToHwpunits(pxPt));
                         obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(pyPt));
                         double bw = Math.abs(bounds[3] - bounds[1]) * ctx.scaleFactor; // right - left
@@ -1496,6 +1792,7 @@ public class InlineFrameHandler {
             box.width(CoordinateConverter.pointsToHwpunits(w));
             box.height(CoordinateConverter.pointsToHwpunits(h));
             box.sourceId("child_u" + Integer.toHexString(tfDomId));
+            box.noAutoLineWrap(shouldUseNoAutoLineWrap(tf));
 
             ASTParagraph paraInner = new ASTParagraph();
             paraInner.alignment("CENTER");
@@ -1672,6 +1969,63 @@ public class InlineFrameHandler {
             }
         }
         return 0;
+    }
+
+    private static double[] toPageRelativeRenderedBounds(
+            ResolvedBuildContext ctx, RenderedGroup rg, double[] bounds) {
+        if (bounds == null || bounds.length < 4) return new double[]{0.0, 0.0};
+        double x = bounds[1];
+        double y = bounds[0];
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.pages() == null || rg == null) {
+            return new double[]{x, y};
+        }
+        for (ResolvedPage page : ctx.resolvedData.pages()) {
+            if (page == null || page.index() != rg.pageIndex()) continue;
+            double[] pb = page.bounds();
+            if (pb == null || pb.length < 4) break;
+            double pageLeft = pb[1] / ctx.scaleFactor;
+            double pageTop = pb[0] / ctx.scaleFactor;
+            if (bounds[3] >= pageLeft) x = bounds[1] - pageLeft;
+            if (bounds[2] >= pageTop) y = bounds[0] - pageTop;
+            break;
+        }
+        return new double[]{x, y};
+    }
+
+    private static boolean shouldUseNoAutoLineWrap(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        if (isShortSingleLineTextFrame(tf)) return true;
+        if (tf.composedLines() == null || tf.composedLines().size() < 2) return false;
+        String visibleText = tf.frameVisibleText();
+        if (visibleText != null && visibleText.startsWith("\uFFFC")) return false;
+
+        Set<Integer> paragraphIndices = new HashSet<>();
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null) return false;
+            int paraIndex = line.paraIndex();
+            if (paraIndex < 0 || !paragraphIndices.add(paraIndex)) {
+                return false;
+            }
+        }
+        return paragraphIndices.size() == tf.composedLines().size();
+    }
+
+    private static boolean isShortSingleLineTextFrame(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines == null || lines.size() != 1) return false;
+        String visibleText = tf.frameVisibleText();
+        if (visibleText == null || visibleText.startsWith("\uFFFC")) return false;
+        if (visibleText.indexOf('\n') >= 0 || visibleText.indexOf('\r') >= 0) return false;
+        if (tf.paragraphStart() != tf.paragraphEnd()) return false;
+        if (tf.frameParaTexts() != null && tf.frameParaTexts().size() != 1) return false;
+
+        String normalized = visibleText
+                .replace("\uFFFC", "")
+                .replace("\u0007", "")
+                .replaceAll("\\s+", "")
+                .trim();
+        return !normalized.isEmpty() && normalized.length() <= SHORT_SINGLE_LINE_NO_WRAP_CHARS;
     }
 
 }

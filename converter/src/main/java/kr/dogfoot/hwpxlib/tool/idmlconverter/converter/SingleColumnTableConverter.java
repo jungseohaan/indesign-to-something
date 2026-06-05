@@ -54,12 +54,6 @@ final class SingleColumnTableConverter {
                                            long x, long y, long w, long h,
                                            java.util.List<ASTParagraph> paragraphs,
                                            boolean suppressBorder) {
-        // 폰트 메트릭 기반 높이 보정: TOP 정렬만 적용 (CENTER/BOTTOM은 팽창 시 중앙/하단 정렬 위치가 틀어짐)
-        VerticalAlign2 _vAlignCheck = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
-        if (_vAlignCheck == VerticalAlign2.TOP) {
-            h = TextBoxLayoutHelpers.adjustHeightByFontMetrics(ctx, h, paragraphs);
-        }
-
         // overflow 방지 높이 축소: resolved 기반 파이프라인에서는 geometricBounds가 정확하므로 비활성화
         // (레거시 파이프라인용 코드, 새 파이프라인에서는 필요 없음)
 
@@ -67,6 +61,7 @@ final class SingleColumnTableConverter {
         if (ctx.config != null && ctx.config.textBoxWidthExpandPercent() > 0) {
             w = w + w * ctx.config.textBoxWidthExpandPercent() / 100;
         }
+        w = expandWidthForDotLeaderTabs(block, paragraphs, w);
 
         Run anchorRun = framePara.addNewRun();
         anchorRun.charPrIDRef("0");
@@ -96,10 +91,9 @@ final class SingleColumnTableConverter {
                 .borderFillIDRefAnd("1")
                 .noAdjustAnd(false);
 
-        // ShapeSize — verticalJustification 이 CENTER/BOTTOM 일 때 높이를 명시 (정렬 동작 보장).
-        // TOP 정렬은 0 (auto) 로 두어 콘텐츠 자동 확장 허용.
-        VerticalAlign2 _vAlignForTblSz = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
-        long _tblHeight = (_vAlignForTblSz != VerticalAlign2.TOP && h > 0) ? h : 0L;
+        // ShapeSize — 실제 프레임 높이를 명시한다.
+        // TOP 정렬 표도 height=0(auto)로 두면 일부 HWPX 렌더러에서 겹침/표시 누락이 발생한다.
+        long _tblHeight = h > 0 ? h : 0L;
         table.createSZ();
         table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
                 .heightAnd(_tblHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
@@ -174,23 +168,17 @@ final class SingleColumnTableConverter {
         tc.createCellSpan();
         tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
 
-        // 셀 크기 — verticalJustification 이 CENTER/BOTTOM 일 때 셀 높이를 명시해야 정렬 동작.
-        // TOP 정렬은 0 (auto) 로 두어 콘텐츠 자동 확장 허용.
+        // 셀 크기 — 표 높이와 동일하게 실제 프레임 높이를 명시한다.
         tc.createCellSz();
-        VerticalAlign2 cellVAlignForSz = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
-        long cellHeight = (cellVAlignForSz != VerticalAlign2.TOP && h > 0) ? h : 0L;
+        long cellHeight = h > 0 ? h : 0L;
         tc.cellSz().widthAnd(w).heightAnd(cellHeight);
 
-        // 셀 여백 — 블록 인셋 적용 (InDesign insetSpacing), 하단 최소 5pt.
-        // 단, 셀 높이가 작은 (≤ 2000 hwpu = 20pt) 작은 라벨/배지는 강제 마진 적용 시 텍스트가 셀 밖으로 밀려나므로 인셋 그대로 사용.
+        // 셀 여백 — 블록 인셋 적용 (InDesign insetSpacing).
         tc.createCellMargin();
-        long bottomInset = (cellHeight > 0 && cellHeight <= 2000)
-                ? block.insetBottom()
-                : Math.max(block.insetBottom(), 500L);
         tc.cellMargin().leftAnd(block.insetLeft())
                 .rightAnd(block.insetRight())
                 .topAnd(block.insetTop())
-                .bottomAnd(bottomInset);
+                .bottomAnd(block.insetBottom());
 
         // 셀 내부 SubList
         tc.createSubList();
@@ -198,7 +186,7 @@ final class SingleColumnTableConverter {
         TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
         VerticalAlign2 cellVAlign = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
         subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(LineWrapMethod.BREAK)
+                .lineWrapAnd(HwpxTextBoxBuilder.textFrameLineWrap(block))
                 .vertAlignAnd(cellVAlign);
 
         // 연결 글상자 링크 설정
@@ -235,6 +223,7 @@ final class SingleColumnTableConverter {
                 }
             }
         }
+        suppressFirstParagraphSpaceBefore(paragraphs);
 
         // 단락 추가 (인라인 테이블 포함)
         for (ASTParagraph para : paragraphs) {
@@ -248,5 +237,33 @@ final class SingleColumnTableConverter {
         if (subList.countOfPara() == 0) {
             paragraphBuilder.addEmptySubListPara(subList);
         }
+    }
+
+    private void suppressFirstParagraphSpaceBefore(java.util.List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return;
+        ASTParagraph firstPara = paragraphs.get(0);
+        if (firstPara == null || firstPara.spaceBefore() == null || firstPara.spaceBefore() <= 0) return;
+        // InDesign does not render paragraph Space Before as top padding at the start of a text frame.
+        firstPara.spaceBefore(0L);
+    }
+
+    private long expandWidthForDotLeaderTabs(ASTTextFrameBlock block,
+                                             java.util.List<ASTParagraph> paragraphs,
+                                             long width) {
+        if (block == null || paragraphs == null || paragraphs.isEmpty()) return width;
+        final long safetyPad = 500L; // 5pt: HWP tab leader/right edge clipping guard.
+        long requiredInnerWidth = 0L;
+        for (ASTParagraph para : paragraphs) {
+            if (para == null || para.tabStops() == null) continue;
+            long paraRight = para.rightMargin() != null ? Math.max(0L, para.rightMargin()) : 0L;
+            for (ASTTabStop stop : para.tabStops()) {
+                if (stop == null || stop.position() <= 0) continue;
+                if (!".".equals(stop.leader())) continue;
+                requiredInnerWidth = Math.max(requiredInnerWidth, stop.position() + paraRight);
+            }
+        }
+        if (requiredInnerWidth <= 0L) return width;
+        long requiredOuterWidth = block.insetLeft() + requiredInnerWidth + block.insetRight() + safetyPad;
+        return Math.max(width, requiredOuterWidth);
     }
 }

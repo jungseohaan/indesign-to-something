@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import java.io.File;
@@ -37,11 +38,14 @@ public final class RenderableFramePlacer {
                 continue;
             }
             if (rg3.file() == null) continue;
+            if (ctx.isDisposed(rg3.id(), FrameDisposition.TEXT_BLOCK_PLACED)) continue;
             // Phase 6(BackgroundInjector)이 이미 배치한 항목은 중복 배치 방지
             if (ctx.phase6PlacedIds.contains(rg3.id())) continue;
             // inline_object로도 등록된 ID는 Phase 3이 인라인으로 처리 → 플로팅 중복 방지
             if (ctx.resolvedData.isInlineObjectId(rg3.id())) continue;
-            // 자식 TF가 editableTextFrame인 그룹은 Phase 3이 텍스트로 배치 → 그룹 PNG 중복 방지
+            if (rg3.shouldSkipByOwnership()) continue;
+            // 자식 TF가 editableTextFrame인 그룹은 기본적으로 Phase 3 텍스트와 중복된다.
+            // extractor가 텍스트를 숨긴 visual-only PNG라고 명시한 경우는 배치한다.
             if (rg3.childIds() != null) {
                 boolean hasEditableTfChild = false;
                 for (int childId : rg3.childIds()) {
@@ -50,7 +54,7 @@ public final class RenderableFramePlacer {
                         break;
                     }
                 }
-                if (hasEditableTfChild) continue;
+                if (hasEditableTfChild && !rg3.hasEditableTextHiddenFromPng()) continue;
             }
             String dedupKey3 = rg3.pageIndex() + "|" + rg3.file();
             if (!placedKeys.add(dedupKey3)) continue;
@@ -117,8 +121,20 @@ public final class RenderableFramePlacer {
                     fig3.imageFormat("png");
                     fig3.pixelWidth(img3.getWidth());
                     fig3.pixelHeight(img3.getHeight());
-                    fig3.zOrder(rg3.zOrder() > 0 ? rg3.zOrder() : 5);
-                    fig3.fromGroup(true);
+                    boolean coversPageByArea3 = pageWidthPt3 < 1e9 && pageHeightPt3 < 1e9
+                            && (rawRight3 - rawLeft3) * (rawBottom3 - rawTop3)
+                                >= 0.3 * pageWidthPt3 * pageHeightPt3;
+                    boolean isPageCoveringBg3 = rawLeft3 <= 10.0 * sf3
+                            && rawTop3 <= 10.0 * sf3
+                            && (rawBottom3 >= pageHeightPt3 - sf3 || coversPageByArea3);
+                    boolean isBackgroundLike3 = isPageCoveringBg3 || coversPageByArea3;
+                    int z3 = isBackgroundLike3
+                            ? 0
+                            : (rg3.zOrderKnown()
+                                    ? rg3.zOrder()
+                                    : (rg3.zOrder() > 0 ? rg3.zOrder() : 5));
+                    fig3.zOrder(z3);
+                    fig3.fromGroup(!isBackgroundLike3);
                     sections.get(secIdx3).addBlock(fig3);
                     count++;
                 }
@@ -162,8 +178,8 @@ public final class RenderableFramePlacer {
                                 figOv.imageFormat("png");
                                 figOv.pixelWidth(ovImg.getWidth());
                                 figOv.pixelHeight(ovImg.getHeight());
-                                figOv.zOrder(1); // overflow 배경은 항상 최하단
-                                figOv.fromGroup(true);
+                                figOv.zOrder(0); // overflow 배경은 항상 최하단
+                                figOv.fromGroup(false);
                                 sections.get(nextSec).addBlock(figOv);
                                 count++;
                                 placedKeys.add(nextPi + "|" + rg3.file());
@@ -218,8 +234,20 @@ public final class RenderableFramePlacer {
                                 figLeft.imageFormat("png");
                                 figLeft.pixelWidth(leftImg.getWidth());
                                 figLeft.pixelHeight(leftImg.getHeight());
-                                figLeft.zOrder(rg3.zOrder() > 0 ? rg3.zOrder() : 5);
-                                figLeft.fromGroup(true);
+                                boolean coversPageByAreaLeft = prevPageW < 1e9 && prevPageH < 1e9
+                                        && (rawRight3 - rawLeft3) * (rawBottom3 - rawTop3)
+                                            >= 0.3 * prevPageW * prevPageH;
+                                boolean isPageCoveringBgLeft = ovXonPrev <= 10.0 * sf3
+                                        && rawTop3 <= 10.0 * sf3
+                                        && (rawBottom3 >= prevPageH - sf3 || coversPageByAreaLeft);
+                                boolean isBackgroundLikeLeft = isPageCoveringBgLeft || coversPageByAreaLeft;
+                                int zLeft = isBackgroundLikeLeft
+                                        ? 0
+                                        : (rg3.zOrderKnown()
+                                                ? rg3.zOrder()
+                                                : (rg3.zOrder() > 0 ? rg3.zOrder() : 5));
+                                figLeft.zOrder(zLeft);
+                                figLeft.fromGroup(!isBackgroundLikeLeft);
                                 sections.get(prevSec).addBlock(figLeft);
                                 count++;
                                 placedKeys.add(prevPi + "|" + rg3.file());

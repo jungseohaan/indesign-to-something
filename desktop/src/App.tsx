@@ -8,13 +8,10 @@ import { PdfPreviewPanel } from "./components/PdfPreviewPanel";
 import { ConversionPanel } from "./components/ConversionPanel";
 import { FontMappingModal } from "./components/FontMappingModal";
 import { InddBatchModal } from "./components/InddBatchModal";
-import { SemanticPage } from "./components/SemanticPage";
-import { ReextractReviewModal } from "./components/ReextractReviewModal";
+import { TeachingPage } from "./components/TeachingPage";
 import { useAppStore } from "./stores/useAppStore";
-import { useSemanticStore } from "./stores/useSemanticStore";
-import { useAstStore } from "./stores/useAstStore";
 
-type Tab = "converter" | "semantic";
+type Tab = "converter" | "teaching";
 type RightPanel = "ast" | "pdf";
 
 function App() {
@@ -61,62 +58,13 @@ function App() {
       }
     });
 
-    // ────────────────────────────────────────────────────────────
-    // SPEC-019 M1: 새 메뉴 이벤트 리스너
-    // ────────────────────────────────────────────────────────────
-
-    // 탭 전환 (⌘1 / ⌘2)
     const unlistenTabConverter = listen("menu-tab-converter", () => {
       setCurrentTab("converter");
     });
-    const unlistenTabSemantic = listen("menu-tab-semantic", () => {
-      setCurrentTab("semantic");
+    const unlistenTabTeaching = listen("menu-tab-teaching", () => {
+      setCurrentTab("teaching");
     });
 
-    // 시멘틱 추출 (⌘R)
-    const unlistenSemanticExtract = listen("menu-semantic-extract", () => {
-      const astDoc = useAstStore.getState().astDoc;
-      if (!astDoc) {
-        alert("먼저 InDesign 또는 IDML 파일을 열어 AST를 로드하세요.");
-        return;
-      }
-      setCurrentTab("semantic");
-      useSemanticStore.getState().loadFromAst(astDoc);
-    });
-
-    // 시멘틱 재분류 (⌘⇧R)
-    const unlistenSemanticReclassify = listen("menu-semantic-reclassify", () => {
-      const { nodes, activeSchema, reclassify } = useSemanticStore.getState();
-      if (nodes.length === 0) {
-        alert("재분류할 노드가 없습니다. 먼저 시멘틱을 추출하세요.");
-        return;
-      }
-      if (!activeSchema) {
-        alert("활성 스키마가 없습니다. 스키마를 선택하세요.");
-        return;
-      }
-      setCurrentTab("semantic");
-      reclassify();
-    });
-
-    // 스키마 편집 (⌘⇧M)
-    const unlistenSchemaEdit = listen("menu-semantic-schema-edit", () => {
-      setCurrentTab("semantic");
-      useSemanticStore.getState().setShowSchemaEditor(true);
-    });
-
-    // 스키마 AST에서 생성
-    const unlistenSchemaGenerate = listen("menu-semantic-schema-generate", () => {
-      const astDoc = useAstStore.getState().astDoc;
-      if (!astDoc) {
-        alert("먼저 InDesign 또는 IDML 파일을 열어 AST를 로드하세요.");
-        return;
-      }
-      setCurrentTab("semantic");
-      useSemanticStore.getState().generateSchemaFromAst(astDoc);
-    });
-
-    // Export ▸ HWPX (⌘E)
     const unlistenExportHwpx = listen("menu-export-hwpx", async () => {
       const { startConversion } = useAppStore.getState();
       setCurrentTab("converter");
@@ -127,32 +75,6 @@ function App() {
       }
     });
 
-    // Export ▸ Semantic JSON (⌘⇧E)
-    const unlistenExportSemanticJson = listen("menu-export-semantic-json", async () => {
-      const { nodes, saveLayerToFile } = useSemanticStore.getState();
-      if (nodes.length === 0) {
-        alert("내보낼 시멘틱 노드가 없습니다. 먼저 시멘틱을 추출하세요.");
-        return;
-      }
-      setCurrentTab("semantic");
-      try {
-        await saveLayerToFile();
-      } catch (e) {
-        alert(`Semantic JSON 저장 실패: ${e}`);
-      }
-    });
-
-    // Export ▸ PowerPoint (PPTX)
-    const unlistenExportPptx = listen("menu-export-pptx", () => {
-      const { nodes, setShowPptExport } = useSemanticStore.getState();
-      if (nodes.length === 0) {
-        alert("내보낼 시멘틱 노드가 없습니다. 먼저 시멘틱을 추출하세요.");
-        return;
-      }
-      setCurrentTab("semantic");
-      setShowPptExport(true);
-    });
-
     return () => {
       unlistenOpenIndd.then((f) => f());
       unlistenOpenInddFolder.then((f) => f());
@@ -160,18 +82,11 @@ function App() {
       unlistenAbout.then((f) => f());
       unlistenClearCache.then((f) => f());
       unlistenTabConverter.then((f) => f());
-      unlistenTabSemantic.then((f) => f());
-      unlistenSemanticExtract.then((f) => f());
-      unlistenSemanticReclassify.then((f) => f());
-      unlistenSchemaEdit.then((f) => f());
-      unlistenSchemaGenerate.then((f) => f());
+      unlistenTabTeaching.then((f) => f());
       unlistenExportHwpx.then((f) => f());
-      unlistenExportSemanticJson.then((f) => f());
-      unlistenExportPptx.then((f) => f());
     };
   }, [initJarPath, selectInddFile, selectInddFolder, selectHwpxFile]);
 
-  // About 다이얼로그를 열 때 캐시 통계 갱신
   useEffect(() => {
     if (!showAbout) return;
     invoke<[number, number]>("extract_cache_stats")
@@ -179,11 +94,9 @@ function App() {
       .catch(() => setCacheStats(null));
   }, [showAbout]);
 
-  const showReextractReview = useSemanticStore((s) => s.showReextractReview);
-
   const tabs: { key: Tab; label: string }[] = [
     { key: "converter", label: "HWPX 내보내기" },
-    { key: "semantic", label: "시멘틱 레이어" },
+    { key: "teaching", label: "교수자료 생성" },
   ];
 
   return (
@@ -206,8 +119,8 @@ function App() {
       </div>
 
       {/* Tab Content */}
-      {currentTab === "semantic" ? (
-        <SemanticPage />
+      {currentTab === "teaching" ? (
+        <TeachingPage />
       ) : (
         <div className="flex-1 flex flex-col min-h-0">
           <FileSelector />
@@ -260,9 +173,6 @@ function App() {
 
       {/* Batch Processing Modal */}
       <InddBatchModal />
-
-      {/* Reextract Review Modal */}
-      {showReextractReview && <ReextractReviewModal />}
 
       {/* About Dialog */}
       {showAbout && (

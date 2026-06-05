@@ -47,21 +47,44 @@ public final class EnvFileReader {
      * 파일을 찾지 못하면 빈 인스턴스를 반환한다 (예외 없음).
      */
     public static EnvFileReader load() {
-        String[] candidates = {
-            jarDir(),
-            System.getProperty("user.dir"),
-        };
+        // 탐색 후보 디렉토리 목록 (순서대로 시도)
+        java.util.List<String> candidates = new java.util.ArrayList<String>();
+
+        // 1. JAR 위치 (예: converter/target/) 및 그 상위 2단계 (project root)
+        String jar = jarDir();
+        if (jar != null) {
+            candidates.add(jar);
+            File f1 = new File(jar).getParentFile();          // converter/
+            if (f1 != null) candidates.add(f1.getAbsolutePath());
+            File f2 = f1 != null ? f1.getParentFile() : null; // project root
+            if (f2 != null) candidates.add(f2.getAbsolutePath());
+        }
+
+        // 2. 현재 작업 디렉토리 및 그 상위 2단계
+        String cwd = System.getProperty("user.dir");
+        if (cwd != null) {
+            candidates.add(cwd);
+            File c1 = new File(cwd).getParentFile();
+            if (c1 != null) candidates.add(c1.getAbsolutePath());
+            File c2 = c1 != null ? c1.getParentFile() : null;
+            if (c2 != null) candidates.add(c2.getAbsolutePath());
+        }
+
         for (String dir : candidates) {
             if (dir == null) continue;
             File f = new File(dir, ENV_FILENAME);
             if (f.exists() && f.isFile()) {
                 try {
-                    return loadFrom(f);
+                    EnvFileReader result = loadFrom(f);
+                    System.err.println("[EnvFileReader] .env 로드: " + f.getAbsolutePath()
+                            + " (" + result.size() + "개 키)");
+                    return result;
                 } catch (Exception e) {
                     System.err.println("[EnvFileReader] .env 로드 실패 (" + f.getAbsolutePath() + "): " + e.getMessage());
                 }
             }
         }
+        System.err.println("[EnvFileReader] .env 파일을 찾지 못했습니다. 탐색 경로: " + candidates);
         return new EnvFileReader(new LinkedHashMap<>());
     }
 

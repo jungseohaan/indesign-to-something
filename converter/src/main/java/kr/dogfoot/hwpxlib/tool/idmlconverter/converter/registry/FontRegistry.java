@@ -166,14 +166,6 @@ public class FontRegistry {
     }
 
     /**
-     * 마지막 resolveFontIdPair() 호출 결과의 높이 스케일을 반환한다.
-     * 1.0 이상이면 HWPX 폰트가 IDML 폰트보다 세로로 큰 것.
-     */
-    public double lastHeightScale() {
-        return lastMappingResult != null ? lastMappingResult.heightScale : 1.0;
-    }
-
-    /**
      * 마지막 resolveFontIdPair() 호출 결과의 장평 비율을 반환한다.
      * 1.0 미만이면 HWPX 폰트가 원본보다 넓어서 장평 축소 필요.
      */

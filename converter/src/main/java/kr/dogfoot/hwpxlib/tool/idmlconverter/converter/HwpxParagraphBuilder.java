@@ -182,7 +182,8 @@ public class HwpxParagraphBuilder {
         boolean replaceTabsInRuns = isHangingIndentParagraph(astPara);
 
         // 인라인 항목 변환
-        for (ASTInlineItem item : astPara.items()) {
+        for (int i = 0; i < astPara.items().size(); i++) {
+            ASTInlineItem item = astPara.items().get(i);
             switch (item.itemType()) {
                 case TEXT_RUN:
                     ASTTextRun tr = (ASTTextRun) item;
@@ -192,7 +193,8 @@ public class HwpxParagraphBuilder {
                     addTextRun(para, tr, paraCharPrId, astPara.indentToHerePosition());
                     break;
                 case INLINE_OBJECT:
-                    addInlineObject(para, (ASTInlineObject) item);
+                    inlineItemDispatcher.addInlineObject(para, (ASTInlineObject) item,
+                            hasMeaningfulFollowingInlineContent(astPara.items(), i + 1));
                     break;
                 case BREAK:
                     addBreak(para, (ASTBreak) item);
@@ -212,6 +214,21 @@ public class HwpxParagraphBuilder {
 
         // 셀 내 Y 커서 업데이트 (오버레이 좌표 계산용)
         ctx.cellContentYCursor += lineSpacingResolver.estimateParagraphHeight(astPara);
+    }
+
+    private static boolean hasMeaningfulFollowingInlineContent(java.util.List<ASTInlineItem> items, int startIndex) {
+        if (items == null) return false;
+        for (int i = startIndex; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (item == null || item.itemType() == ASTInlineItem.ItemType.BREAK) continue;
+            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !text.trim().isEmpty()) return true;
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 
 

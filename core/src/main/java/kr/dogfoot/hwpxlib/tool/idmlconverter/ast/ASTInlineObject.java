@@ -94,6 +94,8 @@ public class ASTInlineObject extends ASTInlineItem {
 
     // 텍스트 프레임 수직 정렬 (TopAlign, CenterAlign, BottomAlign)
     private String verticalJustification;
+    // 원본 InDesign 조판에서 각 composed line이 별도 문단인 경우 HWP 자동 줄감기 금지.
+    private boolean noAutoLineWrap;
 
     public ItemType itemType() { return ItemType.INLINE_OBJECT; }
 
@@ -247,4 +249,7 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public String verticalJustification() { return verticalJustification; }
     public void verticalJustification(String v) { this.verticalJustification = v; }
+
+    public boolean noAutoLineWrap() { return noAutoLineWrap; }
+    public void noAutoLineWrap(boolean v) { this.noAutoLineWrap = v; }
 }

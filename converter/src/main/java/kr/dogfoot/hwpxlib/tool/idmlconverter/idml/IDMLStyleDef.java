@@ -26,8 +26,14 @@ public class IDMLStyleDef {
     private Double tracking;
     private Boolean underline;     // 밑줄
     private String underlineType;  // 밑줄 타입 ("StrokeStyle/$ID/Wavy" 등)
+    private Double underlineWeight; // 밑줄 두께 (points)
+    private Double underlineOffset; // 밑줄 오프셋 (points)
     private Boolean strikeThrough; // 취소선
     private Boolean ruleBelowOn;   // 단락 아래선 (RuleBelow)
+    private Double ruleAboveLineWeight; // 단락 위선 두께 (points)
+    private Double ruleBelowLineWeight; // 단락 아래선 두께 (points)
+    private String ruleAboveColor;      // 단락 위선 색상
+    private String ruleBelowColor;      // 단락 아래선 색상
     private Double baselineShift;  // 기준선 이동 (points)
     private String capitalization;  // "SmallCaps", "AllCaps", "Normal"
 
@@ -163,11 +169,29 @@ public class IDMLStyleDef {
     public String underlineType() { return underlineType; }
     public void underlineType(String v) { this.underlineType = v; }
 
+    public Double underlineWeight() { return underlineWeight; }
+    public void underlineWeight(Double v) { this.underlineWeight = v; }
+
+    public Double underlineOffset() { return underlineOffset; }
+    public void underlineOffset(Double v) { this.underlineOffset = v; }
+
     public Boolean strikeThrough() { return strikeThrough; }
     public void strikeThrough(Boolean v) { this.strikeThrough = v; }
 
     public Boolean ruleBelowOn() { return ruleBelowOn; }
     public void ruleBelowOn(Boolean v) { this.ruleBelowOn = v; }
+
+    public Double ruleAboveLineWeight() { return ruleAboveLineWeight; }
+    public void ruleAboveLineWeight(Double v) { this.ruleAboveLineWeight = v; }
+
+    public Double ruleBelowLineWeight() { return ruleBelowLineWeight; }
+    public void ruleBelowLineWeight(Double v) { this.ruleBelowLineWeight = v; }
+
+    public String ruleAboveColor() { return ruleAboveColor; }
+    public void ruleAboveColor(String v) { this.ruleAboveColor = v; }
+
+    public String ruleBelowColor() { return ruleBelowColor; }
+    public void ruleBelowColor(String v) { this.ruleBelowColor = v; }
 
     public Double baselineShift() { return baselineShift; }
     public void baselineShift(Double v) { this.baselineShift = v; }
