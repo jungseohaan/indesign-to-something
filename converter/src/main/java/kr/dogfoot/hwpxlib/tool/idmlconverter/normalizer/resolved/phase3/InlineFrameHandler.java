@@ -280,6 +280,7 @@ public class InlineFrameHandler {
             obj.height(CoordinateConverter.pointsToHwpunits(h));
             obj.sourceId(ParagraphTextHelpers.domIdToSourceId(childTf.id()));
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
+            obj.nativeGraphicsAllowed(true);
 
             if (matchedRect != null) {
                 String strokeName = matchedRect.strokeColorName();
@@ -368,6 +369,7 @@ public class InlineFrameHandler {
                 obj.height(CoordinateConverter.pointsToHwpunits(rh));
                 obj.sourceId(ParagraphTextHelpers.domIdToSourceId(nestedTf.id()));
                 obj.noAutoLineWrap(shouldUseNoAutoLineWrap(nestedTf));
+                obj.nativeGraphicsAllowed(true);
 
                 String strokeName = rectPi.strokeColorName();
                 if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)) {
@@ -490,6 +492,7 @@ public class InlineFrameHandler {
             obj.height(CoordinateConverter.pointsToHwpunits(rh));
             obj.sourceId(tfSourceId);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(tf));
+            obj.nativeGraphicsAllowed(true);
 
             String strokeName = bestSibling.strokeColorName();
             if (strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)) {

@@ -26,6 +26,7 @@ public class IDMLStyleDef {
     private Double tracking;
     private Boolean underline;     // 밑줄
     private String underlineType;  // 밑줄 타입 ("StrokeStyle/$ID/Wavy" 등)
+    private String underlineColor; // 밑줄 색상
     private Double underlineWeight; // 밑줄 두께 (points)
     private Double underlineOffset; // 밑줄 오프셋 (points)
     private Boolean strikeThrough; // 취소선
@@ -168,6 +169,9 @@ public class IDMLStyleDef {
 
     public String underlineType() { return underlineType; }
     public void underlineType(String v) { this.underlineType = v; }
+
+    public String underlineColor() { return underlineColor; }
+    public void underlineColor(String v) { this.underlineColor = v; }
 
     public Double underlineWeight() { return underlineWeight; }
     public void underlineWeight(Double v) { this.underlineWeight = v; }

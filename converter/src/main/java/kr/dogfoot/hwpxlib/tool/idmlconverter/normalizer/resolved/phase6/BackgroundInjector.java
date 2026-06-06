@@ -218,6 +218,23 @@ public final class BackgroundInjector {
                 }
             }
 
+            if (shouldPreserveVisualLabelAspect(rg, pixelW, pixelH)) {
+                double storedW = visRight - visLeft;
+                double storedH = visBottom - visTop;
+                double imageRatio = (double) pixelW / (double) pixelH;
+                double storedRatio = storedW / storedH;
+                if (storedW > 0 && storedH > 0 && imageRatio > 0
+                        && storedRatio > imageRatio * 1.10) {
+                    double targetH = storedW / imageRatio;
+                    double growRatio = targetH / storedH;
+                    if (growRatio > 1.0 && growRatio <= 3.0) {
+                        double cy = (visTop + visBottom) / 2.0;
+                        visTop = cy - targetH / 2.0;
+                        visBottom = cy + targetH / 2.0;
+                    }
+                }
+            }
+
             long x = CoordinateConverter.pointsToHwpunits(visLeft * ctx.scaleFactor);
             long y = CoordinateConverter.pointsToHwpunits(visTop * ctx.scaleFactor);
             long w = CoordinateConverter.pointsToHwpunits((visRight - visLeft) * ctx.scaleFactor);
@@ -633,6 +650,14 @@ public final class BackgroundInjector {
         // If the text frame remains editable in HWPX, its inline visuals must stay
         // in the text flow instead of being baked into the floating visual shell.
         return !"hwpx_tf".equals(rg.textOwner());
+    }
+
+    private static boolean shouldPreserveVisualLabelAspect(RenderedGroup rg, int pixelW, int pixelH) {
+        return rg != null
+                && pixelW > 0
+                && pixelH > 0
+                && "visual_label_indesign_png".equals(rg.reason())
+                && "indesign_png".equals(rg.textOwner());
     }
 
     private static double[] boundsWithTfInlineVisuals(

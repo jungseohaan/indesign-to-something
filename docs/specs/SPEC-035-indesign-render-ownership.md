@@ -96,6 +96,71 @@
 | text-on-path/복합 효과 | InDesign PNG | hidden semantic 권장 | 편집성보다 시각 우선 |
 | 스프레드 걸침 객체 | 페이지별 crop PNG | 해당 없음 | 동일 zOrder 유지 |
 
+### 그룹 렌더 단위 정책
+
+`mixedGroup`의 기본 렌더 단위는 "가장 큰 부모 그룹"이 아니라 "의미 있는 최소 시각 단위"이다.
+
+배경/버튼/라벨/텍스트 프레임이 함께 묶인 큰 부모 그룹을 통 PNG로 렌더하면, 다음 문제가 생긴다.
+
+- 원본에서 편집 가능한 TF 주변의 독립 그래픽까지 하나의 큰 이미지로 묶인다.
+- 작은 라벨 하나를 보존하려고 큰 학습 활동 영역 전체가 이미지화된다.
+- zOrder/중복 방지는 쉬워지지만, 편집성과 객체 선택성이 크게 떨어진다.
+- 부분 수정이 필요한 그래픽의 원인 추적이 어려워진다.
+
+따라서 큰 부모 그룹은 아래 조건을 만족할 때 통 렌더하지 않는다.
+
+1. 그룹 bounds가 페이지의 넓은 영역을 차지한다.
+2. 자식에 2개 이상의 독립 TF 또는 독립 박스/패널이 있다.
+3. 자식들이 서로 다른 학습 의미 단위로 보인다. 예: 활동 제목, 설명 TF, `가/나/다/라` 카드, 출처 라벨.
+4. 자식 TF 일부는 HWPX 편집 텍스트로 유지되어야 한다.
+
+이 경우 extractor는 부모 그룹이 아니라 내부의 atomic visual cluster를 렌더한다.
+
+| atomic visual cluster | 시각 처리 | 텍스트 처리 |
+|---|---|---|
+| `가/나/다/라` 버튼 + 해당 카드 사각형 | 단일 PNG 가능 | 버튼 글자는 PNG 소유 가능 |
+| 빈 활동 카드/답안 박스 | 카드 단위 PNG | 내부 편집 텍스트 없음 |
+| `모둠 활동` 배지처럼 아이콘+짧은 라벨이 하나의 로고처럼 동작하는 그룹 | 단일 PNG 가능 | 라벨 텍스트는 PNG 소유 또는 hidden semantic |
+| 제목 옆 살구색 밑그림/장식 그래픽 | 독립 PNG | 제목 TF는 HWPX TF |
+| 긴 지시문/본문/문항 TF | 배경 그래픽과 분리 | HWPX TF |
+| 출처/캡션처럼 편집 가치가 낮지만 위치 기준이 필요한 짧은 텍스트 | 기본은 HWPX TF, 시각 효과가 강하면 hidden semantic 검토 | 중복 방지 메타 필수 |
+
+판정 원칙:
+
+- "큰 부모 그룹을 한 번에 렌더"는 fallback이다.
+- 먼저 자식 그룹/자식 도형 묶음에서 atomic visual cluster를 찾는다.
+- atomic cluster가 렌더되면 해당 cluster의 `sourceObjectIds`를 소유권으로 기록하고, 부모 mixedGroup 렌더에서는 제외한다.
+- 부모 mixedGroup의 남은 자식이 독립 cluster들뿐이면 부모 PNG를 만들지 않는다.
+- 부모 mixedGroup 렌더가 필요하더라도 editable TF는 숨기고 visual-only shell로만 사용한다.
+- `visual_label_indesign_png`의 배치 bounds가 실제 PNG 비율보다 과도하게 넓어져 라벨이 납작해지는 경우, bounds의 가로폭은 유지하고 PNG pixel ratio에 맞춰 세로를 중앙 기준으로 확장한다.
+
+### 마스터 페이지 그래픽 정책
+
+마스터 페이지 그래픽은 page side별로 InDesign의 실제 stacking을 보존한 합성 PNG로 추출한다.
+
+이전처럼 "가장 큰 마스터 객체 1개"만 추출하면 큰 배경 사각형만 살아남고, 그 위의 흰 오버레이/장식 그룹/마스터 로고가 누락된다. 따라서 extractor는 적용된 마스터 스프레드의 각 page side에 걸치는 top-level visual item을 수집해 임시 페이지에 override한 뒤 하나의 PNG로 export한다.
+
+원칙:
+
+- page side와 교차하는 top-level master item을 모두 포함한다.
+- 중심점 기준 필터는 사용하지 않는다. 스프레드 걸침 객체와 page side를 덮는 오버레이가 누락될 수 있기 때문이다.
+- Group/TextFrame/Rectangle/Oval/Polygon/GraphicLine 등 visible master visual item은 합성 대상이 될 수 있다.
+- HWPX TF로 별도 인스턴스화되는 editable master TextFrame은 합성 export 전에 content만 숨겨 텍스트 중복을 막는다.
+- 장식 로고/아웃라인/그룹 그래픽은 master PNG가 소유한다.
+- 결과 PNG에는 합성에 참여한 `sourceObjectIds`를 기록해 이후 중복 배치 판단에 사용한다.
+
+의도:
+
+- page 188의 `단원 마무리` 좌상단 그룹, 초록 배경, 흰 오버레이처럼 하나의 마스터 visual layer로 동작하는 요소를 함께 보존한다.
+- 특정 페이지 예외가 아니라 마스터 추출 단위 자체를 "largest item"에서 "composed master page side"로 바꾼다.
+
+이 정책의 의도:
+
+- `가/나/다/라` 버튼과 각 카드 사각형처럼 하나의 시각 단위인 묶음은 이미지로 보존한다.
+- `자료 수집하기 및 쟁점 설정하기` 제목 근처의 살구색 그래픽과 제목 TF는 분리한다.
+- `모둠 활동` 배지는 통 이미지로 허용하되, 그것을 이유로 page 181 활동 영역 전체를 통 이미지화하지 않는다.
+- 큰 학습 활동 영역은 "통 이미지"가 아니라 작은 시각 단위들의 집합 + HWPX TF로 구성한다.
+
 ---
 
 ## Visual Source 정책
@@ -113,11 +178,16 @@
 7. InDesign에서 이미 렌더된 작은 vector-only inline PNG 조각들이 원본에서 하나의 시각 단위로 겹쳐 있으면 단일 이미지로 합성해 배치한다.
    - Java는 새 도형을 그리지 않고 InDesign 렌더 PNG의 zOrder/좌표만 보존해 합성한다.
    - 합성된 조각의 나머지 앵커는 이미 배치된 것으로 표시해 중복 inline 배치를 막는다.
+8. 텍스트와 원본 도형이 1:1로 결합된 작은 인라인 박스 배지는 제한적으로 HWP native line/fill을 허용한다.
+   - 예: `ㄴ`, `ㅈ`, `ㅌ`, `ㄷ`처럼 글자 자체는 HWPX 텍스트여야 하고 외곽 박스도 같은 인라인 흐름 안에서 함께 움직여야 하는 경우.
+   - 이 허용은 `ASTInlineObject.nativeGraphicsAllowed=true`인 객체에만 적용하며, 일반 TF/말풍선/배경 그래픽에는 적용하지 않는다.
+   - 목적은 InDesign 렌더 PNG를 새로 만들지 못한 경우의 fallback이 아니라, 편집 가능한 텍스트와 소유권이 명확한 작은 도형을 한 단위로 보존하는 것이다.
 
 구현 스위치:
 
 - `VisualSourcePolicy.useHwpNativeTextBoxGraphics() == false`
 - `VisualSourcePolicy.useJavaSyntheticGraphicPngs() == false`
+- `ASTInlineObject.nativeGraphicsAllowed == true`인 작은 인라인 박스 배지는 전역 스위치와 무관하게 해당 객체의 선/채움만 보존
 - HWPX text container height is derived from original TF bounds, not HWP font metrics.
 
 ---
@@ -141,19 +211,37 @@ HWP 폰트 매핑이 InDesign과 정확히 맞지 않으면 HWPX 글상자 내�
 
 ---
 
+## 색상/틴트/투명도 정책
+
+- InDesign `FillTint`/`StrokeTint`는 투명도가 아니라 원색과 흰색의 혼합 비율이다.
+- `tint=100`은 원래 색, `tint=0`은 흰색으로 해석한다.
+- `tint=-1`, 누락, `NaN`은 InDesign 기본값으로 보고 `100`으로 보정한다.
+- 도형의 표시 여부는 `None`, 실제 opacity, hidden/nonprinting/layer 상태로 판단한다. `tint=0`만으로는 invisible 또는 누락 대상으로 판단하지 않는다.
+- Java 변환 경로는 `ColorResolver.applyTintToHex()`를 공용 진입점으로 사용한다. HWPX로 넘길 때는 가능한 한 RGB에 tint를 반영하고 `fillTint=100`으로 고정해, HWPX의 tint 해석 차이로 색이 흔들리지 않게 한다.
+
+## 렌더 결과 추적 필드
+
+- 렌더 항목은 ownership 판단과 회귀 추적을 위해 `placementRole`과 `zSource`를 기록한다.
+- `placementRole` 예: `tf_visual_shell`, `inline_object`, `floating_visual`, `master_graphic`, `atomic_text_visual`, `visual_only_png`.
+- `zSource` 예: `sourceObjectIds`, `absoluteZOrderIndex`.
+- 이 필드는 배치 정책을 직접 바꾸는 값이 아니라, 누락/중복/z-depth 문제를 추적하기 위한 디버그 메타데이터다.
+
+---
+
 ## 구현 계획
 
 ### Phase 1: resolved ownership 스키마 추가
 
 - `scripts/extract_indd.jsx`
-  - 렌더 항목 생성 시 `sourceObjectIds`, `editableTextFrameIds`, `containsEditableText`, `placementAllowed`, `reason` 기록
+  - 렌더 항목 생성 시 `sourceObjectIds`, `editableTextFrameIds`, `containsEditableText`, `placementAllowed`, `reason`, `placementRole`, `zSource` 기록
   - 그룹 렌더 전 자식 TextFrame 분류 결과를 참조
   - 텍스트 포함 그룹 PNG는 기본 `placementAllowed=false`
 - `docs/resolved-json-spec.md`
   - rendered item ownership 필드 문서화
 - 진행:
-  - 구현 완료 (2026-06-05)
-  - `EXTRACT_SCRIPT_VERSION=8`로 캐시 무효화
+  - ownership 필드 구현 완료 (2026-06-05)
+  - 추적 필드와 tint=0 유지 정책 반영 (2026-06-06)
+  - `EXTRACT_SCRIPT_VERSION=15`로 캐시 무효화
 
 ### Phase 2: Java 모델/파서 확장
 

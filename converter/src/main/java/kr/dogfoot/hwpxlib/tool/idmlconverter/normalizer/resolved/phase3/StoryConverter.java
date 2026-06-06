@@ -74,13 +74,16 @@ public final class StoryConverter {
         final Double tracking;
         final String fontFamily;
         final Double fontSize;
+        final String underlineColor;
         boolean hasTabStops;
 
-        StyleContext(String fillColor, Double tracking, String fontFamily, Double fontSize) {
+        StyleContext(String fillColor, Double tracking, String fontFamily, Double fontSize,
+                     String underlineColor) {
             this.fillColor = fillColor;
             this.tracking = tracking;
             this.fontFamily = fontFamily;
             this.fontSize = fontSize;
+            this.underlineColor = underlineColor;
         }
     }
 
@@ -1016,6 +1019,7 @@ public final class StoryConverter {
             if (rp.spaceAfter() != null && rp.spaceAfter() > 0) {
                 para.spaceAfter(CoordinateConverter.pointsToHwpunits(rp.spaceAfter()));
             }
+            boolean preserveHangingTab = StoryLoader.shouldPreserveNeutralHangingIndentForTab(rp);
             boolean neutralHangingIndent = StoryLoader.isNeutralHangingIndent(rp.leftIndent(), rp.firstLineIndent());
             if (neutralHangingIndent) {
                 para.leftMargin(0L);
@@ -1027,6 +1031,18 @@ public final class StoryConverter {
             }
             if (!neutralHangingIndent && rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
                 para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
+            }
+            if (rp.hasTabStops()) {
+                double leftPt = (rp.leftIndent() != null ? rp.leftIndent() : 0);
+                for (ResolvedTabStop rts : rp.tabStops()) {
+                    if (rts.position() == null || rts.position() <= 0) continue;
+                    double posPt = preserveHangingTab ? rts.position() : rts.position() - leftPt;
+                    if (posPt < 0) posPt = 0;
+                    para.addTabStop(new ASTTabStop(
+                            CoordinateConverter.pointsToHwpunits(posPt),
+                            mapResolvedTabAlignment(rts.alignment()),
+                            null));
+                }
             }
 
             // 런 변환 (ResolvedParagraph → runs 직접)

@@ -80,6 +80,9 @@ public class ASTInlineObject extends ASTInlineItem {
 
     // INLINE_TEXT_FRAME 배경 PNG 바이트 (설정된 경우 winBrush 대신 imgBrush로 배경 표시)
     private byte[] imageFillData;
+    // true이면 전역 시각 정책과 무관하게 이 인라인 프레임의 원본 선/채움을 HWP 도형으로 보존.
+    // 작은 텍스트 결합 배지처럼 텍스트는 편집 가능해야 하고 배경 도형은 인라인 흐름에 붙어야 하는 경우에만 사용한다.
+    private boolean nativeGraphicsAllowed;
 
     // IMAGE 그룹 내 오버레이 텍스트프레임 목록 (IMAGE kind 전용)
     // 이미지 컨테이너 내부에 중첩하여 이미지 위에 올바르게 배치
@@ -224,6 +227,9 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public byte[] imageFillData() { return imageFillData; }
     public void imageFillData(byte[] v) { this.imageFillData = v; }
+
+    public boolean nativeGraphicsAllowed() { return nativeGraphicsAllowed; }
+    public void nativeGraphicsAllowed(boolean v) { this.nativeGraphicsAllowed = v; }
 
     public String bundlePath() { return bundlePath; }
     public void bundlePath(String v) { this.bundlePath = v; }

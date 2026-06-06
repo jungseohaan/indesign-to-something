@@ -73,6 +73,14 @@ public final class ResolvedZOrderNormalizer {
     private static boolean applyRenderedZ(Map<String, Integer> zByDomId, RenderedGroup rg) {
         if (rg == null) return false;
         Integer z = zByDomId.get(String.valueOf(rg.id()));
+        if (z == null && rg.sourceObjectIds() != null) {
+            for (int sourceId : rg.sourceObjectIds()) {
+                Integer childZ = zByDomId.get(String.valueOf(sourceId));
+                if (childZ != null && (z == null || childZ < z)) {
+                    z = childZ;
+                }
+            }
+        }
         if (z == null) return false;
         rg.zOrder(z);
         rg.zOrderKnown(true);

@@ -81,7 +81,9 @@ public final class TableBuilder {
             if (tf.onHiddenLayer() || tf.nonprinting()) continue;
             boolean editableTextFrame = ctx.resolvedData.isEditableTextFrame(tf.id());
             boolean tableAnchorOnlyFrame = isTableAnchorOnlyFrame(tf);
-            if (tf.isInline() && editableTextFrame) continue;
+            // Inline TextFrame에 포함된 table은 해당 anchor 위치에서 ASTInlineObject.inlineTables로
+            // 배치한다. 여기서 다시 page-level floating table로 만들면 동일 셀이 중복된다.
+            if (tf.isInline()) continue;
             if (!tf.isInline() && !editableTextFrame && !tableAnchorOnlyFrame) continue;
 
             int pageIdx = ctx.toSectionIndex.applyAsInt(tf.pageIndex());
@@ -560,13 +562,7 @@ public final class TableBuilder {
     }
 
     private static String resolveFillHex(ResolvedBuildContext ctx, ResolvedPageItem item) {
-        String hex = ctx.resolvedData.resolveColorHex(item.fillColorName());
-        if (hex == null) return null;
-        double tint = item.fillTint();
-        if (tint > 0 && tint < 100) {
-            hex = blendColorWithWhite(hex, tint / 100.0);
-        }
-        return hex;
+        return ctx.resolvedData.resolveTintedColorHex(item.fillColorName(), item.fillTint());
     }
 
     private static ASTTableCell findCoveredCell(

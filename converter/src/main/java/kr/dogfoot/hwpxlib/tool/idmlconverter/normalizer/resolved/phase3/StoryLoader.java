@@ -142,6 +142,7 @@ class StoryLoader {
                 if (rp.spaceAfter() != null && rp.spaceAfter() > 0) {
                     para.spaceAfter(CoordinateConverter.pointsToHwpunits(rp.spaceAfter()));
                 }
+                boolean preserveHangingTab = shouldPreserveNeutralHangingIndentForTab(rp);
                 boolean neutralHangingIndent = isNeutralHangingIndent(rp.leftIndent(), rp.firstLineIndent());
                 if (neutralHangingIndent) {
                     para.leftMargin(0L);
@@ -161,7 +162,7 @@ class StoryLoader {
                     double leftPt = (rp.leftIndent() != null ? rp.leftIndent() : 0);
                     for (ResolvedTabStop rts : rp.tabStops()) {
                         if (rts.position() != null && rts.position() > 0) {
-                            double posPt = rts.position() - leftPt;
+                            double posPt = preserveHangingTab ? rts.position() : rts.position() - leftPt;
                             if (posPt < 0) posPt = 0;
                             String align = "left";
                             if (rts.alignment() != null) {
@@ -221,7 +222,8 @@ class StoryLoader {
                     RunBuilder.getStyleFillColor(ctx, ip.appliedParagraphStyle()),
                     RunBuilder.getStyleTracking(ctx, ip.appliedParagraphStyle()),
                     RunBuilder.getStyleFontFamily(ctx, ip.appliedParagraphStyle()),
-                    RunBuilder.getStyleFontSize(ctx, ip.appliedParagraphStyle()));
+                    RunBuilder.getStyleFontSize(ctx, ip.appliedParagraphStyle()),
+                    RunBuilder.getStyleUnderlineColor(ctx, ip.appliedParagraphStyle()));
             // tabStop이 있으면 \t 문자를 보존 (HwpxParagraphBuilder가 <hp:tab>으로 변환)
             sc.hasTabStops = para.hasTabStops();
 
@@ -761,5 +763,20 @@ class StoryLoader {
         if (leftIndent == null || firstLineIndent == null) return false;
         return leftIndent > 0 && firstLineIndent < 0
                 && Math.abs(leftIndent + firstLineIndent) < 0.01;
+    }
+
+    static boolean shouldPreserveNeutralHangingIndentForTab(ResolvedParagraph rp) {
+        if (rp == null || !isNeutralHangingIndent(rp.leftIndent(), rp.firstLineIndent())
+                || !rp.hasTabStops()) {
+            return false;
+        }
+        double left = rp.leftIndent();
+        for (ResolvedTabStop tab : rp.tabStops()) {
+            if (tab == null || tab.position() == null) continue;
+            if (Math.abs(tab.position() - left) < 0.01) {
+                return true;
+            }
+        }
+        return false;
     }
 }

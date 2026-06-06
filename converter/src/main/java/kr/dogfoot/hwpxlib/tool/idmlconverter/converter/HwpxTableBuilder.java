@@ -102,8 +102,6 @@ public class HwpxTableBuilder {
      * SubList 내에 인라인 테이블을 추가한다 (treatAsChar=true).
      */
     void addInlineTableToSubList(SubList subList, ASTTable astTable) {
-        long totalWidth = astTable.width();
-
         Para tablePara = subList.addNewPara();
         tablePara.idAnd(HwpxUtil.nextParaId())
                 .paraPrIDRefAnd("3")
@@ -112,7 +110,17 @@ public class HwpxTableBuilder {
                 .columnBreakAnd(false)
                 .merged(false);
 
-        Run run = tablePara.addNewRun();
+        addInlineTableToPara(tablePara, astTable);
+    }
+
+    /**
+     * 현재 문단 안에 인라인 테이블을 직접 추가한다.
+     * table-only inline TextFrame을 hp:rect로 한 번 더 감싸면 HWP에서 셀/텍스트가 중복 표시될 수 있다.
+     */
+    void addInlineTableToPara(Para para, ASTTable astTable) {
+        long totalWidth = astTable.width();
+
+        Run run = para.addNewRun();
         run.charPrIDRef("0");
 
         Table table = run.addNewTable();

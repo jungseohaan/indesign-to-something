@@ -215,8 +215,13 @@ public class HwpxTextBoxBuilder {
      */
     void setupTextBoxLineShape(Rectangle rect, String strokeColor, double strokeWeightPt,
                                 String strokeType, double strokeTint) {
+        setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, strokeType, strokeTint, false);
+    }
+
+    void setupTextBoxLineShape(Rectangle rect, String strokeColor, double strokeWeightPt,
+                                String strokeType, double strokeTint, boolean forceNativeGraphics) {
         rect.createLineShape();
-        boolean hasStroke = nativeTextBoxGraphicsEnabled()
+        boolean hasStroke = (nativeTextBoxGraphicsEnabled() || forceNativeGraphics)
                 && strokeColor != null && strokeColor.startsWith("#") && strokeWeightPt > 0;
 
         if (hasStroke) {
@@ -249,7 +254,11 @@ public class HwpxTextBoxBuilder {
      * fillTint는 색상 농도(흰색 블렌딩)로 처리하고, alpha=0(불투명)으로 설정.
      */
     void setupTextBoxFillBrush(Rectangle rect, String fillColor, double fillTint) {
-        if (!nativeTextBoxGraphicsEnabled()) return;
+        setupTextBoxFillBrush(rect, fillColor, fillTint, false);
+    }
+
+    void setupTextBoxFillBrush(Rectangle rect, String fillColor, double fillTint, boolean forceNativeGraphics) {
+        if (!nativeTextBoxGraphicsEnabled() && !forceNativeGraphics) return;
         if (fillColor != null && fillColor.startsWith("#")) {
             String tinted = blendColorWithWhite(fillColor, fillTint / 100.0);
             rect.createFillBrush();
@@ -1071,21 +1080,6 @@ public class HwpxTextBoxBuilder {
      * fraction=1.0 → 원래 색상, fraction=0.0 → 흰색.
      */
     static String blendColorWithWhite(String hex, double fraction) {
-        if (hex == null || !hex.startsWith("#") || hex.length() < 7) return hex;
-        try {
-            int rgb = Integer.parseInt(hex.substring(1, 7), 16);
-            int r = (rgb >> 16) & 0xFF;
-            int g = (rgb >> 8) & 0xFF;
-            int b = rgb & 0xFF;
-            r = (int) Math.round(255 + (r - 255) * fraction);
-            g = (int) Math.round(255 + (g - 255) * fraction);
-            b = (int) Math.round(255 + (b - 255) * fraction);
-            return String.format("#%02X%02X%02X",
-                    Math.max(0, Math.min(255, r)),
-                    Math.max(0, Math.min(255, g)),
-                    Math.max(0, Math.min(255, b)));
-        } catch (Exception e) {
-            return hex;
-        }
+        return kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver.blendColorWithWhite(hex, fraction);
     }
 }

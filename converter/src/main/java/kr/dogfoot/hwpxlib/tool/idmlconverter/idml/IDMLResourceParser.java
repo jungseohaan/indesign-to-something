@@ -207,6 +207,7 @@ public class IDMLResourceParser {
             if (ulType != null) {
                 def.underlineType(ulType);
             }
+            def.underlineColor(getPropertyText(props, "UnderlineColor"));
             def.ruleAboveColor(getPropertyText(props, "RuleAboveColor"));
             def.ruleBelowColor(getPropertyText(props, "RuleBelowColor"));
 

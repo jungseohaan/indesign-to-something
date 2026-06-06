@@ -731,6 +731,7 @@ public class ASTRunConverter {
         Double tracking = run.tracking();
         Boolean underline = run.underline();
         String underlineType = run.underlineType();
+        String underlineColor = null;
         Boolean strikeThrough = run.strikeThrough();
         Double baselineShift = run.baselineShift();
         Double horizontalScale = run.horizontalScale();
@@ -747,6 +748,7 @@ public class ASTRunConverter {
                 if (tracking == null) tracking = charStyle.tracking();
                 if (underline == null) underline = charStyle.underline();
                 if (underlineType == null) underlineType = charStyle.underlineType();
+                if (underlineColor == null) underlineColor = charStyle.underlineColor();
                 if (strikeThrough == null) strikeThrough = charStyle.strikeThrough();
                 if (baselineShift == null) baselineShift = charStyle.baselineShift();
                 if (horizontalScale == null) horizontalScale = charStyle.horizontalScale();
@@ -771,6 +773,7 @@ public class ASTRunConverter {
                 if (tracking == null) tracking = paraStyle.tracking();
                 if (underline == null) underline = paraStyle.underline();
                 if (underlineType == null) underlineType = paraStyle.underlineType();
+                if (underlineColor == null) underlineColor = paraStyle.underlineColor();
                 if (strikeThrough == null) strikeThrough = paraStyle.strikeThrough();
                 if (baselineShift == null) baselineShift = paraStyle.baselineShift();
                 if (horizontalScale == null) horizontalScale = paraStyle.horizontalScale();
@@ -842,6 +845,8 @@ public class ASTRunConverter {
             double tint = run.underlineTint() / 100.0;
             int gray = (int) Math.round(255 * (1.0 - tint));
             textRun.underlineColor(String.format("#%02X%02X%02X", gray, gray, gray));
+        } else if (Boolean.TRUE.equals(underline) && underlineColor != null) {
+            textRun.underlineColor(colorResolver.resolve(underlineColor));
         }
         textRun.strikeThrough(Boolean.TRUE.equals(strikeThrough));
 

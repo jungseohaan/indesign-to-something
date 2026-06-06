@@ -227,7 +227,7 @@ public class StyleRegistry {
                 bold, italic,
                 false, false,
                 underline ? UnderlineType.BOTTOM : UnderlineType.NONE,
-                underline ? textColor : "#000000",
+                underline ? (styleDef.underlineColor() != null ? styleDef.underlineColor() : textColor) : "#000000",
                 ulShape,
                 styleDef.horizontalScale(),
                 strikeThrough,

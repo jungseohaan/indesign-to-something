@@ -42,7 +42,11 @@ final class InlineItemDispatcher {
             paragraphBuilder.imageBuilder.addInlineBadgeGroup(para, obj,
                     paragraphBuilder.textBoxBuilder, paragraphBuilder);
         } else if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) {
-            if (shouldFlattenInlineTextFrame(obj)) {
+            if (isTableOnlyInlineTextFrame(obj)) {
+                for (ASTTable table : obj.inlineTables()) {
+                    paragraphBuilder.tableBuilder.addInlineTableToPara(para, table);
+                }
+            } else if (shouldFlattenInlineTextFrame(obj)) {
                 flattenInlineTextFrame(para, obj);
             } else {
                 paragraphBuilder.textBoxBuilder.addInlineTextFrame(para, obj);
@@ -70,6 +74,12 @@ final class InlineItemDispatcher {
         } else if (obj.kind() == ASTInlineObject.ObjectKind.SPACER_RECT) {
             paragraphBuilder.textBoxBuilder.addSpacerRect(para, obj);
         }
+    }
+
+    private static boolean isTableOnlyInlineTextFrame(ASTInlineObject obj) {
+        boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
+        boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
+        return hasInlineTables && !hasParagraphs;
     }
 
     private boolean isNonFlowHorizontalLine(ASTInlineObject obj) {

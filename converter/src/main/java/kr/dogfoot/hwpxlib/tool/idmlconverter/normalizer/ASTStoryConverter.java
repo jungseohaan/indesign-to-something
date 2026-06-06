@@ -562,6 +562,7 @@ public class ASTStoryConverter {
         merged.underlineType(style.underlineType() != null ? style.underlineType() : parent.underlineType());
         merged.underlineWeight(style.underlineWeight() != null ? style.underlineWeight() : parent.underlineWeight());
         merged.underlineOffset(style.underlineOffset() != null ? style.underlineOffset() : parent.underlineOffset());
+        merged.underlineColor(style.underlineColor() != null ? style.underlineColor() : parent.underlineColor());
         merged.strikeThrough(style.strikeThrough() != null ? style.strikeThrough() : parent.strikeThrough());
         merged.leading(style.leading() != null ? style.leading() : parent.leading());
         merged.leadingType(style.leadingType() != null ? style.leadingType() : parent.leadingType());

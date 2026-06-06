@@ -31,6 +31,7 @@ public class ASTStyleDef {
     private Double autoLeading;       // 자동 줄간격 비율 (%)
     private Boolean underline;        // 밑줄
     private String underlineType;     // 밑줄 타입 ("WAVE" 등)
+    private String underlineColor;    // 밑줄 색상
     private Boolean strikeThrough;    // 취소선
 
     // 두문자 (DropCap)
@@ -108,6 +109,9 @@ public class ASTStyleDef {
 
     public String underlineType() { return underlineType; }
     public void underlineType(String v) { this.underlineType = v; }
+
+    public String underlineColor() { return underlineColor; }
+    public void underlineColor(String v) { this.underlineColor = v; }
 
     public Boolean strikeThrough() { return strikeThrough; }
     public void strikeThrough(Boolean v) { this.strikeThrough = v; }

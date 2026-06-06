@@ -149,7 +149,9 @@ final class InlineFrameBuilder {
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
         // LineShape — 부모 Group 배경 사각형의 테두리
-        textBoxBuilder.setupTextBoxLineShape(rect, obj.strokeColor(), obj.strokeWeight(), "Solid", obj.strokeTint());
+        boolean nativeGraphicsAllowed = obj.nativeGraphicsAllowed();
+        textBoxBuilder.setupTextBoxLineShape(rect, obj.strokeColor(), obj.strokeWeight(),
+                "Solid", obj.strokeTint(), nativeGraphicsAllowed);
 
         // FillBrush — 배경 PNG가 있으면 imgBrush, 없으면 winBrush(solid color)
         boolean imgBrushSet = false;
@@ -157,7 +159,7 @@ final class InlineFrameBuilder {
             imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(rect, obj.imageFillData());
         }
         if (!imgBrushSet) {
-            textBoxBuilder.setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint());
+            textBoxBuilder.setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint(), nativeGraphicsAllowed);
         }
 
         // DrawText

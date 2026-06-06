@@ -216,6 +216,9 @@ class RunBuilder {
         if (cr.underline() != null && cr.underline()) {
             tr.underline(true);
         }
+        if (tr.underline() && tr.underlineColor() == null && sc.underlineColor != null) {
+            tr.underlineColor(sc.underlineColor);
+        }
         if (cr.strikeThrough() != null && cr.strikeThrough()) {
             tr.strikeThrough(true);
         }
@@ -389,6 +392,15 @@ class RunBuilder {
         if (ctx.styleResolver == null) return null;
         IDMLStyleDef resolved = ctx.styleResolver.getResolvedParagraphStyle(styleRef);
         return resolved != null ? resolved.fontSize() : null;
+    }
+
+    static String getStyleUnderlineColor(ResolvedBuildContext ctx, String styleRef) {
+        if (ctx.styleResolver == null) return null;
+        IDMLStyleDef resolved = ctx.styleResolver.getResolvedParagraphStyle(styleRef);
+        if (resolved != null && resolved.underlineColor() != null) {
+            return resolveColorToHex(ctx, resolved.underlineColor());
+        }
+        return null;
     }
 
     /**

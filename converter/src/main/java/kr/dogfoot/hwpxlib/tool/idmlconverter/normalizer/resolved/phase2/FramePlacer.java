@@ -10,6 +10,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -89,6 +90,9 @@ public final class FramePlacer {
             }
 
             int tfDomId = parseDomIdOrNeg(tf.id());
+            if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) {
+                continue;
+            }
 
             // 인라인 프레임은 Phase 3에서 처리
             // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
@@ -566,14 +570,10 @@ public final class FramePlacer {
             try {
                 String fillName = tf.fillColor();
                 if (fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
-                    String fillHex = ctx.resolvedData.resolveColorHex(fillName);
+                    String fillHex = ctx.resolvedData.resolveTintedColorHex(fillName, tf.fillTint());
                     if (fillHex != null) {
                         block.fillColor(fillHex);
-                        if (tf.fillTint() > 0 && tf.fillTint() <= 100) {
-                            block.fillTint((int) tf.fillTint());
-                        } else {
-                            block.fillTint(100);
-                        }
+                        block.fillTint(100);
                     }
                 }
                 if (tf.cornerRadius() > 0) {
@@ -689,6 +689,8 @@ public final class FramePlacer {
      */
     private static boolean shouldSkipNonEditableTf(
             ResolvedBuildContext ctx, ResolvedTextFrame tf, int tfDomId, FrameIndex idx) {
+        if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return true;
+
         // domId=None TF: ExtendScript가 domId를 얻지 못해 editability 확인 불가.
         // storyId가 있고 비-숨김/비인쇄이면 IDML에 실제 내용이 있을 수 있으므로 배치 허용.
         if (tf.id() == null && tf.storyId() != null && !tf.onHiddenLayer() && !tf.nonprinting()) return false;
@@ -793,10 +795,10 @@ public final class FramePlacer {
         String fillName = best.fillColorName();
         if ((block.fillColor() == null || block.fillColor().isEmpty())
                 && fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
-            String fillHex = ctx.resolvedData.resolveColorHex(fillName);
+            String fillHex = ctx.resolvedData.resolveTintedColorHex(fillName, best.fillTint());
             if (fillHex != null) {
                 block.fillColor(fillHex);
-                block.fillTint(best.fillTint() > 0 && best.fillTint() <= 100 ? best.fillTint() : 100);
+                block.fillTint(100);
             }
         }
 
@@ -808,7 +810,7 @@ public final class FramePlacer {
             if (strokeHex != null) {
                 block.strokeColor(strokeHex);
                 block.strokeWeight(best.strokeWeight());
-                block.strokeTint(best.strokeTint() > 0 && best.strokeTint() <= 100 ? best.strokeTint() : 100);
+                block.strokeTint(ColorResolver.normalizeTint(best.strokeTint()));
             }
         }
 

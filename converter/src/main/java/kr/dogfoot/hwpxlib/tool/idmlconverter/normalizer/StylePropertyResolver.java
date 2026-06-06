@@ -179,8 +179,12 @@ public class StylePropertyResolver {
         if (child.tracking() != null) merged.tracking(child.tracking());
         if (child.horizontalScale() != null) merged.horizontalScale(child.horizontalScale());
         if (child.baselineShift() != null) merged.baselineShift(child.baselineShift());
+        if (child.underline() != null) merged.underline(child.underline());
+        if (child.underlineType() != null) merged.underlineType(child.underlineType());
         if (child.underlineWeight() != null) merged.underlineWeight(child.underlineWeight());
         if (child.underlineOffset() != null) merged.underlineOffset(child.underlineOffset());
+        if (child.underlineColor() != null) merged.underlineColor(child.underlineColor());
+        if (child.strikeThrough() != null) merged.strikeThrough(child.strikeThrough());
         if (child.ruleAboveLineWeight() != null) merged.ruleAboveLineWeight(child.ruleAboveLineWeight());
         if (child.ruleBelowLineWeight() != null) merged.ruleBelowLineWeight(child.ruleBelowLineWeight());
         if (child.ruleAboveColor() != null) merged.ruleAboveColor(child.ruleAboveColor());
@@ -213,8 +217,12 @@ public class StylePropertyResolver {
         copy.tracking(src.tracking());
         copy.horizontalScale(src.horizontalScale());
         copy.baselineShift(src.baselineShift());
+        copy.underline(src.underline());
+        copy.underlineType(src.underlineType());
         copy.underlineWeight(src.underlineWeight());
         copy.underlineOffset(src.underlineOffset());
+        copy.underlineColor(src.underlineColor());
+        copy.strikeThrough(src.strikeThrough());
         copy.ruleAboveLineWeight(src.ruleAboveLineWeight());
         copy.ruleBelowLineWeight(src.ruleBelowLineWeight());
         copy.ruleAboveColor(src.ruleAboveColor());

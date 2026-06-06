@@ -71,6 +71,7 @@ class ASTMetadataBuilder {
             // 밑줄 / 취소선
             sd.underline(s.underline());
             sd.underlineType(s.underlineType());
+            if (s.underlineColor() != null) sd.underlineColor(colorResolver.resolve(s.underlineColor()));
             sd.strikeThrough(s.strikeThrough());
             // 두문자 (DropCap)
             if (s.dropCapLines() != null && s.dropCapLines() > 0) {
@@ -109,6 +110,7 @@ class ASTMetadataBuilder {
             if (s.horizontalScale() != null) sd.horizontalScale((short) Math.round(s.horizontalScale()));
             sd.underline(s.underline());
             sd.underlineType(s.underlineType());
+            if (s.underlineColor() != null) sd.underlineColor(colorResolver.resolve(s.underlineColor()));
             sd.strikeThrough(s.strikeThrough());
             doc.addCharacterStyle(sd);
         }

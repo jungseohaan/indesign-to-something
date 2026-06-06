@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
+
 /**
  * resolved.json 최상위 컨테이너.
  * InDesign ExtendScript에서 수집한 모든 resolved 데이터.
@@ -33,6 +35,7 @@ public class ResolvedData {
     private final Set<String> consumedRenderedGraphicIds = new HashSet<>();  // 인라인 처리로 소비된 deco DOM id
     private final List<RenderedGroup> renderedFloatingItems = new ArrayList<>();  // 통합 플로팅 그래픽
     private final Map<String, RenderedGroup> renderedFloatingItemMap = new LinkedHashMap<>();
+    private final Set<String> indesignPngTextOwnerFrameIds = new HashSet<>();
     private Set<String> editableTextFrameIds;  // 배경에서 숨겨진 TextFrame DOM ID
     private String basePath;  // resolved.json 부모 디렉토리 경로
     private final Map<String, String> paragraphStyleJustMap = new HashMap<>();  // styleName → justification (top-level paragraphStyles)
@@ -95,6 +98,10 @@ public class ResolvedData {
         if ("Black".equals(colorName)) return "#000000";
         if ("White".equals(colorName)) return "#FFFFFF";
         return null;
+    }
+
+    public String resolveTintedColorHex(String colorName, double tint) {
+        return ColorResolver.applyTintToHex(resolveColorHex(colorName), tint);
     }
 
     public void addTextFrame(ResolvedTextFrame frame) {
@@ -267,9 +274,29 @@ public class ResolvedData {
         }
         renderedFloatingItemMap.put(key, item);
         renderedFloatingItems.add(item);
+        registerIndesignPngTextOwner(item);
     }
 
     public List<RenderedGroup> allRenderedFloatingItems() { return renderedFloatingItems; }
+
+    private void registerIndesignPngTextOwner(RenderedGroup item) {
+        if (item == null || !"indesign_png".equals(item.textOwner())) return;
+        String[] ids = item.editableTextFrameIds();
+        if (ids == null) return;
+        for (String id : ids) {
+            if (id != null && !id.isEmpty()) {
+                indesignPngTextOwnerFrameIds.add(id);
+            }
+        }
+    }
+
+    /**
+     * 해당 TextFrame 텍스트가 InDesign PNG 내부에 이미 포함되어 있는지 확인한다.
+     * 이런 TF는 HWPX 글상자로 다시 배치하면 같은 라벨 텍스트가 중복된다.
+     */
+    public boolean isTextOwnedByIndesignPng(String domId) {
+        return domId != null && indesignPngTextOwnerFrameIds.contains(domId);
+    }
 
     public boolean hasRenderedFloatingItem(String idmlHexId) {
         if (idmlHexId == null || idmlHexId.length() < 2 || idmlHexId.charAt(0) != 'u') return false;

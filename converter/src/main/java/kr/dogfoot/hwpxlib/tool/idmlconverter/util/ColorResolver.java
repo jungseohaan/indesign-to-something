@@ -48,6 +48,16 @@ public class ColorResolver {
     }
 
     /**
+     * 색상 참조에 tint를 적용해 HEX 색상으로 변환한다.
+     *
+     * <p>InDesign FillTint/StrokeTint는 투명도가 아니라 원색과 흰색의 혼합 비율이다.
+     * tint=100은 원색, tint=0은 흰색이며, -1/NaN 같은 누락 값은 100으로 보정한다.</p>
+     */
+    public String resolveTinted(String colorRef, double tint) {
+        return applyTintToHex(resolve(colorRef), tint);
+    }
+
+    /**
      * IDMLDocument 없이 기본 색상만 처리하는 정적 메서드.
      */
     public static String resolveBasicColor(String colorRef) {
@@ -59,5 +69,39 @@ public class ColorResolver {
         if (colorRef.contains("White")) return "#FFFFFF";
 
         return null;
+    }
+
+    public static double normalizeTint(double tint) {
+        if (Double.isNaN(tint) || tint < 0) return 100.0;
+        if (tint > 100) return 100.0;
+        return tint;
+    }
+
+    public static String applyTintToHex(String hex, double tint) {
+        return blendColorWithWhite(hex, normalizeTint(tint) / 100.0);
+    }
+
+    /**
+     * 색상 hex를 fraction 비율로 흰색과 블렌딩.
+     * fraction=1.0 → 원래 색상, fraction=0.0 → 흰색.
+     */
+    public static String blendColorWithWhite(String hex, double fraction) {
+        if (hex == null || !hex.startsWith("#") || hex.length() < 7) return hex;
+        double f = Math.max(0.0, Math.min(1.0, fraction));
+        try {
+            int rgb = Integer.parseInt(hex.substring(1, 7), 16);
+            int r = (rgb >> 16) & 0xFF;
+            int g = (rgb >> 8) & 0xFF;
+            int b = rgb & 0xFF;
+            r = (int) Math.round(255 + (r - 255) * f);
+            g = (int) Math.round(255 + (g - 255) * f);
+            b = (int) Math.round(255 + (b - 255) * f);
+            return String.format("#%02X%02X%02X",
+                    Math.max(0, Math.min(255, r)),
+                    Math.max(0, Math.min(255, g)),
+                    Math.max(0, Math.min(255, b)));
+        } catch (Exception e) {
+            return hex;
+        }
     }
 }
