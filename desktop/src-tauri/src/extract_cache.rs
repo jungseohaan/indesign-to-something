@@ -561,7 +561,9 @@ fn extract_item_id_from_filename(name: &str) -> Option<u64> {
 /// 병합 규칙:
 /// - documentInfo, paragraphStyles, colors, fonts, fontMetrics: 새 파일 우선
 /// - stories, textFrames, pages, pageItems: ID/index 기준으로 합산 (새 파일 항목 우선)
-/// - renderedTextFrames, renderedFloatingItems: id 기준으로 합산 (새 파일 항목 우선)
+/// - renderedTextFrames: id 기준으로 합산 (새 파일 항목 우선)
+/// - renderedFloatingItems: id + pageIndex + file 기준으로 합산
+///   (master_graphic처럼 같은 id/file이 여러 페이지에 반복 적용되는 인스턴스를 보존)
 /// - editableTextFrameIds: 합산 후 중복 제거
 ///
 /// 변경된 페이지의 항목은 새 파일에, 변경 없는 페이지의 항목은 캐시에 있다.
@@ -632,6 +634,50 @@ pub fn merge_resolved_json(
         }
     }
 
+    fn rendered_item_key(item: &serde_json::Value) -> Option<String> {
+        let id = item.get("id").and_then(|v| match v {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        })?;
+        let page = item
+            .get("pageIndex")
+            .and_then(|v| v.as_i64())
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let file = item
+            .get("file")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        Some(format!("{}:{}:{}", id, page, file))
+    }
+
+    fn merge_rendered_floating_items(
+        new_val: &mut serde_json::Value,
+        cached_val: &serde_json::Value,
+    ) {
+        let new_arr = match new_val.get_mut("renderedFloatingItems").and_then(|v| v.as_array_mut()) {
+            Some(a) => a,
+            None => return,
+        };
+        let cached_arr = match cached_val.get("renderedFloatingItems").and_then(|v| v.as_array()) {
+            Some(a) => a,
+            None => return,
+        };
+        let mut new_keys: std::collections::HashSet<String> = new_arr
+            .iter()
+            .filter_map(rendered_item_key)
+            .collect();
+        for item in cached_arr {
+            if let Some(key) = rendered_item_key(item) {
+                if !new_keys.contains(&key) {
+                    new_arr.push(item.clone());
+                    new_keys.insert(key);
+                }
+            }
+        }
+    }
+
     // pages는 "index" 필드 기준
     fn merge_pages(new_val: &mut serde_json::Value, cached_val: &serde_json::Value) {
         let new_arr = match new_val.get_mut("pages").and_then(|v| v.as_array_mut()) {
@@ -680,7 +726,7 @@ pub fn merge_resolved_json(
     merge_array_by_field(&mut new_val, &cached_val, "textFrames", "id");
     merge_array_by_field(&mut new_val, &cached_val, "pageItems", "id");
     merge_array_by_field(&mut new_val, &cached_val, "renderedTextFrames", "id");
-    merge_array_by_field(&mut new_val, &cached_val, "renderedFloatingItems", "id");
+    merge_rendered_floating_items(&mut new_val, &cached_val);
     merge_array_by_field(&mut new_val, &cached_val, "renderedPdfFrames", "id");
     merge_array_by_field(&mut new_val, &cached_val, "renderedGraphicFrames", "id");
     merge_array_by_field(&mut new_val, &cached_val, "renderedImageFrames", "id");
@@ -699,6 +745,8 @@ pub fn merge_resolved_json(
 /// 청크 분할 추출 후 `resolved_START_END.json` 파일들을 `resolved.json`에 병합한다.
 ///
 /// output_dir에서 `resolved_*.json` 패턴 파일을 찾아 base인 `resolved.json`에 순서대로 병합.
+/// renderedFloatingItems는 같은 master PNG가 여러 페이지에 반복 적용될 수 있으므로
+/// id 단독이 아니라 id + pageIndex + file 기준으로 병합한다.
 /// 병합 후 청크 파일들은 삭제한다.
 pub fn merge_chunk_resolved_files(output_dir: &Path) -> Result<usize, String> {
     let base_path = output_dir.join("resolved.json");
@@ -763,6 +811,47 @@ pub fn merge_chunk_resolved_files(output_dir: &Path) -> Result<usize, String> {
         }
     }
 
+    fn rendered_item_key(item: &serde_json::Value) -> Option<String> {
+        let id = item.get("id").and_then(|v| match v {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        })?;
+        let page = item
+            .get("pageIndex")
+            .and_then(|v| v.as_i64())
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let file = item
+            .get("file")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        Some(format!("{}:{}:{}", id, page, file))
+    }
+
+    fn append_rendered_floating_items(base: &mut serde_json::Value, other: &serde_json::Value) {
+        let base_arr = match base.get_mut("renderedFloatingItems").and_then(|v| v.as_array_mut()) {
+            Some(a) => a,
+            None => return,
+        };
+        let other_arr = match other.get("renderedFloatingItems").and_then(|v| v.as_array()) {
+            Some(a) => a,
+            None => return,
+        };
+        let mut existing: std::collections::HashSet<String> = base_arr
+            .iter()
+            .filter_map(rendered_item_key)
+            .collect();
+        for item in other_arr {
+            if let Some(key) = rendered_item_key(item) {
+                if !existing.contains(&key) {
+                    base_arr.push(item.clone());
+                    existing.insert(key);
+                }
+            }
+        }
+    }
+
     fn append_pages(base: &mut serde_json::Value, other: &serde_json::Value) {
         let base_arr = match base.get_mut("pages").and_then(|v| v.as_array_mut()) {
             Some(a) => a,
@@ -806,7 +895,7 @@ pub fn merge_chunk_resolved_files(output_dir: &Path) -> Result<usize, String> {
         append_array(&mut merged, &chunk_val, "textFrames", "id");
         append_array(&mut merged, &chunk_val, "pageItems", "id");
         append_array(&mut merged, &chunk_val, "renderedTextFrames", "id");
-        append_array(&mut merged, &chunk_val, "renderedFloatingItems", "id");
+        append_rendered_floating_items(&mut merged, &chunk_val);
         append_array(&mut merged, &chunk_val, "renderedPdfFrames", "id");
         append_array(&mut merged, &chunk_val, "renderedGraphicFrames", "id");
         append_array(&mut merged, &chunk_val, "renderedImageFrames", "id");

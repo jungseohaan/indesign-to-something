@@ -46,9 +46,10 @@ class StoryLoader {
     static List<ASTParagraph> convertStoryFromIDML(ResolvedBuildContext ctx, String storyId, boolean suppressLeftIndent) {
         if (ctx.idmlDir == null) return null;
         // storyId(DOM decimal) → IDML hex → Story_u{hex}.xml
+        String sourceStoryId = sourceStoryId(storyId);
         String hexId;
         try {
-            hexId = "u" + Integer.toHexString(Integer.parseInt(storyId));
+            hexId = "u" + Integer.toHexString(Integer.parseInt(sourceStoryId));
         } catch (NumberFormatException e) {
             return null;
         }
@@ -177,7 +178,7 @@ class StoryLoader {
                                 else if (a.contains("decimal")) align = "decimal";
                             }
                             para.addTabStop(new ASTTabStop(
-                                    CoordinateConverter.pointsToHwpunits(posPt), align, null));
+                                    CoordinateConverter.pointsToHwpunits(posPt), align, rts.leader()));
                         }
                     }
                 }
@@ -570,6 +571,16 @@ class StoryLoader {
 
         StoryConverter.removeDuplicateDoviraLeadingMarkers(ctx, storyId, paragraphs);
         return paragraphs;
+    }
+
+    private static String sourceStoryId(String storyId) {
+        if (storyId == null) return "";
+        int cut = -1;
+        int pi = storyId.indexOf("_pi");
+        int oc = storyId.indexOf("_oc");
+        if (pi >= 0) cut = pi;
+        if (oc >= 0) cut = cut < 0 ? oc : Math.min(cut, oc);
+        return cut >= 0 ? storyId.substring(0, cut) : storyId;
     }
 
     private static void applyTrailingPageNumberLeader(ResolvedBuildContext ctx,

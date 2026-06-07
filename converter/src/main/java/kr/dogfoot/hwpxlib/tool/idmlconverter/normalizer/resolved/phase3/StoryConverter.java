@@ -27,6 +27,7 @@ import javax.imageio.ImageIO;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -226,6 +227,8 @@ public final class StoryConverter {
             ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, storyId);
             restoreTfInlineVisuals(ctx, blocks);
             preserveComposedLineBreaksForTrailingAnswerVisuals(ctx, blocks);
+            replaceDottedInlineImagesWithTabLeaders(ctx, blocks);
+            coalesceDotLeaderAnswerVisualBreaks(blocks);
             normalizeDotLeaderPageNumberTabs(blocks);
             expandBlocksForDotLeaderTabs(blocks);
             forceSingleLineJustifiedFramesLeft(ctx, blocks);
@@ -351,6 +354,7 @@ public final class StoryConverter {
         }
         ResolvedTextFrame.ComposedLine last = lines.get(lines.size() - 1);
         if (last == null || last.bounds() == null || last.bounds().length < 4) return false;
+        if (!hasTrailingAnswerLineMarker(last.text())) return false;
         double scale = ctx.resolvedData.scaleFactor();
         if (scale <= 0.0) scale = 1.0;
         if (last.wrapIndentRight() / scale < 8.0) return false;
@@ -390,6 +394,19 @@ public final class StoryConverter {
             return true;
         }
         return false;
+    }
+
+    private static boolean hasTrailingAnswerLineMarker(String text) {
+        if (text == null) return false;
+        if (text.indexOf('\uFFFC') >= 0
+                || text.indexOf('\u0007') >= 0
+                || text.indexOf('\b') >= 0
+                || text.indexOf('\t') >= 0) {
+            return true;
+        }
+        return text.contains("···")
+                || text.contains("...")
+                || text.contains("…");
     }
 
     private static boolean isAnswerTrailingVisualCandidate(RenderedGroup rg) {
@@ -440,11 +457,14 @@ public final class StoryConverter {
             }
             int textOffset = paraMap.textOffsetsAfterNormalizedChars[breakNormOffset];
             if (textOffset <= 0 || textOffset >= paraMap.textLength) return false;
-            offsets.add(textOffset);
+            offsets.add((trailingObjectReplacementCount(lines.get(i).text()) << 24) | textOffset);
             searchFrom = breakNormOffset;
         }
         for (int i = offsets.size() - 1; i >= 0; i--) {
-            insertBreakAtTextOffset(para, offsets.get(i));
+            int packed = offsets.get(i);
+            int trailingObjects = packed >>> 24;
+            int textOffset = packed & 0x00ffffff;
+            insertBreakAtTextOffset(para, textOffset, trailingObjects);
         }
         return !offsets.isEmpty();
     }
@@ -492,6 +512,25 @@ public final class StoryConverter {
                 .replace("\r", "")
                 .replace("\n", "")
                 .trim();
+    }
+
+    private static int trailingObjectReplacementCount(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        int count = 0;
+        for (int i = text.length() - 1; i >= 0; i--) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC') {
+                count++;
+                continue;
+            }
+            if (ch == '\u0003' || ch == '\u0007' || ch == '\u0008'
+                    || ch == '\r' || ch == '\n' || ch == '\u2028'
+                    || Character.isWhitespace(ch)) {
+                continue;
+            }
+            break;
+        }
+        return count;
     }
 
     /**
@@ -759,6 +798,10 @@ public final class StoryConverter {
     }
 
     private static void insertBreakAtTextOffset(ASTParagraph para, int offset) {
+        insertBreakAtTextOffset(para, offset, 0);
+    }
+
+    private static void insertBreakAtTextOffset(ASTParagraph para, int offset, int trailingInlineObjects) {
         if (para == null || para.items() == null) return;
         int remaining = Math.max(0, offset);
         List<ASTInlineItem> items = para.items();
@@ -780,21 +823,57 @@ public final class StoryConverter {
                 continue;
             }
             if (remaining == 0) {
-                items.add(i, lineBreak);
+                items.add(advancePastTrailingInlineObjects(items, i, trailingInlineObjects), lineBreak);
                 return;
             }
             if (remaining == len) {
-                items.add(i + 1, lineBreak);
+                items.add(advancePastTrailingInlineObjects(items, i + 1, trailingInlineObjects), lineBreak);
                 return;
             }
             ASTTextRun before = copyTextRun(run, text.substring(0, remaining));
             ASTTextRun after = copyTextRun(run, text.substring(remaining));
             items.set(i, before);
-            items.add(i + 1, lineBreak);
-            items.add(i + 2, after);
+            items.add(i + 1, after);
+            items.add(advancePastTrailingInlineObjects(items, i + 1, trailingInlineObjects), lineBreak);
             return;
         }
-        items.add(lineBreak);
+        items.add(advancePastTrailingInlineObjects(items, items.size(), trailingInlineObjects), lineBreak);
+    }
+
+    private static int advancePastTrailingInlineObjects(
+            List<ASTInlineItem> items, int index, int trailingInlineObjects) {
+        if (items == null || trailingInlineObjects <= 0) return index;
+        int pos = Math.max(0, Math.min(index, items.size()));
+        int remainingObjects = trailingInlineObjects;
+        while (pos < items.size() && remainingObjects > 0) {
+            ASTInlineItem item = items.get(pos);
+            if (item instanceof ASTInlineObject) {
+                remainingObjects--;
+                pos++;
+                continue;
+            }
+            if (isWhitespaceOnlyTextRunForLineBoundary(item)) {
+                pos++;
+                continue;
+            }
+            break;
+        }
+        while (pos < items.size() && isWhitespaceOnlyTextRunForLineBoundary(items.get(pos))) {
+            pos++;
+        }
+        return pos;
+    }
+
+    private static boolean isWhitespaceOnlyTextRunForLineBoundary(ASTInlineItem item) {
+        if (!(item instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) item).text();
+        if (text == null || text.isEmpty()) return true;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\r' || ch == '\n' || ch == '\u2028') return false;
+            if (!Character.isWhitespace(ch)) return false;
+        }
+        return true;
     }
 
     private static ASTTextRun copyTextRun(ASTTextRun source, String text) {
@@ -889,6 +968,285 @@ public final class StoryConverter {
                 block.width(requiredOuterWidth);
             }
         }
+    }
+
+    private static void replaceDottedInlineImagesWithTabLeaders(
+            ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || blocks == null) return;
+        double scale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null) continue;
+            long contentLeft = block.x() + block.insetLeft();
+            long contentRight = block.x() + Math.max(0L, block.width() - block.insetRight());
+            for (ASTParagraph para : block.paragraphs()) {
+                if (para == null || para.items() == null) continue;
+                List<ASTInlineItem> items = para.items();
+                for (int i = 0; i < items.size(); i++) {
+                    ASTInlineItem item = items.get(i);
+                    if (!(item instanceof ASTInlineObject)) continue;
+                    ASTInlineObject obj = (ASTInlineObject) item;
+                    if (!isDottedLeaderInlineImage(obj)) continue;
+
+                    long tabPos = dottedLeaderTabStopPosition(obj, contentLeft, contentRight, scale);
+                    if (tabPos <= 0) continue;
+                    ensureDotLeaderTabStop(para, tabPos);
+                    items.set(i, tabTextRunLike(items, i));
+                }
+            }
+        }
+    }
+
+    private static void coalesceDotLeaderAnswerVisualBreaks(List<ASTTextFrameBlock> blocks) {
+        if (blocks == null) return;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null) continue;
+            boolean changedBlock = false;
+            for (ASTParagraph para : block.paragraphs()) {
+                if (para == null || para.items() == null) continue;
+                List<ASTInlineItem> items = para.items();
+                for (int i = 0; i < items.size(); i++) {
+                    if (!isDotLeaderTabRun(items.get(i))) continue;
+
+                    int afterTab = skipNonTabWhitespaceTextRuns(items, i + 1);
+                    int cursor = afterTab;
+                    List<Integer> breakIndexes = new ArrayList<>();
+                    while (cursor < items.size()) {
+                        ASTInlineItem item = items.get(cursor);
+                        if (isLineBreak(item)) {
+                            breakIndexes.add(cursor);
+                            cursor++;
+                            cursor = skipNonTabWhitespaceTextRuns(items, cursor);
+                            continue;
+                        }
+                        break;
+                    }
+                    if (breakIndexes.isEmpty()) continue;
+
+                    int tail = skipNonTabWhitespaceTextRuns(items, cursor);
+                    int duplicateTab = -1;
+                    if (tail < items.size() && isDotLeaderTabRun(items.get(tail))) {
+                        duplicateTab = tail;
+                        tail = skipNonTabWhitespaceTextRuns(items, tail + 1);
+                    }
+                    if (!hasAnswerVisualSoon(items, tail)) continue;
+
+                    if (duplicateTab >= 0) {
+                        items.remove(duplicateTab);
+                    }
+                    for (int b = breakIndexes.size() - 1; b >= 0; b--) {
+                        int index = breakIndexes.get(b);
+                        if (index >= 0 && index < items.size() && isLineBreak(items.get(index))) {
+                            items.remove(index);
+                        }
+                    }
+                    para.alignment("left");
+                    changedBlock = true;
+                }
+                if (removeAdjacentDuplicateDotLeaderTabsBeforeAnswerVisuals(para)) {
+                    para.alignment("left");
+                    changedBlock = true;
+                }
+            }
+            if (changedBlock) {
+                block.noAutoLineWrap(true);
+            }
+        }
+    }
+
+    private static boolean removeAdjacentDuplicateDotLeaderTabsBeforeAnswerVisuals(ASTParagraph para) {
+        if (para == null || para.items() == null) return false;
+        boolean changed = false;
+        List<ASTInlineItem> items = para.items();
+        for (int i = 0; i < items.size(); i++) {
+            if (!isDotLeaderTabRun(items.get(i))) continue;
+            int next = skipNonTabWhitespaceTextRuns(items, i + 1);
+            if (next >= items.size() || !isDotLeaderTabRun(items.get(next))) continue;
+            int afterNext = skipNonTabWhitespaceTextRuns(items, next + 1);
+            if (!hasAnswerVisualSoon(items, afterNext)) continue;
+            items.remove(next);
+            changed = true;
+            i--;
+        }
+        return changed;
+    }
+
+    private static boolean isDotLeaderTabRun(ASTInlineItem item) {
+        if (!(item instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) item).text();
+        if (text == null || text.isEmpty() || text.indexOf('\t') < 0) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch != '\t' && !Character.isWhitespace(ch)) return false;
+        }
+        return true;
+    }
+
+    private static int skipWhitespaceTextRuns(List<ASTInlineItem> items, int index) {
+        if (items == null) return index;
+        int pos = Math.max(0, index);
+        while (pos < items.size() && isWhitespaceOnlyTextRunForLineBoundary(items.get(pos))) {
+            pos++;
+        }
+        return pos;
+    }
+
+    private static int skipNonTabWhitespaceTextRuns(List<ASTInlineItem> items, int index) {
+        if (items == null) return index;
+        int pos = Math.max(0, index);
+        while (pos < items.size() && isNonTabWhitespaceOnlyTextRun(items.get(pos))) {
+            pos++;
+        }
+        return pos;
+    }
+
+    private static boolean isNonTabWhitespaceOnlyTextRun(ASTInlineItem item) {
+        if (!(item instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) item).text();
+        if (text == null || text.isEmpty()) return true;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\t' || ch == '\r' || ch == '\n' || ch == '\u2028') return false;
+            if (!Character.isWhitespace(ch)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isLineBreak(ASTInlineItem item) {
+        if (item instanceof ASTBreak) {
+            return ((ASTBreak) item).breakType() == ASTBreak.BreakType.LINE;
+        }
+        if (!(item instanceof ASTTextRun)) return false;
+        String text = ((ASTTextRun) item).text();
+        if (text == null || text.isEmpty()) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch != '\r' && ch != '\n' && ch != '\u2028') return false;
+        }
+        return true;
+    }
+
+    private static boolean hasAnswerVisualSoon(List<ASTInlineItem> items, int index) {
+        if (items == null) return false;
+        int seen = 0;
+        for (int i = Math.max(0, index); i < items.size() && seen < 6; i++) {
+            ASTInlineItem item = items.get(i);
+            if (item instanceof ASTInlineObject) {
+                ASTInlineObject obj = (ASTInlineObject) item;
+                long minVisualSize = CoordinateConverter.pointsToHwpunits(3.0);
+                return obj.width() >= minVisualSize && obj.height() >= minVisualSize;
+            }
+            if (isWhitespaceOnlyTextRunForLineBoundary(item) || isDotLeaderTabRun(item)) {
+                seen++;
+                continue;
+            }
+            if (item instanceof ASTBreak) return false;
+            seen++;
+        }
+        return false;
+    }
+
+    private static boolean isDottedLeaderInlineImage(ASTInlineObject obj) {
+        if (obj == null) return false;
+        ASTInlineObject.ObjectKind kind = obj.kind();
+        if (kind != ASTInlineObject.ObjectKind.IMAGE
+                && kind != ASTInlineObject.ObjectKind.RENDERED_GROUP) {
+            return false;
+        }
+        if (obj.width() < CoordinateConverter.pointsToHwpunits(20.0)) return false;
+        if (obj.height() > CoordinateConverter.pointsToHwpunits(6.0)) return false;
+        return looksLikeDottedHorizontalBitmap(obj.imageData());
+    }
+
+    private static boolean looksLikeDottedHorizontalBitmap(byte[] data) {
+        if (data == null || data.length == 0) return false;
+        try {
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(data));
+            if (img == null || img.getWidth() < 16 || img.getHeight() < 1) return false;
+            if (img.getHeight() > 12) return false;
+            int bestRuns = 0;
+            double bestCoverage = 0.0;
+            for (int y = 0; y < img.getHeight(); y++) {
+                int runs = 0;
+                int ink = 0;
+                boolean inInk = false;
+                for (int x = 0; x < img.getWidth(); x++) {
+                    boolean on = isInkPixel(img.getRGB(x, y));
+                    if (on) {
+                        ink++;
+                        if (!inInk) {
+                            runs++;
+                            inInk = true;
+                        }
+                    } else {
+                        inInk = false;
+                    }
+                }
+                double coverage = ink / (double) img.getWidth();
+                if (runs > bestRuns || (runs == bestRuns && coverage > bestCoverage)) {
+                    bestRuns = runs;
+                    bestCoverage = coverage;
+                }
+            }
+            return bestRuns >= 4 && bestCoverage > 0.03 && bestCoverage < 0.75;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean isInkPixel(int argb) {
+        int alpha = (argb >>> 24) & 0xff;
+        if (alpha < 32) return false;
+        int r = (argb >>> 16) & 0xff;
+        int g = (argb >>> 8) & 0xff;
+        int b = argb & 0xff;
+        return Math.min(r, Math.min(g, b)) < 245;
+    }
+
+    private static long dottedLeaderTabStopPosition(
+            ASTInlineObject obj, long contentLeft, long contentRight, double scale) {
+        long fallback = Math.max(0L, contentRight - contentLeft);
+        if (obj == null || obj.boundsX() < 0 || obj.width() <= 0) return fallback;
+        long absoluteRight = CoordinateConverter.pointsToHwpunits(obj.boundsX() * scale) + obj.width();
+        long pos = absoluteRight - contentLeft;
+        if (pos <= 0) return fallback;
+        return Math.max(pos, CoordinateConverter.pointsToHwpunits(8.0));
+    }
+
+    private static void ensureDotLeaderTabStop(ASTParagraph para, long position) {
+        if (para == null || position <= 0) return;
+        long tol = CoordinateConverter.pointsToHwpunits(1.0);
+        if (para.tabStops() != null) {
+            for (ASTTabStop stop : para.tabStops()) {
+                if (stop == null) continue;
+                if (Math.abs(stop.position() - position) <= tol) {
+                    stop.alignment("left");
+                    stop.leader(".");
+                    return;
+                }
+            }
+        }
+        para.addTabStop(new ASTTabStop(position, "left", "."));
+    }
+
+    private static ASTTextRun tabTextRunLike(List<ASTInlineItem> items, int index) {
+        ASTTextRun sample = nearestTextRun(items, index);
+        if (sample != null) return copyTextRun(sample, "\t");
+        ASTTextRun run = new ASTTextRun();
+        run.text("\t");
+        return run;
+    }
+
+    private static ASTTextRun nearestTextRun(List<ASTInlineItem> items, int index) {
+        if (items == null || items.isEmpty()) return null;
+        for (int i = index - 1; i >= 0; i--) {
+            ASTInlineItem item = items.get(i);
+            if (item instanceof ASTTextRun) return (ASTTextRun) item;
+        }
+        for (int i = index + 1; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (item instanceof ASTTextRun) return (ASTTextRun) item;
+        }
+        return null;
     }
 
     private static void normalizeDotLeaderPageNumberTabs(List<ASTTextFrameBlock> blocks) {
@@ -1374,7 +1732,7 @@ public final class StoryConverter {
                     para.addTabStop(new ASTTabStop(
                             CoordinateConverter.pointsToHwpunits(posPt),
                             mapResolvedTabAlignment(rts.alignment()),
-                            null));
+                            rts.leader()));
                 }
             }
 
@@ -1808,7 +2166,7 @@ public final class StoryConverter {
                 para.addTabStop(new ASTTabStop(
                         CoordinateConverter.pointsToHwpunits(posPt),
                         mapResolvedTabAlignment(rts.alignment()),
-                        null));
+                        rts.leader()));
             }
         }
         if (!para.hasTabStops() || para.tabStops().size() < 2) return false;

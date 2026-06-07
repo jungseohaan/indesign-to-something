@@ -489,6 +489,9 @@ public class ResolvedDataReader {
         if (o.has("bounds") && !o.get("bounds").isJsonNull()) {
             group.bounds(parseDoubleArray(o.getAsJsonArray("bounds")));
         }
+        if (o.has("cropSourceBounds") && !o.get("cropSourceBounds").isJsonNull()) {
+            group.cropSourceBounds(parseDoubleArray(o.getAsJsonArray("cropSourceBounds")));
+        }
         if (o.has("visibleExpansion") && !o.get("visibleExpansion").isJsonNull()) {
             group.visibleExpansion(parseDoubleArray(o.getAsJsonArray("visibleExpansion")));
         }

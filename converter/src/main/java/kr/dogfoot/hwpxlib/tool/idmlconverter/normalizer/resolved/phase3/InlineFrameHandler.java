@@ -29,6 +29,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -1060,7 +1061,7 @@ public class InlineFrameHandler {
     static ASTTextRun tryInlineTextFrameAsRun(ResolvedBuildContext ctx, int anchoredObjectId,
                                              String previousText, String nextText) {
         // Phase 2가 floating text box로 승격한 TF → 인라인 런 중복 방지
-        if (ctx.isDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+        if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
         String domId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
         if (tf == null) {
@@ -1347,6 +1348,7 @@ public class InlineFrameHandler {
 
     /** IDML 경로용: resolved TextFrame bounds만으로 판별 (renderedFloatingItems 사용 안 함) */
     static boolean isAnchoredOutsideParentByTextFrame(ResolvedBuildContext ctx, int anchoredId, String parentStoryId) {
+        if (isSyntheticMasterStory(parentStoryId) && hasInlineObjectRender(ctx, anchoredId)) return false;
         ResolvedTextFrame anchoredTf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredId));
         if (anchoredTf == null) {
             // TextFrame이 아닌 인라인(Polygon/Rectangle 등): renderedFloatingItems에서 bounds 확인
@@ -1369,6 +1371,7 @@ public class InlineFrameHandler {
 
     /** Resolved 경로용: resolved TextFrame + renderedFloatingItems bounds로 판별 */
     static boolean isAnchoredOutsideParent(ResolvedBuildContext ctx, int anchoredId, String parentStoryId) {
+        if (isSyntheticMasterStory(parentStoryId) && hasInlineObjectRender(ctx, anchoredId)) return false;
         double[] aGb = null;
         // 1) resolved TextFrame에서 bounds
         ResolvedTextFrame anchoredTf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredId));
@@ -1403,6 +1406,20 @@ public class InlineFrameHandler {
             }
         }
         return anyParentChecked;
+    }
+
+    private static boolean isSyntheticMasterStory(String storyId) {
+        return storyId != null && (storyId.contains("_pi") || storyId.contains("_oc"));
+    }
+
+    private static boolean hasInlineObjectRender(ResolvedBuildContext ctx, int anchoredId) {
+        if (ctx == null || ctx.resolvedData == null) return false;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg.id() == anchoredId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1530,7 +1547,7 @@ public class InlineFrameHandler {
         for (RenderedGroup candidate : ctx.resolvedData.allRenderedFloatingItems()) {
             if (candidate == null || candidate.id() == anchoredObjectId) continue;
             if (!isMergeableInlineVector(ctx, candidate)) continue;
-            if (ctx.isDisposed(candidate.id(), FrameDisposition.TEXT_BLOCK_PLACED)) continue;
+            if (ctx.isRenderedDisposed(candidate.id(), FrameDisposition.TEXT_BLOCK_PLACED)) continue;
             if (candidate.pageIndex() != anchor.pageIndex()) continue;
             if (!boundsOverlapEnough(anchor.bounds(), candidate.bounds())) continue;
             parts.add(candidate);
@@ -1546,7 +1563,7 @@ public class InlineFrameHandler {
 
             for (RenderedGroup part : parts) {
                 if (part.id() != anchoredObjectId) {
-                    ctx.setDisposition(part.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+                    ctx.setRenderedDisposition(part.id(), FrameDisposition.TEXT_BLOCK_PLACED);
                 }
             }
 
@@ -1683,9 +1700,9 @@ public class InlineFrameHandler {
 
         // Phase 2 가 이 inline_object 의 자손 TF 를 floating 으로 전환했으면
         // inline PNG 는 Phase 7 이 floating ASTFigure 로 재배치 → 여기서 억제.
-        if (ctx.isDisposed(anchoredObjectId, FrameDisposition.PNG_CONVERT_TO_FLOATING)) return null;
+        if (ctx.isInlineDisposed(anchoredObjectId, FrameDisposition.PNG_CONVERT_TO_FLOATING)) return null;
         // Phase 2 가 floating text box 로 승격한 inline TF → inline PNG 도 억제 (28pt PNG가 행간 팽창하는 것 방지).
-        if (ctx.isDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+        if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
 
         // 부모 rendered PNG가 이미 소유한 visual-only 인라인 그래픽은 Story 흐름에 다시 넣지 않는다.
         // 예: 말풍선 curly-brace, 답안 밑줄, 작은 bullet/badge 배경.
@@ -1816,7 +1833,7 @@ public class InlineFrameHandler {
                         // AR=6~7 정도의 라벨 박스(예: "최근 사회·문화적 맥락" 36mm×6mm)는 인라인 유지.
                         // GraphicLine(인라인 선)은 제외.
                         if (!isGraphicLine && bw > bh * 8.0 && bw > 100.0) {
-                            ctx.setDisposition(anchoredObjectId, FrameDisposition.PNG_CONVERT_TO_FLOATING);
+                            ctx.setInlineDisposition(anchoredObjectId, FrameDisposition.PNG_CONVERT_TO_FLOATING);
                             return null;
                         }
                         obj.width(CoordinateConverter.pointsToHwpunits(bw));
@@ -2119,7 +2136,7 @@ public class InlineFrameHandler {
         if (isShortSingleLineTextFrame(tf)) return true;
         if (tf.composedLines() == null || tf.composedLines().size() < 2) return false;
         String visibleText = tf.frameVisibleText();
-        if (visibleText != null && visibleText.startsWith("\uFFFC")) return false;
+        if (!hasVisibleTextExcludingObjectControls(visibleText)) return false;
 
         Set<Integer> paragraphIndices = new HashSet<>();
         for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
@@ -2132,21 +2149,40 @@ public class InlineFrameHandler {
         return paragraphIndices.size() == tf.composedLines().size();
     }
 
+    private static boolean hasVisibleTextExcludingObjectControls(String visibleText) {
+        if (visibleText == null) return false;
+        String normalized = visibleText
+                .replace("\uFFFC", "")
+                .replace("\u0007", "")
+                .replace("\b", "")
+                .replaceAll("\\s+", "")
+                .trim();
+        return !normalized.isEmpty();
+    }
+
+    private static String normalizeVisibleText(String visibleText) {
+        if (visibleText == null) return "";
+        return visibleText
+                .replace("\uFFFC", "")
+                .replace("\u0007", "")
+                .replace("\b", "")
+                .replaceAll("\\s+", "")
+                .trim();
+    }
+
     private static boolean isShortSingleLineTextFrame(ResolvedTextFrame tf) {
         if (tf == null) return false;
         List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
-        if (lines == null || lines.size() != 1) return false;
+        boolean singleComposedLine = lines != null && lines.size() == 1;
+        boolean singleReportedLine = (lines == null || lines.isEmpty()) && tf.lineCount() == 1;
+        if (!singleComposedLine && !singleReportedLine) return false;
         String visibleText = tf.frameVisibleText();
-        if (visibleText == null || visibleText.startsWith("\uFFFC")) return false;
+        if (visibleText == null) return false;
         if (visibleText.indexOf('\n') >= 0 || visibleText.indexOf('\r') >= 0) return false;
         if (tf.paragraphStart() != tf.paragraphEnd()) return false;
         if (tf.frameParaTexts() != null && tf.frameParaTexts().size() != 1) return false;
 
-        String normalized = visibleText
-                .replace("\uFFFC", "")
-                .replace("\u0007", "")
-                .replaceAll("\\s+", "")
-                .trim();
+        String normalized = normalizeVisibleText(visibleText);
         return !normalized.isEmpty() && normalized.length() <= SHORT_SINGLE_LINE_NO_WRAP_CHARS;
     }
 

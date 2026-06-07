@@ -8,11 +8,13 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDispositio
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -32,11 +34,16 @@ public final class BackgroundInjector {
     private BackgroundInjector() {}
     private static final double TF_INLINE_VISUAL_UNION_MAX_RATIO = 1.25;
     private static final int TF_INLINE_VISUAL_MAX_CANVAS_PIXELS = 25_000_000;
+    private static final double TF_VISUAL_SHELL_MIN_AREA_RATIO = 0.45;
+    private static final double TF_VISUAL_SHELL_MAX_AREA_RATIO = 1.80;
+    private static final double TF_VISUAL_SHELL_OVERLAP_MIN = 0.75;
 
     public static void inject(ResolvedBuildContext ctx, List<ASTSection> sections) {
         if (ctx.resolvedData == null) return;
         List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
         if (floatingItems == null || floatingItems.isEmpty()) return;
+
+        Set<Integer> editableLabelShellIds = collectEditableLabelShells(ctx, floatingItems);
 
         // Pass 1: id → pageIndex 맵 구성 (자식의 페이지 판별용)
         Map<Integer, Integer> idToPage = new HashMap<>();
@@ -49,10 +56,11 @@ public final class BackgroundInjector {
         // 같은 페이지의 자식만 수집 (다른 페이지 자식은 독립 배치 허용).
         Set<Integer> childOfGroup = new HashSet<>();
         for (RenderedGroup rg : floatingItems) {
-            if (!canSuppressChildren(ctx, sections, rg)) continue;
+            if (!canSuppressChildren(ctx, sections, rg, editableLabelShellIds)) continue;
             int parentPage = rg.pageIndex();
             if (rg.childIds() != null) {
                 for (int cid : rg.childIds()) {
+                    if (editableLabelShellIds.contains(cid)) continue;
                     Integer cp = idToPage.get(cid);
                     if (cp != null && cp == parentPage)
                         childOfGroup.add(cid);
@@ -60,6 +68,7 @@ public final class BackgroundInjector {
             }
             if (rg.childImageIds() != null) {
                 for (int cid : rg.childImageIds()) {
+                    if (editableLabelShellIds.contains(cid)) continue;
                     Integer cp = idToPage.get(cid);
                     if (cp != null && cp == parentPage)
                         childOfGroup.add(cid);
@@ -74,47 +83,75 @@ public final class BackgroundInjector {
         ctx.phase6PlacedIds.addAll(coveredByInlineObjects);
 
         Set<String> processedKeys = new HashSet<>();
+        Set<String> processedDomPageKeys = new HashSet<>();
 
         for (RenderedGroup rg : floatingItems) {
             if (!isPageObject(rg)) {
                 continue;
             }
-            if (ctx.isDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) {
+            if (shouldDecomposeToEditableLabelShell(rg, editableLabelShellIds)) {
                 ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_EDITABLE_LABEL_PARENT",
+                        "editable label shell is placed from a tighter child render");
+                continue;
+            }
+            if (ctx.isRenderedDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) {
+                ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_RENDERED_DISPOSED", "rendered item already handled");
                 continue;
             }
             // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
             if (childOfGroup.contains(rg.id())) {
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_CHILD_OF_GROUP", "covered by renderable parent group");
                 continue;
             }
             if (isCoveredByInlineObject(rg, coveredByInlineObjects)) {
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_COVERAGE", "covered by inline_object ownership");
                 continue;
             }
             // 같은 ID가 inline_object로도 등록된 경우: Phase 3가 인라인으로 처리하므로 floating 중복 금지.
             if (ctx.resolvedData.isInlineObjectId(rg.id())) {
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_OBJECT", "inline object handled by story flow");
+                continue;
+            }
+            if (ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg)) {
+                ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_VISUAL_LABEL_TEXT_EDITABLE", "text label kept editable");
                 continue;
             }
             if (rg.shouldSkipByOwnership()) {
                 ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OWNERSHIP", "render ownership says text is not hidden");
                 continue;
             }
             // childIds 검사
             if (shouldSkipByChildPolicy(ctx, rg)) {
                 ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_CHILD_POLICY", "child policy suppresses render");
                 continue;
             }
-            // 같은 파일이 중복 추출된 경우만 스킵 (id가 같아도 deco/graphic 등 파일이 다르면 둘 다 배치)
-            if (!processedKeys.add(rg.file() != null ? rg.file() : rg.id() + ":" + rg.pageIndex())) {
+            if (!processedDomPageKeys.add(rg.id() + ":" + rg.pageIndex())) {
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_DUPLICATE_DOM_PAGE",
+                        "same DOM id already rendered on this page");
+                continue;
+            }
+            // 같은 페이지에서 같은 파일이 중복 추출된 경우만 스킵한다.
+            // master_graphic은 같은 PNG asset을 여러 페이지 인스턴스가 공유하므로 pageIndex를 보존해야 한다.
+            if (!processedKeys.add((rg.file() != null ? rg.file() : String.valueOf(rg.id()))
+                    + ":" + rg.pageIndex())) {
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_DUPLICATE_FILE_PAGE", "same page/file already processed");
                 continue;
             }
 
             int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) {
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_NO_SECTION", "pageIndex not mapped to section");
                 continue;
             }
 
             double[] bounds = rg.bounds();
             if (bounds == null || bounds.length < 4) {
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_NO_BOUNDS", "rendered item has no bounds");
                 continue;
             }
             bounds = shouldCompositeTfInlineVisuals(rg)
@@ -123,6 +160,7 @@ public final class BackgroundInjector {
 
             byte[] imageData = loadPng(ctx, rg);
             if (imageData == null) {
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_PNG_LOAD_FAILED", "png file missing or unreadable");
                 continue;
             }
 
@@ -131,6 +169,18 @@ public final class BackgroundInjector {
             double rawRight = bounds[3], rawBottom = bounds[2];
             double fullW = rawRight - rawLeft;
             double fullH = rawBottom - rawTop;
+            double cropRefLeft = rawLeft, cropRefTop = rawTop;
+            double cropRefRight = rawRight, cropRefBottom = rawBottom;
+            boolean hasCropSourceBounds = hasUsableCropSourceBounds(rg, bounds);
+            if (hasCropSourceBounds) {
+                double[] cropSource = rg.cropSourceBounds();
+                cropRefLeft = cropSource[1];
+                cropRefTop = cropSource[0];
+                cropRefRight = cropSource[3];
+                cropRefBottom = cropSource[2];
+            }
+            double cropRefW = cropRefRight - cropRefLeft;
+            double cropRefH = cropRefBottom - cropRefTop;
 
             // 페이지 경계 밖으로 넘치는 PNG를 가시 영역으로 크롭
             double pageWidthMm = 1e9, pageHeightMm = 1e9;
@@ -147,10 +197,14 @@ public final class BackgroundInjector {
             double visRight = Math.min(rawRight, pageWidthMm);
             double visBottom = Math.min(rawBottom, pageHeightMm);
             if (visLeft >= visRight || visTop >= visBottom) {
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OUTSIDE_PAGE", "no visible page intersection");
                 continue;
             }
 
             int pixelW = 0, pixelH = 0;
+            Double stripCropLeftOverride = null;
+            Double stripCropWidthOverride = null;
+            boolean pageAnchoredStripCrop = false;
             try {
                 BufferedImage img = loadImageForPlacement(ctx, rg);
                 if (img != null && shouldCompositeTfInlineVisuals(rg)) {
@@ -182,14 +236,71 @@ public final class BackgroundInjector {
                     } catch (Exception ignored2) {}
                 }
                 if (img != null) {
-                    boolean needsCrop = fullW > 1.0 && fullH > 1.0
+                    if (shouldCropOwnedTextFrameShellToAlpha(rg)) {
+                        int[] alphaBounds = alphaBounds(img);
+                        if (alphaBounds != null && shouldApplyAlphaCrop(img, alphaBounds)) {
+                            int pxX = alphaBounds[0];
+                            int pxY = alphaBounds[1];
+                            int pxW = alphaBounds[2];
+                            int pxH = alphaBounds[3];
+                            double cropLeft = rawLeft + (double) pxX / (double) img.getWidth() * fullW;
+                            double cropTop = rawTop + (double) pxY / (double) img.getHeight() * fullH;
+                            double cropRight = rawLeft + (double) (pxX + pxW) / (double) img.getWidth() * fullW;
+                            double cropBottom = rawTop + (double) (pxY + pxH) / (double) img.getHeight() * fullH;
+                            BufferedImage cropped = img.getSubimage(pxX, pxY, pxW, pxH);
+                            imageData = encodePng(cropped);
+                            pixelW = cropped.getWidth();
+                            pixelH = cropped.getHeight();
+                            img.flush();
+                            img = cropped;
+
+                            rawLeft = cropLeft;
+                            rawTop = cropTop;
+                            rawRight = cropRight;
+                            rawBottom = cropBottom;
+                            fullW = rawRight - rawLeft;
+                            fullH = rawBottom - rawTop;
+                            visLeft = Math.max(0.0, rawLeft);
+                            visTop = Math.max(0.0, rawTop);
+                            visRight = Math.min(rawRight, pageWidthMm);
+                            visBottom = Math.min(rawBottom, pageHeightMm);
+                            if (visLeft >= visRight || visTop >= visBottom) {
+                                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OUTSIDE_PAGE_AFTER_ALPHA_CROP", "alpha crop removed page intersection");
+                                continue;
+                            }
+                        }
+                    }
+                    boolean needsCrop = (fullW > 1.0 && fullH > 1.0
                             && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
-                                || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5);
+                                || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5))
+                            || (hasCropSourceBounds && cropRefW > 1.0 && cropRefH > 1.0);
                     if (needsCrop) {
-                        int pxX = (int) Math.round((visLeft - rawLeft) / fullW * img.getWidth());
-                        int pxY = (int) Math.round((visTop - rawTop) / fullH * img.getHeight());
-                        int pxW = (int) Math.round((visRight - rawLeft) / fullW * img.getWidth()) - pxX;
-                        int pxH = (int) Math.round((visBottom - rawTop) / fullH * img.getHeight()) - pxY;
+                        pageAnchoredStripCrop = !hasCropSourceBounds && shouldAnchorStripCropToPage(
+                                rg, rawLeft, rawRight, rawTop, rawBottom, pageWidthMm, pageHeightMm);
+                        int[] stripRun = pageAnchoredStripCrop
+                                ? edgeAlphaRun(img, pageIdx)
+                                : null;
+                        int pxX;
+                        int pxY;
+                        int pxW;
+                        int pxH;
+                        if (stripRun != null) {
+                            pxX = stripRun[0];
+                            pxY = 0;
+                            pxW = stripRun[1] - stripRun[0] + 1;
+                            pxH = img.getHeight();
+                            stripCropLeftOverride = (double) pxX / (double) img.getWidth() * pageWidthMm;
+                            stripCropWidthOverride = (double) pxW / (double) img.getWidth() * pageWidthMm;
+                        } else {
+                            pxX = pageAnchoredStripCrop
+                                    ? 0
+                                    : (int) Math.round((visLeft - cropRefLeft) / cropRefW * img.getWidth());
+                            pxY = (int) Math.round((visTop - cropRefTop) / cropRefH * img.getHeight());
+                            pxW = pageAnchoredStripCrop
+                                    ? (int) Math.round((visRight - visLeft) / fullW * img.getWidth())
+                                    : (int) Math.round((visRight - cropRefLeft) / cropRefW * img.getWidth()) - pxX;
+                            pxH = (int) Math.round((visBottom - cropRefTop) / cropRefH * img.getHeight()) - pxY;
+                        }
                         pxX = Math.max(0, Math.min(pxX, img.getWidth() - 1));
                         pxY = Math.max(0, Math.min(pxY, img.getHeight() - 1));
                         pxW = Math.max(1, Math.min(img.getWidth() - pxX, pxW));
@@ -257,6 +368,10 @@ public final class BackgroundInjector {
             long y = CoordinateConverter.pointsToHwpunits(visTop * ctx.scaleFactor);
             long w = CoordinateConverter.pointsToHwpunits((visRight - visLeft) * ctx.scaleFactor);
             long h = CoordinateConverter.pointsToHwpunits((visBottom - visTop) * ctx.scaleFactor);
+            if (stripCropLeftOverride != null && stripCropWidthOverride != null) {
+                x = CoordinateConverter.pointsToHwpunits(stripCropLeftOverride * ctx.scaleFactor);
+                w = CoordinateConverter.pointsToHwpunits(stripCropWidthOverride * ctx.scaleFactor);
+            }
 
             if (w <= 0 || h <= 0) continue;
 
@@ -285,7 +400,10 @@ public final class BackgroundInjector {
             boolean isBackgroundLike = isFullPageBg || (isTextFrameVisualShell && coversPageByArea);
             int resolvedZ = isBackgroundLike
                     ? 0
-                    : (rg.zOrderKnown() ? rg.zOrder() : Math.max(rg.zOrder(), 5));
+                    : effectiveZOrder(ctx, rg);
+            if (stripCropLeftOverride != null && stripCropWidthOverride != null) {
+                resolvedZ = Math.max(resolvedZ, 900);
+            }
             fig.zOrder(resolvedZ);
             fig.fromGroup(!isBackgroundLike);
             fig.sourceId("page_obj_" + rg.id());
@@ -293,9 +411,13 @@ public final class BackgroundInjector {
             // BEHIND_TEXT 항목은 XML 순서상 앞에 올수록 더 아래 레이어 → addBlockAtFront
             sections.get(pageIdx).addBlockAtFront(fig);
             ctx.phase6PlacedIds.add(rg.id());
+            ctx.recordRenderedDecision(rg, "Phase6", "PLACE", "placed as ASTFigure");
 
             // 스프레드를 가로질러 다음 페이지로 넘치는 경우: 우측 반을 다음 페이지에 별도 배치
-            boolean overflowsRight = rawRight > pageWidthMm + 10.0 && pageIdx + 1 < sections.size();
+            // 얇은 master/haseera strip은 각 페이지별 렌더 항목이 따로 있으므로
+            // neighbor overflow를 만들면 반대쪽 페이지 placeholder(PB 등)가 중복 배치된다.
+            boolean overflowsRight = !pageAnchoredStripCrop
+                    && rawRight > pageWidthMm + 10.0 && pageIdx + 1 < sections.size();
             if (overflowsRight) {
                 int nextPageIdx = pageIdx + 1;
                 double nextPageWidthMm = 1e9, nextPageHeightMm = 1e9;
@@ -536,16 +658,239 @@ public final class BackgroundInjector {
                 || f.contains("haseera_"));
     }
 
+    private static boolean hasUsableCropSourceBounds(RenderedGroup rg, double[] bounds) {
+        double[] crop = rg.cropSourceBounds();
+        if (crop == null || crop.length < 4 || bounds == null || bounds.length < 4) return false;
+        double cropW = crop[3] - crop[1];
+        double cropH = crop[2] - crop[0];
+        double boundsW = bounds[3] - bounds[1];
+        double boundsH = bounds[2] - bounds[0];
+        if (cropW <= 1.0 || cropH <= 1.0 || boundsW <= 0.0 || boundsH <= 0.0) return false;
+        boolean containsBounds = crop[0] <= bounds[0] + 0.05
+                && crop[1] <= bounds[1] + 0.05
+                && crop[2] >= bounds[2] - 0.05
+                && crop[3] >= bounds[3] - 0.05;
+        boolean materiallyLarger = cropW > boundsW + 0.5 || cropH > boundsH + 0.5;
+        return containsBounds && materiallyLarger;
+    }
+
+    private static boolean shouldAnchorStripCropToPage(RenderedGroup rg,
+                                                       double rawLeft,
+                                                       double rawRight,
+                                                       double rawTop,
+                                                       double rawBottom,
+                                                       double pageWidth) {
+        return shouldAnchorStripCropToPage(rg, rawLeft, rawRight, rawTop, rawBottom, pageWidth, 1e9);
+    }
+
+    private static boolean shouldAnchorStripCropToPage(RenderedGroup rg,
+                                                       double rawLeft,
+                                                       double rawRight,
+                                                       double rawTop,
+                                                       double rawBottom,
+                                                       double pageWidth,
+                                                       double pageHeight) {
+        if (pageWidth >= 1e8) return false;
+        if (rawLeft >= -0.5 || rawRight <= pageWidth + 0.5) return false;
+        double fullH = rawBottom - rawTop;
+        double maxStripHeight = pageHeight < 1e8 ? Math.min(40.0, pageHeight * 0.15) : 40.0;
+        if (fullH > maxStripHeight) return false;
+        String file = rg.file();
+        String reason = rg.reason();
+        return (file != null && (file.contains("master_") || file.contains("haseera_")))
+                || "master_graphic".equals(reason)
+                || "haseera_graphic".equals(reason);
+    }
+
+    private static int[] edgeAlphaRun(BufferedImage img, int pageIdx) {
+        int w = img.getWidth();
+        int h = img.getHeight();
+        if (w <= 0 || h <= 0) return null;
+
+        int[] colorRun = edgeColorRun(img, pageIdx);
+        if (colorRun != null) return colorRun;
+
+        boolean[] occupied = new boolean[w];
+        int occupiedCount = 0;
+        for (int x = 0; x < w; x++) {
+            for (int y = 0; y < h; y++) {
+                if (((img.getRGB(x, y) >>> 24) & 0xFF) > 8) {
+                    occupied[x] = true;
+                    occupiedCount++;
+                    break;
+                }
+            }
+        }
+        if (occupiedCount == 0 || occupiedCount > w * 0.35) return null;
+
+        int gapLimit = Math.max(8, w / 180);
+        List<int[]> runs = new ArrayList<>();
+        int runStart = -1;
+        int lastOccupied = -1;
+        for (int x = 0; x < w; x++) {
+            if (!occupied[x]) continue;
+            if (runStart < 0 || (lastOccupied >= 0 && x - lastOccupied > gapLimit)) {
+                if (runStart >= 0) runs.add(new int[]{runStart, lastOccupied});
+                runStart = x;
+            }
+            lastOccupied = x;
+        }
+        if (runStart >= 0) runs.add(new int[]{runStart, lastOccupied});
+        if (runs.isEmpty()) return null;
+
+        int[] selected = runs.get(0);
+        if ((pageIdx & 1) == 1) {
+            selected = runs.get(runs.size() - 1);
+        }
+        int pad = Math.max(2, w / 1000);
+        int left = Math.max(0, selected[0] - pad);
+        int right = Math.min(w - 1, selected[1] + pad);
+        if (right - left + 1 > w * 0.35) return null;
+        return new int[]{left, right};
+    }
+
+    private static int[] edgeColorRun(BufferedImage img, int pageIdx) {
+        int w = img.getWidth();
+        int h = img.getHeight();
+        boolean[] occupied = new boolean[w];
+        int occupiedCount = 0;
+        for (int x = 0; x < w; x++) {
+            for (int y = 0; y < h; y++) {
+                int argb = img.getRGB(x, y);
+                int a = (argb >>> 24) & 0xFF;
+                if (a <= 8) continue;
+                int r = (argb >>> 16) & 0xFF;
+                int g = (argb >>> 8) & 0xFF;
+                int b = argb & 0xFF;
+                int max = Math.max(r, Math.max(g, b));
+                int min = Math.min(r, Math.min(g, b));
+                if (max >= 80 && max - min >= 35) {
+                    occupied[x] = true;
+                    occupiedCount++;
+                    break;
+                }
+            }
+        }
+        if (occupiedCount == 0 || occupiedCount > w * 0.35) return null;
+        return selectEdgeRun(occupied, pageIdx, w);
+    }
+
+    private static int[] selectEdgeRun(boolean[] occupied, int pageIdx, int width) {
+        int gapLimit = Math.max(8, width / 180);
+        List<int[]> runs = new ArrayList<>();
+        int runStart = -1;
+        int lastOccupied = -1;
+        for (int x = 0; x < width; x++) {
+            if (!occupied[x]) continue;
+            if (runStart < 0 || (lastOccupied >= 0 && x - lastOccupied > gapLimit)) {
+                if (runStart >= 0) runs.add(new int[]{runStart, lastOccupied});
+                runStart = x;
+            }
+            lastOccupied = x;
+        }
+        if (runStart >= 0) runs.add(new int[]{runStart, lastOccupied});
+        if (runs.isEmpty()) return null;
+
+        int[] selected = runs.get(0);
+        if ((pageIdx & 1) == 1) {
+            selected = runs.get(runs.size() - 1);
+        }
+        int pad = Math.max(2, width / 1000);
+        int left = Math.max(0, selected[0] - pad);
+        int right = Math.min(width - 1, selected[1] + pad);
+        if (right - left + 1 > width * 0.35) return null;
+        return new int[]{left, right};
+    }
+
     private static boolean canSuppressChildren(
-            ResolvedBuildContext ctx, List<ASTSection> sections, RenderedGroup rg) {
+            ResolvedBuildContext ctx, List<ASTSection> sections, RenderedGroup rg,
+            Set<Integer> editableLabelShellIds) {
         if (!isPageObject(rg)) return false;
         if (ctx.resolvedData.isInlineObjectId(rg.id())) return false;
+        if (ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg)) return false;
+        if (shouldDecomposeToEditableLabelShell(rg, editableLabelShellIds)) return false;
         if (rg.shouldSkipByOwnership()) return false;
         if (shouldSkipByChildPolicy(ctx, rg)) return false;
         if (rg.bounds() == null || rg.bounds().length < 4) return false;
         int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
         if (pageIdx < 0 || pageIdx >= sections.size()) return false;
         return hasRenderablePng(ctx, rg);
+    }
+
+    private static Set<Integer> collectEditableLabelShells(
+            ResolvedBuildContext ctx, List<RenderedGroup> floatingItems) {
+        Set<Integer> ids = new HashSet<>();
+        if (ctx == null || ctx.resolvedData == null || floatingItems == null) return ids;
+        for (RenderedGroup rg : floatingItems) {
+            if (!isEditableLabelShellCandidate(rg)) continue;
+            if (matchesShortEditableLabelText(ctx, rg)) {
+                ids.add(rg.id());
+            }
+        }
+        return ids;
+    }
+
+    private static boolean isEditableLabelShellCandidate(RenderedGroup rg) {
+        if (rg == null || !isPageObject(rg)) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
+        if ("indesign_png".equals(rg.textOwner())) return false;
+        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (!isTextFrameVisualShellReason(rg.reason())) return false;
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        double w = b[3] - b[1];
+        double h = b[2] - b[0];
+        return w >= 8.0 && w <= 90.0
+                && h >= 2.5 && h <= 14.0
+                && w / h >= 2.0;
+    }
+
+    private static boolean matchesShortEditableLabelText(ResolvedBuildContext ctx, RenderedGroup shell) {
+        double[] sb = shell.bounds();
+        if (sb == null || sb.length < 4) return false;
+        double shellArea = area(sb);
+        if (shellArea <= 0) return false;
+        double[] scaledSb = new double[] {
+                sb[0] * ctx.scaleFactor,
+                sb[1] * ctx.scaleFactor,
+                sb[2] * ctx.scaleFactor,
+                sb[3] * ctx.scaleFactor
+        };
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || tf.pageIndex() != shell.pageIndex()) continue;
+            if (!hasShortSemanticText(tf)) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb == null || tb.length < 4) continue;
+            double tfArea = area(tb);
+            if (tfArea <= 0) continue;
+            double overlap = Math.max(overlapArea(sb, tb), overlapArea(scaledSb, tb));
+            if (overlap / tfArea < 0.60) continue;
+            double areaRatio = shellArea / tfArea;
+            if (areaRatio >= 0.35 && areaRatio <= 2.20) return true;
+        }
+        return false;
+    }
+
+    private static boolean shouldDecomposeToEditableLabelShell(
+            RenderedGroup rg, Set<Integer> editableLabelShellIds) {
+        if (rg == null || editableLabelShellIds == null || editableLabelShellIds.isEmpty()) return false;
+        if (rg.childIds() == null || rg.childIds().length == 0) return false;
+        boolean ownsEditableText = "hwpx_tf".equals(rg.textOwner())
+                || Boolean.TRUE.equals(rg.containsEditableText())
+                || (rg.editableTextFrameIds() != null && rg.editableTextFrameIds().length > 0);
+        if (!ownsEditableText) return false;
+        boolean hasProtectedShell = false;
+        for (int cid : rg.childIds()) {
+            if (editableLabelShellIds.contains(cid)) {
+                hasProtectedShell = true;
+                break;
+            }
+        }
+        if (!hasProtectedShell) return false;
+        String reason = rg.reason();
+        return "visual_label_indesign_png".equals(reason)
+                || (reason != null && reason.contains("text_hidden"));
     }
 
     private static boolean shouldSkipByChildPolicy(ResolvedBuildContext ctx, RenderedGroup rg) {
@@ -670,12 +1015,240 @@ public final class BackgroundInjector {
         return !"hwpx_tf".equals(rg.textOwner());
     }
 
+    private static boolean shouldCropOwnedTextFrameShellToAlpha(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!isPageObject(rg)) return false;
+        if (!"hwpx_tf".equals(rg.textOwner())) return false;
+        String reason = rg.reason();
+        if (reason == null) return false;
+        return reason.contains("text_hidden")
+                || reason.contains("visual_shell")
+                || reason.contains("editable_textframe_visual_shell")
+                || reason.contains("image_group");
+    }
+
+    private static int[] alphaBounds(BufferedImage img) {
+        if (img == null || img.getWidth() <= 0 || img.getHeight() <= 0) return null;
+        int minX = img.getWidth();
+        int minY = img.getHeight();
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int alpha = (img.getRGB(x, y) >>> 24) & 0xFF;
+                if (alpha <= 10) continue;
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+        if (maxX < minX || maxY < minY) return null;
+        int pad = 1;
+        minX = Math.max(0, minX - pad);
+        minY = Math.max(0, minY - pad);
+        maxX = Math.min(img.getWidth() - 1, maxX + pad);
+        maxY = Math.min(img.getHeight() - 1, maxY + pad);
+        return new int[] { minX, minY, maxX - minX + 1, maxY - minY + 1 };
+    }
+
+    private static boolean shouldApplyAlphaCrop(BufferedImage img, int[] bounds) {
+        if (img == null || bounds == null || bounds.length < 4) return false;
+        int cropW = bounds[2];
+        int cropH = bounds[3];
+        if (cropW <= 0 || cropH <= 0) return false;
+        int padLeft = bounds[0];
+        int padTop = bounds[1];
+        int padRight = img.getWidth() - (bounds[0] + cropW);
+        int padBottom = img.getHeight() - (bounds[1] + cropH);
+        int maxPad = Math.max(Math.max(padLeft, padRight), Math.max(padTop, padBottom));
+        if (maxPad < 2) return false;
+        double areaRatio = (double) cropW * (double) cropH
+                / ((double) img.getWidth() * (double) img.getHeight());
+        return areaRatio > 0.01 && areaRatio < 0.98;
+    }
+
     private static boolean shouldPreserveVisualLabelAspect(RenderedGroup rg, int pixelW, int pixelH) {
         return rg != null
                 && pixelW > 0
                 && pixelH > 0
                 && "visual_label_indesign_png".equals(rg.reason())
                 && "indesign_png".equals(rg.textOwner());
+    }
+
+    private static int effectiveZOrder(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (rg == null) return 5;
+        int ownedShellZ = ownedTextFrameShellZOrder(ctx, rg);
+        if (ownedShellZ >= 0) return ownedShellZ;
+        int inferredShellZ = inferredTextFrameVisualShellZOrder(ctx, rg);
+        if (inferredShellZ >= 0) return inferredShellZ;
+        int titleLabelZ = titleLabelBackgroundZOrder(ctx, rg);
+        if (titleLabelZ >= 0) return titleLabelZ;
+        if (rg.zOrderKnown()) return rg.zOrder();
+        return Math.max(rg.zOrder(), 5);
+    }
+
+    private static int ownedTextFrameShellZOrder(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || ctx.resolvedData == null || rg == null) return -1;
+        if (!"hwpx_tf".equals(rg.textOwner())) return -1;
+        String[] editableIds = rg.editableTextFrameIds();
+        if (editableIds == null || editableIds.length == 0) return -1;
+        int minZ = Integer.MAX_VALUE;
+        for (String editableId : editableIds) {
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(editableId);
+            if (tf == null || tf.pageIndex() != rg.pageIndex()) continue;
+            minZ = Math.min(minZ, tf.zOrder());
+        }
+        return minZ == Integer.MAX_VALUE ? -1 : Math.max(1, minZ - 1);
+    }
+
+    private static int inferredTextFrameVisualShellZOrder(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || ctx.resolvedData == null || rg == null) return -1;
+        if (!isPageObject(rg)) return -1;
+        if (Boolean.FALSE.equals(rg.placementAllowed())) return -1;
+        if (!"indesign_png".equals(rg.visualOwner())) return -1;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return -1;
+        if (!isTextFrameVisualShellReason(rg.reason())) return -1;
+        double[] rbRaw = rg.bounds();
+        if (rbRaw == null || rbRaw.length < 4) return -1;
+
+        int semanticOverlapZ = semanticTextOverlapShellZOrder(ctx, rg, rbRaw);
+        if (semanticOverlapZ >= 0) return semanticOverlapZ;
+
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || tf.pageIndex() != rg.pageIndex()) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb == null || tb.length < 4) continue;
+            double[] scaledRb = new double[] {
+                    rbRaw[0] * ctx.scaleFactor,
+                    rbRaw[1] * ctx.scaleFactor,
+                    rbRaw[2] * ctx.scaleFactor,
+                    rbRaw[3] * ctx.scaleFactor
+            };
+            if (isSimilarTextFrameVisualShell(rbRaw, tb) || isSimilarTextFrameVisualShell(scaledRb, tb)) {
+                return Math.max(1, tf.zOrder() - 1);
+            }
+        }
+        return -1;
+    }
+
+    private static int semanticTextOverlapShellZOrder(ResolvedBuildContext ctx, RenderedGroup rg, double[] rbRaw) {
+        if (!"editable_textframe_visual_shell".equals(rg.reason())) return -1;
+        int minZ = Integer.MAX_VALUE;
+        String shellId = String.valueOf(rg.id());
+        double[] scaledRb = new double[] {
+                rbRaw[0] * ctx.scaleFactor,
+                rbRaw[1] * ctx.scaleFactor,
+                rbRaw[2] * ctx.scaleFactor,
+                rbRaw[3] * ctx.scaleFactor
+        };
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || tf.pageIndex() != rg.pageIndex()) continue;
+            if (shellId.equals(tf.id())) continue;
+            if (!hasSemanticText(tf)) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb == null || tb.length < 4) continue;
+            double tfArea = area(tb);
+            if (tfArea <= 0) continue;
+            double overlap = Math.max(overlapArea(rbRaw, tb), overlapArea(scaledRb, tb));
+            if (overlap / tfArea >= 0.10) {
+                minZ = Math.min(minZ, tf.zOrder());
+            }
+        }
+        return minZ == Integer.MAX_VALUE ? -1 : Math.max(1, minZ - 2);
+    }
+
+    private static int titleLabelBackgroundZOrder(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || ctx.resolvedData == null || rg == null) return -1;
+        if (!isPageObject(rg)) return -1;
+        if (!"indesign_png".equals(rg.visualOwner())) return -1;
+        if ("hwpx_tf".equals(rg.textOwner())) return -1;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return -1;
+        double[] rbRaw = rg.bounds();
+        if (rbRaw == null || rbRaw.length < 4) return -1;
+
+        double w = rbRaw[3] - rbRaw[1];
+        double h = rbRaw[2] - rbRaw[0];
+        if (w < 20.0 || h < 3.0 || h > 16.0 || w / h < 3.0) return -1;
+
+        double[] scaledRb = new double[] {
+                rbRaw[0] * ctx.scaleFactor,
+                rbRaw[1] * ctx.scaleFactor,
+                rbRaw[2] * ctx.scaleFactor,
+                rbRaw[3] * ctx.scaleFactor
+        };
+        int minZ = Integer.MAX_VALUE;
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || tf.pageIndex() != rg.pageIndex()) continue;
+            if (!hasShortSemanticText(tf)) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb == null || tb.length < 4) continue;
+            double tfArea = area(tb);
+            if (tfArea <= 0) continue;
+            double overlap = Math.max(overlapArea(rbRaw, tb), overlapArea(scaledRb, tb));
+            if (overlap / tfArea >= 0.35) {
+                minZ = Math.min(minZ, tf.zOrder());
+            }
+        }
+        return minZ == Integer.MAX_VALUE ? -1 : Math.max(1, minZ - 1);
+    }
+
+    private static boolean hasSemanticText(ResolvedTextFrame tf) {
+        String text = tf.frameVisibleText();
+        if (text == null) return false;
+        return text.replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .trim()
+                .length() > 0;
+    }
+
+    private static boolean hasShortSemanticText(ResolvedTextFrame tf) {
+        String text = tf.frameVisibleText();
+        if (text == null) return false;
+        text = text.replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .trim();
+        if (text.isEmpty() || text.length() > 60) return false;
+        return !text.contains("\n") && !text.contains("\r");
+    }
+
+    private static boolean isTextFrameVisualShellReason(String reason) {
+        if (reason == null) return false;
+        return reason.contains("decoration")
+                || reason.contains("visual_shell")
+                || reason.contains("textframe_visual_shell")
+                || reason.contains("complex_graphic");
+    }
+
+    private static boolean isSimilarTextFrameVisualShell(double[] shellBounds, double[] tfBounds) {
+        double tfArea = area(tfBounds);
+        double shellArea = area(shellBounds);
+        if (tfArea <= 0 || shellArea <= 0) return false;
+        double areaRatio = shellArea / tfArea;
+        if (areaRatio < TF_VISUAL_SHELL_MIN_AREA_RATIO || areaRatio > TF_VISUAL_SHELL_MAX_AREA_RATIO) {
+            return false;
+        }
+        return overlapArea(shellBounds, tfBounds) / tfArea >= TF_VISUAL_SHELL_OVERLAP_MIN;
+    }
+
+    private static double area(double[] b) {
+        if (b == null || b.length < 4) return 0.0;
+        double w = b[3] - b[1];
+        double h = b[2] - b[0];
+        return w > 0 && h > 0 ? w * h : 0.0;
+    }
+
+    private static double overlapArea(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return 0.0;
+        double left = Math.max(a[1], b[1]);
+        double top = Math.max(a[0], b[0]);
+        double right = Math.min(a[3], b[3]);
+        double bottom = Math.min(a[2], b[2]);
+        double w = right - left;
+        double h = bottom - top;
+        return w > 0 && h > 0 ? w * h : 0.0;
     }
 
     private static double[] boundsWithTfInlineVisuals(

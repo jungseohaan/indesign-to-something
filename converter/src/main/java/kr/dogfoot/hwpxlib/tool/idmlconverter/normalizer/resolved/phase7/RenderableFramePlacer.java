@@ -37,13 +37,28 @@ public final class RenderableFramePlacer {
             if (!"page_object".equals(rg3.itemType())) {
                 continue;
             }
-            if (rg3.file() == null) continue;
-            if (ctx.isDisposed(rg3.id(), FrameDisposition.TEXT_BLOCK_PLACED)) continue;
+            if (rg3.file() == null) {
+                ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_NO_FILE", "rendered item has no file");
+                continue;
+            }
+            if (ctx.isRenderedDisposed(rg3.id(), FrameDisposition.TEXT_BLOCK_PLACED)) {
+                ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_RENDERED_DISPOSED", "rendered item already handled");
+                continue;
+            }
             // Phase 6(BackgroundInjector)이 이미 배치한 항목은 중복 배치 방지
-            if (ctx.phase6PlacedIds.contains(rg3.id())) continue;
+            if (ctx.phase6PlacedIds.contains(rg3.id())) {
+                ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_PHASE6_HANDLED", "Phase6 already placed or suppressed this id");
+                continue;
+            }
             // inline_object로도 등록된 ID는 Phase 3이 인라인으로 처리 → 플로팅 중복 방지
-            if (ctx.resolvedData.isInlineObjectId(rg3.id())) continue;
-            if (rg3.shouldSkipByOwnership()) continue;
+            if (ctx.resolvedData.isInlineObjectId(rg3.id())) {
+                ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_INLINE_OBJECT", "inline object handled by story flow");
+                continue;
+            }
+            if (rg3.shouldSkipByOwnership()) {
+                ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_OWNERSHIP", "render ownership says text is not hidden");
+                continue;
+            }
             // 자식 TF가 editableTextFrame인 그룹은 기본적으로 Phase 3 텍스트와 중복된다.
             // extractor가 텍스트를 숨긴 visual-only PNG라고 명시한 경우는 배치한다.
             if (rg3.childIds() != null) {
@@ -54,20 +69,35 @@ public final class RenderableFramePlacer {
                         break;
                     }
                 }
-                if (hasEditableTfChild && !rg3.hasEditableTextHiddenFromPng()) continue;
+                if (hasEditableTfChild && !rg3.hasEditableTextHiddenFromPng()) {
+                    ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_EDITABLE_TEXT_CHILD", "editable child text not hidden from png");
+                    continue;
+                }
             }
             String dedupKey3 = rg3.pageIndex() + "|" + rg3.file();
-            if (!placedKeys.add(dedupKey3)) continue;
+            if (!placedKeys.add(dedupKey3)) {
+                ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_DUPLICATE_FILE_PAGE", "same page/file already processed");
+                continue;
+            }
 
             File pngFile3 = new File(ctx.basePath, rg3.file());
-            if (!pngFile3.exists()) continue;
+            if (!pngFile3.exists()) {
+                ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_PNG_MISSING", "png file does not exist");
+                continue;
+            }
 
             int secIdx3 = ctx.toSectionIndex.applyAsInt(rg3.pageIndex());
-            if (secIdx3 < 0 || secIdx3 >= sections.size()) continue;
+            if (secIdx3 < 0 || secIdx3 >= sections.size()) {
+                ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_NO_SECTION", "pageIndex not mapped to section");
+                continue;
+            }
 
             try {
                 double[] bounds3 = rg3.bounds();
-                if (bounds3 == null || bounds3.length < 4) continue;
+                if (bounds3 == null || bounds3.length < 4) {
+                    ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_NO_BOUNDS", "rendered item has no bounds");
+                    continue;
+                }
 
                 // renderedFloatingItems(page_object) bounds: page-relative mm → sf 곱해 page-relative pt
                 double sf3 = ctx.scaleFactor;
@@ -89,10 +119,16 @@ public final class RenderableFramePlacer {
                 double rawBottom3 = bounds3[2] * sf3;
                 double fullW3 = rawRight3 - rawLeft3;
                 double fullH3 = rawBottom3 - rawTop3;
-                if (fullW3 <= 0 || fullH3 <= 0) continue;
+                if (fullW3 <= 0 || fullH3 <= 0) {
+                    ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_INVALID_BOUNDS", "bounds width or height <= 0");
+                    continue;
+                }
 
                 java.awt.image.BufferedImage origImg3 = javax.imageio.ImageIO.read(pngFile3);
-                if (origImg3 == null || origImg3.getWidth() <= 2) continue;
+                if (origImg3 == null || origImg3.getWidth() <= 2) {
+                    ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_INVALID_PNG", "png decode failed or too small");
+                    continue;
+                }
 
 
                 // 주 페이지 가시 영역 크롭
@@ -137,6 +173,7 @@ public final class RenderableFramePlacer {
                     fig3.fromGroup(!isBackgroundLike3);
                     sections.get(secIdx3).addBlock(fig3);
                     count++;
+                    ctx.recordRenderedDecision(rg3, "Phase7", "PLACE", "placed visible page intersection as ASTFigure");
                 }
 
                 // 우측 오버플로우: 다음 페이지(pageIndex+1)에 넘친 부분 배치

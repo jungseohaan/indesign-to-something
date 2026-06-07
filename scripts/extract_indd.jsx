@@ -15,7 +15,7 @@
 // SPEC-011: 추출 캐시 무효화용 스크립트 버전.
 // 출력 형식이나 추출 로직이 변경되면 이 값을 올려서 모든 캐시를 강제 무효화한다.
 // (mtime/size 기반 자동 무효화와 별개로 명시적 버전 관리 채널)
-var EXTRACT_SCRIPT_VERSION = "15";
+var EXTRACT_SCRIPT_VERSION = "17";
 
 // =============================================================================
 // SECTION 1: BOOTSTRAP
@@ -927,6 +927,109 @@ function exportTextFrameShellFallbackShape(item, parentPage, outFile) {
     }
 }
 
+function hasRoundedTextFrameCorners(item) {
+    function _cornerRadiusValue(v) {
+        try {
+            var n = Number(v);
+            if (!isNaN(n)) return n;
+        } catch (e0) {}
+        try {
+            var parsed = parseFloat(String(v));
+            return isNaN(parsed) ? 0 : parsed;
+        } catch (e1) {}
+        return 0;
+    }
+    function _isRoundedOption(v) {
+        try {
+            var s = String(v || "");
+            if (!s || s === "CornerOptions.NONE") return false;
+            return s.indexOf("ROUNDED") >= 0
+                || s.indexOf("FANCY") >= 0
+                || s.indexOf("BEVEL") >= 0
+                || s.indexOf("INSET") >= 0;
+        } catch (e2) {}
+        return false;
+    }
+    try {
+        var tl = _cornerRadiusValue(item.topLeftCornerRadius);
+        var tr = _cornerRadiusValue(item.topRightCornerRadius);
+        var bl = _cornerRadiusValue(item.bottomLeftCornerRadius);
+        var br = _cornerRadiusValue(item.bottomRightCornerRadius);
+        if (tl > 0.1 || tr > 0.1 || bl > 0.1 || br > 0.1) return true;
+    } catch (e) {}
+    try {
+        if (_isRoundedOption(item.topLeftCornerOption)
+                || _isRoundedOption(item.topRightCornerOption)
+                || _isRoundedOption(item.bottomLeftCornerOption)
+                || _isRoundedOption(item.bottomRightCornerOption)) {
+            return true;
+        }
+    } catch (e2) {}
+    return false;
+}
+
+function visibleTextLengthOfTextFrame(tf) {
+    try {
+        var text = tf.contents || "";
+        text = String(text).replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC﻿]/g, "");
+        return text.length;
+    } catch (e) {}
+    return 0;
+}
+
+function boundsOverlapArea(a, b) {
+    if (!a || !b) return 0;
+    var left = Math.max(a[1], b[1]);
+    var top = Math.max(a[0], b[0]);
+    var right = Math.min(a[3], b[3]);
+    var bottom = Math.min(a[2], b[2]);
+    var w = right - left;
+    var h = bottom - top;
+    return w > 0 && h > 0 ? w * h : 0;
+}
+
+function boundsArea(b) {
+    if (!b) return 0;
+    var w = b[3] - b[1];
+    var h = b[2] - b[0];
+    return w > 0 && h > 0 ? w * h : 0;
+}
+
+function shouldExportRectStrokeTextFrameShell(item, allItems) {
+    var gb = null;
+    try { gb = item.geometricBounds; } catch (e) {}
+    if (!gb) return false;
+    var tfW = Math.abs(gb[3] - gb[1]);
+    var tfH = Math.abs(gb[2] - gb[0]);
+    if (tfW < 10 || tfH < 10) return false;
+
+    // Large layout frames are real visual shells even when rectangular.
+    if (tfW >= 50 && tfH >= 45) return true;
+
+    // Rounded stroke-only frames are commonly worksheet answer/layout shells.
+    if (hasRoundedTextFrameCorners(item) && tfW >= 30 && tfH >= 20) return true;
+
+    // A rectangular stroke-only empty TF that contains semantic text frames is
+    // a layout shell. Preserve it instead of relying on brittle absolute size
+    // thresholds.
+    try {
+        var page = item.parentPage;
+        for (var i = 0; i < allItems.length; i++) {
+            var other = allItems[i];
+            if (!other || other === item || other.constructor.name !== "TextFrame") continue;
+            try { if (other.parentPage !== page) continue; } catch (ePage) {}
+            if (visibleTextLengthOfTextFrame(other) < 2) continue;
+            var ob = null;
+            try { ob = other.geometricBounds; } catch (eOb) {}
+            var oa = boundsArea(ob);
+            if (oa <= 0) continue;
+            if (boundsOverlapArea(gb, ob) / oa >= 0.10) return true;
+        }
+    } catch (e3) {}
+
+    return false;
+}
+
 /**
  * editable TextFrame의 fill/stroke 시각 요소만 PNG로 내보낸다.
  * 텍스트와 인라인 객체는 HWPX TF가 소유하므로 복제본의 contents를 비워 중복을 막는다.
@@ -943,13 +1046,13 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
 
         var domId = item.id;
         if (isOnHiddenLayer(item)) continue;
-        if (decoChildIds && decoChildIds[domId]) continue;
+        var _tfHasContent = false;
+        try { _tfHasContent = item.contents.replace(/[\s﻿]/g, "").length > 0; } catch (e) {}
+        if (decoChildIds && decoChildIds[domId] && _tfHasContent) continue;
         // editable TF이거나 빈 TF(텍스트 없음)인 경우 처리.
         // 내용 있는 비-편집 TF는 exportRenderedTextFrames에서 이미 처리됨.
         var _tfIsEditable = editableIds && editableIds[domId];
         if (!_tfIsEditable) {
-            var _tfHasContent = false;
-            try { _tfHasContent = item.contents.replace(/[\s﻿]/g, "").length > 0; } catch (e) {}
             if (_tfHasContent) continue;
         }
 
@@ -961,14 +1064,9 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
         // fill이 있는 TF는 배경/말풍선/라벨로 쓰이는 경우가 많아 형태와 관계없이 보존한다.
         var isNonRect = hasNonRectangularPath(item);
         if (!hasFill && !isNonRect) {
-            // 경로 판별 실패 또는 직사각형 → 크기가 충분히 크면 포함
-            // (배경 PNG에서 숨겨진 stroke를 복원하기 위해 대형 bordered TF도 대상)
-            try {
-                var gbb = item.geometricBounds;
-                var tfW = Math.abs(gbb[3] - gbb[1]);
-                var tfH = Math.abs(gbb[2] - gbb[0]);
-                if (tfW < 50 || tfH < 50) continue;  // 50pt 미만 소형은 스킵
-            } catch (e) { continue; }
+            // 직사각 stroke-only TF도 라운드 코너/내부 semantic TF가 있으면
+            // 레이아웃 shell로 보존한다. 50pt 절대 문턱은 페이지별로 쉽게 흔들린다.
+            if (!shouldExportRectStrokeTextFrameShell(item, allItems)) continue;
         }
 
         var parentPage = null;
@@ -1829,7 +1927,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
     }
 
     function _textStatsOfGroup(grp) {
-        var stats = { count: 0, length: 0, hasTable: false };
+        var stats = { count: 0, length: 0, hasTable: false, titleLabelStyle: false };
         try {
             var nested = grp.allPageItems;
             for (var i = 0; i < nested.length; i++) {
@@ -1846,6 +1944,13 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                     text = String(text).replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC]/g, "");
                     stats.length += text.length;
                 } catch (eText) {}
+                try {
+                    var ps = item.parentStory && item.parentStory.paragraphs.length > 0
+                            ? item.parentStory.paragraphs[0].appliedParagraphStyle
+                            : null;
+                    var styleName = ps ? String(ps.name || "") : "";
+                    if (styleName.indexOf("#표제목") === 0) stats.titleLabelStyle = true;
+                } catch (eStyle) {}
             }
         } catch (e) {}
         return stats;
@@ -1863,9 +1968,58 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return false;
     }
 
+    function _isStrokeLineGridGroup(grp) {
+        try {
+            var nested = grp.allPageItems;
+            var lineLikeCount = 0;
+            var dottedCount = 0;
+            for (var i = 0; i < nested.length; i++) {
+                var item = nested[i];
+                var cn = item.constructor.name;
+                if (cn === "Group") continue;
+                if (cn === "TextFrame") return false;
+                if (cn !== "GraphicLine" && cn !== "Rectangle" && cn !== "Polygon" && cn !== "Oval") {
+                    return false;
+                }
+                try {
+                    if (item.images && item.images.length > 0) return false;
+                    if (item.pdfs && item.pdfs.length > 0) return false;
+                    if (item.epss && item.epss.length > 0) return false;
+                } catch (ePlaced) {}
+
+                var sw = 0;
+                try { sw = item.strokeWeight || 0; } catch (eSw) {}
+                if (sw <= 0) continue;
+
+                var hasFill = false;
+                try {
+                    var fc = item.fillColor;
+                    var fn = fc ? String(fc.name || "") : "";
+                    hasFill = fn && fn !== "None" && fn !== "[None]";
+                } catch (eFill) {}
+
+                var gb = null;
+                try { gb = item.geometricBounds; } catch (eGb) {}
+                var w = gb ? Math.abs(gb[3] - gb[1]) : 0;
+                var h = gb ? Math.abs(gb[2] - gb[0]) : 0;
+                var thinStrokeBox = (cn !== "GraphicLine" && !hasFill && (w <= 6 || h <= 6));
+                if (cn === "GraphicLine" || thinStrokeBox) {
+                    lineLikeCount++;
+                    try {
+                        var st = String(item.strokeType ? item.strokeType.name : "");
+                        if (/Dotted|Dots|Dashed/i.test(st)) dottedCount++;
+                    } catch (eSt) {}
+                }
+            }
+            return lineLikeCount >= 2 && dottedCount >= 1;
+        } catch (e) {}
+        return false;
+    }
+
     function _isShortVisualLabelGroup(grp) {
         var stats = _textStatsOfGroup(grp);
         if (stats.count < 1 || stats.length < 1 || stats.length > 8 || stats.hasTable) return false;
+        if (stats.titleLabelStyle) return false;
         if (!_hasVisualShapeChild(grp)) return false;
         var b = _boundsOfItem(grp);
         if (!b) return false;
@@ -1969,6 +2123,11 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
     function _classifyGroup(grp) {
         var nested;
         try { nested = grp.allPageItems; } catch (e) { return null; }
+
+        // Dotted/dashed line grids are fragile as a single InDesign PNG export:
+        // vertical strokes can disappear while the group still claims its child IDs.
+        // Keep children available for vector_shape export instead of rendering the group.
+        if (_isStrokeLineGridGroup(grp)) return null;
 
         // pureShape: 도형/그룹만 (자식 1개 이상)
         if (isAllShapeChildren(grp)) return "pureShape";
@@ -2199,7 +2358,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             }
 
             var editableTfIdsForGroup = [];
-            if (kind === "textComposite") {
+            if (kind === "mixedGroup" || kind === "textComposite") {
                 try { editableTfIdsForGroup = _collectTextFrameIds(grp, true, true); } catch (e) {}
             }
 
@@ -2308,6 +2467,47 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, decoChildId
     var results = [];
     var renderedIds = {};
 
+    function _isExplicitlyInvisibleTint(tint) {
+        return tint !== undefined && tint !== null && Number(tint) === 0;
+    }
+
+    function _hasVisibleVectorFill(item) {
+        try {
+            var fc = item.fillColor;
+            var name = fc ? fc.name : "None";
+            if (!name || name === "None" || name === "[None]") return false;
+            try {
+                var tint = item.fillTint;
+                if (_isExplicitlyInvisibleTint(tint)) return false;
+            } catch (eTint) {}
+            try {
+                var opacity = item.fillTransparencySettings.blendingSettings.opacity;
+                if (opacity !== undefined && opacity !== null && opacity <= 0) return false;
+            } catch (eOpacity) {}
+            return true;
+        } catch (e) {}
+        return false;
+    }
+
+    function _hasVisibleVectorStroke(item) {
+        try {
+            var sc = item.strokeColor;
+            var name = sc ? sc.name : "None";
+            var sw = item.strokeWeight || 0;
+            if (!name || name === "None" || name === "[None]" || sw <= 0) return false;
+            try {
+                var tint = item.strokeTint;
+                if (_isExplicitlyInvisibleTint(tint)) return false;
+            } catch (eTint) {}
+            try {
+                var opacity = item.strokeTransparencySettings.blendingSettings.opacity;
+                if (opacity !== undefined && opacity !== null && opacity <= 0) return false;
+            } catch (eOpacity) {}
+            return true;
+        } catch (e) {}
+        return false;
+    }
+
     // 도형 1개 개별 export 헬퍼
     function _exportSingleShape(item, domId, parentPage) {
         var fileName = "shape_" + domId + ".png";
@@ -2362,6 +2562,7 @@ function exportVectorShapeFrames(doc, outputDir, startPage, endPage, decoChildId
         if (!hasPlaced) try { hasPlaced = item.pdfs && item.pdfs.length > 0; } catch (e) {}
         if (!hasPlaced) try { hasPlaced = item.epss && item.epss.length > 0; } catch (e) {}
         if (hasPlaced) continue;
+        if (!_hasVisibleVectorFill(item) && !_hasVisibleVectorStroke(item)) continue;
 
         // 인라인 앵커 확인
         var isInline = false;
@@ -2497,7 +2698,7 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
     try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
     try { app.pngExportPreferences.exportingSpread = false; } catch (e) {}
 
-    // msId + "_" + masterPageIdx → { relPath, relTop, relLeft, relBottom, relRight }
+    // msId + "_" + masterPageIdx → [{ relPath, relTop, relLeft, relBottom, relRight }, ...]
     // 마스터 스프레드의 좌/우 페이지별로 분리 export
     var exportedMasterByPage = {};
 
@@ -2510,11 +2711,144 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
         return false;
     }
 
+    function _boundsIntersection(a, b) {
+        try {
+            if (!a || !b || a.length < 4 || b.length < 4) return null;
+            var t = Math.max(a[0], b[0]);
+            var l = Math.max(a[1], b[1]);
+            var bt = Math.min(a[2], b[2]);
+            var r = Math.min(a[3], b[3]);
+            if (t >= bt || l >= r) return null;
+            return [t, l, bt, r];
+        } catch (e) {}
+        return null;
+    }
+
+    function _boundsDiffer(a, b, eps) {
+        eps = eps || 0.01;
+        try {
+            if (!a || !b || a.length < 4 || b.length < 4) return false;
+            return Math.abs(a[0] - b[0]) > eps || Math.abs(a[1] - b[1]) > eps ||
+                   Math.abs(a[2] - b[2]) > eps || Math.abs(a[3] - b[3]) > eps;
+        } catch (e) {}
+        return false;
+    }
+
     function _masterItemBounds(item) {
         var b = null;
         try { b = arrCopy(item.visibleBounds); } catch (e) {}
         if (!b) try { b = arrCopy(item.geometricBounds); } catch (e2) {}
         return b;
+    }
+
+    function _clusterMasterPageItems(pageItems) {
+        var clusters = [];
+        var used = [];
+        var pad = 2.0;
+        for (var i = 0; i < pageItems.length; i++) {
+            if (used[i]) continue;
+            var cluster = [];
+            var queue = [i];
+            used[i] = true;
+            while (queue.length > 0) {
+                var idx = queue.shift();
+                cluster.push(pageItems[idx]);
+                for (var j = 0; j < pageItems.length; j++) {
+                    if (used[j]) continue;
+                    var touches = false;
+                    for (var k = 0; k < cluster.length; k++) {
+                        if (_boundsIntersect(cluster[k].bounds, pageItems[j].bounds, pad)) {
+                            touches = true;
+                            break;
+                        }
+                    }
+                    if (touches) {
+                        used[j] = true;
+                        queue.push(j);
+                    }
+                }
+            }
+            clusters.push(cluster);
+        }
+        return clusters;
+    }
+
+    function _unionMasterEntryBounds(entries) {
+        var union = null;
+        for (var i = 0; i < entries.length; i++) {
+            try {
+                var b = entries[i].bounds;
+                if (!b || b.length < 4) continue;
+                if (!union) {
+                    union = [b[0], b[1], b[2], b[3]];
+                } else {
+                    union[0] = Math.min(union[0], b[0]);
+                    union[1] = Math.min(union[1], b[1]);
+                    union[2] = Math.max(union[2], b[2]);
+                    union[3] = Math.max(union[3], b[3]);
+                }
+            } catch (e) {}
+        }
+        return union;
+    }
+
+    function _boundsAspect(b) {
+        try {
+            if (!b || b.length < 4) return 0;
+            var h = Math.abs(b[2] - b[0]);
+            var w = Math.abs(b[3] - b[1]);
+            if (h <= 0.01 || w <= 0.01) return 0;
+            return w / h;
+        } catch (e) {
+            return 0;
+        }
+    }
+
+    function _boundsAspectFitAtSourceAnchor(sourceBnds, exportBnds) {
+        try {
+            if (!sourceBnds || sourceBnds.length < 4 || !exportBnds || exportBnds.length < 4) {
+                return sourceBnds || exportBnds;
+            }
+            var sourceH = Math.abs(sourceBnds[2] - sourceBnds[0]);
+            var sourceW = Math.abs(sourceBnds[3] - sourceBnds[1]);
+            var exportAspect = _boundsAspect(exportBnds);
+            if (sourceH <= 0.01 || sourceW <= 0.01 || exportAspect <= 0.01) return sourceBnds;
+
+            var sourceAspect = sourceW / sourceH;
+            if (sourceAspect < exportAspect) {
+                var fittedH = sourceW / exportAspect;
+                return [sourceBnds[0], sourceBnds[1], sourceBnds[0] + fittedH, sourceBnds[3]];
+            }
+
+            var fittedW = sourceH * exportAspect;
+            return [sourceBnds[0], sourceBnds[1], sourceBnds[2], sourceBnds[1] + fittedW];
+        } catch (e) {
+            return sourceBnds || exportBnds;
+        }
+    }
+
+    function _clampSmallMasterDecorationInsidePage(bnds, pageBnds) {
+        try {
+            if (!bnds || bnds.length < 4 || !pageBnds || pageBnds.length < 4) return bnds;
+            var pageH = Math.abs(pageBnds[2] - pageBnds[0]);
+            var pageW = Math.abs(pageBnds[3] - pageBnds[1]);
+            var h = Math.abs(bnds[2] - bnds[0]);
+            var w = Math.abs(bnds[3] - bnds[1]);
+            if (pageH <= 0.01 || pageW <= 0.01 || h <= 0.01 || w <= 0.01) return bnds;
+
+            var smallDecoration = h <= pageH * 0.35 && w <= pageW * 0.55;
+            if (!smallDecoration) return bnds;
+
+            var relTop = bnds[0] - pageBnds[0];
+            var relLeft = bnds[1] - pageBnds[1];
+            var bleedThreshold = 6.0;
+            var dy = relTop < -bleedThreshold ? -relTop : 0;
+            var dx = relLeft < -bleedThreshold ? -relLeft : 0;
+            if (dy <= 0 && dx <= 0) return bnds;
+            return [bnds[0] + dy, bnds[1] + dx, bnds[2] + dy, bnds[3] + dx];
+        } catch (e) {
+            return bnds;
+        }
     }
 
     function _isTopLevelMasterItem(item) {
@@ -2551,11 +2885,37 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
         return ids;
     }
 
+    function _isDynamicMasterTextFrame(tf) {
+        try {
+            var story = tf.parentStory;
+            if (!story) return false;
+            try {
+                if (String(story.contents).indexOf("\u0018") >= 0) return true; // auto page number
+            } catch (eContents) {}
+            try {
+                var tvInst = story.textVariableInstances;
+                if (tvInst && tvInst.length > 0) {
+                    var stripped = "";
+                    try {
+                        stripped = String(story.contents)
+                            .replace(/\uFEFF/g, "")
+                            .replace(/\uFFFC/g, "")
+                            .replace(/\u0016/g, "")
+                            .replace(/\u0018/g, "")
+                            .replace(/[\s\r\n]/g, "");
+                    } catch (eStrip) {}
+                    if (stripped.length === 0) return true;
+                }
+            } catch (eTv) {}
+        } catch (e) {}
+        return false;
+    }
+
     function _hideEditableTextContent(renderTarget) {
         var saved = [];
         function hideOne(tf) {
             try {
-                if (classifyTextFrameCached(tf) !== "editable") return;
+                if (classifyTextFrameCached(tf) !== "editable" && !_isDynamicMasterTextFrame(tf)) return;
                 try {
                     var contentBlend = tf.contentTransparencySettings.blendingSettings;
                     var oldOpacity = contentBlend.opacity;
@@ -2636,7 +2996,6 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
             dbg("  masterPage[" + mpIdx + "] items: " + pageItems.length);
             if (pageItems.length === 0) { exportedMasterByPage[masterKey] = null; continue; }
 
-            var sourceIds = _collectIdsForMasterItems(pageItems);
             for (var li = 0; li < pageItems.length; li++) {
                 try {
                     var lb = pageItems[li].bounds;
@@ -2646,78 +3005,173 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
                 } catch (eLi) {}
             }
 
-            var mFileName = "master_" + msId + "_" + mpIdx + ".png";
-            var mOutFile = File(renderDir + "/" + mFileName);
-            var tempPage = null;
-            var tempPageBounds = null;
-            var exportTarget = null;
-            var overriddenItems = [];
-            var hiddenText = [];
-            var grpBnds = null;
-            try {
-                tempPage = doc.pages.add(LocationOptions.AT_END);
-                try { tempPageBounds = arrCopy(tempPage.bounds); } catch (eTP0) {}
-                try { tempPage.appliedMaster = mspread; } catch (eAM) {}
-                for (var oi = 0; oi < pageItems.length; oi++) {
-                    try {
-                        var ov = pageItems[oi].item.override(tempPage);
-                        if (ov) overriddenItems.push(ov);
-                    } catch (eOv) {
-                        dbg("    override fail itemId=" + pageItems[oi].item.id + ": " + eOv);
+            var clusters = _clusterMasterPageItems(pageItems);
+            dbg("  masterPage[" + mpIdx + "] clusters: " + clusters.length);
+            var exportedClusters = [];
+            for (var ci = 0; ci < clusters.length; ci++) {
+                var clusterItems = clusters[ci];
+                var mFileName = "master_" + msId + "_" + mpIdx + "_" + ci + ".png";
+                var mOutFile = File(renderDir + "/" + mFileName);
+                var tempPage = null;
+                var exportTarget = null;
+                var overriddenItems = [];
+                var overriddenSourceEntries = [];
+                var failedOverrideEntries = [];
+                var hiddenText = [];
+                var grpBnds = null;
+                var originalClusterBnds = _unionMasterEntryBounds(clusterItems);
+                try {
+                    tempPage = doc.pages.add(LocationOptions.AT_END);
+                    try { tempPage.appliedMaster = mspread; } catch (eAM) {}
+                    for (var oi = 0; oi < clusterItems.length; oi++) {
+                        try {
+                            var ov = clusterItems[oi].item.override(tempPage);
+                            if (ov) {
+                                overriddenItems.push(ov);
+                                overriddenSourceEntries.push(clusterItems[oi]);
+                            }
+                        } catch (eOv) {
+                            dbg("    override fail itemId=" + clusterItems[oi].item.id + ": " + eOv);
+                            failedOverrideEntries.push(clusterItems[oi]);
+                        }
                     }
-                }
-                if (overriddenItems.length === 0) {
-                    dbg("  FAIL: no overridden master items");
-                    exportedMasterByPage[masterKey] = null;
-                    try { if (tempPage) tempPage.remove(); } catch (eRm0) {}
-                    continue;
-                }
+                    if (overriddenItems.length === 0) {
+                        dbg("  FAIL cluster[" + ci + "]: no overridden master items");
+                    } else {
+                        if (overriddenItems.length === 1) {
+                            exportTarget = overriddenItems[0];
+                        } else {
+                            try { exportTarget = doc.groups.add(overriddenItems); } catch (eGrp) {
+                                dbg("  group error: " + eGrp);
+                                exportTarget = overriddenItems[0];
+                            }
+                        }
 
-                if (overriddenItems.length === 1) {
-                    exportTarget = overriddenItems[0];
+                        hiddenText = _hideEditableTextContent(exportTarget);
+                        try { exportTarget.exportFile(ExportFormat.PNG_FORMAT, mOutFile, false); } catch (eExp) {
+                            dbg("  export error: " + eExp);
+                        }
+                        try { grpBnds = arrCopy(exportTarget.visibleBounds); } catch (eVB) {}
+                        if (!grpBnds) try { grpBnds = arrCopy(exportTarget.geometricBounds); } catch (eGB) {}
+                    }
+                } catch (eOuter) {
+                    dbg("  composed export error: " + eOuter);
+                } finally {
+                    try { restoreTextFrames(hiddenText); } catch (eRestore) {}
+                    try { if (tempPage) tempPage.remove(); } catch (eRm) {}
+                }
+                if (mOutFile.exists && grpBnds) {
+                    dbg("  SUCCESS: " + mFileName + " (" + mOutFile.length + " bytes)");
+                    // Override용 임시 페이지는 문서 끝에 추가되며 page origin이 실제 master side와 다르다.
+                    // exportTarget bounds에서 tempPage.bounds를 빼면 모든 master graphic이 임시 페이지
+                    // offset만큼 위/왼쪽으로 밀린다. 배치 좌표는 원본 master item cluster bounds를
+                    // master page bounds 기준으로 계산해야 한다.
+                    var exportedOriginalBnds = _unionMasterEntryBounds(overriddenSourceEntries) || originalClusterBnds;
+                    var placementBnds = exportedOriginalBnds || grpBnds;
+                    var sourceAspect = _boundsAspect(exportedOriginalBnds);
+                    var exportAspect = _boundsAspect(grpBnds);
+                    if (exportedOriginalBnds && grpBnds && sourceAspect > 0 && exportAspect > 0) {
+                        var aspectDelta = Math.abs(sourceAspect - exportAspect) / exportAspect;
+                        if (aspectDelta > 0.12) {
+                            placementBnds = _boundsAspectFitAtSourceAnchor(exportedOriginalBnds, grpBnds);
+                            dbg("  aspect-adjust cluster[" + ci + "]: sourceAspect=" + sourceAspect.toFixed(3) +
+                                " exportAspect=" + exportAspect.toFixed(3) +
+                                " source=[" + exportedOriginalBnds.join(",") + "]" +
+                                " fitted=[" + placementBnds.join(",") + "]");
+                        }
+                    }
+                    var unclampedPlacementBnds = placementBnds;
+                    placementBnds = _clampSmallMasterDecorationInsidePage(placementBnds, mpBnds);
+                    if (placementBnds !== unclampedPlacementBnds) {
+                        dbg("  bleed-clamp cluster[" + ci + "]: from=[" + unclampedPlacementBnds.join(",") +
+                            "] to=[" + placementBnds.join(",") + "]");
+                    }
+                    var relBase = mpBnds;
+                    var cropSourceBnds = placementBnds;
+                    var visiblePlacementBnds = _boundsIntersection(placementBnds, mpBnds);
+                    if (!visiblePlacementBnds) {
+                        dbg("  SKIP cluster[" + ci + "]: no visible master page intersection after placement");
+                    } else {
+                        var exportedCluster = {
+                            relPath:   "rendered_frames/" + mFileName,
+                            relTop:    visiblePlacementBnds[0] - relBase[0],
+                            relLeft:   visiblePlacementBnds[1] - relBase[1],
+                            relBottom: visiblePlacementBnds[2] - relBase[0],
+                            relRight:  visiblePlacementBnds[3] - relBase[1],
+                            sourceObjectIds: _collectIdsForMasterItems(overriddenSourceEntries)
+                        };
+                        if (_boundsDiffer(cropSourceBnds, visiblePlacementBnds, 0.01)) {
+                            exportedCluster.cropSourceBounds = [
+                                cropSourceBnds[0] - relBase[0],
+                                cropSourceBnds[1] - relBase[1],
+                                cropSourceBnds[2] - relBase[0],
+                                cropSourceBnds[3] - relBase[1]
+                            ];
+                        }
+                        exportedClusters.push(exportedCluster);
+                        dbg("  relBounds[" + ci + "]: ["+exportedCluster.relTop+","+exportedCluster.relLeft+
+                            ","+exportedCluster.relBottom+","+exportedCluster.relRight+"]" +
+                            (exportedCluster.cropSourceBounds ? " cropSource=[" + exportedCluster.cropSourceBounds.join(",") + "]" : ""));
+                    }
                 } else {
-                    try { exportTarget = doc.groups.add(overriddenItems); } catch (eGrp) {
-                        dbg("  group error: " + eGrp);
-                        exportTarget = overriddenItems[0];
-                    }
+                    if (!mOutFile.exists) dbg("  FAIL: " + mFileName + " not created");
+                    if (!grpBnds) dbg("  FAIL: no composed bounds");
                 }
 
-                hiddenText = _hideEditableTextContent(exportTarget);
-                try { exportTarget.exportFile(ExportFormat.PNG_FORMAT, mOutFile, false); } catch (eExp) {
-                    dbg("  export error: " + eExp);
+                // Some valid master items cannot be overridden onto a temporary page
+                // (InDesign reports them as already overridden or invalid). Export those
+                // source master items directly so the composed master layer cannot silently
+                // lose top-level logo/deco groups.
+                for (var foi = 0; foi < failedOverrideEntries.length; foi++) {
+                    var failedEntry = failedOverrideEntries[foi];
+                    var fFileName = "master_" + msId + "_" + mpIdx + "_" + ci + "_fallback_" + foi + ".png";
+                    var fOutFile = File(renderDir + "/" + fFileName);
+                    var fHiddenText = [];
+                    var fBnds = null;
+                    try {
+                        fHiddenText = _hideEditableTextContent(failedEntry.item);
+                        failedEntry.item.exportFile(ExportFormat.PNG_FORMAT, fOutFile, false);
+                        try { fBnds = arrCopy(failedEntry.item.visibleBounds); } catch (eFv) {}
+                        if (!fBnds) try { fBnds = arrCopy(failedEntry.item.geometricBounds); } catch (eFg) {}
+                    } catch (eF) {
+                        dbg("  fallback export error itemId=" + failedEntry.item.id + ": " + eF);
+                    } finally {
+                        try { restoreTextFrames(fHiddenText); } catch (eFr) {}
+                    }
+                    if (!fOutFile.exists || !fBnds) {
+                        dbg("  fallback FAIL itemId=" + failedEntry.item.id + " file=" + fFileName);
+                        continue;
+                    }
+                    var fPlacementBnds = failedEntry.bounds || fBnds;
+                    var fRelBase = mpBnds;
+                    var fVisibleBnds = _boundsIntersection(fPlacementBnds, mpBnds);
+                    if (!fVisibleBnds) {
+                        dbg("  fallback SKIP itemId=" + failedEntry.item.id + ": no visible master page intersection");
+                        continue;
+                    }
+                    var fCluster = {
+                        relPath:   "rendered_frames/" + fFileName,
+                        relTop:    fVisibleBnds[0] - fRelBase[0],
+                        relLeft:   fVisibleBnds[1] - fRelBase[1],
+                        relBottom: fVisibleBnds[2] - fRelBase[0],
+                        relRight:  fVisibleBnds[3] - fRelBase[1],
+                        sourceObjectIds: _collectIdsForMasterItems([failedEntry])
+                    };
+                    if (_boundsDiffer(fPlacementBnds, fVisibleBnds, 0.01)) {
+                        fCluster.cropSourceBounds = [
+                            fPlacementBnds[0] - fRelBase[0],
+                            fPlacementBnds[1] - fRelBase[1],
+                            fPlacementBnds[2] - fRelBase[0],
+                            fPlacementBnds[3] - fRelBase[1]
+                        ];
+                    }
+                    exportedClusters.push(fCluster);
+                    dbg("  fallback SUCCESS itemId=" + failedEntry.item.id + " file=" + fFileName +
+                        " rel=[" + fCluster.relTop + "," + fCluster.relLeft + "," +
+                        fCluster.relBottom + "," + fCluster.relRight + "]");
                 }
-                try { grpBnds = arrCopy(exportTarget.visibleBounds); } catch (eVB) {}
-                if (!grpBnds) try { grpBnds = arrCopy(exportTarget.geometricBounds); } catch (eGB) {}
-            } catch (eOuter) {
-                dbg("  composed export error: " + eOuter);
-            } finally {
-                try { restoreTextFrames(hiddenText); } catch (eRestore) {}
-                try { if (tempPage) tempPage.remove(); } catch (eRm) {}
             }
-            if (!mOutFile.exists) {
-                dbg("  FAIL: " + mFileName + " not created");
-                exportedMasterByPage[masterKey] = null;
-                continue;
-            }
-            if (!grpBnds) {
-                dbg("  FAIL: no composed bounds");
-                exportedMasterByPage[masterKey] = null;
-                continue;
-            }
-            dbg("  SUCCESS: " + mFileName + " (" + mOutFile.length + " bytes)");
-            // tempPage는 finally에서 제거되므로 bounds를 못 얻은 경우 원본 master page bounds로 폴백한다.
-            // override 결과의 상대 좌표가 원본 master side와 같은 좌표계로 유지되는 것이 일반적이다.
-            var relBase = tempPageBounds || mpBnds;
-            exportedMasterByPage[masterKey] = {
-                relPath:   "rendered_frames/" + mFileName,
-                relTop:    grpBnds[0] - relBase[0],
-                relLeft:   grpBnds[1] - relBase[1],
-                relBottom: grpBnds[2] - relBase[0],
-                relRight:  grpBnds[3] - relBase[1],
-                sourceObjectIds: sourceIds
-            };
-            dbg("  relBounds: ["+exportedMasterByPage[masterKey].relTop+","+exportedMasterByPage[masterKey].relLeft+
-                ","+exportedMasterByPage[masterKey].relBottom+","+exportedMasterByPage[masterKey].relRight+"]");
+            exportedMasterByPage[masterKey] = exportedClusters.length > 0 ? exportedClusters : null;
         }
     }
 
@@ -2733,23 +3187,29 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
         for (var pli = 0; pli < pgList.length; pli++) {
             var pgEntry = pgList[pli];
             var masterKey2 = msId2 + "_" + pgEntry.masterPageIdx;
-            var master = exportedMasterByPage[masterKey2];
-            if (!master) continue;
-            if ((master.relRight - master.relLeft) <= 0) continue;
-            dbg("  result docIdx=" + pgEntry.docIdx + " masterPageIdx=" + pgEntry.masterPageIdx +
-                " rel=["+master.relTop+","+master.relLeft+","+master.relBottom+","+master.relRight+"]");
-            results.push(applyRenderOwnership({
-                id: parseInt(msId2, 10),
-                file: master.relPath,
-                bounds: [master.relTop, master.relLeft, master.relBottom, master.relRight],
-                pageIndex: pgEntry.docIdx,
-                zOrder: 0,
-                isMasterGraphic: true
-            }, null, {
-                sourceObjectIds: master.sourceObjectIds || [parseInt(msId2, 10)],
-                textOwner: "none",
-                reason: "master_graphic"
-            }));
+            var masters = exportedMasterByPage[masterKey2];
+            if (!masters || masters.length === 0) continue;
+            for (var mi = 0; mi < masters.length; mi++) {
+                var master = masters[mi];
+                if (!master) continue;
+                if ((master.relRight - master.relLeft) <= 0) continue;
+                dbg("  result docIdx=" + pgEntry.docIdx + " masterPageIdx=" + pgEntry.masterPageIdx +
+                    " cluster=" + mi +
+                    " rel=["+master.relTop+","+master.relLeft+","+master.relBottom+","+master.relRight+"]");
+                results.push(applyRenderOwnership({
+                    id: parseInt(msId2, 10) * 100 + mi,
+                    file: master.relPath,
+                    bounds: [master.relTop, master.relLeft, master.relBottom, master.relRight],
+                    cropSourceBounds: master.cropSourceBounds,
+                    pageIndex: pgEntry.docIdx,
+                    zOrder: mi,
+                    isMasterGraphic: true
+                }, null, {
+                    sourceObjectIds: master.sourceObjectIds || [parseInt(msId2, 10)],
+                    textOwner: "none",
+                    reason: "master_graphic"
+                }));
+            }
         }
     }
 
@@ -2985,11 +3445,31 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
     var tableInlineRendered = [];  // kept for result schema compatibility
     var inlineObjects = [];  // { id, file, parentStoryId, bounds, pageIndex }
     var processedStoryIds = {};  // Story 중복 방지
+    var inlineScanFrames = editableFrames.slice(0);
+    var inlineScanFrameIds = {};
+    for (var _esid in editableFrameIds) inlineScanFrameIds[_esid] = true;
+    try {
+        var masterSpreadsForInline = doc.masterSpreads.everyItem().getElements();
+        for (var msi = 0; msi < masterSpreadsForInline.length; msi++) {
+            var masterItemsForInline = [];
+            try { masterItemsForInline = masterSpreadsForInline[msi].allPageItems; } catch (eMsItems) {}
+            for (var mii = 0; mii < masterItemsForInline.length; mii++) {
+                var masterTfForInline = masterItemsForInline[mii];
+                try {
+                    if (masterTfForInline.constructor.name !== "TextFrame") continue;
+                    if (classifyTextFrameCached(masterTfForInline) !== "editable") continue;
+                    if (inlineScanFrameIds[masterTfForInline.id]) continue;
+                    inlineScanFrames.push(masterTfForInline);
+                    inlineScanFrameIds[masterTfForInline.id] = true;
+                } catch (eMasterInlineTf) {}
+            }
+        }
+    } catch (eMasterInlineScan) {}
     try {
 
     // 인라인 객체 추출: 편집 TextFrame의 Story에 앵커된 그래픽을 개별 PNG로 렌더
-    for (var ei = 0; ei < editableFrames.length; ei++) {
-        var eTf = editableFrames[ei];
+    for (var ei = 0; ei < inlineScanFrames.length; ei++) {
+        var eTf = inlineScanFrames[ei];
         try {
             var eStory = eTf.parentStory;
             // 같은 Story를 이미 처리했으면 건너뜀

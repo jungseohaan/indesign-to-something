@@ -7,10 +7,14 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * SPEC-013 Phase 5: textwrap 글상자 분할 (후처리).
@@ -79,6 +83,10 @@ public final class WrapPhase5 {
                 boolean isLinkedChain = allComposedLines.size() > (rtf.composedLines() != null ? rtf.composedLines().size() : 0);
                 // 문단이 비어있는 블록은 분할하지 않음 (다단 분할 등으로 문단 미배분)
                 if (tfb.paragraphs() == null || tfb.paragraphs().isEmpty()) {
+                    newBlocks.add(blk);
+                    continue;
+                }
+                if (isShortCenteredMultilineTitle(ctx, rtf)) {
                     newBlocks.add(blk);
                     continue;
                 }
@@ -485,6 +493,35 @@ public final class WrapPhase5 {
             groupStart = groupEnd;
         }
         return result.size() > 1 ? result : null;
+    }
+
+    private static boolean isShortCenteredMultilineTitle(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null) return false;
+        String text = tf.frameVisibleText();
+        if (text == null) return false;
+        String clean = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").replace(" ", "").trim();
+        if (clean.length() < 4 || clean.length() > 24) return false;
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines == null || lines.size() < 2 || lines.size() > 6) return false;
+
+        Set<Integer> paraIndices = new HashSet<>();
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null || line.paraIndex() < 0) return false;
+            paraIndices.add(line.paraIndex());
+        }
+        if (paraIndices.size() != lines.size()) return false;
+
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return false;
+        int start = Math.max(0, tf.paragraphStart());
+        int end = tf.paragraphEnd() >= start ? Math.min(tf.paragraphEnd(), story.paragraphs().size() - 1) : start;
+        for (int i = start; i <= end; i++) {
+            ResolvedParagraph rp = story.paragraphs().get(i);
+            String just = rp != null ? rp.justification() : null;
+            if (just == null) continue;
+            if (!just.toLowerCase().contains("center")) return false;
+        }
+        return true;
     }
 
     private static int groupTextLen(List<ResolvedTextFrame.ComposedLine> group) {

@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.StylePropertyResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
@@ -119,24 +120,61 @@ public final class ResolvedBuildContext {
     public java.util.Set<Integer> customAnchoredInlineIds = new java.util.HashSet<>();
 
     /**
-     * DOM 객체 ID → 처리 소유권 결정 맵.
+     * TextFrame DOM ID → 텍스트 처리 소유권 결정.
      *
-     * <p>Phase 2 / Phase 4 / Phase 7 prep이 {@link #setDisposition}으로 등록하고,
-     * Phase 3 / Phase 7이 {@link #isDisposed}로 읽는다.
-     * 등록되지 않은 ID는 기본 경로(Phase 3 스토리 변환 / Phase 7 PNG 배치)를 따른다.</p>
-     *
-     * @see FrameDisposition
+     * <p>RenderedGroup과 TextFrame이 같은 numeric id를 공유하는 케이스가 있으므로,
+     * 텍스트 처리 완료 상태를 PNG 배치 스킵 판단에 재사용하면 안 된다.</p>
      */
-    public java.util.Map<Integer, FrameDisposition> frameDispositions = new java.util.HashMap<>();
+    public java.util.Map<Integer, FrameDisposition> textFrameDispositions = new java.util.HashMap<>();
 
-    /** domId의 disposition을 등록한다. */
-    public void setDisposition(int domId, FrameDisposition d) {
-        frameDispositions.put(domId, d);
+    /** RenderedGroup/page_object ID → PNG 처리 소유권 결정. */
+    public java.util.Map<Integer, FrameDisposition> renderedItemDispositions = new java.util.HashMap<>();
+
+    /** inline_object ID → 인라인 PNG 처리 소유권 결정. */
+    public java.util.Map<Integer, FrameDisposition> inlineObjectDispositions = new java.util.HashMap<>();
+
+    /** TextFrame domId의 disposition을 등록한다. */
+    public void setTextDisposition(int domId, FrameDisposition d) {
+        textFrameDispositions.put(domId, d);
     }
 
-    /** domId가 지정된 disposition으로 등록되어 있으면 true. */
+    /** RenderedGroup domId의 disposition을 등록한다. */
+    public void setRenderedDisposition(int domId, FrameDisposition d) {
+        renderedItemDispositions.put(domId, d);
+    }
+
+    /** inline_object domId의 disposition을 등록한다. */
+    public void setInlineDisposition(int domId, FrameDisposition d) {
+        inlineObjectDispositions.put(domId, d);
+    }
+
+    /** TextFrame domId가 지정된 disposition으로 등록되어 있으면 true. */
+    public boolean isTextDisposed(int domId, FrameDisposition d) {
+        return d.equals(textFrameDispositions.get(domId));
+    }
+
+    /** RenderedGroup domId가 지정된 disposition으로 등록되어 있으면 true. */
+    public boolean isRenderedDisposed(int domId, FrameDisposition d) {
+        return d.equals(renderedItemDispositions.get(domId));
+    }
+
+    /** inline_object domId가 지정된 disposition으로 등록되어 있으면 true. */
+    public boolean isInlineDisposed(int domId, FrameDisposition d) {
+        return d.equals(inlineObjectDispositions.get(domId));
+    }
+
+    /**
+     * 하위 호환용. 새 코드는 처리 대상에 따라 text/rendered/inline 전용 메서드를 써야 한다.
+     */
+    @Deprecated
+    public void setDisposition(int domId, FrameDisposition d) {
+        setTextDisposition(domId, d);
+    }
+
+    /** 하위 호환용. 새 코드는 처리 대상에 따라 text/rendered/inline 전용 메서드를 써야 한다. */
+    @Deprecated
     public boolean isDisposed(int domId, FrameDisposition d) {
-        return d.equals(frameDispositions.get(domId));
+        return isTextDisposed(domId, d);
     }
 
     /**
@@ -158,6 +196,60 @@ public final class ResolvedBuildContext {
      * Phase 7c가 동일 항목을 중복 배치하지 않도록 건너뛰는 데 사용.
      */
     public java.util.Set<Integer> phase6PlacedIds = new java.util.HashSet<>();
+
+    /** rendered page_object의 최종 배치/스킵 사유 추적용 JSONL 라인. */
+    public java.util.List<String> renderDecisionLines = new java.util.ArrayList<>();
+
+    public void recordRenderedDecision(RenderedGroup rg, String phase, String decision, String detail) {
+        if (rg == null) return;
+        StringBuilder sb = new StringBuilder(256);
+        sb.append('{')
+                .append("\"phase\":\"").append(jsonEscape(phase)).append("\",")
+                .append("\"decision\":\"").append(jsonEscape(decision)).append("\",")
+                .append("\"detail\":\"").append(jsonEscape(detail)).append("\",")
+                .append("\"id\":").append(rg.id()).append(',')
+                .append("\"pageIndex\":").append(rg.pageIndex()).append(',')
+                .append("\"file\":\"").append(jsonEscape(rg.file())).append("\",")
+                .append("\"reason\":\"").append(jsonEscape(rg.reason())).append("\",")
+                .append("\"itemType\":\"").append(jsonEscape(rg.itemType())).append("\",")
+                .append("\"visualOwner\":\"").append(jsonEscape(rg.visualOwner())).append("\",")
+                .append("\"textOwner\":\"").append(jsonEscape(rg.textOwner())).append("\",")
+                .append("\"placementAllowed\":").append(Boolean.FALSE.equals(rg.placementAllowed()) ? "false" : "true");
+        double[] b = rg.bounds();
+        if (b != null && b.length >= 4) {
+            sb.append(",\"bounds\":[")
+                    .append(b[0]).append(',')
+                    .append(b[1]).append(',')
+                    .append(b[2]).append(',')
+                    .append(b[3]).append(']');
+        }
+        sb.append('}');
+        renderDecisionLines.add(sb.toString());
+    }
+
+    private static String jsonEscape(String value) {
+        if (value == null) return "";
+        StringBuilder out = new StringBuilder(value.length() + 16);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"': out.append("\\\""); break;
+                case '\\': out.append("\\\\"); break;
+                case '\b': out.append("\\b"); break;
+                case '\f': out.append("\\f"); break;
+                case '\n': out.append("\\n"); break;
+                case '\r': out.append("\\r"); break;
+                case '\t': out.append("\\t"); break;
+                default:
+                    if (c < 0x20) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+            }
+        }
+        return out.toString();
+    }
 
     public ResolvedBuildContext() {
     }

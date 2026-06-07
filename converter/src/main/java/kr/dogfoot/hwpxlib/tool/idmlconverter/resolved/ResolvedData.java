@@ -282,6 +282,7 @@ public class ResolvedData {
         renderedFloatingItemMap.put(key, item);
         renderedFloatingItems.add(item);
         registerIndesignPngTextOwner(item);
+        unregisterEditableLabelTextOwnersCoveredByShell(item);
     }
 
     public List<RenderedGroup> allRenderedFloatingItems() { return renderedFloatingItems; }
@@ -384,6 +385,7 @@ public class ResolvedData {
 
     private void registerIndesignPngTextOwner(RenderedGroup item) {
         if (item == null || !"indesign_png".equals(item.textOwner())) return;
+        if (shouldKeepVisualLabelTextEditable(item)) return;
         String[] ids = item.editableTextFrameIds();
         if (ids == null) return;
         for (String id : ids) {
@@ -398,7 +400,164 @@ public class ResolvedData {
      * 이런 TF는 HWPX 글상자로 다시 배치하면 같은 라벨 텍스트가 중복된다.
      */
     public boolean isTextOwnedByIndesignPng(String domId) {
-        return domId != null && indesignPngTextOwnerFrameIds.contains(domId);
+        return domId != null
+                && indesignPngTextOwnerFrameIds.contains(domId)
+                && !hasHwpxTextOwnerRenderForFrame(domId);
+    }
+
+    /**
+     * Short visual labels are usually atomic PNGs, but semantic title labels
+     * should keep their text editable when the graphic shell can be placed
+     * separately. The extractor now avoids marking these as indesign-owned; this
+     * guard also repairs older cached resolved.json files.
+     */
+    public boolean shouldKeepVisualLabelTextEditable(RenderedGroup item) {
+        if (item == null) return false;
+        if (!"visual_label_indesign_png".equals(item.reason())) return false;
+        if (!"indesign_png".equals(item.textOwner())) return false;
+        if (!Boolean.TRUE.equals(item.containsEditableText())) return false;
+        String[] ids = item.editableTextFrameIds();
+        if (ids == null || ids.length == 0) return false;
+        for (String id : ids) {
+            ResolvedTextFrame tf = getTextFrame(id);
+            if (tf == null || tf.storyId() == null) continue;
+            ResolvedStory story = storyMap.get(tf.storyId());
+            if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) continue;
+            ResolvedParagraph first = story.paragraphs().get(0);
+            String style = first != null ? first.styleName() : null;
+            if (style != null && style.startsWith("#표제목")) {
+                return true;
+            }
+            if (isShortSemanticLabel(tf) && hasHwpxTextOwnerRenderForFrame(id)) {
+                return true;
+            }
+            if (isShortSemanticLabel(tf) && hasSeparateVisualShellForLabel(item, tf)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void unregisterEditableLabelTextOwnersCoveredByShell(RenderedGroup shell) {
+        if (!isEditableLabelShellCandidate(shell)) return;
+        for (RenderedGroup item : renderedFloatingItems) {
+            if (item == null || item == shell) continue;
+            if (!"visual_label_indesign_png".equals(item.reason())) continue;
+            if (!containsId(item.childIds(), shell.id())) continue;
+            if (!shouldKeepVisualLabelTextEditable(item)) continue;
+            String[] ids = item.editableTextFrameIds();
+            if (ids == null) continue;
+            for (String id : ids) {
+                if (id != null) indesignPngTextOwnerFrameIds.remove(id);
+            }
+        }
+    }
+
+    private boolean hasSeparateVisualShellForLabel(RenderedGroup label, ResolvedTextFrame tf) {
+        if (label == null || tf == null || label.childIds() == null) return false;
+        for (RenderedGroup candidate : renderedFloatingItems) {
+            if (!isEditableLabelShellCandidate(candidate)) continue;
+            if (candidate.pageIndex() != label.pageIndex()) continue;
+            if (!containsId(label.childIds(), candidate.id())) continue;
+            if (overlapsTextFrame(candidate.bounds(), tf, 0.55)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasHwpxTextOwnerRenderForFrame(String textFrameId) {
+        if (textFrameId == null) return false;
+        ResolvedTextFrame tf = getTextFrame(textFrameId);
+        if (tf == null) return false;
+        for (RenderedGroup item : renderedFloatingItems) {
+            if (item == null) continue;
+            if (item.pageIndex() != tf.pageIndex()) continue;
+            if (!"page_object".equals(item.type())) continue;
+            if (!"indesign_png".equals(item.visualOwner())) continue;
+            if (!"hwpx_tf".equals(item.textOwner())) continue;
+            if (!containsString(item.editableTextFrameIds(), textFrameId)) continue;
+            String reason = item.reason();
+            if (reason == null || !reason.contains("text_hidden")) continue;
+            if (!overlapsTextFrame(item.bounds(), tf, 0.75)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isEditableLabelShellCandidate(RenderedGroup item) {
+        if (!isVisualOnlyPageObject(item)) return false;
+        String reason = item.reason();
+        if (reason == null || !(reason.contains("decoration")
+                || reason.contains("visual_shell")
+                || reason.contains("complex_graphic"))) {
+            return false;
+        }
+        double[] b = item.bounds();
+        if (b == null || b.length < 4) return false;
+        double w = b[3] - b[1];
+        double h = b[2] - b[0];
+        return w >= 8.0 && w <= 90.0
+                && h >= 2.5 && h <= 14.0
+                && w / h >= 2.0;
+    }
+
+    private static boolean isShortSemanticLabel(ResolvedTextFrame tf) {
+        String text = normalizedText(tf != null ? tf.frameVisibleText() : null);
+        return !text.isEmpty()
+                && text.length() <= 60
+                && text.indexOf('\n') < 0
+                && text.indexOf('\r') < 0;
+    }
+
+    private static String normalizedText(String text) {
+        if (text == null) return "";
+        return text.replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0007", "")
+                .trim();
+    }
+
+    private static boolean overlapsTextFrame(double[] shellBounds, ResolvedTextFrame tf, double minTfCoverage) {
+        if (shellBounds == null || tf == null) return false;
+        double[] tfBounds = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+        if (tfBounds == null || tfBounds.length < 4) return false;
+        double tfArea = area(tfBounds);
+        if (tfArea <= 0) return false;
+        return overlapArea(shellBounds, tfBounds) / tfArea >= minTfCoverage;
+    }
+
+    private static double area(double[] b) {
+        if (b == null || b.length < 4) return 0.0;
+        double w = b[3] - b[1];
+        double h = b[2] - b[0];
+        return w > 0 && h > 0 ? w * h : 0.0;
+    }
+
+    private static double overlapArea(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return 0.0;
+        double left = Math.max(a[1], b[1]);
+        double top = Math.max(a[0], b[0]);
+        double right = Math.min(a[3], b[3]);
+        double bottom = Math.min(a[2], b[2]);
+        double w = right - left;
+        double h = bottom - top;
+        return w > 0 && h > 0 ? w * h : 0.0;
+    }
+
+    private static boolean containsId(int[] ids, int target) {
+        if (ids == null) return false;
+        for (int id : ids) {
+            if (id == target) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsString(String[] ids, String target) {
+        if (ids == null || target == null) return false;
+        for (String id : ids) {
+            if (target.equals(id)) return true;
+        }
+        return false;
     }
 
     public boolean hasRenderedFloatingItem(String idmlHexId) {

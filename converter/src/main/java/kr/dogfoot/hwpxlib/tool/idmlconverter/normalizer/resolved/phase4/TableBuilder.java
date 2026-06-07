@@ -492,25 +492,29 @@ public final class TableBuilder {
         }
         if (pageItemById.isEmpty()) return 0;
 
-        double sf = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
-        double tableLeftMm = CoordinateConverter.hwpunitsToPoints(table.x()) / sf;
-        double tableTopMm = CoordinateConverter.hwpunitsToPoints(table.y()) / sf;
+        double tableLeftPt = CoordinateConverter.hwpunitsToPoints(table.x());
+        double tableTopPt = CoordinateConverter.hwpunitsToPoints(table.y());
 
         long[] colLeft = buildColumnOffsets(table.columnWidths());
         long[] rowTop = buildRowOffsets(table.rows());
 
         int absorbed = 0;
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (!"page_object".equals(rg.itemType())) continue;
-            int rgPageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
-            if (rgPageIdx != pageIdx) continue;
-            if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
-            if (ctx.isDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) continue;
-
-            ResolvedPageItem item = pageItemById.get(rg.id());
+        Set<Integer> absorbedItemIds = new HashSet<>();
+        for (ResolvedPageItem item : ctx.resolvedData.pageItems()) {
+            if (item == null || item.id() == null) continue;
+            int itemPageIdx = ctx.toSectionIndex.applyAsInt(item.pageIndex());
+            if (itemPageIdx != pageIdx) continue;
+            int itemId;
+            try {
+                itemId = Integer.parseInt(item.id());
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+            if (ctx.resolvedData.isInlineObjectId(itemId)) continue;
+            if (ctx.isRenderedDisposed(itemId, FrameDisposition.TEXT_BLOCK_PLACED)) continue;
             if (!isAbsorbableCellBackground(item)) continue;
 
-            double[] b = rg.bounds();
+            double[] b = pageRelativeBoundsInPoints(ctx, item);
             if (b == null || b.length < 4) continue;
             double rectTop = b[0], rectLeft = b[1], rectBottom = b[2], rectRight = b[3];
             if (rectRight <= rectLeft || rectBottom <= rectTop) continue;
@@ -519,18 +523,20 @@ public final class TableBuilder {
             if (fill == null) continue;
 
             ASTTableCell matched = findCoveredCell(
-                    table, colLeft, rowTop, tableLeftMm, tableTopMm, sf,
+                    table, colLeft, rowTop, tableLeftPt, tableTopPt,
                     rectLeft, rectTop, rectRight, rectBottom);
             if (matched == null) continue;
 
             matched.fillColor(fill);
-            markPageObjectHandled(ctx, rg);
+            markPageItemHandled(ctx, itemId);
+            absorbedItemIds.add(itemId);
             absorbed++;
             if (ctx.debugAst) {
-                table.debugOrNew().note("cell background absorbed: page_object " + rg.id()
+                table.debugOrNew().note("cell background absorbed: page_item " + itemId
                         + " -> r=" + matched.rowIndex() + " c=" + matched.columnIndex());
             }
         }
+        suppressRenderedGroupsCoveredByAbsorbedCellBackgrounds(ctx, absorbedItemIds, pageItemById);
         return absorbed;
     }
 
@@ -565,13 +571,21 @@ public final class TableBuilder {
         return ctx.resolvedData.resolveTintedColorHex(item.fillColorName(), item.fillTint());
     }
 
+    private static double[] pageRelativeBoundsInPoints(ResolvedBuildContext ctx, ResolvedPageItem item) {
+        double[] b = item.pageRelativeBounds();
+        if (b != null && b.length >= 4) {
+            double sf = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+            return new double[]{b[0] * sf, b[1] * sf, b[2] * sf, b[3] * sf};
+        }
+        return item.geometricBounds() != null ? item.geometricBounds() : item.visibleBounds();
+    }
+
     private static ASTTableCell findCoveredCell(
             ASTTable table,
             long[] colLeft,
             long[] rowTop,
-            double tableLeftMm,
-            double tableTopMm,
-            double sf,
+            double tableLeftPt,
+            double tableTopPt,
             double rectLeft,
             double rectTop,
             double rectRight,
@@ -586,10 +600,10 @@ public final class TableBuilder {
                 int r1 = Math.min(r0 + Math.max(1, cell.rowSpan()), rowTop.length - 1);
                 if (c0 < 0 || c0 >= colLeft.length || r0 < 0 || r0 >= rowTop.length) continue;
 
-                double cellLeft = tableLeftMm + CoordinateConverter.hwpunitsToPoints(colLeft[c0]) / sf;
-                double cellRight = tableLeftMm + CoordinateConverter.hwpunitsToPoints(colLeft[c1]) / sf;
-                double cellTop = tableTopMm + CoordinateConverter.hwpunitsToPoints(rowTop[r0]) / sf;
-                double cellBottom = tableTopMm + CoordinateConverter.hwpunitsToPoints(rowTop[r1]) / sf;
+                double cellLeft = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c0]);
+                double cellRight = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c1]);
+                double cellTop = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r0]);
+                double cellBottom = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r1]);
                 double score = fullCellCoverScore(
                         rectLeft, rectTop, rectRight, rectBottom,
                         cellLeft, cellTop, cellRight, cellBottom);
@@ -614,17 +628,127 @@ public final class TableBuilder {
 
         double rectCoverage = intersection / rectArea;
         double cellCoverage = intersection / cellArea;
-        double edgeToleranceMm = 1.4;
-        boolean aligned = Math.abs(rectLeft - cellLeft) <= edgeToleranceMm
-                && Math.abs(rectRight - cellRight) <= edgeToleranceMm
-                && Math.abs(rectTop - cellTop) <= edgeToleranceMm
-                && Math.abs(rectBottom - cellBottom) <= edgeToleranceMm;
+        double edgeTolerancePt = 4.0;
+        boolean aligned = Math.abs(rectLeft - cellLeft) <= edgeTolerancePt
+                && Math.abs(rectRight - cellRight) <= edgeTolerancePt
+                && Math.abs(rectTop - cellTop) <= edgeTolerancePt
+                && Math.abs(rectBottom - cellBottom) <= edgeTolerancePt;
         if (!aligned) return 0;
         return Math.min(rectCoverage, cellCoverage);
     }
 
+    private static void markPageItemHandled(ResolvedBuildContext ctx, int itemId) {
+        ctx.setRenderedDisposition(itemId, FrameDisposition.TEXT_BLOCK_PLACED);
+        ctx.phase6PlacedIds.add(itemId);
+    }
+
+    private static void suppressRenderedGroupsCoveredByAbsorbedCellBackgrounds(
+            ResolvedBuildContext ctx,
+            Set<Integer> absorbedItemIds,
+            Map<Integer, ResolvedPageItem> pageItemById) {
+        if (ctx == null || ctx.resolvedData == null || absorbedItemIds == null || absorbedItemIds.isEmpty()) {
+            return;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.sourceObjectIds() == null) continue;
+            boolean containsAbsorbed = false;
+            for (int sourceId : rg.sourceObjectIds()) {
+                if (absorbedItemIds.contains(sourceId)) {
+                    containsAbsorbed = true;
+                    break;
+                }
+            }
+            if (!containsAbsorbed) continue;
+
+            if (shouldSuppressRenderedGroupAfterCellAbsorption(ctx, rg, absorbedItemIds, pageItemById)) {
+                ctx.setRenderedDisposition(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+                ctx.phase6PlacedIds.add(rg.id());
+            }
+        }
+    }
+
+    private static boolean shouldSuppressRenderedGroupAfterCellAbsorption(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            Set<Integer> absorbedItemIds,
+            Map<Integer, ResolvedPageItem> pageItemById) {
+        if (rg == null || rg.sourceObjectIds() == null) return false;
+        String reason = rg.reason();
+        if (reason != null
+                && !(reason.contains("mixed_group")
+                    || reason.contains("text_hidden")
+                    || reason.contains("text_composite"))) {
+            return false;
+        }
+
+        for (int sourceId : rg.sourceObjectIds()) {
+            if (absorbedItemIds.contains(sourceId)) continue;
+            ResolvedPageItem item = pageItemById.get(sourceId);
+            if (item == null) continue;
+            if (isNeutralSourceForCellBackgroundParent(ctx, item, pageItemById)) continue;
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isNeutralSourceForCellBackgroundParent(
+            ResolvedBuildContext ctx,
+            ResolvedPageItem item,
+            Map<Integer, ResolvedPageItem> pageItemById) {
+        if (item == null) return true;
+        String type = item.type();
+        if ("Group".equals(type)) return true;
+        int id;
+        try {
+            id = Integer.parseInt(item.id());
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+        if (ctx.resolvedData.isInlineObjectId(id) || item.isInline()
+                || isDescendantOfInlineObject(ctx, item, pageItemById)) {
+            return true;
+        }
+        if ("TextFrame".equals(type)) {
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(item.id());
+            return isTableAnchorOnlyFrame(tf);
+        }
+        return !isVisiblePageItem(item);
+    }
+
+    private static boolean isDescendantOfInlineObject(
+            ResolvedBuildContext ctx,
+            ResolvedPageItem item,
+            Map<Integer, ResolvedPageItem> pageItemById) {
+        ResolvedPageItem cur = item;
+        Set<Integer> visited = new HashSet<>();
+        while (cur != null && cur.parentId() != null) {
+            int parentId;
+            try {
+                parentId = Integer.parseInt(cur.parentId());
+            } catch (NumberFormatException ignored) {
+                return false;
+            }
+            if (!visited.add(parentId)) return false;
+            if (ctx.resolvedData.isInlineObjectId(parentId)) return true;
+            ResolvedPageItem parent = pageItemById.get(parentId);
+            if (parent == null) return false;
+            if (parent.isInline()) return true;
+            cur = parent;
+        }
+        return false;
+    }
+
+    private static boolean isVisiblePageItem(ResolvedPageItem item) {
+        if (item == null) return false;
+        String fill = item.fillColorName();
+        if (fill != null && !fill.contains("None")) return true;
+        String stroke = item.strokeColorName();
+        if (stroke != null && !stroke.contains("None") && item.strokeWeight() > 0) return true;
+        return "Image".equals(item.type());
+    }
+
     private static void markPageObjectHandled(ResolvedBuildContext ctx, RenderedGroup rg) {
-        ctx.setDisposition(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+        ctx.setRenderedDisposition(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED);
         ctx.phase6PlacedIds.add(rg.id());
         Set<Integer> ids = new HashSet<>();
         ids.add(rg.id());
@@ -661,10 +785,10 @@ public final class TableBuilder {
      */
     private static void suppressAllDescendantsFromPhase7(
             ResolvedBuildContext ctx, Set<Integer> groupIds) {
-        if (ctx.frameDispositions == null || ctx.resolvedData == null) return;
+        if (ctx.renderedItemDispositions == null || ctx.resolvedData == null) return;
 
         // Step 1: 부모 그룹 직접 등록
-        for (int id : groupIds) ctx.setDisposition(id, FrameDisposition.TEXT_BLOCK_PLACED);
+        for (int id : groupIds) ctx.setRenderedDisposition(id, FrameDisposition.TEXT_BLOCK_PLACED);
 
         // Step 2: 공유 PNG 파일로 렌더된 floating 항목 억제
         Set<String> sharedFiles = new HashSet<>();
@@ -676,7 +800,7 @@ public final class TableBuilder {
         if (!sharedFiles.isEmpty()) {
             for (RenderedGroup rt : ctx.resolvedData.allRenderedFloatingItems()) {
                 if (rt.file() != null && sharedFiles.contains(rt.file())) {
-                    ctx.setDisposition(rt.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+                    ctx.setRenderedDisposition(rt.id(), FrameDisposition.TEXT_BLOCK_PLACED);
                 }
             }
         }
@@ -697,7 +821,7 @@ public final class TableBuilder {
             if (children == null) continue;
             for (int child : children) {
                 if (visited.add(child)) {
-                    ctx.setDisposition(child, FrameDisposition.TEXT_BLOCK_PLACED);
+                    ctx.setRenderedDisposition(child, FrameDisposition.TEXT_BLOCK_PLACED);
                     queue.add(child);
                 }
             }

@@ -152,9 +152,25 @@ public class ResolvedToASTBuilder {
         RenderableFramePlacer.place(this.ctx, sections);
         tagPhase(sections, "Phase7.placeRenderableFrames");
 
+        writeRenderDecisionLog();
         System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
         reportSpec016Counts();
         return doc;
+    }
+
+    private void writeRenderDecisionLog() {
+        if (basePath == null || ctx == null || ctx.renderDecisionLines == null
+                || ctx.renderDecisionLines.isEmpty()) {
+            return;
+        }
+        try {
+            java.nio.file.Path out = java.nio.file.Paths.get(basePath, "render-decisions.jsonl");
+            java.nio.file.Files.write(out, ctx.renderDecisionLines,
+                    java.nio.charset.StandardCharsets.UTF_8);
+            System.err.println("[ResolvedToASTBuilder] render decisions: " + out);
+        } catch (Exception e) {
+            System.err.println("[ResolvedToASTBuilder] render decision log write failed: " + e.getMessage());
+        }
     }
 
     /** SPEC-016: 매칭 신뢰도 비율을 stderr에 리포트. */
@@ -204,14 +220,15 @@ public class ResolvedToASTBuilder {
     private IDMLStory loadIDMLStory(String storyId) {
         if (idmlStoryCache.containsKey(storyId)) return idmlStoryCache.get(storyId);
 
+        String sourceStoryId = sourceStoryId(storyId);
         String hexId;
         try {
-            if (storyId.startsWith("u") || storyId.startsWith("U")) {
+            if (sourceStoryId.startsWith("u") || sourceStoryId.startsWith("U")) {
                 // IDML hex format: "u4daf" → hexId = "4daf"
-                hexId = storyId.substring(1).toLowerCase();
+                hexId = sourceStoryId.substring(1).toLowerCase();
             } else {
                 // decimal format (from resolved.json): "17203" → hex
-                hexId = Integer.toHexString(Integer.parseInt(storyId));
+                hexId = Integer.toHexString(Integer.parseInt(sourceStoryId));
             }
         } catch (NumberFormatException e) {
             return null;
@@ -225,10 +242,21 @@ public class ResolvedToASTBuilder {
             org.w3c.dom.Document xmlDoc = factory.newDocumentBuilder().parse(storyFile);
             IDMLStory story = IDMLStoryParser.parseStory(xmlDoc, "u" + hexId);
             idmlStoryCache.put(storyId, story);
+            if (!sourceStoryId.equals(storyId)) idmlStoryCache.put(sourceStoryId, story);
             return story;
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static String sourceStoryId(String storyId) {
+        if (storyId == null) return "";
+        int cut = -1;
+        int pi = storyId.indexOf("_pi");
+        int oc = storyId.indexOf("_oc");
+        if (pi >= 0) cut = pi;
+        if (oc >= 0) cut = cut < 0 ? oc : Math.min(cut, oc);
+        return cut >= 0 ? storyId.substring(0, cut) : storyId;
     }
 
     // 텍스트 기반 resolved 런 매칭 — 매칭 성공 시 인덱스 추적용 (Phase 3에서 ctx.lastMatchResult로 공유)

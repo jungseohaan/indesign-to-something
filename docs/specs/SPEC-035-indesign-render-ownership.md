@@ -121,6 +121,7 @@
 | `가/나/다/라` 버튼 + 해당 카드 사각형 | 단일 PNG 가능 | 버튼 글자는 PNG 소유 가능 |
 | 빈 활동 카드/답안 박스 | 카드 단위 PNG | 내부 편집 텍스트 없음 |
 | `모둠 활동` 배지처럼 아이콘+짧은 라벨이 하나의 로고처럼 동작하는 그룹 | 단일 PNG 가능 | 라벨 텍스트는 PNG 소유 또는 hidden semantic |
+| `언어의 자의성`처럼 개념/제목을 나타내는 짧은 의미 라벨 | 라벨 배경/장식만 PNG | 제목 텍스트는 HWPX TF |
 | 제목 옆 살구색 밑그림/장식 그래픽 | 독립 PNG | 제목 TF는 HWPX TF |
 | 긴 지시문/본문/문항 TF | 배경 그래픽과 분리 | HWPX TF |
 | 출처/캡션처럼 편집 가치가 낮지만 위치 기준이 필요한 짧은 텍스트 | 기본은 HWPX TF, 시각 효과가 강하면 hidden semantic 검토 | 중복 방지 메타 필수 |
@@ -134,25 +135,144 @@
 - 부모 mixedGroup 렌더가 필요하더라도 editable TF는 숨기고 visual-only shell로만 사용한다.
 - `visual_label_indesign_png`의 배치 bounds가 실제 PNG 비율보다 과도하게 넓어져 라벨이 납작해지는 경우, bounds의 가로폭은 유지하고 PNG pixel ratio에 맞춰 세로를 중앙 기준으로 확장한다.
 
+### TF-owned visual shell 정렬 정책
+
+`textOwner=hwpx_tf`인 visual shell PNG는 HWPX TF가 텍스트를 소유하고, InDesign PNG가 배경/말풍선/밑그림 같은 시각 껍데기만 소유하는 구조이다. 이때 텍스트를 숨기고 export한 PNG는 투명 패딩을 포함할 수 있으므로, PNG의 전체 bounds만 믿으면 TF와 배경 도형이 어긋날 수 있다.
+
+정렬 원칙:
+
+- `hwpx_tf` 소유 visual shell은 원본 zOrder가 알려져 있어도 소유 TF 바로 뒤에 배치한다.
+- 내용 없는 TF 자체가 stroke/fill 컨테이너인 경우, shell 자신의 빈 TF zOrder가 아니라 shell과 겹치는 실제 의미 텍스트 TF들의 최소 zOrder보다 충분히 뒤에 배치한다.
+- 짧은 제목 라벨의 배경 도형은 큰 컨테이너 shell보다 앞, 제목 TF보다 뒤에 배치한다. 즉 레이어 순서는 `큰 shell < 제목 라벨 배경 < 제목 TF`이다.
+- 이 순서는 IDML 원본 zOrder보다 ownership 의미를 우선한다. 큰 shell은 컨테이너 배경이고, 라벨 배경은 제목 TF의 직접 시각 배경이기 때문이다.
+- shell PNG 내부에 투명 패딩이 있으면 alpha bbox를 기준으로 실제 보이는 영역을 계산한다.
+- 짧은 제목/개념 라벨 TF는 visual shell의 실제 alpha bbox와 겹치는 경우에만 TF의 세로 bounds를 shell에 맞추고 `verticalJustification=CENTER_ALIGN`으로 보정한다.
+- 이 보정은 텍스트 의미 단위와 시각 shell이 1:1에 가까운 경우에만 적용한다.
+
+적용 조건:
+
+- TF는 검색/편집 가치가 있는 짧은 제목 또는 개념 라벨이다.
+- TF의 composed line은 1줄이거나 1줄로 취급 가능한 구조이다.
+- shell의 `editableTextFrameIds`에 해당 TF id가 포함되어 있다.
+- shell의 alpha bbox와 TF의 x 범위가 충분히 겹친다.
+- shell 높이는 TF 높이보다 약간 크지만, 과도하게 크지 않아야 한다.
+  - 작은 제목 shell의 예: 살구색 밑그림, 라벨 배경, 짧은 제목 밴드.
+  - 높이 비율이 큰 mixed group은 제목 shell이 아니라 컨테이너로 본다.
+
+금지 조건:
+
+- 하나의 shell이 2개 이상의 독립 editable TF를 포함한다.
+- shell bounds 또는 alpha bbox가 제목 TF뿐 아니라 아래 본문/답안 박스/라벨까지 포함한다.
+- shell 높이가 TF 높이의 허용 배수를 크게 넘는다.
+- shell이 활동 영역 전체, 답안 영역 전체, 말풍선 전체처럼 여러 의미 단위를 묶는 컨테이너이다.
+- 이 경우 TF 위치/높이를 shell에 맞춰 확장하지 않는다. 원본 TF bounds를 유지하고, shell은 배경 PNG로만 둔다.
+- stroke-only 빈 TF shell은 고정 크기 문턱만으로 버리지 않는다. 라운드 코너가 있거나 내부/겹침 영역에 의미 TF가 있으면 레이아웃 컨테이너로 보고 보존한다.
+- `fillTint=0`, `stroke=None/strokeWeight=0`처럼 원본에서 비가시 마스크로 쓰인 도형은 vector PNG로 배치하지 않는다. 이런 객체가 흰색 불투명 PNG로 렌더되면 실제 outline을 가리거나 없는 그래픽을 만든다.
+- `fillTint`/`strokeTint=-1`은 InDesign 기본 tint 값으로, 비가시가 아니라 100% 표시로 본다. `-1`을 `0` 이하로 단순 판정하면 stroke-only 외곽선과 박스가 누락된다.
+
+### 선/점선 그리드 소유권 정책
+
+점선 구분선, 표 내부 guide line, stroke-only 박스 외곽선은 통 PNG 그룹으로 소유하지 않는다. InDesign의 `exportFile(PNG)`는 dotted/dashed line group에서 세로선 또는 얇은 stroke-only rectangle을 빈 PNG로 만들거나 일부 방향의 stroke만 남기는 경우가 있다.
+
+정책:
+
+- `GraphicLine` 또는 얇은 stroke-only `Rectangle/Polygon/Oval`로만 이루어진 dotted/dashed line-grid 그룹은 `pure_decoration_group` 통 PNG로 export하지 않는다.
+- line-grid 그룹의 자식 선/외곽선은 `vector_shape` 단계로 넘겨 개별 시각 객체로 추출한다.
+- 이때 `strokeTint=-1`은 100%로 간주해 누락시키지 않는다.
+- 그룹 PNG가 자식 ID를 소유한 뒤 실패하면 개별 fallback이 막히므로, line-grid 여부는 그룹 렌더링 전에 판정한다.
+
+실패 방지 사례:
+
+- page 129 차별적 표현 표: `GraphicLine` 점선 그룹은 원본 IDML에 존재하지만 그룹 PNG에는 가로 점선만 남고 세로 점선이 사라졌다. line-grid 그룹은 통 PNG가 아니라 자식 선 단위로 보존한다.
+
+실패 방지 사례:
+
+- page 122 `언어의 본질 이해하기`: shell PNG 내부의 투명 패딩 때문에 살색 도형이 아래로 밀려 보였으므로 alpha bbox 기준으로 TF와 shell을 맞춘다.
+- page 127 `(2) (1)을 바탕으로 차별적 표현의 의미를 파악해 보자.`: 제목과 아래 답안 영역이 같은 큰 mixed group에 들어 있어도, 이 그룹은 제목 shell이 아니라 컨테이너이다. 제목 TF를 그룹 alpha 높이로 확장하면 아래 글상자와 겹치므로 보정 대상에서 제외한다.
+
+### 짧은 라벨 텍스트 소유권 정책
+
+짧은 라벨이라고 해서 무조건 `textOwner=indesign_png`로 만들지 않는다. 길이와 bounds는 보조 조건일 뿐이며, 최종 판정은 라벨의 의미와 편집 가치가 우선이다.
+
+`textOwner=indesign_png` 허용:
+
+- `가/나/다/라`, 숫자, 체크박스 라벨처럼 본문 의미보다 시각 마커 성격이 강한 버튼
+- 아이콘+텍스트가 하나의 로고처럼 동작하고, 편집 대상이 아닌 짧은 활동 배지
+- 글자가 도형 효과의 일부라서 HWPX TF로 분리하면 원본성을 크게 잃는 장식 텍스트
+
+`textOwner=hwpx_tf` 유지:
+
+- `#표제목...` 계열 스타일처럼 개념명/제목/소제목 역할을 하는 라벨
+- `언어의 자의성`, `언어의 사회성`, `언어의 역사성`, `언어의 창조성`처럼 검색/편집 가치가 있는 짧은 개념 라벨
+- 제목 옆 장식 그래픽과 시각적으로 붙어 있지만, 텍스트 자체는 독립된 의미 단위인 라벨
+
+구현 원칙:
+
+- extractor는 의미 라벨을 `visual_label_indesign_png` atomic parent로 만들지 않는다.
+- 의미 라벨 주변 그래픽은 별도의 `decoration_group`, `complex_graphic_text_hidden`, `visual_only_png` 등으로 배치한다.
+- Java 변환기는 구 캐시에서 이미 `visual_label_indesign_png + textOwner=indesign_png`로 들어온 항목이라도, editable TF의 paragraph style이 `#표제목...`이면 parent PNG를 배치하지 않고 TF를 HWPX 텍스트로 살린다.
+- 이때 parent PNG의 child suppression도 적용하지 않아, 그래픽 껍데기 렌더가 별도로 존재하면 그것을 배치할 수 있게 한다.
+- 이 정책은 특정 DOM id나 페이지 예외가 아니라 “시각 마커 라벨”과 “의미 제목 라벨”의 소유권 분리 규칙이다.
+
 ### 마스터 페이지 그래픽 정책
 
 마스터 페이지 그래픽은 page side별로 InDesign의 실제 stacking을 보존한 합성 PNG로 추출한다.
 
-이전처럼 "가장 큰 마스터 객체 1개"만 추출하면 큰 배경 사각형만 살아남고, 그 위의 흰 오버레이/장식 그룹/마스터 로고가 누락된다. 따라서 extractor는 적용된 마스터 스프레드의 각 page side에 걸치는 top-level visual item을 수집해 임시 페이지에 override한 뒤 하나의 PNG로 export한다.
+이전처럼 "가장 큰 마스터 객체 1개"만 추출하면 큰 배경 사각형만 살아남고, 그 위의 흰 오버레이/장식 그룹/마스터 로고가 누락된다. 따라서 extractor는 적용된 마스터 스프레드의 각 page side에 걸치는 top-level visual item을 수집한다. 단, page side 전체를 무조건 하나의 PNG로 묶지는 않는다. 서로 bounds가 닿거나 겹치는 top-level item만 하나의 visual cluster로 보고, 떨어져 있는 장식/페이지번호 strip/로고는 별도 PNG로 export한다.
 
 원칙:
 
 - page side와 교차하는 top-level master item을 모두 포함한다.
 - 중심점 기준 필터는 사용하지 않는다. 스프레드 걸침 객체와 page side를 덮는 오버레이가 누락될 수 있기 때문이다.
+- page side의 top-level master item은 bounds 연결성 기준으로 visual cluster를 나눈다.
+  - 서로 겹치거나 닿는 배경+오버레이+로고는 하나의 cluster PNG로 export해 stacking을 보존한다.
+  - 서로 떨어진 좌상단 장식과 하단 페이지번호 strip은 별도 cluster PNG로 export한다.
+- cluster PNG를 export하기 위해 임시 페이지에 override하더라도 배치 bounds는 임시 페이지 origin을 쓰지 않는다.
+  - 임시 페이지는 문서 끝에 추가되어 원본 master side와 page origin이 다를 수 있다.
+  - 배치 좌표는 원본 master top-level item cluster의 union bounds를 원본 master page bounds 기준으로 계산한다.
+  - 임시 override/export target bounds는 PNG 생성에는 사용할 수 있지만, HWPX 배치 좌표의 기준으로 쓰면 모든 master graphic이 임시 페이지 offset만큼 위/왼쪽으로 밀린다.
 - Group/TextFrame/Rectangle/Oval/Polygon/GraphicLine 등 visible master visual item은 합성 대상이 될 수 있다.
 - HWPX TF로 별도 인스턴스화되는 editable master TextFrame은 합성 export 전에 content만 숨겨 텍스트 중복을 막는다.
+- 자동 페이지번호와 텍스트 변수 기반 하시라는 동적 마스터 텍스트로 본다. 마스터 PNG에는 `PB`, `<01 T>` 같은 placeholder가 들어가면 안 되며, 실제 페이지번호/하시라 텍스트는 HWPX TF 복원 단계가 소유한다.
 - 장식 로고/아웃라인/그룹 그래픽은 master PNG가 소유한다.
 - 결과 PNG에는 합성에 참여한 `sourceObjectIds`를 기록해 이후 중복 배치 판단에 사용한다.
+- 마스터 PNG 파일은 여러 실제 페이지가 공유하는 asset일 수 있다. 따라서 `master_graphic`은 파일명 또는 master id 단독으로 dedupe하지 않고, `id + pageIndex + file` 조합을 하나의 배치 인스턴스로 본다.
+- 청크 추출/증분 캐시 병합에서도 `renderedFloatingItems`의 `master_graphic` 인스턴스는 pageIndex별로 보존한다. 같은 `master_*.png`가 여러 페이지에 반복되는 것은 중복이 아니라 정상 적용이다.
+- Java 배치 단계의 파일 중복 스킵도 같은 페이지 안에서만 적용한다. 다른 pageIndex의 같은 master PNG는 각각 배치해야 한다.
 
 의도:
 
 - page 188의 `단원 마무리` 좌상단 그룹, 초록 배경, 흰 오버레이처럼 하나의 마스터 visual layer로 동작하는 요소를 함께 보존한다.
 - 특정 페이지 예외가 아니라 마스터 추출 단위 자체를 "largest item"에서 "composed master page side"로 바꾼다.
+- page 130처럼 같은 마스터가 여러 페이지에 반복 적용되는 경우, 청크 병합 과정에서 후속 페이지의 마스터 인스턴스가 사라지지 않게 한다.
+- page 123 이후 footer처럼 마스터 PNG가 placeholder 텍스트를 포함하고 Java가 실제 페이지번호/하시라를 다시 배치하는 중복을 방지한다.
+- page 122 좌상단 단원 장식처럼 하단 페이지번호 strip과 떨어진 그래픽은 별도 cluster로 export한다. 한 PNG로 묶으면 하단 strip의 spread-wide bounds가 crop 기준을 오염시켜 좌상단 장식이 작게 보이거나 일부 잘릴 수 있다.
+- page 122 좌상단 단원 장식, page 120/121 footer의 파랑 배지처럼 master origin이 틀어지면 그래픽이 페이지 밖으로 과도하게 밀려 작아 보이거나 다른 객체에 덮인다. 따라서 원본 master page 기준 좌표를 보존한다.
+- page 124/126 좌상단 단원 장식처럼 일부 master item override가 실패하면 원본 cluster union bounds와 실제 PNG export bounds의 종횡비가 달라질 수 있다. 이때 원본 union bounds를 그대로 HWPX 배치 크기로 쓰면 PNG가 길쭉하게 변형된다.
+  - 기본 배치 좌표는 원본 master cluster bounds를 사용한다.
+  - 단, 원본 cluster aspect와 export target aspect 차이가 큰 경우에는 원본 top/left anchor를 유지하고, 원본의 주 footprint 축을 보존한 채 PNG aspect에 맞춘다.
+  - source aspect가 PNG보다 좁고 긴 경우에는 원본 width를 보존하고 height를 줄인다. 이 상황은 실패한 override/bleed 객체가 세로 bounds를 오염시킨 경우가 많다.
+  - source aspect가 PNG보다 넓고 낮은 경우에는 원본 height를 보존하고 width를 조정한다.
+  - 작은 장식/로고/단원 아이콘 master cluster가 page top/left 밖으로 크게 나가면 HWPX에서 잘릴 수 있다. HWPX에는 InDesign master/bleed canvas가 없으므로, page 대비 작은 cluster에 한해 `top < -6pt` 또는 `left < -6pt`이면 전체 bounds를 페이지 안쪽으로 평행 이동한다.
+  - 이 보정은 page 대비 작은 장식 cluster에만 적용한다. 페이지 전체 배경, 하단 페이지번호 strip, spread-wide graphic은 bleed/crop 정책 대상이지 위치 clamp 대상이 아니다.
+  - 이는 실패한 override 객체가 배치 bounds를 오염시키는 것을 막기 위한 일반 정책이며, 특정 페이지 예외가 아니다.
+
+### 부분 text-wrap 문단과 leftIndent 정책
+
+일부 문단만 왼쪽 text-wrap을 크게 받는 TF에서는 `leftIndent`를 HWPX 문단 `leftMargin`으로 그대로 옮기지 않는다.
+
+원칙:
+
+- `composedLines`가 있는 TF에서 visible paragraph가 2개 이상이고, 그중 일부 paragraph만 큰 `wrapIndentLeft`를 가진 경우 부분 text-wrap으로 본다.
+- 큰 left wrap 기준은 `wrapIndentLeft > max(10pt, frameWidth * 0.18)`이다.
+- 해당 paragraph가 양수 `leftIndent`를 가지더라도, neutral hanging indent/leader tab/의미 있는 tab 정렬/선행 inline anchor 문단이 아니면 `suppressParaLeftIndent=true`를 적용한다.
+- `firstLineIndent`는 유지한다. 전체 문단을 오른쪽으로 밀어 버리는 left margin만 제거하고, 첫 줄 보정은 보존한다.
+- 작은 내부 탭스톱이 `leftIndent`보다 앞에 있는 경우는 레이아웃 부산물로 보고 보호 조건으로 쓰지 않는다.
+
+의도:
+
+- InDesign의 text-wrap 결과와 paragraph `leftIndent`가 HWPX에서 중복 보정되는 것을 막는다.
+- 예: 3-1 3단원 소(2) page 130 `"아내와 함께 외출하던 영식은 길에서 손자인 윤호를 마주친다."` 첫 문단은 왼쪽 그래픽 때문에 composed line wrap이 잡히지만, 문단 left margin까지 누적하면 텍스트가 과도하게 오른쪽으로 밀려 보인다.
 
 이 정책의 의도:
 
@@ -216,7 +336,7 @@ HWP 폰트 매핑이 InDesign과 정확히 맞지 않으면 HWPX 글상자 내�
 - InDesign `FillTint`/`StrokeTint`는 투명도가 아니라 원색과 흰색의 혼합 비율이다.
 - `tint=100`은 원래 색, `tint=0`은 흰색으로 해석한다.
 - `tint=-1`, 누락, `NaN`은 InDesign 기본값으로 보고 `100`으로 보정한다.
-- 도형의 표시 여부는 `None`, 실제 opacity, hidden/nonprinting/layer 상태로 판단한다. `tint=0`만으로는 invisible 또는 누락 대상으로 판단하지 않는다.
+- 도형의 색상 해석은 `tint`를 반영하되, vector PNG 추출의 표시 여부는 별도 정책으로 판단한다. `tint=-1`은 항상 기본값 100으로 보고, `tint=0`인 stroke/fill-only mask 객체는 PNG 배치 대상에서 제외할 수 있다.
 - Java 변환 경로는 `ColorResolver.applyTintToHex()`를 공용 진입점으로 사용한다. HWPX로 넘길 때는 가능한 한 RGB에 tint를 반영하고 `fillTint=100`으로 고정해, HWPX의 tint 해석 차이로 색이 흔들리지 않게 한다.
 
 ## 렌더 결과 추적 필드
@@ -295,6 +415,32 @@ HWP 폰트 매핑이 InDesign과 정확히 맞지 않으면 HWPX 글상자 내�
   - 주요 페이지 시각 회귀 수동 확인
 
 ---
+
+## Disposition Namespace 정책
+
+정책 충돌 방지를 위해 처리 완료(disposition) 상태는 대상 종류별로 분리한다.
+
+- `textFrameDispositions`
+  - TextFrame 텍스트가 HWPX 글상자/런으로 이미 배치되었는지 기록한다.
+  - Phase 3의 inline text 재주입 억제에만 사용한다.
+- `renderedItemDispositions`
+  - `renderedFloatingItems` / `page_object` PNG가 이미 흡수되었거나 배치되었는지 기록한다.
+  - Phase 6/7의 PNG 중복 배치 억제에만 사용한다.
+- `inlineObjectDispositions`
+  - inline PNG를 story flow에 넣을지, floating으로 넘길지 기록한다.
+  - Phase 3의 `loadInlineObject()` 판단에만 사용한다.
+
+금지 사항:
+
+- TextFrame id와 rendered item id가 같을 수 있으므로 `TEXT_BLOCK_PLACED`를 단일 DOM id 맵으로 공유하지 않는다.
+- “텍스트가 이미 배치됨”을 근거로 같은 id의 `tf_shell_*.png`나 visual shell PNG를 스킵하지 않는다.
+- Phase 6/7의 스킵 판단은 rendered 전용 disposition과 ownership 메타(`visualOwner`, `textOwner`, `placementAllowed`, `reason`)만 사용한다.
+
+진단 로그:
+
+- 변환 시 resolved 출력 폴더에 `render-decisions.jsonl`을 생성한다.
+- 각 `page_object` rendered item의 `PLACE` / `SKIP_*` 결정을 pageIndex, id, file, reason, owner와 함께 기록한다.
+- 특정 페이지 그래픽 누락은 먼저 이 파일에서 `pageIndex`와 `id`를 조회해 “추출 누락”, “Phase 6 스킵”, “Phase 7 스킵”, “배치 후 z-depth/렌더 문제”를 분리한다.
 
 ## 대상 파일
 

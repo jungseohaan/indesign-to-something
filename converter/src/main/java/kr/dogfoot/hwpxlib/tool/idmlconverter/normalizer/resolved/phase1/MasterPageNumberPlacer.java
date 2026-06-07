@@ -217,11 +217,6 @@ public final class MasterPageNumberPlacer {
                 String parentStory = tf.getAttribute("ParentStory");
                 if (!aceStoryIds.contains(parentStory)) continue;
 
-                String itemTransform = tf.getAttribute("ItemTransform");
-                double[] it = parseDoubles(itemTransform);
-                if (it.length < 6) continue;
-                double tx = it[4], ty = it[5];
-
                 // PathGeometry: anchor points (local coords)
                 double minX = Double.MAX_VALUE, maxX = -Double.MAX_VALUE;
                 double minY = Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
@@ -237,11 +232,13 @@ public final class MasterPageNumberPlacer {
                 }
                 if (minX == Double.MAX_VALUE) continue;
 
-                // TF bounds in spread coords (pt)
-                double spreadLeft   = minX + tx;
-                double spreadRight  = maxX + tx;
-                double spreadTop    = minY + ty;
-                double spreadBottom = maxY + ty;
+                // TF bounds in spread coords (pt). A master TextFrame may be
+                // nested in Groups, so accumulate every ancestor transform.
+                double[] spreadBounds = transformedBounds(tf, minX, minY, maxX, maxY);
+                double spreadTop = spreadBounds[0];
+                double spreadLeft = spreadBounds[1];
+                double spreadBottom = spreadBounds[2];
+                double spreadRight = spreadBounds[3];
 
                 double centerX = (spreadLeft + spreadRight) / 2;
 
@@ -376,7 +373,7 @@ public final class MasterPageNumberPlacer {
         block.y(yHwp);
         block.width(wHwp);
         block.height(hHwp);
-        block.zOrder(20); // 배경(z=0) + 장식(z=5)보다 위
+        block.zOrder(910); // page footer marker: keep above page graphics
         block.columnCount(1);
         block.fillColor("Swatch/None");
         block.strokeColor("Swatch/None");
@@ -417,6 +414,72 @@ public final class MasterPageNumberPlacer {
             try { result[i] = Double.parseDouble(parts[i]); } catch (NumberFormatException e) { result[i] = 0; }
         }
         return result;
+    }
+
+    private static double[] parseTransform(String s) {
+        double[] v = parseDoubles(s);
+        if (v.length >= 6) return new double[]{v[0], v[1], v[2], v[3], v[4], v[5]};
+        return new double[]{1, 0, 0, 1, 0, 0};
+    }
+
+    private static double[] cumulativeTransform(Element el) {
+        List<double[]> chain = new ArrayList<>();
+        Node n = el;
+        while (n != null && n.getNodeType() == Node.ELEMENT_NODE) {
+            Element e = (Element) n;
+            if (e.hasAttribute("ItemTransform")) {
+                chain.add(parseTransform(e.getAttribute("ItemTransform")));
+            }
+            n = n.getParentNode();
+        }
+        double[] result = new double[]{1, 0, 0, 1, 0, 0};
+        for (int i = chain.size() - 1; i >= 0; i--) {
+            result = multiply(result, chain.get(i));
+        }
+        return result;
+    }
+
+    private static double[] multiply(double[] left, double[] right) {
+        double a = left[0], b = left[1], c = left[2], d = left[3], tx = left[4], ty = left[5];
+        double e = right[0], f = right[1], g = right[2], h = right[3], ux = right[4], uy = right[5];
+        return new double[]{
+                a * e + c * f,
+                b * e + d * f,
+                a * g + c * h,
+                b * g + d * h,
+                a * ux + c * uy + tx,
+                b * ux + d * uy + ty
+        };
+    }
+
+    private static double[] apply(double[] m, double x, double y) {
+        return new double[]{
+                m[0] * x + m[2] * y + m[4],
+                m[1] * x + m[3] * y + m[5]
+        };
+    }
+
+    private static double[] transformedBounds(Element el,
+                                              double minX,
+                                              double minY,
+                                              double maxX,
+                                              double maxY) {
+        double[] m = cumulativeTransform(el);
+        double[][] pts = new double[][]{
+                apply(m, minX, minY),
+                apply(m, maxX, minY),
+                apply(m, maxX, maxY),
+                apply(m, minX, maxY)
+        };
+        double left = Double.MAX_VALUE, right = -Double.MAX_VALUE;
+        double top = Double.MAX_VALUE, bottom = -Double.MAX_VALUE;
+        for (double[] p : pts) {
+            left = Math.min(left, p[0]);
+            right = Math.max(right, p[0]);
+            top = Math.min(top, p[1]);
+            bottom = Math.max(bottom, p[1]);
+        }
+        return new double[]{top, left, bottom, right};
     }
 
     // ─── 데이터 클래스 ────────────────────────────────────────────────────

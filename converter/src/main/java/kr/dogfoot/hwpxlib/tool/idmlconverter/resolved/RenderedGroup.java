@@ -8,6 +8,7 @@ public class RenderedGroup {
     private int id;              // InDesign DOM ID (decimal)
     private String file;         // 상대 경로 (예: "group_renders/group_5941.jpg")
     private double[] bounds;     // [top, left, bottom, right] (points)
+    private double[] cropSourceBounds; // PNG crop 기준 bounds. bounds가 page-local로 clip된 경우 원본 bounds 보존.
     private int pageIndex;       // 0-based 페이지 인덱스
     private double[] visibleExpansion;  // [widthRatio, heightRatio, offsetRatioX, offsetRatioY]
                                         // geometricBounds → visibleBounds 보정 비율
@@ -41,6 +42,9 @@ public class RenderedGroup {
 
     public double[] bounds() { return bounds; }
     public void bounds(double[] v) { this.bounds = v; }
+
+    public double[] cropSourceBounds() { return cropSourceBounds; }
+    public void cropSourceBounds(double[] v) { this.cropSourceBounds = v; }
 
     public int pageIndex() { return pageIndex; }
     public void pageIndex(int v) { this.pageIndex = v; }

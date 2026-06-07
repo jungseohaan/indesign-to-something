@@ -9,9 +9,15 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.Paragrap
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTabStop;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -62,6 +68,26 @@ public final class FramePlacer {
     private static final double XSHIFT_STRIP_HEIGHT_RATIO     = 0.20;
     /** X-shift 적용 후 남은 너비가 이 pt 미만이면 shift 취소 */
     private static final double XSHIFT_MIN_REMAIN_PT          = 20.0;
+    /** TF visual shell 추정: shell이 TF 면적 중 이 비율 이상을 덮어야 함 */
+    private static final double VISUAL_SHELL_TF_OVERLAP_MIN = 0.75;
+    /** TF visual shell 추정: shell 면적이 TF 면적의 이 배수보다 크면 페이지 배경/큰 장식으로 간주 */
+    private static final double VISUAL_SHELL_MAX_AREA_RATIO = 1.8;
+    /** TF visual shell 추정: shell 면적이 TF 면적의 이 배수보다 작으면 부분 장식으로 간주 */
+    private static final double VISUAL_SHELL_MIN_AREA_RATIO = 0.45;
+    /** shell 위 제목 TF: sibling fill 도형이 TF보다 이 배수 이상 높으면 TF 세로 bounds를 shell에 맞춘다. */
+    private static final double TITLE_SHELL_HEIGHT_RATIO = 1.35;
+    /** shell 위 제목 TF: sibling fill 도형이 TF보다 너무 크면 전체 배경 컨테이너이므로 세로 확장하지 않는다. */
+    private static final double TITLE_SHELL_MAX_HEIGHT_RATIO = 3.0;
+    /** 짧은 다중행 제목 TF: sibling shell이 TF 폭보다 이 배수 이상이면 좌우 중심 기준으로 사용한다. */
+    private static final double MULTILINE_TITLE_SHELL_MIN_WIDTH_RATIO = 1.08;
+    /** 짧은 다중행 제목 TF: 지나치게 넓은 shell은 페이지/섹션 컨테이너로 보고 제외한다. */
+    private static final double MULTILINE_TITLE_SHELL_MAX_WIDTH_RATIO = 2.10;
+    /** 짧은 다중행 제목 TF: shell이 TF 면적 중 이 비율 이상을 덮어야 한다. */
+    private static final double MULTILINE_TITLE_SHELL_OVERLAP_MIN = 0.72;
+    /** 일부 문단만 text-wrap 으로 왼쪽이 밀릴 때 문단 leftIndent 를 중복 적용하지 않는 최소 wrap 폭. */
+    private static final double PARTIAL_LEFT_WRAP_MIN_PT = 10.0;
+    /** 일부 문단만 text-wrap 으로 왼쪽이 밀릴 때 frame 폭 대비 최소 wrap 비율. */
+    private static final double PARTIAL_LEFT_WRAP_FRAME_RATIO = 0.18;
     // -----------------------------------------------------------------------
 
     public static void placeTextFrames(ResolvedBuildContext ctx, List<ASTSection> sections) {
@@ -81,7 +107,7 @@ public final class FramePlacer {
         // 공간 포함 감지: inner TF가 outer TF bounds 안에 완전히 들어가고 다른 story를 가진 경우.
         // InDesign "밑줄 빈칸 + 예시 답안 오버레이" 패턴: inner TF는 outer TF의 마지막 단락에 주입.
         // key=inner TF id (decimal), value=outer TF id (decimal)
-        ContainmentMaps cm = buildContainmentMap(frames, idx.badgeChildDomIds);
+        ContainmentMaps cm = buildContainmentMap(ctx, frames, idx.badgeChildDomIds);
 
         for (ResolvedTextFrame tf : frames) {
             // 공간 포함 inner TF: outer TF 단락에 주입될 예정 → 독립 배치 스킵
@@ -169,13 +195,31 @@ public final class FramePlacer {
                             && (ctx.resolvedData.isRenderedByOtherChannel(tfDomId)
                                 || idx.allRenderedItemIds.contains(tfDomId));
                     if (!_isRenderedInline) {
-                        // 렌더 없음 → Phase 3 가 IDML 스토리에서 인라인 텍스트 런으로 처리
-                        continue;
+                        // 렌더 없음 → 보통은 Phase 3 가 IDML 스토리에서 인라인 텍스트 런으로 처리한다.
+                        // 단, resolved DOM 에서는 isInline=true 이지만 parentId가 없는 독립 TF가 있다.
+                        // 이 경우 IDML inline run으로 다시 주입되지 않아 텍스트가 누락되므로
+                        // 일반 floating text block으로 배치한다.
+                        ResolvedPageItem _tfi3 = ctx.resolvedData.getPageItem(tf.id());
+                        boolean _parentlessInline = _tfi3 == null || _tfi3.parentId() == null;
+                        String _visInline = tf.frameVisibleText();
+                        boolean _hasOwnInlineText = _visInline != null
+                                && _visInline
+                                    .replace("\uFFFC", "")
+                                    .replace("\b", "")
+                                    .replace("\r", "")
+                                    .replace("\n", "")
+                                    .trim().length() > 1;
+                        if (_parentlessInline && _hasOwnInlineText) {
+                            inlineToFloatingReason = InlineToFloatingReason.EDITABLE_UNANCHORED_TEXT;
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        // 렌더 있음 → floating 배치 + Phase 3 중복 방지
+                        // (tfDomId >= 0은 _isRenderedInline 조건이 보장)
+                        ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+                        inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
                     }
-                    // 렌더 있음 → floating 배치 + Phase 3 중복 방지
-                    // (tfDomId >= 0은 _isRenderedInline 조건이 보장)
-                    ctx.setDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                    inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
                 }
             }
             boolean inlineToFloating = inlineToFloatingReason != InlineToFloatingReason.NONE;
@@ -295,6 +339,7 @@ public final class FramePlacer {
             double y = gb[0] - pageTop;
             double w = gb[3] - gb[1];
             double h = gb[2] - gb[0];
+            boolean expandedToTitleShell = false;
 
             ASTSection section = sections.get(pageIdx);
 
@@ -410,6 +455,19 @@ public final class FramePlacer {
                 System.err.println("[FramePlacer] 타이틀 오버레이 감지 오류 tf=" + tf.id() + ": " + eTOPre);
             }
 
+            double[] visibleOwnedShell = visibleOwnedTextFrameShellBounds(ctx, tf);
+            if (visibleOwnedShell != null
+                    && shouldAlignTitleToVisibleShell(tf, x, w, y, h, visibleOwnedShell)) {
+                y = visibleOwnedShell[0];
+                h = visibleOwnedShell[2] - visibleOwnedShell[0];
+                expandedToTitleShell = true;
+            }
+            double[] centeredTitleShell = centeredMultilineTitleShellBounds(ctx, tf, pageLeft, pageTop, x, w, y, h);
+            if (centeredTitleShell != null) {
+                x = centeredTitleShell[1];
+                w = centeredTitleShell[3] - centeredTitleShell[1];
+            }
+
             // 같은 부모 Group 안의 형제 도형(fill 있는 Rectangle/Polygon/Oval) 과
             // 동일 baseline 에 있을 때 형제 우측으로 이동. (예: page 17 Theme 라벨 + 한국어 TF)
             try {
@@ -439,6 +497,15 @@ public final class FramePlacer {
                         // 형제의 상단이 TF 상단에서 절반 이상 아래에 있으면 장식 요소(말풍선 꼬리 등) →
                         // 텍스트 옆으로 shift 금지 (형제가 TF 하단부에만 겹치면 사이드 라벨 패턴이 아님)
                         if ((sbT - y) >= h * 0.5) continue;
+                        if (hasHwpxOwnedVisualShell(ctx, tf.id())
+                                && shouldExpandTitleToSiblingShell(tf, sib, x, w, y, h, sbT, sbB, sbL, sbR)) {
+                            double newTop = Math.min(y, sbT);
+                            double newBottom = Math.max(y + h, sbB);
+                            y = newTop;
+                            h = newBottom - newTop;
+                            expandedToTitleShell = true;
+                            continue;
+                        }
                         // 형제의 Y-extent 가 TF 높이의 1.3배 이상이면 배경 도형(TF를 감싸는 container) →
                         // 텍스트가 배경 위에 올라타는 패턴이므로 shift 금지
                         if (sibYExt > h * XSHIFT_CONTAINER_HEIGHT_RATIO) continue;
@@ -523,6 +590,12 @@ public final class FramePlacer {
                     }
                 }
             }
+            if (!block.suppressParaLeftIndent()
+                    && shouldSuppressParaLeftIndentForPartialLeftWrap(ctx, tf)) {
+                block.suppressParaLeftIndent(true);
+                System.err.println("[FramePlacer] partial-left-wrap 감지 → suppressParaLeftIndent: tf="
+                        + tf.id() + " storyId=" + tf.storyId());
+            }
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
@@ -546,6 +619,9 @@ public final class FramePlacer {
             // 수직 정렬
             if (tf.verticalJustification() != null) {
                 block.verticalJustification(tf.verticalJustification());
+            }
+            if (expandedToTitleShell) {
+                block.verticalJustification("CENTER_ALIGN");
             }
             // composedLines 로 실제 텍스트 위치를 확인: TOP_ALIGN 이지만 텍스트가 프레임 상단에서
             // 15% 이상 아래에 있으면 InDesign 이 inset/padding 으로 시각적 중앙 정렬을 구현한 것.
@@ -638,7 +714,7 @@ public final class FramePlacer {
                                 // inline_object PNG가 있으면 inline 배치 유지 → floating 전환 등록 안 함.
                                 // TF는 floating text box로 배치되어 PNG 위에 텍스트 오버레이 역할을 한다.
                                 if (_ancRg.file() != null) break outer_anc;
-                                ctx.setDisposition(_ancRg.id(), FrameDisposition.PNG_CONVERT_TO_FLOATING);
+                                ctx.setInlineDisposition(_ancRg.id(), FrameDisposition.PNG_CONVERT_TO_FLOATING);
                                 ctx.inlineObjectTfPageIndex.put(_ancRg.id(), tf.pageIndex());
                                 break outer_anc;
                             }
@@ -665,30 +741,100 @@ public final class FramePlacer {
         List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
         if (groups == null) return false;
         String tfId = String.valueOf(tfDomId);
+        ResolvedTextFrame tf = null;
+        if (ctx.resolvedData.textFrames() != null) {
+            for (ResolvedTextFrame candidate : ctx.resolvedData.textFrames()) {
+                if (candidate != null && tfId.equals(candidate.id())) {
+                    tf = candidate;
+                    break;
+                }
+            }
+        }
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
             if (!"page_object".equals(rg.type())) continue;
             if (Boolean.FALSE.equals(rg.placementAllowed())) continue;
             if (!"indesign_png".equals(rg.visualOwner())) continue;
-            if (!rg.hasEditableTextHiddenFromPng()) continue;
             String[] editableIds = rg.editableTextFrameIds();
-            if (editableIds == null) continue;
-            for (String editableId : editableIds) {
-                if (tfId.equals(editableId)) {
-                    return true;
+            if (rg.hasEditableTextHiddenFromPng() && editableIds != null) {
+                for (String editableId : editableIds) {
+                    if (tfId.equals(editableId)) {
+                        return true;
+                    }
                 }
+            }
+            if (tf != null && isInferredTextFrameVisualShell(ctx, tf, rg)) {
+                return true;
             }
         }
         return false;
     }
 
+    private static boolean isInferredTextFrameVisualShell(
+            ResolvedBuildContext ctx, ResolvedTextFrame tf, RenderedGroup rg) {
+        if (tf == null || rg == null) return false;
+        if (tf.pageIndex() != rg.pageIndex()) return false;
+        if (ctx.resolvedData.isInlineObjectId(rg.id())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
+        if (!isDecorationVisualShellReason(rg.reason())) return false;
+        double[] rbRaw = rg.bounds();
+        double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+        if (rbRaw == null || rbRaw.length < 4 || tb == null || tb.length < 4) return false;
+        double[] scaledRb = new double[] {
+                rbRaw[0] * ctx.scaleFactor,
+                rbRaw[1] * ctx.scaleFactor,
+                rbRaw[2] * ctx.scaleFactor,
+                rbRaw[3] * ctx.scaleFactor
+        };
+        return isSimilarShellBounds(scaledRb, tb) || isSimilarShellBounds(rbRaw, tb);
+    }
+
+    private static boolean isSimilarShellBounds(double[] shellBounds, double[] tfBounds) {
+        if (shellBounds == null || shellBounds.length < 4 || tfBounds == null || tfBounds.length < 4) {
+            return false;
+        }
+        double tfArea = area(tfBounds);
+        double shellArea = area(shellBounds);
+        if (tfArea <= 0 || shellArea <= 0) return false;
+        double areaRatio = shellArea / tfArea;
+        if (areaRatio < VISUAL_SHELL_MIN_AREA_RATIO || areaRatio > VISUAL_SHELL_MAX_AREA_RATIO) {
+            return false;
+        }
+        return overlapArea(shellBounds, tfBounds) / tfArea >= VISUAL_SHELL_TF_OVERLAP_MIN;
+    }
+
+    private static boolean isDecorationVisualShellReason(String reason) {
+        if (reason == null) return false;
+        return reason.contains("decoration")
+                || reason.contains("visual_shell")
+                || reason.contains("textframe_visual_shell");
+    }
+
+    private static double area(double[] b) {
+        if (b == null || b.length < 4) return 0.0;
+        double w = b[3] - b[1];
+        double h = b[2] - b[0];
+        return w > 0 && h > 0 ? w * h : 0.0;
+    }
+
+    private static double overlapArea(double[] a, double[] b) {
+        double left = Math.max(a[1], b[1]);
+        double top = Math.max(a[0], b[0]);
+        double right = Math.min(a[3], b[3]);
+        double bottom = Math.min(a[2], b[2]);
+        double w = right - left;
+        double h = bottom - top;
+        return w > 0 && h > 0 ? w * h : 0.0;
+    }
+
     /**
      * non-editable + non-inlineToFloating TF의 배치 여부를 결정한다.
      * true 반환 시 해당 TF를 건너뜀, false 반환 시 글상자 배치 계속.
-     * 부작용: _parentIsRotatedRect 시 ctx.setDisposition(tfDomId, TEXT_BLOCK_PLACED) 호출.
+     * 부작용: _parentIsRotatedRect 시 ctx.setTextDisposition(tfDomId, TEXT_BLOCK_PLACED) 호출.
      */
     private static boolean shouldSkipNonEditableTf(
             ResolvedBuildContext ctx, ResolvedTextFrame tf, int tfDomId, FrameIndex idx) {
+        if (shouldPlaceVisualLabelTextSeparately(ctx, tf)) return false;
         if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return true;
 
         // domId=None TF: ExtendScript가 domId를 얻지 못해 editability 확인 불가.
@@ -742,11 +888,42 @@ public final class FramePlacer {
         }
 
         if (_parentIsRotatedRect) {
-            // Phase 7 PNG 는 이후 ctx.frameDispositions(TEXT_BLOCK_PLACED) 확인 시 건너뜀.
-            ctx.setDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+            // Phase 3 inline text 재배치는 이후 textFrameDispositions(TEXT_BLOCK_PLACED) 확인 시 건너뜀.
+            ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
             return false; // 글상자로 배치
         }
         return !_nonRenderedWithText; // nonRenderedWithText → 배치(false), 그 외 → 건너뜀(true)
+    }
+
+    private static boolean shouldPlaceVisualLabelTextSeparately(
+            ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return false;
+        if (tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (!hasShortSemanticText(tf)) return false;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.pageIndex() != tf.pageIndex()) continue;
+            if (!"visual_label_indesign_png".equals(rg.reason())) continue;
+            if (!"indesign_png".equals(rg.textOwner())) continue;
+            if (!Boolean.TRUE.equals(rg.containsEditableText())) continue;
+            if (!containsEditableTextFrameId(rg, tf.id())) continue;
+            if (ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasShortSemanticText(ResolvedTextFrame tf) {
+        String text = tf != null ? tf.frameVisibleText() : null;
+        if (text == null) return false;
+        text = text.replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0007", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+        return !text.isEmpty() && text.length() <= 60;
     }
 
     /** 두 bounds 배열([top,left,bottom,right])의 X 겹침 비율을 반환. 겹침 없으면 0. */
@@ -844,7 +1021,9 @@ public final class FramePlacer {
         /** non-editable inline TF + 텍스트 있음 + 렌더 없음 + story 미공유 → floating 텍스트 박스. */
         NON_EDITABLE_WITH_TEXT,
         /** editable inline TF + 렌더 채널 있음(배지 등) → floating 텍스트 박스 + TEXT_BLOCK_PLACED. */
-        EDITABLE_RENDERED
+        EDITABLE_RENDERED,
+        /** editable inline TF + parentId 없음 + 렌더 없음 → Phase 3가 못 살리므로 floating 텍스트 박스. */
+        EDITABLE_UNANCHORED_TEXT
     }
 
     /** {@link #placeTextFrames} 에서 사전 구축하는 룩업 인덱스 집합. */
@@ -932,6 +1111,7 @@ public final class FramePlacer {
     }
 
     private static ContainmentMaps buildContainmentMap(
+            ResolvedBuildContext ctx,
             List<ResolvedTextFrame> frames,
             Set<Integer> badgeChildDomIds) {
         Map<String, String> innerToOuterMap = new HashMap<>();
@@ -960,7 +1140,7 @@ public final class FramePlacer {
                         && bGb[2] <= aGb[2] + TOL && bGb[3] <= aGb[3] + TOL) {
                     int innerDomId = parseDomIdOrNeg(inner.id());
                     boolean isBadgeChild = innerDomId >= 0 && badgeChildDomIds.contains(innerDomId);
-                    if (!isBadgeChild) {
+                    if (!isBadgeChild && !hasHwpxOwnedVisualShell(ctx, inner.id())) {
                         innerCandidates.computeIfAbsent(inner.id(), k -> new ArrayList<>()).add(outer);
                     }
                 }
@@ -997,6 +1177,305 @@ public final class FramePlacer {
             outerToInnerMap.put(e.getValue(), e.getKey());
         }
         return new ContainmentMaps(innerToOuterMap, outerToInnerMap);
+    }
+
+    private static boolean hasHwpxOwnedVisualShell(ResolvedBuildContext ctx, String tfId) {
+        if (ctx == null || ctx.resolvedData == null || tfId == null) return false;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
+            if (!"page_object".equals(rg.type())) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null) continue;
+            for (String editableId : editableIds) {
+                if (tfId.equals(editableId)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean shouldExpandTitleToSiblingShell(
+            ResolvedTextFrame tf,
+            ResolvedPageItem sibling,
+            double tfLeft,
+            double tfWidth,
+            double tfTop,
+            double tfHeight,
+            double shellTop,
+            double shellBottom,
+            double shellLeft,
+            double shellRight) {
+        if (tf == null || sibling == null || tfHeight <= 0) return false;
+        String text = tf.frameVisibleText();
+        if (text == null) return false;
+        String clean = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+        if (clean.length() < 6 || clean.length() > SHORT_SINGLE_LINE_NO_WRAP_CHARS + 12) return false;
+        if (tf.composedLines() != null && tf.composedLines().size() > 1) return false;
+
+        double shellHeight = shellBottom - shellTop;
+        if (shellHeight <= 0) return false;
+        double heightRatio = shellHeight / tfHeight;
+        if (heightRatio < TITLE_SHELL_HEIGHT_RATIO || heightRatio > TITLE_SHELL_MAX_HEIGHT_RATIO) return false;
+
+        double tfBottom = tfTop + tfHeight;
+        double yOverlap = Math.min(tfBottom, shellBottom) - Math.max(tfTop, shellTop);
+        if (yOverlap <= 0 || yOverlap / Math.min(tfHeight, shellHeight) < 0.60) return false;
+
+        if (tfWidth <= 0) return false;
+        double tfRight = tfLeft + tfWidth;
+        double xOverlap = Math.min(tfRight, shellRight) - Math.max(tfLeft, shellLeft);
+        if (xOverlap <= 0) return false;
+        if (xOverlap / tfWidth < 0.70) return false;
+
+        String type = sibling.type();
+        return "Rectangle".equals(type) || "Polygon".equals(type) || "Oval".equals(type);
+    }
+
+    private static double[] visibleOwnedTextFrameShellBounds(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return null;
+        if (!isShortSingleLineTitleText(tf)) return null;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return null;
+        double[] best = null;
+        double bestArea = Double.MAX_VALUE;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
+            if (rg.pageIndex() != tf.pageIndex()) continue;
+            if (!"page_object".equals(rg.type())) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            if (!containsEditableTextFrameId(rg, tf.id())) continue;
+            if (!isOwnedTextFrameShellReason(rg.reason())) continue;
+            double[] rb = rg.bounds();
+            if (rb == null || rb.length < 4) continue;
+            try {
+                File pngFile = new File(ctx.basePath, rg.file());
+                if (!pngFile.exists()) continue;
+                BufferedImage img = ImageIO.read(pngFile);
+                if (img == null || img.getWidth() <= 0 || img.getHeight() <= 0) continue;
+                int[] ab = alphaBounds(img);
+                if (ab == null || !shouldUseAlphaBounds(img, ab)) {
+                    img.flush();
+                    continue;
+                }
+                double rbTop = rb[0] * ctx.scaleFactor;
+                double rbLeft = rb[1] * ctx.scaleFactor;
+                double rbBottom = rb[2] * ctx.scaleFactor;
+                double rbRight = rb[3] * ctx.scaleFactor;
+                double fullW = rbRight - rbLeft;
+                double fullH = rbBottom - rbTop;
+                if (fullW <= 0 || fullH <= 0) {
+                    img.flush();
+                    continue;
+                }
+                double left = rbLeft + (double) ab[0] / (double) img.getWidth() * fullW;
+                double top = rbTop + (double) ab[1] / (double) img.getHeight() * fullH;
+                double right = rbLeft + (double) (ab[0] + ab[2]) / (double) img.getWidth() * fullW;
+                double bottom = rbTop + (double) (ab[1] + ab[3]) / (double) img.getHeight() * fullH;
+                img.flush();
+                double area = Math.max(0, right - left) * Math.max(0, bottom - top);
+                if (area > 0 && area < bestArea) {
+                    bestArea = area;
+                    best = new double[] { top, left, bottom, right };
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return best;
+    }
+
+    private static boolean shouldAlignTitleToVisibleShell(
+            ResolvedTextFrame tf,
+            double tfLeft,
+            double tfWidth,
+            double tfTop,
+            double tfHeight,
+            double[] shell) {
+        if (tf == null || shell == null || shell.length < 4 || tfWidth <= 0 || tfHeight <= 0) return false;
+        if (!isShortSingleLineTitleText(tf)) return false;
+        double shellHeight = shell[2] - shell[0];
+        double shellWidth = shell[3] - shell[1];
+        if (shellHeight <= 0 || shellWidth <= 0) return false;
+        double heightRatio = shellHeight / tfHeight;
+        if (heightRatio < TITLE_SHELL_HEIGHT_RATIO || heightRatio > 2.20) return false;
+        double tfRight = tfLeft + tfWidth;
+        double xOverlap = Math.min(tfRight, shell[3]) - Math.max(tfLeft, shell[1]);
+        if (xOverlap <= 0 || xOverlap / tfWidth < 0.60) return false;
+        double tfCenter = tfTop + tfHeight / 2.0;
+        double shellCenter = (shell[0] + shell[2]) / 2.0;
+        double centerDistance = Math.abs(tfCenter - shellCenter);
+        return centerDistance <= Math.max(tfHeight, shellHeight) * 1.25;
+    }
+
+    private static double[] centeredMultilineTitleShellBounds(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            double pageLeft,
+            double pageTop,
+            double tfLeft,
+            double tfWidth,
+            double tfTop,
+            double tfHeight) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tfWidth <= 0 || tfHeight <= 0) return null;
+        if (!isShortCenteredMultilineTitle(ctx, tf)) return null;
+        List<ResolvedPageItem> items = ctx.resolvedData.pageItems();
+        if (items == null) return null;
+
+        double[] best = null;
+        double bestScore = Double.MAX_VALUE;
+        double tfRight = tfLeft + tfWidth;
+        double tfBottom = tfTop + tfHeight;
+        double tfArea = tfWidth * tfHeight;
+        double tfCenterX = tfLeft + tfWidth / 2.0;
+        double tfCenterY = tfTop + tfHeight / 2.0;
+
+        for (ResolvedPageItem item : items) {
+            if (item == null || item.id() == null || item.id().equals(tf.id())) continue;
+            if (item.pageIndex() != tf.pageIndex()) continue;
+            if (!isTitleShellShape(item)) continue;
+            double[] gb = item.geometricBounds();
+            if (gb == null || gb.length < 4) continue;
+
+            double shellTop = gb[0] - pageTop;
+            double shellLeft = gb[1] - pageLeft;
+            double shellBottom = gb[2] - pageTop;
+            double shellRight = gb[3] - pageLeft;
+            double shellWidth = shellRight - shellLeft;
+            double shellHeight = shellBottom - shellTop;
+            if (shellWidth <= 0 || shellHeight <= 0) continue;
+
+            double widthRatio = shellWidth / tfWidth;
+            if (widthRatio < MULTILINE_TITLE_SHELL_MIN_WIDTH_RATIO
+                    || widthRatio > MULTILINE_TITLE_SHELL_MAX_WIDTH_RATIO) continue;
+            double heightRatio = shellHeight / tfHeight;
+            if (heightRatio < 0.85 || heightRatio > TITLE_SHELL_MAX_HEIGHT_RATIO) continue;
+
+            double xOverlap = Math.min(tfRight, shellRight) - Math.max(tfLeft, shellLeft);
+            double yOverlap = Math.min(tfBottom, shellBottom) - Math.max(tfTop, shellTop);
+            if (xOverlap <= 0 || yOverlap <= 0) continue;
+            double overlapRatio = (xOverlap * yOverlap) / tfArea;
+            if (overlapRatio < MULTILINE_TITLE_SHELL_OVERLAP_MIN) continue;
+
+            double shellCenterX = (shellLeft + shellRight) / 2.0;
+            double shellCenterY = (shellTop + shellBottom) / 2.0;
+            double centerDistance = Math.abs(tfCenterX - shellCenterX)
+                    + Math.abs(tfCenterY - shellCenterY) * 0.25;
+            double area = shellWidth * shellHeight;
+            double score = centerDistance + area * 0.0001;
+            if (score < bestScore) {
+                bestScore = score;
+                best = new double[]{shellTop, shellLeft, shellBottom, shellRight};
+            }
+        }
+        return best;
+    }
+
+    private static boolean isTitleShellShape(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = item.type();
+        if (!"Rectangle".equals(type) && !"Polygon".equals(type) && !"Oval".equals(type)) return false;
+        boolean hasStroke = item.strokeColorName() != null
+                && !"None".equals(item.strokeColorName())
+                && !"[None]".equals(item.strokeColorName())
+                && item.strokeWeight() > 0;
+        boolean hasFill = item.fillColorName() != null
+                && !"None".equals(item.fillColorName())
+                && !"[None]".equals(item.fillColorName());
+        return hasStroke || hasFill;
+    }
+
+    private static boolean isShortCenteredMultilineTitle(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        String text = tf.frameVisibleText();
+        if (text == null) return false;
+        String clean = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").replace(" ", "").trim();
+        if (clean.length() < 4 || clean.length() > 24) return false;
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines == null || lines.size() < 2 || lines.size() > 6) return false;
+
+        Set<Integer> paraIndices = new HashSet<>();
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null || line.paraIndex() < 0) return false;
+            paraIndices.add(line.paraIndex());
+        }
+        if (paraIndices.size() != lines.size()) return false;
+
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return false;
+        int start = Math.max(0, tf.paragraphStart());
+        int end = tf.paragraphEnd() >= start ? Math.min(tf.paragraphEnd(), story.paragraphs().size() - 1) : start;
+        for (int i = start; i <= end; i++) {
+            ResolvedParagraph rp = story.paragraphs().get(i);
+            String just = rp != null ? rp.justification() : null;
+            if (just == null) continue;
+            String lower = just.toLowerCase();
+            if (!lower.contains("center")) return false;
+        }
+        return true;
+    }
+
+    private static boolean isShortSingleLineTitleText(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        String text = tf.frameVisibleText();
+        if (text == null) return false;
+        String clean = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+        if (clean.length() < 6 || clean.length() > SHORT_SINGLE_LINE_NO_WRAP_CHARS + 12) return false;
+        return tf.composedLines() == null || tf.composedLines().size() <= 1;
+    }
+
+    private static boolean containsEditableTextFrameId(RenderedGroup rg, String tfId) {
+        if (rg == null || tfId == null || rg.editableTextFrameIds() == null) return false;
+        for (String editableId : rg.editableTextFrameIds()) {
+            if (tfId.equals(editableId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isOwnedTextFrameShellReason(String reason) {
+        if (reason == null) return false;
+        return reason.contains("text_hidden")
+                || reason.contains("visual_shell")
+                || reason.contains("editable_textframe_visual_shell")
+                || reason.contains("image_group");
+    }
+
+    private static int[] alphaBounds(BufferedImage img) {
+        if (img == null || img.getWidth() <= 0 || img.getHeight() <= 0) return null;
+        int minX = img.getWidth();
+        int minY = img.getHeight();
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int alpha = (img.getRGB(x, y) >>> 24) & 0xFF;
+                if (alpha <= 10) continue;
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+        if (maxX < minX || maxY < minY) return null;
+        int pad = 1;
+        minX = Math.max(0, minX - pad);
+        minY = Math.max(0, minY - pad);
+        maxX = Math.min(img.getWidth() - 1, maxX + pad);
+        maxY = Math.min(img.getHeight() - 1, maxY + pad);
+        return new int[] { minX, minY, maxX - minX + 1, maxY - minY + 1 };
+    }
+
+    private static boolean shouldUseAlphaBounds(BufferedImage img, int[] bounds) {
+        if (img == null || bounds == null || bounds.length < 4) return false;
+        int cropW = bounds[2];
+        int cropH = bounds[3];
+        if (cropW <= 0 || cropH <= 0) return false;
+        int maxPad = Math.max(
+                Math.max(bounds[0], img.getWidth() - (bounds[0] + cropW)),
+                Math.max(bounds[1], img.getHeight() - (bounds[1] + cropH)));
+        if (maxPad < 2) return false;
+        double areaRatio = (double) cropW * (double) cropH
+                / ((double) img.getWidth() * (double) img.getHeight());
+        return areaRatio > 0.01 && areaRatio < 0.98;
     }
 
     /**
@@ -1356,6 +1835,103 @@ public final class FramePlacer {
         return shouldUseNoAutoLineWrap(tf.composedLines(), false, tf.frameVisibleText());
     }
 
+    private static boolean shouldSuppressParaLeftIndentForPartialLeftWrap(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null) return false;
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines == null || lines.size() < 3) return false;
+
+        double[] gb = tf.geometricBounds();
+        if (gb == null || gb.length < 4) return false;
+        double frameW = gb[3] - gb[1];
+        if (frameW <= 0) return false;
+        double threshold = Math.max(PARTIAL_LEFT_WRAP_MIN_PT, frameW * PARTIAL_LEFT_WRAP_FRAME_RATIO);
+
+        Set<Integer> visibleParas = new HashSet<>();
+        Set<Integer> leftWrappedParas = new HashSet<>();
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null || line.paraIndex() < 0) continue;
+            String text = line.text();
+            if (!hasVisibleTextExcludingObjectControls(text)) continue;
+            int paraIndex = line.paraIndex();
+            visibleParas.add(paraIndex);
+            if (line.wrapIndentLeft() > threshold) {
+                leftWrappedParas.add(paraIndex);
+            }
+        }
+        if (leftWrappedParas.isEmpty() || visibleParas.size() < 2) return false;
+        if (leftWrappedParas.containsAll(visibleParas)) return false;
+
+        ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return false;
+
+        int storyParaStart = Math.max(0, tf.paragraphStart());
+        for (Integer localParaIndex : leftWrappedParas) {
+            int storyParaIndex = storyParaStart + localParaIndex;
+            ResolvedParagraph rp = paragraphAt(story, storyParaIndex);
+            if (rp == null && localParaIndex >= 0) {
+                rp = paragraphAt(story, localParaIndex);
+            }
+            if (isSuppressiblePartialWrapParagraph(rp)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ResolvedParagraph paragraphAt(ResolvedStory story, int index) {
+        if (story == null || story.paragraphs() == null) return null;
+        if (index < 0 || index >= story.paragraphs().size()) return null;
+        return story.paragraphs().get(index);
+    }
+
+    private static boolean isSuppressiblePartialWrapParagraph(ResolvedParagraph rp) {
+        if (rp == null || rp.leftIndent() == null || rp.leftIndent() <= 0) return false;
+        if (isNeutralHangingIndent(rp.leftIndent(), rp.firstLineIndent())) return false;
+        if (hasMeaningfulTabStopsAfterIndent(rp)) return false;
+        return !startsWithInlineAnchor(rp);
+    }
+
+    private static boolean hasMeaningfulTabStopsAfterIndent(ResolvedParagraph rp) {
+        if (rp == null || rp.tabStops() == null || rp.tabStops().isEmpty()) return false;
+        double leftIndent = rp.leftIndent() != null ? rp.leftIndent() : 0.0;
+        for (ResolvedTabStop tab : rp.tabStops()) {
+            if (tab == null) continue;
+            String leader = tab.leader();
+            if (leader != null && !leader.isEmpty()) return true;
+            Double pos = tab.position();
+            if (pos != null && pos > leftIndent + 0.5) return true;
+        }
+        return false;
+    }
+
+    private static boolean isNeutralHangingIndent(Double leftIndent, Double firstLineIndent) {
+        return leftIndent != null && firstLineIndent != null
+                && leftIndent > 0 && firstLineIndent < 0
+                && Math.abs(leftIndent + firstLineIndent) < 0.01;
+    }
+
+    private static boolean startsWithInlineAnchor(ResolvedParagraph rp) {
+        if (rp == null || rp.runs() == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun run : rp.runs()) {
+            if (run == null) continue;
+            if (run.isInlineAnchor()) return true;
+            String text = run.text();
+            if (text == null) continue;
+            String cleaned = text
+                    .replace("\uFFFC", "")
+                    .replace("\u0003", "")
+                    .replace("\u0007", "")
+                    .replace("\b", "")
+                    .replace("\r", "")
+                    .replace("\n", "")
+                    .trim();
+            if (!cleaned.isEmpty()) return false;
+        }
+        return false;
+    }
+
     private static boolean shouldUseVisualShellNoAutoLineWrap(
             boolean hasRenderedVisualShell,
             ResolvedTextFrame tf,
@@ -1376,7 +1952,7 @@ public final class FramePlacer {
             boolean suppressLeftIndent,
             String visibleText) {
         if (suppressLeftIndent || lines == null || lines.size() < 2) return false;
-        if (visibleText != null && visibleText.startsWith("\uFFFC")) return false;
+        if (!hasVisibleTextExcludingObjectControls(visibleText)) return false;
 
         Set<Integer> paragraphIndices = new HashSet<>();
         for (ResolvedTextFrame.ComposedLine line : lines) {
@@ -1389,21 +1965,40 @@ public final class FramePlacer {
         return paragraphIndices.size() == lines.size();
     }
 
+    private static boolean hasVisibleTextExcludingObjectControls(String visibleText) {
+        if (visibleText == null) return false;
+        String normalized = visibleText
+                .replace("\uFFFC", "")
+                .replace("\u0007", "")
+                .replace("\b", "")
+                .replaceAll("\\s+", "")
+                .trim();
+        return !normalized.isEmpty();
+    }
+
+    private static String normalizeVisibleText(String visibleText) {
+        if (visibleText == null) return "";
+        return visibleText
+                .replace("\uFFFC", "")
+                .replace("\u0007", "")
+                .replace("\b", "")
+                .replaceAll("\\s+", "")
+                .trim();
+    }
+
     private static boolean isShortSingleLineTextFrame(ResolvedTextFrame tf) {
         if (tf == null) return false;
         List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
-        if (lines == null || lines.size() != 1) return false;
+        boolean singleComposedLine = lines != null && lines.size() == 1;
+        boolean singleReportedLine = (lines == null || lines.isEmpty()) && tf.lineCount() == 1;
+        if (!singleComposedLine && !singleReportedLine) return false;
         String visibleText = tf.frameVisibleText();
-        if (visibleText == null || visibleText.startsWith("\uFFFC")) return false;
+        if (visibleText == null) return false;
         if (visibleText.indexOf('\n') >= 0 || visibleText.indexOf('\r') >= 0) return false;
         if (tf.paragraphStart() != tf.paragraphEnd()) return false;
         if (tf.frameParaTexts() != null && tf.frameParaTexts().size() != 1) return false;
 
-        String normalized = visibleText
-                .replace("\uFFFC", "")
-                .replace("\u0007", "")
-                .replaceAll("\\s+", "")
-                .trim();
+        String normalized = normalizeVisibleText(visibleText);
         return !normalized.isEmpty() && normalized.length() <= SHORT_SINGLE_LINE_NO_WRAP_CHARS;
     }
 }
