@@ -19,6 +19,7 @@ import java.util.List;
  */
 class RunBuilder {
     private RunBuilder() {}
+    private static final String UNDERLINE_BLANK_UNIT = "\t";
 
     /** 기본 매칭 신뢰도(LOW)로 createRunFromIDML 호출 — 호환용 래퍼. */
     static ASTTextRun createRunFromIDML(ResolvedBuildContext ctx, IDMLCharacterRun cr, String text, ResolvedRun rr, StoryConverter.StyleContext sc) {
@@ -38,10 +39,11 @@ class RunBuilder {
         // \t + \u0008 패턴: 인라인 아이콘 앞 탭+IndentToHere → 둘 다 제거
         // 단독 \t: tabStop이 있으면 유지 (HwpxParagraphBuilder가 <hp:tab>으로 변환), 없으면 공백 치환
         if (text != null) {
-            text = text.replace("\t\u0008", ""); // \t + IndentToHere 조합 제거
+            boolean preserveUnderlineBlank = hasUnderlineIntent(cr, rr);
+            text = text.replace("\t\u0008", preserveUnderlineBlank ? UNDERLINE_BLANK_UNIT : ""); // \t + IndentToHere 조합 제거
             text = text.replace("\u0003", "");   // Frame Break 제거
             text = text.replace("\u0007", "");   // IndentToHere 제거
-            text = text.replace("\u0008", "");   // 단독 IndentToHere 제거
+            text = text.replace("\u0008", preserveUnderlineBlank ? UNDERLINE_BLANK_UNIT : "");   // 단독 IndentToHere 제거
             text = text.replace("\n", "");       // Frame Break 제거
             if (!sc.hasTabStops) {
                 text = text.replace("\t", " ");  // 탭 → 공백 (탭스톱 없는 경우 간격 방지)
@@ -255,6 +257,26 @@ class RunBuilder {
         }
         // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
         return tr;
+    }
+
+    static boolean hasUnderlineIntent(IDMLCharacterRun cr, ResolvedRun rr) {
+        if (rr != null && Boolean.TRUE.equals(rr.underline())) return true;
+        if (cr != null && Boolean.TRUE.equals(cr.underline())) return true;
+        String charStyle = cr != null ? cr.appliedCharacterStyle() : null;
+        if (charStyle != null) {
+            String lower = charStyle.toLowerCase();
+            if (charStyle.contains("밑줄") || lower.contains("underline")) return true;
+        }
+        String resolvedCharStyle = rr != null ? rr.charStyle() : null;
+        if (resolvedCharStyle != null) {
+            String lower = resolvedCharStyle.toLowerCase();
+            return resolvedCharStyle.contains("밑줄") || lower.contains("underline");
+        }
+        return false;
+    }
+
+    static String underlineBlankUnit() {
+        return UNDERLINE_BLANK_UNIT;
     }
 
     /** 한국어 폰트 이름 판별: 한글 문자가 포함되어 있으면 한국어 폰트 */

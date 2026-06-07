@@ -12,6 +12,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -20,6 +21,7 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.NPFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTabStop;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import java.io.File;
@@ -81,6 +83,9 @@ class StoryLoader {
             IDMLParagraph ip = idmlParas.get(i);
             ASTParagraph para = new ASTParagraph();
             boolean hasIdmlInlineAnchors = false; // FFFC 앵커 순서로 인라인 삽입된 경우 true
+            ResolvedParagraph resolvedParagraph = (resolvedStory != null && i < resolvedStory.paragraphs().size())
+                    ? resolvedStory.paragraphs().get(i)
+                    : null;
 
             // 칼럼 브레이크 (ACE 8)
             if (ip.columnBreakAfter()) {
@@ -118,8 +123,8 @@ class StoryLoader {
                 }
                 // alignment가 null이면 HwpxParagraphBuilder에서 baseStyle 또는 기본 JUSTIFY 적용
             }
-            if (resolvedStory != null && i < resolvedStory.paragraphs().size()) {
-                ResolvedParagraph rp = resolvedStory.paragraphs().get(i);
+            if (resolvedParagraph != null) {
+                ResolvedParagraph rp = resolvedParagraph;
                 // leading: resolved 우선 (실제 렌더링 값), IDML 스타일 fallback
                 // 단, auto leading(>50pt = percentage 값)은 무시
                 Double fixedLeading = rp.fixedLeading(); // resolved (실제 렌더링 값)
@@ -235,6 +240,8 @@ class StoryLoader {
             // 전처리: 한국어+수식마커 혼합 런 분리 + 원문자 변환
             List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(ip.characterRuns());
             ASTRunConverter.convertCircledNumberRuns(runs);
+            addUnderlineBlankTabStop(ctx, storyId, i, para, runs);
+            sc.hasTabStops = para.hasTabStops();
 
             // 수식 그룹화 상태
             List<IDMLCharacterRun> mathGroup = new ArrayList<>();
@@ -431,18 +438,30 @@ class StoryLoader {
                                 String inlineHexId = inlineIds.get(anchorIdx);
                                 try {
                                     int domId = Integer.parseInt(inlineHexId.substring(1), 16);
+                                    if (isDoviraSubunitMarker(resolvedParagraph, ip, domId)
+                                            && DoviraSubunitMarkerPolicy.isDuplicateMarkerStory(ctx.resolvedData, storyId)) {
+                                        anchorIdx++;
+                                        continue;
+                                    }
                                     // AnchoredPosition="Anchored" + TextWrapMode="None" Group:
                                     // 사전 스캔에서 등록됨 → 인라인 삽입 건너뛰고 Phase 3 후처리가 floating ASTFigure 로 배치.
                                     if (ctx.deferredAnchoredFloatingIds.contains(domId)) {
                                         anchorIdx++;
                                         continue;
                                     }
-                                    // 커스텀 위치 앵커 객체 건너뛰기: resolved TextFrame의 중심X가 부모 범위 밖이면 인라인 삽입 안 함
+                                    // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
+                                    // 단, inline_object PNG가 있으면 시각 장식이므로 절대 좌표 floating으로 보존한다.
                                     if (InlineFrameHandler.isAnchoredOutsideParentByTextFrame(ctx, domId, storyId)) {
+                                        if (hasInlineObjectPng(ctx, domId)) {
+                                            ctx.deferredAnchoredFloatingIds.add(domId);
+                                        }
                                         anchorIdx++;
                                         continue;
                                     }
-                                    maybeInsertDecorativeLeaderTab(ctx, ip, run, inlineHexId, partText, para);
+                                    String nextPartText = (pi + 1 < parts.length) ? parts[pi + 1] : null;
+                                    if (!InlineFrameHandler.isInlineVocabularyMarker(ctx, domId, partText, nextPartText)) {
+                                        maybeInsertDecorativeLeaderTab(ctx, ip, run, inlineHexId, partText, para);
+                                    }
                                     // SPEC-025: Group 앵커가 다수의 박스(예: 자모 배지 ㅍㅎㅂㅅ) 면 각 자식 TF 를
                                     // 박스 스타일 inline TextFrame 으로 개별 분해 → 검색 가능 + 시각 박스 보존.
                                     java.util.List<ASTInlineObject> boxList =
@@ -456,7 +475,8 @@ class StoryLoader {
                                             para.addItem(fracEq);
                                         } else {
                                             // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환
-                                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, domId);
+                                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, domId,
+                                                    partText, nextPartText);
                                             if (textRun != null) {
                                                 para.addItem(textRun);
                                             } else {
@@ -548,6 +568,7 @@ class StoryLoader {
             paragraphs.add(para);
         }
 
+        StoryConverter.removeDuplicateDoviraLeadingMarkers(ctx, storyId, paragraphs);
         return paragraphs;
     }
 
@@ -710,6 +731,115 @@ class StoryLoader {
         if (a.contains("right")) return "right";
         if (a.contains("decimal")) return "decimal";
         return "left";
+    }
+
+    private static void addUnderlineBlankTabStop(ResolvedBuildContext ctx, String storyId, int paraIndex,
+                                                 ASTParagraph para, List<IDMLCharacterRun> runs) {
+        if (ctx == null || ctx.resolvedData == null || storyId == null || para == null) return;
+        if (!hasUnderlineBlankAnchor(runs)) return;
+
+        double posPt = -1;
+        List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
+        if (frames == null) return;
+        for (ResolvedTextFrame tf : frames) {
+            if (tf == null) continue;
+            int localPara = paraIndex - tf.paragraphStart();
+            if (localPara < 0) continue;
+            double[] frameBounds = tf.geometricBounds();
+            if (frameBounds == null || frameBounds.length < 4) continue;
+
+            double insetLeft = 0;
+            double insetRight = 0;
+            if (tf.insetSpacing() != null && tf.insetSpacing().length >= 4) {
+                insetLeft = tf.insetSpacing()[1];
+                insetRight = tf.insetSpacing()[3];
+            }
+            if (tf.composedLines() != null) {
+                for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+                    if (line == null || line.paraIndex() != localPara) continue;
+                    String lineText = line.text();
+                    if (lineText == null || lineText.indexOf('\u0008') < 0) continue;
+                    double[] lineBounds = line.bounds();
+                    if (lineBounds != null && lineBounds.length >= 4) {
+                        posPt = Math.max(posPt, lineBounds[3] - frameBounds[1] - insetLeft);
+                    }
+                }
+            }
+            if (posPt <= 0 && tf.frameParaTexts() != null && localPara < tf.frameParaTexts().size()) {
+                String frameText = tf.frameParaTexts().get(localPara);
+                if (frameText != null && frameText.indexOf('\u0008') >= 0) {
+                    posPt = Math.max(posPt, (frameBounds[3] - frameBounds[1]) - insetLeft - insetRight);
+                }
+            }
+        }
+        if (posPt <= 0) return;
+        long pos = CoordinateConverter.pointsToHwpunits(posPt);
+        if (pos <= 0) return;
+        if (para.tabStops() != null) {
+            long tol = CoordinateConverter.pointsToHwpunits(1.0);
+            for (ASTTabStop tab : para.tabStops()) {
+                if (tab != null && Math.abs(tab.position() - pos) <= tol) {
+                    return;
+                }
+            }
+        }
+        para.addTabStop(new ASTTabStop(pos, "left", null));
+    }
+
+    private static boolean hasUnderlineBlankAnchor(List<IDMLCharacterRun> runs) {
+        if (runs == null) return false;
+        for (IDMLCharacterRun run : runs) {
+            if (run == null || run.content() == null) continue;
+            if (run.content().indexOf('\u0008') >= 0 && RunBuilder.hasUnderlineIntent(run, null)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isDoviraSubunitMarker(ResolvedParagraph resolvedParagraph,
+                                                 IDMLParagraph idmlParagraph,
+                                                 int domId) {
+        if (domId <= 0) return false;
+        if (!isDoviraSubunitParagraph(resolvedParagraph, idmlParagraph)) return false;
+        if (resolvedParagraph == null || resolvedParagraph.runs() == null) {
+            return true;
+        }
+        for (ResolvedRun run : resolvedParagraph.runs()) {
+            if (run == null || !run.isInlineAnchor()) continue;
+            Integer anchoredId = run.anchoredObjectId();
+            if (anchoredId != null && anchoredId == domId) {
+                return true;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isDoviraSubunitParagraph(ResolvedParagraph resolvedParagraph,
+                                                    IDMLParagraph idmlParagraph) {
+        if (DoviraSubunitMarkerPolicy.isDoviraSubunitParagraph(resolvedParagraph)) {
+            return true;
+        }
+        String style = idmlParagraph != null ? idmlParagraph.appliedParagraphStyle() : null;
+        if (style == null || style.isEmpty()) return false;
+        if (DoviraSubunitMarkerPolicy.isDoviraSubunitStyleName(style)) return true;
+        int slash = style.lastIndexOf('/');
+        String leaf = slash >= 0 ? style.substring(slash + 1) : style;
+        return DoviraSubunitMarkerPolicy.isDoviraSubunitStyleName(leaf);
+    }
+
+    private static boolean hasInlineObjectPng(ResolvedBuildContext ctx, int objectId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != objectId) continue;
+            if (!"inline_object".equals(rg.itemType())) continue;
+            String file = rg.file();
+            if (file == null || file.isEmpty()) continue;
+            return ctx.basePath == null || new File(ctx.basePath, file).exists();
+        }
+        return false;
     }
 
     private static boolean isInlinePageNumberFrame(ResolvedBuildContext ctx, IDMLCharacterRun run, String inlineHexId) {

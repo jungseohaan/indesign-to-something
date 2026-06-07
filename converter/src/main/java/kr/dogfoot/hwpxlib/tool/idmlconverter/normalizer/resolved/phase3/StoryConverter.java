@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.MatchConfidence;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
@@ -224,6 +225,7 @@ public final class StoryConverter {
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
             ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, storyId);
             restoreTfInlineVisuals(ctx, blocks);
+            preserveComposedLineBreaksForTrailingAnswerVisuals(ctx, blocks);
             normalizeDotLeaderPageNumberTabs(blocks);
             expandBlocksForDotLeaderTabs(blocks);
             forceSingleLineJustifiedFramesLeft(ctx, blocks);
@@ -246,6 +248,253 @@ public final class StoryConverter {
     }
 
     /**
+     * Preserve InDesign's line composition for paragraphs whose final line owns
+     * trailing answer visuals such as dotted blanks or answer circles.
+     *
+     * <p>HWP can otherwise rewrap the text before the answer blank and then
+     * justify the short line, producing wide word gaps and detached visuals.</p>
+     */
+    private static void preserveComposedLineBreaksForTrailingAnswerVisuals(
+            ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null) return;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
+            String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+            if (tf == null || tf.composedLines() == null || tf.composedLines().size() < 2) continue;
+
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> linesByPara =
+                    composedLinesByParagraph(tf);
+            if (linesByPara.isEmpty()) continue;
+
+            boolean changedBlock = false;
+            Set<ASTParagraph> processed = new HashSet<>();
+            for (Map.Entry<Integer, List<ResolvedTextFrame.ComposedLine>> entry : linesByPara.entrySet()) {
+                int paraIndex = entry.getKey();
+                if (block.excludedParagraphIndices() != null
+                        && block.excludedParagraphIndices().contains(paraIndex)) continue;
+                List<ResolvedTextFrame.ComposedLine> lines = entry.getValue();
+                if (!shouldPreserveAnswerVisualLines(ctx, tf, lines)) continue;
+                ASTParagraph para = findParagraphForComposedLines(block.paragraphs(), lines, processed);
+                if (para == null) continue;
+                if (insertComposedLineBreaks(para, lines)) {
+                    processed.add(para);
+                    para.alignment("left");
+                    changedBlock = true;
+                }
+            }
+            if (changedBlock) {
+                block.noAutoLineWrap(true);
+            }
+        }
+    }
+
+    private static Map<Integer, List<ResolvedTextFrame.ComposedLine>> composedLinesByParagraph(
+            ResolvedTextFrame tf) {
+        Map<Integer, List<ResolvedTextFrame.ComposedLine>> result = new LinkedHashMap<>();
+        if (tf == null || tf.composedLines() == null) return result;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || line.paraIndex() < 0) continue;
+            result.computeIfAbsent(line.paraIndex(), k -> new ArrayList<>()).add(line);
+        }
+        return result;
+    }
+
+    private static ASTParagraph findParagraphForComposedLines(
+            List<ASTParagraph> paragraphs,
+            List<ResolvedTextFrame.ComposedLine> lines,
+            Set<ASTParagraph> processed) {
+        if (paragraphs == null || lines == null || lines.isEmpty()) return null;
+        String expected = normalizeForParagraphMatch(combinedComposedLineText(lines));
+        if (expected.isEmpty()) return null;
+        for (ASTParagraph para : paragraphs) {
+            if (para == null || (processed != null && processed.contains(para))) continue;
+            String actual = normalizeForParagraphMatch(ParagraphTextHelpers.getParaPlainText(para));
+            if (actual.isEmpty()) continue;
+            if (actual.equals(expected)
+                    || actual.contains(expected)
+                    || (actual.length() >= 6 && expected.contains(actual))) {
+                return para;
+            }
+        }
+        return null;
+    }
+
+    private static String combinedComposedLineText(List<ResolvedTextFrame.ComposedLine> lines) {
+        StringBuilder sb = new StringBuilder();
+        if (lines != null) {
+            for (ResolvedTextFrame.ComposedLine line : lines) {
+                sb.append(normalizeComposedLineText(line != null ? line.text() : null));
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String normalizeForParagraphMatch(String text) {
+        if (text == null) return "";
+        return text.replace("\uFFFC", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\u0008", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .replaceAll("\\s+", "")
+                .trim();
+    }
+
+    private static boolean shouldPreserveAnswerVisualLines(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            List<ResolvedTextFrame.ComposedLine> lines) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || lines == null || lines.size() < 2) {
+            return false;
+        }
+        ResolvedTextFrame.ComposedLine last = lines.get(lines.size() - 1);
+        if (last == null || last.bounds() == null || last.bounds().length < 4) return false;
+        double scale = ctx.resolvedData.scaleFactor();
+        if (scale <= 0.0) scale = 1.0;
+        if (last.wrapIndentRight() / scale < 8.0) return false;
+
+        double[] line = last.bounds();
+        double pageLeft = pageLeft(ctx, tf.pageIndex());
+        double pageTop = pageTop(ctx, tf.pageIndex());
+        double lineTop = (line[0] - pageTop) / scale;
+        double lineBottom = (line[2] - pageTop) / scale;
+        double lineRight = (line[3] - pageLeft) / scale;
+
+        double[] tfb = tf.pageRelativeBounds();
+        if (tfb == null || tfb.length < 4) {
+            double[] gb = tf.geometricBounds();
+            if (gb == null || gb.length < 4) return false;
+            tfb = new double[] {
+                    (gb[0] - pageTop) / scale,
+                    (gb[1] - pageLeft) / scale,
+                    (gb[2] - pageTop) / scale,
+                    (gb[3] - pageLeft) / scale
+            };
+        }
+        double frameLeft = tfb[1];
+        double frameRight = tfb[3];
+
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.pageIndex() != tf.pageIndex()) continue;
+            if (rg.bounds() == null || rg.bounds().length < 4) continue;
+            if (!isAnswerTrailingVisualCandidate(rg)) continue;
+            double[] b = rg.bounds();
+            double vOverlap = Math.min(lineBottom, b[2]) - Math.max(lineTop, b[0]);
+            if (vOverlap <= 0) continue;
+            double lineH = Math.max(0.1, lineBottom - lineTop);
+            if (vOverlap < lineH * 0.35) continue;
+            if (b[3] < lineRight + 4.0) continue;
+            if (b[1] > frameRight + 6.0 || b[3] < frameLeft - 6.0) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isAnswerTrailingVisualCandidate(RenderedGroup rg) {
+        if (rg == null) return false;
+        String reason = rg.reason();
+        if (reason == null) return false;
+        if (Boolean.TRUE.equals(rg.containsEditableText())) return false;
+        return reason.contains("decoration")
+                || reason.contains("vector_shape")
+                || reason.contains("text_composite_editable_text_hidden");
+    }
+
+    private static double pageLeft(ResolvedBuildContext ctx, int pageIndex) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.pages() == null) return 0.0;
+        for (ResolvedPage page : ctx.resolvedData.pages()) {
+            if (page == null || page.index() != pageIndex) continue;
+            double[] b = page.bounds();
+            return b != null && b.length >= 4 ? b[1] : 0.0;
+        }
+        return 0.0;
+    }
+
+    private static double pageTop(ResolvedBuildContext ctx, int pageIndex) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.pages() == null) return 0.0;
+        for (ResolvedPage page : ctx.resolvedData.pages()) {
+            if (page == null || page.index() != pageIndex) continue;
+            double[] b = page.bounds();
+            return b != null && b.length >= 4 ? b[0] : 0.0;
+        }
+        return 0.0;
+    }
+
+    private static boolean insertComposedLineBreaks(
+            ASTParagraph para, List<ResolvedTextFrame.ComposedLine> lines) {
+        if (para == null || para.items() == null || lines == null || lines.size() < 2) return false;
+        NormalizedTextMap paraMap = normalizedTextMap(para);
+        if (paraMap.normalized.isEmpty()) return false;
+        List<Integer> offsets = new ArrayList<>();
+        int searchFrom = 0;
+        for (int i = 0; i < lines.size() - 1; i++) {
+            String lineText = normalizeForParagraphMatch(lines.get(i).text());
+            if (lineText.isEmpty()) return false;
+            int found = paraMap.normalized.indexOf(lineText, searchFrom);
+            if (found < 0) return false;
+            int breakNormOffset = found + lineText.length();
+            if (breakNormOffset <= 0 || breakNormOffset >= paraMap.textOffsetsAfterNormalizedChars.length) {
+                return false;
+            }
+            int textOffset = paraMap.textOffsetsAfterNormalizedChars[breakNormOffset];
+            if (textOffset <= 0 || textOffset >= paraMap.textLength) return false;
+            offsets.add(textOffset);
+            searchFrom = breakNormOffset;
+        }
+        for (int i = offsets.size() - 1; i >= 0; i--) {
+            insertBreakAtTextOffset(para, offsets.get(i));
+        }
+        return !offsets.isEmpty();
+    }
+
+    private static NormalizedTextMap normalizedTextMap(ASTParagraph para) {
+        StringBuilder normalized = new StringBuilder();
+        List<Integer> offsets = new ArrayList<>();
+        offsets.add(0);
+        int textOffset = 0;
+        if (para != null && para.items() != null) {
+            for (ASTInlineItem item : para.items()) {
+                if (!(item instanceof ASTTextRun)) continue;
+                String text = ((ASTTextRun) item).text();
+                if (text == null || text.isEmpty()) continue;
+                for (int i = 0; i < text.length(); i++) {
+                    char ch = text.charAt(i);
+                    textOffset++;
+                    if (isIgnoredForComposedLineMatch(ch)) continue;
+                    normalized.append(ch);
+                    offsets.add(textOffset);
+                }
+            }
+        }
+        int[] map = new int[offsets.size()];
+        for (int i = 0; i < offsets.size(); i++) map[i] = offsets.get(i);
+        return new NormalizedTextMap(normalized.toString(), map, textOffset);
+    }
+
+    private static boolean isIgnoredForComposedLineMatch(char ch) {
+        return ch == '\uFFFC'
+                || ch == '\u0003'
+                || ch == '\u0007'
+                || ch == '\u0008'
+                || ch == '\r'
+                || ch == '\n'
+                || Character.isWhitespace(ch);
+    }
+
+    private static String normalizeComposedLineText(String text) {
+        if (text == null) return "";
+        return text.replace("\uFFFC", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\u0008", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+    }
+
+    /**
      * Reinsert visual-only inline objects that belong to an editable TF.
      *
      * <p>The extractor records these objects on the rendered visual shell as
@@ -264,12 +513,15 @@ public final class StoryConverter {
             RenderedGroup owner = findTfInlineVisualOwner(ctx, domId);
             if (owner == null || owner.tfInlineVisualIds() == null || owner.tfInlineVisualIds().length == 0) continue;
 
+            List<Integer> inlineVisualIds = tfInlineVisualIdsForStory(ctx, owner, block.storyId());
+            if (inlineVisualIds.isEmpty()) continue;
+
             int idIdx = 0;
             int searchPara = 0;
             int searchOffset = 0;
-            for (int i = 0; i < visibleText.length() && idIdx < owner.tfInlineVisualIds().length; i++) {
+            for (int i = 0; i < visibleText.length() && idIdx < inlineVisualIds.size(); i++) {
                 if (visibleText.charAt(i) != '\uFFFC') continue;
-                int inlineId = owner.tfInlineVisualIds()[idIdx++];
+                int inlineId = inlineVisualIds.get(idIdx++);
                 if (containsInlineSource(block, inlineId)) continue;
                 ASTInlineObject inline = loadTfInlineVisual(ctx, inlineId);
                 if (inline == null) continue;
@@ -287,6 +539,21 @@ public final class StoryConverter {
                 searchOffset = point.offset + (lookup != null ? lookup.length() : 0);
             }
         }
+    }
+
+    private static List<Integer> tfInlineVisualIdsForStory(
+            ResolvedBuildContext ctx, RenderedGroup owner, String storyId) {
+        List<Integer> ids = new ArrayList<>();
+        if (ctx == null || owner == null || owner.tfInlineVisualIds() == null) return ids;
+        for (int inlineId : owner.tfInlineVisualIds()) {
+            RenderedGroup inlineRg = findRenderedGroup(ctx, inlineId);
+            String parentStoryId = inlineRg != null ? inlineRg.parentStoryId() : null;
+            if (parentStoryId != null && storyId != null && !storyId.equals(parentStoryId)) {
+                continue;
+            }
+            ids.add(inlineId);
+        }
+        return ids;
     }
 
     private static RenderedGroup findTfInlineVisualOwner(ResolvedBuildContext ctx, String domId) {
@@ -409,6 +676,20 @@ public final class StoryConverter {
         return len;
     }
 
+    private static boolean hasInlineObjectPng(ResolvedBuildContext ctx, int objectId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != objectId) continue;
+            if (!"inline_object".equals(rg.itemType())) continue;
+            String file = rg.file();
+            if (file == null || file.isEmpty()) continue;
+            return ctx.basePath == null || new File(ctx.basePath, file).exists();
+        }
+        return false;
+    }
+
     private static InsertPoint findInlineInsertPoint(
             List<ASTParagraph> paragraphs, String lookup, int startPara, int startOffset) {
         if (paragraphs == null || paragraphs.isEmpty() || lookup == null || lookup.isEmpty()) return null;
@@ -477,6 +758,45 @@ public final class StoryConverter {
         items.add(inline);
     }
 
+    private static void insertBreakAtTextOffset(ASTParagraph para, int offset) {
+        if (para == null || para.items() == null) return;
+        int remaining = Math.max(0, offset);
+        List<ASTInlineItem> items = para.items();
+        ASTBreak lineBreak = new ASTBreak(ASTBreak.BreakType.LINE);
+        for (int i = 0; i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) {
+                if (remaining == 0) {
+                    items.add(i, lineBreak);
+                    return;
+                }
+                continue;
+            }
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            int len = text != null ? text.length() : 0;
+            if (remaining > len) {
+                remaining -= len;
+                continue;
+            }
+            if (remaining == 0) {
+                items.add(i, lineBreak);
+                return;
+            }
+            if (remaining == len) {
+                items.add(i + 1, lineBreak);
+                return;
+            }
+            ASTTextRun before = copyTextRun(run, text.substring(0, remaining));
+            ASTTextRun after = copyTextRun(run, text.substring(remaining));
+            items.set(i, before);
+            items.add(i + 1, lineBreak);
+            items.add(i + 2, after);
+            return;
+        }
+        items.add(lineBreak);
+    }
+
     private static ASTTextRun copyTextRun(ASTTextRun source, String text) {
         ASTTextRun copy = new ASTTextRun();
         copy.characterStyleRef(source.characterStyleRef());
@@ -509,6 +829,19 @@ public final class StoryConverter {
             this.paraIndex = paraIndex;
             this.para = para;
             this.offset = offset;
+        }
+    }
+
+    private static final class NormalizedTextMap {
+        final String normalized;
+        final int[] textOffsetsAfterNormalizedChars;
+        final int textLength;
+
+        NormalizedTextMap(String normalized, int[] textOffsetsAfterNormalizedChars, int textLength) {
+            this.normalized = normalized != null ? normalized : "";
+            this.textOffsetsAfterNormalizedChars = textOffsetsAfterNormalizedChars != null
+                    ? textOffsetsAfterNormalizedChars : new int[] { 0 };
+            this.textLength = textLength;
         }
     }
 
@@ -1053,7 +1386,9 @@ public final class StoryConverter {
             ResolvedTextFrame firstAnchorTf = null;
             List<ResolvedRun> runs = rp.runs();
             if (runs != null) {
+                int runIndex = -1;
                 for (ResolvedRun run : runs) {
+                    runIndex++;
                     if (run.isInlineAnchor()) {
                         Integer aid = run.anchoredObjectId();
                         if (aid != null) firstAnchorTf = ctx.resolvedData.getTextFrame(String.valueOf(aid));
@@ -1064,12 +1399,18 @@ public final class StoryConverter {
                 }
             }
             if (runs != null) {
+                int runIndex = -1;
                 for (ResolvedRun run : runs) {
+                    runIndex++;
                     if (stopAfterThisRun) break;
                     // inline_anchor: 인라인 그래픽 → ASTInlineObject로 변환
                     if (run.isInlineAnchor()) {
                         Integer anchoredId = run.anchoredObjectId();
                         if (anchoredId != null) {
+                            if (isDoviraSubunitMarker(rp, runs, runIndex)
+                                    && DoviraSubunitMarkerPolicy.isDuplicateMarkerStory(ctx.resolvedData, story.id())) {
+                                continue;
+                            }
                             if (!hasVisibleText(para)) {
                                 firstTextRunAfterLeadingAnchor = true;
                             }
@@ -1078,14 +1419,23 @@ public final class StoryConverter {
                             if (ctx.deferredAnchoredFloatingIds.contains(anchoredId)) {
                                 continue;
                             }
-                            // 커스텀 위치 앵커 객체 건너뛰기
+                            // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
+                            // 단, inline_object PNG가 있으면 시각 장식이므로 절대 좌표 floating으로 보존한다.
                             if (InlineFrameHandler.isAnchoredOutsideParent(ctx, anchoredId, story.id())) {
+                                if (hasInlineObjectPng(ctx, anchoredId)) {
+                                    ctx.deferredAnchoredFloatingIds.add(anchoredId);
+                                }
                                 continue;
                             }
                             // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
-                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, anchoredId);
+                            String prevRunText = adjacentRunText(runs, runIndex, -1);
+                            String nextRunText = adjacentRunText(runs, runIndex, 1);
+                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, anchoredId,
+                                    prevRunText, nextRunText);
                             if (textRun != null) {
-                                maybeInsertDecorativeLeaderTab(ctx, rp, anchoredId, para);
+                                if (!InlineFrameHandler.isInlineVocabularyMarker(ctx, anchoredId, prevRunText, nextRunText)) {
+                                    maybeInsertDecorativeLeaderTab(ctx, rp, anchoredId, para);
+                                }
                                 para.addItem(textRun);
                                 continue;
                             }
@@ -1129,8 +1479,9 @@ public final class StoryConverter {
                         }
                     }
                     // 특수 제어 문자 제거 (IDML 경로와 동일)
+                    boolean preserveUnderlineBlank = RunBuilder.hasUnderlineIntent(null, run);
                     if (runText != null) {
-                        if (firstTextRunAfterLeadingAnchor) {
+                        if (firstTextRunAfterLeadingAnchor && !preserveUnderlineBlank) {
                             runText = stripLeadingAnchorLayoutSpaces(runText);
                         }
                         // SPEC-025: ACE 7 (IndentToHere, \u0007 or \u0008) 감지 — 첫 inline anchor 이후
@@ -1150,8 +1501,8 @@ public final class StoryConverter {
                         }
                         runText = runText.replace("\u0003", "");
                         runText = runText.replace("\u0007", "");
-                        runText = runText.replace("\t\u0008", "");
-                        runText = runText.replace("\u0008", "");
+                        runText = runText.replace("\t\u0008", preserveUnderlineBlank ? RunBuilder.underlineBlankUnit() : "");
+                        runText = runText.replace("\u0008", preserveUnderlineBlank ? RunBuilder.underlineBlankUnit() : "");
                         runText = runText.replace("\n", "");
                         runText = runText.replace("\r", "");
                         // Yoon 폰트 PUA 글리프 → 안전한 유니코드 치환 (□ 빈 정답 칸)
@@ -1166,6 +1517,9 @@ public final class StoryConverter {
                     }
                     firstTextRunAfterLeadingAnchor = false;
                     textRun.text(runText);
+                    if (run.charStyle() != null) {
+                        textRun.characterStyleRef(run.charStyle());
+                    }
                     textRun.fontFamily(run.fontFamily());
                     if (run.fontSize() != null && run.fontSize() > 0) {
                         textRun.fontSizeHwpunits((int) Math.round(run.fontSize() * 100));
@@ -1189,6 +1543,12 @@ public final class StoryConverter {
                     if (run.baselineShift() != null && run.baselineShift() != 0) {
                         textRun.baselineShift((short) run.baselineShift().doubleValue());
                     }
+                    if (preserveUnderlineBlank || Boolean.TRUE.equals(run.underline())) {
+                        textRun.underline(true);
+                    }
+                    if (Boolean.TRUE.equals(run.strikeThru())) {
+                        textRun.strikeThrough(true);
+                    }
                     para.addItem(textRun);
                 }
             }
@@ -1206,7 +1566,48 @@ public final class StoryConverter {
             RunPostProcessor.splitOverlineRuns(para);
         }
 
+        removeDuplicateDoviraLeadingMarkers(ctx, story.id(), paragraphs);
         return paragraphs;
+    }
+
+    static void removeDuplicateDoviraLeadingMarkers(ResolvedBuildContext ctx,
+                                                    String storyId,
+                                                    List<ASTParagraph> paragraphs) {
+        if (ctx == null || ctx.resolvedData == null || paragraphs == null || paragraphs.isEmpty()) return;
+        if (!DoviraSubunitMarkerPolicy.isDuplicateMarkerStory(ctx.resolvedData, storyId)) return;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null || paragraph.items().isEmpty()) continue;
+            paragraph.dropLeadingSmallInlineObjects(true);
+            for (int i = 0; i < paragraph.items().size(); ) {
+                ASTInlineItem item = paragraph.items().get(i);
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text == null || text.replace("\uFFFC", "").trim().isEmpty()) {
+                        i++;
+                        continue;
+                    }
+                    break;
+                }
+                if (isSmallDoviraMarkerObject(item)) {
+                    paragraph.items().remove(i);
+                    continue;
+                }
+                break;
+            }
+        }
+    }
+
+    private static boolean isSmallDoviraMarkerObject(ASTInlineItem item) {
+        if (!(item instanceof ASTInlineObject)) return false;
+        ASTInlineObject obj = (ASTInlineObject) item;
+        if (obj.kind() != ASTInlineObject.ObjectKind.IMAGE
+                && obj.kind() != ASTInlineObject.ObjectKind.RENDERED_GROUP) {
+            return false;
+        }
+        return obj.width() > 0
+                && obj.height() > 0
+                && obj.width() <= CoordinateConverter.pointsToHwpunits(35)
+                && obj.height() <= CoordinateConverter.pointsToHwpunits(25);
     }
 
     /**
@@ -1314,6 +1715,18 @@ public final class StoryConverter {
         return false;
     }
 
+    private static String adjacentRunText(List<ResolvedRun> runs, int index, int direction) {
+        if (runs == null || direction == 0) return null;
+        for (int i = index + direction; i >= 0 && i < runs.size(); i += direction) {
+            ResolvedRun r = runs.get(i);
+            if (r == null || r.isInlineAnchor()) continue;
+            String text = r.text();
+            if (text == null || text.isEmpty()) continue;
+            return text;
+        }
+        return null;
+    }
+
     private static boolean isResolvedPageNumberFrame(ResolvedBuildContext ctx, int anchoredId) {
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredId));
         if (tf == null) return false;
@@ -1348,6 +1761,37 @@ public final class StoryConverter {
         if (style == null) return rp.hasTabStops();
         if (positive(style.ruleAboveLineWeight()) || positive(style.ruleBelowLineWeight())) return true;
         return positive(style.underlineWeight()) && positive(style.underlineOffset());
+    }
+
+    static boolean isDoviraSubunitMarker(ResolvedParagraph rp,
+                                         List<ResolvedRun> runs,
+                                         int runIndex) {
+        if (rp == null || runs == null || runIndex < 0 || runIndex >= runs.size()) return false;
+        if (!DoviraSubunitMarkerPolicy.isDoviraSubunitParagraph(rp)) return false;
+        ResolvedRun current = runs.get(runIndex);
+        return current != null && current.isInlineAnchor();
+    }
+
+    static boolean isStandaloneDoviraSubunitMarker(ResolvedParagraph rp) {
+        if (!DoviraSubunitMarkerPolicy.isDoviraSubunitParagraph(rp)) return false;
+        List<ResolvedRun> runs = rp.runs();
+        if (runs == null || runs.isEmpty()) return false;
+        boolean hasAnchor = false;
+        for (ResolvedRun run : runs) {
+            if (run == null) continue;
+            if (run.isInlineAnchor()) {
+                hasAnchor = true;
+                continue;
+            }
+            String text = run.text();
+            if (text == null) continue;
+            String cleaned = text.replace("\uFFFC", "")
+                    .replace("\r", "")
+                    .replace("\n", "")
+                    .trim();
+            if (!cleaned.isEmpty()) return false;
+        }
+        return hasAnchor;
     }
 
     private static boolean positive(Double value) {

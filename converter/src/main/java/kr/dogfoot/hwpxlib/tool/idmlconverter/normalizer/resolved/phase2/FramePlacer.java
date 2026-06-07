@@ -945,7 +945,10 @@ public final class FramePlacer {
             for (ResolvedTextFrame inner : frames) {
                 if (inner == outer) continue;
                 if (inner.storyId() == null || inner.storyId().equals(outer.storyId())) continue;
-                if (inner.previousFrameId() != null) continue;
+                // Threaded frames are a continuous text flow, not an overlay answer
+                // inserted into a containing blank. Keeping them independent avoids
+                // duplicating the same story both inside the outer TF and as its own TF.
+                if (inner.previousFrameId() != null || inner.nextFrameId() != null) continue;
                 if (inner.pageIndex() != outer.pageIndex()) continue;
                 if (inner.onHiddenLayer() || outer.onHiddenLayer() || inner.nonprinting() || outer.nonprinting()) continue;
                 if (inner.isInline()) continue;

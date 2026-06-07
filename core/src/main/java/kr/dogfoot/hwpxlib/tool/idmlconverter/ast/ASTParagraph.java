@@ -57,6 +57,9 @@ public class ASTParagraph {
     // 불릿 단락 플래그 (●, • 등으로 시작 — 불릿 이후 런 색상 리셋용)
     private boolean bulletParagraph;
 
+    // 중복 도비라 소단원명 story에서 앞쪽에 섞여 들어온 소형 장식 마커 제거
+    private boolean dropLeadingSmallInlineObjects;
+
     // 인라인 항목 (읽기 순서)
     private List<ASTInlineItem> items;
 
@@ -150,6 +153,9 @@ public class ASTParagraph {
 
     public boolean bulletParagraph() { return bulletParagraph; }
     public void bulletParagraph(boolean v) { this.bulletParagraph = v; }
+
+    public boolean dropLeadingSmallInlineObjects() { return dropLeadingSmallInlineObjects; }
+    public void dropLeadingSmallInlineObjects(boolean v) { this.dropLeadingSmallInlineObjects = v; }
 
     public List<ASTInlineItem> items() { return items; }
     public void addItem(ASTInlineItem item) { items.add(item); }

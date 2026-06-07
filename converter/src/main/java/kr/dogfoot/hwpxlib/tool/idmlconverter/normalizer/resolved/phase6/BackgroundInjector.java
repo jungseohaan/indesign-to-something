@@ -76,16 +76,24 @@ public final class BackgroundInjector {
         Set<String> processedKeys = new HashSet<>();
 
         for (RenderedGroup rg : floatingItems) {
-            if (!isPageObject(rg)) continue;
+            if (!isPageObject(rg)) {
+                continue;
+            }
             if (ctx.isDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) {
                 ctx.phase6PlacedIds.add(rg.id());
                 continue;
             }
             // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
-            if (childOfGroup.contains(rg.id())) continue;
-            if (isCoveredByInlineObject(rg, coveredByInlineObjects)) continue;
+            if (childOfGroup.contains(rg.id())) {
+                continue;
+            }
+            if (isCoveredByInlineObject(rg, coveredByInlineObjects)) {
+                continue;
+            }
             // 같은 ID가 inline_object로도 등록된 경우: Phase 3가 인라인으로 처리하므로 floating 중복 금지.
-            if (ctx.resolvedData.isInlineObjectId(rg.id())) continue;
+            if (ctx.resolvedData.isInlineObjectId(rg.id())) {
+                continue;
+            }
             if (rg.shouldSkipByOwnership()) {
                 ctx.phase6PlacedIds.add(rg.id());
                 continue;
@@ -96,19 +104,27 @@ public final class BackgroundInjector {
                 continue;
             }
             // 같은 파일이 중복 추출된 경우만 스킵 (id가 같아도 deco/graphic 등 파일이 다르면 둘 다 배치)
-            if (!processedKeys.add(rg.file() != null ? rg.file() : rg.id() + ":" + rg.pageIndex())) continue;
+            if (!processedKeys.add(rg.file() != null ? rg.file() : rg.id() + ":" + rg.pageIndex())) {
+                continue;
+            }
 
             int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
-            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+            if (pageIdx < 0 || pageIdx >= sections.size()) {
+                continue;
+            }
 
             double[] bounds = rg.bounds();
-            if (bounds == null || bounds.length < 4) continue;
+            if (bounds == null || bounds.length < 4) {
+                continue;
+            }
             bounds = shouldCompositeTfInlineVisuals(rg)
                     ? boundsWithTfInlineVisuals(ctx, rg, bounds)
                     : bounds;
 
             byte[] imageData = loadPng(ctx, rg);
-            if (imageData == null) continue;
+            if (imageData == null) {
+                continue;
+            }
 
             // bounds: [top, left, bottom, right] in document units (mm)
             double rawLeft = bounds[1], rawTop = bounds[0];
@@ -130,7 +146,9 @@ public final class BackgroundInjector {
             double visTop = Math.max(0.0, rawTop);
             double visRight = Math.min(rawRight, pageWidthMm);
             double visBottom = Math.min(rawBottom, pageHeightMm);
-            if (visLeft >= visRight || visTop >= visBottom) continue;
+            if (visLeft >= visRight || visTop >= visBottom) {
+                continue;
+            }
 
             int pixelW = 0, pixelH = 0;
             try {

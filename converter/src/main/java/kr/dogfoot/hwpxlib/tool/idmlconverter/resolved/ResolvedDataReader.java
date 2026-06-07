@@ -506,7 +506,11 @@ public class ResolvedDataReader {
         group.pdfPageIndex(getInt(o, "pdfPageIndex", -1));
         // z-order (InDesign allPageItems 인덱스: 0=앞, 큰 값=뒤)
         group.zOrder(getInt(o, "zOrder", 0));
-        group.itemType(getString(o, "itemType"));
+        String itemType = getString(o, "itemType");
+        if (itemType == null || itemType.isEmpty()) {
+            itemType = group.type();
+        }
+        group.itemType(itemType);
         group.imageFormat(getString(o, "imageFormat"));
         group.whiteStroke(getBool(o, "whiteStroke", false));
         // badge_group: PNG 내보내기 전 TF 텍스트를 숨겼는지 여부
@@ -520,6 +524,7 @@ public class ResolvedDataReader {
         group.placementAllowed(getBoxedBool(o, "placementAllowed"));
         group.overlapPolicy(getString(o, "overlapPolicy"));
         group.reason(getString(o, "reason"));
+        group.parentStoryId(getString(o, "parentStoryId"));
         if (o.has("editableTextFrameIds") && !o.get("editableTextFrameIds").isJsonNull()) {
             group.editableTextFrameIds(parseStringArray(o.getAsJsonArray("editableTextFrameIds")));
         }

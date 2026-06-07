@@ -184,6 +184,9 @@ public class HwpxParagraphBuilder {
         // 인라인 항목 변환
         for (int i = 0; i < astPara.items().size(); i++) {
             ASTInlineItem item = astPara.items().get(i);
+            if (shouldDropLeadingSmallInlineObject(astPara, item, i)) {
+                continue;
+            }
             switch (item.itemType()) {
                 case TEXT_RUN:
                     ASTTextRun tr = (ASTTextRun) item;
@@ -214,6 +217,37 @@ public class HwpxParagraphBuilder {
 
         // 셀 내 Y 커서 업데이트 (오버레이 좌표 계산용)
         ctx.cellContentYCursor += lineSpacingResolver.estimateParagraphHeight(astPara);
+    }
+
+    private static boolean shouldDropLeadingSmallInlineObject(ASTParagraph paragraph,
+                                                              ASTInlineItem item,
+                                                              int index) {
+        if (paragraph == null || !paragraph.dropLeadingSmallInlineObjects()) return false;
+        if (!(item instanceof ASTInlineObject)) return false;
+        ASTInlineObject obj = (ASTInlineObject) item;
+        if (obj.kind() != ASTInlineObject.ObjectKind.IMAGE
+                && obj.kind() != ASTInlineObject.ObjectKind.RENDERED_GROUP) {
+            return false;
+        }
+        if (obj.width() <= 0 || obj.height() <= 0) return false;
+        if (obj.width() > CoordinateConverter.pointsToHwpunits(35)
+                || obj.height() > CoordinateConverter.pointsToHwpunits(25)) {
+            return false;
+        }
+        return !hasMeaningfulTextBefore(paragraph.items(), index);
+    }
+
+    private static boolean hasMeaningfulTextBefore(java.util.List<ASTInlineItem> items, int index) {
+        if (items == null) return false;
+        for (int i = 0; i < index && i < items.size(); i++) {
+            ASTInlineItem item = items.get(i);
+            if (!(item instanceof ASTTextRun)) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text != null && !text.replace("\uFFFC", "").trim().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasMeaningfulFollowingInlineContent(java.util.List<ASTInlineItem> items, int startIndex) {

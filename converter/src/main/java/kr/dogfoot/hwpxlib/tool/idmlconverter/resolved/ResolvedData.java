@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -267,6 +268,12 @@ public class ResolvedData {
     // --- RenderedFloatingItem (통합 플로팅 그래픽) ---
 
     public void addRenderedFloatingItem(RenderedGroup item) {
+        if (isLiveTitleDecorationDuplicate(item)) {
+            return;
+        }
+        if (isDuplicateVisualPageObject(item)) {
+            return;
+        }
         String key = String.valueOf(item.id());
         RenderedGroup existing = renderedFloatingItemMap.get(key);
         if (existing != null && existing.childIds() != null && item.childIds() == null) {
@@ -278,6 +285,102 @@ public class ResolvedData {
     }
 
     public List<RenderedGroup> allRenderedFloatingItems() { return renderedFloatingItems; }
+
+    private boolean isDuplicateVisualPageObject(RenderedGroup item) {
+        if (!isVisualOnlyPageObject(item)) return false;
+        for (RenderedGroup existing : renderedFloatingItems) {
+            if (!isVisualOnlyPageObject(existing)) continue;
+            if (existing.pageIndex() != item.pageIndex()) continue;
+            if (!sameBounds(existing.bounds(), item.bounds(), 0.05)) continue;
+            if (!sameSourceObjectIds(existing.sourceObjectIds(), item.sourceObjectIds())) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isLiveTitleDecorationDuplicate(RenderedGroup item) {
+        if (!isVisualOnlyPageObject(item)) return false;
+        String reason = item.reason();
+        if (reason == null || !(reason.contains("decoration_group")
+                || reason.contains("complex_graphic"))) {
+            return false;
+        }
+        double[] ib = item.bounds();
+        if (ib == null || ib.length < 4) return false;
+        for (ResolvedTextFrame tf : textFrames) {
+            if (tf == null || tf.pageIndex() != item.pageIndex()) continue;
+            double[] tb = tf.geometricBounds();
+            if (!overlaps(ib, tb, 0.5)) continue;
+            if (!looksLikeInlineTitleDecoration(ib, tb)) continue;
+            ResolvedStory story = tf.storyId() != null ? storyMap.get(tf.storyId()) : null;
+            if (!isUnitTitleStory(story)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isUnitTitleStory(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) {
+            return false;
+        }
+        ResolvedParagraph first = story.paragraphs().get(0);
+        String style = first != null ? first.styleName() : null;
+        return "02 단원제목".equals(style);
+    }
+
+    private static boolean looksLikeInlineTitleDecoration(double[] itemBounds, double[] titleBounds) {
+        if (itemBounds == null || titleBounds == null
+                || itemBounds.length < 4 || titleBounds.length < 4) {
+            return false;
+        }
+        double itemW = itemBounds[3] - itemBounds[1];
+        double itemH = itemBounds[2] - itemBounds[0];
+        double titleW = titleBounds[3] - titleBounds[1];
+        double titleH = titleBounds[2] - titleBounds[0];
+        if (itemW <= 0 || itemH <= 0 || titleW <= 0 || titleH <= 0) return false;
+
+        // 제목 중복 제거는 TF 내부에 붙은 작은 번호/장식 마커만 대상으로 한다.
+        // 페이지 좌상단의 큰 단원 아이콘처럼 제목 TF와 겹치지만 독립 시각 요소인
+        // 그래픽은 보존해야 한다.
+        return itemW <= titleW * 0.75
+                && itemH <= titleH * 1.25
+                && itemBounds[1] >= titleBounds[1] - titleW * 0.20
+                && itemBounds[0] >= titleBounds[0] - titleH * 0.35
+                && itemBounds[2] <= titleBounds[2] + titleH * 0.35;
+    }
+
+    private static boolean isVisualOnlyPageObject(RenderedGroup item) {
+        if (item == null) return false;
+        if (!"page_object".equals(item.type())) return false;
+        if (Boolean.TRUE.equals(item.containsEditableText())) return false;
+        if ("indesign_png".equals(item.textOwner())) return false;
+        return item.sourceObjectIds() != null && item.sourceObjectIds().length > 0;
+    }
+
+    private static boolean sameSourceObjectIds(int[] a, int[] b) {
+        if (a == null || b == null || a.length != b.length) return false;
+        int[] aa = Arrays.copyOf(a, a.length);
+        int[] bb = Arrays.copyOf(b, b.length);
+        Arrays.sort(aa);
+        Arrays.sort(bb);
+        return Arrays.equals(aa, bb);
+    }
+
+    private static boolean sameBounds(double[] a, double[] b, double tolerancePt) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
+        for (int i = 0; i < 4; i++) {
+            if (Math.abs(a[i] - b[i]) > tolerancePt) return false;
+        }
+        return true;
+    }
+
+    private static boolean overlaps(double[] a, double[] b, double tolerancePt) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
+        return a[0] < b[2] + tolerancePt
+                && a[2] > b[0] - tolerancePt
+                && a[1] < b[3] + tolerancePt
+                && a[3] > b[1] - tolerancePt;
+    }
 
     private void registerIndesignPngTextOwner(RenderedGroup item) {
         if (item == null || !"indesign_png".equals(item.textOwner())) return;

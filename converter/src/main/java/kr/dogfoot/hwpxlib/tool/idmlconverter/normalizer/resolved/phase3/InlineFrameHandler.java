@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -1053,6 +1054,11 @@ public class InlineFrameHandler {
     }
 
     static ASTTextRun tryInlineTextFrameAsRun(ResolvedBuildContext ctx, int anchoredObjectId) {
+        return tryInlineTextFrameAsRun(ctx, anchoredObjectId, null, null);
+    }
+
+    static ASTTextRun tryInlineTextFrameAsRun(ResolvedBuildContext ctx, int anchoredObjectId,
+                                             String previousText, String nextText) {
         // Phase 2가 floating text box로 승격한 TF → 인라인 런 중복 방지
         if (ctx.isDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
         String domId = String.valueOf(anchoredObjectId);
@@ -1163,7 +1169,8 @@ public class InlineFrameHandler {
         // resolved story에서 런 스타일 가져오기
         ResolvedStory story = (tf.storyId() != null) ? ctx.resolvedData.getStory(tf.storyId()) : null;
         ASTTextRun run = new ASTTextRun();
-        run.text(visText + " "); // 뒤에 공백 추가 (텍스트와의 간격)
+        boolean inlineVocabularyMarker = isInlineVocabularyMarker(ctx, anchoredObjectId, previousText, nextText);
+        run.text(visText + (inlineVocabularyMarker ? "" : " ")); // 기본은 텍스트와의 간격 유지
 
         if (story != null && !story.paragraphs().isEmpty()) {
             ResolvedParagraph rp = story.paragraphs().get(0);
@@ -1189,6 +1196,10 @@ public class InlineFrameHandler {
                 if (rr.underline() != null && rr.underline()) run.underline(true);
                 if (rr.strikeThru() != null && rr.strikeThru()) run.strikeThrough(true);
             }
+        }
+        if (inlineVocabularyMarker) {
+            Short markerShift = inlineFrameBaselineShift(tf, run, story);
+            if (markerShift != null) run.baselineShift(markerShift);
         }
         // IDML CharacterStyle에서 밑줄 추론
         if (tf.storyId() != null) {
@@ -1232,6 +1243,106 @@ public class InlineFrameHandler {
         }
 
         return run;
+    }
+
+    static boolean isInlineVocabularyMarker(ResolvedBuildContext ctx, int anchoredObjectId,
+                                            String previousText, String nextText) {
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredObjectId));
+        if (tf == null) return false;
+        String visText = tf.frameVisibleText();
+        if (visText == null || cleanInlineText(visText).isEmpty()) {
+            ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+            if (story != null && story.paragraphs() != null && !story.paragraphs().isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                for (ResolvedParagraph rp : story.paragraphs()) {
+                    if (rp.runs() == null) continue;
+                    for (ResolvedRun rr : rp.runs()) {
+                        if (rr.text() != null) sb.append(rr.text());
+                    }
+                }
+                visText = sb.toString();
+            }
+        }
+        String marker = cleanInlineText(visText);
+        if (!marker.matches("\\d{1,2}")) return false;
+        if (!endsWithLayoutSpace(previousText)) return false;
+        if (!startsWithHangul(nextText)) return false;
+        if (!tf.isInline()) return false;
+
+        double[] gb = tf.geometricBounds();
+        if (gb != null && gb.length >= 4) {
+            double w = Math.abs(gb[3] - gb[1]);
+            double h = Math.abs(gb[2] - gb[0]);
+            if (w > 8.0 || h > 8.0) return false;
+        }
+
+        ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+        if (story != null && story.paragraphs() != null && !story.paragraphs().isEmpty()) {
+            ResolvedParagraph rp = story.paragraphs().get(0);
+            String styleName = rp.styleName();
+            if (styleName != null && styleName.contains("어휘숫자")) return true;
+        }
+
+        // 소형 인라인 숫자 프레임은 본문 어휘 번호로 쓰이는 경우가 많다.
+        // 스타일명이 누락된 추출본에서도 앞뒤 문맥과 크기가 맞으면 번호 뒤 공백을 만들지 않는다.
+        return true;
+    }
+
+    private static String cleanInlineText(String text) {
+        if (text == null) return "";
+        return text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+    }
+
+    private static boolean endsWithLayoutSpace(String text) {
+        if (text == null || text.isEmpty()) return false;
+        char ch = text.charAt(text.length() - 1);
+        return ch == ' ' || ch == '\t' || ch == '\u00A0' || ch == '\u2002' || ch == '\u2003';
+    }
+
+    private static boolean startsWithHangul(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (Character.isWhitespace(ch) || ch == '\uFFFC') continue;
+            return ch >= '\uAC00' && ch <= '\uD7A3';
+        }
+        return false;
+    }
+
+    private static Short inlineFrameBaselineShift(ResolvedTextFrame tf, ASTTextRun run, ResolvedStory story) {
+        if (tf == null || run == null) {
+            return null;
+        }
+        double[] gb = tf.geometricBounds();
+        if (gb == null || gb.length < 4) return null;
+
+        double frameHeightPt = Math.abs(gb[2] - gb[0]);
+        double fontSizePt = run.fontSizeHwpunits() != null && run.fontSizeHwpunits() > 0
+                ? run.fontSizeHwpunits() / 100.0
+                : firstStoryFontSizePt(story);
+        if (frameHeightPt <= 0 || fontSizePt <= 0) return null;
+
+        // InDesign inline vocabulary markers are often tiny anchored text frames whose local
+        // bottom sits on the insertion baseline. When we replace that frame with live text,
+        // preserve the marker's line-top feel with a HWPX character offset.
+        if (frameHeightPt > fontSizePt * 1.25) return null;
+
+        double shiftPct = Math.max(60.0, ((fontSizePt - frameHeightPt) / fontSizePt) * 75.0);
+        shiftPct = Math.max(20.0, Math.min(75.0, shiftPct));
+        return (short) -Math.round(shiftPct);
+    }
+
+    private static double firstStoryFontSizePt(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null) return 0;
+        for (ResolvedParagraph rp : story.paragraphs()) {
+            if (rp == null || rp.runs() == null) continue;
+            for (ResolvedRun rr : rp.runs()) {
+                if (rr != null && rr.fontSize() != null && rr.fontSize() > 0) {
+                    return rr.fontSize();
+                }
+            }
+        }
+        return 0;
     }
 
     /** IDML 경로용: resolved TextFrame bounds만으로 판별 (renderedFloatingItems 사용 안 함) */
@@ -1635,6 +1746,7 @@ public class InlineFrameHandler {
                 proceed = ancTf != null && ancTf.isInline();
             }
             if (proceed) {
+                if (isDoviraSubunitMarkerRender(ctx, rg)) return null;
                 boolean isNullTypeInline = rg.itemType() == null;
                 // inline_object PNG를 그대로 사용 (tryInlineGroupAsSingleBadge가 먼저 INLINE_TEXT_FRAME을 시도했으므로
                 // 여기 도달했다면 구조 조건 미충족 → PNG fallback이 가장 정확한 표현).
@@ -1762,6 +1874,13 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    private static boolean isDoviraSubunitMarkerRender(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || ctx.resolvedData == null || rg == null) return false;
+        String storyId = rg.parentStoryId();
+        if (storyId == null || storyId.isEmpty()) return false;
+        return DoviraSubunitMarkerPolicy.isDuplicateMarkerStory(ctx.resolvedData, storyId);
     }
 
     /**

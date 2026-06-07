@@ -102,12 +102,7 @@ public final class ParagraphTextHelpers {
                     remaining -= text.length();
                 } else {
                     // 런 잘라내기
-                    ASTTextRun trimmedRun = new ASTTextRun();
-                    trimmedRun.text(text.substring(0, remaining));
-                    trimmedRun.fontFamily(origRun.fontFamily());
-                    trimmedRun.fontStyle(origRun.fontStyle());
-                    trimmedRun.fontSizeHwpunits(origRun.fontSizeHwpunits());
-                    trimmedRun.textColor(origRun.textColor());
+                    ASTTextRun trimmedRun = copyTextRun(origRun, text.substring(0, remaining));
                     split.addItem(trimmedRun);
                     remaining = 0;
                 }
@@ -148,12 +143,7 @@ public final class ParagraphTextHelpers {
                 if (skipped < skipLen) {
                     // 런 중간에서 시작
                     int offset = skipLen - skipped;
-                    ASTTextRun partialRun = new ASTTextRun();
-                    partialRun.text(text.substring(offset));
-                    partialRun.fontFamily(origRun.fontFamily());
-                    partialRun.fontStyle(origRun.fontStyle());
-                    partialRun.fontSizeHwpunits(origRun.fontSizeHwpunits());
-                    partialRun.textColor(origRun.textColor());
+                    ASTTextRun partialRun = copyTextRun(origRun, text.substring(offset));
                     cont.addItem(partialRun);
                     skipped = skipLen;
                 } else {
@@ -169,5 +159,28 @@ public final class ParagraphTextHelpers {
         }
 
         return cont.items().isEmpty() ? null : cont;
+    }
+
+    private static ASTTextRun copyTextRun(ASTTextRun source, String text) {
+        ASTTextRun copy = new ASTTextRun();
+        copy.characterStyleRef(source.characterStyleRef());
+        copy.text(text);
+        copy.fontFamily(source.fontFamily());
+        copy.fontStyle(source.fontStyle());
+        copy.fontSizeHwpunits(source.fontSizeHwpunits());
+        copy.textColor(source.textColor());
+        copy.letterSpacing(source.letterSpacing());
+        copy.subscript(source.subscript());
+        copy.superscript(source.superscript());
+        copy.grepMathFont(source.grepMathFont());
+        copy.underline(source.underline());
+        copy.underlineColor(source.underlineColor());
+        copy.underlineShape(source.underlineShape());
+        copy.strikeThrough(source.strikeThrough());
+        copy.horizontalScale(source.horizontalScale());
+        copy.verticalScale(source.verticalScale());
+        copy.baselineShift(source.baselineShift());
+        copy.grepStyleApplied(source.grepStyleApplied());
+        return copy;
     }
 }

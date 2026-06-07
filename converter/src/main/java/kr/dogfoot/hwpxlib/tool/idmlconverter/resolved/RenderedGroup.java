@@ -31,6 +31,7 @@ public class RenderedGroup {
     private int[] sourceObjectIds;
     private String overlapPolicy;
     private String reason;
+    private String parentStoryId;
 
     public int id() { return id; }
     public void id(int v) { this.id = v; }
@@ -115,6 +116,9 @@ public class RenderedGroup {
 
     public String reason() { return reason; }
     public void reason(String v) { this.reason = v; }
+
+    public String parentStoryId() { return parentStoryId; }
+    public void parentStoryId(String v) { this.parentStoryId = v; }
 
     private boolean whiteStroke; // true: 획이 흰색(Paper)이었던 PNG → 검은 픽셀을 흰색으로 반전 필요
 

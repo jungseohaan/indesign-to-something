@@ -4,6 +4,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 
@@ -200,6 +201,9 @@ public class ASTRunConverter {
             int boxDomId = -1;
             try { boxDomId = Integer.parseInt(ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId(), 16); } catch (Exception e) {}
             if (boxDomId > 0) {
+                if (isDoviraSubunitMarkerObject(boxDomId, resolvedData)) {
+                    return;
+                }
                 kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
                         new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();
                 tmpCtx.resolvedData = resolvedData;
@@ -229,11 +233,17 @@ public class ASTRunConverter {
         if (ig.selfId() != null) {
             try { domId = Integer.parseInt(ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId(), 16); } catch (Exception e) {}
         }
+        if (resolvedData != null && domId > 0 && isDoviraSubunitMarkerObject(domId, resolvedData)) {
+            return;
+        }
 
         // inline_object PNG (imageLoader 불필요)
         if (resolvedData != null && domId > 0) {
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
                 if (rg.id() == domId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
+                    if (isDoviraSubunitMarkerRender(rg, resolvedData)) {
+                        return;
+                    }
                     // 자손 TextFrame이 플로팅 텍스트박스로 배치되면 PNG와 글상자 중복됨 → 스킵
                     if (inlineObjectContainsFloatingTextFrame(domId, resolvedData)) {
                         return;
@@ -430,8 +440,34 @@ public class ASTRunConverter {
         return false;
     }
 
+    private static boolean isDoviraSubunitMarkerRender(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg,
+            ResolvedData resolvedData) {
+        if (rg == null || resolvedData == null) return false;
+        String storyId = rg.parentStoryId();
+        if (storyId == null || storyId.isEmpty()) return false;
+        return DoviraSubunitMarkerPolicy.isDuplicateMarkerStory(resolvedData, storyId);
+    }
+
+    private static boolean isDoviraSubunitMarkerObject(int domId, ResolvedData resolvedData) {
+        if (domId <= 0 || resolvedData == null || resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                : resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || !isDoviraSubunitMarkerRender(rg, resolvedData)) continue;
+            if (rg.id() == domId) return true;
+            int[] sourceIds = rg.sourceObjectIds();
+            if (sourceIds == null) continue;
+            for (int sourceId : sourceIds) {
+                if (sourceId == domId) return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean hasRenderedGraphicDescendant(IDMLCharacterRun.InlineGraphic ig,
-                                                         kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolvedData) {
+                                                       kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData resolvedData) {
         // 자기 자신은 체크하지 않음 — 자손만 확인
         for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
             if (hasRenderedGraphicDescendantIncludingSelf(child, resolvedData)) {

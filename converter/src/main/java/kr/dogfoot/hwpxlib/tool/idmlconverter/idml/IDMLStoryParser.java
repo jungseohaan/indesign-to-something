@@ -334,7 +334,7 @@ public class IDMLStoryParser {
 
                 if ("Br".equals(tag)) {
                     // 현재 런을 마무리하고 단락을 분리
-                    String text = contentBuilder.toString();
+                    String text = replaceUnmatchedObjectAnchors(contentBuilder.toString(), pendingAce8);
                     if (!text.isEmpty()) {
                         currentRun.content(text);
                     }
@@ -416,7 +416,7 @@ public class IDMLStoryParser {
             }
 
             // CharacterStyleRange 끝: 남은 내용을 현재 단락에 추가
-            String text = replacePUA(contentBuilder.toString());
+            String text = replacePUA(replaceUnmatchedObjectAnchors(contentBuilder.toString(), pendingAce8));
             if (!text.isEmpty()) {
                 currentRun.content(text);
             }
@@ -431,6 +431,17 @@ public class IDMLStoryParser {
             result.add(currentPara);
         }
         return result;
+    }
+
+    private static String replaceUnmatchedObjectAnchors(String text, int count) {
+        if (text == null || text.isEmpty() || count <= 0) return text;
+        StringBuilder sb = new StringBuilder(text);
+        for (int replaced = 0; replaced < count; replaced++) {
+            int idx = sb.lastIndexOf("\uFFFC");
+            if (idx < 0) break;
+            sb.setCharAt(idx, '\u0008');
+        }
+        return sb.toString();
     }
 
     /**
