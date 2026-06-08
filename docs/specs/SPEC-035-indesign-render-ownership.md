@@ -198,7 +198,7 @@
 - 문자 강조 배경은 CharacterStyle의 `BasedOn` 상속, GREP 적용 문자 스타일, 런 직접 속성 순서를 모두 보존한다. 공백 런도 같은 `shadeColor`를 가져야 문장 중간이 끊겨 보이지 않는다.
 - 글 사이의 빈 밑줄은 인라인 그래픽 이미지로 두지 않고, HWPX 밑줄이 적용된 공백/탭/리더로 변환한다.
 - extractor가 `GraphicLine`이 아닌 얇은 인라인 PNG로 빈 밑줄을 넘긴 경우에도, 앞쪽에 본문 텍스트가 이미 있으면 같은 밑줄 공백 런으로 흡수한다.
-- 텍스트 한 줄과 거의 같은 폭/높이로 겹치는 얇은 벡터 배경은 독립 PNG 배치를 생략하고 HWPX paragraph shading으로 흡수한다.
+- 텍스트 한 줄과 거의 같은 폭/높이로 겹치는 얇은 벡터 배경은 독립 PNG 배치를 생략하고, 가장 잘 겹치는 InDesign `composedLine`을 찾아 해당 문자 범위의 HWPX `CharPr.shadeColor`로 흡수한다.
 - shading 색상은 원본 PNG의 비투명 픽셀을 흰 종이에 합성한 평균색으로 근사한다.
 - extractor가 텍스트를 숨겨 만든 `text_hidden_shell` 계열 PNG도, 긴 한 줄 강조 배경이면 같은 방식으로 흡수할 수 있다.
 - `visual_label_text_hidden_shell`/`concept_label_shell`처럼 짧은 라벨/버튼의 배경을 소유하는 shell은 강조 배경으로 흡수하지 않는다. 이 계열은 텍스트는 HWPX TF가 소유하고, 캡슐/라운드 버튼/외곽선/그림자는 InDesign PNG가 TF 뒤에서 소유한다.
@@ -207,6 +207,8 @@
   - 객체 높이가 실제 텍스트 composed line 높이에 가까운 얇은 강조 띠이다.
   - 빈 밑줄 PNG 흡수는 문단 선두 장식과 충돌하지 않도록 선행 본문 텍스트가 있는 경우로 제한한다.
   - 객체와 composed line의 overlap이 충분하다.
+  - 렌더 객체 bounds와 composed line bounds의 좌표 단위가 다를 수 있으므로 raw 좌표와 `scaleFactor` 적용 좌표를 모두 비교해 더 강한 overlap을 채택한다.
+  - AST 적용 시 `paraIndex`만 신뢰하지 않고, 실제 paragraph compact text가 composed line compact text를 포함하는지 검증한다. 짧은 부분 단락이 line text에 포함된다는 이유만으로 매칭하지 않는다.
   - 객체가 말풍선/박스/표/개념도 컨테이너처럼 여러 의미 단위를 감싸지 않는다.
 - `textOwner=hwpx_tf`인 짧은 라벨/버튼 shell은 흡수하지 않는다. 라벨 shell은 텍스트 배경 이미지로 남아야 하고, 본문 강조 배경만 HWPX 속성으로 흡수한다. 부모 그룹 중복 방지, inline coverage, visual-label editable 스킵보다 개별 라벨 shell 보존이 우선한다.
 - 너무 얇은 선은 shading으로 만들지 않는다. 실제 밑줄 또는 빈칸 선으로 보고 underline 경로를 우선한다.
@@ -215,6 +217,7 @@
 
 - page 74 `"내가 속한 언어 공동체인 ___ 의 시선으로"`: 밑줄 구간은 인라인 그래픽이 아니라 HWPX 밑줄 속성으로 유지한다.
 - page 74 `"나는 얼마나 자주, 그리고 어떠한 목적으로 글을 쓰는가?"`: 보라색 사선 배경은 텍스트와 분리된 floating PNG보다 HWPX shading 근사로 흡수한다.
+- page 86 `"나는 얼마나 자주, 그리고 언제 글을 쓰는가?"`: `Right Slant Hash` `GraphicLine` 2개로 만들어진 보라색 사선 배경은 composed line에 매칭해 문자 음영으로 흡수한다. 선분 PNG는 배치하지 않는다.
 
 ### 개념도 클러스터 정책
 

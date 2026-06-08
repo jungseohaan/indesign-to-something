@@ -139,6 +139,12 @@ public final class ResolvedBuildContext {
      */
     public java.util.Set<Integer> inlineCompleteSimpleButtonLabelIds = new java.util.HashSet<>();
 
+    /**
+     * Phase 3가 의미 라벨 Group(배경 도형 + editable TF)을 INLINE_TEXT_FRAME으로 재구성한 DOM id.
+     * Phase 6는 같은 id의 배경 PNG를 플로팅으로 다시 배치하지 않는다.
+     */
+    public java.util.Set<Integer> inlineEditableLabelShellIds = new java.util.HashSet<>();
+
     /** TextFrame domId의 disposition을 등록한다. */
     public void setTextDisposition(int domId, FrameDisposition d) {
         textFrameDispositions.put(domId, d);

@@ -2,14 +2,17 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.VisualSourcePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
@@ -106,6 +109,7 @@ public final class BackgroundInjector {
         Set<Integer> coveredByInlineObjects = collectInlineObjectCoverage(ctx, floatingItems);
         ctx.phase6PlacedIds.addAll(coveredByInlineObjects);
         Set<Integer> completeInlineSimpleButtonLabels = ctx.inlineCompleteSimpleButtonLabelIds;
+        Set<Integer> inlineEditableLabelShells = ctx.inlineEditableLabelShellIds;
 
         Set<String> processedKeys = new HashSet<>();
         Set<String> processedDomPageKeys = new HashSet<>();
@@ -139,6 +143,14 @@ public final class BackgroundInjector {
                 ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_COMPLETE_LABEL",
                         "complete simple button label is owned by inline object");
+                continue;
+            }
+            if (isPageObject(rg)
+                    && inlineEditableLabelShells.contains(rg.id())
+                    && isInlineEditableLabelShellRender(rg)) {
+                ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_EDITABLE_LABEL_SHELL",
+                        "editable label shell is owned by inline text frame");
                 continue;
             }
             // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
@@ -211,7 +223,7 @@ public final class BackgroundInjector {
             if (tryAbsorbTextEmphasisBackdrop(ctx, sections, rg, bounds)) {
                 ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "ABSORB_TEXT_EMPHASIS_BACKDROP",
-                        "thin text backdrop converted to HWPX paragraph shading");
+                        "thin text backdrop converted to HWPX character shading");
                 continue;
             }
 
@@ -2035,6 +2047,12 @@ public final class BackgroundInjector {
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             if (tf == null || tf.pageIndex() != rg.pageIndex()) continue;
             if (!hasSemanticText(tf)) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb != null && tb.length >= 4
+                    && (isTextLineBackdropInsideTextFrame(rbRaw, tb)
+                        || isTextLineBackdropInsideTextFrame(scaledRb, tb))) {
+                minZ = Math.min(minZ, tf.zOrder());
+            }
             java.util.List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
             if (lines == null || lines.isEmpty()) continue;
             for (ResolvedTextFrame.ComposedLine line : lines) {
@@ -2050,6 +2068,25 @@ public final class BackgroundInjector {
             }
         }
         return minZ == Integer.MAX_VALUE ? -1 : Math.max(1, minZ - 1);
+    }
+
+    private static boolean isTextLineBackdropInsideTextFrame(double[] rb, double[] tb) {
+        if (rb == null || rb.length < 4 || tb == null || tb.length < 4) return false;
+        double w = rb[3] - rb[1];
+        double h = rb[2] - rb[0];
+        if (w < 20.0 || h < 1.0 || h > 8.0 || w / h < 4.0) return false;
+        double rbArea = area(rb);
+        if (rbArea <= 0.0) return false;
+        double overlap = overlapArea(rb, tb);
+        if (overlap / rbArea < 0.65) return false;
+        double centerY = (rb[0] + rb[2]) / 2.0;
+        double centerX = (rb[1] + rb[3]) / 2.0;
+        double yTol = Math.max(2.0, h);
+        double xTol = Math.max(2.0, h);
+        return centerY >= tb[0] - yTol
+                && centerY <= tb[2] + yTol
+                && centerX >= tb[1] - xTol
+                && centerX <= tb[3] + xTol;
     }
 
     private static boolean hasSemanticText(ResolvedTextFrame tf) {
@@ -2082,33 +2119,188 @@ public final class BackgroundInjector {
             RenderedGroup rg,
             double[] rbRaw) {
         if (ctx == null || ctx.resolvedData == null || sections == null || rg == null) return false;
-        if (!isAbsorbableTextEmphasisBackdrop(ctx, rg, rbRaw)) return false;
+        if (!isAbsorbableTextEmphasisBackdrop(ctx, rg, rbRaw)) {
+            return false;
+        }
 
         TextLineMatch match = findBestTextLineMatch(ctx, rg, rbRaw);
-        if (match == null || match.tf == null || match.line == null) return false;
+        if (match == null || match.tf == null || match.line == null) {
+            return false;
+        }
         ASTParagraph para = findAstParagraphForLine(ctx, sections, rg.pageIndex(), match.tf, match.line);
-        if (para == null) return false;
+        if (para == null) {
+            return false;
+        }
 
         byte[] png = loadPng(ctx, rg);
         String color = inferEmphasisColorFromPng(png);
-        if (color == null) return false;
-
-        para.shadingOn(true);
-        para.shadingColor(color);
-        para.shadingTint(100.0);
-
-        double[] lb = match.line.bounds();
-        if (lb != null && lb.length >= 4) {
-            long left = CoordinateConverter.pointsToHwpunits(Math.max(0, (lb[1] - rbRaw[1]) * ctx.scaleFactor));
-            long right = CoordinateConverter.pointsToHwpunits(Math.max(0, (rbRaw[3] - lb[3]) * ctx.scaleFactor));
-            long top = CoordinateConverter.pointsToHwpunits(Math.max(0, (lb[0] - rbRaw[0]) * ctx.scaleFactor));
-            long bottom = CoordinateConverter.pointsToHwpunits(Math.max(0, (rbRaw[2] - lb[2]) * ctx.scaleFactor));
-            para.shadingLeftOffset(left);
-            para.shadingRightOffset(right);
-            para.shadingTopOffset(top);
-            para.shadingBottomOffset(bottom);
+        if (color == null) {
+            return false;
         }
-        return true;
+
+        return applyCharacterShadeToComposedLine(para, match.line, color);
+    }
+
+    private static boolean applyCharacterShadeToComposedLine(
+            ASTParagraph para,
+            ResolvedTextFrame.ComposedLine line,
+            String color) {
+        if (para == null || line == null || color == null || color.isEmpty()) return false;
+        String lineText = line.text();
+        if (lineText == null || lineText.isEmpty()) return false;
+
+        TextOffsetMap paraMap = buildParagraphCompactTextMap(para);
+        TextOffsetMap lineMap = buildCompactTextMap(lineText);
+        if (paraMap.compact.isEmpty() || lineMap.compact.isEmpty()) return false;
+
+        int compactStart = paraMap.compact.indexOf(lineMap.compact);
+        if (compactStart < 0) {
+            // Some composed-line strings include paragraph-leading inline anchors
+            // or layout-only punctuation. Try a conservative suffix match before
+            // giving up; this still maps to an actual paragraph character span.
+            String needle = trimCompactNeedle(lineMap.compact);
+            compactStart = needle.isEmpty() ? -1 : paraMap.compact.indexOf(needle);
+            if (compactStart < 0) return false;
+            lineMap = buildCompactTextMap(needle);
+        }
+
+        int compactEnd = compactStart + lineMap.compact.length();
+        if (compactStart < 0 || compactEnd > paraMap.originalOffsetsAfterCompactChars.length) return false;
+        int originalStart = paraMap.originalOffsetsAfterCompactChars[compactStart] - 1;
+        int originalEnd = paraMap.originalOffsetsAfterCompactChars[compactEnd - 1];
+        if (originalStart < 0 || originalEnd <= originalStart) return false;
+        return shadeParagraphTextRange(para, originalStart, originalEnd, color);
+    }
+
+    private static String trimCompactNeedle(String compact) {
+        if (compact == null) return "";
+        String result = compact;
+        while (result.length() > 2 && isDecorativeLinePrefix(result.charAt(0))) {
+            result = result.substring(1);
+        }
+        return result;
+    }
+
+    private static boolean isDecorativeLinePrefix(char ch) {
+        return ch == '\uFFFC' || ch == '•' || ch == '●' || ch == '·';
+    }
+
+    private static final class TextOffsetMap {
+        final String compact;
+        final int[] originalOffsetsAfterCompactChars;
+
+        TextOffsetMap(String compact, int[] originalOffsetsAfterCompactChars) {
+            this.compact = compact;
+            this.originalOffsetsAfterCompactChars = originalOffsetsAfterCompactChars;
+        }
+    }
+
+    private static TextOffsetMap buildParagraphCompactTextMap(ASTParagraph para) {
+        StringBuilder original = new StringBuilder();
+        if (para != null && para.items() != null) {
+            for (ASTInlineItem item : para.items()) {
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null) original.append(text);
+                }
+            }
+        }
+        return buildCompactTextMap(original.toString());
+    }
+
+    private static TextOffsetMap buildCompactTextMap(String text) {
+        if (text == null || text.isEmpty()) return new TextOffsetMap("", new int[0]);
+        StringBuilder compact = new StringBuilder();
+        List<Integer> offsets = new ArrayList<>();
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (isLayoutControlForEmphasisMatch(ch) || Character.isWhitespace(ch)) continue;
+            compact.append(ch);
+            offsets.add(i + 1);
+        }
+        int[] resultOffsets = new int[offsets.size()];
+        for (int i = 0; i < offsets.size(); i++) resultOffsets[i] = offsets.get(i);
+        return new TextOffsetMap(compact.toString(), resultOffsets);
+    }
+
+    private static boolean isLayoutControlForEmphasisMatch(char ch) {
+        return ch == '\uFFFC'
+                || ch == '\u0003'
+                || ch == '\u0007'
+                || ch == '\u0008'
+                || ch == '\u0016'
+                || ch == '\u0018'
+                || ch == '\r'
+                || ch == '\n';
+    }
+
+    private static boolean shadeParagraphTextRange(
+            ASTParagraph para,
+            int originalStart,
+            int originalEnd,
+            String color) {
+        if (para == null || para.items() == null || originalEnd <= originalStart) return false;
+        List<ASTInlineItem> rebuilt = new ArrayList<>();
+        int cursor = 0;
+        boolean changed = false;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) {
+                rebuilt.add(item);
+                continue;
+            }
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            int len = text != null ? text.length() : 0;
+            int runStart = cursor;
+            int runEnd = cursor + len;
+            cursor = runEnd;
+            if (len == 0 || runEnd <= originalStart || runStart >= originalEnd) {
+                rebuilt.add(item);
+                continue;
+            }
+
+            int localStart = Math.max(0, originalStart - runStart);
+            int localEnd = Math.min(len, originalEnd - runStart);
+            if (localStart > 0) {
+                rebuilt.add(copyTextRun(run, text.substring(0, localStart)));
+            }
+            ASTTextRun shaded = copyTextRun(run, text.substring(localStart, localEnd));
+            shaded.shadeColor(color);
+            rebuilt.add(shaded);
+            if (localEnd < len) {
+                rebuilt.add(copyTextRun(run, text.substring(localEnd)));
+            }
+            changed = true;
+        }
+        if (changed) {
+            para.items().clear();
+            para.items().addAll(rebuilt);
+        }
+        return changed;
+    }
+
+    private static ASTTextRun copyTextRun(ASTTextRun source, String text) {
+        ASTTextRun copy = new ASTTextRun();
+        copy.characterStyleRef(source.characterStyleRef());
+        copy.text(text);
+        copy.fontFamily(source.fontFamily());
+        copy.fontStyle(source.fontStyle());
+        copy.fontSizeHwpunits(source.fontSizeHwpunits());
+        copy.textColor(source.textColor());
+        copy.shadeColor(source.shadeColor());
+        copy.letterSpacing(source.letterSpacing());
+        copy.subscript(source.subscript());
+        copy.superscript(source.superscript());
+        copy.grepMathFont(source.grepMathFont());
+        copy.underline(source.underline());
+        copy.underlineColor(source.underlineColor());
+        copy.underlineShape(source.underlineShape());
+        copy.strikeThrough(source.strikeThrough());
+        copy.horizontalScale(source.horizontalScale());
+        copy.verticalScale(source.verticalScale());
+        copy.baselineShift(source.baselineShift());
+        copy.grepStyleApplied(source.grepStyleApplied());
+        return copy;
     }
 
     private static boolean isAbsorbableTextEmphasisBackdrop(
@@ -2133,11 +2325,18 @@ public final class BackgroundInjector {
         if (isShortOwnedLabelShell(ctx, rg, match.tf)) return false;
         double[] lb = match.line.bounds();
         double lineH = Math.max(0.1, lb[2] - lb[0]);
-        double overlapRatio = overlapArea(rbRaw, lb) / Math.max(0.1, area(lb));
+        double[] scaledRb = new double[] {
+                rbRaw[0] * ctx.scaleFactor,
+                rbRaw[1] * ctx.scaleFactor,
+                rbRaw[2] * ctx.scaleFactor,
+                rbRaw[3] * ctx.scaleFactor
+        };
+        double overlapRatio = Math.max(overlapArea(rbRaw, lb), overlapArea(scaledRb, lb))
+                / Math.max(0.1, area(lb));
         if (overlapRatio < 0.18) return false;
 
         // A true underline is usually much thinner than the text line. Keep it in
-        // the underline path rather than converting it to paragraph shading.
+        // the underline path rather than converting it to character shading.
         return h >= Math.max(2.5, lineH * 0.25);
     }
 
@@ -2233,18 +2432,88 @@ public final class BackgroundInjector {
         if (section == null || section.blocks() == null) return null;
 
         String storyId = tf.storyId();
+        String tfId = tf.id();
         int paraIndex = Math.max(0, line.paraIndex());
         ASTParagraph fallback = null;
+        String lineCompact = buildCompactTextMap(line.text()).compact;
+
+        // Best path: use the actual originating TextFrame block. Story IDs can
+        // diverge between resolved fallback and IDML-loaded stories, but the
+        // source frame id remains stable.
+        if (tfId != null) {
+            for (ASTBlock block : section.blocks()) {
+                if (!(block instanceof ASTTextFrameBlock)) continue;
+                ASTTextFrameBlock tfBlock = (ASTTextFrameBlock) block;
+                String blockDomId = ParagraphTextHelpers.domIdFromSourceId(tfBlock.sourceId());
+                if (!tfId.equals(blockDomId)) continue;
+                List<ASTParagraph> paras = tfBlock.paragraphs();
+                if (paras == null || paras.isEmpty()) continue;
+                if (paraIndex < paras.size()
+                        && paragraphContainsCompactLine(paras.get(paraIndex), lineCompact)) {
+                    return paras.get(paraIndex);
+                }
+                for (ASTParagraph para : paras) {
+                    if (paragraphContainsCompactLine(para, lineCompact)) {
+                        return para;
+                    }
+                }
+                if (lineCompact.isEmpty()) {
+                    return paras.get(Math.min(paras.size() - 1, 0));
+                }
+            }
+        }
+
         for (ASTBlock block : section.blocks()) {
             if (!(block instanceof ASTTextFrameBlock)) continue;
             ASTTextFrameBlock tfBlock = (ASTTextFrameBlock) block;
             if (storyId != null && !storyId.equals(tfBlock.storyId())) continue;
             List<ASTParagraph> paras = tfBlock.paragraphs();
             if (paras == null || paras.isEmpty()) continue;
-            if (paraIndex < paras.size()) return paras.get(paraIndex);
+            if (paraIndex < paras.size()
+                    && paragraphContainsCompactLine(paras.get(paraIndex), lineCompact)) {
+                return paras.get(paraIndex);
+            }
+            for (ASTParagraph para : paras) {
+                if (paragraphContainsCompactLine(para, lineCompact)) {
+                    return para;
+                }
+            }
             if (fallback == null) fallback = paras.get(Math.min(paras.size() - 1, 0));
         }
-        return fallback;
+        if (fallback != null && lineCompact.isEmpty()) return fallback;
+
+        // Last fallback: match by composed line text. This is intentionally
+        // scoped to the same page/section so it cannot steal unrelated stories.
+        if (lineCompact.isEmpty()) return null;
+        for (ASTBlock block : section.blocks()) {
+            if (!(block instanceof ASTTextFrameBlock)) continue;
+            ASTTextFrameBlock tfBlock = (ASTTextFrameBlock) block;
+            List<ASTParagraph> paras = tfBlock.paragraphs();
+            if (paras == null || paras.isEmpty()) continue;
+            for (ASTParagraph para : paras) {
+                if (para == null) continue;
+                String paraCompact = buildParagraphCompactTextMap(para).compact;
+                if (compactParagraphContainsLine(paraCompact, lineCompact)) {
+                    return para;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean paragraphContainsCompactLine(ASTParagraph para, String lineCompact) {
+        if (para == null || lineCompact == null || lineCompact.isEmpty()) return false;
+        String paraCompact = buildParagraphCompactTextMap(para).compact;
+        return compactParagraphContainsLine(paraCompact, lineCompact);
+    }
+
+    private static boolean compactParagraphContainsLine(String paraCompact, String lineCompact) {
+        if (paraCompact == null || lineCompact == null || paraCompact.isEmpty() || lineCompact.isEmpty()) {
+            return false;
+        }
+        if (paraCompact.contains(lineCompact)) return true;
+        String needle = trimCompactNeedle(lineCompact);
+        return !needle.isEmpty() && paraCompact.contains(needle);
     }
 
     private static String inferEmphasisColorFromPng(byte[] png) {
@@ -2445,6 +2714,12 @@ public final class BackgroundInjector {
             if (rg != null && rg.id() == id) return rg;
         }
         return null;
+    }
+
+    private static boolean isInlineEditableLabelShellRender(RenderedGroup rg) {
+        if (rg == null) return false;
+        return "inline_graphic_only".equals(rg.reason())
+                || "text_composite_editable_text_hidden".equals(rg.reason());
     }
 
     private static byte[] encodePng(BufferedImage image) throws Exception {

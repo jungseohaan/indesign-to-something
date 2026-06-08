@@ -855,6 +855,16 @@ public class InlineFrameHandler {
             }
         }
 
+        if (!ctx.resolvedData.isSimpleButtonLabelTextFrame(childTf.id())) {
+            ASTInlineObject semanticLabelShell =
+                    loadInlineEditableLabelShell(ctx, anchoredObjectId, anchorItem, childTf, w, h,
+                            bgShape, hasOval);
+            if (semanticLabelShell != null) {
+                ctx.inlineEditableLabelShellIds.add(anchoredObjectId);
+                return semanticLabelShell;
+            }
+        }
+
         ASTInlineObject renderedBadge = loadRenderedInlineBadge(ctx, anchoredObjectId, w, h, childTf);
         if (renderedBadge != null) {
             return renderedBadge;
@@ -906,6 +916,160 @@ public class InlineFrameHandler {
         obj.verticalJustification("CenterAlign");
 
         return obj;
+    }
+
+    private static ASTInlineObject loadInlineEditableLabelShell(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedPageItem anchorItem,
+            ResolvedTextFrame childTf,
+            double widthPt,
+            double heightPt,
+            ResolvedPageItem bgShape,
+            boolean hasOval) {
+        RenderedGroup shell = findInlineEditableLabelShell(ctx, anchoredObjectId, childTf);
+        if (shell == null) return null;
+        try {
+            double w = widthPt;
+            double h = heightPt;
+            if ((w <= 0 || h <= 0) && anchorItem != null && anchorItem.geometricBounds() != null) {
+                double[] gb = anchorItem.geometricBounds();
+                if (gb.length >= 4) {
+                    w = Math.abs(gb[3] - gb[1]);
+                    h = Math.abs(gb[2] - gb[0]);
+                }
+            }
+            if (w <= 0 || h <= 0) return null;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+            obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+            obj.width(CoordinateConverter.pointsToHwpunits(w));
+            obj.height(CoordinateConverter.pointsToHwpunits(h));
+            obj.nativeGraphicsAllowed(true);
+            obj.keepInline(true);
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
+            obj.verticalJustification("CenterAlign");
+            boolean nativeStyle = applyInlineEditableLabelShellStyle(ctx, obj, bgShape, hasOval, w, h);
+            applyInlineEditableLabelTextMargins(obj, anchorItem, childTf);
+            if (!nativeStyle) {
+                if (ctx.basePath == null || shell.file() == null) return null;
+                File pngFile = new File(ctx.basePath, shell.file());
+                if (!pngFile.exists() || !pngFile.isFile()) return null;
+                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                BufferedImage img = ImageIO.read(pngFile);
+                if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+                obj.imageFillData(imageData);
+            }
+            buildBadgeParagraph(ctx, childTf, obj);
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean applyInlineEditableLabelShellStyle(
+            ResolvedBuildContext ctx,
+            ASTInlineObject obj,
+            ResolvedPageItem bgShape,
+            boolean hasOval,
+            double widthPt,
+            double heightPt) {
+        if (ctx == null || obj == null || bgShape == null) return false;
+        boolean applied = false;
+
+        String fillName = bgShape.fillColorName();
+        if (fillName != null && !isNoneColor(fillName)) {
+            String fillHex = ctx.resolvedData.resolveColorHex(fillName);
+            if (fillHex != null) {
+                obj.fillColor(fillHex);
+                obj.fillTint(bgShape.fillTint() > 0 ? bgShape.fillTint() : 100);
+                applied = true;
+            }
+        }
+
+        String strokeName = bgShape.strokeColorName();
+        if (strokeName != null && !isNoneColor(strokeName)) {
+            String strokeHex = ctx.resolvedData.resolveColorHex(strokeName);
+            if (strokeHex != null) {
+                obj.strokeColor(strokeHex);
+                double sw = bgShape.strokeWeight();
+                if (ctx.scaleFactor > 0) sw = sw / ctx.scaleFactor;
+                obj.strokeWeight(sw > 0 ? Math.max(sw, 0.5) : 0.5);
+                obj.strokeTint(bgShape.strokeTint() > 0 ? bgShape.strokeTint() : 100);
+                applied = true;
+            }
+        }
+
+        double cr = 0;
+        if (hasOval) {
+            cr = heightPt / 2.0;
+        } else if (bgShape.cornerRadius() > 0) {
+            cr = bgShape.cornerRadius();
+        } else {
+            cr = lookupIdmlShapeCornerRadius(ctx, bgShape.id());
+            if (cr <= 0 && "Oval".equals(bgShape.type())) {
+                cr = heightPt / 2.0;
+            } else if (cr <= 0 && applied) {
+                // Semantic inline labels are usually pill-shaped. Use a full capsule
+                // when the background is much wider than tall; otherwise keep a
+                // conservative rounded rectangle.
+                cr = widthPt >= heightPt * 3.0 ? heightPt / 2.0 : heightPt / 6.0;
+            }
+        }
+        if (cr > 0) {
+            obj.cornerRadius(cr);
+        }
+
+        return applied;
+    }
+
+    private static void applyInlineEditableLabelTextMargins(
+            ASTInlineObject obj,
+            ResolvedPageItem anchorItem,
+            ResolvedTextFrame childTf) {
+        if (obj == null || anchorItem == null || childTf == null) return;
+        double[] groupBounds = anchorItem.geometricBounds();
+        double[] textBounds = childTf.geometricBounds();
+        if (groupBounds == null || textBounds == null || groupBounds.length < 4 || textBounds.length < 4) {
+            return;
+        }
+
+        double left = Math.max(0, textBounds[1] - groupBounds[1]);
+        double top = Math.max(0, textBounds[0] - groupBounds[0]);
+        double right = Math.max(0, groupBounds[3] - textBounds[3]);
+        double bottom = Math.max(0, groupBounds[2] - textBounds[2]);
+        if (left + top + right + bottom < 0.1) return;
+
+        obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left));
+        obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top));
+        obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right));
+        obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom));
+    }
+
+    private static RenderedGroup findInlineEditableLabelShell(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedTextFrame childTf) {
+        if (ctx == null || ctx.resolvedData == null || childTf == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        String childId = childTf.id();
+        RenderedGroup fallback = null;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != anchoredObjectId || rg.file() == null) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if ("inline_graphic_only".equals(rg.reason()) && rg.parentStoryId() != null) {
+                return rg;
+            }
+            if ("text_composite_editable_text_hidden".equals(rg.reason())
+                    && ("hwpx_tf".equals(rg.textOwner()) || "none".equals(rg.textOwner()))
+                    && containsStringId(rg.editableTextFrameIds(), childId)) {
+                fallback = rg;
+            }
+        }
+        return fallback;
     }
 
     private static ASTInlineObject loadRenderedInlineBadge(
