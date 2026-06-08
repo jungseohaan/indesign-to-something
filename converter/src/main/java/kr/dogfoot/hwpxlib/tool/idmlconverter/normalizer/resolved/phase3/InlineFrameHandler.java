@@ -121,6 +121,7 @@ public class InlineFrameHandler {
         String domId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
         if (tf == null || !tf.isInline()) return null;
+        if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) return null;
         if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
 
         // 2개 단락 = 분수 구조 (frameParaTexts[0]=분자, [1]=분모)
@@ -748,6 +749,9 @@ public class InlineFrameHandler {
         if (childTf == null) {
             return null;
         }
+        if (ctx.resolvedData.isTextOwnedByIndesignPng(childTf.id())) {
+            return null;
+        }
 
         // Group 후손 중 fill 또는 stroke 있는 도형 수집 (가장 큰 도형 = 배경)
         ResolvedPageItem bgShape = null;
@@ -854,6 +858,9 @@ public class InlineFrameHandler {
         ASTInlineObject renderedBadge = loadRenderedInlineBadge(ctx, anchoredObjectId, w, h, childTf);
         if (renderedBadge != null) {
             return renderedBadge;
+        }
+        if (ctx.resolvedData.isSimpleButtonLabelTextFrame(childTf.id())) {
+            return null;
         }
 
         // Fallback: rendered PNG가 없으면 투명 HWP rect + 텍스트로 공간만 보존한다.
@@ -984,6 +991,10 @@ public class InlineFrameHandler {
             obj.keepInline(true);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
             obj.verticalJustification("CenterAlign");
+            if (isCompletePngSimpleButtonLabel(ctx, matched)) {
+                ctx.inlineCompleteSimpleButtonLabelIds.add(anchoredObjectId);
+                ctx.inlineCompleteSimpleButtonLabelIds.add(matched.id());
+            }
             if (shouldOverlayRenderedBadgeText(ctx, matched)) {
                 buildBadgeParagraph(ctx, childTf, obj);
             }
@@ -1093,6 +1104,34 @@ public class InlineFrameHandler {
                 && ctx.resolvedData.shouldUseCompletePngForSimpleButtonLabel(rg);
     }
 
+    public static boolean isSimpleButtonLabelAnchor(ResolvedBuildContext ctx, int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null) return false;
+        if (ctx.resolvedData.isSimpleButtonLabelTextFrame(String.valueOf(anchoredObjectId))) {
+            return true;
+        }
+        return findSimpleButtonLabelChildTextFrame(ctx, anchoredObjectId) != null;
+    }
+
+    private static ResolvedTextFrame findSimpleButtonLabelChildTextFrame(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null) return null;
+        String anchorId = String.valueOf(anchoredObjectId);
+        java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 5);
+        ResolvedTextFrame found = null;
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
+            if (pi == null) continue;
+            boolean inGroup = anchorId.equals(pi.parentId()) || descendantIds.contains(pi.parentId());
+            if (!inGroup) continue;
+            if (!tf.isInline()) continue;
+            if (!ctx.resolvedData.isSimpleButtonLabelTextFrame(tf.id())) continue;
+            if (found != null) return null;
+            found = tf;
+        }
+        return found;
+    }
+
     /** 배지 텍스트 단락 빌드 (CENTER 정렬, 폰트 속성 복사). INLINE_TEXT_FRAME/INLINE_BADGE_GROUP 공용. */
     private static void buildBadgeParagraph(ResolvedBuildContext ctx, ResolvedTextFrame childTf, ASTInlineObject obj) {
         String text = childTf.frameVisibleText().replace("￼", "").replace("\r", "").replace("\n", "").trim();
@@ -1197,6 +1236,7 @@ public class InlineFrameHandler {
         if (isConceptDiagramTextFrame(ctx, domId)) return null;
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
         if (tf == null || !tf.isInline()) return null;
+        if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) return null;
         if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
 
         ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
@@ -1291,6 +1331,7 @@ public class InlineFrameHandler {
             if (!inlineDescs.isEmpty()) {
                 StringBuilder _sb = new StringBuilder();
                 for (ResolvedTextFrame d : inlineDescs) {
+                    if (ctx.resolvedData.isTextOwnedByIndesignPng(d.id())) continue;
                     String t = d.frameVisibleText();
                     String c = t == null ? "" : t.replace("￼", "").replace("\r", "").replace("\n", "").trim();
                     if (!c.isEmpty()) _sb.append(c);
@@ -1305,6 +1346,7 @@ public class InlineFrameHandler {
             return null;
         }
         if (!tf.isInline()) return null;
+        if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) return null;
 
         // 렌더 PDF 프레임으로 이미 배치된 경우 텍스트 런 변환 안 함
         if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
@@ -1970,6 +2012,10 @@ public class InlineFrameHandler {
         // Phase 2 가 floating text box 로 승격한 inline TF → inline PNG 도 억제 (28pt PNG가 행간 팽창하는 것 방지).
         if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
 
+        ASTInlineObject completeSimpleButton =
+                loadCompleteSimpleButtonLabelInlineObject(ctx, anchoredObjectId);
+        if (completeSimpleButton != null) return completeSimpleButton;
+
         // 부모 rendered PNG가 이미 소유한 visual-only 인라인 그래픽은 Story 흐름에 다시 넣지 않는다.
         // 예: 말풍선 curly-brace, 답안 밑줄, 작은 bullet/badge 배경.
         // 이 객체들은 부모 PNG의 원본 좌표가 정답이고, 인라인으로 중복 배치하면 줄바꿈/수직정렬 문제가 생긴다.
@@ -2030,6 +2076,11 @@ public class InlineFrameHandler {
             }
             if (proceed) {
                 if (isDoviraSubunitMarkerRender(ctx, rg)) return null;
+                if ("inline_object".equals(rg.itemType())
+                        && findCompleteLabelPageObjectPair(ctx, rg) != null
+                        && !shouldPlaceCompleteLabelPairInline(ctx, rg, anchoredObjectId)) {
+                    return null;
+                }
                 boolean isNullTypeInline = rg.itemType() == null;
                 // inline_object PNG를 그대로 사용 (tryInlineGroupAsSingleBadge가 먼저 INLINE_TEXT_FRAME을 시도했으므로
                 // 여기 도달했다면 구조 조건 미충족 → PNG fallback이 가장 정확한 표현).
@@ -2159,6 +2210,172 @@ public class InlineFrameHandler {
         return null;
     }
 
+    public static ASTInlineObject loadCompleteSimpleButtonLabelInlineObject(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.basePath == null || ctx.resolvedData == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        RenderedGroup completeRender = findCompleteSimpleButtonLabelRender(ctx, anchoredObjectId);
+        if (completeRender == null || completeRender.file() == null) return null;
+        ResolvedTextFrame childTf = findSimpleButtonLabelChildTextFrame(ctx, anchoredObjectId);
+        RenderedGroup inlineRender = findInlineGraphicOnlyRender(ctx, anchoredObjectId);
+        RenderedGroup placementRender = inlineRender != null ? inlineRender : completeRender;
+        if (!shouldPlaceCompleteSimpleButtonLabelInline(ctx, childTf, placementRender)) {
+            return null;
+        }
+        File pngFile = new File(ctx.basePath, completeRender.file());
+        if (!pngFile.exists() || !pngFile.isFile()) return null;
+        try {
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            BufferedImage img = ImageIO.read(pngFile);
+            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+            obj.imageData(imageData);
+            obj.imageFormat("png");
+            obj.pixelWidth(img.getWidth());
+            obj.pixelHeight(img.getHeight());
+            obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+            obj.keepInline(true);
+            obj.verticalJustification("CenterAlign");
+
+            double[] bounds = placementRender.bounds();
+            if (bounds != null && bounds.length >= 4) {
+                obj.boundsX(bounds[1]);
+                double[] pageRelative = toPageRelativeRenderedBounds(ctx, placementRender, bounds);
+                obj.resolvedPageX(CoordinateConverter.pointsToHwpunits(pageRelative[0] * ctx.scaleFactor));
+                obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(pageRelative[1] * ctx.scaleFactor));
+                double bw = Math.abs(bounds[3] - bounds[1]) * ctx.scaleFactor;
+                double bh = Math.abs(bounds[2] - bounds[0]) * ctx.scaleFactor;
+                if (bw <= 0 || bh <= 0) return null;
+                obj.width(CoordinateConverter.pointsToHwpunits(bw));
+                obj.height(CoordinateConverter.pointsToHwpunits(bh));
+            } else {
+                obj.width(CoordinateConverter.pointsToHwpunits(img.getWidth() * 72.0 / ctx.pngExportDpi));
+                obj.height(CoordinateConverter.pointsToHwpunits(img.getHeight() * 72.0 / ctx.pngExportDpi));
+            }
+            ctx.inlineCompleteSimpleButtonLabelIds.add(anchoredObjectId);
+            ctx.inlineCompleteSimpleButtonLabelIds.add(completeRender.id());
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static RenderedGroup findInlineGraphicOnlyRender(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != anchoredObjectId) continue;
+            if (!"inline_graphic_only".equals(rg.reason())) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if (rg.parentStoryId() == null || rg.parentStoryId().isEmpty()) continue;
+            return rg;
+        }
+        return null;
+    }
+
+    private static boolean shouldPlaceCompleteSimpleButtonLabelInline(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame childTf,
+            RenderedGroup completeRender) {
+        if (ctx == null || ctx.resolvedData == null || childTf == null || completeRender == null) {
+            return false;
+        }
+        double[] labelBounds = completeRender.bounds();
+        if (labelBounds == null || labelBounds.length < 4) return false;
+        double labelTop = labelBounds[0];
+        double labelLeft = labelBounds[1];
+        double labelBottom = labelBounds[2];
+        double labelRight = labelBounds[3];
+        double labelHeight = Math.max(0.1, labelBottom - labelTop);
+        double labelCenterY = (labelTop + labelBottom) / 2.0;
+        if (isCompleteLabelAnchoredInTextStory(ctx, completeRender)) {
+            return true;
+        }
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || tf.id() == null || tf.id().equals(childTf.id())) continue;
+            if (tf.pageIndex() != childTf.pageIndex()) continue;
+            if (tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (ctx.resolvedData.isSimpleButtonLabelTextFrame(tf.id())) continue;
+            String text = tf.frameVisibleText();
+            if (visibleTextLength(text) < 2) continue;
+            double[] b = tf.geometricBounds();
+            if (b == null || b.length < 4) continue;
+            double centerY = (b[0] + b[2]) / 2.0;
+            double verticalDelta = Math.abs(centerY - labelCenterY);
+            if (verticalDelta > Math.max(8.0, labelHeight * 1.5)) continue;
+            double rightGap = b[1] - labelRight;
+            if (rightGap >= -1.0 && rightGap <= 18.0) return true;
+            double leftGap = labelLeft - b[3];
+            if (leftGap >= -1.0 && leftGap <= 8.0) return true;
+        }
+        return false;
+    }
+
+    private static boolean isCompleteLabelAnchoredInTextStory(
+            ResolvedBuildContext ctx,
+            RenderedGroup inlineRender) {
+        if (ctx == null || ctx.resolvedData == null || inlineRender == null) return false;
+        String storyId = inlineRender.parentStoryId();
+        if (storyId == null || storyId.isEmpty()) return false;
+        ResolvedStory story = ctx.resolvedData.getStory(storyId);
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph para : story.paragraphs()) {
+            if (para == null || para.runs() == null) continue;
+            for (ResolvedRun run : para.runs()) {
+                if (run == null || run.isInlineAnchor()) continue;
+                if (visibleTextLength(run.text()) > 0) return true;
+            }
+        }
+        return false;
+    }
+
+    private static int visibleTextLength(String text) {
+        if (text == null) return 0;
+        return text
+                .replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0007", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim()
+                .length();
+    }
+
+    private static RenderedGroup findCompleteSimpleButtonLabelRender(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        String anchorId = String.valueOf(anchoredObjectId);
+        ResolvedTextFrame childTf = findSimpleButtonLabelChildTextFrame(ctx, anchoredObjectId);
+        String childTfId = childTf != null ? childTf.id() : null;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || !isCompletePngSimpleButtonLabel(ctx, rg)) continue;
+            if (rg.id() == anchoredObjectId) return rg;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null) continue;
+            for (String editableId : editableIds) {
+                if (anchorId.equals(editableId)
+                        || (childTfId != null && childTfId.equals(editableId))) {
+                    return rg;
+                }
+            }
+        }
+        return null;
+    }
+
     private static boolean isDoviraSubunitMarkerRender(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (ctx == null || ctx.resolvedData == null || rg == null) return false;
         String storyId = rg.parentStoryId();
@@ -2181,6 +2398,7 @@ public class InlineFrameHandler {
             if (pi == null || !groupIdStr.equals(pi.parentId())) continue;
             if (!tf.isInline()) continue;
             if (!ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
+            if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) continue;
             String vt = tf.frameVisibleText();
             if (vt == null) continue;
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
@@ -2465,6 +2683,73 @@ public class InlineFrameHandler {
             break;
         }
         return new double[]{x, y};
+    }
+
+    private static boolean isShiftedCompleteLabelInlinePair(ResolvedBuildContext ctx, RenderedGroup inline) {
+        RenderedGroup pageObject = findCompleteLabelPageObjectPair(ctx, inline);
+        if (pageObject == null || inline == null || inline.bounds() == null || pageObject.bounds() == null) {
+            return false;
+        }
+        double[] ib = inline.bounds();
+        double[] pb = pageObject.bounds();
+        if (ib.length < 4 || pb.length < 4) return false;
+        double dx = Math.abs(ib[1] - pb[1]);
+        double dy = Math.abs(ib[0] - pb[0]);
+        if (dx <= 1.0 && dy <= 1.0) return false;
+        double pageWidth = localPageWidth(ctx, pageObject.pageIndex());
+        double pageHeight = localPageHeight(ctx, pageObject.pageIndex());
+        return (pageWidth > 0.0 && Math.abs(dx - pageWidth) <= 2.0)
+                || (pageHeight > 0.0 && Math.abs(dy - pageHeight) <= 2.0);
+    }
+
+    private static boolean shouldPlaceCompleteLabelPairInline(
+            ResolvedBuildContext ctx,
+            RenderedGroup inline,
+            int anchoredObjectId) {
+        RenderedGroup pageObject = findCompleteLabelPageObjectPair(ctx, inline);
+        if (pageObject == null) return true;
+        ResolvedTextFrame childTf = findSimpleButtonLabelChildTextFrame(ctx, anchoredObjectId);
+        boolean placeInline = shouldPlaceCompleteSimpleButtonLabelInline(ctx, childTf, pageObject);
+        if (placeInline) {
+            ctx.inlineCompleteSimpleButtonLabelIds.add(anchoredObjectId);
+            ctx.inlineCompleteSimpleButtonLabelIds.add(pageObject.id());
+        }
+        return placeInline;
+    }
+
+    private static RenderedGroup findCompleteLabelPageObjectPair(ResolvedBuildContext ctx, RenderedGroup inline) {
+        if (ctx == null || ctx.resolvedData == null || inline == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != inline.id()) continue;
+            if (!"page_object".equals(rg.itemType())) continue;
+            if (isCompletePngSimpleButtonLabel(ctx, rg)) return rg;
+        }
+        return null;
+    }
+
+    private static double localPageWidth(ResolvedBuildContext ctx, int pageIndex) {
+        double[] bounds = pageBounds(ctx, pageIndex);
+        if (bounds == null) return 0.0;
+        double width = bounds[3] - bounds[1];
+        return ctx.scaleFactor != 0.0 ? width / ctx.scaleFactor : width;
+    }
+
+    private static double localPageHeight(ResolvedBuildContext ctx, int pageIndex) {
+        double[] bounds = pageBounds(ctx, pageIndex);
+        if (bounds == null) return 0.0;
+        double height = bounds[2] - bounds[0];
+        return ctx.scaleFactor != 0.0 ? height / ctx.scaleFactor : height;
+    }
+
+    private static double[] pageBounds(ResolvedBuildContext ctx, int pageIndex) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.pages() == null) return null;
+        if (pageIndex < 0 || pageIndex >= ctx.resolvedData.pages().size()) return null;
+        ResolvedPage page = ctx.resolvedData.pages().get(pageIndex);
+        if (page == null || page.bounds() == null || page.bounds().length < 4) return null;
+        return page.bounds();
     }
 
     private static boolean containsConceptDiagramTextFrame(ResolvedBuildContext ctx, String anchorId) {

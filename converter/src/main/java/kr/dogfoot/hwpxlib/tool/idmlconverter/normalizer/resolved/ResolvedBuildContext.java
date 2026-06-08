@@ -133,6 +133,12 @@ public final class ResolvedBuildContext {
     /** inline_object ID → 인라인 PNG 처리 소유권 결정. */
     public java.util.Map<Integer, FrameDisposition> inlineObjectDispositions = new java.util.HashMap<>();
 
+    /**
+     * Phase 3가 완성형 단순 버튼 라벨 PNG를 문단 인라인 객체로 실제 배치한 DOM id.
+     * Phase 6는 이 집합에 들어 있는 page_object만 중복 플로팅 배치하지 않는다.
+     */
+    public java.util.Set<Integer> inlineCompleteSimpleButtonLabelIds = new java.util.HashSet<>();
+
     /** TextFrame domId의 disposition을 등록한다. */
     public void setTextDisposition(int domId, FrameDisposition d) {
         textFrameDispositions.put(domId, d);

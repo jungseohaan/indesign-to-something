@@ -118,6 +118,7 @@ public final class StoryConverter {
                         // domId=None TF: sourceId 없지만 Phase 2가 storyId를 직접 설정했으면 사용
                         String directStoryId = tfb.storyId();
                         if (directStoryId != null) {
+                            if (isStoryFullyOwnedByIndesignPng(ctx, directStoryId)) continue;
                             storyToBlocks.computeIfAbsent(directStoryId, k -> new ArrayList<>()).add(tfb);
                         }
                         continue;
@@ -126,9 +127,11 @@ public final class StoryConverter {
                     // SPEC-025: master instance ("_pi" 접미사) 도 처리
                     String domId = ParagraphTextHelpers.domIdFromSourceId(sourceId);
                     if (domId == null) continue;
+                    if (ctx.resolvedData.isTextOwnedByIndesignPng(domId)) continue;
                     ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
                     if (rtf != null && rtf.storyId() != null) {
                         String storyId = rtf.storyId();
+                        if (isStoryFullyOwnedByIndesignPng(ctx, storyId)) continue;
                         // IDML story에 테이블이 있으면 Phase 4가 ASTTable로 처리 → Phase 3 skip
                         // (동일 TF에 대해 1×1 래퍼 TextBox 중복 생성 방지)
                         if (ctx.loadIDMLStory != null) {
@@ -160,6 +163,7 @@ public final class StoryConverter {
         for (Map.Entry<String, List<ASTTextFrameBlock>> entry : storyToBlocks.entrySet()) {
             String storyId = entry.getKey();
             List<ASTTextFrameBlock> blocks = entry.getValue();
+            if (isStoryFullyOwnedByIndesignPng(ctx, storyId)) continue;
             // 1차: IDML Story XML에서 단락 파싱 (정확한 단락 구조)
             boolean suppressLeftInd = blocks.stream().anyMatch(b -> b.suppressParaLeftIndent());
             List<ASTParagraph> paragraphs = StoryLoader.convertStoryFromIDML(ctx, storyId, suppressLeftInd);
@@ -249,6 +253,19 @@ public final class StoryConverter {
         // Phase 3 후처리: AnchoredPosition="Anchored" + TextWrapMode="None" Group 들을
         // BEHIND_TEXT 위치-절대 ASTFigure 로 배치 (텍스트 겹침, 밀지 않음).
         placeDeferredAnchoredFloating(ctx, sections);
+    }
+
+    private static boolean isStoryFullyOwnedByIndesignPng(ResolvedBuildContext ctx, String storyId) {
+        if (ctx == null || ctx.resolvedData == null || storyId == null) return false;
+        List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
+        if (frames == null || frames.isEmpty()) return false;
+        boolean hasOwnedFrame = false;
+        for (ResolvedTextFrame tf : frames) {
+            if (tf == null || tf.id() == null) continue;
+            if (!ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return false;
+            hasOwnedFrame = true;
+        }
+        return hasOwnedFrame;
     }
 
     /**
@@ -1840,6 +1857,14 @@ public final class StoryConverter {
                             if (boxList != null && !boxList.isEmpty()) {
                                 for (ASTInlineObject box : boxList) para.addItem(box);
                                 continue;
+                            }
+                            if (InlineFrameHandler.isSimpleButtonLabelAnchor(ctx, anchoredId)) {
+                                ASTInlineObject inlineObj =
+                                        InlineFrameHandler.loadCompleteSimpleButtonLabelInlineObject(ctx, anchoredId);
+                                if (inlineObj != null) {
+                                    para.addItem(inlineObj);
+                                    continue;
+                                }
                             }
                             // 배경 도형 + 단일 짧은 텍스트프레임 (예: "가" / "나" 캡슐 배지)
                             // → INLINE_TEXT_FRAME (한 몸 + 검색 가능)

@@ -90,8 +90,14 @@ final class FrameTransformations {
         textBoxBuilder.setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
                 block.strokeType(), block.strokeTint());
 
-        // FillBrush (배경색)
-        textBoxBuilder.setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint());
+        boolean imgBrushSet = false;
+        if (block.imageFillData() != null && block.imageFillData().length > 0) {
+            imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(rect, block.imageFillData());
+        }
+        if (!imgBrushSet) {
+            textBoxBuilder.setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint(),
+                    block.nativeGraphicsAllowed());
+        }
 
         // DrawText (글상자 내용)
         rect.createDrawText();
@@ -214,7 +220,14 @@ final class FrameTransformations {
             fillColor = "#FFFFFF";
             fillTint = 100;
         }
-        textBoxBuilder.setupTextBoxFillBrush(rect, fillColor, fillTint);
+        boolean imgBrushSet = false;
+        if (block.imageFillData() != null && block.imageFillData().length > 0) {
+            imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(rect, block.imageFillData());
+        }
+        if (!imgBrushSet) {
+            textBoxBuilder.setupTextBoxFillBrush(rect, fillColor, fillTint,
+                    block.nativeGraphicsAllowed());
+        }
 
         // DrawText (글상자 내용)
         rect.createDrawText();

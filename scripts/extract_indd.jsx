@@ -2138,17 +2138,44 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return stats;
     }
 
-    function _isVisualMarkerLabelGroup(grp) {
-        var stats = _textStatsOfGroup(grp);
-        if (stats.count !== 1 || stats.length < 1 || stats.length > 2) return false;
-        var text = stats.text || "";
-        // 선택지/번호/체크박스처럼 텍스트보다 마커 시각성이 우선인 짧은 버튼만
-        // InDesign PNG가 텍스트까지 소유할 수 있다. "나는", "굴을" 같은 짧은
-        // 의미 단어 라벨은 editable TF로 유지하고 배경만 shell PNG로 추출한다.
+    function _plainTextOfTextFrame(tf) {
+        var text = "";
+        try { text = tf.contents || ""; } catch (eContents) {}
+        if (!text) {
+            try {
+                if (tf.parentStory) text = tf.parentStory.contents || "";
+            } catch (eStoryContents) {}
+        }
+        return String(text || "").replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC]/g, "");
+    }
+
+    function _isSimpleMarkerLabelText(text) {
+        text = String(text || "").replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC]/g, "");
+        if (!text) return false;
         if (/^(가|나|다|라|마|바|ㄱ|ㄴ|ㄷ|ㄹ|ㅁ|ㅂ|ㅅ|ㅇ|ㅈ|ㅊ|ㅋ|ㅌ|ㅍ|ㅎ)$/.test(text)) return true;
         if (/^[0-9]{1,2}$/.test(text)) return true;
         if (/^[①-⑳]$/.test(text)) return true;
         return false;
+    }
+
+    function _isVisualMarkerLabelGroup(grp) {
+        var stats = _textStatsOfGroup(grp);
+        if (stats.count !== 1) return false;
+        var text = stats.text || "";
+        if (text.length < 1 || text.length > 2) {
+            try {
+                var nested = grp.allPageItems;
+                for (var i = 0; i < nested.length; i++) {
+                    if (nested[i].constructor.name !== "TextFrame") continue;
+                    text = _plainTextOfTextFrame(nested[i]);
+                    break;
+                }
+            } catch (eFallbackText) {}
+        }
+        // 선택지/번호/체크박스처럼 텍스트보다 마커 시각성이 우선인 짧은 버튼만
+        // InDesign PNG가 텍스트까지 소유할 수 있다. "나는", "굴을" 같은 짧은
+        // 의미 단어 라벨은 editable TF로 유지하고 배경만 shell PNG로 추출한다.
+        return _isSimpleMarkerLabelText(text);
     }
 
     function _renderEditableVisualLabelShell(grp, page, reason) {

@@ -472,6 +472,15 @@ class StoryLoader {
                                         if (fracEq != null) {
                                             para.addItem(fracEq);
                                         } else {
+                                            if (InlineFrameHandler.isSimpleButtonLabelAnchor(ctx, domId)) {
+                                                ASTInlineObject inlineObj =
+                                                        InlineFrameHandler.loadCompleteSimpleButtonLabelInlineObject(ctx, domId);
+                                                if (inlineObj != null) {
+                                                    para.addItem(inlineObj);
+                                                    anchorIdx++;
+                                                    continue;
+                                                }
+                                            }
                                             // 배경 도형 + 단일 짧은 텍스트프레임 (예: 페이지 39 "가" / "나" 캡슐 배지)
                                             // → INLINE_TEXT_FRAME (한 몸 + 검색 가능)
                                             ASTInlineObject singleBadge = InlineFrameHandler.tryInlineGroupAsSingleBadge(ctx, domId);

@@ -143,6 +143,8 @@
 
 - `hwpx_tf` 소유 visual shell은 원본 zOrder가 알려져 있어도 소유 TF 바로 뒤에 배치한다.
 - 내용 없는 TF 자체가 stroke/fill 컨테이너인 경우, shell 자신의 빈 TF zOrder가 아니라 shell과 겹치는 실제 의미 텍스트 TF들의 최소 zOrder보다 충분히 뒤에 배치한다.
+- 큰 컨테이너 shell은 editable TF뿐 아니라 사진, 차트, 캐릭터 컷처럼 의미 콘텐츠인 compact image/graphic PNG보다도 뒤에 배치한다. 즉 보호 대상은 `textOwner=hwpx_tf`에 한정하지 않는다.
+- 단, page-wide 배경이나 큰 장식 면은 의미 콘텐츠로 보지 않는다. shell 면적보다 과도하게 크거나 페이지/섹션 배경 성격이 강한 PNG는 컨테이너를 끌어올리는 기준에서 제외한다.
 - 짧은 제목 라벨의 배경 도형은 큰 컨테이너 shell보다 앞, 제목 TF보다 뒤에 배치한다. 즉 레이어 순서는 `큰 shell < 제목 라벨 배경 < 제목 TF`이다.
 - 이 순서는 IDML 원본 zOrder보다 ownership 의미를 우선한다. 큰 shell은 컨테이너 배경이고, 라벨 배경은 제목 TF의 직접 시각 배경이기 때문이다.
 - shell PNG 내부에 투명 패딩이 있으면 alpha bbox를 기준으로 실제 보이는 영역을 계산한다.
@@ -314,6 +316,7 @@ Extractor atomic shell 원칙:
 - 같은 DOM id가 inline 렌더와 page_object 렌더 양쪽에 있어도 위 기준을 그대로 적용한다. 배치 형태가 아니라 텍스트의 편집 가치가 owner를 결정한다.
 - 인라인 단순 버튼 라벨이 위 완성형 PNG 조건을 만족하면 extractor는 텍스트를 숨긴 `inline_text_hidden`이 아니라 텍스트 포함 `visual_marker_label_indesign_png` 인라인 PNG를 만든다.
 - 같은 DOM id의 완성형 인라인 PNG와 완성형 page_object PNG가 동시에 존재하면 HWPX 문단 흐름을 보존하기 위해 인라인 PNG가 우선 소유하고, page_object는 중복 배치하지 않는다.
+- 완성형 PNG 대상 단순 배지는 HWPX inline TF/text run fallback을 만들지 않는다. 완성형 PNG가 없을 때 도형-only PNG와 텍스트 TF를 임시 조합하면 같은 문서 안에서 `가/나`와 `다/라`의 소유권이 갈라지고 중복이 재발하기 때문이다.
 - 이때 parent PNG의 child suppression도 적용하지 않아, 그래픽 껍데기 렌더가 별도로 존재하면 그것을 배치할 수 있게 한다.
 - 이 정책은 특정 DOM id나 페이지 예외가 아니라 “시각 마커 라벨”과 “의미 제목 라벨”의 소유권 분리 규칙이다.
 

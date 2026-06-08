@@ -693,6 +693,7 @@ public final class FramePlacer {
             if (!hasRenderedVisualShell) {
                 applyGroupBackgroundShapeStyle(ctx, tf, block);
             }
+            applyInlineOwnedVisualShellImageFill(ctx, tf, block, pageLeft, pageTop);
 
             // overflow 감지용 텍스트 길이 저장
             String visText = tf.frameVisibleText();
@@ -775,7 +776,7 @@ public final class FramePlacer {
         }
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
-            if (!"page_object".equals(rg.type())) continue;
+            if (!isRenderedPageObject(rg)) continue;
             if (Boolean.FALSE.equals(rg.placementAllowed())) continue;
             if (!"indesign_png".equals(rg.visualOwner())) continue;
             String[] editableIds = rg.editableTextFrameIds();
@@ -1259,6 +1260,105 @@ public final class FramePlacer {
             }
         }
         return false;
+    }
+
+    private static boolean isRenderedPageObject(RenderedGroup rg) {
+        if (rg == null) return false;
+        String itemType = rg.itemType();
+        if ("page_object".equals(itemType)) return true;
+        if (itemType != null) return false;
+        String file = rg.file();
+        return file != null && (file.contains("img_")
+                || file.contains("deco_")
+                || file.contains("shape_")
+                || file.contains("graphic_")
+                || file.contains("master_"));
+    }
+
+    private static void applyInlineOwnedVisualShellImageFill(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            ASTTextFrameBlock block,
+            double pageLeft,
+            double pageTop) {
+        if (ctx == null || ctx.resolvedData == null || ctx.basePath == null
+                || tf == null || tf.id() == null || block == null) {
+            return;
+        }
+        if (ctx.resolvedData.isSimpleButtonLabelTextFrame(tf.id())) {
+            return;
+        }
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return;
+
+        RenderedGroup best = null;
+        double bestArea = Double.MAX_VALUE;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
+            if (rg.pageIndex() != tf.pageIndex()) continue;
+            if (!isRenderedPageObject(rg)) continue;
+            if (Boolean.FALSE.equals(rg.placementAllowed())) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if (!containsEditableTextFrameId(rg, tf.id())) continue;
+            if (!isOwnedTextFrameShellReason(rg.reason())) continue;
+
+            ResolvedPageItem sourceItem = ctx.resolvedData.getPageItem(String.valueOf(rg.id()));
+            if (sourceItem == null || !sourceItem.isInline()) continue;
+
+            double[] b = rg.bounds();
+            if (b == null || b.length < 4) continue;
+            double w = b[3] - b[1];
+            double h = b[2] - b[0];
+            if (w <= 0 || h <= 0) continue;
+            double area = w * h;
+            if (area < bestArea) {
+                bestArea = area;
+                best = rg;
+            }
+        }
+        if (best == null) return;
+
+        File pngFile = new File(ctx.basePath, best.file());
+        if (!pngFile.exists() || !pngFile.isFile()) return;
+        double[] shell = best.bounds();
+        double[] tfb = tf.geometricBounds();
+        if (shell == null || shell.length < 4 || tfb == null || tfb.length < 4) return;
+
+        try {
+            byte[] png = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            if (png == null || png.length == 0) return;
+
+            double tfLeft = tfb[1] - pageLeft;
+            if (tfLeft < 0) tfLeft = tfb[1];
+            double tfTop = tfb[0] - pageTop;
+            double tfRight = tfb[3] - pageLeft;
+            if (tfRight < 0) tfRight = tfb[3];
+            double tfBottom = tfb[2] - pageTop;
+
+            double shellTop = shell[0];
+            double shellLeft = shell[1];
+            double shellBottom = shell[2];
+            double shellRight = shell[3];
+            double shellW = shellRight - shellLeft;
+            double shellH = shellBottom - shellTop;
+            if (shellW <= 0 || shellH <= 0) return;
+
+            block.x(CoordinateConverter.pointsToHwpunits(shellLeft));
+            block.y(CoordinateConverter.pointsToHwpunits(shellTop));
+            block.width(CoordinateConverter.pointsToHwpunits(shellW));
+            block.height(CoordinateConverter.pointsToHwpunits(shellH));
+            block.insetLeft(CoordinateConverter.pointsToHwpunits(Math.max(0, tfLeft - shellLeft)));
+            block.insetTop(CoordinateConverter.pointsToHwpunits(Math.max(0, tfTop - shellTop)));
+            block.insetRight(CoordinateConverter.pointsToHwpunits(Math.max(0, shellRight - tfRight)));
+            block.insetBottom(CoordinateConverter.pointsToHwpunits(Math.max(0, shellBottom - tfBottom)));
+            block.imageFillData(png);
+            block.nativeGraphicsAllowed(true);
+            block.inlineToFloating(true);
+            ctx.setRenderedDisposition(best.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+            ctx.phase6PlacedIds.add(best.id());
+        } catch (Exception ignored) {
+        }
     }
 
     private static boolean shouldExpandTitleToSiblingShell(

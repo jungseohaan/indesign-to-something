@@ -105,7 +105,7 @@ public final class BackgroundInjector {
 
         Set<Integer> coveredByInlineObjects = collectInlineObjectCoverage(ctx, floatingItems);
         ctx.phase6PlacedIds.addAll(coveredByInlineObjects);
-        Set<Integer> completeInlineSimpleButtonLabels = collectCompleteInlineSimpleButtonLabels(ctx, floatingItems);
+        Set<Integer> completeInlineSimpleButtonLabels = ctx.inlineCompleteSimpleButtonLabelIds;
 
         Set<String> processedKeys = new HashSet<>();
         Set<String> processedDomPageKeys = new HashSet<>();
@@ -130,6 +130,9 @@ public final class BackgroundInjector {
             boolean protectedEditableLabelShell = conceptDiagramLabelShell
                     || conceptDiagramInlineShell
                     || shouldPreserveEditableLabelShell(rg, editableLabelShellIds);
+            // 단순 배지 완성형 PNG가 inline_object/page_object 쌍으로 동시에 추출되면
+            // page_object가 원본 절대 좌표를 보존한다. inline_object는 HWP 문장 흐름에
+            // 들어가면서 플로팅 위치/선택 영역이 밀리는 경우가 있어 Phase 3에서 버린다.
             if (isPageObject(rg)
                     && completeInlineSimpleButtonLabels.contains(rg.id())
                     && isCompletePngSimpleButtonLabel(ctx, rg)) {
@@ -491,9 +494,9 @@ public final class BackgroundInjector {
                         foregroundMarkerZOrder(sections.get(pageIdx), x, y, w, h, resolvedZ));
             }
             boolean demotedBehindForeground = false;
-            int overlappingRenderedContentZ = maxOverlappingRenderedContentZ(ctx, floatingItems, rg);
-            if (overlappingRenderedContentZ >= 0) {
-                resolvedZ = Math.max(resolvedZ, Math.min(999, overlappingRenderedContentZ + 1));
+            int containerAdjustedZ = containerShellZOrderBehindRenderedContent(ctx, floatingItems, rg, resolvedZ);
+            if (containerAdjustedZ < resolvedZ) {
+                resolvedZ = containerAdjustedZ;
                 demotedBehindForeground = true;
             }
             if (!isBackgroundLike && !isTextFrameBackdrop
@@ -1450,6 +1453,62 @@ public final class BackgroundInjector {
         addAll(rg.tfInlineVisualIds(), coveredIds);
     }
 
+    private static boolean shouldPreferInlineCompleteLabelPair(ResolvedBuildContext ctx, RenderedGroup pageObject) {
+        RenderedGroup inline = findInlinePair(ctx, pageObject);
+        if (inline == null || inline.bounds() == null || pageObject == null || pageObject.bounds() == null) {
+            return false;
+        }
+        double[] ib = inline.bounds();
+        double[] pb = pageObject.bounds();
+        if (ib.length < 4 || pb.length < 4) return false;
+        double dx = Math.abs(ib[1] - pb[1]);
+        double dy = Math.abs(ib[0] - pb[0]);
+        if (dx <= 1.0 && dy <= 1.0) return true;
+
+        double pageWidth = localPageWidth(ctx, pageObject.pageIndex());
+        double pageHeight = localPageHeight(ctx, pageObject.pageIndex());
+        boolean shiftedByPageWidth = pageWidth > 0.0 && Math.abs(dx - pageWidth) <= 2.0;
+        boolean shiftedByPageHeight = pageHeight > 0.0 && Math.abs(dy - pageHeight) <= 2.0;
+        if (shiftedByPageWidth || shiftedByPageHeight) return false;
+        return dx <= 4.0 && dy <= 4.0;
+    }
+
+    private static RenderedGroup findInlinePair(ResolvedBuildContext ctx, RenderedGroup pageObject) {
+        if (ctx == null || ctx.resolvedData == null || pageObject == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != pageObject.id()) continue;
+            if ("inline_object".equals(rg.itemType()) || "inline_object".equals(rg.type())) {
+                return rg;
+            }
+        }
+        return null;
+    }
+
+    private static double localPageWidth(ResolvedBuildContext ctx, int pageIndex) {
+        double[] bounds = pageBounds(ctx, pageIndex);
+        if (bounds == null) return 0.0;
+        double width = bounds[3] - bounds[1];
+        return ctx.scaleFactor != 0.0 ? width / ctx.scaleFactor : width;
+    }
+
+    private static double localPageHeight(ResolvedBuildContext ctx, int pageIndex) {
+        double[] bounds = pageBounds(ctx, pageIndex);
+        if (bounds == null) return 0.0;
+        double height = bounds[2] - bounds[0];
+        return ctx.scaleFactor != 0.0 ? height / ctx.scaleFactor : height;
+    }
+
+    private static double[] pageBounds(ResolvedBuildContext ctx, int pageIndex) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.pages() == null) return null;
+        if (pageIndex < 0 || pageIndex >= ctx.resolvedData.pages().size()) return null;
+        if (ctx.resolvedData.pages().get(pageIndex) == null) return null;
+        double[] bounds = ctx.resolvedData.pages().get(pageIndex).bounds();
+        return bounds != null && bounds.length >= 4 ? bounds : null;
+    }
+
     private static void addAll(int[] ids, Set<Integer> target) {
         if (ids == null || target == null) return;
         for (int id : ids) {
@@ -1585,8 +1644,10 @@ public final class BackgroundInjector {
         if (items == null) return ids;
         for (RenderedGroup rg : items) {
             if (rg == null) continue;
-            if (!"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) continue;
-            if (isCompletePngSimpleButtonLabel(ctx, rg)) ids.add(rg.id());
+            if (!isCompletePngSimpleButtonLabel(ctx, rg)) continue;
+            boolean inlineOwned = "inline_object".equals(rg.itemType())
+                    || "inline_object".equals(rg.type());
+            if (inlineOwned) ids.add(rg.id());
         }
         return ids;
     }
@@ -1682,14 +1743,14 @@ public final class BackgroundInjector {
             List<RenderedGroup> items,
             RenderedGroup shell,
             int currentZ) {
-        int maxContentZ = maxOverlappingRenderedContentZ(ctx, items, shell);
-        if (maxContentZ < 0 || currentZ > maxContentZ) {
+        int minContentZ = minOverlappingRenderedContentZ(ctx, items, shell);
+        if (minContentZ < 0 || currentZ < minContentZ) {
             return currentZ;
         }
-        return Math.min(999, maxContentZ + 1);
+        return Math.max(0, minContentZ - 1);
     }
 
-    private static int maxOverlappingRenderedContentZ(
+    private static int minOverlappingRenderedContentZ(
             ResolvedBuildContext ctx,
             List<RenderedGroup> items,
             RenderedGroup shell) {
@@ -1700,9 +1761,9 @@ public final class BackgroundInjector {
         double shellArea = area(shellBounds);
         if (shellArea <= 0) return -1;
 
-        int maxContentZ = Integer.MIN_VALUE;
+        int minContentZ = Integer.MAX_VALUE;
         for (RenderedGroup content : items) {
-            if (!isRenderedContentLayer(content) || content.pageIndex() != shell.pageIndex()) continue;
+            if (!isRenderedContentLayer(content, shellArea) || content.pageIndex() != shell.pageIndex()) continue;
             if (content.id() == shell.id()) continue;
             double[] contentBounds = content.bounds();
             double contentArea = area(contentBounds);
@@ -1715,10 +1776,10 @@ public final class BackgroundInjector {
 
             int contentZ = effectiveZOrder(ctx, content);
             if (contentZ > 0) {
-                maxContentZ = Math.max(maxContentZ, contentZ);
+                minContentZ = Math.min(minContentZ, contentZ);
             }
         }
-        return maxContentZ == Integer.MIN_VALUE ? -1 : maxContentZ;
+        return minContentZ == Integer.MAX_VALUE ? -1 : minContentZ;
     }
 
     private static boolean isRenderedContainerShell(RenderedGroup rg) {
@@ -1738,15 +1799,47 @@ public final class BackgroundInjector {
     }
 
     private static boolean isRenderedContentLayer(RenderedGroup rg) {
+        return isRenderedContentLayer(rg, -1.0);
+    }
+
+    private static boolean isRenderedContentLayer(RenderedGroup rg, double shellArea) {
         if (rg == null || !isPageObject(rg)) return false;
         if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
         if ("hwpx_tf".equals(rg.textOwner())) return true;
         String reason = rg.reason();
         if (reason == null) return false;
-        return reason.contains("mixed_group_text_hidden")
+        if (reason.contains("mixed_group_text_hidden")
                 || reason.contains("image_group_text_hidden")
-                || reason.contains("complex_graphic_text_hidden");
+                || reason.contains("complex_graphic_text_hidden")) {
+            return true;
+        }
+        return isSemanticImageContentLayer(rg, shellArea);
+    }
+
+    private static boolean isSemanticImageContentLayer(RenderedGroup rg) {
+        return isSemanticImageContentLayer(rg, -1.0);
+    }
+
+    private static boolean isSemanticImageContentLayer(RenderedGroup rg, double shellArea) {
+        if (rg == null) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
+        String reason = rg.reason();
+        if (reason == null) return false;
+        boolean imageLike = reason.contains("image_group")
+                || reason.contains("graphic")
+                || reason.contains("photo")
+                || reason.contains("picture");
+        if (!imageLike) return false;
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        double w = b[3] - b[1];
+        double h = b[2] - b[0];
+        double a = area(b);
+        if (w <= 0 || h <= 0 || a < 25.0) return false;
+        if (w > 170.0 || h > 170.0 || a > 12000.0) return false;
+        if (shellArea > 0 && a > shellArea * 1.25) return false;
+        return true;
     }
 
     private static boolean isForegroundOverlapShellCandidate(RenderedGroup rg) {

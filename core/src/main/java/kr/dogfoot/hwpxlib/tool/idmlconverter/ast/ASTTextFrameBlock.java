@@ -28,6 +28,8 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     // 프레임 스타일
     private String fillColor;
+    private byte[] imageFillData;
+    private boolean nativeGraphicsAllowed;
     private String strokeColor;
     private double strokeWeight;
     private String strokeType = "Solid"; // Solid, Dashed, Dotted
@@ -130,6 +132,12 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public String fillColor() { return fillColor; }
     public void fillColor(String v) { this.fillColor = v; }
+
+    public byte[] imageFillData() { return imageFillData; }
+    public void imageFillData(byte[] v) { this.imageFillData = v; }
+
+    public boolean nativeGraphicsAllowed() { return nativeGraphicsAllowed; }
+    public void nativeGraphicsAllowed(boolean v) { this.nativeGraphicsAllowed = v; }
 
     public String strokeColor() { return strokeColor; }
     public void strokeColor(String v) { this.strokeColor = v; }

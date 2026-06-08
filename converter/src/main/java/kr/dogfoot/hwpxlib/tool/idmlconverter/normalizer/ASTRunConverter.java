@@ -224,6 +224,16 @@ public class ASTRunConverter {
                     }
                     return;
                 }
+                if (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                        .isSimpleButtonLabelAnchor(tmpCtx, boxDomId)) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject completeBadge =
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                    .loadCompleteSimpleButtonLabelInlineObject(tmpCtx, boxDomId);
+                    if (completeBadge != null) {
+                        para.addItem(completeBadge);
+                        return;
+                    }
+                }
                 // 단일 배지 (배경 도형 + TF 1개): INLINE_TEXT_FRAME으로 변환
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject singleBadge =
                         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler

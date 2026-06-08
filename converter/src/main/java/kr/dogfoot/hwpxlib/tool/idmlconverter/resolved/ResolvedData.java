@@ -465,6 +465,10 @@ public class ResolvedData {
         return true;
     }
 
+    public boolean isSimpleButtonLabelTextFrame(String textFrameId) {
+        return isSimpleButtonLabelText(getTextFrame(textFrameId));
+    }
+
     private static boolean isSimpleButtonLabelText(ResolvedTextFrame tf) {
         if (tf == null) return false;
         String text = tf.frameVisibleText();

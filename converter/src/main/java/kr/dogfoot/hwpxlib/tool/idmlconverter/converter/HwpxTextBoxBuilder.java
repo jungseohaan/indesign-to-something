@@ -124,8 +124,14 @@ public class HwpxTextBoxBuilder {
         setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
                 block.strokeType(), block.strokeTint());
 
-        // FillBrush (배경색)
-        setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint());
+        boolean imgBrushSet = false;
+        if (block.imageFillData() != null && block.imageFillData().length > 0) {
+            imgBrushSet = setupTextBoxImgBrush(rect, block.imageFillData());
+        }
+        if (!imgBrushSet) {
+            setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint(),
+                    block.nativeGraphicsAllowed());
+        }
 
         // DrawText (글상자 내용)
         rect.createDrawText();
@@ -325,6 +331,10 @@ public class HwpxTextBoxBuilder {
 
 
         // inlineToFloating: 배지 단일-child — fill 없으면 hp:tbl 흰 배경 방지를 위해 투명 DrawText 경로 사용
+        if (block.imageFillData() != null && block.imageFillData().length > 0) {
+            frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
+            return;
+        }
         if (block.inlineToFloating() && block.fillColor() == null && !block.isBackgroundOnly()) {
             frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
             return;
