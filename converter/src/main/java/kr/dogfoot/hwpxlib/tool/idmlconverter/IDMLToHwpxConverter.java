@@ -393,6 +393,76 @@ public class IDMLToHwpxConverter {
         }
     }
 
+    private static int adjustRenderedBackgroundShellZOrder(
+            RenderedGroup rg, ASTSection section, ASTFigure figure, int currentZ) {
+        if (!isRenderedBackgroundShellCandidate(rg)
+                || section == null || figure == null
+                || figure.width() <= 0 || figure.height() <= 0) {
+            return currentZ;
+        }
+        int minOverlapZ = Integer.MAX_VALUE;
+        for (ASTBlock block : section.blocks()) {
+            if (block == null || block == figure) continue;
+            long[] b = blockBounds(block);
+            if (b == null) continue;
+            long overlap = overlapArea(
+                    figure.x(), figure.y(), figure.width(), figure.height(),
+                    b[0], b[1], b[2], b[3]);
+            if (overlap <= 0) continue;
+            int z = blockZOrder(block);
+            if (z <= 0) continue;
+            if (z < minOverlapZ) minOverlapZ = z;
+        }
+        if (minOverlapZ == Integer.MAX_VALUE) return currentZ;
+        return Math.max(0, Math.min(currentZ, minOverlapZ - 1));
+    }
+
+    private static boolean isRenderedBackgroundShellCandidate(RenderedGroup rg) {
+        if (rg == null) return false;
+        String reason = rg.reason();
+        if (reason == null) return false;
+        return "decoration_group".equals(reason)
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("mixed_group_text_hidden")
+                || reason.contains("image_group_text_hidden")
+                || reason.contains("visual_label_text_hidden_shell")
+                || reason.contains("textframe_visual_shell");
+    }
+
+    private static long[] blockBounds(ASTBlock block) {
+        if (block instanceof ASTTextFrameBlock) {
+            ASTTextFrameBlock tf = (ASTTextFrameBlock) block;
+            return new long[] { tf.x(), tf.y(), tf.effectiveWidth(), tf.height() };
+        }
+        if (block instanceof ASTFigure) {
+            ASTFigure fig = (ASTFigure) block;
+            return new long[] { fig.x(), fig.y(), fig.width(), fig.height() };
+        }
+        if (block instanceof ASTTable) {
+            ASTTable table = (ASTTable) block;
+            return new long[] { table.x(), table.y(), table.width(), table.height() };
+        }
+        return null;
+    }
+
+    private static int blockZOrder(ASTBlock block) {
+        if (block instanceof ASTTextFrameBlock) return ((ASTTextFrameBlock) block).zOrder();
+        if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
+        if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
+        return 0;
+    }
+
+    private static long overlapArea(
+            long ax, long ay, long aw, long ah,
+            long bx, long by, long bw, long bh) {
+        long left = Math.max(ax, bx);
+        long top = Math.max(ay, by);
+        long right = Math.min(ax + aw, bx + bw);
+        long bottom = Math.min(ay + ah, by + bh);
+        if (right <= left || bottom <= top) return 0;
+        return (right - left) * (bottom - top);
+    }
+
     private static boolean isRenderedCoveredByUsedSource(
             RenderedGroup rg, java.util.Set<Integer> coveredIds) {
         if (rg == null || coveredIds == null || coveredIds.isEmpty()) return false;
@@ -668,10 +738,16 @@ public class IDMLToHwpxConverter {
                         isBackground = true;
                     }
                 }
+                boolean demoteToBehindText = false;
                 if (isBackground) {
                     fig.zOrder(0);  // 배경은 최하위 z-order
+                } else {
+                    int beforeAdjustZ = fig.zOrder();
+                    int adjustedZ = adjustRenderedBackgroundShellZOrder(rg, section, fig, beforeAdjustZ);
+                    fig.zOrder(adjustedZ);
+                    demoteToBehindText = adjustedZ < beforeAdjustZ;
                 }
-                fig.fromGroup(!isBackground);  // 배경이면 BEHIND_TEXT, 아니면 IN_FRONT_OF_TEXT
+                fig.fromGroup(!isBackground && !demoteToBehindText);  // 배경이면 BEHIND_TEXT, 아니면 IN_FRONT_OF_TEXT
 
                 section.addBlock(fig);
 

@@ -28,6 +28,8 @@ public class IDMLCharacterRun {
     private Boolean underline;     // 밑줄 (IDML Underline="true")
     private String underlineType;  // 밑줄 타입 (IDML UnderlineType: "StrokeStyle/$ID/Wavy" 등)
     private Double underlineTint;  // 밑줄 틴트 % (IDML UnderlineTint)
+    private String shadeColor;     // 문자 배경색/강조색 (IDML CharacterShading/Shading 계열)
+    private Double shadeTint;      // 문자 배경색 틴트 %
     private Boolean strikeThrough; // 취소선 (IDML StrikeThru="true")
     private Double baselineShift;  // 기준선 이동 (points, 양수=위)
     private Double horizontalScale; // 장평 (%, 100=normal)
@@ -295,6 +297,12 @@ public class IDMLCharacterRun {
 
     public Double underlineTint() { return underlineTint; }
     public void underlineTint(Double v) { this.underlineTint = v; }
+
+    public String shadeColor() { return shadeColor; }
+    public void shadeColor(String v) { this.shadeColor = v; }
+
+    public Double shadeTint() { return shadeTint; }
+    public void shadeTint(Double v) { this.shadeTint = v; }
 
     public Boolean strikeThrough() { return strikeThrough; }
     public void strikeThrough(Boolean v) { this.strikeThrough = v; }

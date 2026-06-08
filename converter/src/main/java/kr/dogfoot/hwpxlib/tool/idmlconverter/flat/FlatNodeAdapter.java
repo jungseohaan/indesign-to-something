@@ -358,6 +358,7 @@ public class FlatNodeAdapter {
         run.fontStyle(item.fontStyle());
         run.fontSizeHwpunits(item.fontSizeHwpunits());
         run.textColor(item.textColor());
+        run.shadeColor(item.shadeColor());
         run.letterSpacing(item.letterSpacing());
         run.subscript(item.subscript());
         run.superscript(item.superscript());
@@ -447,6 +448,7 @@ public class FlatNodeAdapter {
 
         // Frame style
         obj.fillColor(node.fillColor());
+        obj.imageFillData(node.imageFillData());
         obj.fillTint(node.fillTint());
         obj.strokeColor(node.strokeColor());
         obj.strokeWeight(node.strokeWeight());

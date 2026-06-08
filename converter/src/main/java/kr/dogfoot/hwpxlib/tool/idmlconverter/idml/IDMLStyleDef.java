@@ -29,6 +29,8 @@ public class IDMLStyleDef {
     private String underlineColor; // 밑줄 색상
     private Double underlineWeight; // 밑줄 두께 (points)
     private Double underlineOffset; // 밑줄 오프셋 (points)
+    private String shadeColor;     // 문자 배경색/강조색
+    private Double shadeTint;      // 문자 배경색 틴트 %
     private Boolean strikeThrough; // 취소선
     private Boolean ruleBelowOn;   // 단락 아래선 (RuleBelow)
     private Double ruleAboveLineWeight; // 단락 위선 두께 (points)
@@ -178,6 +180,12 @@ public class IDMLStyleDef {
 
     public Double underlineOffset() { return underlineOffset; }
     public void underlineOffset(Double v) { this.underlineOffset = v; }
+
+    public String shadeColor() { return shadeColor; }
+    public void shadeColor(String v) { this.shadeColor = v; }
+
+    public Double shadeTint() { return shadeTint; }
+    public void shadeTint(Double v) { this.shadeTint = v; }
 
     public Boolean strikeThrough() { return strikeThrough; }
     public void strikeThrough(Boolean v) { this.strikeThrough = v; }

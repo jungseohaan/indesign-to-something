@@ -199,6 +199,7 @@ class MathProcessor {
                 tr.fontStyle(templateRun.fontStyle());
                 tr.fontSizeHwpunits(templateRun.fontSizeHwpunits());
                 tr.textColor(templateRun.textColor());
+                tr.shadeColor(templateRun.shadeColor());
                 para.addItem(tr);
             }
         }

@@ -11,6 +11,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
@@ -217,6 +219,7 @@ public final class TableBuilder {
                         idmlTable, thisX, thisY, tf.zOrder(),
                         ctx.idmlDocumentSupplier.get(), ctx.colorResolverSupplier.get(),
                         ctx.imageLoaderSupplier.get(), ctx.resolvedData);
+                restoreAnchorOnlyEditableInlineGraphics(ctx, astTable, idmlTable);
 
                 // 테이블 셀에 포함된 인라인 그룹 → 컬럼 분할 (예: 문장 성분의 종류 마인드맵)
                 ASTTable expandedTable = tryExpandInlineGroupColumns(ctx, astTable, idmlTable);
@@ -261,6 +264,90 @@ public final class TableBuilder {
             return false;
         }
         return true;
+    }
+
+    private static void restoreAnchorOnlyEditableInlineGraphics(
+            ResolvedBuildContext ctx,
+            ASTTable astTable,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable) {
+        if (ctx == null || astTable == null || idmlTable == null) return;
+        if (astTable.rows() == null || idmlTable.rows() == null) return;
+
+        int rowCount = Math.min(astTable.rows().size(), idmlTable.rows().size());
+        for (int ri = 0; ri < rowCount; ri++) {
+            ASTTableRow astRow = astTable.rows().get(ri);
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow idmlRow = idmlTable.rows().get(ri);
+            if (astRow == null || idmlRow == null || astRow.cells() == null || idmlRow.cells() == null) continue;
+            int cellCount = Math.min(astRow.cells().size(), idmlRow.cells().size());
+            for (int ci = 0; ci < cellCount; ci++) {
+                ASTTableCell astCell = astRow.cells().get(ci);
+                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell = idmlRow.cells().get(ci);
+                if (astCell == null || idmlCell == null || astCell.paragraphs() == null || idmlCell.paragraphs() == null) {
+                    continue;
+                }
+                int paraCount = Math.min(astCell.paragraphs().size(), idmlCell.paragraphs().size());
+                for (int pi = 0; pi < paraCount; pi++) {
+                    IDMLParagraph idmlPara = idmlCell.paragraphs().get(pi);
+                    int groupId = anchorOnlyGraphicDomId(idmlPara);
+                    if (groupId <= 0) continue;
+                    List<ASTInlineObject> boxes =
+                            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                    .buildChildEditableBoxes(ctx, groupId);
+                    if (boxes == null || boxes.isEmpty()) continue;
+
+                    ASTParagraph astPara = astCell.paragraphs().get(pi);
+                    astPara.items().clear();
+                    for (ASTInlineObject box : boxes) {
+                        astPara.addItem(box);
+                    }
+                    ctx.setInlineDisposition(groupId, FrameDisposition.TEXT_BLOCK_PLACED);
+                }
+            }
+        }
+    }
+
+    private static int anchorOnlyGraphicDomId(IDMLParagraph para) {
+        if (para == null || para.characterRuns() == null) return -1;
+        int groupId = -1;
+        int anchorCount = 0;
+        for (IDMLCharacterRun run : para.characterRuns()) {
+            if (run == null) continue;
+            String content = run.content();
+            if (content != null) {
+                String visible = content.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+                if (!visible.isEmpty()) return -1;
+            }
+            if (run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) continue;
+            for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+                if (anchor == null) continue;
+                if (anchor.type() != IDMLCharacterRun.InlineAnchorType.GRAPHIC) return -1;
+                if (run.inlineGraphics() == null || anchor.index() < 0 || anchor.index() >= run.inlineGraphics().size()) {
+                    return -1;
+                }
+                IDMLCharacterRun.InlineGraphic graphic = run.inlineGraphics().get(anchor.index());
+                int parsed = parseInlineGraphicDomId(graphic);
+                if (parsed <= 0) return -1;
+                if (groupId > 0 && groupId != parsed) return -1;
+                groupId = parsed;
+                anchorCount++;
+            }
+        }
+        return anchorCount == 1 ? groupId : -1;
+    }
+
+    private static int parseInlineGraphicDomId(IDMLCharacterRun.InlineGraphic graphic) {
+        if (graphic == null || graphic.selfId() == null) return -1;
+        String id = graphic.selfId();
+        if (id.startsWith("u") || id.startsWith("U")) id = id.substring(1);
+        try {
+            return Integer.parseInt(id, 16);
+        } catch (NumberFormatException e) {
+            try {
+                return Integer.parseInt(id);
+            } catch (NumberFormatException ignored) {
+                return -1;
+            }
+        }
     }
 
     /**

@@ -197,6 +197,13 @@ public final class ResolvedBuildContext {
      */
     public java.util.Set<Integer> phase6PlacedIds = new java.util.HashSet<>();
 
+    /**
+     * Concept diagram pseudo-table 영역에 속한 TextFrame DOM id.
+     * 이 영역은 실제 IDML Table이 아니라 visual shell + editable TF + 독립 설명 TF
+     * 조합이므로, table/grid/width-expansion/label-centering 보정보다 원본 좌표 보존을 우선한다.
+     */
+    public java.util.Set<String> conceptDiagramTextFrameIds = new java.util.HashSet<>();
+
     /** rendered page_object의 최종 배치/스킵 사유 추적용 JSONL 라인. */
     public java.util.List<String> renderDecisionLines = new java.util.ArrayList<>();
 

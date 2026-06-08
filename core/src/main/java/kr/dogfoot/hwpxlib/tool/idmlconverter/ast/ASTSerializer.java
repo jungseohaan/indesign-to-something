@@ -589,6 +589,7 @@ public class ASTSerializer {
             first = writeBoxedIntField(sb, "fontSizeHwpunits", run.fontSizeHwpunits(), first);
         }
         first = writeStringField(sb, "textColor", run.textColor(), first);
+        first = writeStringField(sb, "shadeColor", run.shadeColor(), first);
         if (run.letterSpacing() != null) {
             first = writeBoxedShortField(sb, "letterSpacing", run.letterSpacing(), first);
         }

@@ -746,6 +746,7 @@ public class FlatSerializer {
             first = writeBoxedIntField(sb, "fontSizeHwpunits", item.fontSizeHwpunits(), first);
         }
         first = writeStringField(sb, "textColor", item.textColor(), first);
+        first = writeStringField(sb, "shadeColor", item.shadeColor(), first);
         if (item.letterSpacing() != null) {
             first = writeBoxedShortField(sb, "letterSpacing", item.letterSpacing(), first);
         }

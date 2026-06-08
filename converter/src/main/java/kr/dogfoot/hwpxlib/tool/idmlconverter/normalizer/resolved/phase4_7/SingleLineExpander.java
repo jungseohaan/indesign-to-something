@@ -69,6 +69,7 @@ public final class SingleLineExpander {
     private static Outcome considerExpand(ResolvedBuildContext ctx, ASTTextFrameBlock tfb, ASTSection section) {
         if (tfb.paragraphs() == null || tfb.paragraphs().size() != 1) return Outcome.NOT_CANDIDATE;
         if (tfb.columnCount() > 1) return Outcome.NOT_CANDIDATE;
+        if (isConceptDiagramTextFrame(ctx, tfb)) return Outcome.NOT_CANDIDATE;
         ASTParagraph p = tfb.paragraphs().get(0);
         if (p.items() == null || p.items().isEmpty()) return Outcome.NOT_CANDIDATE;
 
@@ -195,6 +196,12 @@ public final class SingleLineExpander {
             if (expected.equals(candidate)) return true;
         }
         return false;
+    }
+
+    private static boolean isConceptDiagramTextFrame(ResolvedBuildContext ctx, ASTTextFrameBlock tfb) {
+        if (ctx == null || ctx.conceptDiagramTextFrameIds == null || tfb == null) return false;
+        int tfDomId = sourceDomId(tfb);
+        return tfDomId >= 0 && ctx.conceptDiagramTextFrameIds.contains(String.valueOf(tfDomId));
     }
 
     private static int sourceDomId(ASTTextFrameBlock tfb) {

@@ -161,6 +161,13 @@ public class IDMLResourceParser {
         def.tracking(parseDoubleAttr(styleElem, "Tracking"));
         def.baselineShift(parseDoubleAttr(styleElem, "BaselineShift"));
         def.capitalization(getAttrOrNull(styleElem, "Capitalization"));
+        String directShadeColor = firstAttr(styleElem,
+                "CharacterShadingColor", "ShadingColor", "TextShadingColor");
+        if (isShadingEnabled(styleElem, directShadeColor)) {
+            def.shadeColor(directShadeColor);
+        }
+        def.shadeTint(firstDoubleAttr(styleElem,
+                "CharacterShadingTint", "ShadingTint", "TextShadingTint"));
         def.underlineWeight(parseDoubleAttr(styleElem, "UnderlineWeight"));
         def.underlineOffset(parseDoubleAttr(styleElem, "UnderlineOffset"));
         def.ruleAboveLineWeight(parseDoubleAttr(styleElem, "RuleAboveLineWeight"));
@@ -208,6 +215,15 @@ public class IDMLResourceParser {
                 def.underlineType(ulType);
             }
             def.underlineColor(getPropertyText(props, "UnderlineColor"));
+            String propShadeColor = firstPropertyText(props,
+                    "CharacterShadingColor", "ShadingColor", "TextShadingColor");
+            if (def.shadeColor() == null && isShadingEnabled(props, propShadeColor)) {
+                def.shadeColor(propShadeColor);
+            }
+            if (def.shadeTint() == null) {
+                def.shadeTint(firstPropertyDouble(props,
+                        "CharacterShadingTint", "ShadingTint", "TextShadingTint"));
+            }
             def.ruleAboveColor(getPropertyText(props, "RuleAboveColor"));
             def.ruleBelowColor(getPropertyText(props, "RuleBelowColor"));
 
@@ -274,6 +290,61 @@ public class IDMLResourceParser {
         }
 
         return def;
+    }
+
+    private static String firstAttr(Element elem, String... names) {
+        if (elem == null || names == null) return null;
+        for (String name : names) {
+            String value = getAttrOrNull(elem, name);
+            if (value != null && !value.isEmpty() && !"Nothing".equalsIgnoreCase(value)
+                    && !"None".equalsIgnoreCase(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static Double firstDoubleAttr(Element elem, String... names) {
+        String value = firstAttr(elem, names);
+        if (value == null) return null;
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String firstPropertyText(Element props, String... names) {
+        if (props == null || names == null) return null;
+        for (String name : names) {
+            String value = getPropertyText(props, name);
+            if (value != null && !value.isEmpty() && !"Nothing".equalsIgnoreCase(value)
+                    && !"None".equalsIgnoreCase(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static Double firstPropertyDouble(Element props, String... names) {
+        String value = firstPropertyText(props, names);
+        if (value == null) return null;
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static boolean isShadingEnabled(Element elem, String color) {
+        if (elem == null) return false;
+        String on = firstAttr(elem, "CharacterShadingOn", "ShadingOn", "TextShadingOn");
+        if (on != null) return "true".equalsIgnoreCase(on);
+        String propOn = getPropertyText(elem, "CharacterShadingOn");
+        if (propOn == null) propOn = getPropertyText(elem, "ShadingOn");
+        if (propOn == null) propOn = getPropertyText(elem, "TextShadingOn");
+        if (propOn != null) return "true".equalsIgnoreCase(propOn);
+        return color != null;
     }
 
     // ===== Resources/Graphic.xml 파싱 =====

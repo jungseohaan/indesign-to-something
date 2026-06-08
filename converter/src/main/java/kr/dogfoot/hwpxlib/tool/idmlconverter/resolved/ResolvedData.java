@@ -37,6 +37,7 @@ public class ResolvedData {
     private final List<RenderedGroup> renderedFloatingItems = new ArrayList<>();  // 통합 플로팅 그래픽
     private final Map<String, RenderedGroup> renderedFloatingItemMap = new LinkedHashMap<>();
     private final Set<String> indesignPngTextOwnerFrameIds = new HashSet<>();
+    private final Set<String> atomicIndesignPngTextOwnerFrameIds = new HashSet<>();
     private Set<String> editableTextFrameIds;  // 배경에서 숨겨진 TextFrame DOM ID
     private String basePath;  // resolved.json 부모 디렉토리 경로
     private final Map<String, String> paragraphStyleJustMap = new HashMap<>();  // styleName → justification (top-level paragraphStyles)
@@ -268,6 +269,9 @@ public class ResolvedData {
     // --- RenderedFloatingItem (통합 플로팅 그래픽) ---
 
     public void addRenderedFloatingItem(RenderedGroup item) {
+        if (isExactRenderedItemDuplicate(item)) {
+            return;
+        }
         if (isLiveTitleDecorationDuplicate(item)) {
             return;
         }
@@ -286,6 +290,28 @@ public class ResolvedData {
     }
 
     public List<RenderedGroup> allRenderedFloatingItems() { return renderedFloatingItems; }
+
+    private boolean isExactRenderedItemDuplicate(RenderedGroup item) {
+        if (item == null) return true;
+        for (RenderedGroup existing : renderedFloatingItems) {
+            if (existing == null) continue;
+            if (existing.id() != item.id()) continue;
+            if (existing.pageIndex() != item.pageIndex()) continue;
+            if (!safeEquals(existing.type(), item.type())) continue;
+            if (!safeEquals(existing.itemType(), item.itemType())) continue;
+            if (!safeEquals(existing.file(), item.file())) continue;
+            if (!safeEquals(existing.reason(), item.reason())) continue;
+            if (!sameBounds(existing.bounds(), item.bounds(), 0.05)) continue;
+            if (!sameSourceObjectIds(existing.sourceObjectIds(), item.sourceObjectIds())) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean safeEquals(String a, String b) {
+        if (a == null) return b == null;
+        return a.equals(b);
+    }
 
     private boolean isDuplicateVisualPageObject(RenderedGroup item) {
         if (!isVisualOnlyPageObject(item)) return false;
@@ -385,9 +411,19 @@ public class ResolvedData {
 
     private void registerIndesignPngTextOwner(RenderedGroup item) {
         if (item == null || !"indesign_png".equals(item.textOwner())) return;
-        if (shouldKeepVisualLabelTextEditable(item)) return;
         String[] ids = item.editableTextFrameIds();
         if (ids == null) return;
+        if (shouldUseCompletePngForSimpleButtonLabel(item)) {
+            for (String id : ids) {
+                if (id != null && !id.isEmpty()) {
+                    atomicIndesignPngTextOwnerFrameIds.add(id);
+                    indesignPngTextOwnerFrameIds.add(id);
+                }
+            }
+            return;
+        }
+        if ("visual_marker_label_indesign_png".equals(item.reason())) return;
+        if (shouldKeepVisualLabelTextEditable(item)) return;
         for (String id : ids) {
             if (id != null && !id.isEmpty()) {
                 indesignPngTextOwnerFrameIds.add(id);
@@ -400,9 +436,49 @@ public class ResolvedData {
      * 이런 TF는 HWPX 글상자로 다시 배치하면 같은 라벨 텍스트가 중복된다.
      */
     public boolean isTextOwnedByIndesignPng(String domId) {
+        if (domId != null && atomicIndesignPngTextOwnerFrameIds.contains(domId)) {
+            return true;
+        }
         return domId != null
                 && indesignPngTextOwnerFrameIds.contains(domId)
                 && !hasHwpxTextOwnerRenderForFrame(domId);
+    }
+
+    /**
+     * 기본 원칙은 editable TF 유지다. 다만 가/나/다/라, 1/2/3, 01/02처럼
+     * 내용 의미보다 위치 식별자 성격이 강한 짧은 버튼 라벨은 InDesign에서
+     * 완성형 PNG로 추출해도 편집 손실보다 중복/정렬 리스크가 작다.
+     * 이 기준은 플로팅/인라인에 동일하게 적용한다.
+     */
+    public boolean shouldUseCompletePngForSimpleButtonLabel(RenderedGroup item) {
+        if (item == null) return false;
+        if (!"visual_marker_label_indesign_png".equals(item.reason())) return false;
+        if (!"indesign_png".equals(item.visualOwner())) return false;
+        if (!"indesign_png".equals(item.textOwner())) return false;
+        if (!Boolean.TRUE.equals(item.containsEditableText())) return false;
+        String[] ids = item.editableTextFrameIds();
+        if (ids == null || ids.length == 0 || ids.length > 2) return false;
+        for (String id : ids) {
+            ResolvedTextFrame tf = getTextFrame(id);
+            if (!isSimpleButtonLabelText(tf)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isSimpleButtonLabelText(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        String text = tf.frameVisibleText();
+        if (text == null) return false;
+        text = text.replace("\uFFFC", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .replaceAll("\\s+", "")
+                .trim();
+        if (text.isEmpty()) return false;
+        if (text.matches("\\d{1,2}")) return true;
+        return text.codePointCount(0, text.length()) == 1
+                && text.codePointAt(0) >= 0xAC00
+                && text.codePointAt(0) <= 0xD7A3;
     }
 
     /**
@@ -817,7 +893,7 @@ public class ResolvedData {
         // inline_object로 등록된 DOM id 집합 (FramePlacer 조상 검사 + Phase 7 skip용)
         inlineObjectDomIds = new HashSet<>();
         for (RenderedGroup flt : renderedFloatingItems) {
-            if ("inline_object".equals(flt.itemType())) {
+            if ("inline_object".equals(flt.itemType()) || "inline_object".equals(flt.type())) {
                 inlineObjectDomIds.add(flt.id());
             }
         }

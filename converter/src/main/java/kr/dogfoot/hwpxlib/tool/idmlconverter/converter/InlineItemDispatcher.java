@@ -101,6 +101,7 @@ final class InlineItemDispatcher {
         if (obj.isOverlay()) return false;
         if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
         if (obj.paragraphs() == null || obj.paragraphs().size() != 1) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) return false;
         if (obj.fillColor() != null && !obj.fillColor().isEmpty()) return false;
         if (obj.strokeWeight() > 0.5) return false;
         // anchoredPosition이 있는 앵커 객체는 펼치지 않음

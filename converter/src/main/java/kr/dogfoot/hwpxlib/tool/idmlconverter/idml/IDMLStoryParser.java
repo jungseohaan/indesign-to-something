@@ -588,6 +588,13 @@ public class IDMLStoryParser {
         run.baselineShift(parseDoubleAttr(charRange, "BaselineShift"));
         run.horizontalScale(parseDoubleAttr(charRange, "HorizontalScale"));
         run.capitalization(getAttrOrNull(charRange, "Capitalization"));
+        String directShadeColor = firstAttr(charRange,
+                "CharacterShadingColor", "ShadingColor", "TextShadingColor");
+        if (isShadingEnabled(charRange, directShadeColor)) {
+            run.shadeColor(directShadeColor);
+        }
+        run.shadeTint(firstDoubleAttr(charRange,
+                "CharacterShadingTint", "ShadingTint", "TextShadingTint"));
 
         // 밑줄 / 취소선
         String underline = getAttrOrNull(charRange, "Underline");
@@ -611,6 +618,15 @@ public class IDMLStoryParser {
             String ulType = getPropertyText(props, "UnderlineType");
             if (ulType != null) {
                 run.underlineType(ulType);
+            }
+            String propShadeColor = firstPropertyText(props,
+                    "CharacterShadingColor", "ShadingColor", "TextShadingColor");
+            if (run.shadeColor() == null && isShadingEnabled(props, propShadeColor)) {
+                run.shadeColor(propShadeColor);
+            }
+            if (run.shadeTint() == null) {
+                run.shadeTint(firstPropertyDouble(props,
+                        "CharacterShadingTint", "ShadingTint", "TextShadingTint"));
             }
         }
         return run;
@@ -1859,6 +1875,61 @@ public class IDMLStoryParser {
         return false;
     }
 
+    private static String firstAttr(Element elem, String... names) {
+        if (elem == null || names == null) return null;
+        for (String name : names) {
+            String value = getAttrOrNull(elem, name);
+            if (value != null && !value.isEmpty() && !"Nothing".equalsIgnoreCase(value)
+                    && !"None".equalsIgnoreCase(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static Double firstDoubleAttr(Element elem, String... names) {
+        String value = firstAttr(elem, names);
+        if (value == null) return null;
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static String firstPropertyText(Element props, String... names) {
+        if (props == null || names == null) return null;
+        for (String name : names) {
+            String value = getPropertyText(props, name);
+            if (value != null && !value.isEmpty() && !"Nothing".equalsIgnoreCase(value)
+                    && !"None".equalsIgnoreCase(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static Double firstPropertyDouble(Element props, String... names) {
+        String value = firstPropertyText(props, names);
+        if (value == null) return null;
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static boolean isShadingEnabled(Element elem, String color) {
+        if (elem == null) return false;
+        String on = firstAttr(elem, "CharacterShadingOn", "ShadingOn", "TextShadingOn");
+        if (on != null) return "true".equalsIgnoreCase(on);
+        String propOn = getPropertyText(elem, "CharacterShadingOn");
+        if (propOn == null) propOn = getPropertyText(elem, "ShadingOn");
+        if (propOn == null) propOn = getPropertyText(elem, "TextShadingOn");
+        if (propOn != null) return "true".equalsIgnoreCase(propOn);
+        return color != null;
+    }
+
     /**
      * 런의 스타일 속성을 복사하고 텍스트만 변경한 새 런을 생성한다.
      */
@@ -1873,6 +1944,9 @@ public class IDMLStoryParser {
         clone.tracking(source.tracking());
         clone.underline(source.underline());
         clone.underlineType(source.underlineType());
+        clone.underlineTint(source.underlineTint());
+        clone.shadeColor(source.shadeColor());
+        clone.shadeTint(source.shadeTint());
         clone.strikeThrough(source.strikeThrough());
         clone.grepAppliedCharStyle(source.grepAppliedCharStyle());
         clone.content(newText);

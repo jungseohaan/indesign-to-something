@@ -513,6 +513,47 @@ function _runRenderPhases(doc, ctx, allItems) {
         for (var _i = 0; _i < arr.length; _i++) arr[_i].type = type;
     }
 
+    function renderedItemDedupeKey(item) {
+        if (!item) return "";
+        function arrKey(a) {
+            if (!a || !a.length) return "";
+            var out = [];
+            for (var i = 0; i < a.length; i++) out.push(String(a[i]));
+            return out.join(",");
+        }
+        function boundsKey(b) {
+            if (!b || b.length < 4) return "";
+            return [
+                Math.round(b[0] * 100),
+                Math.round(b[1] * 100),
+                Math.round(b[2] * 100),
+                Math.round(b[3] * 100)
+            ].join(",");
+        }
+        return [
+            item.id,
+            item.pageIndex,
+            item.type || "",
+            item.file || "",
+            item.reason || "",
+            boundsKey(item.bounds),
+            arrKey(item.sourceObjectIds)
+        ].join("|");
+    }
+
+    function dedupeRenderedFloatingItems(items) {
+        var out = [];
+        var seen = {};
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var key = renderedItemDedupeKey(item);
+            if (seen[key]) continue;
+            seen[key] = true;
+            out.push(item);
+        }
+        return out;
+    }
+
     // 03c. allItems 전체 분류 캐시 — classifyTextFrame의 중복 DOM 호출 제거
     _ctfCache = {};
     _hiddenLayerCache = {};  // isOnHiddenLayer 캐시 리셋 (새 allItems 기준)
@@ -584,13 +625,15 @@ function _runRenderPhases(doc, ctx, allItems) {
     for (var otfi = 0; otfi < tfShellFrames.length; otfi++) renderedFloatingItems.push(tfShellFrames[otfi]);
     try { $.gc(); } catch (e) {}
 
+    renderedFloatingItems = dedupeRenderedFloatingItems(renderedFloatingItems);
+
     // 추출 통계 기록
     try {
         var _statsEndMs = (new Date()).getTime();
         var _statsStartMs = _phaseTimingState ? _phaseTimingState.startTime : _statsEndMs;
         var _inlineCount = 0;
-        for (var _si2 = 0; _si2 < bgResult.items.length; _si2++) {
-            if (bgResult.items[_si2].type === "inline_object") _inlineCount++;
+        for (var _si2 = 0; _si2 < renderedFloatingItems.length; _si2++) {
+            if (renderedFloatingItems[_si2].type === "inline_object") _inlineCount++;
         }
         var _statsObj = {
             elapsed_ms: _statsEndMs - _statsStartMs,
@@ -1220,6 +1263,144 @@ function hideTextFrames(renderTarget) {
         }
     } catch (e) {}
     return saved;
+}
+
+function hideRepeatedCellBackgroundCandidates(renderTarget) {
+    // Mixed groups can contain both a decorative title/icon and InDesign table-cell
+    // background rectangles. Later Java absorbs those cell fills into HWP table cells,
+    // so keeping them in the group PNG creates duplicate boxes. Hide only repeated,
+    // fill-only, axis-aligned rectangular backgrounds during PNG export.
+    var saved = [];
+    try {
+        var nested = renderTarget.allPageItems;
+        var buckets = {};
+        for (var i = 0; i < nested.length; i++) {
+            var it = nested[i];
+            var cn = it.constructor.name;
+            if (cn !== "Rectangle" && cn !== "TextFrame") continue;
+            if (isOnHiddenLayer(it)) continue;
+            try { if (it.nonprinting) continue; } catch (eNp) {}
+            try { if (Math.abs(it.rotationAngle || 0) > 0.1) continue; } catch (eRot) {}
+
+            var fillName = null;
+            try { fillName = it.fillColor ? it.fillColor.name : null; } catch (eFill) {}
+            if (!fillName || fillName === "None" || fillName === "[None]") continue;
+
+            var strokeName = null;
+            try { strokeName = it.strokeColor ? it.strokeColor.name : null; } catch (eStroke) {}
+            var strokeWeight = 0;
+            try { strokeWeight = it.strokeWeight || 0; } catch (eSw) {}
+            if (strokeName && strokeName !== "None" && strokeName !== "[None]" && strokeWeight > 0.01) continue;
+
+            var b = null;
+            try { b = it.geometricBounds; } catch (eB) {}
+            if (!b || b.length < 4) continue;
+            var h = b[2] - b[0], w = b[3] - b[1];
+            if (h <= 1.0 || w <= 1.0) continue;
+            if (h > 28 || w > 90) continue;
+
+            var key = fillName;
+            if (!buckets[key]) buckets[key] = [];
+            buckets[key].push({ item: it, bounds: [b[0], b[1], b[2], b[3]], width: w, height: h });
+        }
+
+        for (var key in buckets) {
+            if (!buckets.hasOwnProperty(key)) continue;
+            var arr = buckets[key];
+            if (arr.length < 3) continue;
+            arr.sort(function(a, b) {
+                if (Math.abs(a.bounds[0] - b.bounds[0]) > 1) return a.bounds[0] - b.bounds[0];
+                return a.bounds[1] - b.bounds[1];
+            });
+
+            // Require a row/list-like repeated structure: same top or same left
+            // among at least three candidates. This avoids hiding isolated label pills.
+            var topBins = {}, leftBins = {};
+            for (var ai = 0; ai < arr.length; ai++) {
+                var topKey = String(Math.round(arr[ai].bounds[0] / 2));
+                var leftKey = String(Math.round(arr[ai].bounds[1] / 2));
+                topBins[topKey] = (topBins[topKey] || 0) + 1;
+                leftBins[leftKey] = (leftBins[leftKey] || 0) + 1;
+            }
+            var repeated = false;
+            for (var tk in topBins) if (topBins.hasOwnProperty(tk) && topBins[tk] >= 3) repeated = true;
+            for (var lk in leftBins) if (leftBins.hasOwnProperty(lk) && leftBins[lk] >= 3) repeated = true;
+            if (!repeated) continue;
+
+            for (var si = 0; si < arr.length; si++) {
+                var item = arr[si].item;
+                var state = { item: item, mode: "cellBg" };
+                var changed = false;
+                try {
+                    state.fillColor = item.fillColor;
+                    item.fillColor = app.activeDocument.swatches.itemByName("None");
+                    changed = true;
+                } catch (eNoneFill) {
+                    try {
+                        state.fillColor = item.fillColor;
+                        item.fillColor = app.activeDocument.swatches.itemByName("[None]");
+                        changed = true;
+                    } catch (eNoneFill2) {}
+                }
+                try {
+                    var blend = item.transparencySettings.blendingSettings;
+                    state.opacity = blend.opacity;
+                    blend.opacity = 0;
+                    changed = true;
+                } catch (eOp) {}
+                try {
+                    var fillBlend = item.fillTransparencySettings.blendingSettings;
+                    state.fillOpacity = fillBlend.opacity;
+                    fillBlend.opacity = 0;
+                    changed = true;
+                } catch (eFillOp) {}
+                try {
+                    var strokeBlend = item.strokeTransparencySettings.blendingSettings;
+                    state.strokeOpacity = strokeBlend.opacity;
+                    strokeBlend.opacity = 0;
+                    changed = true;
+                } catch (eStrokeOp) {}
+                if (!changed) {
+                    try {
+                        state.wasVisible = item.visible;
+                        item.visible = false;
+                        state.mode = "visible";
+                        changed = true;
+                    } catch (eVis) {}
+                }
+                if (changed) {
+                    saved.push(state);
+                }
+            }
+        }
+    } catch (e) {}
+    return saved;
+}
+
+function restoreRepeatedCellBackgroundCandidates(saved) {
+    if (!saved) return;
+    for (var i = saved.length - 1; i >= 0; i--) {
+        try {
+            if (saved[i].mode === "cellBg") {
+                if (saved[i].fillColor !== undefined) {
+                    saved[i].item.fillColor = saved[i].fillColor;
+                }
+                if (saved[i].opacity !== undefined) {
+                    saved[i].item.transparencySettings.blendingSettings.opacity = saved[i].opacity;
+                }
+                if (saved[i].fillOpacity !== undefined) {
+                    saved[i].item.fillTransparencySettings.blendingSettings.opacity = saved[i].fillOpacity;
+                }
+                if (saved[i].strokeOpacity !== undefined) {
+                    saved[i].item.strokeTransparencySettings.blendingSettings.opacity = saved[i].strokeOpacity;
+                }
+            } else if (saved[i].mode === "visible") {
+                saved[i].item.visible = saved[i].wasVisible;
+            } else if (saved[i].mode === "opacity") {
+                saved[i].item.transparencySettings.blendingSettings.opacity = saved[i].opacity;
+            }
+        } catch (e) {}
+    }
 }
 
 function _isTopLevelInlineVisualItem(item) {
@@ -1927,7 +2108,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
     }
 
     function _textStatsOfGroup(grp) {
-        var stats = { count: 0, length: 0, hasTable: false, titleLabelStyle: false };
+        var stats = { count: 0, length: 0, text: "", hasTable: false, titleLabelStyle: false };
         try {
             var nested = grp.allPageItems;
             for (var i = 0; i < nested.length; i++) {
@@ -1943,6 +2124,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                     var text = item.contents || "";
                     text = String(text).replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC]/g, "");
                     stats.length += text.length;
+                    stats.text += text;
                 } catch (eText) {}
                 try {
                     var ps = item.parentStory && item.parentStory.paragraphs.length > 0
@@ -1954,6 +2136,39 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             }
         } catch (e) {}
         return stats;
+    }
+
+    function _isVisualMarkerLabelGroup(grp) {
+        var stats = _textStatsOfGroup(grp);
+        if (stats.count !== 1 || stats.length < 1 || stats.length > 2) return false;
+        var text = stats.text || "";
+        // 선택지/번호/체크박스처럼 텍스트보다 마커 시각성이 우선인 짧은 버튼만
+        // InDesign PNG가 텍스트까지 소유할 수 있다. "나는", "굴을" 같은 짧은
+        // 의미 단어 라벨은 editable TF로 유지하고 배경만 shell PNG로 추출한다.
+        if (/^(가|나|다|라|마|바|ㄱ|ㄴ|ㄷ|ㄹ|ㅁ|ㅂ|ㅅ|ㅇ|ㅈ|ㅊ|ㅋ|ㅌ|ㅍ|ㅎ)$/.test(text)) return true;
+        if (/^[0-9]{1,2}$/.test(text)) return true;
+        if (/^[①-⑳]$/.test(text)) return true;
+        return false;
+    }
+
+    function _renderEditableVisualLabelShell(grp, page, reason) {
+        var editableIds = [];
+        try { editableIds = _collectTextFrameIds(grp, true, true); } catch (eIds) {}
+        var savedTFs = null;
+        try {
+            savedTFs = hideTextFrames(grp);
+            _decoRender(grp, page, null, {
+                textHiddenBeforeExport: true,
+                textOwner: "hwpx_tf",
+                placementAllowed: true,
+                editableTextFrameIds: editableIds,
+                reason: reason || "visual_label_text_hidden_shell"
+            });
+        } catch (e) {
+            // fall through to restore
+        } finally {
+            try { if (savedTFs && savedTFs.length > 0) restoreTextFrames(savedTFs); } catch (eRestore) {}
+        }
     }
 
     function _hasVisualShapeChild(grp) {
@@ -2052,14 +2267,18 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 if (!_isShortVisualLabelGroup(child)) continue;
                 var editableIds = [];
                 try { editableIds = _collectTextFrameIds(child, true, true); } catch (eIds) {}
-                _decoRender(child, page, null, {
-                    textOwner: "indesign_png",
-                    containsText: true,
-                    containsEditableText: true,
-                    placementAllowed: true,
-                    editableTextFrameIds: editableIds,
-                    reason: "visual_label_indesign_png"
-                });
+                if (_isVisualMarkerLabelGroup(child)) {
+                    _decoRender(child, page, null, {
+                        textOwner: "indesign_png",
+                        containsText: true,
+                        containsEditableText: true,
+                        placementAllowed: true,
+                        editableTextFrameIds: editableIds,
+                        reason: "visual_marker_label_indesign_png"
+                    });
+                } else {
+                    _renderEditableVisualLabelShell(child, page, "visual_label_text_hidden_shell");
+                }
                 rendered++;
             }
         } catch (e) {}
@@ -2341,6 +2560,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         if (grpPage.documentOffset + 1 < startPage || grpPage.documentOffset + 1 > endPage) continue;
 
         var _savedTFsForCatch = null;
+        var _savedCellBgsForCatch = null;
         try {
             // hexGrid: 자신의 자식이 이전 Pass에서 개별 렌더된 경우 results에서 제거
             if (kind === "hexGrid") {
@@ -2365,14 +2585,18 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             if ((kind === "mixedGroup" || kind === "textComposite") && _isShortVisualLabelGroup(grp)) {
                 var _labelEditableIds = [];
                 try { _labelEditableIds = _collectTextFrameIds(grp, true, true); } catch (e) {}
-                _decoRender(grp, grpPage, null, {
-                    textOwner: "indesign_png",
-                    containsText: true,
-                    containsEditableText: true,
-                    placementAllowed: true,
-                    editableTextFrameIds: _labelEditableIds,
-                    reason: "visual_label_indesign_png"
-                });
+                if (_isVisualMarkerLabelGroup(grp)) {
+                    _decoRender(grp, grpPage, null, {
+                        textOwner: "indesign_png",
+                        containsText: true,
+                        containsEditableText: true,
+                        placementAllowed: true,
+                        editableTextFrameIds: _labelEditableIds,
+                        reason: "visual_marker_label_indesign_png"
+                    });
+                } else {
+                    _renderEditableVisualLabelShell(grp, grpPage, "visual_label_text_hidden_shell");
+                }
             } else if (kind === "mixedGroup" && _isLargeMixedParentGroup(grp)) {
                 _renderAtomicVisualClusters(grp, grpPage);
                 // 큰 부모 mixedGroup은 통 이미지로 만들지 않는다. 자식 atomic cluster와
@@ -2383,14 +2607,18 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 // 말풍선 brace, 답안 밑줄처럼 TF story에 앵커되어도 시각 껍데기의 일부인 객체는
                 // 부모 PNG의 visualOnlyChildIds로 소유시켜 Java inline 재배치를 막는다.
                 var savedTFs = hideTextFrames(grp);
+                var savedCellBgs = hideRepeatedCellBackgroundCandidates(grp);
                 _savedTFsForCatch = savedTFs;
+                _savedCellBgsForCatch = savedCellBgs;
                 _decoRender(grp, grpPage, null, {
                     textHiddenBeforeExport: true,
                     textOwner: "hwpx_tf",
                     editableTextFrameIds: editableTfIdsForGroup.length > 0 ? editableTfIdsForGroup : undefined,
                     reason: kind === "textComposite" ? "text_composite_editable_text_hidden" : "mixed_group_text_hidden"
                 });
+                restoreRepeatedCellBackgroundCandidates(savedCellBgs);
                 restoreTextFrames(savedTFs);
+                _savedCellBgsForCatch = null;
                 _savedTFsForCatch = null;
                 // Color/Paper (흰색) 획 도형은 투명배경 PNG에서 소실 → 검은색으로 임시 변환 후 개별 추출
                 _exportPaperStrokeShapes(grp, grpPage);
@@ -2407,6 +2635,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             }
         } catch (e) {
             // outer catch: 예외가 발생해도 숨겼던 TF 복원
+            try { if (_savedCellBgsForCatch && _savedCellBgsForCatch.length > 0) restoreRepeatedCellBackgroundCandidates(_savedCellBgsForCatch); } catch (e1) {}
             try { if (_savedTFsForCatch && _savedTFsForCatch.length > 0) restoreTextFrames(_savedTFsForCatch); } catch (e2) {}
         }
 
@@ -2830,6 +3059,11 @@ function exportMasterPageGraphics(doc, outputDir, startPage, endPage) {
     function _clampSmallMasterDecorationInsidePage(bnds, pageBnds) {
         try {
             if (!bnds || bnds.length < 4 || !pageBnds || pageBnds.length < 4) return bnds;
+            // Master graphics frequently use bleed/overhang intentionally
+            // (page-number badges, hashira strips, edge markers). If the item already intersects
+            // the page, preserve the original master coordinates and let the placement stage crop
+            // the visible page intersection. Moving it inside destroys the left/right clipping.
+            if (_boundsIntersection(bnds, pageBnds)) return bnds;
             var pageH = Math.abs(pageBnds[2] - pageBnds[0]);
             var pageW = Math.abs(pageBnds[3] - pageBnds[1]);
             var h = Math.abs(bnds[2] - bnds[0]);
@@ -3520,15 +3754,22 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                 // inline export에서 픽셀에 텍스트가 남을 수 있어 TF 자체를 잠시 숨긴다.
                 var savedInlineTextFrames = [];
                 var inlineHiddenTextFrameIds = [];
+                var inlineCompleteMarkerEditableIds = [];
+                var inlineCompleteMarker = false;
                 try {
                     // SPEC-020: Group 뿐 아니라 Rectangle/Polygon/Oval 컨테이너 안의
                     // TextFrame 텍스트도 PNG 렌더링 시 숨김 — 텍스트는 변환 결과에서
                     // 별도 오버레이되므로 PNG에 같이 그려지면 이중 렌더링이 발생한다.
                     var containerType = inItem.constructor.name;
+                    inlineCompleteMarker = (containerType === "Group" && _isVisualMarkerLabelGroup(inItem));
+                    if (inlineCompleteMarker) {
+                        try { inlineCompleteMarkerEditableIds = _collectTextFrameIds(inItem, true, true); } catch (eIds) {}
+                    }
                     var shouldHideText = (containerType === "Group"
                             || containerType === "Rectangle"
                             || containerType === "Polygon"
                             || containerType === "Oval");
+                    if (inlineCompleteMarker) shouldHideText = false;
                     if (shouldHideText) {
                         var groupItems = inItem.allPageItems;
                         for (var gki = 0; gki < groupItems.length; gki++) {
@@ -3571,11 +3812,12 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                             childIds: inlineHiddenTextFrameIds
                         }, inItem, {
                             textHiddenBeforeExport: _inlineHasHiddenText,
-                            textOwner: _inlineHasHiddenText ? "hwpx_tf" : "none",
-                            containsText: false,
-                            containsEditableText: false,
+                            textOwner: inlineCompleteMarker ? "indesign_png" : (_inlineHasHiddenText ? "hwpx_tf" : "none"),
+                            containsText: inlineCompleteMarker ? true : false,
+                            containsEditableText: inlineCompleteMarker ? true : false,
                             placementAllowed: true,
-                            reason: _inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only"
+                            editableTextFrameIds: inlineCompleteMarker ? inlineCompleteMarkerEditableIds : inlineHiddenTextFrameIds,
+                            reason: inlineCompleteMarker ? "visual_marker_label_indesign_png" : (_inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only")
                         }));
                     }
                 } catch (eRender) {}

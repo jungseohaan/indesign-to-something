@@ -1,7 +1,10 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
@@ -169,8 +172,11 @@ public final class RenderableFramePlacer {
                             : (rg3.zOrderKnown()
                                     ? rg3.zOrder()
                                     : (rg3.zOrder() > 0 ? rg3.zOrder() : 5));
+                    int originalZ3 = z3;
+                    z3 = adjustBackgroundShellZOrder(
+                            rg3, sections.get(secIdx3), fig3.x(), fig3.y(), fig3.width(), fig3.height(), z3);
                     fig3.zOrder(z3);
-                    fig3.fromGroup(!isBackgroundLike3);
+                    fig3.fromGroup(!isBackgroundLike3 && z3 >= originalZ3);
                     sections.get(secIdx3).addBlock(fig3);
                     count++;
                     ctx.recordRenderedDecision(rg3, "Phase7", "PLACE", "placed visible page intersection as ASTFigure");
@@ -283,8 +289,12 @@ public final class RenderableFramePlacer {
                                         : (rg3.zOrderKnown()
                                                 ? rg3.zOrder()
                                                 : (rg3.zOrder() > 0 ? rg3.zOrder() : 5));
+                                int originalZLeft = zLeft;
+                                zLeft = adjustBackgroundShellZOrder(
+                                        rg3, sections.get(prevSec), figLeft.x(), figLeft.y(),
+                                        figLeft.width(), figLeft.height(), zLeft);
                                 figLeft.zOrder(zLeft);
-                                figLeft.fromGroup(!isBackgroundLikeLeft);
+                                figLeft.fromGroup(!isBackgroundLikeLeft && zLeft >= originalZLeft);
                                 sections.get(prevSec).addBlock(figLeft);
                                 count++;
                                 placedKeys.add(prevPi + "|" + rg3.file());
@@ -297,6 +307,85 @@ public final class RenderableFramePlacer {
 
         if (count > 0) {
             System.err.println("[ResolvedToASTBuilder] Phase 7: " + count + " renderable frames placed");
+        }
+    }
+
+    private static int adjustBackgroundShellZOrder(
+            RenderedGroup rg, ASTSection section, long x, long y, long w, long h, int currentZ) {
+        if (!isBackgroundShellCandidate(rg) || section == null || w <= 0 || h <= 0) {
+            return currentZ;
+        }
+        int minOverlapZ = Integer.MAX_VALUE;
+        for (ASTBlock block : section.blocks()) {
+            if (block == null) continue;
+            Bounds b = boundsOf(block);
+            if (b == null || b.w <= 0 || b.h <= 0) continue;
+            long overlap = overlapArea(x, y, w, h, b.x, b.y, b.w, b.h);
+            if (overlap <= 0) continue;
+            int z = zOrderOf(block);
+            if (z <= 0) continue;
+            if (z < minOverlapZ) minOverlapZ = z;
+        }
+        if (minOverlapZ == Integer.MAX_VALUE) return currentZ;
+        return Math.max(0, Math.min(currentZ, minOverlapZ - 1));
+    }
+
+    private static boolean isBackgroundShellCandidate(RenderedGroup rg) {
+        if (rg == null) return false;
+        String reason = rg.reason();
+        if (reason == null) return false;
+        return "decoration_group".equals(reason)
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("mixed_group_text_hidden")
+                || reason.contains("image_group_text_hidden")
+                || reason.contains("visual_label_text_hidden_shell")
+                || reason.contains("textframe_visual_shell");
+    }
+
+    private static Bounds boundsOf(ASTBlock block) {
+        if (block instanceof ASTTextFrameBlock) {
+            ASTTextFrameBlock tf = (ASTTextFrameBlock) block;
+            return new Bounds(tf.x(), tf.y(), tf.effectiveWidth(), tf.height());
+        }
+        if (block instanceof ASTFigure) {
+            ASTFigure fig = (ASTFigure) block;
+            return new Bounds(fig.x(), fig.y(), fig.width(), fig.height());
+        }
+        if (block instanceof ASTTable) {
+            ASTTable table = (ASTTable) block;
+            return new Bounds(table.x(), table.y(), table.width(), table.height());
+        }
+        return null;
+    }
+
+    private static int zOrderOf(ASTBlock block) {
+        if (block instanceof ASTTextFrameBlock) return ((ASTTextFrameBlock) block).zOrder();
+        if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
+        if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
+        return 0;
+    }
+
+    private static long overlapArea(
+            long ax, long ay, long aw, long ah,
+            long bx, long by, long bw, long bh) {
+        long left = Math.max(ax, bx);
+        long top = Math.max(ay, by);
+        long right = Math.min(ax + aw, bx + bw);
+        long bottom = Math.min(ay + ah, by + bh);
+        if (right <= left || bottom <= top) return 0;
+        return (right - left) * (bottom - top);
+    }
+
+    private static final class Bounds {
+        final long x;
+        final long y;
+        final long w;
+        final long h;
+        Bounds(long x, long y, long w, long h) {
+            this.x = x;
+            this.y = y;
+            this.w = w;
+            this.h = h;
         }
     }
 

@@ -17,6 +17,7 @@ public class FlatInlineItem {
     private String fontStyle;
     private Integer fontSizeHwpunits;
     private String textColor;
+    private String shadeColor;
     private Short letterSpacing;
     private boolean subscript;
     private boolean superscript;
@@ -92,6 +93,9 @@ public class FlatInlineItem {
 
     public String textColor() { return textColor; }
     public void textColor(String v) { this.textColor = v; }
+
+    public String shadeColor() { return shadeColor; }
+    public void shadeColor(String v) { this.shadeColor = v; }
 
     public Short letterSpacing() { return letterSpacing; }
     public void letterSpacing(Short v) { this.letterSpacing = v; }

@@ -460,9 +460,6 @@ class StoryLoader {
                                         continue;
                                     }
                                     String nextPartText = (pi + 1 < parts.length) ? parts[pi + 1] : null;
-                                    if (!InlineFrameHandler.isInlineVocabularyMarker(ctx, domId, partText, nextPartText)) {
-                                        maybeInsertDecorativeLeaderTab(ctx, ip, run, inlineHexId, partText, para);
-                                    }
                                     // SPEC-025: Group 앵커가 다수의 박스(예: 자모 배지 ㅍㅎㅂㅅ) 면 각 자식 TF 를
                                     // 박스 스타일 inline TextFrame 으로 개별 분해 → 검색 가능 + 시각 박스 보존.
                                     java.util.List<ASTInlineObject> boxList =
@@ -475,10 +472,31 @@ class StoryLoader {
                                         if (fracEq != null) {
                                             para.addItem(fracEq);
                                         } else {
+                                            // 배경 도형 + 단일 짧은 텍스트프레임 (예: 페이지 39 "가" / "나" 캡슐 배지)
+                                            // → INLINE_TEXT_FRAME (한 몸 + 검색 가능)
+                                            ASTInlineObject singleBadge = InlineFrameHandler.tryInlineGroupAsSingleBadge(ctx, domId);
+                                            if (singleBadge != null) {
+                                                para.addItem(singleBadge);
+                                                anchorIdx++;
+                                                continue;
+                                            }
+                                            // 하위 인라인 TF 안에 다시 ORC 앵커가 있는 경우
+                                            // 텍스트 런으로 평탄화하지 말고 배지/박스 + 텍스트 순서를 보존한다.
+                                            List<ASTInlineItem> nestedItems =
+                                                    InlineFrameHandler.tryInlineTextFrameAsItems(ctx, domId,
+                                                            partText, nextPartText);
+                                            if (nestedItems != null && !nestedItems.isEmpty()) {
+                                                for (ASTInlineItem item : nestedItems) para.addItem(item);
+                                                anchorIdx++;
+                                                continue;
+                                            }
                                             // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환
                                             ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, domId,
                                                     partText, nextPartText);
                                             if (textRun != null) {
+                                                if (!InlineFrameHandler.isInlineVocabularyMarker(ctx, domId, partText, nextPartText)) {
+                                                    maybeInsertDecorativeLeaderTab(ctx, ip, run, inlineHexId, partText, para);
+                                                }
                                                 para.addItem(textRun);
                                             } else {
                                                 // SPEC-025: 빈 inline TextFrame 이지만 fillColor 가 있으면 데코 박스 (예: 본문 빈칸 강조 박스)
@@ -486,16 +504,9 @@ class StoryLoader {
                                                 if (emptyBox != null) {
                                                     para.addItem(emptyBox);
                                                 } else {
-                                                    // 배경 도형 + 단일 짧은 텍스트프레임 (예: 페이지 39 "가" / "나" 캡슐 배지)
-                                                    // → INLINE_TEXT_FRAME (한 몸 + 검색 가능)
-                                                    ASTInlineObject singleBadge = InlineFrameHandler.tryInlineGroupAsSingleBadge(ctx, domId);
-                                                    if (singleBadge != null) {
-                                                        para.addItem(singleBadge);
-                                                    } else {
-                                                        ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, domId);
-                                                        if (inlineObj != null) {
-                                                            para.addItem(inlineObj);
-                                                        }
+                                                    ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, domId);
+                                                    if (inlineObj != null) {
+                                                        para.addItem(inlineObj);
                                                     }
                                                 }
                                             }

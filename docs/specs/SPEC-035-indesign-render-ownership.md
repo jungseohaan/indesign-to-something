@@ -185,6 +185,93 @@
 
 - page 129 차별적 표현 표: `GraphicLine` 점선 그룹은 원본 IDML에 존재하지만 그룹 PNG에는 가로 점선만 남고 세로 점선이 사라졌다. line-grid 그룹은 통 PNG가 아니라 자식 선 단위로 보존한다.
 
+### 텍스트 추종 강조 속성 정책
+
+텍스트와 함께 움직여야 하는 밑줄/강조 배경은 독립 PNG보다 HWPX 텍스트 속성으로 흡수한다. 편집성이 중요한 본문 질문, 빈칸, 강조 문장은 글자가 수정되거나 줄바꿈되어도 장식이 같이 따라가야 한다.
+
+정책:
+
+- InDesign `Underline=true` 또는 underline 계열 CharacterStyle/ParagraphStyle은 HWPX `CharPr` 밑줄로 변환한다.
+- InDesign `CharacterShading*`/`Shading*`/`TextShading*` 계열의 문자 강조 배경은 HWPX `CharPr.shadeColor`로 변환한다. 별도 PNG나 floating 그래픽으로 배치하지 않는다.
+- 문자 강조 배경은 CharacterStyle의 `BasedOn` 상속, GREP 적용 문자 스타일, 런 직접 속성 순서를 모두 보존한다. 공백 런도 같은 `shadeColor`를 가져야 문장 중간이 끊겨 보이지 않는다.
+- 글 사이의 빈 밑줄은 인라인 그래픽 이미지로 두지 않고, HWPX 밑줄이 적용된 공백/탭/리더로 변환한다.
+- extractor가 `GraphicLine`이 아닌 얇은 인라인 PNG로 빈 밑줄을 넘긴 경우에도, 앞쪽에 본문 텍스트가 이미 있으면 같은 밑줄 공백 런으로 흡수한다.
+- 텍스트 한 줄과 거의 같은 폭/높이로 겹치는 얇은 벡터 배경은 독립 PNG 배치를 생략하고 HWPX paragraph shading으로 흡수한다.
+- shading 색상은 원본 PNG의 비투명 픽셀을 흰 종이에 합성한 평균색으로 근사한다.
+- extractor가 텍스트를 숨겨 만든 `text_hidden_shell` 계열 PNG도, 긴 한 줄 강조 배경이면 같은 방식으로 흡수할 수 있다.
+- `visual_label_text_hidden_shell`/`concept_label_shell`처럼 짧은 라벨/버튼의 배경을 소유하는 shell은 강조 배경으로 흡수하지 않는다. 이 계열은 텍스트는 HWPX TF가 소유하고, 캡슐/라운드 버튼/외곽선/그림자는 InDesign PNG가 TF 뒤에서 소유한다.
+- 이 정책은 다음 조건을 모두 만족할 때만 적용한다.
+  - 시각 객체가 `indesign_png` 소유의 순수 시각 요소이고 editable text를 포함하지 않는다.
+  - 객체 높이가 실제 텍스트 composed line 높이에 가까운 얇은 강조 띠이다.
+  - 빈 밑줄 PNG 흡수는 문단 선두 장식과 충돌하지 않도록 선행 본문 텍스트가 있는 경우로 제한한다.
+  - 객체와 composed line의 overlap이 충분하다.
+  - 객체가 말풍선/박스/표/개념도 컨테이너처럼 여러 의미 단위를 감싸지 않는다.
+- `textOwner=hwpx_tf`인 짧은 라벨/버튼 shell은 흡수하지 않는다. 라벨 shell은 텍스트 배경 이미지로 남아야 하고, 본문 강조 배경만 HWPX 속성으로 흡수한다. 부모 그룹 중복 방지, inline coverage, visual-label editable 스킵보다 개별 라벨 shell 보존이 우선한다.
+- 너무 얇은 선은 shading으로 만들지 않는다. 실제 밑줄 또는 빈칸 선으로 보고 underline 경로를 우선한다.
+
+실패 방지 사례:
+
+- page 74 `"내가 속한 언어 공동체인 ___ 의 시선으로"`: 밑줄 구간은 인라인 그래픽이 아니라 HWPX 밑줄 속성으로 유지한다.
+- page 74 `"나는 얼마나 자주, 그리고 어떠한 목적으로 글을 쓰는가?"`: 보라색 사선 배경은 텍스트와 분리된 floating PNG보다 HWPX shading 근사로 흡수한다.
+
+### 개념도 클러스터 정책
+
+교과서의 개념 설명 영역은 겉보기에는 표처럼 보이지만, IDML 구조상 실제 `Table`이 아니라 다음 요소들이 섞인 pseudo-table/concept diagram인 경우가 많다.
+
+- 왼쪽 축 제목 TF
+- 개념 라벨을 담은 rounded box/말풍선/버튼 shell
+- 라벨 그룹 내부의 editable TF
+- 라벨 바로 아래 또는 오른쪽에 놓인 독립 설명 TF
+- 연결선, brace, dotted guide, 배경 capsule
+
+이 구조를 table-cell 정책으로 흡수하면 셀 병합/간격/inset 보정이 잘못 적용되고, DOM parent만 따라가면 그룹 밖의 설명 TF가 분리된다. 따라서 converter는 이런 영역을 `concept diagram cluster`로 별도 취급한다.
+
+판정 기준:
+
+- 같은 페이지에서 짧은 의미 라벨 TF와 설명 TF가 반복적인 좌표 관계를 가진다.
+  - 라벨 TF는 `이어진문장`, `안은문장`, `대등하게 이어진문장`, `명사절`처럼 짧은 개념명이다.
+  - 설명 TF는 라벨 아래 또는 오른쪽에 붙어 있고, 라벨과 x/y 축이 맞는다.
+- 하나 이상의 visual shell PNG가 있고, `textOwner=hwpx_tf` 또는 `*_text_hidden` 계열 reason으로 텍스트가 숨겨져 있다.
+- 영역 안에 dotted line/connector/brace가 있을 수 있지만, 실제 IDML `Table` 객체가 아니거나 table cell 주소/row/column 구조가 없다.
+- 독립 TF라도 같은 visual shell 또는 라벨 TF와 공간적으로 강하게 연결되어 있으면 같은 cluster에 포함한다.
+
+배치 원칙:
+
+- visual shell, connector, dotted guide는 InDesign PNG/vector가 소유한다.
+- 모든 개념명과 설명문은 HWPX TF가 소유한다.
+- cluster 내부 TF는 원본 absolute bounds를 우선 보존한다. table/grid merge, 연결 글상자 merge, wrap split, label-center 보정 대상에서 제외한다.
+- 라벨 TF와 설명 TF를 같은 HWP table cell로 합치지 않는다. 이 영역은 편집 가능한 독립 TF들의 집합으로 유지한다.
+- `textOwner=hwpx_tf` shell은 cluster 내부 TF들보다 뒤에 둔다. 단, shell 안 라벨 배경은 라벨 TF 바로 뒤에 배치한다.
+- 라벨/설명 TF를 감싸는 개별 rounded box, capsule, 버튼형 shell은 extractor 단계에서 개별 PNG로 추출하고, Java 변환기는 그 PNG를 해당 TF의 배경으로 배치한다. 큰 cluster/container PNG를 Java에서 잘라 쓰지 않는다.
+- cluster 밖의 일반 본문 TF와 겹치지 않도록 cluster의 좌표 보존을 우선한다. 글꼴 차이로 줄바꿈이 생겨도 TF를 다른 cluster 요소 쪽으로 밀지 않는다.
+
+Extractor atomic shell 원칙:
+
+- `TextFrame`과 이를 감싸는 `Rectangle/Oval/Polygon`이 같은 부모 그룹 안에서 1:1 또는 반복 라벨 패턴을 이루면 `concept_label_shell`로 추출한다.
+- 자식이 독립 `Group`인 경우뿐 아니라, `Rectangle + TextFrame` 형제 구조도 후보로 본다. page 114 `대등하게 이어진문장`, `종속적으로 이어진문장`처럼 라벨 도형과 TF가 같은 큰 mixedGroup 안의 형제인 경우가 여기에 해당한다.
+- export 대상은 라벨 도형 또는 라벨 도형을 포함한 최소 시각 shell이다. export 전에 연결된 TF 텍스트는 숨기고, 주변 설명문/connector/다른 라벨은 숨기거나 제외한다.
+- 추출 메타는 `reason=concept_label_shell`, `textOwner=hwpx_tf`, `visualOwner=indesign_png`, `editableTextFrameIds=[...]`, `placementAllowed=true`를 기록한다.
+- 큰 concept container는 계속 억제 가능해야 한다. 개별 shell이 성공한 경우 큰 `mixed_group_text_hidden` 또는 `inline_text_hidden` 부모 PNG가 같은 라벨/설명 텍스트를 덮지 않도록 Java의 child/source suppression 정책이 우선한다.
+
+충돌 방지:
+
+- table fill-color 흡수 정책은 실제 table 또는 strong grid-cell 후보에만 적용한다. concept diagram cluster 안의 라벨 shell/설명 capsule/연결 그래픽은 table cell로 보지 않는다.
+- `짧은 라벨 텍스트 소유권 정책`은 라벨 내부 텍스트의 owner만 결정한다. 라벨과 설명 TF의 공간 관계는 concept diagram cluster 정책이 결정한다.
+- `TF-owned visual shell 정렬 정책`은 1:1 라벨 shell에만 적용한다. 하나의 shell이 라벨, 설명, 연결선까지 포함하면 cluster container로 보고 TF 위치를 shell alpha bbox에 맞춰 확장하지 않는다.
+- 그룹 중복 방지 정책은 `concept_label_shell` 개별 PNG를 자식 그래픽으로 억제하지 않는다. 단, 여러 라벨/설명/연결선을 포함하는 큰 통 PNG는 텍스트를 덮을 수 있으므로 억제한다.
+- 그룹 중복 방지 정책은 `visual_label_text_hidden_shell` 개별 PNG도 자식 그래픽으로 억제하지 않는다. 텍스트까지 포함한 `visual_label_indesign_png`는 중복 방지를 위해 스킵할 수 있지만, 텍스트를 숨긴 shell PNG는 라벨의 배경이므로 반드시 배치 후보로 남긴다.
+- `INLINE_BADGE_GROUP`은 문단 흐름 안의 실제 콘텐츠이다. 텍스트 overlay가 있는 경우 HWPX 출력은 `container(pic + rect)`보다 `단일 rect + imgBrush + drawText`를 우선한다. container 내부 자식 drawText는 HWP 렌더러에 따라 page/floating shell과 결합될 때 보이지 않을 수 있기 때문이다.
+- Java 단계에서 부모 PNG를 crop해서 자식 shell을 만드는 fallback은 사용하지 않는다. crop은 PNG 투명 패딩, stroke outside, effect expansion, DPI 반올림에 민감해 extractor의 원본 객체 export보다 불안정하다.
+- line-grid 정책은 dotted guide의 시각 보존만 담당한다. dotted guide가 있다고 해서 주변 TF를 table로 병합하지 않는다.
+
+적용 사례:
+
+- page 114 `문장의 짜임에 따른 문장의 종류` 영역은 실제 Table이 아니라 개념도 클러스터이다.
+  - 왼쪽 축 제목 `문장의 짜임에 따른 문장의 종류`, `겹문장의 짜임`은 cluster 제목 TF이다.
+  - `이어진문장`, `안은문장` 라벨은 shell PNG 위의 HWPX TF이다.
+  - `둘 이상의 홑문장이 나란히 이어진 문장.`, `다른 홑문장을 문장 성분으로 포함하고 있는 전체 문장.`은 부모 그룹이 없어도 각각 라벨 바로 아래의 설명 TF로 cluster에 포함한다.
+  - `대등하게 이어진문장`, `종속적으로 이어진문장`, `명사절/관형절/부사절/서술절/인용절`도 같은 cluster 내부 라벨/설명 구조로 유지한다.
+
 실패 방지 사례:
 
 - page 122 `언어의 본질 이해하기`: shell PNG 내부의 투명 패딩 때문에 살색 도형이 아래로 밀려 보였으므로 alpha bbox 기준으로 TF와 shell을 맞춘다.
@@ -194,23 +281,39 @@
 
 짧은 라벨이라고 해서 무조건 `textOwner=indesign_png`로 만들지 않는다. 길이와 bounds는 보조 조건일 뿐이며, 최종 판정은 라벨의 의미와 편집 가치가 우선이다.
 
-`textOwner=indesign_png` 허용:
+기본값:
 
-- `가/나/다/라`, 숫자, 체크박스 라벨처럼 본문 의미보다 시각 마커 성격이 강한 버튼
+- 모든 라벨/버튼 텍스트는 먼저 editable 후보로 본다.
+- 완성형 PNG 허용은 예외이며, 플로팅/인라인 여부와 무관하게 같은 기준을 사용한다.
+- editable로 판정되면 PNG에는 도형/배지/외곽선/그림자만 남기고, 텍스트는 HWPX TF 또는 inline TF가 소유한다.
+
+`textOwner=indesign_png` 완성형 PNG 허용:
+
+- `가/나/다/라`처럼 한 글자 한글 식별자만 담은 버튼
+- `1/2/3`, `01/02`처럼 1~2자리 숫자 식별자만 담은 버튼
+- 해당 라벨이 본문 검색/수정 대상이 아니라 카드/도표/문항 위치를 가리키는 시각 마커로만 쓰이는 경우
+- 완성형 PNG 안에 포함된 텍스트를 다시 HWPX TF로 배치하면 중복이나 z-depth 오염이 더 커지는 경우
 - 아이콘+텍스트가 하나의 로고처럼 동작하고, 편집 대상이 아닌 짧은 활동 배지
 - 글자가 도형 효과의 일부라서 HWPX TF로 분리하면 원본성을 크게 잃는 장식 텍스트
 
 `textOwner=hwpx_tf` 유지:
 
+- 검색/수정 대상 본문, 문항 지시문, 제목, 개념어
 - `#표제목...` 계열 스타일처럼 개념명/제목/소제목 역할을 하는 라벨
 - `언어의 자의성`, `언어의 사회성`, `언어의 역사성`, `언어의 창조성`처럼 검색/편집 가치가 있는 짧은 개념 라벨
 - 제목 옆 장식 그래픽과 시각적으로 붙어 있지만, 텍스트 자체는 독립된 의미 단위인 라벨
+- `굴을`, `나는`처럼 보기/문항 안에서 의미 단어 역할을 하는 짧은 박스형 라벨
+- `주장`, `이유 1`, `근거 1`처럼 학습 구조의 의미 슬롯을 나타내는 라벨
 
 구현 원칙:
 
 - extractor는 의미 라벨을 `visual_label_indesign_png` atomic parent로 만들지 않는다.
-- 의미 라벨 주변 그래픽은 별도의 `decoration_group`, `complex_graphic_text_hidden`, `visual_only_png` 등으로 배치한다.
+- 의미 라벨 주변 그래픽은 텍스트를 숨긴 전체 shell PNG로 배치한다. 개별 자식 장식만 추출하면 외곽선/그림자/채움 중 일부가 누락될 수 있다.
 - Java 변환기는 구 캐시에서 이미 `visual_label_indesign_png + textOwner=indesign_png`로 들어온 항목이라도, editable TF의 paragraph style이 `#표제목...`이면 parent PNG를 배치하지 않고 TF를 HWPX 텍스트로 살린다.
+- Java 변환기는 `visual_marker_label_indesign_png`라도 연결된 `editableTextFrameIds`의 실제 텍스트가 한 글자 한글 또는 1~2자리 숫자 식별자가 아니면 `indesign_png` 텍스트 소유권을 인정하지 않는다.
+- 같은 DOM id가 inline 렌더와 page_object 렌더 양쪽에 있어도 위 기준을 그대로 적용한다. 배치 형태가 아니라 텍스트의 편집 가치가 owner를 결정한다.
+- 인라인 단순 버튼 라벨이 위 완성형 PNG 조건을 만족하면 extractor는 텍스트를 숨긴 `inline_text_hidden`이 아니라 텍스트 포함 `visual_marker_label_indesign_png` 인라인 PNG를 만든다.
+- 같은 DOM id의 완성형 인라인 PNG와 완성형 page_object PNG가 동시에 존재하면 HWPX 문단 흐름을 보존하기 위해 인라인 PNG가 우선 소유하고, page_object는 중복 배치하지 않는다.
 - 이때 parent PNG의 child suppression도 적용하지 않아, 그래픽 껍데기 렌더가 별도로 존재하면 그것을 배치할 수 있게 한다.
 - 이 정책은 특정 DOM id나 페이지 예외가 아니라 “시각 마커 라벨”과 “의미 제목 라벨”의 소유권 분리 규칙이다.
 
@@ -441,6 +544,28 @@ HWP 폰트 매핑이 InDesign과 정확히 맞지 않으면 HWPX 글상자 내�
 - 변환 시 resolved 출력 폴더에 `render-decisions.jsonl`을 생성한다.
 - 각 `page_object` rendered item의 `PLACE` / `SKIP_*` 결정을 pageIndex, id, file, reason, owner와 함께 기록한다.
 - 특정 페이지 그래픽 누락은 먼저 이 파일에서 `pageIndex`와 `id`를 조회해 “추출 누락”, “Phase 6 스킵”, “Phase 7 스킵”, “배치 후 z-depth/렌더 문제”를 분리한다.
+
+## Rendered Item 중복 방지 정책
+
+`renderedFloatingItems`는 extractor 여러 단계의 결과가 합쳐지는 최종 렌더 큐이다. 같은 DOM 객체가 inline 추출과 배경/데코 추출 경로를 모두 통과하면 같은 PNG가 두 번 들어오거나, 부모 visual shell과 자식 `tf_shell`이 동시에 살아 outline이 이중으로 그려질 수 있다.
+
+원칙:
+
+- `id + pageIndex + type + file + reason + bounds + sourceObjectIds`가 같은 렌더 항목은 하나만 보존한다.
+- 이 중복 제거는 extractor 최종 병합 단계와 Java `ResolvedData` 로딩 단계 양쪽에 둔다.
+  - 새 캐시는 extractor에서 깨끗하게 생성한다.
+  - 기존 캐시나 외부 resolved 입력은 Java 로딩 단계에서 한 번 더 방어한다.
+- `textOwner=hwpx_tf`이고 `reason`이 `*_text_hidden`, `visual_shell`, `image_group` 계열인 부모 PNG가 정상 배치 가능하면, 부모의 `sourceObjectIds`에 포함된 자식 visual shell은 fallback이 아니라 중복으로 본다.
+- 단, 짧은 의미 라벨을 HWPX TF로 살리기 위해 보호된 `editableLabelShell`은 이 suppression 대상에서 제외한다.
+- IDML Story의 ORC 재귀 텍스트 추출도 렌더 ownership을 따른다.
+  - ORC가 가리키는 inline graphic/TextFrame이 `renderedFloatingItems`에 소유권 있는 이미지로 등록되어 있으면, 그 자식 텍스트를 일반 문자열로 복사하지 않는다.
+  - 실제 삽입 단계에서는 `tryInlineGroupAsBoxList`/`tryInlineGroupAsSingleBadge` 같은 구조화된 inline object를 일반 `ASTTextRun`보다 먼저 시도한다.
+  - 이렇게 해야 `예` 같은 배지가 배지로도 나오고 뒤 문장 안의 일반 글자로도 들어가는 중복을 막을 수 있다.
+
+의도:
+
+- page 102 `예 문장의 짜임을 이해해 볼 거야.`처럼 inline 객체가 중복 등록되어 텍스트/배지가 반복되는 문제를 막는다.
+- page 102 스스로 점검 박스처럼 큰 mixed-group PNG가 이미 박스 외곽선을 포함하는데, 개별 `tf_shell_*`이 다시 올라와 outline이 지저분해지는 문제를 막는다.
 
 ## 대상 파일
 

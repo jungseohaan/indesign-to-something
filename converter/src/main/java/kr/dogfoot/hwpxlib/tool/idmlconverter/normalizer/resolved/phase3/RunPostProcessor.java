@@ -88,6 +88,7 @@ class RunPostProcessor {
                         tr.fontStyle(run.fontStyle());
                         tr.fontSizeHwpunits(run.fontSizeHwpunits());
                         tr.textColor(run.textColor());
+                        tr.shadeColor(run.shadeColor());
                         newItems.add(tr);
                     }
                     break;
@@ -100,6 +101,7 @@ class RunPostProcessor {
                     tr.fontStyle(run.fontStyle());
                     tr.fontSizeHwpunits(run.fontSizeHwpunits());
                     tr.textColor(run.textColor());
+                    tr.shadeColor(run.shadeColor());
                     newItems.add(tr);
                 }
                 int markerEnd = text.indexOf('\uE001', markerStart + 1);

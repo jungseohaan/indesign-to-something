@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 
@@ -64,9 +65,19 @@ public final class ParagraphTextHelpers {
             if (item instanceof ASTTextRun) {
                 String t = ((ASTTextRun) item).text();
                 if (t != null) sb.append(t);
+            } else if (item instanceof ASTInlineObject) {
+                appendInlineObjectPlainText(sb, (ASTInlineObject) item);
             }
         }
         return sb.toString();
+    }
+
+    private static void appendInlineObjectPlainText(StringBuilder sb, ASTInlineObject obj) {
+        if (obj == null || obj.paragraphs() == null || obj.paragraphs().isEmpty()) return;
+        for (ASTParagraph childPara : obj.paragraphs()) {
+            if (childPara == null) continue;
+            sb.append(getParaPlainText(childPara));
+        }
     }
 
     /**
@@ -169,6 +180,7 @@ public final class ParagraphTextHelpers {
         copy.fontStyle(source.fontStyle());
         copy.fontSizeHwpunits(source.fontSizeHwpunits());
         copy.textColor(source.textColor());
+        copy.shadeColor(source.shadeColor());
         copy.letterSpacing(source.letterSpacing());
         copy.subscript(source.subscript());
         copy.superscript(source.superscript());

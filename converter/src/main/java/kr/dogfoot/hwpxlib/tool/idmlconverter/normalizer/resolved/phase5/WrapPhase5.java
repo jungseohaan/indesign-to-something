@@ -50,6 +50,13 @@ public final class WrapPhase5 {
                 catch (NumberFormatException e) { newBlocks.add(blk); continue; }
                 ResolvedTextFrame rtf = ctx.resolvedData.getTextFrame(domId);
                 if (rtf == null) { newBlocks.add(blk); continue; }
+                // Multi-column text frames already carry their column structure into HWPX.
+                // Treating column gaps as wrap-indent obstacles splits continuous text
+                // into separate TFs, so Phase 5 must leave them intact.
+                if (tfb.columnCount() > 1 || rtf.columnCount() > 1) {
+                    newBlocks.add(blk);
+                    continue;
+                }
 
                 // 연결 글상자 체인이면 모든 TF의 composedLines를 합침
                 List<ResolvedTextFrame.ComposedLine> allComposedLines = new ArrayList<>();

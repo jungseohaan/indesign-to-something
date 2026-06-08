@@ -10,6 +10,7 @@ public class ASTTextRun extends ASTInlineItem {
     private String fontStyle;
     private Integer fontSizeHwpunits;
     private String textColor;
+    private String shadeColor;    // 문자 배경색/강조색 (HWPX CharPr shadeColor)
     private Short letterSpacing;
     private boolean subscript;
     private boolean superscript;
@@ -42,6 +43,9 @@ public class ASTTextRun extends ASTInlineItem {
 
     public String textColor() { return textColor; }
     public void textColor(String v) { this.textColor = v; }
+
+    public String shadeColor() { return shadeColor; }
+    public void shadeColor(String v) { this.shadeColor = v; }
 
     public Short letterSpacing() { return letterSpacing; }
     public void letterSpacing(Short v) { this.letterSpacing = v; }

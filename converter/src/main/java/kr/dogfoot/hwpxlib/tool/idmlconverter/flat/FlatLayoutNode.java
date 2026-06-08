@@ -52,6 +52,7 @@ public class FlatLayoutNode {
     private long insetBottom;
     private long insetRight;
     private String fillColor;
+    private byte[] imageFillData;
     private String strokeColor;
     private double strokeWeight;
     private String strokeType = "Solid";
@@ -243,6 +244,9 @@ public class FlatLayoutNode {
 
     public String fillColor() { return fillColor; }
     public void fillColor(String v) { this.fillColor = v; }
+
+    public byte[] imageFillData() { return imageFillData; }
+    public void imageFillData(byte[] v) { this.imageFillData = v; }
 
     public String strokeColor() { return strokeColor; }
     public void strokeColor(String v) { this.strokeColor = v; }

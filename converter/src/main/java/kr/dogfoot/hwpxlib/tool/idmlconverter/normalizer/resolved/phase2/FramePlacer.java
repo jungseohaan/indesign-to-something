@@ -94,6 +94,9 @@ public final class FramePlacer {
         List<ResolvedTextFrame> frames = ctx.resolvedData.textFrames();
 
         FrameIndex idx = buildIndex(ctx.resolvedData.allRenderedFloatingItems(), frames, ctx);
+        Set<String> duplicateVisualShellTextFrameIds =
+                collectDuplicateVisualShellTextFrameIds(ctx, frames);
+        ctx.conceptDiagramTextFrameIds.addAll(collectConceptDiagramTextFrameIds(ctx, frames));
 
         // FP-B: title overlay 및 inline Y-조정 내부 루프에서 같은 페이지 TF만 검색하도록
         // pageIndex → TF 목록 사전 구축 (O(N²) → O(N) per TF)
@@ -110,12 +113,20 @@ public final class FramePlacer {
         ContainmentMaps cm = buildContainmentMap(ctx, frames, idx.badgeChildDomIds);
 
         for (ResolvedTextFrame tf : frames) {
+            if (duplicateVisualShellTextFrameIds.contains(tf.id())) {
+                int duplicateDomId = parseDomIdOrNeg(tf.id());
+                if (duplicateDomId >= 0) {
+                    ctx.setTextDisposition(duplicateDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+                }
+                continue;
+            }
             // 공간 포함 inner TF: outer TF 단락에 주입될 예정 → 독립 배치 스킵
             if (cm.innerToOuter.containsKey(tf.id())) {
                 continue;
             }
 
             int tfDomId = parseDomIdOrNeg(tf.id());
+            boolean conceptDiagramTf = ctx.conceptDiagramTextFrameIds.contains(tf.id());
             if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) {
                 continue;
             }
@@ -124,7 +135,12 @@ public final class FramePlacer {
             // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
             InlineToFloatingReason inlineToFloatingReason = InlineToFloatingReason.NONE;
             if (tf.isInline()) {
-                if (!ctx.resolvedData.isEditableTextFrame(tf.id())) {
+                if (conceptDiagramTf) {
+                    if (tfDomId >= 0) {
+                        ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+                    }
+                    inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
+                } else if (!ctx.resolvedData.isEditableTextFrame(tf.id())) {
                     String vis = tf.frameVisibleText();
                     boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 1;
                     boolean rendered = tfDomId >= 0 && ctx.resolvedData.isRenderedByOtherChannel(tfDomId);
@@ -181,12 +197,8 @@ public final class FramePlacer {
                     // - 멀티 child 배지 (Phase 3 가 자손 텍스트 결합 ≥ 2자): Phase 3 가 결합 인라인 임베드 → 플로팅 스킵
                     // - 단일 1자 라벨 (예: "1", "예"): Phase 3 가 PNG 임베드 (텍스트 누락) → 플로팅으로 검색 가능 텍스트 보강
                     // 부모 Group이 inline_object이면 inline PNG가 시각적 배지 전체를 포함 → floating 불필요.
-                    if (tfDomId >= 0) {
-                        ResolvedPageItem _tfi2 = ctx.resolvedData.getPageItem(tf.id());
-                        if (_tfi2 != null && _tfi2.parentId() != null) {
-                            int parentDomId = parseDomIdOrNeg(_tfi2.parentId());
-                            if (parentDomId >= 0 && ctx.resolvedData.isInlineObjectId(parentDomId)) continue; // O(1)
-                        }
+                    if (tfDomId >= 0 && isDescendantOfInlineObject(ctx, idx, tf.id())) {
+                        continue;
                     }
                     // inline+editable TF가 어떤 렌더 채널에도 없으면 Phase 3 인라인 런으로 처리.
                     // (어휘 숫자 superscript "1"/"2"/"3" 등 — PNG 없이 IDML 스토리 텍스트만 존재)
@@ -210,6 +222,10 @@ public final class FramePlacer {
                                     .replace("\n", "")
                                     .trim().length() > 1;
                         if (_parentlessInline && _hasOwnInlineText) {
+                            if (isConsumedParentlessInlineContinuation(
+                                    ctx, tf, framesByPage.getOrDefault(tf.pageIndex(), Collections.emptyList()))) {
+                                continue;
+                            }
                             inlineToFloatingReason = InlineToFloatingReason.EDITABLE_UNANCHORED_TEXT;
                         } else {
                             continue;
@@ -361,7 +377,7 @@ public final class FramePlacer {
             // 해당 단락을 제외 후보로 수집 (paraIdx=0 이면 y/h 도 둘째 줄 기준으로 보정).
             int preDetectedSkipParas = 0;
             Set<Integer> excludedParaIndices = null;
-            try {
+            if (!conceptDiagramTf) try {
                 List<ResolvedTextFrame.ComposedLine> _cls = tf.composedLines();
                 if (_cls != null && !_cls.isEmpty() && tf.paragraphEnd() >= tf.paragraphStart()) {
                     // 단락별로 line bounds 를 union 해서 단락 영역 계산
@@ -456,13 +472,16 @@ public final class FramePlacer {
             }
 
             double[] visibleOwnedShell = visibleOwnedTextFrameShellBounds(ctx, tf);
-            if (visibleOwnedShell != null
+            if (!conceptDiagramTf
+                    && visibleOwnedShell != null
                     && shouldAlignTitleToVisibleShell(tf, x, w, y, h, visibleOwnedShell)) {
                 y = visibleOwnedShell[0];
                 h = visibleOwnedShell[2] - visibleOwnedShell[0];
                 expandedToTitleShell = true;
             }
-            double[] centeredTitleShell = centeredMultilineTitleShellBounds(ctx, tf, pageLeft, pageTop, x, w, y, h);
+            double[] centeredTitleShell = conceptDiagramTf
+                    ? null
+                    : centeredMultilineTitleShellBounds(ctx, tf, pageLeft, pageTop, x, w, y, h);
             if (centeredTitleShell != null) {
                 x = centeredTitleShell[1];
                 w = centeredTitleShell[3] - centeredTitleShell[1];
@@ -470,7 +489,7 @@ public final class FramePlacer {
 
             // 같은 부모 Group 안의 형제 도형(fill 있는 Rectangle/Polygon/Oval) 과
             // 동일 baseline 에 있을 때 형제 우측으로 이동. (예: page 17 Theme 라벨 + 한국어 TF)
-            try {
+            if (!conceptDiagramTf) try {
                 ResolvedPageItem tfPi = ctx.resolvedData.getPageItem(tf.id());
                 String tfParentId = (tfPi != null) ? tfPi.parentId() : null;
                 if (tfParentId != null) {
@@ -546,7 +565,9 @@ public final class FramePlacer {
             // YGap 블록이 생기면 distributeByComposedCharRange 경로를 타고 연결 글상자 체인 블록들이
             // 단락 배분에서 제외되어 텍스트가 다음 페이지로 흐르지 못하는 버그 발생.
             // (hasNextPageChain은 위 chain merge loop에서 이미 계산됨)
-            if (!hasNextPageChain && tf.composedLines() != null && tf.composedLines().size() > 1) {
+            if (!conceptDiagramTf
+                    && tf.columnCount() <= 1
+                    && !hasNextPageChain && tf.composedLines() != null && tf.composedLines().size() > 1) {
                 // 1) wrap indent 기반 분할 (텍스트가 이미지를 비껴가는 경우)
                 // placeByWrapIndent는 Phase 5에서 후처리 (Phase 3 변환 파이프라인 유지)
                 // if (placeByWrapIndent(tf, section, pageLeft, pageTop)) continue;
@@ -677,7 +698,9 @@ public final class FramePlacer {
             String visText = tf.frameVisibleText();
             if (visText != null) {
                 block.frameVisibleText(visText);
-                block.frameVisibleTextLength(visText.replace("\uFFFC", "").replace("\n", "").replace("\r", "").length());
+                int visibleLen = visibleTextLength(visText);
+                int inlineEditableLen = editableInlineTextLengthForStory(ctx, tf.storyId());
+                block.frameVisibleTextLength(Math.max(visibleLen, inlineEditableLen));
             }
             block.noAutoLineWrap(shouldUseNoAutoLineWrap(tf, block)
                     || shouldUseVisualShellNoAutoLineWrap(hasRenderedVisualShell, tf, block));
@@ -835,6 +858,7 @@ public final class FramePlacer {
     private static boolean shouldSkipNonEditableTf(
             ResolvedBuildContext ctx, ResolvedTextFrame tf, int tfDomId, FrameIndex idx) {
         if (shouldPlaceVisualLabelTextSeparately(ctx, tf)) return false;
+        if (hasEditableInlineTextHiddenGroupInStory(ctx, tf.storyId())) return false;
         if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return true;
 
         // domId=None TF: ExtendScript가 domId를 얻지 못해 editability 확인 불가.
@@ -893,6 +917,47 @@ public final class FramePlacer {
             return false; // 글상자로 배치
         }
         return !_nonRenderedWithText; // nonRenderedWithText → 배치(false), 그 외 → 건너뜀(true)
+    }
+
+    private static boolean hasEditableInlineTextHiddenGroupInStory(
+            ResolvedBuildContext ctx, String storyId) {
+        return editableInlineTextLengthForStory(ctx, storyId) > 0;
+    }
+
+    private static int editableInlineTextLengthForStory(
+            ResolvedBuildContext ctx, String storyId) {
+        if (ctx == null || ctx.resolvedData == null || storyId == null) return 0;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return 0;
+        int total = 0;
+        for (RenderedGroup rg : groups) {
+            if (rg == null) continue;
+            if (!storyId.equals(rg.parentStoryId())) continue;
+            if (!"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) continue;
+            if (!rg.hasEditableTextHiddenFromPng()) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null || editableIds.length == 0) continue;
+            for (String editableId : editableIds) {
+                ResolvedTextFrame child = ctx.resolvedData.getTextFrame(editableId);
+                String text = child != null ? child.frameVisibleText() : null;
+                int len = visibleTextLength(text);
+                if (len > 0) total += len;
+            }
+        }
+        return total;
+    }
+
+    private static int visibleTextLength(String text) {
+        if (text == null) return 0;
+        return text
+                .replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0007", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim()
+                .length();
     }
 
     private static boolean shouldPlaceVisualLabelTextSeparately(
@@ -1431,12 +1496,205 @@ public final class FramePlacer {
         return false;
     }
 
+    private static boolean containsString(String[] values, String expected) {
+        if (values == null || expected == null) return false;
+        for (String value : values) {
+            if (expected.equals(value)) return true;
+        }
+        return false;
+    }
+
     private static boolean isOwnedTextFrameShellReason(String reason) {
         if (reason == null) return false;
         return reason.contains("text_hidden")
                 || reason.contains("visual_shell")
                 || reason.contains("editable_textframe_visual_shell")
                 || reason.contains("image_group");
+    }
+
+    public static Set<String> collectConceptDiagramTextFrameIds(
+            ResolvedBuildContext ctx,
+            List<ResolvedTextFrame> frames) {
+        Set<String> result = new HashSet<>();
+        if (ctx == null || ctx.resolvedData == null || frames == null || frames.isEmpty()) return result;
+
+        Map<String, ResolvedTextFrame> byId = new HashMap<>();
+        Map<Integer, List<ResolvedTextFrame>> byPage = new HashMap<>();
+        for (ResolvedTextFrame tf : frames) {
+            if (tf == null || tf.id() == null) continue;
+            byId.put(tf.id(), tf);
+            byPage.computeIfAbsent(tf.pageIndex(), k -> new ArrayList<>()).add(tf);
+        }
+
+        Map<Integer, List<double[]>> clusterBoundsByPage = new HashMap<>();
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (!isConceptDiagramShellCandidate(rg)) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null || editableIds.length < 3) continue;
+
+            int shortLabels = 0;
+            int longTexts = 0;
+            for (String editableId : editableIds) {
+                ResolvedTextFrame tf = byId.get(editableId);
+                String clean = cleanVisibleText(tf);
+                if (clean.isEmpty()) continue;
+                if (clean.length() <= 18 && !isNumericOnlyActivityMarker(clean)) shortLabels++;
+                if (clean.length() >= 18) longTexts++;
+            }
+            if (shortLabels < 2 || longTexts < 1) continue;
+
+            double[] rb = rg.bounds();
+            if (rb == null || rb.length < 4) continue;
+            boolean hasIndependentDescription = false;
+            for (ResolvedTextFrame tf : byPage.getOrDefault(rg.pageIndex(), Collections.emptyList())) {
+                if (tf == null || tf.id() == null) continue;
+                if (containsString(editableIds, tf.id())) continue;
+                if (!isParentlessTextFrame(ctx, tf)) continue;
+                String clean = cleanVisibleText(tf);
+                if (clean.length() < 8) continue;
+                if (looksLikeNumberedActivityPrompt(clean)) continue;
+                double[] tb = boundsOf(tf);
+                if (isConceptDescriptionConnected(rb, tb, ctx.scaleFactor)) {
+                    hasIndependentDescription = true;
+                    result.add(tf.id());
+                }
+            }
+            if (!hasIndependentDescription) continue;
+
+            for (String editableId : editableIds) {
+                if (editableId != null) result.add(editableId);
+            }
+            clusterBoundsByPage.computeIfAbsent(rg.pageIndex(), k -> new ArrayList<>()).add(rb);
+        }
+
+        // Concept diagrams often have side-axis headings that are separate TFs
+        // outside the visual shell. Add only close parentless headings on pages
+        // where a cluster was already confirmed by shell + independent description.
+        for (Map.Entry<Integer, List<double[]>> entry : clusterBoundsByPage.entrySet()) {
+            int pageIndex = entry.getKey();
+            double[] union = unionBounds(entry.getValue());
+            if (union == null) continue;
+            for (ResolvedTextFrame tf : byPage.getOrDefault(pageIndex, Collections.emptyList())) {
+                if (tf == null || tf.id() == null || result.contains(tf.id())) continue;
+                if (!isParentlessTextFrame(ctx, tf)) continue;
+                String clean = cleanVisibleText(tf);
+                if (clean.length() < 4 || clean.length() > 40) continue;
+                double[] tb = boundsOf(tf);
+                if (tb == null || tb.length < 4) continue;
+                double horizontalGap = union[1] - tb[3];
+                if (horizontalGap < -4.0 || horizontalGap > 65.0) continue;
+                double yOverlap = Math.min(union[2], tb[2]) - Math.max(union[0], tb[0]);
+                double tfHeight = tb[2] - tb[0];
+                double tfCenterY = (tb[0] + tb[2]) / 2.0;
+                boolean verticallyRelated = yOverlap > Math.max(1.0, tfHeight * 0.20)
+                        || (tfCenterY >= union[0] - 8.0 && tfCenterY <= union[2] + 8.0);
+                if (verticallyRelated) {
+                    result.add(tf.id());
+                }
+            }
+        }
+
+        if (!result.isEmpty()) {
+            System.err.println("[FramePlacer] concept diagram cluster TFs protected: " + result);
+        }
+        return result;
+    }
+
+    private static boolean isConceptDiagramShellCandidate(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!"hwpx_tf".equals(rg.textOwner())) return false;
+        if (!rg.hasEditableTextHiddenFromPng()) return false;
+        String reason = rg.reason();
+        if (reason == null) return false;
+        if (!reason.contains("text_hidden")) return false;
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        double h = b[2] - b[0];
+        double w = b[3] - b[1];
+        return h >= 8.0 && w >= 35.0;
+    }
+
+    private static boolean isNumericOnlyActivityMarker(String clean) {
+        if (clean == null) return false;
+        return clean.trim().matches("[0-9０-９]+");
+    }
+
+    private static boolean looksLikeNumberedActivityPrompt(String clean) {
+        if (clean == null) return false;
+        String s = clean.trim();
+        return s.matches("^\\(?[0-9０-９]+\\)?[\\s\\t.．、,，]+.*");
+    }
+
+    private static boolean isParentlessTextFrame(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return false;
+        ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
+        return pi == null || pi.parentId() == null || pi.parentId().isEmpty();
+    }
+
+    private static boolean isInsideOrMostlyCovered(double[] shellBounds, double[] tfBounds, double scaleFactor) {
+        if (shellBounds == null || shellBounds.length < 4 || tfBounds == null || tfBounds.length < 4) return false;
+        if (isInsideOrMostlyCoveredSameScale(shellBounds, tfBounds)) return true;
+        if (scaleFactor > 0 && Math.abs(scaleFactor - 1.0) > 0.001) {
+            double[] scaled = new double[] {
+                    shellBounds[0] * scaleFactor,
+                    shellBounds[1] * scaleFactor,
+                    shellBounds[2] * scaleFactor,
+                    shellBounds[3] * scaleFactor
+            };
+            return isInsideOrMostlyCoveredSameScale(scaled, tfBounds);
+        }
+        return false;
+    }
+
+    private static boolean isConceptDescriptionConnected(double[] shellBounds, double[] tfBounds, double scaleFactor) {
+        if (shellBounds == null || shellBounds.length < 4 || tfBounds == null || tfBounds.length < 4) return false;
+        if (isConceptDescriptionConnectedSameScale(shellBounds, tfBounds)) return true;
+        if (scaleFactor > 0 && Math.abs(scaleFactor - 1.0) > 0.001) {
+            double[] scaled = new double[] {
+                    shellBounds[0] * scaleFactor,
+                    shellBounds[1] * scaleFactor,
+                    shellBounds[2] * scaleFactor,
+                    shellBounds[3] * scaleFactor
+            };
+            return isConceptDescriptionConnectedSameScale(scaled, tfBounds);
+        }
+        return false;
+    }
+
+    private static boolean isConceptDescriptionConnectedSameScale(double[] shellBounds, double[] tfBounds) {
+        if (isInsideOrMostlyCoveredSameScale(shellBounds, tfBounds)) return true;
+        double tfWidth = tfBounds[3] - tfBounds[1];
+        double tfHeight = tfBounds[2] - tfBounds[0];
+        if (tfWidth <= 0 || tfHeight <= 0) return false;
+        double xOverlap = Math.min(shellBounds[3], tfBounds[3]) - Math.max(shellBounds[1], tfBounds[1]);
+        if (xOverlap <= 0 || xOverlap / tfWidth < 0.60) return false;
+        double yOverlap = Math.min(shellBounds[2], tfBounds[2]) - Math.max(shellBounds[0], tfBounds[0]);
+        if (yOverlap > 0 && yOverlap / tfHeight >= 0.25) return true;
+        double verticalGap = tfBounds[0] - shellBounds[2];
+        return verticalGap >= 0 && verticalGap <= Math.max(8.0, tfHeight * 0.75);
+    }
+
+    private static boolean isInsideOrMostlyCoveredSameScale(double[] outer, double[] inner) {
+        if (containsBounds(outer, inner, 1.0)) return true;
+        double innerArea = area(inner);
+        return innerArea > 0 && overlapArea(outer, inner) / innerArea >= 0.72;
+    }
+
+    private static double[] unionBounds(List<double[]> bounds) {
+        if (bounds == null || bounds.isEmpty()) return null;
+        double[] out = null;
+        for (double[] b : bounds) {
+            if (b == null || b.length < 4) continue;
+            if (out == null) {
+                out = new double[] { b[0], b[1], b[2], b[3] };
+            } else {
+                if (b[0] < out[0]) out[0] = b[0];
+                if (b[1] < out[1]) out[1] = b[1];
+                if (b[2] > out[2]) out[2] = b[2];
+                if (b[3] > out[3]) out[3] = b[3];
+            }
+        }
+        return out;
     }
 
     private static int[] alphaBounds(BufferedImage img) {
@@ -1932,6 +2190,43 @@ public final class FramePlacer {
         return false;
     }
 
+    private static boolean isConsumedParentlessInlineContinuation(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame inlineTf,
+            List<ResolvedTextFrame> samePageFrames) {
+        if (ctx == null || inlineTf == null || samePageFrames == null) return false;
+        if (!inlineTf.isInline()) return false;
+        ResolvedPageItem inlineItem = ctx.resolvedData.getPageItem(inlineTf.id());
+        if (inlineItem != null && inlineItem.parentId() != null) return false;
+
+        String inlineText = inlineTf.frameVisibleText();
+        if (inlineText == null || !inlineText.startsWith("\uFFFC")) return false;
+        double[] ib = inlineTf.geometricBounds();
+        if (ib == null || ib.length < 4) return false;
+
+        for (ResolvedTextFrame owner : samePageFrames) {
+            if (owner == null || owner == inlineTf || owner.isInline()) continue;
+            if (owner.storyId() != null && owner.storyId().equals(inlineTf.storyId())) continue;
+            if (!ctx.resolvedData.isEditableTextFrame(owner.id())) continue;
+
+            String ownerText = owner.frameVisibleText();
+            if (ownerText == null || !ownerText.trim().endsWith("\uFFFC")) continue;
+            double[] ob = owner.geometricBounds();
+            if (ob == null || ob.length < 4) continue;
+
+            boolean insideOwner = ib[0] >= ob[0] - 0.5
+                    && ib[1] >= ob[1] - 0.5
+                    && ib[2] <= ob[2] + 0.5
+                    && ib[3] <= ob[3] + 0.5;
+            if (insideOwner) {
+                System.err.println("[FramePlacer] parentless inline continuation consumed: tf="
+                        + inlineTf.id() + " ownerTf=" + owner.id());
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean shouldUseVisualShellNoAutoLineWrap(
             boolean hasRenderedVisualShell,
             ResolvedTextFrame tf,
@@ -1945,6 +2240,117 @@ public final class FramePlacer {
             return false;
         }
         return tf.paragraphStart() == tf.paragraphEnd();
+    }
+
+    private static Set<String> collectDuplicateVisualShellTextFrameIds(
+            ResolvedBuildContext ctx, List<ResolvedTextFrame> frames) {
+        Set<String> suppress = new HashSet<>();
+        if (ctx == null || ctx.resolvedData == null || frames == null) return suppress;
+
+        Map<String, ResolvedTextFrame> byId = new HashMap<>();
+        for (ResolvedTextFrame tf : frames) {
+            if (tf != null && tf.id() != null) byId.put(tf.id(), tf);
+        }
+
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (!isSegmentedVisualShellGroup(rg)) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null || editableIds.length < 2) continue;
+
+            List<ResolvedTextFrame> childTfs = new ArrayList<>();
+            for (String id : editableIds) {
+                ResolvedTextFrame tf = byId.get(id);
+                if (tf != null && !cleanVisibleText(tf).isEmpty()) childTfs.add(tf);
+            }
+            if (childTfs.size() < 2) continue;
+
+            for (int i = 0; i < childTfs.size(); i++) {
+                ResolvedTextFrame a = childTfs.get(i);
+                String aText = cleanVisibleText(a);
+                double[] aBounds = boundsOf(a);
+                if (aText.isEmpty() || aText.length() > 8 || aBounds == null) continue;
+
+                if (isSyntheticGroupWideLabel(rg, a, childTfs)) {
+                    suppress.add(a.id());
+                    continue;
+                }
+
+                for (int j = 0; j < childTfs.size(); j++) {
+                    if (i == j) continue;
+                    ResolvedTextFrame b = childTfs.get(j);
+                    if (!aText.equals(cleanVisibleText(b))) continue;
+                    double[] bBounds = boundsOf(b);
+                    if (bBounds == null) continue;
+                    if (containsBounds(aBounds, bBounds, 0.35)
+                            && area(aBounds) > area(bBounds) * 1.15) {
+                        suppress.add(a.id());
+                        break;
+                    }
+                }
+            }
+        }
+        return suppress;
+    }
+
+    private static boolean isSegmentedVisualShellGroup(RenderedGroup rg) {
+        if (rg == null || !"page_object".equals(rg.type())) return false;
+        if (!"hwpx_tf".equals(rg.textOwner())) return false;
+        if (!rg.hasEditableTextHiddenFromPng()) return false;
+        String reason = rg.reason();
+        if (reason == null) return false;
+        return reason.contains("mixed_group_text_hidden")
+                || reason.contains("visual_label_text_hidden_shell");
+    }
+
+    private static boolean isSyntheticGroupWideLabel(
+            RenderedGroup rg, ResolvedTextFrame tf, List<ResolvedTextFrame> siblings) {
+        if (rg == null || tf == null || siblings == null || siblings.size() < 3) return false;
+        String text = cleanVisibleText(tf);
+        if (text.isEmpty() || text.length() > 8) return false;
+        double[] rb = rg.bounds();
+        double[] tb = boundsOf(tf);
+        if (rb == null || tb == null) return false;
+        double rArea = area(rb);
+        double tArea = area(tb);
+        if (rArea <= 0.0 || tArea <= 0.0) return false;
+        double overlap = overlapArea(rb, tb);
+        boolean nearlyGroupSized = overlap / tArea >= 0.92 && tArea / rArea >= 0.72;
+        if (!nearlyGroupSized) return false;
+
+        int otherTextFrames = 0;
+        for (ResolvedTextFrame sibling : siblings) {
+            if (sibling == tf) continue;
+            if (!cleanVisibleText(sibling).isEmpty()) otherTextFrames++;
+        }
+        return otherTextFrames >= 2;
+    }
+
+    private static String cleanVisibleText(ResolvedTextFrame tf) {
+        String text = tf != null ? tf.frameVisibleText() : null;
+        if (text == null) return "";
+        return text.replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+    }
+
+    private static double[] boundsOf(ResolvedTextFrame tf) {
+        if (tf == null) return null;
+        double[] b = tf.pageRelativeBounds();
+        if (b == null || b.length < 4) b = tf.geometricBounds();
+        return b != null && b.length >= 4 ? b : null;
+    }
+
+    private static boolean containsBounds(double[] outer, double[] inner, double tolerancePt) {
+        if (outer == null || inner == null || outer.length < 4 || inner.length < 4) return false;
+        return outer[0] <= inner[0] + tolerancePt
+                && outer[1] <= inner[1] + tolerancePt
+                && outer[2] >= inner[2] - tolerancePt
+                && outer[3] >= inner[3] - tolerancePt;
     }
 
     private static boolean shouldUseNoAutoLineWrap(
@@ -1984,6 +2390,24 @@ public final class FramePlacer {
                 .replace("\b", "")
                 .replaceAll("\\s+", "")
                 .trim();
+    }
+
+    private static boolean isDescendantOfInlineObject(
+            ResolvedBuildContext ctx, FrameIndex idx, String domId) {
+        if (ctx == null || ctx.resolvedData == null || domId == null) return false;
+        String curId = domId;
+        for (int depth = 0; depth < 8 && curId != null; depth++) {
+            ResolvedPageItem pi = ctx.resolvedData.getPageItem(curId);
+            if (pi == null || pi.parentId() == null) return false;
+            int parentDomId = parseDomIdOrNeg(pi.parentId());
+            if (parentDomId >= 0) {
+                if (ctx.resolvedData.isInlineObjectId(parentDomId)) return true;
+                if (idx != null && idx.inlineObjectById.containsKey(parentDomId)) return true;
+                if (idx != null && idx.inlineFileGroupIds.contains(parentDomId)) return true;
+            }
+            curId = pi.parentId();
+        }
+        return false;
     }
 
     private static boolean isShortSingleLineTextFrame(ResolvedTextFrame tf) {

@@ -386,6 +386,7 @@ public class ASTDeserializer {
         run.fontStyle(getString(o, "fontStyle"));
         run.fontSizeHwpunits(getBoxedInt(o, "fontSizeHwpunits"));
         run.textColor(getString(o, "textColor"));
+        run.shadeColor(getString(o, "shadeColor"));
         run.letterSpacing(getBoxedShort(o, "letterSpacing"));
         run.subscript(getBool(o, "subscript"));
         run.superscript(getBool(o, "superscript"));

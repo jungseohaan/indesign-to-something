@@ -358,6 +358,26 @@ public class HwpxImageBuilder {
             return;
         }
 
+        boolean hasOverlayText = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
+        if (hasOverlayText) {
+            ASTInlineObject frame = new ASTInlineObject();
+            frame.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+            frame.sourceId(obj.sourceId());
+            frame.width(obj.width() > 0 ? obj.width() : 5000);
+            frame.height(obj.height() > 0 ? obj.height() : 2000);
+            frame.imageFillData(imageData);
+            frame.noAutoLineWrap(obj.noAutoLineWrap());
+            frame.keepInline(obj.keepInline());
+            frame.verticalJustification(obj.verticalJustification());
+            frame.textMarginLeft(obj.textMarginLeft());
+            frame.textMarginRight(obj.textMarginRight());
+            frame.textMarginTop(obj.textMarginTop());
+            frame.textMarginBottom(obj.textMarginBottom());
+            frame.paragraphs(obj.paragraphs());
+            textBoxBuilder.addInlineTextFrame(para, frame);
+            return;
+        }
+
         String format = obj.imageFormat() != null ? obj.imageFormat() : "png";
         String itemId = ImageInserter.registerImage(ctx.hwpxFile, imageData, format);
 
@@ -372,7 +392,7 @@ public class HwpxImageBuilder {
         container.idAnd(HwpxUtil.nextShapeId())
                 .zOrderAnd(0)
                 .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None);
@@ -428,67 +448,6 @@ public class HwpxImageBuilder {
         pic.createImg();
         pic.img().binaryItemIDRefAnd(itemId).brightAnd(0).contrastAnd(0)
                 .effectAnd(ImageEffect.REAL_PIC).alphaAnd(0f);
-
-        boolean hasOverlayText = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
-        if (!hasOverlayText) {
-            ctx.imagesConverted++;
-            return;
-        }
-
-        // ── 자식2: Rectangle + DrawText (텍스트 오버레이) ──
-        Rectangle rect = container.addNewRectangle();
-        rect.idAnd(HwpxUtil.nextShapeId())
-                .zOrderAnd(1).numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT).textFlowAnd(TextFlowSide.BOTH_SIDES)
-                .lockAnd(false).dropcapstyleAnd(DropCapStyle.None);
-        rect.hrefAnd("").groupLevelAnd((short) 1).instidAnd(HwpxUtil.nextShapeId());
-        rect.createOffset(); rect.offset().set(0L, 0L);
-        rect.createOrgSz(); rect.orgSz().set(w, h);
-        rect.createCurSz(); rect.curSz().set(w, h);
-        rect.createFlip(); rect.flip().horizontalAnd(false).verticalAnd(false);
-        rect.createRotationInfo();
-        rect.rotationInfo().angleAnd((short) 0).centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
-        rect.createRenderingInfo();
-        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        textBoxBuilder.setupTextBoxLineShape(rect, null, 0, "None", 100); // 테두리 없음
-        // 배경 없음 (투명) — setupTextBoxFillBrush 호출 불필요 (null fillColor → fillBrush 미생성)
-        rect.createDrawText();
-        DrawText dt = rect.drawText();
-        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
-        dt.createTextMargin();
-        dt.textMargin().leftAnd(obj.textMarginLeft()).rightAnd(obj.textMarginRight())
-                .topAnd(obj.textMarginTop()).bottomAnd(obj.textMarginBottom());
-        dt.createSubList();
-        SubList subList = dt.subList();
-        VerticalAlign2 vAlign = HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification());
-        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
-                .lineWrapAnd(HwpxTextBoxBuilder.inlineTextFrameLineWrap(obj)).vertAlignAnd(vAlign)
-                .linkListIDRefAnd("0").linkListNextIDRefAnd("0")
-                .textWidthAnd(0).textHeightAnd(0)
-                .hasTextRefAnd(false).hasNumRefAnd(false);
-        if (obj.paragraphs() != null) {
-            for (ASTParagraph p : obj.paragraphs()) {
-                paragraphBuilder.addParagraphToSubList(subList, p);
-            }
-        }
-        if (subList.countOfPara() == 0) paragraphBuilder.addEmptySubListPara(subList);
-        rect.ratioAnd((short) 0);
-        rect.createPt0(); rect.pt0().set(0L, 0L);
-        rect.createPt1(); rect.pt1().set(w, 0L);
-        rect.createPt2(); rect.pt2().set(w, h);
-        rect.createPt3(); rect.pt3().set(0L, h);
-        rect.createSZ();
-        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE).protectAnd(false);
-        rect.createPos();
-        rect.pos().treatAsCharAnd(false).affectLSpacingAnd(false).flowWithTextAnd(true)
-                .allowOverlapAnd(true).holdAnchorAndSOAnd(false)
-                .vertRelToAnd(VertRelTo.PARA).horzRelToAnd(HorzRelTo.PARA)
-                .vertAlignAnd(VertAlign.BOTTOM).horzAlignAnd(HorzAlign.LEFT)
-                .vertOffsetAnd(0L).horzOffset(0L);
-        rect.createOutMargin(); rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
         ctx.imagesConverted++;
     }

@@ -114,7 +114,7 @@ final class CharPrFactory {
      * 기존 CharPr과 동일하되 ratio만 spaceRatio()로 축소.
      */
     private String getOrCreateSpaceCharPr(String baseCharPrId, ASTTextRun textRun) {
-        String cacheKey = "SP|" + baseCharPrId;
+        String cacheKey = "SP|" + baseCharPrId + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "");
         String cached = ctx.charPrCache.get(cacheKey);
         if (cached != null) return cached;
 
@@ -148,6 +148,7 @@ final class CharPrFactory {
                 textRun.strikeThrough(),
                 textRun.verticalScale(),
                 textRun.baselineShift());
+        applyShadeColor(charPr, textRun);
         // spaceCondenseRatio를 절대 목표값으로 직접 적용 (fontRatio와 독립)
         short sr = spaceRatio();
         charPr.ratio().set(sr, sr, sr, sr, sr, sr, sr);
@@ -196,6 +197,7 @@ final class CharPrFactory {
                 || run.fontStyle() != null
                 || run.fontSizeHwpunits() != null
                 || run.textColor() != null
+                || run.shadeColor() != null
                 || run.letterSpacing() != null
                 || run.horizontalScale() != null
                 || run.verticalScale() != null
@@ -211,6 +213,7 @@ final class CharPrFactory {
                 + "|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "")
                 + "|" + (textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : "")
                 + "|" + (textRun.textColor() != null ? textRun.textColor() : "")
+                + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "")
                 + "|" + (textRun.fontStyle() != null ? textRun.fontStyle() : "")
                 + "|" + (textRun.letterSpacing() != null ? textRun.letterSpacing() : "")
                 + "|" + (textRun.horizontalScale() != null ? textRun.horizontalScale() : "")
@@ -271,9 +274,16 @@ final class CharPrFactory {
                 textRun.strikeThrough(),
                 textRun.verticalScale(),
                 textRun.baselineShift());
+        applyShadeColor(charPr, textRun);
 
         ctx.charPrCache.put(cacheKey, newId);
         return newId;
+    }
+
+    private void applyShadeColor(CharPr charPr, ASTTextRun textRun) {
+        if (textRun.shadeColor() != null && !textRun.shadeColor().isEmpty()) {
+            charPr.shadeColor(textRun.shadeColor());
+        }
     }
 
     /**
@@ -352,7 +362,8 @@ final class CharPrFactory {
     String createEquationFontCharPr(ASTTextRun textRun, String baseCharPrId) {
         String cacheKey = baseCharPrId + "|EQ|" + (textRun.fontFamily() != null ? textRun.fontFamily() : "")
                 + "|" + (textRun.fontSizeHwpunits() != null ? textRun.fontSizeHwpunits() : "")
-                + "|" + (textRun.textColor() != null ? textRun.textColor() : "");
+                + "|" + (textRun.textColor() != null ? textRun.textColor() : "")
+                + "|" + (textRun.shadeColor() != null ? textRun.shadeColor() : "");
         String cached = ctx.eqFontCharPrCache.get(cacheKey);
         if (cached != null) return cached;
 
@@ -374,6 +385,7 @@ final class CharPrFactory {
                 null,
                 false,
                 null, null);
+        applyShadeColor(charPr, textRun);
 
         ctx.eqFontCharPrCache.put(cacheKey, newId);
         return newId;

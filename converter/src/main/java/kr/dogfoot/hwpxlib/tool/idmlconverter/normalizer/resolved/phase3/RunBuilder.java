@@ -134,6 +134,10 @@ class RunBuilder {
         if (resolvedColor != null) {
             tr.textColor(resolvedColor);
         }
+        String resolvedShadeColor = resolveCharacterShadeColor(ctx, cr, grepCharStyle);
+        if (resolvedShadeColor != null) {
+            tr.shadeColor(resolvedShadeColor);
+        }
 
         // fontStyle: IDML CR이 EH/BT 수식 폰트를 한국어에 잘못 적용한 경우 리셋
         if (cr.fontStyle() != null) {
@@ -425,6 +429,44 @@ class RunBuilder {
         return null;
     }
 
+    private static String resolveCharacterShadeColor(ResolvedBuildContext ctx, IDMLCharacterRun cr,
+                                                     IDMLStyleDef grepCharStyle) {
+        String color = cr != null ? cr.shadeColor() : null;
+        Double tint = cr != null ? cr.shadeTint() : null;
+
+        if (color == null && grepCharStyle != null && grepCharStyle.shadeColor() != null) {
+            color = grepCharStyle.shadeColor();
+            tint = grepCharStyle.shadeTint();
+        }
+
+        if (color == null && cr != null && cr.appliedCharacterStyle() != null && ctx.styleResolver != null) {
+            IDMLStyleDef charStyle = ctx.styleResolver.getResolvedCharacterStyle(cr.appliedCharacterStyle());
+            if (charStyle != null && charStyle.shadeColor() != null) {
+                color = charStyle.shadeColor();
+                tint = charStyle.shadeTint();
+            }
+        }
+
+        String hex = resolveColorToHex(ctx, color);
+        if (hex == null) return null;
+        if (tint != null && tint >= 0 && tint < 100) {
+            return blendWithWhite(hex, tint / 100.0);
+        }
+        return hex;
+    }
+
+    private static String blendWithWhite(String hex, double fraction) {
+        if (hex == null || !hex.matches("#[0-9A-Fa-f]{6}")) return hex;
+        double f = Math.max(0, Math.min(1, fraction));
+        int r = Integer.parseInt(hex.substring(1, 3), 16);
+        int g = Integer.parseInt(hex.substring(3, 5), 16);
+        int b = Integer.parseInt(hex.substring(5, 7), 16);
+        int rr = (int) Math.round(255 + (r - 255) * f);
+        int gg = (int) Math.round(255 + (g - 255) * f);
+        int bb = (int) Math.round(255 + (b - 255) * f);
+        return String.format("#%02X%02X%02X", rr, gg, bb);
+    }
+
     /**
      * 한국어 사이 단일 라틴 문자를 수식 변수(이탤릭)로 분리.
      * "길이를 x라고 할 때" → "길이를 " + [수식 x] + "라고 할 때"
@@ -480,6 +522,7 @@ class RunBuilder {
         tr.fontStyle(src.fontStyle());
         tr.fontSizeHwpunits(src.fontSizeHwpunits());
         tr.textColor(src.textColor());
+        tr.shadeColor(src.shadeColor());
         tr.letterSpacing(src.letterSpacing());
         tr.grepMathFont(src.grepMathFont());
         tr.underline(src.underline());

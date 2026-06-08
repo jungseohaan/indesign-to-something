@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.MatchConfidence;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
@@ -562,6 +563,11 @@ public final class StoryConverter {
                 if (visibleText.charAt(i) != '\uFFFC') continue;
                 int inlineId = inlineVisualIds.get(idIdx++);
                 if (containsInlineSource(block, inlineId)) continue;
+                if (shouldFloatTfOwnedInlineVisual(ctx, owner, block, inlineId)) {
+                    ctx.setInlineDisposition(inlineId, FrameDisposition.PNG_CONVERT_TO_FLOATING);
+                    ctx.deferredAnchoredFloatingIds.add(inlineId);
+                    continue;
+                }
                 ASTInlineObject inline = loadTfInlineVisual(ctx, inlineId);
                 if (inline == null) continue;
 
@@ -610,6 +616,46 @@ public final class StoryConverter {
             }
         }
         return null;
+    }
+
+    private static boolean shouldFloatTfOwnedInlineVisual(
+            ResolvedBuildContext ctx, RenderedGroup owner, ASTTextFrameBlock block, int inlineId) {
+        if (ctx == null || ctx.resolvedData == null || owner == null || block == null) return false;
+        RenderedGroup inlineRg = findRenderedGroup(ctx, inlineId);
+        if (inlineRg == null || !"inline_object".equals(inlineRg.itemType())) return false;
+        if (!"hwpx_tf".equals(owner.textOwner())) return false;
+
+        String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+        ResolvedTextFrame tf = domId != null ? ctx.resolvedData.getTextFrame(domId) : null;
+        double[] tfBounds = tf != null ? tf.pageRelativeBounds() : null;
+        double[] inlineBounds = inlineRg.bounds();
+        if (tfBounds == null || tfBounds.length < 4 || inlineBounds == null || inlineBounds.length < 4) {
+            return false;
+        }
+
+        double tfW = Math.abs(tfBounds[3] - tfBounds[1]);
+        double tfH = Math.abs(tfBounds[2] - tfBounds[0]);
+        double inlineW = Math.abs(inlineBounds[3] - inlineBounds[1]);
+        double inlineH = Math.abs(inlineBounds[2] - inlineBounds[0]);
+        if (tfW <= 0.0 || tfH <= 0.0 || inlineW <= 0.0 || inlineH <= 0.0) return false;
+
+        boolean wideStrip = inlineW >= tfW * 0.60 && inlineH <= tfH * 0.90;
+        if (!wideStrip) return false;
+
+        // TF-owned wide strips are usually decorative speech-bubble/blank outlines.
+        // Keeping them as inline characters makes HWP lay out image + text in one line,
+        // which stretches or breaks the editable text. Preserve them as floating visuals instead.
+        return ownerContainsId(owner.tfInlineVisualIds(), inlineId)
+                || ownerContainsId(owner.childImageIds(), inlineId)
+                || ownerContainsId(owner.sourceObjectIds(), inlineId);
+    }
+
+    private static boolean ownerContainsId(int[] ids, int value) {
+        if (ids == null) return false;
+        for (int id : ids) {
+            if (id == value) return true;
+        }
+        return false;
     }
 
     private static ASTInlineObject loadTfInlineVisual(ResolvedBuildContext ctx, int inlineId) {
@@ -884,6 +930,7 @@ public final class StoryConverter {
         copy.fontStyle(source.fontStyle());
         copy.fontSizeHwpunits(source.fontSizeHwpunits());
         copy.textColor(source.textColor());
+        copy.shadeColor(source.shadeColor());
         copy.letterSpacing(source.letterSpacing());
         copy.subscript(source.subscript());
         copy.superscript(source.superscript());
@@ -1785,18 +1832,8 @@ public final class StoryConverter {
                                 }
                                 continue;
                             }
-                            // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환 우선
                             String prevRunText = adjacentRunText(runs, runIndex, -1);
                             String nextRunText = adjacentRunText(runs, runIndex, 1);
-                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, anchoredId,
-                                    prevRunText, nextRunText);
-                            if (textRun != null) {
-                                if (!InlineFrameHandler.isInlineVocabularyMarker(ctx, anchoredId, prevRunText, nextRunText)) {
-                                    maybeInsertDecorativeLeaderTab(ctx, rp, anchoredId, para);
-                                }
-                                para.addItem(textRun);
-                                continue;
-                            }
                             // 다수 박스(예: ㅍ ㅎ ㅂ ㅅ 자모 배지) → 각 TF 를 박스 스타일 INLINE_TEXT_FRAME 으로 분해
                             List<ASTInlineObject> boxList =
                                     InlineFrameHandler.tryInlineGroupAsBoxList(ctx, anchoredId);
@@ -1809,6 +1846,26 @@ public final class StoryConverter {
                             ASTInlineObject singleBadge = InlineFrameHandler.tryInlineGroupAsSingleBadge(ctx, anchoredId);
                             if (singleBadge != null) {
                                 para.addItem(singleBadge);
+                                continue;
+                            }
+                            // 하위 인라인 TF 안에 다시 ORC 앵커가 있는 경우
+                            // 텍스트 런으로 평탄화하지 말고 배지/박스 + 텍스트 순서를 보존한다.
+                            List<ASTInlineItem> nestedItems =
+                                    InlineFrameHandler.tryInlineTextFrameAsItems(ctx, anchoredId,
+                                            prevRunText, nextRunText);
+                            if (nestedItems != null && !nestedItems.isEmpty()) {
+                                for (ASTInlineItem item : nestedItems) para.addItem(item);
+                                continue;
+                            }
+                            // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환.
+                            // 배경+텍스트 배지는 위에서 먼저 처리해 ORC 텍스트가 일반 런으로 중복 삽입되지 않게 한다.
+                            ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, anchoredId,
+                                    prevRunText, nextRunText);
+                            if (textRun != null) {
+                                if (!InlineFrameHandler.isInlineVocabularyMarker(ctx, anchoredId, prevRunText, nextRunText)) {
+                                    maybeInsertDecorativeLeaderTab(ctx, rp, anchoredId, para);
+                                }
+                                para.addItem(textRun);
                                 continue;
                             }
                             ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, anchoredId);

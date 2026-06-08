@@ -451,6 +451,7 @@ public class ASTToFlatConverter {
         item.fontStyle(run.fontStyle());
         item.fontSizeHwpunits(run.fontSizeHwpunits());
         item.textColor(run.textColor());
+        item.shadeColor(run.shadeColor());
         item.letterSpacing(run.letterSpacing());
         item.subscript(run.subscript());
         item.superscript(run.superscript());
@@ -638,6 +639,7 @@ public class ASTToFlatConverter {
 
         // Frame style
         node.fillColor(inObj.fillColor());
+        node.imageFillData(inObj.imageFillData());
         node.fillTint(inObj.fillTint());
         node.strokeColor(inObj.strokeColor());
         node.strokeWeight(inObj.strokeWeight());

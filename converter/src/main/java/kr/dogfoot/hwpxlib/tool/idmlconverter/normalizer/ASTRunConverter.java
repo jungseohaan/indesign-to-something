@@ -209,6 +209,12 @@ public class ASTRunConverter {
                 tmpCtx.resolvedData = resolvedData;
                 tmpCtx.basePath = resolvedData.basePath();
                 tmpCtx.scaleFactor = resolvedData.scaleFactor();
+                tmpCtx.conceptDiagramTextFrameIds.addAll(
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2.FramePlacer
+                                .collectConceptDiagramTextFrameIds(tmpCtx, resolvedData.textFrames()));
+                if (anchorContainsConceptDiagramTextFrame(tmpCtx, String.valueOf(boxDomId))) {
+                    return;
+                }
                 java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject> boxList =
                         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
                                 .tryInlineGroupAsBoxList(tmpCtx, boxDomId);
@@ -250,6 +256,9 @@ public class ASTRunConverter {
                     }
                     ASTInlineObject inlineImg = loadRenderedGroupAsInlineImage(ig, rg, null, resolvedData);
                     if (inlineImg != null) {
+                        if (tryConvertThinInlineImageToUnderlineTab(inlineImg, para, null, null)) {
+                            return;
+                        }
                         para.addItem(inlineImg);
                         return;
                     }
@@ -264,6 +273,9 @@ public class ASTRunConverter {
             if (groupRg != null && groupRg.file() != null) {
                 ASTInlineObject groupImg = loadRenderedGroupAsInlineImage(ig, groupRg, imageLoader, resolvedData);
                 if (groupImg != null) {
+                    if (tryConvertThinInlineImageToUnderlineTab(groupImg, para, null, null)) {
+                        return;
+                    }
                     para.addItem(groupImg);
                     return;
                 }
@@ -281,6 +293,9 @@ public class ASTRunConverter {
         if (inlineObj != null) {
             // 인라인 수평 GraphicLine → 언더라인 탭으로 변환 (빈칸 밑줄선)
             if (tryConvertGraphicLineToUnderlineTab(ig, inlineObj, para, colorResolver, idmlDoc)) {
+                return;
+            }
+            if (tryConvertThinInlineImageToUnderlineTab(inlineObj, para, null, null)) {
                 return;
             }
             // 자식 도형이 모두 renderedGraphicFrame으로 렌더링되는 그룹은 합성 이미지 생략
@@ -588,6 +603,35 @@ public class ASTRunConverter {
             else if ("dash".equals(shape.strokeTypeHint())) ulShape = "DASH";
         }
 
+        addUnderlineTabRunFromInlineWidth(inlineObj.width(), para, blended, ulShape);
+        return true;
+    }
+
+    private static boolean tryConvertThinInlineImageToUnderlineTab(
+            ASTInlineObject inlineObj, ASTParagraph para, String colorHex, String underlineShape) {
+        if (inlineObj == null || para == null) return false;
+        if (inlineObj.kind() != ASTInlineObject.ObjectKind.IMAGE
+                && inlineObj.kind() != ASTInlineObject.ObjectKind.RENDERED_GROUP) {
+            return false;
+        }
+        long w = inlineObj.width();
+        long h = inlineObj.height();
+        if (w <= 0 || h <= 0) return false;
+        if (h > 220 || w < 600 || (double) w / Math.max(1L, h) < 8.0) return false;
+        if (countTextCharsBefore(para) < 3) return false;
+
+        String resolvedColor = colorHex != null ? colorHex : inferInlineImageStrokeColor(inlineObj);
+        if (resolvedColor == null) {
+            resolvedColor = lastTextColor(para);
+        }
+        if (resolvedColor == null) resolvedColor = "#000000";
+
+        addUnderlineTabRunFromInlineWidth(w, para, resolvedColor, underlineShape);
+        return true;
+    }
+
+    private static void addUnderlineTabRunFromInlineWidth(
+            long inlineWidth, ASTParagraph para, String colorHex, String ulShape) {
         // 선행 텍스트 길이로 변환 방식 결정
         int textCharsBefore = 0;
         int lastFontSize = 1350; // default 13.5pt
@@ -610,7 +654,7 @@ public class ASTRunConverter {
                 }
             }
             // 안전 마진 200 HWPUNIT(2pt): 탭 리더가 셀 경계에 닿으면 한글이 줄바꿈하므로
-            long tabPos = lastTabPos + inlineObj.width() - 200;
+            long tabPos = lastTabPos + inlineWidth - 200;
             if (tabPos < lastTabPos + 100) tabPos = lastTabPos + 100;
             para.addTabStop(new ASTTabStop(tabPos, "left", "_"));
 
@@ -618,7 +662,7 @@ public class ASTRunConverter {
             tabRun.text("\t");
             // 탭 리더("_" → SOLID)가 밑줄 역할을 하므로 문자 밑줄은 설정하지 않는다.
             // 둘 다 설정하면 이중 밑줄이 나타남.
-            tabRun.textColor(blended);
+            tabRun.textColor(colorHex);
             para.addItem(tabRun);
         } else {
             // 고정폭 공백 방식: 본문 중간의 빈칸 밑줄 (e.g., "I like [___] the most")
@@ -626,12 +670,12 @@ public class ASTRunConverter {
             if ("DOT".equals(ulShape)) {
                 int dotWidth = lastFontSize / 2;
                 if (dotWidth <= 0) dotWidth = 675;
-                int count = Math.max(1, (int) Math.round((double) inlineObj.width() / dotWidth));
+                int count = Math.max(1, (int) Math.round((double) inlineWidth / dotWidth));
                 StringBuilder sb = new StringBuilder();
                 for (int i = 0; i < count; i++) sb.append('\u00B7'); // middle dot
                 ASTTextRun dotRun = new ASTTextRun();
                 dotRun.text(sb.toString());
-                dotRun.textColor(blended);
+                dotRun.textColor(colorHex);
                 dotRun.fontSizeHwpunits(lastFontSize);
                 if (lastFontFamily != null) dotRun.fontFamily(lastFontFamily);
                 para.addItem(dotRun);
@@ -639,22 +683,79 @@ public class ASTRunConverter {
                 // en-space (U+2002) = 0.5em 폭으로 정밀한 너비 제어
                 int enSpaceWidth = lastFontSize / 2;
                 if (enSpaceWidth <= 0) enSpaceWidth = 675;
-                int count = Math.max(1, (int) Math.round((double) inlineObj.width() / enSpaceWidth));
+                int count = Math.max(1, (int) Math.round((double) inlineWidth / enSpaceWidth));
                 StringBuilder sb = new StringBuilder();
                 for (int i = 0; i < count; i++) sb.append('\u2002');
 
                 ASTTextRun spaceRun = new ASTTextRun();
                 spaceRun.text(sb.toString());
                 spaceRun.underline(true);
-                spaceRun.underlineColor(blended);
+                spaceRun.underlineColor(colorHex);
                 spaceRun.underlineShape(ulShape);
-                spaceRun.textColor(blended);
+                spaceRun.textColor(colorHex);
                 spaceRun.fontSizeHwpunits(lastFontSize);
                 if (lastFontFamily != null) spaceRun.fontFamily(lastFontFamily);
                 para.addItem(spaceRun);
             }
         }
-        return true;
+    }
+
+    private static int countTextCharsBefore(ASTParagraph para) {
+        if (para == null || para.items() == null) return 0;
+        int count = 0;
+        for (ASTInlineItem item : para.items()) {
+            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                ASTTextRun tr = (ASTTextRun) item;
+                if (tr.text() != null) count += tr.text().length();
+            }
+        }
+        return count;
+    }
+
+    private static String lastTextColor(ASTParagraph para) {
+        if (para == null || para.items() == null) return null;
+        for (int i = para.items().size() - 1; i >= 0; i--) {
+            ASTInlineItem item = para.items().get(i);
+            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                ASTTextRun tr = (ASTTextRun) item;
+                if (tr.textColor() != null) return tr.textColor();
+            }
+        }
+        return null;
+    }
+
+    private static String inferInlineImageStrokeColor(ASTInlineObject inlineObj) {
+        byte[] data = inlineObj != null ? inlineObj.imageData() : null;
+        if (data == null || data.length == 0) return null;
+        try {
+            java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(data));
+            if (image == null) return null;
+            long rSum = 0, gSum = 0, bSum = 0, count = 0;
+            int stepX = Math.max(1, image.getWidth() / 200);
+            int stepY = Math.max(1, image.getHeight() / 40);
+            for (int y = 0; y < image.getHeight(); y += stepY) {
+                for (int x = 0; x < image.getWidth(); x += stepX) {
+                    int argb = image.getRGB(x, y);
+                    int a = (argb >>> 24) & 0xFF;
+                    int r = (argb >>> 16) & 0xFF;
+                    int g = (argb >>> 8) & 0xFF;
+                    int b = argb & 0xFF;
+                    if (a < 64) continue;
+                    if (r > 245 && g > 245 && b > 245) continue;
+                    rSum += r;
+                    gSum += g;
+                    bSum += b;
+                    count++;
+                }
+            }
+            if (count == 0) return null;
+            return String.format("#%02X%02X%02X",
+                    Math.round((double) rSum / count),
+                    Math.round((double) gSum / count),
+                    Math.round((double) bSum / count));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -764,6 +865,8 @@ public class ASTRunConverter {
         Double fontSize = run.fontSize();
         String fillColor = run.fillColor();
         String fontStyle = run.fontStyle();
+        String shadeColor = run.shadeColor();
+        Double shadeTint = run.shadeTint();
         Double tracking = run.tracking();
         Boolean underline = run.underline();
         String underlineType = run.underlineType();
@@ -781,6 +884,10 @@ public class ASTRunConverter {
                 if (fontSize == null) fontSize = charStyle.fontSize();
                 if (fillColor == null) fillColor = charStyle.fillColor();
                 if (fontStyle == null) fontStyle = charStyle.fontStyle();
+                if (shadeColor == null) {
+                    shadeColor = charStyle.shadeColor();
+                    shadeTint = charStyle.shadeTint();
+                }
                 if (tracking == null) tracking = charStyle.tracking();
                 if (underline == null) underline = charStyle.underline();
                 if (underlineType == null) underlineType = charStyle.underlineType();
@@ -823,6 +930,10 @@ public class ASTRunConverter {
                     run.grepAppliedCharStyle(), idmlDoc.charStyles());
             if (grepCharStyle != null) {
                 if (grepCharStyle.fillColor() != null) fillColor = grepCharStyle.fillColor();
+                if (grepCharStyle.shadeColor() != null) {
+                    shadeColor = grepCharStyle.shadeColor();
+                    shadeTint = grepCharStyle.shadeTint();
+                }
                 if (grepCharStyle.fontFamily() != null) fontFamily = grepCharStyle.fontFamily();
                 if (grepCharStyle.fontSize() != null) fontSize = grepCharStyle.fontSize();
                 if (grepCharStyle.fontStyle() != null) fontStyle = grepCharStyle.fontStyle();
@@ -854,6 +965,13 @@ public class ASTRunConverter {
 
         if (fillColor != null) {
             textRun.textColor(colorResolver.resolve(fillColor));
+        }
+        if (shadeColor != null) {
+            String resolvedShade = colorResolver.resolve(shadeColor);
+            if (shadeTint != null && shadeTint >= 0 && shadeTint < 100) {
+                resolvedShade = blendWithWhite(resolvedShade, shadeTint / 100.0);
+            }
+            textRun.shadeColor(resolvedShade);
         }
 
         if (tracking != null) {
@@ -907,7 +1025,27 @@ public class ASTRunConverter {
         return textRun;
     }
 
-    /**
+    private static boolean anchorContainsConceptDiagramTextFrame(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext ctx,
+            String anchorId) {
+        if (ctx == null || ctx.resolvedData == null || anchorId == null) return false;
+        if (ctx.conceptDiagramTextFrameIds == null || ctx.conceptDiagramTextFrameIds.isEmpty()) return false;
+        if (ctx.conceptDiagramTextFrameIds.contains(anchorId)) return true;
+        java.util.Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 5);
+        for (String tfId : ctx.conceptDiagramTextFrameIds) {
+            if (tfId == null) continue;
+            kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem pi =
+                    ctx.resolvedData.getPageItem(tfId);
+            if (pi == null) continue;
+            String parentId = pi.parentId();
+            if (anchorId.equals(parentId) || descendants.contains(tfId)
+                    || (parentId != null && descendants.contains(parentId))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * 그룹 자체가 renderedGraphicFrame으로 통째 렌더링된 경우,
      * 해당 PNG를 인라인 이미지로 로드하여 반환.
@@ -979,5 +1117,17 @@ public class ASTRunConverter {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static String blendWithWhite(String hex, double fraction) {
+        if (hex == null || !hex.matches("#[0-9A-Fa-f]{6}")) return hex;
+        double f = Math.max(0, Math.min(1, fraction));
+        int r = Integer.parseInt(hex.substring(1, 3), 16);
+        int g = Integer.parseInt(hex.substring(3, 5), 16);
+        int b = Integer.parseInt(hex.substring(5, 7), 16);
+        int rr = (int) Math.round(255 + (r - 255) * f);
+        int gg = (int) Math.round(255 + (g - 255) * f);
+        int bb = (int) Math.round(255 + (b - 255) * f);
+        return String.format("#%02X%02X%02X", rr, gg, bb);
     }
 }

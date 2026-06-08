@@ -191,6 +191,7 @@ public class InlineFrameHandler {
      */
     public static java.util.List<ASTInlineObject> tryInlineGroupAsBoxList(ResolvedBuildContext ctx, int anchoredObjectId) {
         String anchorId = String.valueOf(anchoredObjectId);
+        if (containsConceptDiagramTextFrame(ctx, anchorId)) return null;
         ResolvedTextFrame anchorTf = ctx.resolvedData.getTextFrame(anchorId);
         if (anchorTf != null) return null;
 
@@ -709,6 +710,7 @@ public class InlineFrameHandler {
      */
     public static ASTInlineObject tryInlineGroupAsSingleBadge(ResolvedBuildContext ctx, int anchoredObjectId) {
         String anchorId = String.valueOf(anchoredObjectId);
+        if (containsConceptDiagramTextFrame(ctx, anchorId)) return null;
         // AboveLine 앵커는 floating badge → Phase 7 이 처리, 인라인 변환 불가
         if (ctx.aboveLineAnchoredIds.contains(anchoredObjectId)) {
             return null;
@@ -785,6 +787,16 @@ public class InlineFrameHandler {
             }
         }
         if (bgShape == null) {
+            // Some editable inline labels are backed only by visual-only vector lines
+            // (for example, a soft highlight/underline made from GraphicLine items).
+            // The extractor hides the child TF before PNG export and records
+            // textOwner=hwpx_tf; even if no Rectangle/Oval/Polygon shell is found,
+            // Phase 3 still owns rebuilding the editable text over that PNG shell.
+            ASTInlineObject textHiddenShell =
+                    loadRenderedTextHiddenInlineShell(ctx, anchoredObjectId, anchorItem, childTf);
+            if (textHiddenShell != null) {
+                return textHiddenShell;
+            }
             return null;
         }
 
@@ -896,16 +908,38 @@ public class InlineFrameHandler {
 
         File pngFile = null;
         RenderedGroup matched = null;
+        File atomicPngFile = null;
+        RenderedGroup atomicMatched = null;
+        File fallbackPngFile = null;
+        RenderedGroup fallbackMatched = null;
         if (ctx.resolvedData != null && ctx.resolvedData.allRenderedFloatingItems() != null) {
             for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
                 if (rg == null || rg.id() != anchoredObjectId || rg.file() == null) continue;
                 File candidate = new File(ctx.basePath, rg.file());
-                if (candidate.exists()) {
+                if (!candidate.exists()) continue;
+                if (isCompletePngSimpleButtonLabel(ctx, rg)) {
+                    atomicPngFile = candidate;
+                    atomicMatched = rg;
+                    break;
+                }
+                if ("inline_object".equals(rg.itemType())) {
                     pngFile = candidate;
                     matched = rg;
                     break;
                 }
+                if (fallbackPngFile == null) {
+                    fallbackPngFile = candidate;
+                    fallbackMatched = rg;
+                }
             }
+        }
+        if (atomicPngFile != null) {
+            pngFile = atomicPngFile;
+            matched = atomicMatched;
+        }
+        if (pngFile == null) {
+            pngFile = fallbackPngFile;
+            matched = fallbackMatched;
         }
         if (pngFile == null) {
             File candidate = new File(ctx.basePath, "rendered_frames/inline_" + anchoredObjectId + ".png");
@@ -919,6 +953,13 @@ public class InlineFrameHandler {
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
             if (matched != null && "hwpx_tf".equals(matched.textOwner())
                     && !matched.hasEditableTextHiddenFromPng()) {
+                return null;
+            }
+            if (matched != null
+                    && Boolean.TRUE.equals(matched.containsEditableText())
+                    && "indesign_png".equals(matched.textOwner())
+                    && "visual_marker_label_indesign_png".equals(matched.reason())
+                    && !isCompletePngSimpleButtonLabel(ctx, matched)) {
                 return null;
             }
 
@@ -943,7 +984,7 @@ public class InlineFrameHandler {
             obj.keepInline(true);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
             obj.verticalJustification("CenterAlign");
-            if (shouldOverlayRenderedBadgeText(matched)) {
+            if (shouldOverlayRenderedBadgeText(ctx, matched)) {
                 buildBadgeParagraph(ctx, childTf, obj);
             }
             return obj;
@@ -952,14 +993,104 @@ public class InlineFrameHandler {
         }
     }
 
-    private static boolean shouldOverlayRenderedBadgeText(RenderedGroup matched) {
+    private static ASTInlineObject loadRenderedTextHiddenInlineShell(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedPageItem anchorItem,
+            ResolvedTextFrame childTf) {
+        RenderedGroup shell = findTextHiddenInlineShell(ctx, anchoredObjectId, childTf);
+        if (shell == null || ctx.basePath == null || shell.file() == null) return null;
+        File pngFile = new File(ctx.basePath, shell.file());
+        if (!pngFile.exists() || !pngFile.isFile()) return null;
+        try {
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            BufferedImage img = ImageIO.read(pngFile);
+            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+
+            double[] shellBounds = shell.bounds();
+            double w = 0;
+            double h = 0;
+            if (shellBounds != null && shellBounds.length >= 4) {
+                w = Math.abs(shellBounds[3] - shellBounds[1]) * ctx.scaleFactor;
+                h = Math.abs(shellBounds[2] - shellBounds[0]) * ctx.scaleFactor;
+            }
+            if ((w <= 0 || h <= 0) && anchorItem != null && anchorItem.geometricBounds() != null) {
+                double[] grpBounds = anchorItem.geometricBounds();
+                if (grpBounds.length >= 4) {
+                    w = Math.abs(grpBounds[3] - grpBounds[1]);
+                    h = Math.abs(grpBounds[2] - grpBounds[0]);
+                }
+            }
+            if (w <= 0 || h <= 0) return null;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+            obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+            obj.width(CoordinateConverter.pointsToHwpunits(w));
+            obj.height(CoordinateConverter.pointsToHwpunits(h));
+            obj.imageFillData(imageData);
+            obj.nativeGraphicsAllowed(true);
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
+            obj.verticalJustification("CenterAlign");
+            buildBadgeParagraph(ctx, childTf, obj);
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean hasTextHiddenInlineShell(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedTextFrame childTf) {
+        return findTextHiddenInlineShell(ctx, anchoredObjectId, childTf) != null;
+    }
+
+    private static RenderedGroup findTextHiddenInlineShell(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedTextFrame childTf) {
+        if (ctx == null || ctx.resolvedData == null || childTf == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        String childId = childTf.id();
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != anchoredObjectId) continue;
+            if (!"inline_object".equals(rg.itemType())) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            if (!rg.hasEditableTextHiddenFromPng()) continue;
+            if (!containsStringId(rg.editableTextFrameIds(), childId)) continue;
+            return rg;
+        }
+        return null;
+    }
+
+    private static boolean containsStringId(String[] ids, String id) {
+        if (ids == null || id == null) return false;
+        for (String v : ids) {
+            if (id.equals(v)) return true;
+        }
+        return false;
+    }
+
+    private static boolean shouldOverlayRenderedBadgeText(ResolvedBuildContext ctx, RenderedGroup matched) {
         if (matched == null) return true;
+        if (isCompletePngSimpleButtonLabel(ctx, matched)) return false;
         if (matched.hasEditableTextHiddenFromPng()) return true;
         if (Boolean.TRUE.equals(matched.containsEditableText())
                 && "indesign_png".equals(matched.textOwner())) {
+            if ("visual_marker_label_indesign_png".equals(matched.reason())) return true;
             return false;
         }
         return true;
+    }
+
+    private static boolean isCompletePngSimpleButtonLabel(ResolvedBuildContext ctx, RenderedGroup rg) {
+        return ctx != null
+                && ctx.resolvedData != null
+                && ctx.resolvedData.shouldUseCompletePngForSimpleButtonLabel(rg);
     }
 
     /** 배지 텍스트 단락 빌드 (CENTER 정렬, 폰트 속성 복사). INLINE_TEXT_FRAME/INLINE_BADGE_GROUP 공용. */
@@ -1058,11 +1189,99 @@ public class InlineFrameHandler {
         return tryInlineTextFrameAsRun(ctx, anchoredObjectId, null, null);
     }
 
+    static List<ASTInlineItem> tryInlineTextFrameAsItems(ResolvedBuildContext ctx, int anchoredObjectId,
+                                                         String previousText, String nextText) {
+        // Phase 2가 floating text box로 승격한 TF → 인라인 런 중복 방지
+        if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+        String domId = String.valueOf(anchoredObjectId);
+        if (isConceptDiagramTextFrame(ctx, domId)) return null;
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+        if (tf == null || !tf.isInline()) return null;
+        if (ctx.resolvedData.isRenderedByOtherChannel(anchoredObjectId)) return null;
+
+        ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+        if (story == null || story.paragraphs() == null || story.paragraphs().size() != 1) return null;
+        ResolvedParagraph rp = story.paragraphs().get(0);
+        if (rp == null || rp.runs() == null || rp.runs().isEmpty()) return null;
+
+        boolean parentFrameUnderline = inlineTextFrameHasParagraphUnderline(ctx, tf.storyId(), story);
+        boolean hasNestedAnchor = false;
+        List<ASTInlineItem> items = new ArrayList<>();
+        for (ResolvedRun rr : rp.runs()) {
+            if (rr == null) continue;
+            if (rr.isInlineAnchor()) {
+                Integer childId = rr.anchoredObjectId();
+                if (childId == null) continue;
+                hasNestedAnchor = true;
+
+                List<ASTInlineObject> boxList = tryInlineGroupAsBoxList(ctx, childId);
+                if (boxList != null && !boxList.isEmpty()) {
+                    items.addAll(boxList);
+                    continue;
+                }
+
+                ASTEquation fracEq = tryInlineFractionAsEquation(ctx, childId);
+                if (fracEq != null) {
+                    items.add(fracEq);
+                    continue;
+                }
+
+                ASTInlineObject singleBadge = tryInlineGroupAsSingleBadge(ctx, childId);
+                if (singleBadge != null) {
+                    items.add(singleBadge);
+                    continue;
+                }
+
+                ASTTextRun textRun = tryInlineTextFrameAsRun(ctx, childId, previousText, nextText);
+                if (textRun != null) {
+                    items.add(textRun);
+                    continue;
+                }
+
+                ASTInlineObject emptyBox = tryInlineEmptyFilledBoxAsFrame(ctx, childId);
+                if (emptyBox != null) {
+                    items.add(emptyBox);
+                    continue;
+                }
+
+                List<ASTInlineObject> childEditableBoxes = buildChildEditableBoxes(ctx, childId);
+                if (childEditableBoxes != null && !childEditableBoxes.isEmpty()) {
+                    items.addAll(childEditableBoxes);
+                    continue;
+                }
+
+                ASTInlineObject inlineObj = loadInlineObject(ctx, childId);
+                if (inlineObj != null) {
+                    items.add(inlineObj);
+                    continue;
+                }
+
+                ASTTextRun spaceRun = createSpaceRunForEmptyAnchor(ctx, childId);
+                if (spaceRun != null) items.add(spaceRun);
+                continue;
+            }
+
+            String text = rr.text();
+            if (text == null || text.isEmpty()) continue;
+            text = text.replace("\r", "").replace("\n", "");
+            if (text.isEmpty()) continue;
+            ASTTextRun textRun = new ASTTextRun();
+            textRun.text(text);
+            applyResolvedRunStyle(ctx, textRun, rr);
+            if (parentFrameUnderline) textRun.underline(true);
+            items.add(textRun);
+        }
+
+        if (!hasNestedAnchor || items.isEmpty()) return null;
+        return items;
+    }
+
     static ASTTextRun tryInlineTextFrameAsRun(ResolvedBuildContext ctx, int anchoredObjectId,
                                              String previousText, String nextText) {
         // Phase 2가 floating text box로 승격한 TF → 인라인 런 중복 방지
         if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
         String domId = String.valueOf(anchoredObjectId);
+        if (isConceptDiagramTextFrame(ctx, domId)) return null;
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
         if (tf == null) {
             // SPEC-025: anchoredId 가 Group (TextFrame 아님) 인 경우, 자손 중 inline+editable TF 텍스트를 합쳐 임베드.
@@ -1244,6 +1463,53 @@ public class InlineFrameHandler {
         }
 
         return run;
+    }
+
+    private static void applyResolvedRunStyle(ResolvedBuildContext ctx, ASTTextRun run, ResolvedRun rr) {
+        if (run == null || rr == null) return;
+        if (rr.fontFamily() != null) run.fontFamily(rr.fontFamily());
+        if (rr.fontStyle() != null) run.fontStyle(rr.fontStyle());
+        if (rr.fontSize() != null && rr.fontSize() > 0) {
+            run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+        }
+        if (rr.fillColor() != null) run.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+        if (rr.underline() != null && rr.underline()) run.underline(true);
+        if (rr.strikeThru() != null && rr.strikeThru()) run.strikeThrough(true);
+    }
+
+    private static boolean inlineTextFrameHasParagraphUnderline(ResolvedBuildContext ctx, String storyId, ResolvedStory story) {
+        if (story != null && story.paragraphs() != null && !story.paragraphs().isEmpty()) {
+            String styleName = story.paragraphs().get(0).styleName();
+            if (styleName != null && (styleName.contains("선") || styleName.toLowerCase().contains("underline"))) {
+                return true;
+            }
+        }
+        if (storyId == null) return false;
+
+        IDMLStory idmlStory = ctx.loadIDMLStory.apply(storyId);
+        if (idmlStory == null || idmlStory.paragraphs().isEmpty()) return false;
+
+        IDMLParagraph ip0 = idmlStory.paragraphs().get(0);
+        if (ip0.ruleBelowOn()) return true;
+        if (!ip0.characterRuns().isEmpty()) {
+            IDMLCharacterRun cr = ip0.characterRuns().get(0);
+            if (cr.underline() != null && cr.underline()) return true;
+            String cs = cr.appliedCharacterStyle();
+            if (cs != null && (cs.contains("밑줄") || cs.toLowerCase().contains("underline"))) return true;
+        }
+
+        if (ctx.idmlDocumentSupplier != null) {
+            if (ctx.ensureIdmlInfra != null) ctx.ensureIdmlInfra.run();
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idoc = ctx.idmlDocumentSupplier.get();
+            if (idoc != null) {
+                String psRef = ip0.appliedParagraphStyle();
+                if (psRef != null) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef sd = idoc.getParagraphStyle(psRef);
+                    if (sd != null && Boolean.TRUE.equals(sd.ruleBelowOn())) return true;
+                }
+            }
+        }
+        return false;
     }
 
     static boolean isInlineVocabularyMarker(ResolvedBuildContext ctx, int anchoredObjectId,
@@ -1906,9 +2172,10 @@ public class InlineFrameHandler {
      *
      * PNG에는 editable TF 내용이 포함되지 않으므로 별도로 배치해야 한다.
      */
-    static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {
+    public static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {
         java.util.List<ASTInlineObject> result = new ArrayList<>();
         String groupIdStr = String.valueOf(groupId);
+        java.util.List<ResolvedTextFrame> editableChildren = new ArrayList<>();
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
             if (pi == null || !groupIdStr.equals(pi.parentId())) continue;
@@ -1920,18 +2187,59 @@ public class InlineFrameHandler {
             if (cleaned.isEmpty()) continue;
             double[] gb = tf.geometricBounds();
             if (gb == null || gb.length < 4) continue;
+            editableChildren.add(tf);
+        }
+
+        RenderedGroup inlineBackdrop = editableChildren.size() == 1
+                ? findInlineEditableGroupBackdrop(ctx, groupId)
+                : null;
+        byte[] inlineBackdropData = loadRenderedPngBytes(ctx, inlineBackdrop);
+        double[] inlineBackdropBounds = inlineBackdrop != null ? inlineBackdrop.bounds() : null;
+
+        for (ResolvedTextFrame tf : editableChildren) {
+            String vt = tf.frameVisibleText();
+            String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            double[] gb = tf.geometricBounds();
             double w = Math.abs(gb[3] - gb[1]);
             double h = Math.abs(gb[2] - gb[0]);
             if (w <= 0 || h <= 0) continue;
             int tfDomId;
             try { tfDomId = Integer.parseInt(tf.id()); } catch (NumberFormatException e) { continue; }
 
+            double boxW = w;
+            double boxH = h;
+            double marginTop = 0;
+            double marginLeft = 0;
+            double marginBottom = 0;
+            double marginRight = 0;
+            if (inlineBackdropData != null && inlineBackdropBounds != null && inlineBackdropBounds.length >= 4) {
+                boxW = Math.abs(inlineBackdropBounds[3] - inlineBackdropBounds[1]);
+                boxH = Math.abs(inlineBackdropBounds[2] - inlineBackdropBounds[0]);
+                if (boxW > 0 && boxH > 0) {
+                    marginTop = Math.max(0, gb[0] - inlineBackdropBounds[0]);
+                    marginLeft = Math.max(0, gb[1] - inlineBackdropBounds[1]);
+                    marginBottom = Math.max(0, inlineBackdropBounds[2] - gb[2]);
+                    marginRight = Math.max(0, inlineBackdropBounds[3] - gb[3]);
+                } else {
+                    boxW = w;
+                    boxH = h;
+                }
+            }
+
             ASTInlineObject box = new ASTInlineObject();
             box.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
-            box.width(CoordinateConverter.pointsToHwpunits(w));
-            box.height(CoordinateConverter.pointsToHwpunits(h));
+            box.width(CoordinateConverter.pointsToHwpunits(boxW));
+            box.height(CoordinateConverter.pointsToHwpunits(boxH));
             box.sourceId("child_u" + Integer.toHexString(tfDomId));
             box.noAutoLineWrap(shouldUseNoAutoLineWrap(tf));
+            if (inlineBackdropData != null) {
+                box.imageFillData(inlineBackdropData);
+                box.nativeGraphicsAllowed(true);
+                box.textMarginTop(CoordinateConverter.pointsToHwpunits(marginTop));
+                box.textMarginLeft(CoordinateConverter.pointsToHwpunits(marginLeft));
+                box.textMarginBottom(CoordinateConverter.pointsToHwpunits(marginBottom));
+                box.textMarginRight(CoordinateConverter.pointsToHwpunits(marginRight));
+            }
 
             ASTParagraph paraInner = new ASTParagraph();
             paraInner.alignment("CENTER");
@@ -1956,6 +2264,29 @@ public class InlineFrameHandler {
             result.add(box);
         }
         return result;
+    }
+
+    private static RenderedGroup findInlineEditableGroupBackdrop(ResolvedBuildContext ctx, int groupId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) return null;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != groupId || rg.file() == null) continue;
+            if (!"inline_object".equals(rg.itemType())) continue;
+            if (!rg.hasEditableTextHiddenFromPng()) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            return rg;
+        }
+        return null;
+    }
+
+    private static byte[] loadRenderedPngBytes(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || ctx.basePath == null || rg == null || rg.file() == null) return null;
+        try {
+            File pngFile = new File(ctx.basePath, rg.file());
+            if (!pngFile.exists() || !pngFile.isFile()) return null;
+            return java.nio.file.Files.readAllBytes(pngFile.toPath());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -2064,6 +2395,10 @@ public class InlineFrameHandler {
     /** InlineGraphic(Group/Rectangle/Polygon) 내부의 모든 TextFrame 텍스트를 재귀로 합쳐 반환. */
     private static String extractGraphicText(ResolvedBuildContext ctx, IDMLCharacterRun.InlineGraphic ig, int depth) {
         if (ig == null || depth >= 4) return "";
+        // 그래픽 자체가 renderedFloatingItems로 소유권을 가진 경우, ORC 재귀 텍스트 추출에서
+        // 자식 TF 텍스트를 문자열로 복사하지 않는다. 삽입 단계에서 INLINE_TEXT_FRAME/PNG가
+        // 시각 단위로 배치되므로 여기서 텍스트를 반환하면 "예 예..." 같은 중복이 생긴다.
+        if (isRenderedAsImage(ctx, ig.selfId())) return "";
         StringBuilder sb = new StringBuilder();
         // 그래픽 자체에 임베드된 텍스트
         if (ig.embeddedText() != null && !ig.embeddedText().isEmpty()) {
@@ -2073,6 +2408,7 @@ public class InlineFrameHandler {
         if (ig.childTextFrames() != null) {
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame ctf : ig.childTextFrames()) {
                 if (ctf == null || ctf.parentStoryId() == null) continue;
+                if (isRenderedAsImage(ctx, ctf.selfId())) continue;
                 IDMLStory cs = ctx.loadIDMLStory.apply(ctf.parentStoryId());
                 String t = extractTextRecursive(ctx, cs, depth + 1);
                 if (t != null && !t.isEmpty()) sb.append(t);
@@ -2129,6 +2465,31 @@ public class InlineFrameHandler {
             break;
         }
         return new double[]{x, y};
+    }
+
+    private static boolean containsConceptDiagramTextFrame(ResolvedBuildContext ctx, String anchorId) {
+        if (ctx == null || ctx.resolvedData == null || anchorId == null) return false;
+        if (isConceptDiagramTextFrame(ctx, anchorId)) return true;
+        if (ctx.conceptDiagramTextFrameIds == null || ctx.conceptDiagramTextFrameIds.isEmpty()) return false;
+        Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 5);
+        for (String tfId : ctx.conceptDiagramTextFrameIds) {
+            if (tfId == null) continue;
+            ResolvedPageItem pi = ctx.resolvedData.getPageItem(tfId);
+            if (pi == null) continue;
+            String parentId = pi.parentId();
+            if (anchorId.equals(parentId) || descendants.contains(tfId)
+                    || (parentId != null && descendants.contains(parentId))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isConceptDiagramTextFrame(ResolvedBuildContext ctx, String tfId) {
+        return ctx != null
+                && ctx.conceptDiagramTextFrameIds != null
+                && tfId != null
+                && ctx.conceptDiagramTextFrameIds.contains(tfId);
     }
 
     private static boolean shouldUseNoAutoLineWrap(ResolvedTextFrame tf) {
