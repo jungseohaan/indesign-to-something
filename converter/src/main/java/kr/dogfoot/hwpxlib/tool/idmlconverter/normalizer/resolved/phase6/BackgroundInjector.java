@@ -279,6 +279,16 @@ public final class BackgroundInjector {
                     visLeft = Math.max(0.0, visRight - minEdgeStripVisibleWidth);
                 }
             }
+            boolean isTextFrameVisualShell = "editable_textframe_visual_shell".equals(rg.reason());
+            boolean coversPageByArea = pageWidthMm < 1e9 && pageHeightMm < 1e9
+                    && (rawRight - rawLeft) * (rawBottom - rawTop)
+                        >= 0.3 * pageWidthMm * pageHeightMm;
+            boolean isFullPageBg = rawLeft <= 10.0
+                    && rawTop <= 10.0
+                    && (rawBottom >= pageHeightMm - 1.0 || coversPageByArea);
+            boolean isBackgroundLike = isFullPageBg || (isTextFrameVisualShell && coversPageByArea);
+            boolean isContainerVisualShell = !isBackgroundLike
+                    && (isRenderedContainerShell(rg) || isTextFrameVisualShell);
 
             int pixelW = 0, pixelH = 0;
             Double stripCropLeftOverride = null;
@@ -288,6 +298,14 @@ public final class BackgroundInjector {
                 BufferedImage img = loadImageForPlacement(ctx, rg);
                 if (img != null && shouldCompositeTfInlineVisuals(rg)) {
                     imageData = encodePng(img);
+                }
+                if (img != null && isContainerVisualShell) {
+                    BufferedImage transparentShell = knockOutPaperLikeFill(img);
+                    if (transparentShell != img) {
+                        imageData = encodePng(transparentShell);
+                        img.flush();
+                        img = transparentShell;
+                    }
                 }
                 // whiteStroke: PNG가 흑색 획으로 내보낸 것 → 흰색으로 반전
                 if (img != null && rg.isWhiteStroke()) {
@@ -483,21 +501,13 @@ public final class BackgroundInjector {
             // 장식/부분 항목 → zOrder=5 (배경 위에 표시)
             // 페이지 배경 판별: 블리드 여유(최대 10mm) 허용 + 면적이 페이지 30% 이상이면 배경으로 간주.
             // graphic_3357처럼 페이지 높이의 일부만 덮는 스프레드 배경 이미지도 포함하기 위해 면적 조건 추가.
-            boolean isTextFrameVisualShell = "editable_textframe_visual_shell".equals(rg.reason());
-            boolean coversPageByArea = pageWidthMm < 1e9 && pageHeightMm < 1e9
-                    && (rawRight - rawLeft) * (rawBottom - rawTop)
-                        >= 0.3 * pageWidthMm * pageHeightMm;
-            boolean isFullPageBg = rawLeft <= 10.0
-                    && rawTop <= 10.0
-                    && (rawBottom >= pageHeightMm - 1.0 || coversPageByArea);
-            boolean isBackgroundLike = isFullPageBg || (isTextFrameVisualShell && coversPageByArea);
             boolean isTextFrameBackdrop = inferredTextLineBackdropZOrder(ctx, rg) >= 0;
             boolean isEditableLabelShell = isEditableLabelShellCandidate(rg);
             boolean isTextOwnedVisualShell = isTextOwnedVisualShell(rg) && !isEditableLabelShell;
             boolean isTextOwnedRenderedContent = isTextOwnedRenderedContent(rg);
             int resolvedZ = isBackgroundLike
                     ? 0
-                    : effectiveZOrder(ctx, rg);
+                    : Math.max(5, effectiveZOrder(ctx, rg));
             if (stripCropLeftOverride != null && stripCropWidthOverride != null) {
                 resolvedZ = Math.max(resolvedZ, 900);
             }
@@ -519,8 +529,14 @@ public final class BackgroundInjector {
                 demotedBehindForeground = demotedBehindForeground || adjustedZ < resolvedZ;
                 resolvedZ = adjustedZ;
             }
+            if (isContainerVisualShell) {
+                resolvedZ = Math.max(1, Math.min(resolvedZ, 4));
+            }
             fig.zOrder(resolvedZ);
-            fig.fromGroup(!(isBackgroundLike || isTextFrameBackdrop || isTextOwnedVisualShell
+            boolean keepShellInFrontLayer = isContainerVisualShell
+                    || (isTextFrameVisualShell && !isBackgroundLike);
+            fig.fromGroup(keepShellInFrontLayer
+                    || !(isBackgroundLike || isTextFrameBackdrop || isTextOwnedVisualShell
                     || demotedBehindForeground));
             fig.sourceId("page_obj_" + rg.id());
 
@@ -1569,6 +1585,48 @@ public final class BackgroundInjector {
             System.err.println("[BackgroundInjector] PNG 합성 실패: " + e.getMessage());
             return null;
         }
+    }
+
+    private static BufferedImage knockOutPaperLikeFill(BufferedImage img) {
+        if (img == null || img.getWidth() <= 0 || img.getHeight() <= 0) return img;
+        long total = (long) img.getWidth() * (long) img.getHeight();
+        if (total <= 0) return img;
+
+        long paperLike = 0;
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int argb = img.getRGB(x, y);
+                int a = (argb >>> 24) & 0xFF;
+                if (a < 220) continue;
+                int r = (argb >>> 16) & 0xFF;
+                int g = (argb >>> 8) & 0xFF;
+                int b = argb & 0xFF;
+                if (isPaperLikeRgb(r, g, b)) paperLike++;
+            }
+        }
+
+        if ((double) paperLike / (double) total < 0.55) {
+            return img;
+        }
+
+        BufferedImage out = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int argb = img.getRGB(x, y);
+                int a = (argb >>> 24) & 0xFF;
+                int r = (argb >>> 16) & 0xFF;
+                int g = (argb >>> 8) & 0xFF;
+                int b = argb & 0xFF;
+                out.setRGB(x, y, (a >= 180 && isPaperLikeRgb(r, g, b)) ? 0x00000000 : argb);
+            }
+        }
+        return out;
+    }
+
+    private static boolean isPaperLikeRgb(int r, int g, int b) {
+        int max = Math.max(r, Math.max(g, b));
+        int min = Math.min(r, Math.min(g, b));
+        return r >= 246 && g >= 246 && b >= 246 && (max - min) <= 8;
     }
 
     private static boolean hasTfInlineVisuals(RenderedGroup rg) {

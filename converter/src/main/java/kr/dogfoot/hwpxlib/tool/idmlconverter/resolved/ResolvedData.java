@@ -66,6 +66,18 @@ public class ResolvedData {
         return editableTextFrameIds != null && editableTextFrameIds.contains(domId);
     }
 
+    /**
+     * PNG export에서 텍스트를 숨기고 HWPX TF가 텍스트를 소유하도록 선언된 프레임.
+     *
+     * 일부 inline child TF는 resolved.json 최상위 editableTextFrameIds에는 빠지지만,
+     * renderedFloatingItems[].editableTextFrameIds + textOwner=hwpx_tf에는 정확히 기록된다.
+     * 이 경우 최상위 editable 목록보다 textOwner 계약을 우선해야 PNG/TF 양쪽에서 모두
+     * 텍스트가 사라지는 일을 막을 수 있다.
+     */
+    public boolean isHwpxOwnedTextFrame(String domId) {
+        return hasHwpxTextOwnerRenderForFrame(domId);
+    }
+
     public void addStory(ResolvedStory story) {
         storyMap.put(story.id(), story);
     }

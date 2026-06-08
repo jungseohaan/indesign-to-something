@@ -127,6 +127,8 @@ public final class FramePlacer {
 
             int tfDomId = parseDomIdOrNeg(tf.id());
             boolean conceptDiagramTf = ctx.conceptDiagramTextFrameIds.contains(tf.id());
+            boolean hwpxOwnedTextFrame = ctx.resolvedData.isHwpxOwnedTextFrame(tf.id());
+            boolean editableForHwpx = ctx.resolvedData.isEditableTextFrame(tf.id()) || hwpxOwnedTextFrame;
             if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) {
                 continue;
             }
@@ -140,7 +142,7 @@ public final class FramePlacer {
                         ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
                     }
                     inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                } else if (!ctx.resolvedData.isEditableTextFrame(tf.id())) {
+                } else if (!editableForHwpx) {
                     String vis = tf.frameVisibleText();
                     boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 1;
                     boolean rendered = tfDomId >= 0 && ctx.resolvedData.isRenderedByOtherChannel(tfDomId);
@@ -197,44 +199,53 @@ public final class FramePlacer {
                     // - 멀티 child 배지 (Phase 3 가 자손 텍스트 결합 ≥ 2자): Phase 3 가 결합 인라인 임베드 → 플로팅 스킵
                     // - 단일 1자 라벨 (예: "1", "예"): Phase 3 가 PNG 임베드 (텍스트 누락) → 플로팅으로 검색 가능 텍스트 보강
                     // 부모 Group이 inline_object이면 inline PNG가 시각적 배지 전체를 포함 → floating 불필요.
-                    if (tfDomId >= 0 && isDescendantOfInlineObject(ctx, idx, tf.id())) {
+                    if (hwpxOwnedTextFrame) {
+                        // rendered page_object가 textOwner=hwpx_tf로 선언된 경우 PNG에서는
+                        // 텍스트를 숨긴 상태다. Phase 3 inline story 흐름에 기대면 parentless
+                        // inline child TF가 누락될 수 있으므로 Phase 2에서 글상자로 확정 배치한다.
+                        if (tfDomId >= 0) {
+                            ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+                        }
+                        inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
+                    } else if (tfDomId >= 0 && isDescendantOfInlineObject(ctx, idx, tf.id())) {
                         continue;
-                    }
-                    // inline+editable TF가 어떤 렌더 채널에도 없으면 Phase 3 인라인 런으로 처리.
-                    // (어휘 숫자 superscript "1"/"2"/"3" 등 — PNG 없이 IDML 스토리 텍스트만 존재)
-                    // 렌더된 경우에만 floating 배치 + TEXT_BLOCK_PLACED 설정.
-                    boolean _isRenderedInline = tfDomId >= 0
-                            && (ctx.resolvedData.isRenderedByOtherChannel(tfDomId)
-                                || idx.allRenderedItemIds.contains(tfDomId));
-                    if (!_isRenderedInline) {
-                        // 렌더 없음 → 보통은 Phase 3 가 IDML 스토리에서 인라인 텍스트 런으로 처리한다.
-                        // 단, resolved DOM 에서는 isInline=true 이지만 parentId가 없는 독립 TF가 있다.
-                        // 이 경우 IDML inline run으로 다시 주입되지 않아 텍스트가 누락되므로
-                        // 일반 floating text block으로 배치한다.
-                        ResolvedPageItem _tfi3 = ctx.resolvedData.getPageItem(tf.id());
-                        boolean _parentlessInline = _tfi3 == null || _tfi3.parentId() == null;
-                        String _visInline = tf.frameVisibleText();
-                        boolean _hasOwnInlineText = _visInline != null
-                                && _visInline
-                                    .replace("\uFFFC", "")
-                                    .replace("\b", "")
-                                    .replace("\r", "")
-                                    .replace("\n", "")
-                                    .trim().length() > 1;
-                        if (_parentlessInline && _hasOwnInlineText) {
-                            if (isConsumedParentlessInlineContinuation(
-                                    ctx, tf, framesByPage.getOrDefault(tf.pageIndex(), Collections.emptyList()))) {
+                    } else {
+                        // inline+editable TF가 어떤 렌더 채널에도 없으면 Phase 3 인라인 런으로 처리.
+                        // (어휘 숫자 superscript "1"/"2"/"3" 등 — PNG 없이 IDML 스토리 텍스트만 존재)
+                        // 렌더된 경우에만 floating 배치 + TEXT_BLOCK_PLACED 설정.
+                        boolean _isRenderedInline = tfDomId >= 0
+                                && (ctx.resolvedData.isRenderedByOtherChannel(tfDomId)
+                                    || idx.allRenderedItemIds.contains(tfDomId));
+                        if (!_isRenderedInline) {
+                            // 렌더 없음 → 보통은 Phase 3 가 IDML 스토리에서 인라인 텍스트 런으로 처리한다.
+                            // 단, resolved DOM 에서는 isInline=true 이지만 parentId가 없는 독립 TF가 있다.
+                            // 이 경우 IDML inline run으로 다시 주입되지 않아 텍스트가 누락되므로
+                            // 일반 floating text block으로 배치한다.
+                            ResolvedPageItem _tfi3 = ctx.resolvedData.getPageItem(tf.id());
+                            boolean _parentlessInline = _tfi3 == null || _tfi3.parentId() == null;
+                            String _visInline = tf.frameVisibleText();
+                            boolean _hasOwnInlineText = _visInline != null
+                                    && _visInline
+                                        .replace("\uFFFC", "")
+                                        .replace("\b", "")
+                                        .replace("\r", "")
+                                        .replace("\n", "")
+                                        .trim().length() > 1;
+                            if (_parentlessInline && _hasOwnInlineText) {
+                                if (isConsumedParentlessInlineContinuation(
+                                        ctx, tf, framesByPage.getOrDefault(tf.pageIndex(), Collections.emptyList()))) {
+                                    continue;
+                                }
+                                inlineToFloatingReason = InlineToFloatingReason.EDITABLE_UNANCHORED_TEXT;
+                            } else {
                                 continue;
                             }
-                            inlineToFloatingReason = InlineToFloatingReason.EDITABLE_UNANCHORED_TEXT;
                         } else {
-                            continue;
+                            // 렌더 있음 → floating 배치 + Phase 3 중복 방지
+                            // (tfDomId >= 0은 _isRenderedInline 조건이 보장)
+                            ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+                            inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
                         }
-                    } else {
-                        // 렌더 있음 → floating 배치 + Phase 3 중복 방지
-                        // (tfDomId >= 0은 _isRenderedInline 조건이 보장)
-                        ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                        inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
                     }
                 }
             }
@@ -253,12 +264,12 @@ public final class FramePlacer {
             }
             // 배경에 포함된 프레임은 건너뜀 (editable 프레임만 글상자로 배치)
             // 단, 같은 story를 editable TF와 공유하는 non-editable TF는 배치
-            if (!inlineToFloating && !ctx.resolvedData.isEditableTextFrame(tf.id())) {
+            if (!inlineToFloating && !editableForHwpx) {
                 if (shouldSkipNonEditableTf(ctx, tf, tfDomId, idx)) continue;
             }
             // badge_group_child(non-editable)는 부모 PNG가 텍스트를 포함하므로 글상자 배치 건너뜀.
             // SPEC-025: editable로 승격된 frame은 !isEditableTextFrame 가드로 보호됨 → 건너뛰지 않음
-            boolean skipAsBadgeChild = !ctx.resolvedData.isEditableTextFrame(tf.id())
+            boolean skipAsBadgeChild = !editableForHwpx
                     && tfDomId >= 0 && idx.badgeChildDomIds.contains(tfDomId);
             if (skipAsBadgeChild) { continue; }
 
@@ -693,7 +704,9 @@ public final class FramePlacer {
             if (!hasRenderedVisualShell) {
                 applyGroupBackgroundShapeStyle(ctx, tf, block);
             }
-            applyInlineOwnedVisualShellImageFill(ctx, tf, block, pageLeft, pageTop);
+            if (!hwpxOwnedTextFrame) {
+                applyInlineOwnedVisualShellImageFill(ctx, tf, block, pageLeft, pageTop);
+            }
 
             // overflow 감지용 텍스트 길이 저장
             String visText = tf.frameVisibleText();
