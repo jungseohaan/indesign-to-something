@@ -47,6 +47,7 @@ public final class OwnershipPlanner {
         planTextFrames();
         resolveInlineFloatingSameDom();
         resolveDuplicateRenderedChannels();
+        resolveInlineCompositeHwpxTextParents();
         resolveVisualBackdropClusterSources();
         resolveTextShellSharedSources();
         resolveCoveredParentGroups();
@@ -157,6 +158,9 @@ public final class OwnershipPlanner {
             return VisualAction.DROP_VISUAL;
         }
         if (Boolean.FALSE.equals(rg.placementAllowed())) {
+            return VisualAction.DROP_VISUAL;
+        }
+        if (isUnabsorbedHwpxTextStyleInlineVisual(rg)) {
             return VisualAction.DROP_VISUAL;
         }
         if (textAction == TextAction.OWNED_BY_HWPX_TEXT
@@ -549,6 +553,20 @@ public final class OwnershipPlanner {
                 ObjectPlan loser = plans.get(idx);
                 plans.set(idx, loser.withVisualAction(VisualAction.DROP_VISUAL, loser.reason));
             }
+        }
+    }
+
+    private void resolveInlineCompositeHwpxTextParents() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isVisibleRenderedVisual(plan)) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) continue;
+            if (plan.textAction == TextAction.OWNED_BY_PNG) continue;
+            if (plan.sourceObjectIds == null || plan.sourceObjectIds.length <= 1) continue;
+            if (!containsHwpxOwnedTextFrameSource(plan)) continue;
+            plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
+                    "inline_parent_contains_hwpx_text_sources"));
         }
     }
 
@@ -1044,6 +1062,67 @@ public final class OwnershipPlanner {
 
     private static boolean hasEditableTextFrameIds(RenderedGroup rg) {
         return rg.editableTextFrameIds() != null && rg.editableTextFrameIds().length > 0;
+    }
+
+    private boolean isUnabsorbedHwpxTextStyleInlineVisual(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        if (w <= 0.0 || h <= 0.0) return false;
+        boolean thinTextStyleStrip = h <= 3.0 && w >= 6.0 && w / Math.max(0.1, h) >= 4.0;
+        if (!thinTextStyleStrip) return false;
+
+        int id = rg.id();
+        for (RenderedGroup owner : allRenderedGroups()) {
+            if (owner == null) continue;
+            if (!"hwpx_tf".equals(owner.textOwner()) && !hasEditableTextFrameIds(owner)) continue;
+            if (!contains(owner.tfInlineVisualIds(), id)
+                    && !contains(sourceIdsOrSelf(owner), id)) {
+                continue;
+            }
+            if (hasHwpxOwnedTextFrame(owner)) return true;
+        }
+        return false;
+    }
+
+    private boolean containsHwpxOwnedTextFrameSource(ObjectPlan plan) {
+        if (plan == null || plan.sourceObjectIds == null) return false;
+        for (int sourceId : plan.sourceObjectIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+            if (tf != null && data.isHwpxOwnedTextFrame(tf.id())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasHwpxOwnedTextFrame(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (rg.editableTextFrameIds() != null) {
+            for (String id : rg.editableTextFrameIds()) {
+                if (id != null && data.isHwpxOwnedTextFrame(id)) return true;
+            }
+        }
+        if (rg.sourceObjectIds() != null) {
+            for (int sourceId : rg.sourceObjectIds()) {
+                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+                if (tf != null && data.isHwpxOwnedTextFrame(tf.id())) return true;
+            }
+        }
+        return false;
+    }
+
+    private List<RenderedGroup> allRenderedGroups() {
+        List<RenderedGroup> out = new ArrayList<>();
+        out.addAll(data.allRenderedFloatingItems());
+        out.addAll(data.allRenderedGraphicFrames());
+        out.addAll(data.allRenderedImageFrames());
+        out.addAll(data.allRenderedPdfFrames());
+        return out;
     }
 
     private static int[] sourceIdsOrSelf(RenderedGroup rg) {
@@ -2076,6 +2155,7 @@ public final class OwnershipPlanner {
     }
 
     private static boolean containsAll(int[] values, int[] candidates) {
+        if (values == null || candidates == null) return false;
         for (int candidate : candidates) {
             if (!contains(values, candidate)) return false;
         }
@@ -2083,6 +2163,7 @@ public final class OwnershipPlanner {
     }
 
     private static boolean contains(int[] values, int candidate) {
+        if (values == null) return false;
         for (int value : values) {
             if (value == candidate) return true;
         }

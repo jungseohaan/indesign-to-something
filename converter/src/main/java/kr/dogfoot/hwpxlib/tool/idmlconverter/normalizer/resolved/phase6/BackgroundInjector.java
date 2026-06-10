@@ -2627,6 +2627,8 @@ public final class BackgroundInjector {
         if (isShortOwnedLabelShell(ctx, rg, match.tf)) return false;
         double[] lb = match.line.bounds();
         double lineH = Math.max(0.1, lb[2] - lb[0]);
+        if (h > Math.max(8.0, lineH * 2.4)) return false;
+        if (countMatchedLineOverlaps(ctx, rg, rbRaw, match.tf) > 1) return false;
         double[] scaledRb = new double[] {
                 rbRaw[0] * ctx.scaleFactor,
                 rbRaw[1] * ctx.scaleFactor,
@@ -2640,6 +2642,34 @@ public final class BackgroundInjector {
         // A true underline is usually much thinner than the text line. Keep it in
         // the underline path rather than converting it to character shading.
         return h >= Math.max(2.5, lineH * 0.25);
+    }
+
+    private static int countMatchedLineOverlaps(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            double[] rbRaw,
+            ResolvedTextFrame tf) {
+        if (ctx == null || rg == null || rbRaw == null || tf == null) return 0;
+        List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
+        if (lines == null || lines.isEmpty()) return 0;
+        double[] scaledRb = new double[] {
+                rbRaw[0] * ctx.scaleFactor,
+                rbRaw[1] * ctx.scaleFactor,
+                rbRaw[2] * ctx.scaleFactor,
+                rbRaw[3] * ctx.scaleFactor
+        };
+        int count = 0;
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
+            double[] lb = line.bounds();
+            double lineArea = area(lb);
+            if (lineArea <= 0.0) continue;
+            double overlap = Math.max(overlapArea(rbRaw, lb), overlapArea(scaledRb, lb));
+            if (overlap / lineArea >= 0.12) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static boolean isTextEmphasisBackdropReason(String reason) {

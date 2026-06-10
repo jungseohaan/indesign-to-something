@@ -372,6 +372,10 @@ public class HwpxTextBoxBuilder {
                     && block.fillColor().startsWith("#") && !block.fillColor().equals("#FFFFFF");
             boolean hasWrapper = nativeTextBoxGraphicsEnabled()
                     && (block.hasWrapperFill() || hasOwnVisibleFill);
+            if (!hasWrapper && shouldUseFloatingDrawTextBox(block)) {
+                frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
+                return;
+            }
             // 둥근 모서리 래퍼: Table 대신 Rectangle+DrawText 단일 객체 사용
             // (Table은 사각형이라 래퍼 Rectangle의 둥근 모서리를 덮어버림)
             if (hasWrapper && block.cornerRadius() > 0) {
@@ -426,6 +430,28 @@ public class HwpxTextBoxBuilder {
                 xCursor += colWidths[c] + gutter;
             }
         }
+    }
+
+    private boolean shouldUseFloatingDrawTextBox(ASTTextFrameBlock block) {
+        if (block == null || block.isBackgroundOnly()) return false;
+        if (block.columnCount() > 1) return false;
+        if (block.hasWrapperFill()) return false;
+        if (block.fillColor() != null && block.fillColor().startsWith("#")) return false;
+        if (block.strokeColor() != null && block.strokeColor().startsWith("#") && block.strokeWeight() > 0) {
+            return false;
+        }
+        if (block.imageFillData() != null && block.imageFillData().length > 0) return false;
+        if (block.paragraphs() == null || block.paragraphs().isEmpty()) return false;
+        if (containsInlineTable(block.paragraphs())) return false;
+        return true;
+    }
+
+    private boolean containsInlineTable(java.util.List<ASTParagraph> paragraphs) {
+        if (paragraphs == null) return false;
+        for (ASTParagraph para : paragraphs) {
+            if (para != null && para.inlineTable() != null) return true;
+        }
+        return false;
     }
 
     /**

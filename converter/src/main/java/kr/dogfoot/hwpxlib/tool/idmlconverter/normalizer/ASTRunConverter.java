@@ -5,6 +5,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 
@@ -117,7 +118,8 @@ public class ASTRunConverter {
                                         imageLoader, processedGraphicIndices, resolvedData);
                             } else if (!useAnchors && frameIdx < frames.size()) {
                                 IDMLTextFrame inlineTf = frames.get(frameIdx++);
-                                if (!ASTPageProcessor.shouldDeferInlineFrame(inlineTf)) {
+                                if (!shouldSkipInlineFrameByPlan(inlineTf, resolvedData)
+                                        && !ASTPageProcessor.shouldDeferInlineFrame(inlineTf)) {
                                     addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                                 }
                             } else {
@@ -140,6 +142,7 @@ public class ASTRunConverter {
         } else {
             for (int i = frameIdx; i < frames.size(); i++) {
                 IDMLTextFrame inlineTf = frames.get(i);
+                if (shouldSkipInlineFrameByPlan(inlineTf, resolvedData)) continue;
                 if (ASTPageProcessor.shouldDeferInlineFrame(inlineTf)) continue;
                 addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader, resolvedData);
             }
@@ -166,7 +169,8 @@ public class ASTRunConverter {
         if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME) {
             if (anchor.index() < run.inlineFrames().size()) {
                 IDMLTextFrame inlineTf = run.inlineFrames().get(anchor.index());
-                if (!ASTPageProcessor.shouldDeferInlineFrame(inlineTf)) {
+                if (!shouldSkipInlineFrameByPlan(inlineTf, resolvedData)
+                        && !ASTPageProcessor.shouldDeferInlineFrame(inlineTf)) {
                     addInlineFrame(inlineTf, para, idmlDoc, colorResolver, imageLoader, resolvedData);
                 }
             }
@@ -179,6 +183,15 @@ public class ASTRunConverter {
                 }
             }
         }
+    }
+
+    private static boolean shouldSkipInlineFrameByPlan(IDMLTextFrame inlineTf,
+                                                       ResolvedData resolvedData) {
+        if (inlineTf == null || resolvedData == null || inlineTf.selfId() == null) {
+            return false;
+        }
+        String domId = ParagraphTextHelpers.domIdFromSourceId(inlineTf.selfId());
+        return domId != null && resolvedData.isHwpxOwnedTextFrame(domId);
     }
 
     /**
@@ -202,6 +215,9 @@ public class ASTRunConverter {
             try { boxDomId = Integer.parseInt(ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId(), 16); } catch (Exception e) {}
             if (boxDomId > 0) {
                 if (isDoviraSubunitMarkerObject(boxDomId, resolvedData)) {
+                    return;
+                }
+                if (ASTInlineObjectBuilder.hasHwpxOwnedChildTextFrameRecursive(ig, resolvedData)) {
                     return;
                 }
                 kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
@@ -356,13 +372,16 @@ public class ASTRunConverter {
         boolean isImageGroup = inlineObj != null
                 && inlineObj.kind() == ASTInlineObject.ObjectKind.IMAGE
                 && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig);
+        boolean hasHwpxOwnedChildTextFrame =
+                ASTInlineObjectBuilder.hasHwpxOwnedChildTextFrameRecursive(ig, resolvedData);
         if (isImageGroup) {
             ASTInlineObjectBuilder.collectOverlayFrames(
                     ig, inlineObj, idmlDoc, colorResolver, imageLoader, bg, resolvedData);
         } else {
             // 배경 있는 그룹 + 자식 텍스트프레임 → 단일 래퍼 글상자로 변환
             // (벡터 화살표 등은 소실되지만 텍스트+배경 스타일은 보존)
-            if (bg != null && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig)) {
+            if (!hasHwpxOwnedChildTextFrame
+                    && bg != null && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig)) {
                 ASTInlineObject wrapper = ASTOverlayBuilder.createBackgroundGroupWrapper(
                         ig, bg, idmlDoc, colorResolver, imageLoader);
                 if (wrapper != null) {
@@ -378,8 +397,9 @@ public class ASTRunConverter {
                 }
             }
             // 그리드 테이블 감지 시도 (2×2 이상의 TextFrame 그리드 → ASTTable)
-            ASTTable gridTable = ASTTableConverter.tryBuildGridTable(
-                    ig, idmlDoc, colorResolver, imageLoader, bg);
+            ASTTable gridTable = hasHwpxOwnedChildTextFrame ? null
+                    : ASTTableConverter.tryBuildGridTable(
+                            ig, idmlDoc, colorResolver, imageLoader, bg);
             if (gridTable != null) {
                 if (inlineObj == null) {
                     inlineObj = new ASTInlineObject();

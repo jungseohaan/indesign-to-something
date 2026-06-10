@@ -1037,14 +1037,19 @@ public final class FramePlacer {
         ResolvedPageItem tfItem = ctx.resolvedData.getPageItem(tf.id());
         if (tfItem == null || tfItem.parentId() == null || tf.geometricBounds() == null) return;
 
+        double[] tfb = tf.geometricBounds();
+        ResolvedPageItem parent = ctx.resolvedData.getPageItem(tfItem.parentId());
+        if (isTextShellShape(parent) && overlapRatio(tfb, parent.geometricBounds()) >= 0.75) {
+            applyPageItemStyleToBlock(ctx, parent, block);
+            return;
+        }
+
         ResolvedPageItem best = null;
         double bestScore = 0.0;
-        double[] tfb = tf.geometricBounds();
         for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
             if (pi == null || pi.id() == null || pi.id().equals(tf.id())) continue;
             if (!tfItem.parentId().equals(pi.parentId())) continue;
-            String t = pi.type();
-            if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t)) continue;
+            if (!isTextShellShape(pi)) continue;
             double[] pb = pi.geometricBounds();
             if (pb == null || pb.length < 4) continue;
             double score = overlapRatio(tfb, pb);
@@ -1055,30 +1060,45 @@ public final class FramePlacer {
         }
         if (best == null || bestScore < 0.75) return;
 
-        String fillName = best.fillColorName();
+        applyPageItemStyleToBlock(ctx, best, block);
+    }
+
+    private static boolean isTextShellShape(ResolvedPageItem item) {
+        if (item == null) return false;
+        String t = item.type();
+        if (!"Rectangle".equals(t) && !"Polygon".equals(t) && !"Oval".equals(t)) return false;
+        double[] gb = item.geometricBounds();
+        return gb != null && gb.length >= 4;
+    }
+
+    private static void applyPageItemStyleToBlock(
+            ResolvedBuildContext ctx, ResolvedPageItem source, ASTTextFrameBlock block) {
+        if (source == null || block == null) return;
+
+        String fillName = source.fillColorName();
         if ((block.fillColor() == null || block.fillColor().isEmpty())
                 && fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
-            String fillHex = ctx.resolvedData.resolveTintedColorHex(fillName, best.fillTint());
+            String fillHex = ctx.resolvedData.resolveTintedColorHex(fillName, source.fillTint());
             if (fillHex != null) {
                 block.fillColor(fillHex);
                 block.fillTint(100);
             }
         }
 
-        String strokeName = best.strokeColorName();
+        String strokeName = source.strokeColorName();
         if ((block.strokeColor() == null || block.strokeColor().isEmpty())
                 && strokeName != null && !"None".equals(strokeName) && !"[None]".equals(strokeName)
-                && best.strokeWeight() > 0) {
+                && source.strokeWeight() > 0) {
             String strokeHex = ctx.resolvedData.resolveColorHex(strokeName);
             if (strokeHex != null) {
                 block.strokeColor(strokeHex);
-                block.strokeWeight(best.strokeWeight());
-                block.strokeTint(ColorResolver.normalizeTint(best.strokeTint()));
+                block.strokeWeight(source.strokeWeight());
+                block.strokeTint(ColorResolver.normalizeTint(source.strokeTint()));
             }
         }
 
-        if (block.cornerRadius() <= 0 && best.cornerRadius() > 0) {
-            block.cornerRadius(best.cornerRadius());
+        if (block.cornerRadius() <= 0 && source.cornerRadius() > 0) {
+            block.cornerRadius(source.cornerRadius());
         }
     }
 

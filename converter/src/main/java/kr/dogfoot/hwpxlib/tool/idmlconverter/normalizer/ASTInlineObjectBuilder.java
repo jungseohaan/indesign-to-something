@@ -4,6 +4,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -138,6 +139,9 @@ class ASTInlineObjectBuilder {
                                                          IDMLCharacterRun.InlineGraphic rootGroup,
                                                          ResolvedData resolvedData) {
         for (IDMLTextFrame childTf : ig.childTextFrames()) {
+            if (isHwpxOwnedChildTextFrame(childTf, resolvedData)) {
+                continue;
+            }
             // 수식 폰트 전용 TextFrame 건너뛰기 (괄호/중괄호 장식 — HWPX에서 표현 불가)
             if (isMathFontOnlyStory(childTf, idmlDoc)) continue;
 
@@ -234,6 +238,32 @@ class ASTInlineObjectBuilder {
             if (hasChildTextFramesRecursive(child)) return true;
         }
         return false;
+    }
+
+    static boolean hasHwpxOwnedChildTextFrameRecursive(IDMLCharacterRun.InlineGraphic ig,
+                                                       ResolvedData resolvedData) {
+        if (ig == null || resolvedData == null) return false;
+        if (ig.childTextFrames() != null) {
+            for (IDMLTextFrame tf : ig.childTextFrames()) {
+                if (isHwpxOwnedChildTextFrame(tf, resolvedData)) {
+                    return true;
+                }
+            }
+        }
+        if (ig.childGraphics() != null) {
+            for (IDMLCharacterRun.InlineGraphic child : ig.childGraphics()) {
+                if (hasHwpxOwnedChildTextFrameRecursive(child, resolvedData)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isHwpxOwnedChildTextFrame(IDMLTextFrame tf, ResolvedData resolvedData) {
+        if (tf == null || resolvedData == null || tf.selfId() == null) return false;
+        String domId = ParagraphTextHelpers.domIdFromSourceId(tf.selfId());
+        return domId != null && resolvedData.isHwpxOwnedTextFrame(domId);
     }
 
     /**

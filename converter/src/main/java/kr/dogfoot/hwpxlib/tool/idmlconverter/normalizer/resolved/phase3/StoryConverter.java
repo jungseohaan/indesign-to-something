@@ -580,6 +580,9 @@ public final class StoryConverter {
                 if (visibleText.charAt(i) != '\uFFFC') continue;
                 int inlineId = inlineVisualIds.get(idIdx++);
                 if (containsInlineSource(block, inlineId)) continue;
+                if (shouldDropUnabsorbedTextStyleInlineVisual(ctx, owner, block, inlineId)) {
+                    continue;
+                }
                 if (shouldFloatTfOwnedInlineVisual(ctx, owner, block, inlineId)) {
                     ctx.setInlineDisposition(inlineId, FrameDisposition.PNG_CONVERT_TO_FLOATING);
                     ctx.deferredAnchoredFloatingIds.add(inlineId);
@@ -633,6 +636,35 @@ public final class StoryConverter {
             }
         }
         return null;
+    }
+
+    private static boolean shouldDropUnabsorbedTextStyleInlineVisual(
+            ResolvedBuildContext ctx, RenderedGroup owner, ASTTextFrameBlock block, int inlineId) {
+        if (ctx == null || ctx.resolvedData == null || owner == null || block == null) return false;
+        if (!"hwpx_tf".equals(owner.textOwner())) return false;
+        String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+        if (domId == null || !ctx.resolvedData.isHwpxOwnedTextFrame(domId)) return false;
+
+        RenderedGroup inlineRg = findRenderedGroup(ctx, inlineId);
+        if (inlineRg == null || !"inline_object".equals(inlineRg.itemType())) return false;
+        if (Boolean.TRUE.equals(inlineRg.containsText()) || Boolean.TRUE.equals(inlineRg.containsEditableText())) {
+            return false;
+        }
+        double[] b = inlineRg.bounds();
+        if (b == null || b.length < 4) return false;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        if (w <= 0.0 || h <= 0.0) return false;
+
+        // InDesign often represents highlight/underline-like text styling as
+        // anchored vector strips inside a TextFrame. When HWPX owns the text,
+        // these strips must either become character attributes or be dropped;
+        // keeping them as inline images breaks editing and line flow.
+        boolean thinTextStyleStrip = h <= 3.0 && w >= 6.0 && w / Math.max(0.1, h) >= 4.0;
+        if (!thinTextStyleStrip) return false;
+        return ownerContainsId(owner.tfInlineVisualIds(), inlineId)
+                || ownerContainsId(owner.visualOnlyChildIds(), inlineId)
+                || ownerContainsId(owner.sourceObjectIds(), inlineId);
     }
 
     private static boolean shouldFloatTfOwnedInlineVisual(
@@ -1019,6 +1051,7 @@ public final class StoryConverter {
             long requiredInnerWidth = 0;
             for (ASTParagraph para : block.paragraphs()) {
                 if (para == null || para.tabStops() == null) continue;
+                if (!hasActualTabRun(para)) continue;
                 long paraRight = para.rightMargin() != null ? Math.max(0L, para.rightMargin()) : 0L;
                 for (ASTTabStop stop : para.tabStops()) {
                     if (stop == null || stop.position() <= 0) continue;
@@ -1032,6 +1065,16 @@ public final class StoryConverter {
                 block.width(requiredOuterWidth);
             }
         }
+    }
+
+    private static boolean hasActualTabRun(ASTParagraph para) {
+        if (para == null || para.items() == null) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            String text = ((ASTTextRun) item).text();
+            if (text != null && text.indexOf('\t') >= 0) return true;
+        }
+        return false;
     }
 
     private static void replaceDottedInlineImagesWithTabLeaders(
