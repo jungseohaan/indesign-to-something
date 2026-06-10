@@ -5,6 +5,10 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -137,6 +141,9 @@ public final class FramePlacer {
             // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
             InlineToFloatingReason inlineToFloatingReason = InlineToFloatingReason.NONE;
             if (tf.isInline()) {
+                if (ownershipPlanKeepsInlineText(ctx, tfDomId)) {
+                    continue;
+                }
                 if (conceptDiagramTf) {
                     if (tfDomId >= 0) {
                         ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
@@ -1119,6 +1126,15 @@ public final class FramePlacer {
     private static boolean isSubstantiveLine(String lineText) {
         return lineText != null
                 && !lineText.replace("\r", "").replace("\n", "").replace("\uFFFC", "").trim().isEmpty();
+    }
+
+    private static boolean ownershipPlanKeepsInlineText(ResolvedBuildContext ctx, int tfDomId) {
+        if (ctx == null || tfDomId < 0) return false;
+        ObjectPlan plan = ctx.findOwnershipPlanForDomId(tfDomId);
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.visualAction == VisualAction.DROP_VISUAL
+                && plan.placement == Placement.INLINE;
     }
 
     private enum InlineToFloatingReason {

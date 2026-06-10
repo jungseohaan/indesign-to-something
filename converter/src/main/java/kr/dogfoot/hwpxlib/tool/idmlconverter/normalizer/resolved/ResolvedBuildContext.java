@@ -306,6 +306,19 @@ public final class ResolvedBuildContext {
         return findOwnershipPlanForRendered(rg) != null;
     }
 
+    public ObjectPlan findOwnershipPlanForDomId(int domId) {
+        if (domId < 0) return null;
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan.domId == domId) return plan;
+            if (plan.sourceObjectIds != null) {
+                for (int sourceObjectId : plan.sourceObjectIds) {
+                    if (sourceObjectId == domId) return plan;
+                }
+            }
+        }
+        return null;
+    }
+
     public boolean isCompleteInlinePngByOwnershipPlan(RenderedGroup rg) {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         return plan != null

@@ -196,6 +196,18 @@ HWPX에는 `BEHIND_TEXT`와 `IN_FRONT_OF_TEXT` 평면 차이가 있다.
 
 ---
 
+## Legacy Phase Bridge 규칙
+
+legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
+
+- `placement=INLINE`, `textAction=OWNED_BY_HWPX_TEXT`, `visualAction=DROP_VISUAL`인 TextFrame은
+  Phase 2에서 floating fallback으로 재배치하지 않는다.
+- parentId가 없는 inline TF라도 ObjectPlan이 inline text 소유를 명시하면 Phase 3 inline story 흐름이 소유한다.
+- parentless inline fallback은 ObjectPlan이 없거나, ObjectPlan이 명시적으로 floating 배치를 요구하는 경우에만 허용한다.
+- Phase 2/3/6/7은 inline/floating 여부를 새로 판정하지 않고 plan을 실행한다.
+
+---
+
 ## Editable Label Shell
 
 검색/편집 가치가 있는 짧은 라벨은 텍스트와 시각을 분리한다.
