@@ -2617,6 +2617,7 @@ public final class BackgroundInjector {
         String reason = rg.reason();
         if (isEditableLabelShellReason(reason)) return false;
         if (!isTextEmphasisBackdropReason(reason)) return false;
+        if (isLargePaperVectorShape(ctx, rg, rbRaw)) return false;
 
         double w = rbRaw[3] - rbRaw[1];
         double h = rbRaw[2] - rbRaw[0];
@@ -2627,21 +2628,55 @@ public final class BackgroundInjector {
         if (isShortOwnedLabelShell(ctx, rg, match.tf)) return false;
         double[] lb = match.line.bounds();
         double lineH = Math.max(0.1, lb[2] - lb[0]);
-        if (h > Math.max(8.0, lineH * 2.4)) return false;
-        if (countMatchedLineOverlaps(ctx, rg, rbRaw, match.tf) > 1) return false;
+        double rawOverlap = overlapArea(rbRaw, lb);
         double[] scaledRb = new double[] {
                 rbRaw[0] * ctx.scaleFactor,
                 rbRaw[1] * ctx.scaleFactor,
                 rbRaw[2] * ctx.scaleFactor,
                 rbRaw[3] * ctx.scaleFactor
         };
-        double overlapRatio = Math.max(overlapArea(rbRaw, lb), overlapArea(scaledRb, lb))
+        double scaledOverlap = overlapArea(scaledRb, lb);
+        double comparableH = scaledOverlap > rawOverlap ? h * ctx.scaleFactor : h;
+        if (comparableH > Math.max(6.5, lineH * 1.35)) return false;
+        if (countMatchedLineOverlaps(ctx, rg, rbRaw, match.tf) > 1) return false;
+        double overlapRatio = Math.max(rawOverlap, scaledOverlap)
                 / Math.max(0.1, area(lb));
         if (overlapRatio < 0.18) return false;
 
         // A true underline is usually much thinner than the text line. Keep it in
         // the underline path rather than converting it to character shading.
         return h >= Math.max(2.5, lineH * 0.25);
+    }
+
+    private static boolean isLargePaperVectorShape(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            double[] bounds) {
+        if (ctx == null || ctx.resolvedData == null || rg == null || bounds == null || bounds.length < 4) {
+            return false;
+        }
+        if (!"vector_shape".equals(rg.reason())) return false;
+        double w = bounds[3] - bounds[1];
+        double h = bounds[2] - bounds[0];
+        if (w < 30.0 || h < 9.0) return false;
+
+        int[] sourceIds = rg.sourceObjectIds();
+        if (sourceIds != null) {
+            for (int sourceId : sourceIds) {
+                ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+                if (isPaperFilledVector(item)) {
+                    return true;
+                }
+            }
+        }
+        return isPaperFilledVector(ctx.resolvedData.getPageItem(String.valueOf(rg.id())));
+    }
+
+    private static boolean isPaperFilledVector(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = item.type();
+        if (!"Rectangle".equals(type) && !"Polygon".equals(type) && !"Oval".equals(type)) return false;
+        return isPaperColor(item.fillColorName());
     }
 
     private static int countMatchedLineOverlaps(

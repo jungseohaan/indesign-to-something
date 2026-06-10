@@ -452,7 +452,8 @@ class StoryLoader {
                                     }
                                     // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
                                     // 단, inline_object PNG가 있으면 시각 장식이므로 절대 좌표 floating으로 보존한다.
-                                    if (InlineFrameHandler.isAnchoredOutsideParentByTextFrame(ctx, domId, storyId)) {
+                                    if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, domId)
+                                            && InlineFrameHandler.isAnchoredOutsideParentByTextFrame(ctx, domId, storyId)) {
                                         if (hasInlineObjectPng(ctx, domId)) {
                                             ctx.deferredAnchoredFloatingIds.add(domId);
                                         }

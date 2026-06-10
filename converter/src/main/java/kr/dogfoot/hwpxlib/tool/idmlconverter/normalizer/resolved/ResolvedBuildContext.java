@@ -310,6 +310,8 @@ public final class ResolvedBuildContext {
         if (domId < 0) return null;
         for (ObjectPlan plan : ownershipPlans) {
             if (plan.domId == domId) return plan;
+        }
+        for (ObjectPlan plan : ownershipPlans) {
             if (plan.sourceObjectIds != null) {
                 for (int sourceObjectId : plan.sourceObjectIds) {
                     if (sourceObjectId == domId) return plan;
@@ -362,7 +364,6 @@ public final class ResolvedBuildContext {
             boolean domMatches = plan.domId == rg.id();
             if (renderMatches && fileMatches && placementMatches) return plan;
             if (renderMatches && placementMatches) return plan;
-            if (renderMatches) return plan;
             if (sameDom == null && domMatches && placementMatches) sameDom = plan;
             if (sameFileAndBounds == null && fileMatches && placementMatches && sameRoundedBounds(plan.bounds, rg.bounds())) {
                 sameFileAndBounds = plan;

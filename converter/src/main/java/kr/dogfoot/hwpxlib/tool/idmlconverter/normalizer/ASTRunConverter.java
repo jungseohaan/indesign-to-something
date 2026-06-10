@@ -217,9 +217,6 @@ public class ASTRunConverter {
                 if (isDoviraSubunitMarkerObject(boxDomId, resolvedData)) {
                     return;
                 }
-                if (ASTInlineObjectBuilder.hasHwpxOwnedChildTextFrameRecursive(ig, resolvedData)) {
-                    return;
-                }
                 kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext tmpCtx =
                         new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext();
                 tmpCtx.resolvedData = resolvedData;
@@ -256,6 +253,9 @@ public class ASTRunConverter {
                                 .tryInlineGroupAsSingleBadge(tmpCtx, boxDomId);
                 if (singleBadge != null) {
                     para.addItem(singleBadge);
+                    return;
+                }
+                if (ASTInlineObjectBuilder.hasHwpxOwnedChildTextFrameRecursive(ig, resolvedData)) {
                     return;
                 }
             }

@@ -10,6 +10,10 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -916,6 +920,50 @@ public class InlineFrameHandler {
         obj.verticalJustification("CenterAlign");
 
         return obj;
+    }
+
+    static boolean shouldKeepAnchoredInlineByOwnershipPlan(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.ownershipPlans == null) return false;
+        String anchorId = String.valueOf(anchoredObjectId);
+        Set<String> descendants = ctx.resolvedData != null
+                ? ctx.resolvedData.buildDescendantSet(anchorId, 5)
+                : java.util.Collections.emptySet();
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            boolean sameAnchor = plan.domId == anchoredObjectId
+                    || containsInt(plan.sourceObjectIds, anchoredObjectId);
+            boolean descendantText = descendants.contains(String.valueOf(plan.domId))
+                    || containsAnyStringId(descendants, plan.sourceObjectIds);
+            if (!sameAnchor && !descendantText) continue;
+
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && plan.visualAction == VisualAction.ABSORB_TEXT_STYLE) {
+                return true;
+            }
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && plan.placement == Placement.INLINE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsInt(int[] values, int target) {
+        if (values == null) return false;
+        for (int value : values) {
+            if (value == target) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsAnyStringId(Set<String> ids, int[] values) {
+        if (ids == null || ids.isEmpty() || values == null) return false;
+        for (int value : values) {
+            if (ids.contains(String.valueOf(value))) return true;
+        }
+        return false;
     }
 
     private static ASTInlineObject loadInlineEditableLabelShell(

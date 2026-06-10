@@ -323,6 +323,9 @@ public final class OwnershipPlanner {
 
         List<ResolvedTextFrame> ownedTextFrames = ownedTextFramesOf(rg);
         if (ownedTextFrames.isEmpty()) return false;
+        if (safe(rg.reason()).contains("text_composite_editable_text_hidden")) {
+            return false;
+        }
         for (ResolvedTextFrame tf : ownedTextFrames) {
             if (canTextFrameAbsorbVisualStyle(tf)) {
                 return true;
@@ -343,6 +346,7 @@ public final class OwnershipPlanner {
         String reason = safe(rg.reason());
         return reason.contains("label")
                 || reason.contains("textframe_visual_shell")
+                || reason.contains("text_composite_editable_text_hidden")
                 || reason.contains("visual_shell")
                 || "hwpx_tf".equals(rg.textOwner())
                 || hasEditableTextFrameIds(rg);

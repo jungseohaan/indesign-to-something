@@ -205,6 +205,9 @@ public final class FramePlacer {
                     // - 자기 텍스트 ≥ 2 자: Phase 3 가 인라인 텍스트 런으로 임베드 → 플로팅 스킵
                     // - 멀티 child 배지 (Phase 3 가 자손 텍스트 결합 ≥ 2자): Phase 3 가 결합 인라인 임베드 → 플로팅 스킵
                     // - 단일 1자 라벨 (예: "1", "예"): Phase 3 가 PNG 임베드 (텍스트 누락) → 플로팅으로 검색 가능 텍스트 보강
+                    if (tfDomId >= 0 && isDescendantOfInlineObject(ctx, idx, tf.id())) {
+                        continue;
+                    }
                     if (hwpxOwnedTextFrame) {
                         // rendered page_object가 textOwner=hwpx_tf로 선언된 경우 PNG에서는
                         // 텍스트를 숨긴 상태다. Phase 3 inline story 흐름에 기대면 parentless
@@ -213,10 +216,6 @@ public final class FramePlacer {
                             ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
                         }
                         inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                    // 부모 Group이 inline_object이고 텍스트 소유권이 HWPX가 아니면 inline PNG가
-                    // 시각적 배지 전체를 포함하므로 floating 보강은 불필요하다.
-                    } else if (tfDomId >= 0 && isDescendantOfInlineObject(ctx, idx, tf.id())) {
-                        continue;
                     } else {
                         // inline+editable TF가 어떤 렌더 채널에도 없으면 Phase 3 인라인 런으로 처리.
                         // (어휘 숫자 superscript "1"/"2"/"3" 등 — PNG 없이 IDML 스토리 텍스트만 존재)
@@ -715,7 +714,7 @@ public final class FramePlacer {
             } catch (Exception eFill) {
                 System.err.println("[FramePlacer] fill/stroke 속성 적용 오류 tf=" + tf.id() + ": " + eFill);
             }
-            if (!hasRenderedVisualShell) {
+            if (!hasRenderedVisualShell || hasAbsorbedTextStylePlan(ctx, tfDomId)) {
                 applyGroupBackgroundShapeStyle(ctx, tf, block);
             }
             if (!hwpxOwnedTextFrame) {
@@ -816,6 +815,19 @@ public final class FramePlacer {
             }
             if (tf != null && isInferredTextFrameVisualShell(ctx, tf, rg)) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasAbsorbedTextStylePlan(ResolvedBuildContext ctx, int tfDomId) {
+        if (ctx == null || tfDomId < 0 || ctx.ownershipPlans == null) return false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.visualAction != VisualAction.ABSORB_TEXT_STYLE) continue;
+            if (plan.domId == tfDomId) return true;
+            if (plan.sourceObjectIds == null) continue;
+            for (int sourceObjectId : plan.sourceObjectIds) {
+                if (sourceObjectId == tfDomId) return true;
             }
         }
         return false;
