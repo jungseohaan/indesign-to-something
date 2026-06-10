@@ -1633,9 +1633,16 @@ public final class StoryConverter {
             double h = Math.abs(gb[2] - gb[0]);
             if (w <= 0 || h <= 0) continue;
 
+            RenderedGroup matchedRg = inlineObjectById.get(domId.intValue());
+            if (matchedRg != null && ctx.hasOwnershipPlan(matchedRg)
+                    && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(matchedRg)) {
+                ctx.recordRenderedDecision(matchedRg, "Phase3.DeferredAnchoredFloating",
+                        "SKIP_OBJECT_PLAN_NOT_FLOATING_VISUAL",
+                        "OwnershipPlanner already assigned this inline visual to a non-floating route");
+                continue;
+            }
             // inline_NNN.png 가 있으면 이미지로, 없으면 일반 fill 도형으로 처리
             File pngFile = null;
-            RenderedGroup matchedRg = inlineObjectById.get(domId.intValue());
             if (matchedRg != null && matchedRg.file() != null)
                 pngFile = new File(ctx.basePath, matchedRg.file());
             if (pngFile == null || !pngFile.exists()) continue;

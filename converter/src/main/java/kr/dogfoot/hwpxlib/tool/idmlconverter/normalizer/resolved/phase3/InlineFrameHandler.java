@@ -2423,9 +2423,11 @@ public class InlineFrameHandler {
                         }
                     }
                     // Group 기반 inline(rtf==null) 과대 크기 방지.
-                    // 비율 0.5~4 범위 아이콘/배지: 14pt 상한.
+                    // 비율 0.5~4 범위의 shape-only 아이콘/배지: 14pt 상한.
+                    // 실제 Image 자식을 포함한 얼굴/사진형 inline visual은 원본 authored bounds를 유지한다.
                     // scribble 외곽선(비율 4.3, 5.8 등)은 page layout 영향으로 제외.
-                    if (!isNullTypeInline && rtf == null && obj.height() > 1500) {
+                    if (!isNullTypeInline && rtf == null && obj.height() > 1500
+                            && !hasRasterImageSource(ctx, rg)) {
                         double ar = (double) obj.width() / obj.height();
                         if (ar >= 0.5 && ar <= 4.0) {
                             long maxH = 1400;
@@ -2442,6 +2444,22 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    private static boolean hasRasterImageSource(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || ctx.resolvedData == null || rg == null) return false;
+        if (isRasterImageItem(ctx, rg.id())) return true;
+        int[] sourceIds = rg.sourceObjectIds();
+        if (sourceIds == null) return false;
+        for (int sourceId : sourceIds) {
+            if (isRasterImageItem(ctx, sourceId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isRasterImageItem(ResolvedBuildContext ctx, int domId) {
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(domId));
+        return item != null && "Image".equals(item.type());
     }
 
     public static ASTInlineObject loadCompleteSimpleButtonLabelInlineObject(

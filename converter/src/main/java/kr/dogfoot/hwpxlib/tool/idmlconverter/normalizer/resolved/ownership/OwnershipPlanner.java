@@ -48,6 +48,7 @@ public final class OwnershipPlanner {
         planRenderedItems();
         planTextFrames();
         resolveInlineFloatingSameDom();
+        resolveFloatingChildrenOwnedByInlineParent();
         resolveDuplicateRenderedChannels();
         resolveInlineCompositeHwpxTextParents();
         resolveVisualBackdropClusterSources();
@@ -559,6 +560,32 @@ public final class OwnershipPlanner {
                 if (idx == winner) continue;
                 ObjectPlan loser = plans.get(idx);
                 plans.set(idx, loser.withVisualAction(VisualAction.DROP_VISUAL, loser.reason));
+            }
+        }
+    }
+
+    private void resolveFloatingChildrenOwnedByInlineParent() {
+        List<ObjectPlan> inlineOwners = new ArrayList<>();
+        for (ObjectPlan plan : plans) {
+            if (!isVisibleRenderedVisual(plan)) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG) continue;
+            if (plan.sourceObjectIds == null || plan.sourceObjectIds.length <= 1) continue;
+            inlineOwners.add(plan);
+        }
+        if (inlineOwners.isEmpty()) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan child = plans.get(i);
+            if (!isVisibleRenderedVisual(child)) continue;
+            if (child.placement != Placement.FLOATING) continue;
+            if (child.sourceObjectIds == null || child.sourceObjectIds.length == 0) continue;
+            for (ObjectPlan parent : inlineOwners) {
+                if (child.pageIndex != parent.pageIndex) continue;
+                if (child.domId == parent.domId) continue;
+                if (!sourceSetContainsAll(parent.sourceObjectIds, child.sourceObjectIds)) continue;
+                plans.set(i, child.withVisualAction(VisualAction.DROP_VISUAL,
+                        "floating_child_owned_by_inline_parent"));
+                break;
             }
         }
     }
@@ -2155,6 +2182,21 @@ public final class OwnershipPlanner {
             }
         }
         return false;
+    }
+
+    private static boolean sourceSetContainsAll(int[] ownerSources, int[] childSources) {
+        if (ownerSources == null || childSources == null || childSources.length == 0) return false;
+        for (int childSource : childSources) {
+            boolean found = false;
+            for (int ownerSource : ownerSources) {
+                if (ownerSource == childSource) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return false;
+        }
+        return true;
     }
 
     private static boolean isVisualBackdropCluster(ObjectPlan plan) {
