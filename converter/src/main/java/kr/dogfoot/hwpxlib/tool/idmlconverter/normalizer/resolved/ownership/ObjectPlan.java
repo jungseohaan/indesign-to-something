@@ -126,6 +126,23 @@ public final class ObjectPlan {
                 bounds);
     }
 
+    public ObjectPlan withZOrder(int newZOrder) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                newZOrder,
+                reason,
+                file,
+                bounds);
+    }
+
     public ObjectPlan withSourceObjectIds(int[] newSourceObjectIds) {
         return new ObjectPlan(
                 domId,
@@ -141,6 +158,29 @@ public final class ObjectPlan {
                 reason,
                 file,
                 bounds);
+    }
+
+    public ObjectPlan withRenderedVisual(
+            VisualLayer newVisualLayer,
+            int[] newSourceObjectIds,
+            int newZOrder,
+            String newReason,
+            String newFile,
+            double[] newBounds) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                newVisualLayer,
+                placement,
+                renderId,
+                newSourceObjectIds,
+                newZOrder,
+                newReason != null ? newReason : reason,
+                newFile != null ? newFile : file,
+                newBounds != null ? newBounds : bounds);
     }
 
     public String toJson() {

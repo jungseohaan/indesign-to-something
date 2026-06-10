@@ -244,6 +244,37 @@ HWPX에는 `BEHIND_TEXT`와 `IN_FRONT_OF_TEXT` 평면 차이가 있다.
 
 ---
 
+## Container Face + Shadow
+
+흰 컨테이너 본체와 컬러 채움 박스가 거의 같은 footprint로 겹쳐 그림자 효과를 만드는 경우,
+두 객체는 z-depth로 따로 맞추지 않고 하나의 컨테이너 시각 단위로 소유한다.
+
+대표 형태:
+
+- 흰 Paper 패널 위에 같은 크기의 파랑/보라/회색 채움 박스가 살짝 밀려 그림자처럼 보이는 경우
+- 본문/기사/자료 박스에서 shadow source가 본문 텍스트를 덮는 경우
+
+조건:
+
+- 두 객체 모두 텍스트가 없는 visual source다.
+- 하나는 Paper-like face이고, 다른 하나는 컬러 fill을 가진 container shadow다.
+- 둘의 bounds 면적과 중심점이 거의 같고, 서로 대부분 겹친다.
+- line/outline-only shape, label shell, foreground mask는 대상이 아니다.
+
+결과:
+
+- face와 shadow는 하나의 combined PNG로 배치한다.
+- combined PNG는 `PLACE_FLOATING_PNG`, `CONTAINER_BACKDROP`이다.
+- shadow를 먼저 그리고 face를 나중에 그린 visual order를 보존한다.
+- combined plan은 face와 shadow의 `sourceObjectIds`를 모두 소유한다.
+- 개별 face/shadow PNG 중 shadow child는 `DROP_VISUAL`이다.
+- 후속 단계는 이 케이스를 z-depth 재조정으로 다시 풀지 않는다.
+
+이 정책은 텍스트를 포함한 mixed group 통이미지를 허용한다는 뜻이 아니다.
+텍스트는 계속 HWPX가 소유하고, face+shadow visual만 하나의 배경 PNG가 소유한다.
+
+---
+
 ## Complete Marker PNG
 
 단순 표식은 완성형 PNG로 갈 수 있다.

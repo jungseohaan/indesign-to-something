@@ -6,6 +6,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -56,6 +58,7 @@ public final class OwnershipPlanner {
         resolveLargeLayeredImageExportBackdrops();
         resolveClippedDecorationParents();
         resolveContainerMasksOverIntrudingLabelBackdrops();
+        resolveLayeredContainerFaces();
         resolveNestedTextShellSources();
         resolveClusterOwnedTextFrameShells();
         resolveDroppedRenderedTextOwnership();
@@ -831,6 +834,190 @@ public final class OwnershipPlanner {
                 break;
             }
         }
+    }
+
+    private void resolveLayeredContainerFaces() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan face = plans.get(i);
+            if (!isVisibleRenderedVisual(face)) continue;
+            if (face.placement != Placement.FLOATING) continue;
+            if (!isPaperLikeContainerFace(face)) continue;
+            if (isLineLikePlan(face)) continue;
+
+            for (int j = 0; j < plans.size(); j++) {
+                if (i == j) continue;
+                ObjectPlan shadow = plans.get(j);
+                if (!isVisibleRenderedVisual(shadow)) continue;
+                if (shadow.placement != Placement.FLOATING) continue;
+                if (shadow.pageIndex != face.pageIndex) continue;
+                if (!isColoredContainerShadow(shadow)) continue;
+                if (!sameContainerFootprint(face, shadow)) continue;
+
+                CombinedVisual combined = createContainerFaceShadowImage(face, shadow);
+                if (combined != null) {
+                    plans.set(i, face.withRenderedVisual(
+                            VisualLayer.CONTAINER_BACKDROP,
+                            combined.sourceObjectIds,
+                            Math.min(face.zOrder, shadow.zOrder),
+                            "container_face_shadow_pair",
+                            combined.file,
+                            combined.bounds));
+                    plans.set(j, shadow.withVisualAction(
+                            VisualAction.DROP_VISUAL,
+                            "container_face_shadow_pair_child"));
+                } else {
+                    int faceZ = Math.min(face.zOrder, shadow.zOrder) - 1;
+                    plans.set(i, face.withVisualLayer(VisualLayer.CONTAINER_FACE).withZOrder(faceZ));
+                    plans.set(j, shadow.withVisualLayer(VisualLayer.CONTAINER_FACE));
+                }
+                break;
+            }
+        }
+    }
+
+    private CombinedVisual createContainerFaceShadowImage(ObjectPlan face, ObjectPlan shadow) {
+        if (data == null || data.basePath() == null) return null;
+        if (face == null || shadow == null) return null;
+        if (face.file == null || face.file.isBlank() || shadow.file == null || shadow.file.isBlank()) return null;
+        if (face.bounds == null || shadow.bounds == null || face.bounds.length < 4 || shadow.bounds.length < 4) return null;
+
+        File faceFile = resolveImageFile(face.file);
+        File shadowFile = resolveImageFile(shadow.file);
+        if (!faceFile.exists() || !shadowFile.exists()) return null;
+
+        try {
+            BufferedImage faceImage = ImageIO.read(faceFile);
+            BufferedImage shadowImage = ImageIO.read(shadowFile);
+            if (faceImage == null || shadowImage == null) return null;
+
+            double[] bounds = unionBounds(face.bounds, shadow.bounds);
+            double outW = Math.max(0.001, bounds[3] - bounds[1]);
+            double outH = Math.max(0.001, bounds[2] - bounds[0]);
+            double xScale = Math.max(
+                    faceImage.getWidth() / Math.max(0.001, face.bounds[3] - face.bounds[1]),
+                    shadowImage.getWidth() / Math.max(0.001, shadow.bounds[3] - shadow.bounds[1]));
+            double yScale = Math.max(
+                    faceImage.getHeight() / Math.max(0.001, face.bounds[2] - face.bounds[0]),
+                    shadowImage.getHeight() / Math.max(0.001, shadow.bounds[2] - shadow.bounds[0]));
+            int pixelW = Math.max(1, (int) Math.ceil(outW * xScale));
+            int pixelH = Math.max(1, (int) Math.ceil(outH * yScale));
+
+            BufferedImage out = new BufferedImage(pixelW, pixelH, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = out.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            drawIntoUnion(g, shadowImage, shadow.bounds, bounds, pixelW, pixelH);
+            drawIntoUnion(g, faceImage, face.bounds, bounds, pixelW, pixelH);
+            g.dispose();
+
+            String relPath = "rendered_frames/container_face_shadow_"
+                    + face.domId + "_" + shadow.domId + ".png";
+            File outFile = resolveImageFile(relPath);
+            File parent = outFile.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) return null;
+            ImageIO.write(out, "png", outFile);
+
+            RenderedGroup faceGroup = renderedGroupForPlan(face);
+            if (faceGroup != null) {
+                faceGroup.file(relPath);
+                faceGroup.bounds(bounds);
+                faceGroup.sourceObjectIds(mergeSourceIds(face.sourceObjectIds, shadow.sourceObjectIds));
+                faceGroup.reason("container_face_shadow_pair");
+                faceGroup.zOrder(Math.min(face.zOrder, shadow.zOrder));
+                faceGroup.imageFormat("png");
+            }
+            return new CombinedVisual(relPath, bounds, mergeSourceIds(face.sourceObjectIds, shadow.sourceObjectIds));
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private RenderedGroup renderedGroupForPlan(ObjectPlan plan) {
+        if (plan == null || plan.renderId == null) return null;
+        for (RenderedGroup rg : allRenderedGroups()) {
+            if (rg != null && rg.id() == plan.renderId.intValue() && rg.pageIndex() == plan.pageIndex) {
+                return rg;
+            }
+        }
+        return null;
+    }
+
+    private static void drawIntoUnion(Graphics2D g, BufferedImage image,
+                                      double[] itemBounds, double[] unionBounds,
+                                      int pixelW, int pixelH) {
+        double unionW = Math.max(0.001, unionBounds[3] - unionBounds[1]);
+        double unionH = Math.max(0.001, unionBounds[2] - unionBounds[0]);
+        int x = (int) Math.round((itemBounds[1] - unionBounds[1]) / unionW * pixelW);
+        int y = (int) Math.round((itemBounds[0] - unionBounds[0]) / unionH * pixelH);
+        int w = (int) Math.round((itemBounds[3] - itemBounds[1]) / unionW * pixelW);
+        int h = (int) Math.round((itemBounds[2] - itemBounds[0]) / unionH * pixelH);
+        g.drawImage(image, x, y, Math.max(1, w), Math.max(1, h), null);
+    }
+
+    private static double[] unionBounds(double[] a, double[] b) {
+        return new double[] {
+                Math.min(a[0], b[0]),
+                Math.min(a[1], b[1]),
+                Math.max(a[2], b[2]),
+                Math.max(a[3], b[3])
+        };
+    }
+
+    private static int[] mergeSourceIds(int[] a, int[] b) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        if (a != null) {
+            for (int id : a) ids.add(id);
+        }
+        if (b != null) {
+            for (int id : b) ids.add(id);
+        }
+        int[] out = new int[ids.size()];
+        int i = 0;
+        for (Integer id : ids) out[i++] = id;
+        Arrays.sort(out);
+        return out;
+    }
+
+    private static final class CombinedVisual {
+        final String file;
+        final double[] bounds;
+        final int[] sourceObjectIds;
+
+        CombinedVisual(String file, double[] bounds, int[] sourceObjectIds) {
+            this.file = file;
+            this.bounds = bounds;
+            this.sourceObjectIds = sourceObjectIds;
+        }
+    }
+
+    private boolean isColoredContainerShadow(ObjectPlan plan) {
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
+        if (isLineLikePlan(plan)) return false;
+        if (area(plan.bounds) < 800.0) return false;
+        for (int sourceId : plan.sourceObjectIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (isFilledContainerBoxItem(item)) return true;
+        }
+        return false;
+    }
+
+    private static boolean sameContainerFootprint(ObjectPlan a, ObjectPlan b) {
+        if (a == null || b == null) return false;
+        if (a.bounds == null || b.bounds == null || a.bounds.length < 4 || b.bounds.length < 4) return false;
+        double aArea = area(a.bounds);
+        double bArea = area(b.bounds);
+        if (aArea <= 0.0 || bArea <= 0.0) return false;
+        double ratio = Math.min(aArea, bArea) / Math.max(aArea, bArea);
+        if (ratio < 0.72) return false;
+        if (!boundsMostlyOverlap(a.bounds, b.bounds, 0.82)) return false;
+        double aCy = (a.bounds[0] + a.bounds[2]) / 2.0;
+        double aCx = (a.bounds[1] + a.bounds[3]) / 2.0;
+        double bCy = (b.bounds[0] + b.bounds[2]) / 2.0;
+        double bCx = (b.bounds[1] + b.bounds[3]) / 2.0;
+        double h = Math.max(1.0, Math.min(Math.abs(a.bounds[2] - a.bounds[0]), Math.abs(b.bounds[2] - b.bounds[0])));
+        double w = Math.max(1.0, Math.min(Math.abs(a.bounds[3] - a.bounds[1]), Math.abs(b.bounds[3] - b.bounds[1])));
+        return Math.abs(aCy - bCy) <= h * 0.08 + 3.0
+                && Math.abs(aCx - bCx) <= w * 0.08 + 3.0;
     }
 
     private void resolveNestedTextShellSources() {
