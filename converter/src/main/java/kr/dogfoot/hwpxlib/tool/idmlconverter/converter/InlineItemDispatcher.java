@@ -39,8 +39,12 @@ final class InlineItemDispatcher {
 
     void addInlineObject(Para para, ASTInlineObject obj, boolean hasMeaningfulFollowingContent) {
         if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP) {
-            paragraphBuilder.imageBuilder.addInlineBadgeGroup(para, obj,
-                    paragraphBuilder.textBoxBuilder, paragraphBuilder);
+            if (isImageOnlyInlineBadgeGroup(obj)) {
+                paragraphBuilder.imageBuilder.addInlineImage(para, obj);
+            } else {
+                paragraphBuilder.imageBuilder.addInlineBadgeGroup(para, obj,
+                        paragraphBuilder.textBoxBuilder, paragraphBuilder);
+            }
         } else if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) {
             if (isTableOnlyInlineTextFrame(obj)) {
                 for (ASTTable table : obj.inlineTables()) {
@@ -74,6 +78,15 @@ final class InlineItemDispatcher {
         } else if (obj.kind() == ASTInlineObject.ObjectKind.SPACER_RECT) {
             paragraphBuilder.textBoxBuilder.addSpacerRect(para, obj);
         }
+    }
+
+    private static boolean isImageOnlyInlineBadgeGroup(ASTInlineObject obj) {
+        boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
+        boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
+        return !hasParagraphs
+                && !hasInlineTables
+                && obj.imageData() != null
+                && obj.imageData().length > 0;
     }
 
     private static boolean isTableOnlyInlineTextFrame(ASTInlineObject obj) {

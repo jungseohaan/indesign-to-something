@@ -89,6 +89,7 @@ public class FlatLayoutNode {
     private boolean flipHorizontal;
     private boolean flipVertical;
     private String bundlePath;
+    private String visualLayer;
     private long containerWidth;
     private long containerHeight;
     private long imageOffsetX;
@@ -352,6 +353,9 @@ public class FlatLayoutNode {
 
     public String bundlePath() { return bundlePath; }
     public void bundlePath(String v) { this.bundlePath = v; }
+
+    public String visualLayer() { return visualLayer; }
+    public void visualLayer(String v) { this.visualLayer = v; }
 
     public long containerWidth() { return containerWidth; }
     public void containerWidth(long v) { this.containerWidth = v; }

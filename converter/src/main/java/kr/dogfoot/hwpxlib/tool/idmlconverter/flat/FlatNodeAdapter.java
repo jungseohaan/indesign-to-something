@@ -131,6 +131,7 @@ public class FlatNodeAdapter {
 
         // Bundle path
         fig.bundlePath(node.bundlePath());
+        fig.visualLayer(node.visualLayer());
 
         // From group
         fig.fromGroup(node.fromGroup());

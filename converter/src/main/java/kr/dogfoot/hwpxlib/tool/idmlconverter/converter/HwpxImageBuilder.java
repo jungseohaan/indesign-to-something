@@ -702,11 +702,13 @@ public class HwpxImageBuilder {
                 && isPaperLikeRaster(figure.imageData());
         boolean isLargeBackground = (!figure.fromGroup() && figAreaHwp > 500_000_000L && figure.zOrder() <= 5)
                 || isLargePaperLikeRaster;
+        boolean forceBehindByLayer = isBehindTextVisualLayer(figure.visualLayer());
+        boolean forceInFrontByLayer = isInFrontVisualLayer(figure.visualLayer());
         TextWrapMethod figWrap = TextWrapMethod.IN_FRONT_OF_TEXT;
-        if (!figure.fromGroup() || isLargeBackground) {
+        if (forceBehindByLayer || (!forceInFrontByLayer && (!figure.fromGroup() || isLargeBackground))) {
             figWrap = TextWrapMethod.BEHIND_TEXT;
         }
-        int outputZOrder = isLargePaperLikeRaster ? 1 : (isLargeBackground ? 0 : figure.zOrder());
+        int outputZOrder = outputZOrderForVisualLayer(figure.visualLayer(), figure.zOrder(), isLargeBackground);
 
         // ShapeObject
         pic.idAnd(picId)
@@ -793,6 +795,37 @@ public class HwpxImageBuilder {
         ctx.imagesConverted++;
     }
 
+    private static boolean isBehindTextVisualLayer(String visualLayer) {
+        return "PAGE_BACKGROUND".equals(visualLayer)
+                || "CONTAINER_BACKDROP".equals(visualLayer);
+    }
+
+    private static boolean isInFrontVisualLayer(String visualLayer) {
+        return "LABEL_BACKDROP".equals(visualLayer)
+                || "CONTENT_VISUAL".equals(visualLayer)
+                || "CONTAINER_OUTLINE".equals(visualLayer)
+                || "FOREGROUND_MASK".equals(visualLayer);
+    }
+
+    private static int outputZOrderForVisualLayer(String visualLayer, int originalZOrder, boolean isLargeBackground) {
+        if (isLargeBackground || "PAGE_BACKGROUND".equals(visualLayer)) {
+            return -10000;
+        }
+        int offset = Math.max(-499, Math.min(499, originalZOrder));
+        if ("CONTAINER_BACKDROP".equals(visualLayer)) {
+            return -4000 + offset;
+        }
+        if ("LABEL_BACKDROP".equals(visualLayer)) {
+            return -2000 + offset;
+        }
+        if ("CONTENT_VISUAL".equals(visualLayer)
+                || "CONTAINER_OUTLINE".equals(visualLayer)
+                || "FOREGROUND_MASK".equals(visualLayer)) {
+            return originalZOrder;
+        }
+        return originalZOrder;
+    }
+
     // ── 배경 PNG ──
 
     public void addBackgroundImage(SectionXMLFile sectionFile, ASTPageBackground bg) {
@@ -810,9 +843,9 @@ public class HwpxImageBuilder {
         Picture pic = anchorRun.addNewPicture();
         String picId = HwpxUtil.nextShapeId();
 
-        // ShapeObject — 배경: z-order=0, BEHIND_TEXT
+        // ShapeObject — 페이지 배경: 다른 BEHIND_TEXT 객체와 섞이지 않도록 최하단 z-order
         pic.idAnd(picId)
-                .zOrderAnd(0)
+                .zOrderAnd(-10000)
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)

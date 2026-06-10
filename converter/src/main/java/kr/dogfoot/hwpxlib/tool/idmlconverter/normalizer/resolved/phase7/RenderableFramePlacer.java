@@ -40,6 +40,16 @@ public final class RenderableFramePlacer {
             if (!"page_object".equals(rg3.itemType())) {
                 continue;
             }
+            if (ctx.shouldDropVisualByOwnershipPlan(rg3)) {
+                ctx.recordRenderedDecision(rg3, "Stage3.VisualBuilder.Phase7", "SKIP_OBJECT_PLAN_DROP_VISUAL",
+                        "OwnershipPlanner visualAction=DROP_VISUAL");
+                continue;
+            }
+            if (ctx.hasOwnershipPlan(rg3) && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg3)) {
+                ctx.recordRenderedDecision(rg3, "Stage3.VisualBuilder.Phase7", "SKIP_OBJECT_PLAN_NOT_FLOATING_VISUAL",
+                        "OwnershipPlanner placement/action is not handled by floating visual executor");
+                continue;
+            }
             if (rg3.file() == null) {
                 ctx.recordRenderedDecision(rg3, "Phase7", "SKIP_NO_FILE", "rendered item has no file");
                 continue;
@@ -111,9 +121,9 @@ public final class RenderableFramePlacer {
                         && rg3.pageIndex() < ctx.resolvedData.pages().size()) {
                     double[] pgB3 = ctx.resolvedData.pages().get(rg3.pageIndex()).bounds();
                     if (pgB3 != null && pgB3.length >= 4) {
-                        pageWidthPt3      = pgB3[3] - pgB3[1];
-                        pageHeightPt3     = pgB3[2] - pgB3[0];
-                        currPageLeftSpread3 = pgB3[1];
+                        pageWidthPt3      = (pgB3[3] - pgB3[1]) * sf3;
+                        pageHeightPt3     = (pgB3[2] - pgB3[0]) * sf3;
+                        currPageLeftSpread3 = pgB3[1] * sf3;
                     }
                 }
                 double rawLeft3   = bounds3[1] * sf3;
@@ -167,16 +177,19 @@ public final class RenderableFramePlacer {
                             && rawTop3 <= 10.0 * sf3
                             && (rawBottom3 >= pageHeightPt3 - sf3 || coversPageByArea3);
                     boolean isBackgroundLike3 = isPageCoveringBg3 || coversPageByArea3;
+                    Integer plannedZ3 = ctx.zOrderByOwnershipPlan(rg3);
                     int z3 = isBackgroundLike3
                             ? 0
-                            : (rg3.zOrderKnown()
-                                    ? rg3.zOrder()
-                                    : (rg3.zOrder() > 0 ? rg3.zOrder() : 5));
+                            : (plannedZ3 != null
+                                    ? plannedZ3
+                                    : (rg3.zOrderKnown()
+                                            ? rg3.zOrder()
+                                            : (rg3.zOrder() > 0 ? rg3.zOrder() : 5)));
                     int originalZ3 = z3;
                     z3 = adjustBackgroundShellZOrder(
                             rg3, sections.get(secIdx3), fig3.x(), fig3.y(), fig3.width(), fig3.height(), z3);
                     fig3.zOrder(z3);
-                    fig3.fromGroup(!isBackgroundLike3 && z3 >= originalZ3);
+                    applyOwnershipVisualLayer(ctx, rg3, fig3, !isBackgroundLike3 && z3 >= originalZ3);
                     sections.get(secIdx3).addBlock(fig3);
                     count++;
                     ctx.recordRenderedDecision(rg3, "Phase7", "PLACE", "placed visible page intersection as ASTFigure");
@@ -192,8 +205,8 @@ public final class RenderableFramePlacer {
                         if (ctx.resolvedData.pages() != null && nextPi < ctx.resolvedData.pages().size()) {
                             double[] npB = ctx.resolvedData.pages().get(nextPi).bounds();
                             if (npB != null && npB.length >= 4) {
-                                nextPageW = npB[3] - npB[1];
-                                nextPageH = npB[2] - npB[0];
+                                nextPageW = (npB[3] - npB[1]) * sf3;
+                                nextPageH = (npB[2] - npB[0]) * sf3;
                             }
                         }
                         double ovLeft  = 0.0;
@@ -222,7 +235,7 @@ public final class RenderableFramePlacer {
                                 figOv.pixelWidth(ovImg.getWidth());
                                 figOv.pixelHeight(ovImg.getHeight());
                                 figOv.zOrder(0); // overflow 배경은 항상 최하단
-                                figOv.fromGroup(false);
+                                applyOwnershipVisualLayer(ctx, rg3, figOv, false);
                                 sections.get(nextSec).addBlock(figOv);
                                 count++;
                                 placedKeys.add(nextPi + "|" + rg3.file());
@@ -242,9 +255,9 @@ public final class RenderableFramePlacer {
                         if (ctx.resolvedData.pages() != null && prevPi < ctx.resolvedData.pages().size()) {
                             double[] ppB = ctx.resolvedData.pages().get(prevPi).bounds();
                             if (ppB != null && ppB.length >= 4) {
-                                prevPageLeftSpread = ppB[1];
-                                prevPageW = ppB[3] - ppB[1];
-                                prevPageH = ppB[2] - ppB[0];
+                                prevPageLeftSpread = ppB[1] * sf3;
+                                prevPageW = (ppB[3] - ppB[1]) * sf3;
+                                prevPageH = (ppB[2] - ppB[0]) * sf3;
                             }
                         }
                         // item의 스프레드 기준 절대 left, 이전 페이지 기준 상대 x
@@ -284,17 +297,20 @@ public final class RenderableFramePlacer {
                                         && rawTop3 <= 10.0 * sf3
                                         && (rawBottom3 >= prevPageH - sf3 || coversPageByAreaLeft);
                                 boolean isBackgroundLikeLeft = isPageCoveringBgLeft || coversPageByAreaLeft;
+                                Integer plannedZLeft = ctx.zOrderByOwnershipPlan(rg3);
                                 int zLeft = isBackgroundLikeLeft
                                         ? 0
-                                        : (rg3.zOrderKnown()
-                                                ? rg3.zOrder()
-                                                : (rg3.zOrder() > 0 ? rg3.zOrder() : 5));
+                                        : (plannedZLeft != null
+                                                ? plannedZLeft
+                                                : (rg3.zOrderKnown()
+                                                        ? rg3.zOrder()
+                                                        : (rg3.zOrder() > 0 ? rg3.zOrder() : 5)));
                                 int originalZLeft = zLeft;
                                 zLeft = adjustBackgroundShellZOrder(
                                         rg3, sections.get(prevSec), figLeft.x(), figLeft.y(),
                                         figLeft.width(), figLeft.height(), zLeft);
                                 figLeft.zOrder(zLeft);
-                                figLeft.fromGroup(!isBackgroundLikeLeft && zLeft >= originalZLeft);
+                                applyOwnershipVisualLayer(ctx, rg3, figLeft, !isBackgroundLikeLeft && zLeft >= originalZLeft);
                                 sections.get(prevSec).addBlock(figLeft);
                                 count++;
                                 placedKeys.add(prevPi + "|" + rg3.file());
@@ -328,6 +344,16 @@ public final class RenderableFramePlacer {
         }
         if (minOverlapZ == Integer.MAX_VALUE) return currentZ;
         return Math.max(0, Math.min(currentZ, minOverlapZ - 1));
+    }
+
+    private static void applyOwnershipVisualLayer(
+            ResolvedBuildContext ctx, RenderedGroup rg, ASTFigure fig, boolean fallbackInFrontLayer) {
+        String visualLayer = ctx.visualLayerByOwnershipPlan(rg);
+        if (visualLayer != null) {
+            fig.visualLayer(visualLayer);
+        }
+        Boolean planInFrontLayer = ctx.inFrontLayerByOwnershipPlan(rg);
+        fig.fromGroup(planInFrontLayer != null ? planInFrontLayer : fallbackInFrontLayer);
     }
 
     private static boolean isBackgroundShellCandidate(RenderedGroup rg) {

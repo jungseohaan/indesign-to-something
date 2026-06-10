@@ -308,6 +308,7 @@ public class ASTDeserializer {
         fig.flipHorizontal(getBool(o, "flipHorizontal"));
         fig.flipVertical(getBool(o, "flipVertical"));
         fig.bundlePath(getString(o, "bundlePath"));
+        fig.visualLayer(getString(o, "visualLayer"));
         return fig;
     }
 

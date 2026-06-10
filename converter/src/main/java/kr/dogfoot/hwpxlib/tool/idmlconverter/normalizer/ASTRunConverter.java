@@ -215,15 +215,6 @@ public class ASTRunConverter {
                 if (anchorContainsConceptDiagramTextFrame(tmpCtx, String.valueOf(boxDomId))) {
                     return;
                 }
-                java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject> boxList =
-                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
-                                .tryInlineGroupAsBoxList(tmpCtx, boxDomId);
-                if (boxList != null && !boxList.isEmpty()) {
-                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject box : boxList) {
-                        para.addItem(box);
-                    }
-                    return;
-                }
                 if (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
                         .isSimpleButtonLabelAnchor(tmpCtx, boxDomId)) {
                     kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject completeBadge =
@@ -233,6 +224,15 @@ public class ASTRunConverter {
                         para.addItem(completeBadge);
                         return;
                     }
+                }
+                java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject> boxList =
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                .tryInlineGroupAsBoxList(tmpCtx, boxDomId);
+                if (boxList != null && !boxList.isEmpty()) {
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject box : boxList) {
+                        para.addItem(box);
+                    }
+                    return;
                 }
                 // 단일 배지 (배경 도형 + TF 1개): INLINE_TEXT_FRAME으로 변환
                 kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject singleBadge =

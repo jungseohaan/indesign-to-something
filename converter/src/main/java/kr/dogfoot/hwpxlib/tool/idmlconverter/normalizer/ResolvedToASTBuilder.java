@@ -13,6 +13,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_5.Bullet
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase5.WrapPhase5;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7.RenderableFramePlacer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
@@ -103,11 +104,30 @@ public class ResolvedToASTBuilder {
         this.styleResolver = StylePropertyResolver.fromIdmlDir(idmlDir);
         this.ctx = newContext();
 
-        // Phase 0: IDML 폰트/스타일/색상 정의 복사 + 스타일 alignment 보강
+        List<ASTSection> sections = prepareInput(doc);
+        planOwnership();
+        buildTextContent(sections);
+        postprocessLayout(sections);
+        placeVisuals(sections);
+
+        writeOwnershipPlanLog();
+        writeRenderDecisionLog();
+        System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
+        reportSpec016Counts();
+        return doc;
+    }
+
+    /**
+     * Stage 0: 입력 인덱스와 페이지 골격만 만든다.
+     *
+     * <p>이 단계에서는 객체 ownership, PNG 배치 여부, TextFrame 배치 여부를
+     * 결정하지 않는다. 마스터 페이지 객체도 장기적으로는 OwnershipPlanner의
+     * 입력으로 넘겨 Stage 2/3에서 실행한다.</p>
+     */
+    private List<ASTSection> prepareInput(ASTDocument doc) {
         InfraSetup.copyIDMLDefinitions(this.ctx);
         InfraSetup.enrichStyleAlignmentFromResolved(this.ctx);
 
-        // Phase 1: 페이지/섹션 빌드
         List<ASTSection> sections = PageLayoutBuilder.build(this.ctx);
         this.pageDocOffsetToSection = this.ctx.pageDocOffsetToSection; // toSectionIndex() 호환
         for (ASTSection sec : sections) {
@@ -120,42 +140,68 @@ public class ResolvedToASTBuilder {
         // Phase 1.6: 마스터 페이지 하시라(러닝 헤더) 배치
         MasterHashiraPlacer.place(this.ctx, sections);
 
-        // Phase 2: TextFrame 분류 및 배치
+        return sections;
+    }
+
+    /**
+     * Stage 1: SPEC-035 OwnershipPlanner 관찰 모드.
+     *
+     * <p>아직 legacy Phase 실행 결과를 바꾸지 않는다. ObjectPlan과 invariant
+     * warning만 기록해 현재 정책 충돌을 눈으로 추적할 수 있게 한다.</p>
+     */
+    private void planOwnership() {
+        OwnershipPlanner.runObservation(this.ctx);
+    }
+
+    /**
+     * Stage 1/2: 현재는 legacy Phase들이 ownership 일부와 text/table 생성을
+     * 함께 수행한다.
+     *
+     * <p>목표 구조에서는 Stage 1 OwnershipPlanner가 먼저 ObjectPlan을 만들고,
+     * 이 메서드는 HWPX가 소유하는 텍스트/테이블만 생성한다. 따라서 새 분류
+     * 로직은 이 메서드 안의 legacy Phase가 아니라 Planner로 이동해야 한다.</p>
+     */
+    private void buildTextContent(List<ASTSection> sections) {
         FramePlacer.placeTextFrames(this.ctx, sections);
-        tagPhase(sections, "Phase2.placeTextFrames");
+        tagPhase(sections, "Stage2.TextBuilder.legacyFramePlacer");
 
-        // Phase 3: Story→단락→런 변환
         StoryConverter.convertStories(this.ctx, sections);
-        tagPhase(sections, "Phase3.convertStories");
+        tagPhase(sections, "Stage2.TextBuilder.legacyStoryConverter");
 
-        // Phase 4: 테이블 포함 TextFrame → ASTTable 변환
         TableBuilder.placeTablesFromIDML(this.ctx, sections);
-        tagPhase(sections, "Phase4.placeTablesFromIDML");
+        tagPhase(sections, "Stage2.TextBuilder.legacyTableBuilder");
+    }
 
-        // Phase 4.5: 불릿 스타일 자동 삽입
+    /**
+     * Stage 4: 생성된 레이아웃을 보정한다.
+     *
+     * <p>이 단계는 줄바꿈/불릿/폭 보정처럼 이미 생성된 AST의 형태만 조정한다.
+     * 새 visible 객체를 만들거나 ownership을 뒤집는 로직을 추가하지 않는다.</p>
+     */
+    private void postprocessLayout(List<ASTSection> sections) {
         BulletInserter.run(this.ctx, sections);
-        tagPhase(sections, "Phase4_5.insertBulletsForBulletStyles");
+        tagPhase(sections, "Stage4.LayoutPostprocess.insertBullets");
 
-        // Phase 4.7: 단일 행 글상자 폭 자동 확장 (font metric 기반)
         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.SingleLineExpander.run(this.ctx, sections);
-        tagPhase(sections, "Phase4_7.singleLineExpand");
+        tagPhase(sections, "Stage4.LayoutPostprocess.singleLineExpand");
 
-        // Phase 5: textwrap 글상자 분할 (composedLine wrapIndent 기반)
         WrapPhase5.splitByWrapIndent(this.ctx, sections);
-        tagPhase(sections, "Phase5.splitByWrapIndent");
+        tagPhase(sections, "Stage4.LayoutPostprocess.splitByWrapIndent");
+    }
 
-        // Phase 6: 페이지 배경 PNG 주입
+    /**
+     * Stage 3: 시각 객체를 배치한다.
+     *
+     * <p>현재는 BackgroundInjector와 RenderableFramePlacer가 각각 skip/중복
+     * 판단을 일부 갖고 있다. 목표 구조에서는 두 클래스를 VisualBuilder로
+     * 흡수하고, ObjectPlan의 visualAction/zOrder만 실행하게 만든다.</p>
+     */
+    private void placeVisuals(List<ASTSection> sections) {
         BackgroundInjector.inject(this.ctx, sections);
-        tagPhase(sections, "Phase6.injectPageBackgrounds");
+        tagPhase(sections, "Stage3.VisualBuilder.legacyBackgroundInjector");
 
-        // Phase 7: renderable TF(배지)를 플로팅 이미지로 배치
         RenderableFramePlacer.place(this.ctx, sections);
-        tagPhase(sections, "Phase7.placeRenderableFrames");
-
-        writeRenderDecisionLog();
-        System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
-        reportSpec016Counts();
-        return doc;
+        tagPhase(sections, "Stage3.VisualBuilder.legacyRenderableFramePlacer");
     }
 
     private void writeRenderDecisionLog() {
@@ -170,6 +216,26 @@ public class ResolvedToASTBuilder {
             System.err.println("[ResolvedToASTBuilder] render decisions: " + out);
         } catch (Exception e) {
             System.err.println("[ResolvedToASTBuilder] render decision log write failed: " + e.getMessage());
+        }
+    }
+
+    private void writeOwnershipPlanLog() {
+        if (basePath == null || ctx == null) {
+            return;
+        }
+        writeJsonLines("ownership-plan.jsonl", ctx.ownershipPlanLines, "ownership plan");
+        writeJsonLines("ownership-warnings.jsonl", ctx.ownershipWarningLines, "ownership warnings");
+    }
+
+    private void writeJsonLines(String fileName, java.util.List<String> lines, String label) {
+        try {
+            java.nio.file.Path out = java.nio.file.Paths.get(basePath, fileName);
+            java.nio.file.Files.write(out,
+                    lines != null ? lines : java.util.Collections.emptyList(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            System.err.println("[ResolvedToASTBuilder] " + label + ": " + out);
+        } catch (Exception e) {
+            System.err.println("[ResolvedToASTBuilder] " + label + " write failed: " + e.getMessage());
         }
     }
 

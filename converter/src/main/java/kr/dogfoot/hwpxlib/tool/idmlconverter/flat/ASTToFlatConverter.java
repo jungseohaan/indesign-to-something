@@ -325,6 +325,7 @@ public class ASTToFlatConverter {
 
         // Bundle path
         node.bundlePath(fig.bundlePath());
+        node.visualLayer(fig.visualLayer());
 
         // From group
         node.fromGroup(fig.fromGroup());

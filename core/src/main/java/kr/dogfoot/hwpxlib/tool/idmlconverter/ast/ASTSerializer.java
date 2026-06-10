@@ -477,6 +477,7 @@ public class ASTSerializer {
         if (fig.flipHorizontal()) first = writeBooleanField(sb, "flipHorizontal", true, first);
         if (fig.flipVertical()) first = writeBooleanField(sb, "flipVertical", true, first);
         first = writeStringField(sb, "bundlePath", fig.bundlePath(), first);
+        first = writeStringField(sb, "visualLayer", fig.visualLayer(), first);
 
         sb.append('}');
     }

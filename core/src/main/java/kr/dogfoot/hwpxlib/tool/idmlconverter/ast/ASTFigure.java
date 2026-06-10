@@ -45,6 +45,9 @@ public class ASTFigure extends ASTBlock {
     // Group 내에서 추출된 이미지 여부
     private boolean fromGroup;
 
+    // SPEC-035 visual layer role (PAGE_BACKGROUND, LABEL_BACKDROP, CONTAINER_OUTLINE, ...)
+    private String visualLayer;
+
     // 소속 그룹 ID (compositing용)
     private String parentGroupId;
 
@@ -130,6 +133,9 @@ public class ASTFigure extends ASTBlock {
 
     public boolean fromGroup() { return fromGroup; }
     public void fromGroup(boolean v) { this.fromGroup = v; }
+
+    public String visualLayer() { return visualLayer; }
+    public void visualLayer(String v) { this.visualLayer = v; }
 
     public String parentGroupId() { return parentGroupId; }
     public void parentGroupId(String v) { this.parentGroupId = v; }

@@ -5,6 +5,12 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.StylePropertyResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.PolicyLayer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
@@ -119,6 +125,20 @@ public final class ResolvedBuildContext {
      */
     public java.util.Set<Integer> customAnchoredInlineIds = new java.util.HashSet<>();
 
+    /*
+     * SPEC-035 migration note:
+     *
+     * 아래 disposition/map/set 묶음은 현재 legacy Phase 2/3/6/7 사이에서
+     * "이미 배치됨", "inline으로 유지", "floating으로 전환", "배경 shell 흡수"
+     * 같은 결정을 전달하는 임시 상태다. 새 ownership 규칙을 추가할 때 이 집합을
+     * 더 늘리면 phase 간 정책 충돌이 다시 커진다.
+     *
+     * 목표 구조에서는 OwnershipPlanner가 DOM/source id별 ObjectPlan을 만들고,
+     * TextBuilder/VisualBuilder는 plan의 textAction/visualAction/zOrder만 실행한다.
+     * 따라서 새 결정 상태는 가능하면 ObjectPlan으로 먼저 모델링하고, 이 필드는
+     * 기존 동작을 이관하는 동안만 유지한다.
+     */
+
     /**
      * TextFrame DOM ID → 텍스트 처리 소유권 결정.
      *
@@ -219,6 +239,147 @@ public final class ResolvedBuildContext {
     /** rendered page_object의 최종 배치/스킵 사유 추적용 JSONL 라인. */
     public java.util.List<String> renderDecisionLines = new java.util.ArrayList<>();
 
+    /** SPEC-035 OwnershipPlanner 관찰 모드: ObjectPlan JSONL 라인. */
+    public java.util.List<String> ownershipPlanLines = new java.util.ArrayList<>();
+
+    /** SPEC-035 OwnershipPlanner 관찰 모드: invariant warning JSONL 라인. */
+    public java.util.List<String> ownershipWarningLines = new java.util.ArrayList<>();
+
+    /**
+     * SPEC-035 Stage 1 ObjectPlan.
+     *
+     * <p>현재는 legacy Phase가 전부 plan executor로 이관되기 전의 중간 단계다.
+     * Visual Builder는 여기서 먼저 DROP_VISUAL만 존중해, 같은 DOM id를 가진
+     * inline/page_object 쌍을 과하게 묶어 스킵하지 않도록 렌더 메타데이터까지
+     * 정확히 매칭한다.</p>
+     */
+    public java.util.List<ObjectPlan> ownershipPlans = new java.util.ArrayList<>();
+
+    public void addOwnershipPlan(ObjectPlan plan) {
+        if (plan != null) ownershipPlans.add(plan);
+    }
+
+    public boolean shouldDropVisualByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        return plan != null && !plan.hasVisibleVisual();
+    }
+
+    public VisualAction visualActionByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        return plan != null ? plan.visualAction : null;
+    }
+
+    public TextAction textActionByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        return plan != null ? plan.textAction : null;
+    }
+
+    public Placement placementByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        return plan != null ? plan.placement : null;
+    }
+
+    public PolicyLayer policyLayerByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        return plan != null ? plan.visualPolicyLayer() : null;
+    }
+
+    public boolean shouldPlaceInlinePngByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        return plan != null && plan.visualAction == VisualAction.PLACE_INLINE_PNG;
+    }
+
+    public boolean shouldPlaceFloatingVisualByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        return plan.visualAction == VisualAction.PLACE_FLOATING_PNG
+                || plan.visualAction == VisualAction.PLACE_TEXT_SHELL;
+    }
+
+    public boolean hasVisibleVisualByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        return plan != null && plan.hasVisibleVisual();
+    }
+
+    public boolean hasOwnershipPlan(RenderedGroup rg) {
+        return findOwnershipPlanForRendered(rg) != null;
+    }
+
+    public boolean isCompleteInlinePngByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_PNG
+                && plan.visualAction == VisualAction.PLACE_INLINE_PNG;
+    }
+
+    public Integer zOrderByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        if (plan == null || !plan.hasVisibleVisual()) return null;
+        return plan.zOrder;
+    }
+
+    public String visualLayerByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        if (plan == null || !plan.hasVisibleVisual() || plan.visualLayer == null) return null;
+        return plan.visualLayer.name();
+    }
+
+    public Boolean inFrontLayerByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        if (plan == null || !plan.hasVisibleVisual() || plan.visualLayer == null) return null;
+        return plan.visualLayer == VisualLayer.LABEL_BACKDROP
+                || plan.visualLayer == VisualLayer.CONTENT_VISUAL
+                || plan.visualLayer == VisualLayer.CONTAINER_OUTLINE
+                || plan.visualLayer == VisualLayer.FOREGROUND_MASK;
+    }
+
+    public ObjectPlan findOwnershipPlanForRendered(RenderedGroup rg) {
+        if (rg == null) return null;
+        ObjectPlan sameDom = null;
+        ObjectPlan sameFileAndBounds = null;
+        ObjectPlan sameFile = null;
+        Placement placement = placementOf(rg);
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan.pageIndex != rg.pageIndex()) continue;
+            boolean fileMatches = safeEquals(plan.file, rg.file());
+            boolean placementMatches = plan.placement == placement;
+            boolean renderMatches = plan.renderId != null && plan.renderId.intValue() == rg.id();
+            boolean domMatches = plan.domId == rg.id();
+            if (renderMatches && fileMatches && placementMatches) return plan;
+            if (renderMatches && placementMatches) return plan;
+            if (renderMatches) return plan;
+            if (sameDom == null && domMatches && placementMatches) sameDom = plan;
+            if (sameFileAndBounds == null && fileMatches && placementMatches && sameRoundedBounds(plan.bounds, rg.bounds())) {
+                sameFileAndBounds = plan;
+            }
+            if (sameFile == null && fileMatches && placementMatches) sameFile = plan;
+        }
+        if (sameDom != null) return sameDom;
+        if (sameFileAndBounds != null) return sameFileAndBounds;
+        return sameFile;
+    }
+
+    private static Placement placementOf(RenderedGroup rg) {
+        if (rg != null && ("inline_object".equals(rg.type()) || "inline_object".equals(rg.itemType()))) {
+            return Placement.INLINE;
+        }
+        return Placement.FLOATING;
+    }
+
+    private static boolean safeEquals(String a, String b) {
+        if (a == null) return b == null;
+        return a.equals(b);
+    }
+
+    private static boolean sameRoundedBounds(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
+        for (int i = 0; i < 4; i++) {
+            if (Math.round(a[i] * 100.0) != Math.round(b[i] * 100.0)) return false;
+        }
+        return true;
+    }
+
     public void recordRenderedDecision(RenderedGroup rg, String phase, String decision, String detail) {
         if (rg == null) return;
         StringBuilder sb = new StringBuilder(256);
@@ -234,6 +395,16 @@ public final class ResolvedBuildContext {
                 .append("\"visualOwner\":\"").append(jsonEscape(rg.visualOwner())).append("\",")
                 .append("\"textOwner\":\"").append(jsonEscape(rg.textOwner())).append("\",")
                 .append("\"placementAllowed\":").append(Boolean.FALSE.equals(rg.placementAllowed()) ? "false" : "true");
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        if (plan != null) {
+            sb.append(",\"planTextAction\":\"").append(plan.textAction).append("\",")
+                    .append("\"planVisualAction\":\"").append(plan.visualAction).append("\",")
+                    .append("\"planVisualLayer\":\"").append(plan.visualLayer).append("\",")
+                    .append("\"planPolicyLayer\":\"").append(plan.visualPolicyLayer()).append("\",")
+                    .append("\"planPlacement\":\"").append(plan.placement).append("\",")
+                    .append("\"planZOrder\":").append(plan.zOrder).append(',')
+                    .append("\"planReason\":\"").append(jsonEscape(plan.reason)).append("\"");
+        }
         double[] b = rg.bounds();
         if (b != null && b.length >= 4) {
             sb.append(",\"bounds\":[")

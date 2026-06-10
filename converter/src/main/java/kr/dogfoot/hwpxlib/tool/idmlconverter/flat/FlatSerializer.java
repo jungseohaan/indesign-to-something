@@ -449,6 +449,7 @@ public class FlatSerializer {
         if (node.containerHeight() != 0) first = writeLongField(sb, "containerHeight", node.containerHeight(), first);
         if (node.imageOffsetX() != 0) first = writeLongField(sb, "imageOffsetX", node.imageOffsetX(), first);
         if (node.imageOffsetY() != 0) first = writeLongField(sb, "imageOffsetY", node.imageOffsetY(), first);
+        first = writeStringField(sb, "visualLayer", node.visualLayer(), first);
         // FIGURE also has fill/stroke for container
         first = writeStringField(sb, "fillColor", node.fillColor(), first);
         first = writeStringField(sb, "strokeColor", node.strokeColor(), first);

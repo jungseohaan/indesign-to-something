@@ -278,14 +278,38 @@ public class ASTToHwpxConverter {
         Para secPrPara = createSectionPara(sectionFile, pagesConverted > 0);
 
         // 1) BEHIND_TEXT FIGURE: 배경 이미지 (그룹 외부)를 먼저 배치
+        //
+        // HWPX에서는 같은 BEHIND_TEXT 객체끼리도 출력 순서가 체감 레이어에 영향을 준다.
+        // Phase 6/7이 section 앞쪽에 삽입한 순서를 그대로 쓰면, 페이지 전체 배경 PNG가
+        // 내부의 흰색 패널/외곽선보다 늦게 출력되어 위로 올라오는 케이스가 생긴다.
+        // 따라서 z-order를 1차 기준으로 삼고, 같은 z-order 안에서는 넓은 배경을 먼저 깔아
+        // 작은 패널/마스크가 그 위에 놓이도록 안정화한다.
+        List<ASTFigure> behindFigures = new ArrayList<>();
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 ASTFigure fig = (ASTFigure) block;
                 if (!fig.fromGroup()) {
-                    imageBuilder.convertFigure(secPrPara, fig);
-                    ctx.framesConverted++;
+                    behindFigures.add(fig);
                 }
             }
+        }
+        Collections.sort(behindFigures, new Comparator<ASTFigure>() {
+            @Override
+            public int compare(ASTFigure a, ASTFigure b) {
+                int z = Integer.compare(a.zOrder(), b.zOrder());
+                if (z != 0) return z;
+
+                int area = Long.compare(figureArea(b), figureArea(a));
+                if (area != 0) return area;
+
+                int y = Long.compare(a.y(), b.y());
+                if (y != 0) return y;
+                return Long.compare(a.x(), b.x());
+            }
+        });
+        for (ASTFigure fig : behindFigures) {
+            imageBuilder.convertFigure(secPrPara, fig);
+            ctx.framesConverted++;
         }
 
         // 2) 배경 전용 블록: BEHIND_TEXT, z-order=0 — FIGURE 위에 렌더링됨
@@ -353,6 +377,14 @@ public class ASTToHwpxConverter {
         if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
         if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
         return 0;
+    }
+
+    private static long figureArea(ASTFigure fig) {
+        long width = Math.max(0L, fig.width());
+        long height = Math.max(0L, fig.height());
+        if (width == 0L || height == 0L) return 0L;
+        if (width > Long.MAX_VALUE / height) return Long.MAX_VALUE;
+        return width * height;
     }
 
     // ── 프레임 배치 판별 / 정렬 ──

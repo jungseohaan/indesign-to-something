@@ -1088,6 +1088,11 @@ public class InlineFrameHandler {
                 if (rg == null || rg.id() != anchoredObjectId || rg.file() == null) continue;
                 File candidate = new File(ctx.basePath, rg.file());
                 if (!candidate.exists()) continue;
+                if (ctx.isCompleteInlinePngByOwnershipPlan(rg)) {
+                    atomicPngFile = candidate;
+                    atomicMatched = rg;
+                    break;
+                }
                 if (isCompletePngSimpleButtonLabel(ctx, rg)) {
                     atomicPngFile = candidate;
                     atomicMatched = rg;
@@ -1122,6 +1127,12 @@ public class InlineFrameHandler {
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+            BadgeImageData badgeImage = null;
+            if (isCompletePngSimpleButtonLabel(ctx, matched)) {
+                badgeImage = trimSimpleButtonBadgeImage(imageData, img);
+                imageData = badgeImage.imageData;
+                img = badgeImage.image;
+            }
             if (matched != null && "hwpx_tf".equals(matched.textOwner())
                     && !matched.hasEditableTextHiddenFromPng()) {
                 return null;
@@ -1140,6 +1151,10 @@ public class InlineFrameHandler {
                 double[] b = matched.bounds();
                 bw = Math.abs(b[3] - b[1]) * ctx.scaleFactor;
                 bh = Math.abs(b[2] - b[0]) * ctx.scaleFactor;
+            }
+            if (badgeImage != null) {
+                bw *= badgeImage.widthScale;
+                bh *= badgeImage.heightScale;
             }
             if (bw <= 0 || bh <= 0) return null;
 
@@ -1252,6 +1267,7 @@ public class InlineFrameHandler {
 
     private static boolean shouldOverlayRenderedBadgeText(ResolvedBuildContext ctx, RenderedGroup matched) {
         if (matched == null) return true;
+        if (ctx != null && ctx.isCompleteInlinePngByOwnershipPlan(matched)) return false;
         if (isCompletePngSimpleButtonLabel(ctx, matched)) return false;
         if (matched.hasEditableTextHiddenFromPng()) return true;
         if (Boolean.TRUE.equals(matched.containsEditableText())
@@ -1271,6 +1287,9 @@ public class InlineFrameHandler {
     public static boolean isSimpleButtonLabelAnchor(ResolvedBuildContext ctx, int anchoredObjectId) {
         if (ctx == null || ctx.resolvedData == null) return false;
         if (ctx.resolvedData.isSimpleButtonLabelTextFrame(String.valueOf(anchoredObjectId))) {
+            return true;
+        }
+        if (findCompleteSimpleButtonLabelRender(ctx, anchoredObjectId) != null) {
             return true;
         }
         return findSimpleButtonLabelChildTextFrame(ctx, anchoredObjectId) != null;
@@ -2239,6 +2258,9 @@ public class InlineFrameHandler {
                 proceed = ancTf != null && ancTf.isInline();
             }
             if (proceed) {
+                if (ctx.hasOwnershipPlan(rg) && !ctx.shouldPlaceInlinePngByOwnershipPlan(rg)) {
+                    return null;
+                }
                 if (isDoviraSubunitMarkerRender(ctx, rg)) return null;
                 if ("inline_object".equals(rg.itemType())
                         && findCompleteLabelPageObjectPair(ctx, rg) != null
@@ -2386,7 +2408,11 @@ public class InlineFrameHandler {
         ResolvedTextFrame childTf = findSimpleButtonLabelChildTextFrame(ctx, anchoredObjectId);
         RenderedGroup inlineRender = findInlineGraphicOnlyRender(ctx, anchoredObjectId);
         RenderedGroup placementRender = inlineRender != null ? inlineRender : completeRender;
-        if (!shouldPlaceCompleteSimpleButtonLabelInline(ctx, childTf, placementRender)) {
+        if (ctx.hasOwnershipPlan(completeRender)) {
+            if (!ctx.shouldPlaceInlinePngByOwnershipPlan(completeRender)) {
+                return null;
+            }
+        } else if (!shouldPlaceCompleteSimpleButtonLabelInline(ctx, childTf, placementRender)) {
             return null;
         }
         File pngFile = new File(ctx.basePath, completeRender.file());
@@ -2395,6 +2421,9 @@ public class InlineFrameHandler {
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+            BadgeImageData badgeImage = trimSimpleButtonBadgeImage(imageData, img);
+            imageData = badgeImage.imageData;
+            img = badgeImage.image;
 
             ASTInlineObject obj = new ASTInlineObject();
             obj.kind(ASTInlineObject.ObjectKind.IMAGE);
@@ -2414,6 +2443,8 @@ public class InlineFrameHandler {
                 obj.resolvedPageY(CoordinateConverter.pointsToHwpunits(pageRelative[1] * ctx.scaleFactor));
                 double bw = Math.abs(bounds[3] - bounds[1]) * ctx.scaleFactor;
                 double bh = Math.abs(bounds[2] - bounds[0]) * ctx.scaleFactor;
+                bw *= badgeImage.widthScale;
+                bh *= badgeImage.heightScale;
                 if (bw <= 0 || bh <= 0) return null;
                 obj.width(CoordinateConverter.pointsToHwpunits(bw));
                 obj.height(CoordinateConverter.pointsToHwpunits(bh));
@@ -2450,9 +2481,10 @@ public class InlineFrameHandler {
             ResolvedBuildContext ctx,
             ResolvedTextFrame childTf,
             RenderedGroup completeRender) {
-        if (ctx == null || ctx.resolvedData == null || childTf == null || completeRender == null) {
+        if (ctx == null || ctx.resolvedData == null || completeRender == null) {
             return false;
         }
+        if (childTf == null) return isCompleteLabelAnchoredInTextStory(ctx, completeRender);
         double[] labelBounds = completeRender.bounds();
         if (labelBounds == null || labelBounds.length < 4) return false;
         double labelTop = labelBounds[0];
@@ -2515,6 +2547,73 @@ public class InlineFrameHandler {
                 .length();
     }
 
+    private static BadgeImageData trimSimpleButtonBadgeImage(byte[] originalData, BufferedImage originalImage)
+            throws java.io.IOException {
+        if (originalImage == null || originalImage.getWidth() <= 0 || originalImage.getHeight() <= 0) {
+            return new BadgeImageData(originalData, originalImage, 1.0, 1.0);
+        }
+        int[] alpha = alphaBounds(originalImage);
+        if (alpha == null) {
+            return new BadgeImageData(originalData, originalImage, 1.0, 1.0);
+        }
+        int x = alpha[0];
+        int y = alpha[1];
+        int w = alpha[2];
+        int h = alpha[3];
+        if (x <= 0 && y <= 0 && w >= originalImage.getWidth() && h >= originalImage.getHeight()) {
+            return new BadgeImageData(originalData, originalImage, 1.0, 1.0);
+        }
+        if (w <= 1 || h <= 1) {
+            return new BadgeImageData(originalData, originalImage, 1.0, 1.0);
+        }
+
+        BufferedImage cropped = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = cropped.createGraphics();
+        try {
+            g.drawImage(originalImage, 0, 0, w, h, x, y, x + w, y + h, null);
+        } finally {
+            g.dispose();
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(cropped, "png", out);
+        double widthScale = w / (double) originalImage.getWidth();
+        double heightScale = h / (double) originalImage.getHeight();
+        return new BadgeImageData(out.toByteArray(), cropped, widthScale, heightScale);
+    }
+
+    private static int[] alphaBounds(BufferedImage image) {
+        int minX = image.getWidth();
+        int minY = image.getHeight();
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int alpha = (image.getRGB(x, y) >>> 24) & 0xff;
+                if (alpha <= 8) continue;
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+        if (maxX < minX || maxY < minY) return null;
+        return new int[] { minX, minY, maxX - minX + 1, maxY - minY + 1 };
+    }
+
+    private static final class BadgeImageData {
+        final byte[] imageData;
+        final BufferedImage image;
+        final double widthScale;
+        final double heightScale;
+
+        BadgeImageData(byte[] imageData, BufferedImage image, double widthScale, double heightScale) {
+            this.imageData = imageData;
+            this.image = image;
+            this.widthScale = widthScale;
+            this.heightScale = heightScale;
+        }
+    }
+
     private static RenderedGroup findCompleteSimpleButtonLabelRender(
             ResolvedBuildContext ctx,
             int anchoredObjectId) {
@@ -2525,19 +2624,28 @@ public class InlineFrameHandler {
         String anchorId = String.valueOf(anchoredObjectId);
         ResolvedTextFrame childTf = findSimpleButtonLabelChildTextFrame(ctx, anchoredObjectId);
         String childTfId = childTf != null ? childTf.id() : null;
+        RenderedGroup fallback = null;
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg == null || !isCompletePngSimpleButtonLabel(ctx, rg)) continue;
-            if (rg.id() == anchoredObjectId) return rg;
+            if (rg == null) continue;
+            boolean planCompleteInline = ctx.isCompleteInlinePngByOwnershipPlan(rg);
+            boolean legacyComplete = isCompletePngSimpleButtonLabel(ctx, rg);
+            if (!planCompleteInline && !legacyComplete) continue;
+            if (rg.id() == anchoredObjectId) {
+                if (planCompleteInline) return rg;
+                if (fallback == null) fallback = rg;
+                continue;
+            }
             String[] editableIds = rg.editableTextFrameIds();
             if (editableIds == null) continue;
             for (String editableId : editableIds) {
                 if (anchorId.equals(editableId)
                         || (childTfId != null && childTfId.equals(editableId))) {
-                    return rg;
+                    if (planCompleteInline) return rg;
+                    if (fallback == null) fallback = rg;
                 }
             }
         }
-        return null;
+        return fallback;
     }
 
     private static boolean isDoviraSubunitMarkerRender(ResolvedBuildContext ctx, RenderedGroup rg) {

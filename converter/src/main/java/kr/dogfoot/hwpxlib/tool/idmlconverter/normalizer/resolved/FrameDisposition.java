@@ -1,12 +1,20 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved;
 
 /**
- * Phase 2가 각 DOM 객체(TF/Group/PNG)에 내린 처리 소유권 결정.
+ * Legacy Phase가 각 DOM 객체(TF/Group/PNG)에 내린 처리 소유권 결정.
+ *
+ * <p>SPEC-035의 목표 구조에서는 {@code OwnershipPlanner/ObjectPlan}이
+ * textAction과 visualAction을 한 번에 결정한다. 이 enum은 그 전까지
+ * Phase 2/3/6/7 사이의 중복 배치를 막기 위한 임시 bridge 상태다.</p>
  *
  * <p>Phase 2 {@link phase2.FramePlacer} 또는 Phase 4, Phase 7 prep이
  * {@link ResolvedBuildContext#setDisposition}으로 등록하면,
  * 이후 Phase 3 / Phase 7이 {@link ResolvedBuildContext#isDisposed}로 읽어
  * 중복 처리 없이 올바른 경로로 분기한다.</p>
+ *
+ * <p>새로운 ownership 규칙을 이 enum에 추가하지 않는다. 새 규칙은 먼저
+ * OwnershipPlanner의 ObjectPlan 모델로 표현하고, legacy Phase는 그 plan을
+ * 실행하는 방향으로 옮긴다.</p>
  *
  * <p>등록되지 않은 DOM ID의 기본 처리 경로:
  * <ul>

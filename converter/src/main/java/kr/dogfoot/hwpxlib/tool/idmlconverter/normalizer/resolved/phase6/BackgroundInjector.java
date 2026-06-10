@@ -119,6 +119,17 @@ public final class BackgroundInjector {
             if (!isPageObject(rg) && !conceptDiagramInlineShell) {
                 continue;
             }
+            if (ctx.shouldDropVisualByOwnershipPlan(rg)) {
+                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", "SKIP_OBJECT_PLAN_DROP_VISUAL",
+                        "OwnershipPlanner visualAction=DROP_VISUAL");
+                continue;
+            }
+            if (ctx.hasOwnershipPlan(rg) && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) {
+                ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", "SKIP_OBJECT_PLAN_NOT_FLOATING_VISUAL",
+                        "OwnershipPlanner placement/action is not handled by floating visual executor");
+                continue;
+            }
             if (shouldDecomposeToEditableLabelShell(rg, editableLabelShellIds, idToRendered)) {
                 ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_EDITABLE_LABEL_PARENT",
@@ -186,7 +197,9 @@ public final class BackgroundInjector {
                 continue;
             }
             // childIds 검사
-            if (shouldSkipByChildPolicy(ctx, rg) && !protectedEditableLabelShell) {
+            boolean planKeepsFloatingVisual = ctx.hasOwnershipPlan(rg)
+                    && ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg);
+            if (!planKeepsFloatingVisual && shouldSkipByChildPolicy(ctx, rg) && !protectedEditableLabelShell) {
                 ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_CHILD_POLICY", "child policy suppresses render");
                 continue;
@@ -289,6 +302,9 @@ public final class BackgroundInjector {
             boolean isBackgroundLike = isFullPageBg || (isTextFrameVisualShell && coversPageByArea);
             boolean isContainerVisualShell = !isBackgroundLike
                     && (isRenderedContainerShell(rg) || isTextFrameVisualShell);
+            boolean isInferredTextFrameVisualShell = inferredTextFrameVisualShellZOrder(ctx, rg) >= 0;
+            String visualLayer = ctx.visualLayerByOwnershipPlan(rg);
+            boolean planKeepsForegroundZ = isPlanForegroundVisualLayer(visualLayer);
 
             int pixelW = 0, pixelH = 0;
             Double stripCropLeftOverride = null;
@@ -299,7 +315,13 @@ public final class BackgroundInjector {
                 if (img != null && shouldCompositeTfInlineVisuals(rg)) {
                     imageData = encodePng(img);
                 }
-                if (img != null && isContainerVisualShell) {
+                boolean keepPlannedContainerBackdropFill = "CONTAINER_BACKDROP".equals(visualLayer)
+                        && isPaperOnlyContainerShell(ctx, rg);
+                if (img != null
+                        && !planKeepsForegroundZ
+                        && !keepPlannedContainerBackdropFill
+                        && isContainerVisualShell
+                        && !isInferredTextFrameVisualShell) {
                     BufferedImage transparentShell = knockOutPaperLikeFill(img);
                     if (transparentShell != img) {
                         imageData = encodePng(transparentShell);
@@ -516,12 +538,15 @@ public final class BackgroundInjector {
                         foregroundMarkerZOrder(sections.get(pageIdx), x, y, w, h, resolvedZ));
             }
             boolean demotedBehindForeground = false;
-            int containerAdjustedZ = containerShellZOrderBehindRenderedContent(ctx, floatingItems, rg, resolvedZ);
-            if (containerAdjustedZ < resolvedZ) {
-                resolvedZ = containerAdjustedZ;
-                demotedBehindForeground = true;
+            if (!planKeepsForegroundZ) {
+                int containerAdjustedZ = containerShellZOrderBehindRenderedContent(ctx, floatingItems, rg, resolvedZ);
+                if (containerAdjustedZ < resolvedZ) {
+                    resolvedZ = containerAdjustedZ;
+                    demotedBehindForeground = true;
+                }
             }
-            if (!isBackgroundLike && !isTextFrameBackdrop
+            if (!planKeepsForegroundZ
+                    && !isBackgroundLike && !isTextFrameBackdrop
                     && !isTextOwnedVisualShell && !isTextOwnedRenderedContent
                     && !isEditableLabelShell
                     && !isCompletePngSimpleButtonLabel(ctx, rg)) {
@@ -529,13 +554,23 @@ public final class BackgroundInjector {
                 demotedBehindForeground = demotedBehindForeground || adjustedZ < resolvedZ;
                 resolvedZ = adjustedZ;
             }
-            if (isContainerVisualShell) {
+            boolean isPaperOnlyContainerShell = isPaperOnlyContainerShell(ctx, rg);
+            if (!planKeepsForegroundZ
+                    && isContainerVisualShell
+                    && !isInferredTextFrameVisualShell
+                    && (!rg.zOrderKnown() || isPaperOnlyContainerShell)) {
                 resolvedZ = Math.max(1, Math.min(resolvedZ, 4));
             }
             fig.zOrder(resolvedZ);
             boolean keepShellInFrontLayer = isContainerVisualShell
                     || (isTextFrameVisualShell && !isBackgroundLike);
-            fig.fromGroup(keepShellInFrontLayer
+            if (visualLayer != null) {
+                fig.visualLayer(visualLayer);
+            }
+            Boolean planInFrontLayer = ctx.inFrontLayerByOwnershipPlan(rg);
+            fig.fromGroup(planInFrontLayer != null
+                    ? planInFrontLayer
+                    : keepShellInFrontLayer
                     || !(isBackgroundLike || isTextFrameBackdrop || isTextOwnedVisualShell
                     || demotedBehindForeground));
             fig.sourceId("page_obj_" + rg.id());
@@ -984,11 +1019,14 @@ public final class BackgroundInjector {
             ResolvedBuildContext ctx, List<ASTSection> sections, RenderedGroup rg,
             Set<Integer> editableLabelShellIds, Map<Integer, RenderedGroup> idToRendered) {
         if (!isPageObject(rg)) return false;
+        if (ctx.hasOwnershipPlan(rg) && !ctx.hasVisibleVisualByOwnershipPlan(rg)) return false;
         if (ctx.resolvedData.isInlineObjectId(rg.id())) return false;
         if (ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg)) return false;
         if (shouldDecomposeToEditableLabelShell(rg, editableLabelShellIds, idToRendered)) return false;
         if (rg.shouldSkipByOwnership()) return false;
-        if (shouldSkipByChildPolicy(ctx, rg)) return false;
+        boolean planKeepsVisibleVisual = ctx.hasOwnershipPlan(rg)
+                && ctx.hasVisibleVisualByOwnershipPlan(rg);
+        if (!planKeepsVisibleVisual && shouldSkipByChildPolicy(ctx, rg)) return false;
         if (rg.bounds() == null || rg.bounds().length < 4) return false;
         int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
         if (pageIdx < 0 || pageIdx >= sections.size()) return false;
@@ -1039,7 +1077,6 @@ public final class BackgroundInjector {
         if (!rg.hasEditableTextHiddenFromPng()) return false;
         String reason = rg.reason() == null ? "" : rg.reason();
         if (!reason.contains("text_composite_editable_text_hidden")
-                && !reason.contains("visual_label_text_hidden_shell")
                 && !reason.contains("concept_label_shell")) {
             return false;
         }
@@ -1724,6 +1761,8 @@ public final class BackgroundInjector {
 
     private static int effectiveZOrder(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (rg == null) return 5;
+        Integer plannedZ = ctx.zOrderByOwnershipPlan(rg);
+        if (plannedZ != null) return plannedZ;
         int ownedShellZ = ownedTextFrameShellZOrder(ctx, rg);
         if (ownedShellZ >= 0) return ownedShellZ;
         int conceptLabelShellZ = conceptDiagramLabelShellZOrder(ctx, rg);
@@ -1868,6 +1907,51 @@ public final class BackgroundInjector {
         return w >= 18.0 && h >= 12.0 && area(b) >= 300.0;
     }
 
+    private static boolean isPaperOnlyContainerShell(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (ctx == null || ctx.resolvedData == null || rg == null) return false;
+        if (!isRenderedContainerShell(rg)) return false;
+        if (!"vector_shape".equals(rg.reason())) return false;
+
+        int[] sourceIds = rg.sourceObjectIds();
+        boolean sawSource = false;
+        boolean sawPaperFill = false;
+        if (sourceIds != null) {
+            for (int sourceId : sourceIds) {
+                if (isPaperOnlyPageItem(ctx, String.valueOf(sourceId))) {
+                    sawSource = true;
+                    sawPaperFill = true;
+                    continue;
+                }
+                ResolvedPageItem pi = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+                if (pi != null) return false;
+            }
+        }
+        if (!sawSource) {
+            return isPaperOnlyPageItem(ctx, String.valueOf(rg.id()));
+        }
+        return sawPaperFill;
+    }
+
+    private static boolean isPaperOnlyPageItem(ResolvedBuildContext ctx, String domId) {
+        if (ctx == null || ctx.resolvedData == null || domId == null) return false;
+        ResolvedPageItem pi = ctx.resolvedData.getPageItem(domId);
+        if (pi == null) return false;
+        if (!isPaperColor(pi.fillColorName())) return false;
+        if (pi.strokeWeight() > 0.01 && !isNoneColor(pi.strokeColorName())) return false;
+        return true;
+    }
+
+    private static boolean isPaperColor(String colorName) {
+        return "Paper".equals(colorName) || "[Paper]".equals(colorName);
+    }
+
+    private static boolean isNoneColor(String colorName) {
+        return colorName == null
+                || colorName.isEmpty()
+                || "None".equals(colorName)
+                || "[None]".equals(colorName);
+    }
+
     private static boolean isRenderedContentLayer(RenderedGroup rg) {
         return isRenderedContentLayer(rg, -1.0);
     }
@@ -1995,7 +2079,9 @@ public final class BackgroundInjector {
         if (Boolean.FALSE.equals(rg.placementAllowed())) return -1;
         if (!"indesign_png".equals(rg.visualOwner())) return -1;
         if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return -1;
-        if (!isTextFrameVisualShellReason(rg.reason())) return -1;
+        boolean explicitVisualShell = isTextFrameVisualShellReason(rg.reason());
+        boolean vectorShapeShell = "vector_shape".equals(rg.reason());
+        if (!explicitVisualShell && !vectorShapeShell) return -1;
         double[] rbRaw = rg.bounds();
         if (rbRaw == null || rbRaw.length < 4) return -1;
 
@@ -2012,11 +2098,83 @@ public final class BackgroundInjector {
                     rbRaw[2] * ctx.scaleFactor,
                     rbRaw[3] * ctx.scaleFactor
             };
-            if (isSimilarTextFrameVisualShell(rbRaw, tb) || isSimilarTextFrameVisualShell(scaledRb, tb)) {
+            if ((isSimilarTextFrameVisualShell(rbRaw, tb) || isSimilarTextFrameVisualShell(scaledRb, tb))
+                    && (!vectorShapeShell || isBestVectorShapeBackdropForTextFrame(ctx, rg, tf, rbRaw, scaledRb))) {
                 return Math.max(1, tf.zOrder() - 1);
             }
         }
         return -1;
+    }
+
+    private static boolean isBestVectorShapeBackdropForTextFrame(
+            ResolvedBuildContext ctx,
+            RenderedGroup candidate,
+            ResolvedTextFrame tf,
+            double[] candidateRawBounds,
+            double[] candidateScaledBounds) {
+        if (ctx == null || ctx.resolvedData == null || candidate == null || tf == null) return false;
+        double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+        if (tb == null || tb.length < 4) return false;
+
+        double candidateScore = textFrameBackdropScore(candidateRawBounds, candidateScaledBounds, tb);
+        if (candidateScore <= 0) return false;
+
+        for (RenderedGroup other : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (other == null || other.id() == candidate.id()) continue;
+            if (other.pageIndex() != candidate.pageIndex()) continue;
+            if (!isPageObject(other)) continue;
+            if (Boolean.FALSE.equals(other.placementAllowed())) continue;
+            if (!"indesign_png".equals(other.visualOwner())) continue;
+            if (Boolean.TRUE.equals(other.containsText()) || Boolean.TRUE.equals(other.containsEditableText())) continue;
+            if (!"vector_shape".equals(other.reason())) continue;
+            double[] ob = other.bounds();
+            if (ob == null || ob.length < 4) continue;
+            if (!isSimilarTextFrameVisualShell(ob, tb)) {
+                double[] scaledOb = new double[] {
+                        ob[0] * ctx.scaleFactor,
+                        ob[1] * ctx.scaleFactor,
+                        ob[2] * ctx.scaleFactor,
+                        ob[3] * ctx.scaleFactor
+                };
+                if (!isSimilarTextFrameVisualShell(scaledOb, tb)) continue;
+                double otherScore = textFrameBackdropScore(ob, scaledOb, tb);
+                if (otherScore > candidateScore + 0.0001) return false;
+            } else {
+                double[] scaledOb = new double[] {
+                        ob[0] * ctx.scaleFactor,
+                        ob[1] * ctx.scaleFactor,
+                        ob[2] * ctx.scaleFactor,
+                        ob[3] * ctx.scaleFactor
+                };
+                double otherScore = textFrameBackdropScore(ob, scaledOb, tb);
+                if (otherScore > candidateScore + 0.0001) return false;
+            }
+        }
+        return true;
+    }
+
+    private static double textFrameBackdropScore(double[] rawBounds, double[] scaledBounds, double[] tfBounds) {
+        return Math.max(textFrameBackdropScore(rawBounds, tfBounds),
+                textFrameBackdropScore(scaledBounds, tfBounds));
+    }
+
+    private static double textFrameBackdropScore(double[] shellBounds, double[] tfBounds) {
+        double tfArea = area(tfBounds);
+        double shellArea = area(shellBounds);
+        if (tfArea <= 0 || shellArea <= 0) return -1.0;
+        double overlapRatio = overlapArea(shellBounds, tfBounds) / tfArea;
+        if (overlapRatio < TF_VISUAL_SHELL_OVERLAP_MIN) return -1.0;
+        double areaRatio = shellArea / tfArea;
+        if (areaRatio < TF_VISUAL_SHELL_MIN_AREA_RATIO || areaRatio > TF_VISUAL_SHELL_MAX_AREA_RATIO) {
+            return -1.0;
+        }
+        double shellCenterY = (shellBounds[0] + shellBounds[2]) / 2.0;
+        double shellCenterX = (shellBounds[1] + shellBounds[3]) / 2.0;
+        double tfCenterY = (tfBounds[0] + tfBounds[2]) / 2.0;
+        double tfCenterX = (tfBounds[1] + tfBounds[3]) / 2.0;
+        double centerDistance = Math.hypot(shellCenterY - tfCenterY, shellCenterX - tfCenterX);
+        double areaPenalty = Math.abs(Math.log(areaRatio));
+        return overlapRatio * 1000.0 - centerDistance * 10.0 - areaPenalty * 100.0;
     }
 
     private static int semanticTextOverlapShellZOrder(ResolvedBuildContext ctx, RenderedGroup rg, double[] rbRaw) {
@@ -2778,6 +2936,12 @@ public final class BackgroundInjector {
         if (rg == null) return false;
         return "inline_graphic_only".equals(rg.reason())
                 || "text_composite_editable_text_hidden".equals(rg.reason());
+    }
+
+    private static boolean isPlanForegroundVisualLayer(String visualLayer) {
+        return "CONTENT_VISUAL".equals(visualLayer)
+                || "CONTAINER_OUTLINE".equals(visualLayer)
+                || "FOREGROUND_MASK".equals(visualLayer);
     }
 
     private static byte[] encodePng(BufferedImage image) throws Exception {

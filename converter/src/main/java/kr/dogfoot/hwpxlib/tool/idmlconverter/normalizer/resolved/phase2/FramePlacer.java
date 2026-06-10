@@ -198,7 +198,6 @@ public final class FramePlacer {
                     // - 자기 텍스트 ≥ 2 자: Phase 3 가 인라인 텍스트 런으로 임베드 → 플로팅 스킵
                     // - 멀티 child 배지 (Phase 3 가 자손 텍스트 결합 ≥ 2자): Phase 3 가 결합 인라인 임베드 → 플로팅 스킵
                     // - 단일 1자 라벨 (예: "1", "예"): Phase 3 가 PNG 임베드 (텍스트 누락) → 플로팅으로 검색 가능 텍스트 보강
-                    // 부모 Group이 inline_object이면 inline PNG가 시각적 배지 전체를 포함 → floating 불필요.
                     if (hwpxOwnedTextFrame) {
                         // rendered page_object가 textOwner=hwpx_tf로 선언된 경우 PNG에서는
                         // 텍스트를 숨긴 상태다. Phase 3 inline story 흐름에 기대면 parentless
@@ -207,6 +206,8 @@ public final class FramePlacer {
                             ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
                         }
                         inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
+                    // 부모 Group이 inline_object이고 텍스트 소유권이 HWPX가 아니면 inline PNG가
+                    // 시각적 배지 전체를 포함하므로 floating 보강은 불필요하다.
                     } else if (tfDomId >= 0 && isDescendantOfInlineObject(ctx, idx, tf.id())) {
                         continue;
                     } else {
@@ -615,9 +616,15 @@ public final class FramePlacer {
                             h += (y - _inlineTop);
                             y = _inlineTop;
                         }
-                        // Phase 3가 이 인라인 TF를 텍스트 런으로 내장하므로 단락 leftIndent 무시
-                        block.suppressParaLeftIndent(true);
-                        System.err.println("[FramePlacer] ORC+inline 감지 → suppressParaLeftIndent: tf=" + tf.id() + " storyId=" + tf.storyId() + " inlineTf=" + _itf.id());
+                        // IndentToHere(ACE 7/8)가 있으면 본문은 선행 인라인 번호 오른쪽에서
+                        // 시작해야 한다. 이 경우 left indent 억제를 적용하면 번호와 본문이 겹친다.
+                        boolean _hasIndentToHere = _fvtInl.indexOf('\u0007') >= 0
+                                || _fvtInl.indexOf('\u0008') >= 0;
+                        if (!_hasIndentToHere) {
+                            // Phase 3가 이 인라인 TF를 텍스트 런으로 내장하므로 단락 leftIndent 무시
+                            block.suppressParaLeftIndent(true);
+                            System.err.println("[FramePlacer] ORC+inline 감지 → suppressParaLeftIndent: tf=" + tf.id() + " storyId=" + tf.storyId() + " inlineTf=" + _itf.id());
+                        }
                         break;
                     }
                 }
@@ -2517,6 +2524,10 @@ public final class FramePlacer {
                 if (ctx.resolvedData.isInlineObjectId(parentDomId)) return true;
                 if (idx != null && idx.inlineObjectById.containsKey(parentDomId)) return true;
                 if (idx != null && idx.inlineFileGroupIds.contains(parentDomId)) return true;
+                ResolvedPageItem parentPi = ctx.resolvedData.getPageItem(pi.parentId());
+                if (parentPi != null && parentPi.isInline() && "Group".equals(parentPi.type())) {
+                    return true;
+                }
             }
             curId = pi.parentId();
         }

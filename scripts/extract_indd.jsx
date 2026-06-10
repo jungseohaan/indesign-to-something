@@ -15,7 +15,7 @@
 // SPEC-011: 추출 캐시 무효화용 스크립트 버전.
 // 출력 형식이나 추출 로직이 변경되면 이 값을 올려서 모든 캐시를 강제 무효화한다.
 // (mtime/size 기반 자동 무효화와 별개로 명시적 버전 관리 채널)
-var EXTRACT_SCRIPT_VERSION = "17";
+var EXTRACT_SCRIPT_VERSION = "20";
 
 // =============================================================================
 // SECTION 1: BOOTSTRAP
@@ -587,6 +587,33 @@ function _runRenderPhases(doc, ctx, allItems) {
     for (var ii = 0; ii < renderedImageFrames.length; ii++) renderedFloatingItems.push(renderedImageFrames[ii]);
     try { $.gc(); } catch (e) {}
 
+    // 2.14b. 여러 비텍스트 visual 조각이 하나의 컨테이너 배경을 이루는 경우 원본 IDML에서 묶음으로 다시 export.
+    // 예: 녹색 칠판 이미지 + 중앙 Paper 패널 + 상단 리본처럼 서로 다른 source item이
+    // 한 배경 구조를 만들 때 개별 배치하면 z-depth가 흔들린다.
+    _marker(ctx.outputDir, "06b_visualBackdropClusters");
+    var visualBackdropClusters = [];
+    // InDesign 2026 can crash when arbitrary page items are duplicated, grouped,
+    // and exported repeatedly. Keep the policy/model, but do not run this
+    // experimental export path until it is moved to a safer extractor strategy.
+    var enableVisualBackdropClusterExport = false;
+    if (enableVisualBackdropClusterExport) {
+        try {
+            visualBackdropClusters = exportVisualBackdropClusters(doc, ctx.outputDir, ctx.startPage, ctx.endPage, allItems);
+        } catch (eVisualBackdropCluster) {
+            try {
+                var _vbcErr = File(ctx.outputDir + "/_visual_backdrop_clusters.log");
+                _vbcErr.encoding = "UTF-8";
+                _vbcErr.open("a");
+                _vbcErr.writeln((new Date()).toString() + " top-level failure: " + eVisualBackdropCluster);
+                _vbcErr.close();
+            } catch (eVbcLog) {}
+            visualBackdropClusters = [];
+        }
+    }
+    addItemType(visualBackdropClusters, "page_object");
+    for (var vbci = 0; vbci < visualBackdropClusters.length; vbci++) renderedFloatingItems.push(visualBackdropClusters[vbci]);
+    try { $.gc(); } catch (e) {}
+
     // 2.15. 장식 그룹 렌더링 — exportImagePlacedFrames에서 처리된 ID 제외
     var imgRenderedIds = {};
     for (var iri = 0; iri < renderedImageFrames.length; iri++) imgRenderedIds[renderedImageFrames[iri].id] = true;
@@ -642,6 +669,7 @@ function _runRenderPhases(doc, ctx, allItems) {
 
             deco_group_count: decoResult.frames.length,
             image_frame_count: renderedImageFrames.length,
+            visual_backdrop_cluster_count: visualBackdropClusters.length,
             complex_frame_count: renderedGraphicFrames.length,
             shape_count: renderedVectorFrames.length,
             master_graphic_count: renderedMasterGraphics.length,
@@ -1091,10 +1119,10 @@ function exportEditableTextFrameVisualShells(doc, outputDir, startPage, endPage,
         if (isOnHiddenLayer(item)) continue;
         var _tfHasContent = false;
         try { _tfHasContent = item.contents.replace(/[\s﻿]/g, "").length > 0; } catch (e) {}
-        if (decoChildIds && decoChildIds[domId] && _tfHasContent) continue;
+        var _tfIsEditable = editableIds && editableIds[domId];
+        if (decoChildIds && decoChildIds[domId]) continue;
         // editable TF이거나 빈 TF(텍스트 없음)인 경우 처리.
         // 내용 있는 비-편집 TF는 exportRenderedTextFrames에서 이미 처리됨.
-        var _tfIsEditable = editableIds && editableIds[domId];
         if (!_tfIsEditable) {
             if (_tfHasContent) continue;
         }
@@ -2016,6 +2044,378 @@ function exportImagePlacedFrames(doc, outputDir, startPage, endPage, allItems) {
 }
 
 /**
+ * 여러 비텍스트 visual source가 한 컨테이너 배경을 구성하는 경우를 원본 IDML에서 한 PNG로 export한다.
+ *
+ * 정책 의도:
+ * - Java에서 이미 추출된 큰 PNG를 crop/합성하지 않는다.
+ * - TextFrame은 포함하지 않는다.
+ * - 배경 이미지/도형 조각을 source 단위로 다시 export하고, ObjectPlan이 같은 source의 개별 visual을 drop한다.
+ *
+ * 대표 케이스:
+ * - 칠판/보드 배경 이미지 + 내부 Paper/흰 패널 + 상단 리본/장식.
+ */
+function exportVisualBackdropClusters(doc, outputDir, startPage, endPage, allItems) {
+    var renderDir = Folder(outputDir + "/rendered_frames");
+    renderDir.create();
+
+    var byPage = {};
+    var candidates = [];
+    var results = [];
+    var debugFile = File(outputDir + "/_visual_backdrop_clusters.log");
+
+    function _clusterLog(msg) {
+        try {
+            debugFile.encoding = "UTF-8";
+            debugFile.open("a");
+            debugFile.writeln((new Date()).toString() + " " + msg);
+            debugFile.close();
+        } catch (e) {}
+    }
+
+    function _clusterPageOf(item) {
+        var page = null;
+        try { page = item.parentPage; } catch (e) {}
+        if (!page) {
+            try {
+                var p = item.parent;
+                while (p && !page) {
+                    try { page = p.parentPage; } catch (e2) {}
+                    if (!page) p = p.parent;
+                }
+            } catch (e3) {}
+        }
+        return page;
+    }
+
+    function _clusterHasPlacedContent(item) {
+        try { if (item.images && item.images.length > 0) return true; } catch (e) {}
+        try { if (item.pdfs && item.pdfs.length > 0) return true; } catch (e2) {}
+        try { if (item.epss && item.epss.length > 0) return true; } catch (e3) {}
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                if (_clusterHasPlacedContent(nested[i])) return true;
+            }
+        } catch (e4) {}
+        return false;
+    }
+
+    function _clusterHasVisualStrokeOrFill(item) {
+        try { if (hasVisibleFill(item) || hasVisibleStroke(item)) return true; } catch (e) {}
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                try { if (hasVisibleFill(nested[i]) || hasVisibleStroke(nested[i])) return true; } catch (e2) {}
+            }
+        } catch (e3) {}
+        return false;
+    }
+
+    function _clusterHasPaperOrWhiteFill(item) {
+        try {
+            var fc = item.fillColor;
+            var name = fc && fc.name ? String(fc.name) : "";
+            if (name === "Paper" || name === "White") return true;
+        } catch (e) {}
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                try {
+                    var childFc = nested[i].fillColor;
+                    var childName = childFc && childFc.name ? String(childFc.name) : "";
+                    if (childName === "Paper" || childName === "White") return true;
+                } catch (e2) {}
+            }
+        } catch (e3) {}
+        return false;
+    }
+
+    function _clusterSourceIds(items) {
+        var out = [], seen = {};
+        for (var i = 0; i < items.length; i++) {
+            var ids = _collectSourceObjectIds(items[i]);
+            for (var j = 0; j < ids.length; j++) _pushUniqueId(out, seen, ids[j]);
+        }
+        out.sort(function(a, b) { return Number(a) - Number(b); });
+        return out;
+    }
+
+    function _clusterBoundsOfItems(items) {
+        var b = null;
+        for (var i = 0; i < items.length; i++) {
+            var ib = null;
+            try { ib = arrCopy(items[i].visibleBounds); } catch (e) {}
+            if (!ib) try { ib = arrCopy(items[i].geometricBounds); } catch (e2) {}
+            if (!ib) continue;
+            if (!b) {
+                b = [ib[0], ib[1], ib[2], ib[3]];
+            } else {
+                b[0] = Math.min(b[0], ib[0]);
+                b[1] = Math.min(b[1], ib[1]);
+                b[2] = Math.max(b[2], ib[2]);
+                b[3] = Math.max(b[3], ib[3]);
+            }
+        }
+        return b;
+    }
+
+    function _clusterSourceKey(ids) {
+        var s = [];
+        for (var i = 0; i < ids.length; i++) s.push(String(ids[i]));
+        return s.join(",");
+    }
+
+    function _clusterSharesSource(a, b) {
+        var seen = {};
+        for (var i = 0; i < a.sourceIds.length; i++) seen[String(a.sourceIds[i])] = true;
+        for (var j = 0; j < b.sourceIds.length; j++) {
+            if (seen[String(b.sourceIds[j])]) return true;
+        }
+        return false;
+    }
+
+    function _clusterMerge(a, b) {
+        var items = [], seenItems = {};
+        for (var i = 0; i < a.items.length; i++) {
+            try { seenItems[String(a.items[i].id)] = true; } catch (e) {}
+            items.push(a.items[i]);
+        }
+        for (var j = 0; j < b.items.length; j++) {
+            var id = null;
+            try { id = String(b.items[j].id); } catch (e2) {}
+            if (id && seenItems[id]) continue;
+            items.push(b.items[j]);
+        }
+        var sourceIds = _clusterSourceIds(items);
+        var bounds = _clusterBoundsOfItems(items);
+        return { page: a.page, pageIndex: a.pageIndex, items: items, sourceIds: sourceIds, bounds: bounds };
+    }
+
+    function _clusterSortBackToFront(items) {
+        var copy = [];
+        for (var i = 0; i < items.length; i++) copy.push(items[i]);
+        copy.sort(function(a, b) {
+            var za = 0, zb = 0;
+            try { za = getItemZOrder(a); } catch (eA) {}
+            try { zb = getItemZOrder(b); } catch (eB) {}
+            return zb - za;
+        });
+        return copy;
+    }
+
+    function _clusterContainsText(item) {
+        return _collectTextFrameIds(item, false, true).length > 0;
+    }
+
+    function _clusterIsTopLevelEnough(item) {
+        try {
+            var p = item.parent;
+            if (p && p.constructor && p.constructor.name === "Group") return false;
+        } catch (e) {}
+        return true;
+    }
+
+    function _clusterItemKind(item, bounds) {
+        if (!bounds) return null;
+        var area = boundsArea(bounds);
+        if (area < 900) return null;
+        var cName = "";
+        try { cName = item.constructor.name; } catch (e) {}
+        if (cName !== "Group" && cName !== "Rectangle" && cName !== "Oval" && cName !== "Polygon") return null;
+        if (isOnHiddenLayer(item)) return null;
+        if (!_clusterIsTopLevelEnough(item)) return null;
+        if (_clusterContainsText(item)) return null;
+
+        var hasPlaced = _clusterHasPlacedContent(item);
+        var hasVisualStyle = _clusterHasVisualStrokeOrFill(item);
+        var hasPaperFill = _clusterHasPaperOrWhiteFill(item);
+        var w = Math.abs(bounds[3] - bounds[1]);
+        var h = Math.abs(bounds[2] - bounds[0]);
+        if (hasPlaced && area >= 12000 && w >= 80 && h >= 60) return "base";
+        if (!hasPlaced && hasVisualStyle && hasPaperFill && area >= 1200 && w >= 25 && h >= 12) return "panel";
+        if (!hasPlaced && cName === "Group" && hasVisualStyle && hasPaperFill && area >= 1200) return "panel";
+        return null;
+    }
+
+    function _clusterRelation(base, cand) {
+        if (!base || !cand || !base.bounds || !cand.bounds) return false;
+        var overlap = boundsOverlapArea(base.bounds, cand.bounds);
+        if (overlap <= 0) return false;
+        var baseArea = boundsArea(base.bounds);
+        var candArea = boundsArea(cand.bounds);
+        if (baseArea <= 0 || candArea <= 0) return false;
+        if (overlap / candArea >= 0.45) return true;
+        if (overlap / baseArea >= 0.18) return true;
+        var cx = (cand.bounds[1] + cand.bounds[3]) / 2.0;
+        var cy = (cand.bounds[0] + cand.bounds[2]) / 2.0;
+        if (cx >= base.bounds[1] - 8 && cx <= base.bounds[3] + 8
+                && cy >= base.bounds[0] - 8 && cy <= base.bounds[2] + 8
+                && overlap / candArea >= 0.18) {
+            return true;
+        }
+        return false;
+    }
+
+    function _clusterExport(cluster) {
+        if (!cluster || !cluster.items || cluster.items.length < 2 || !cluster.page) return false;
+        var sourceIds = cluster.sourceIds || _clusterSourceIds(cluster.items);
+        if (!sourceIds || sourceIds.length < 2) return false;
+        if (cluster.items.length > 8 || sourceIds.length > 40) {
+            _clusterLog("skip oversized cluster page=" + cluster.pageIndex
+                    + " items=" + cluster.items.length + " sources=" + sourceIds.length);
+            return false;
+        }
+        try {
+            var pageBounds = cluster.page.bounds;
+            var pageArea = boundsArea(pageBounds);
+            var clusterArea = boundsArea(cluster.bounds);
+            if (pageArea > 0 && clusterArea / pageArea > 0.72) {
+                _clusterLog("skip page-sized cluster page=" + cluster.pageIndex
+                        + " areaRatio=" + (clusterArea / pageArea));
+                return false;
+            }
+        } catch (eArea) {}
+        var minId = Number(sourceIds[0]);
+        var entryId = 700000000 + Math.abs(minId);
+        var fileName = "visual_backdrop_cluster_" + entryId + ".png";
+        var outFile = File(renderDir + "/" + fileName);
+        var dups = [];
+        var tempGroup = null;
+        var ordered = _clusterSortBackToFront(cluster.items);
+        var z = 0;
+        try { z = getItemZOrder(cluster.items[0]); } catch (eZ0) {}
+        try {
+            _clusterLog("export begin page=" + cluster.pageIndex + " entry=" + entryId
+                    + " items=" + cluster.items.length + " sources=" + _clusterSourceKey(sourceIds));
+            for (var i = 0; i < ordered.length; i++) {
+                var dup = ordered[i].duplicate();
+                dups.push(dup);
+                try {
+                    var iz = getItemZOrder(ordered[i]);
+                    if (iz > z) z = iz;
+                } catch (eZ) {}
+            }
+            try {
+                tempGroup = cluster.page.groups.add(dups);
+            } catch (eGroupPage) {
+                try { tempGroup = doc.groups.add(dups); } catch (eGroupDoc) {}
+            }
+            if (!tempGroup) return false;
+            try { tempGroup.exportFile(ExportFormat.PNG_FORMAT, outFile); } catch (eExport) {}
+            try { if (!outFile.exists || outFile.length < 512) return false; } catch (eSize) {}
+
+            var bounds = null;
+            try { bounds = arrCopy(tempGroup.visibleBounds); } catch (eBounds) {}
+            if (!bounds) try { bounds = arrCopy(tempGroup.geometricBounds); } catch (eBounds2) {}
+            if (bounds) _toPageRelativeBounds(bounds, cluster.page);
+
+            results.push(applyRenderOwnership({
+                id: entryId,
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: cluster.page.documentOffset,
+                zOrder: z
+            }, null, {
+                sourceObjectIds: sourceIds,
+                visualOnlyChildIds: sourceIds,
+                textOwner: "none",
+                containsText: false,
+                containsEditableText: false,
+                placementAllowed: true,
+                placementRole: "visual_backdrop_cluster",
+                reason: "visual_backdrop_cluster"
+            }));
+            _clusterLog("export ok page=" + cluster.pageIndex + " entry=" + entryId);
+            return true;
+        } catch (e) {
+            _clusterLog("export failed page=" + cluster.pageIndex + " error=" + e);
+            return false;
+        } finally {
+            try {
+                if (tempGroup) tempGroup.remove();
+                else {
+                    for (var di = 0; di < dups.length; di++) {
+                        try { dups[di].remove(); } catch (eDup) {}
+                    }
+                }
+            } catch (eCleanup) {}
+        }
+    }
+
+    for (var ai = 0; ai < allItems.length; ai++) {
+        var item = allItems[ai];
+        var page = _clusterPageOf(item);
+        if (!page) continue;
+        var pgIdx = page.documentOffset + 1;
+        if (pgIdx < startPage || pgIdx > endPage) continue;
+        var b = null;
+        try { b = arrCopy(item.visibleBounds); } catch (e) {}
+        if (!b) try { b = arrCopy(item.geometricBounds); } catch (e2) {}
+        var kind = _clusterItemKind(item, b);
+        if (!kind) continue;
+        var cand = {
+            item: item,
+            page: page,
+            pageIndex: page.documentOffset,
+            bounds: b,
+            kind: kind
+        };
+        candidates.push(cand);
+        var key = String(page.documentOffset);
+        if (!byPage[key]) byPage[key] = [];
+        byPage[key].push(cand);
+    }
+    _clusterLog("candidates=" + candidates.length + " pages=" + startPage + "-" + endPage);
+
+    var rawClusters = [];
+    for (var bi = 0; bi < candidates.length; bi++) {
+        var base = candidates[bi];
+        if (base.kind !== "base") continue;
+        var members = [base.item];
+        var hasPanel = false;
+        var pageList = byPage[String(base.pageIndex)] || [];
+        for (var mi = 0; mi < pageList.length; mi++) {
+            var cand2 = pageList[mi];
+            if (cand2.item === base.item) continue;
+            if (cand2.kind !== "panel" && cand2.kind !== "base") continue;
+            if (!_clusterRelation(base, cand2)) continue;
+            members.push(cand2.item);
+            if (cand2.kind === "panel") hasPanel = true;
+        }
+        if (!hasPanel || members.length < 2) continue;
+        var sourceIds = _clusterSourceIds(members);
+        var bounds = _clusterBoundsOfItems(members);
+        rawClusters.push({ page: base.page, pageIndex: base.pageIndex, items: members, sourceIds: sourceIds, bounds: bounds });
+    }
+    _clusterLog("rawClusters=" + rawClusters.length);
+
+    // 같은 Paper/패널을 공유하는 base들이 각각 cluster를 만들면 하나로 병합한다.
+    var merged = [];
+    for (var ri = 0; ri < rawClusters.length; ri++) {
+        var cur = rawClusters[ri];
+        var consumed = false;
+        for (var mj = 0; mj < merged.length; mj++) {
+            if (cur.pageIndex !== merged[mj].pageIndex) continue;
+            if (!_clusterSharesSource(cur, merged[mj])) continue;
+            merged[mj] = _clusterMerge(merged[mj], cur);
+            consumed = true;
+            break;
+        }
+        if (!consumed) merged.push(cur);
+    }
+
+    var exported = {};
+    for (var ei = 0; ei < merged.length; ei++) {
+        var key2 = merged[ei].pageIndex + ":" + _clusterSourceKey(merged[ei].sourceIds);
+        if (exported[key2]) continue;
+        exported[key2] = true;
+        _clusterExport(merged[ei]);
+    }
+    _clusterLog("exported=" + results.length);
+    return results;
+}
+
+/**
  * exportImagePlacedFrames의 안전 버전.
  * exportFile(PNG_FORMAT)를 사용하지 않고, 이미지 링크 경로와 bounds 정보만 수집한다.
  * InDesign이 특정 이미지 프레임의 exportFile에서 C++ 크래시(SIGSEGV)를 일으키는
@@ -2038,6 +2438,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
     var results = [];
     var decoChildIds = {};
     var renderedIds = {};
+    var labelBackdropClaimedIds = {};
+    var labelBackdropClaimedTextFrameIds = {};
 
     // ── 공통 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -2282,6 +2684,364 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return h >= 30 && w >= 80;
     }
 
+    function _sortBackToFront(items) {
+        var copy = [];
+        for (var i = 0; i < items.length; i++) copy.push(items[i]);
+        copy.sort(function(a, b) {
+            var za = 0, zb = 0;
+            try { za = getItemZOrder(a); } catch (eA) {}
+            try { zb = getItemZOrder(b); } catch (eB) {}
+            return zb - za;
+        });
+        return copy;
+    }
+
+    function _isEditableSiblingLabelTextFrame(tf) {
+        try { if (!tf || tf.constructor.name !== "TextFrame") return false; } catch (e0) { return false; }
+        try { if (classifyTextFrame(tf) !== "editable") return false; } catch (e1) { return false; }
+        var text = _plainTextOfTextFrame(tf);
+        if (!text || text.length < 1 || text.length > 12) return false;
+        if (_isSimpleMarkerLabelText(text)) return false;
+        try {
+            var ps = tf.parentStory && tf.parentStory.paragraphs.length > 0
+                    ? tf.parentStory.paragraphs[0].appliedParagraphStyle
+                    : null;
+            var styleName = ps ? String(ps.name || "") : "";
+            if (styleName.indexOf("#표제목") === 0) return false;
+        } catch (eStyle) {}
+        return true;
+    }
+
+    function _isLabelBackdropCandidateItem(item) {
+        try { if (!item || isOnHiddenLayer(item)) return false; } catch (e0) { return false; }
+        try { if (renderedIds[item.id] || decoChildIds[item.id]) return false; } catch (eSeen) {}
+        try {
+            if (item.images && item.images.length > 0) return false;
+            if (item.pdfs && item.pdfs.length > 0) return false;
+            if (item.epss && item.epss.length > 0) return false;
+        } catch (ePlaced) {}
+        var cn = "";
+        try { cn = item.constructor.name; } catch (eCn) {}
+        if (cn === "TextFrame") {
+            if (visibleTextLengthOfTextFrame(item) > 0) return false;
+            return hasVisibleFill(item) || hasVisibleStroke(item);
+        }
+        if (cn === "Rectangle" || cn === "Oval" || cn === "Polygon" || cn === "GraphicLine") {
+            return hasVisibleFill(item) || hasVisibleStroke(item);
+        }
+        return false;
+    }
+
+    function _isLabelBackdropResidualCandidateItem(item) {
+        if (_isLabelBackdropCandidateItem(item)) return true;
+        try { if (!item || isOnHiddenLayer(item)) return false; } catch (e0) { return false; }
+        try { if (renderedIds[item.id] || decoChildIds[item.id]) return false; } catch (eSeen) {}
+        try {
+            if (item.images && item.images.length > 0) return false;
+            if (item.pdfs && item.pdfs.length > 0) return false;
+            if (item.epss && item.epss.length > 0) return false;
+        } catch (ePlaced) {}
+        var cn = "";
+        try { cn = item.constructor.name; } catch (eCn) {}
+        if (cn !== "Group") return false;
+
+        var hasVisual = false;
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                var child = nested[i];
+                if (!child) continue;
+                var ccn = "";
+                try { ccn = child.constructor.name; } catch (eChildCn) {}
+                if (ccn === "TextFrame") {
+                    if (visibleTextLengthOfTextFrame(child) > 0) return false;
+                    if (hasVisibleFill(child) || hasVisibleStroke(child)) hasVisual = true;
+                    continue;
+                }
+                if (ccn === "Rectangle" || ccn === "Oval" || ccn === "Polygon" || ccn === "GraphicLine") {
+                    if (hasVisibleFill(child) || hasVisibleStroke(child)) hasVisual = true;
+                    continue;
+                }
+                if (ccn !== "Group") return false;
+            }
+        } catch (eNested) {
+            return false;
+        }
+        return hasVisual;
+    }
+
+    function _candidateLooksLikeLabelShell(tfBounds, candidateBounds) {
+        if (!tfBounds || !candidateBounds) return false;
+        var tfArea = boundsArea(tfBounds);
+        var candArea = boundsArea(candidateBounds);
+        if (tfArea <= 0 || candArea <= 0) return false;
+        var overlap = boundsOverlapArea(tfBounds, candidateBounds);
+        if (overlap / tfArea < 0.55) return false;
+        var tfW = Math.abs(tfBounds[3] - tfBounds[1]);
+        var tfH = Math.abs(tfBounds[2] - tfBounds[0]);
+        var candW = Math.abs(candidateBounds[3] - candidateBounds[1]);
+        var candH = Math.abs(candidateBounds[2] - candidateBounds[0]);
+        if (candW < tfW * 0.95 || candH < tfH * 0.95) return false;
+        if (candW > Math.max(90, tfW * 5.0)) return false;
+        if (candH > Math.max(35, tfH * 5.0)) return false;
+        return true;
+    }
+
+    function _candidateLooksLikeLabelBackdropResidual(tfBounds, candidateBounds) {
+        if (!tfBounds || !candidateBounds) return false;
+        var tfArea = boundsArea(tfBounds);
+        var candArea = boundsArea(candidateBounds);
+        if (tfArea <= 0 || candArea <= 0) return false;
+
+        var tfW = Math.abs(tfBounds[3] - tfBounds[1]);
+        var tfH = Math.abs(tfBounds[2] - tfBounds[0]);
+        var candW = Math.abs(candidateBounds[3] - candidateBounds[1]);
+        var candH = Math.abs(candidateBounds[2] - candidateBounds[0]);
+        if (candW > Math.max(90, tfW * 5.0)) return false;
+        if (candH > Math.max(35, tfH * 5.0)) return false;
+
+        var cx = (candidateBounds[1] + candidateBounds[3]) / 2.0;
+        var cy = (candidateBounds[0] + candidateBounds[2]) / 2.0;
+        var PAD = 4.0;
+        if (cy < tfBounds[0] - PAD || cy > tfBounds[2] + PAD
+                || cx < tfBounds[1] - PAD || cx > tfBounds[3] + PAD) {
+            return false;
+        }
+
+        var overlap = boundsOverlapArea(tfBounds, candidateBounds);
+        if (overlap > 0) return true;
+
+        // Thin ruling/texture strokes can sit just outside the text glyph bounds
+        // while visually belonging to the same button shell.
+        if (candW >= tfW * 0.45 && candH <= Math.max(2.0, tfH * 0.35)) return true;
+        if (candH >= tfH * 0.45 && candW <= Math.max(2.0, tfW * 0.35)) return true;
+        return false;
+    }
+
+    function _claimLabelBackdropResidualItems(tfBounds, candidates, owned, claimed) {
+        var ownedMap = {};
+        for (var oi = 0; oi < owned.length; oi++) {
+            try { ownedMap[owned[oi].id] = true; } catch (eOwned) {}
+        }
+        for (var ci = 0; ci < candidates.length; ci++) {
+            var cand = candidates[ci];
+            if (!cand || ownedMap[cand.id] || claimed[cand.id]) continue;
+            var cb = _boundsOfItem(cand);
+            if (!_candidateLooksLikeLabelBackdropResidual(tfBounds, cb)) continue;
+            decoChildIds[cand.id] = true;
+            renderedIds[cand.id] = true;
+            labelBackdropClaimedIds[cand.id] = true;
+            claimed[cand.id] = true;
+        }
+    }
+
+    function _exportLabelBackdropGroup(tf, visualItems, page) {
+        if (!tf || !visualItems || visualItems.length < 2 || !page) return false;
+        var tfId = tf.id;
+        var fileName = "label_backdrop_group_" + tfId + ".png";
+        var outFile = File(renderDir + "/" + fileName);
+        var dups = [];
+        var tempGroup = null;
+        var ordered = _sortBackToFront(visualItems);
+        try {
+            for (var i = 0; i < ordered.length; i++) {
+                var dup = ordered[i].duplicate();
+                try {
+                    if (dup.constructor.name === "TextFrame") dup.contents = "";
+                } catch (eClear) {}
+                dups.push(dup);
+            }
+            try {
+                tempGroup = page.groups.add(dups);
+            } catch (eGroupPage) {
+                try { tempGroup = doc.groups.add(dups); } catch (eGroupDoc) {}
+            }
+            if (!tempGroup) return false;
+            try { tempGroup.exportFile(ExportFormat.PNG_FORMAT, outFile); } catch (eExport) {}
+            try { if (!outFile.exists || outFile.length < 512) return false; } catch (eSize) {}
+
+            var bounds = null;
+            try { bounds = arrCopy(tempGroup.visibleBounds); } catch (eBounds) {}
+            if (!bounds) try { bounds = arrCopy(tempGroup.geometricBounds); } catch (eBounds2) {}
+            if (bounds) _toPageRelativeBounds(bounds, page);
+            var sourceIds = [];
+            var seen = {};
+            var z = 0;
+            try { z = getItemZOrder(visualItems[0]); } catch (eZ0) {}
+            for (var si = 0; si < visualItems.length; si++) {
+                var sid = visualItems[si].id;
+                if (!seen[sid]) {
+                    sourceIds.push(sid);
+                    seen[sid] = true;
+                }
+                decoChildIds[sid] = true;
+                renderedIds[sid] = true;
+                labelBackdropClaimedIds[sid] = true;
+                try {
+                    var iz = getItemZOrder(visualItems[si]);
+                    if (iz > z) z = iz;
+                } catch (eZ) {}
+            }
+            labelBackdropClaimedTextFrameIds[tfId] = true;
+            var entryId = -900000000 + Number(tfId);
+            results.push(applyRenderOwnership({
+                id: entryId,
+                file: "rendered_frames/" + fileName,
+                bounds: bounds,
+                pageIndex: page.documentOffset,
+                zOrder: z
+            }, null, {
+                sourceObjectIds: sourceIds,
+                visualOnlyChildIds: sourceIds,
+                editableTextFrameIds: [tfId],
+                textHiddenBeforeExport: true,
+                textOwner: "hwpx_tf",
+                containsText: false,
+                containsEditableText: false,
+                placementAllowed: true,
+                placementRole: "label_backdrop_group",
+                reason: "label_backdrop_group"
+            }));
+            renderedIds[entryId] = true;
+            return true;
+        } catch (e) {
+            return false;
+        } finally {
+            try {
+                if (tempGroup) tempGroup.remove();
+                else {
+                    for (var di = 0; di < dups.length; di++) {
+                        try { dups[di].remove(); } catch (eDup) {}
+                    }
+                }
+            } catch (eCleanup) {}
+        }
+    }
+
+    function _renderSiblingLabelBackdropGroups(grp, page) {
+        var rendered = 0;
+        try {
+            var nested = grp.allPageItems;
+            var candidates = [];
+            var residualCandidates = [];
+            for (var i = 0; i < nested.length; i++) {
+                if (_isLabelBackdropCandidateItem(nested[i])) candidates.push(nested[i]);
+                if (_isLabelBackdropResidualCandidateItem(nested[i])) residualCandidates.push(nested[i]);
+            }
+            if (candidates.length < 2) return 0;
+            var claimed = {};
+            for (var ti = 0; ti < nested.length; ti++) {
+                var tf = nested[ti];
+                if (!_isEditableSiblingLabelTextFrame(tf)) continue;
+                var tfBounds = _boundsOfItem(tf);
+                if (!tfBounds) continue;
+                var owned = [];
+                for (var ci = 0; ci < candidates.length; ci++) {
+                    var cand = candidates[ci];
+                    if (!cand || claimed[cand.id]) continue;
+                    var cb = _boundsOfItem(cand);
+                    if (!_candidateLooksLikeLabelShell(tfBounds, cb)) continue;
+                    owned.push(cand);
+                }
+                if (owned.length < 2) continue;
+                if (_exportLabelBackdropGroup(tf, owned, page)) {
+                    for (var oi = 0; oi < owned.length; oi++) claimed[owned[oi].id] = true;
+                    _claimLabelBackdropResidualItems(tfBounds, residualCandidates, owned, claimed);
+                    rendered++;
+                }
+            }
+        } catch (e) {}
+        return rendered;
+    }
+
+    function _isLabelBackdropOnlyGroup(grp) {
+        var labelCount = 0;
+        try {
+            var nested = grp.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                var item = nested[i];
+                if (!item || item.constructor.name !== "TextFrame") continue;
+                if (visibleTextLengthOfTextFrame(item) <= 0) continue;
+                try { if (classifyTextFrame(item) !== "editable") continue; } catch (eClass) {}
+                var text = _plainTextOfTextFrame(item);
+                if (_isSimpleMarkerLabelText(text) || _isEditableSiblingLabelTextFrame(item)) {
+                    labelCount++;
+                    continue;
+                }
+                return false;
+            }
+        } catch (e) {
+            return false;
+        }
+        return labelCount >= 2;
+    }
+
+    function _hideClaimedLabelBackdropItems(item) {
+        var saved = [];
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                var child = nested[i];
+                if (!child || !labelBackdropClaimedIds[child.id]) continue;
+                try {
+                    saved.push({ item: child, visible: child.visible });
+                    child.visible = false;
+                } catch (eVisible) {}
+            }
+        } catch (e) {}
+        return saved;
+    }
+
+    function _restoreClaimedLabelBackdropItems(saved) {
+        if (!saved) return;
+        for (var i = 0; i < saved.length; i++) {
+            try { saved[i].item.visible = saved[i].visible; } catch (e) {}
+        }
+    }
+
+    function _hasClaimedLabelBackdropItems(item) {
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                if (nested[i] && labelBackdropClaimedIds[nested[i].id]) return true;
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    function _hasOnlyClaimedLabelTextFrames(item) {
+        var count = 0;
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                var child = nested[i];
+                if (!child || child.constructor.name !== "TextFrame") continue;
+                if (visibleTextLengthOfTextFrame(child) <= 0) continue;
+                try { if (classifyTextFrame(child) !== "editable") continue; } catch (eClass) {}
+                count++;
+                if (!labelBackdropClaimedTextFrameIds[child.id]) return false;
+            }
+        } catch (e) {
+            return false;
+        }
+        return count > 0;
+    }
+
+    function _editableVisibleTextFrameCount(item) {
+        var count = 0;
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                var child = nested[i];
+                if (!child || child.constructor.name !== "TextFrame") continue;
+                if (visibleTextLengthOfTextFrame(child) <= 0) continue;
+                try { if (classifyTextFrame(child) !== "editable") continue; } catch (eClass) {}
+                count++;
+            }
+        } catch (e) {}
+        return count;
+    }
+
     function _renderAtomicVisualClusters(grp, page) {
         var rendered = 0;
         try {
@@ -2309,6 +3069,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 rendered++;
             }
         } catch (e) {}
+        try { rendered += _renderSiblingLabelBackdropGroups(grp, page); } catch (eSibling) {}
         return rendered;
     }
 
@@ -2588,6 +3349,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
 
         var _savedTFsForCatch = null;
         var _savedCellBgsForCatch = null;
+        var _savedLabelBackdropsForCatch = null;
         try {
             // hexGrid: 자신의 자식이 이전 Pass에서 개별 렌더된 경우 results에서 제거
             if (kind === "hexGrid") {
@@ -2609,7 +3371,21 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 try { editableTfIdsForGroup = _collectTextFrameIds(grp, true, true); } catch (e) {}
             }
 
-            if ((kind === "mixedGroup" || kind === "textComposite") && _isShortVisualLabelGroup(grp)) {
+            var siblingLabelBackdropCount = 0;
+            if (kind === "mixedGroup" || kind === "textComposite") {
+                siblingLabelBackdropCount = _renderSiblingLabelBackdropGroups(grp, grpPage);
+            }
+
+            if ((siblingLabelBackdropCount > 0
+                        && (_isLabelBackdropOnlyGroup(grp) || _isShortVisualLabelGroup(grp)))
+                    || (_hasClaimedLabelBackdropItems(grp)
+                        && (_hasOnlyClaimedLabelTextFrames(grp) || _editableVisibleTextFrameCount(grp) === 0))) {
+                // LABEL_BACKDROP_GROUP PNG가 라벨 배경을 소유한 경우 기존
+                // visual_label_text_hidden_shell 경로를 다시 타면 같은 visual-only
+                // 조각이 동일 위치에 중복 배치된다. 라벨 전용 parent/child group은
+                // 새 label backdrop route만 남긴다.
+                _exportPaperStrokeShapes(grp, grpPage);
+            } else if ((kind === "mixedGroup" || kind === "textComposite") && _isShortVisualLabelGroup(grp)) {
                 var _labelEditableIds = [];
                 try { _labelEditableIds = _collectTextFrameIds(grp, true, true); } catch (e) {}
                 if (_isVisualMarkerLabelGroup(grp)) {
@@ -2635,16 +3411,20 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 // 부모 PNG의 visualOnlyChildIds로 소유시켜 Java inline 재배치를 막는다.
                 var savedTFs = hideTextFrames(grp);
                 var savedCellBgs = hideRepeatedCellBackgroundCandidates(grp);
+                var savedLabelBackdrops = _hideClaimedLabelBackdropItems(grp);
                 _savedTFsForCatch = savedTFs;
                 _savedCellBgsForCatch = savedCellBgs;
+                _savedLabelBackdropsForCatch = savedLabelBackdrops;
                 _decoRender(grp, grpPage, null, {
                     textHiddenBeforeExport: true,
                     textOwner: "hwpx_tf",
                     editableTextFrameIds: editableTfIdsForGroup.length > 0 ? editableTfIdsForGroup : undefined,
                     reason: kind === "textComposite" ? "text_composite_editable_text_hidden" : "mixed_group_text_hidden"
                 });
+                _restoreClaimedLabelBackdropItems(savedLabelBackdrops);
                 restoreRepeatedCellBackgroundCandidates(savedCellBgs);
                 restoreTextFrames(savedTFs);
+                _savedLabelBackdropsForCatch = null;
                 _savedCellBgsForCatch = null;
                 _savedTFsForCatch = null;
                 // Color/Paper (흰색) 획 도형은 투명배경 PNG에서 소실 → 검은색으로 임시 변환 후 개별 추출
@@ -2662,6 +3442,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             }
         } catch (e) {
             // outer catch: 예외가 발생해도 숨겼던 TF 복원
+            try { if (_savedLabelBackdropsForCatch && _savedLabelBackdropsForCatch.length > 0) _restoreClaimedLabelBackdropItems(_savedLabelBackdropsForCatch); } catch (e0) {}
             try { if (_savedCellBgsForCatch && _savedCellBgsForCatch.length > 0) restoreRepeatedCellBackgroundCandidates(_savedCellBgsForCatch); } catch (e1) {}
             try { if (_savedTFsForCatch && _savedTFsForCatch.length > 0) restoreTextFrames(_savedTFsForCatch); } catch (e2) {}
         }

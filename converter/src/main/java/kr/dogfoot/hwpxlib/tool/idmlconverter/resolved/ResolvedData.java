@@ -284,6 +284,9 @@ public class ResolvedData {
         if (isExactRenderedItemDuplicate(item)) {
             return;
         }
+        if (isMasterInlineTitleFallbackDuplicate(item)) {
+            return;
+        }
         if (isLiveTitleDecorationDuplicate(item)) {
             return;
         }
@@ -318,6 +321,102 @@ public class ResolvedData {
             return true;
         }
         return false;
+    }
+
+    private boolean isMasterInlineTitleFallbackDuplicate(RenderedGroup item) {
+        if (!isMasterFallbackGraphic(item)) return false;
+        if (!isSmallGraphic(item.bounds(), 24.0, 18.0)) return false;
+        if (!overlapsMasterTitleInlineAnchor(item)) return false;
+        for (RenderedGroup existing : renderedFloatingItems) {
+            if (!isNonFallbackMasterGraphic(existing)) continue;
+            if (existing.pageIndex() != item.pageIndex()) continue;
+            if (!containsBounds(existing.bounds(), item.bounds(), 0.75)) continue;
+            if (!containsAllSourceObjectIds(existing.sourceObjectIds(), item.sourceObjectIds())) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isMasterFallbackGraphic(RenderedGroup item) {
+        if (item == null || !"master_graphic".equals(item.reason())) return false;
+        String file = item.file();
+        return file != null && file.contains("_fallback_");
+    }
+
+    private static boolean isNonFallbackMasterGraphic(RenderedGroup item) {
+        if (item == null || !"master_graphic".equals(item.reason())) return false;
+        String file = item.file();
+        return file == null || !file.contains("_fallback_");
+    }
+
+    private boolean overlapsMasterTitleInlineAnchor(RenderedGroup item) {
+        double[] ib = item != null ? item.bounds() : null;
+        if (ib == null || ib.length < 4) return false;
+        for (ResolvedTextFrame tf : textFrames) {
+            if (tf == null || tf.pageIndex() != item.pageIndex()) continue;
+            if (!tf.isMasterInstance()) continue;
+            String text = tf.frameVisibleText();
+            if (text == null || text.indexOf('\uFFFC') < 0) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (!overlaps(ib, tb, 0.5)) continue;
+            if (!looksLikeMasterInlineTitleMarker(ib, tb)) continue;
+            ResolvedStory story = tf.storyId() != null ? storyMap.get(tf.storyId()) : null;
+            if (isMasterTitleStory(story)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isMasterTitleStory(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) {
+            return false;
+        }
+        ResolvedParagraph first = story.paragraphs().get(0);
+        String style = first != null ? first.styleName() : null;
+        if (style == null) return false;
+        return style.contains("단원명")
+                || style.contains("단원제목")
+                || style.contains("소단원");
+    }
+
+    private static boolean looksLikeMasterInlineTitleMarker(double[] itemBounds, double[] titleBounds) {
+        if (itemBounds == null || titleBounds == null
+                || itemBounds.length < 4 || titleBounds.length < 4) {
+            return false;
+        }
+        double itemW = itemBounds[3] - itemBounds[1];
+        double itemH = itemBounds[2] - itemBounds[0];
+        double titleW = titleBounds[3] - titleBounds[1];
+        double titleH = titleBounds[2] - titleBounds[0];
+        if (itemW <= 0 || itemH <= 0 || titleW <= 0 || titleH <= 0) return false;
+        return itemW <= Math.max(16.0, titleW * 0.30)
+                && itemH <= Math.max(12.0, titleH * 1.60)
+                && itemBounds[0] >= titleBounds[0] - titleH * 0.40
+                && itemBounds[2] <= titleBounds[2] + titleH * 0.40;
+    }
+
+    private static boolean isSmallGraphic(double[] bounds, double maxWidth, double maxHeight) {
+        if (bounds == null || bounds.length < 4) return false;
+        double w = bounds[3] - bounds[1];
+        double h = bounds[2] - bounds[0];
+        return w > 0 && h > 0 && w <= maxWidth && h <= maxHeight;
+    }
+
+    private static boolean containsBounds(double[] outer, double[] inner, double tolerancePt) {
+        if (outer == null || inner == null || outer.length < 4 || inner.length < 4) return false;
+        return outer[0] <= inner[0] + tolerancePt
+                && outer[1] <= inner[1] + tolerancePt
+                && outer[2] >= inner[2] - tolerancePt
+                && outer[3] >= inner[3] - tolerancePt;
+    }
+
+    private static boolean containsAllSourceObjectIds(int[] superset, int[] subset) {
+        if (superset == null || subset == null || superset.length == 0 || subset.length == 0) return false;
+        Set<Integer> values = new HashSet<>();
+        for (int id : superset) values.add(id);
+        for (int id : subset) {
+            if (!values.contains(id)) return false;
+        }
+        return true;
     }
 
     private static boolean safeEquals(String a, String b) {
@@ -422,10 +521,9 @@ public class ResolvedData {
     }
 
     private void registerIndesignPngTextOwner(RenderedGroup item) {
-        if (item == null || !"indesign_png".equals(item.textOwner())) return;
-        String[] ids = item.editableTextFrameIds();
-        if (ids == null) return;
         if (shouldUseCompletePngForSimpleButtonLabel(item)) {
+            String[] ids = simpleButtonLabelTextFrameIds(item);
+            if (ids == null) return;
             for (String id : ids) {
                 if (id != null && !id.isEmpty()) {
                     atomicIndesignPngTextOwnerFrameIds.add(id);
@@ -434,6 +532,9 @@ public class ResolvedData {
             }
             return;
         }
+        if (item == null || !"indesign_png".equals(item.textOwner())) return;
+        String[] ids = item.editableTextFrameIds();
+        if (ids == null) return;
         if ("visual_marker_label_indesign_png".equals(item.reason())) return;
         if (shouldKeepVisualLabelTextEditable(item)) return;
         for (String id : ids) {
@@ -451,30 +552,73 @@ public class ResolvedData {
         if (domId != null && atomicIndesignPngTextOwnerFrameIds.contains(domId)) {
             return true;
         }
+        if (hasCompletePngForSimpleButtonLabelTextFrame(domId)) {
+            return true;
+        }
         return domId != null
                 && indesignPngTextOwnerFrameIds.contains(domId)
                 && !hasHwpxTextOwnerRenderForFrame(domId);
     }
 
+    public boolean hasCompletePngForSimpleButtonLabelTextFrame(String textFrameId) {
+        if (textFrameId == null || !isSimpleButtonLabelTextFrame(textFrameId)) return false;
+        for (RenderedGroup item : renderedFloatingItems) {
+            if (!shouldUseCompletePngForSimpleButtonLabel(item)) continue;
+            String[] ids = simpleButtonLabelTextFrameIds(item);
+            if (containsString(ids, textFrameId)) return true;
+        }
+        return false;
+    }
+
     /**
-     * 기본 원칙은 editable TF 유지다. 다만 가/나/다/라, 1/2/3, 01/02처럼
+     * 기본 원칙은 editable TF 유지다. 다만 가/나/다/라, ㄱ/ㄴ/ㄷ, 1/2/3, 01/02처럼
      * 내용 의미보다 위치 식별자 성격이 강한 짧은 버튼 라벨은 InDesign에서
      * 완성형 PNG로 추출해도 편집 손실보다 중복/정렬 리스크가 작다.
      * 이 기준은 플로팅/인라인에 동일하게 적용한다.
      */
     public boolean shouldUseCompletePngForSimpleButtonLabel(RenderedGroup item) {
         if (item == null) return false;
-        if (!"visual_marker_label_indesign_png".equals(item.reason())) return false;
         if (!"indesign_png".equals(item.visualOwner())) return false;
-        if (!"indesign_png".equals(item.textOwner())) return false;
-        if (!Boolean.TRUE.equals(item.containsEditableText())) return false;
-        String[] ids = item.editableTextFrameIds();
+        if ("visual_marker_label_indesign_png".equals(item.reason())) {
+            if (!"indesign_png".equals(item.textOwner())) return false;
+            if (!Boolean.TRUE.equals(item.containsEditableText())) return false;
+        } else if ("visual_label_text_hidden_shell".equals(item.reason())) {
+            if (!"hwpx_tf".equals(item.textOwner())) return false;
+        } else if (!isInlineCompleteSimpleButtonLabelCandidate(item)) {
+            return false;
+        }
+        String[] ids = simpleButtonLabelTextFrameIds(item);
         if (ids == null || ids.length == 0 || ids.length > 2) return false;
         for (String id : ids) {
             ResolvedTextFrame tf = getTextFrame(id);
             if (!isSimpleButtonLabelText(tf)) return false;
         }
         return true;
+    }
+
+    private static boolean isInlineCompleteSimpleButtonLabelCandidate(RenderedGroup item) {
+        if (item == null) return false;
+        if (!"inline_object".equals(item.type()) && !"inline_object".equals(item.itemType())) return false;
+        if (!"inline_graphic_only".equals(item.reason())) return false;
+        String file = item.file();
+        return file != null && file.contains("inline_");
+    }
+
+    private String[] simpleButtonLabelTextFrameIds(RenderedGroup item) {
+        if (item == null) return null;
+        String[] ids = item.editableTextFrameIds();
+        if (ids != null && ids.length > 0) return ids;
+        int[] sourceIds = item.sourceObjectIds();
+        if (sourceIds == null || sourceIds.length == 0) return null;
+        List<String> found = new ArrayList<>();
+        for (int sourceId : sourceIds) {
+            String id = String.valueOf(sourceId);
+            ResolvedTextFrame tf = getTextFrame(id);
+            if (tf == null || !isSimpleButtonLabelText(tf)) continue;
+            if (!found.contains(id)) found.add(id);
+            if (found.size() > 2) break;
+        }
+        return found.toArray(new String[0]);
     }
 
     public boolean isSimpleButtonLabelTextFrame(String textFrameId) {
@@ -492,9 +636,10 @@ public class ResolvedData {
                 .trim();
         if (text.isEmpty()) return false;
         if (text.matches("\\d{1,2}")) return true;
-        return text.codePointCount(0, text.length()) == 1
-                && text.codePointAt(0) >= 0xAC00
-                && text.codePointAt(0) <= 0xD7A3;
+        if (text.codePointCount(0, text.length()) != 1) return false;
+        int cp = text.codePointAt(0);
+        return (cp >= 0xAC00 && cp <= 0xD7A3)
+                || (cp >= 0x3131 && cp <= 0x318E);
     }
 
     /**
