@@ -801,7 +801,8 @@ public class HwpxImageBuilder {
     }
 
     private static boolean isInFrontVisualLayer(String visualLayer) {
-        return "LABEL_BACKDROP".equals(visualLayer)
+        return "CONTAINER_FACE".equals(visualLayer)
+                || "LABEL_BACKDROP".equals(visualLayer)
                 || "CONTENT_VISUAL".equals(visualLayer)
                 || "CONTAINER_OUTLINE".equals(visualLayer)
                 || "FOREGROUND_MASK".equals(visualLayer);
@@ -814,6 +815,9 @@ public class HwpxImageBuilder {
         int offset = Math.max(-499, Math.min(499, originalZOrder));
         if ("CONTAINER_BACKDROP".equals(visualLayer)) {
             return -4000 + offset;
+        }
+        if ("CONTAINER_FACE".equals(visualLayer)) {
+            return -3000 + offset;
         }
         if ("LABEL_BACKDROP".equals(visualLayer)) {
             return -2000 + offset;

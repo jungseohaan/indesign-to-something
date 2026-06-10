@@ -52,6 +52,9 @@ public final class OwnershipPlanner {
         resolveCoveredParentGroups();
         resolveParentGroupsWithMoreSpecificChildren();
         resolveOverlappingImageExportDuplicates();
+        resolveLargeLayeredImageExportBackdrops();
+        resolveClippedDecorationParents();
+        resolveContainerMasksOverIntrudingLabelBackdrops();
         resolveNestedTextShellSources();
         resolveClusterOwnedTextFrameShells();
         resolveDroppedRenderedTextOwnership();
@@ -242,6 +245,9 @@ public final class OwnershipPlanner {
         if (isPaperStrokeContainerVisual(rg)) {
             return VisualLayer.CONTAINER_OUTLINE;
         }
+        if (isTextFrameBackdropVector(rg)) {
+            return VisualLayer.CONTAINER_BACKDROP;
+        }
         if (isOpaquePaperBackdrop(rg)) {
             return VisualLayer.CONTAINER_BACKDROP;
         }
@@ -249,10 +255,13 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTAINER_BACKDROP;
         }
         if (isPaperStrokeBoxBackdrop(rg)) {
-            return VisualLayer.CONTAINER_BACKDROP;
+            return VisualLayer.CONTAINER_FACE;
         }
         if (isFilledContainerBoxBackdrop(rg)) {
             return VisualLayer.CONTAINER_BACKDROP;
+        }
+        if (isRuleLineGroup(rg)) {
+            return VisualLayer.CONTAINER_OUTLINE;
         }
         if (isLineLikeVisual(rg)) {
             return VisualLayer.CONTAINER_OUTLINE;
@@ -303,6 +312,7 @@ public final class OwnershipPlanner {
         if (isImageBackedContentShell(rg) || isPlacedContentImage(rg)) return false;
         if (isPaperStrokeContainerVisual(rg) || isPaperStrokeForegroundMask(rg)) return false;
         if (!looksLikeAbsorbableEditableLabelShell(rg)) return false;
+        if (!hasOnlyAbsorbableEditableLabelShellSources(rg)) return false;
 
         List<ResolvedTextFrame> ownedTextFrames = ownedTextFramesOf(rg);
         if (ownedTextFrames.isEmpty()) return false;
@@ -329,6 +339,32 @@ public final class OwnershipPlanner {
                 || reason.contains("visual_shell")
                 || "hwpx_tf".equals(rg.textOwner())
                 || hasEditableTextFrameIds(rg);
+    }
+
+    private boolean hasOnlyAbsorbableEditableLabelShellSources(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        boolean hasTextFrame = false;
+        boolean hasRect = false;
+        for (int id : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item == null) continue;
+            String type = safe(item.type());
+            if ("Group".equals(type)) {
+                continue;
+            }
+            if ("TextFrame".equals(type)) {
+                hasTextFrame = true;
+                continue;
+            }
+            if (!"Rectangle".equals(type)) {
+                return false;
+            }
+            if (!isSimpleDrawableShape(item)) return false;
+            if (Math.abs(item.absoluteRotationAngle()) > 0.5) return false;
+            if (Math.abs(item.absoluteShearAngle()) > 0.5) return false;
+            hasRect = true;
+        }
+        return hasTextFrame && hasRect;
     }
 
     private List<ResolvedTextFrame> ownedTextFramesOf(RenderedGroup rg) {
@@ -365,7 +401,7 @@ public final class OwnershipPlanner {
         if (tf == null) return false;
         if (!isNoneColor(tf.fillColor()) && !isPaperColor(tf.fillColor())) return true;
         if (!isNoneColor(tf.strokeColor()) && tf.strokeWeight() > 0.01) return true;
-        return tf.cornerRadius() > 0.01;
+        return false;
     }
 
     private boolean hasAbsorbableSiblingShape(ResolvedTextFrame tf) {
@@ -373,17 +409,26 @@ public final class OwnershipPlanner {
         if (tfItem == null || tfItem.parentId() == null) return false;
         double[] tfBounds = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
         if (tfBounds == null || tfBounds.length < 4) return false;
+        boolean foundAbsorbableRect = false;
         for (ResolvedPageItem item : data.pageItems()) {
             if (item == null || item.id() == null || item.id().equals(tf.id())) continue;
             if (!tfItem.parentId().equals(item.parentId())) continue;
-            if (!isSimpleDrawableShape(item)) continue;
+            String type = safe(item.type());
+            if ("TextFrame".equals(type)) continue;
+            if (!isSimpleDrawableShape(item)) {
+                if ("GraphicLine".equals(type)) return false;
+                continue;
+            }
             if (Math.abs(item.absoluteRotationAngle()) > 0.5) continue;
             if (Math.abs(item.absoluteShearAngle()) > 0.5) continue;
+            if (!"Rectangle".equals(type)) return false;
             if (overlapRatio(tfBounds, boundsOf(item)) >= 0.70) {
-                return true;
+                foundAbsorbableRect = true;
+            } else {
+                return false;
             }
         }
-        return false;
+        return foundAbsorbableRect;
     }
 
     private static boolean isSimpleDrawableShape(ResolvedPageItem item) {
@@ -635,17 +680,137 @@ public final class OwnershipPlanner {
                 if (!isImageExportVisual(b)) continue;
                 if (a.pageIndex != b.pageIndex) continue;
                 if (!boundsMostlyOverlap(a.bounds, b.bounds, 0.78)) continue;
-                if (!isLikelyDuplicateImageExport(a, b)) continue;
+                if (isLargeLayeredImageExportPair(a, b)) {
+                    ObjectPlan layerA = a.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+                    ObjectPlan layerB = b.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+                    plans.set(i, layerA);
+                    plans.set(j, layerB);
+                    a = layerA;
+                    continue;
+                }
+                if (!isLikelyDuplicateImageExport(a, b)) {
+                    if (isLargeLayeredImageExportPair(a, b)) {
+                        ObjectPlan layerA = a.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+                        ObjectPlan layerB = b.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+                        plans.set(i, layerA);
+                        plans.set(j, layerB);
+                        a = layerA;
+                    }
+                    continue;
+                }
                 if (isBackdropAndContentImagePair(a, b)) continue;
                 double aScore = visualInkScore(a);
                 double bScore = visualInkScore(b);
                 if (Math.abs(aScore - bScore) < 0.004) continue;
                 if (aScore > bScore) {
-                    plans.set(j, b.withVisualAction(VisualAction.DROP_VISUAL, b.reason));
+                    plans.set(j, b.withVisualAction(VisualAction.DROP_VISUAL, "duplicate_image_export"));
                 } else {
-                    plans.set(i, a.withVisualAction(VisualAction.DROP_VISUAL, a.reason));
+                    plans.set(i, a.withVisualAction(VisualAction.DROP_VISUAL, "duplicate_image_export"));
                     break;
                 }
+            }
+        }
+    }
+
+    private void resolveLargeLayeredImageExportBackdrops() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan a = plans.get(i);
+            if (!isImageExportVisual(a)) continue;
+            for (int j = i + 1; j < plans.size(); j++) {
+                ObjectPlan b = plans.get(j);
+                if (!isImageExportVisual(b)) continue;
+                if (!isLargeLayeredImageExportPair(a, b)) continue;
+                ObjectPlan layerA = a.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+                ObjectPlan layerB = b.withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+                plans.set(i, layerA);
+                plans.set(j, layerB);
+                a = layerA;
+            }
+        }
+    }
+
+    private void resolveClippedDecorationParents() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan parent = plans.get(i);
+            if (!isRenderedClippingParentCandidate(parent)) continue;
+            for (int j = 0; j < plans.size(); j++) {
+                if (i == j) continue;
+                ObjectPlan child = plans.get(j);
+                if (!isVisibleRenderedVisual(child)) continue;
+                if (child.pageIndex != parent.pageIndex) continue;
+                if (!isUnclippedDecorationChild(parent, child)) continue;
+                ObjectPlan retainedParent = parent
+                        .withVisualAction(VisualAction.PLACE_FLOATING_PNG, parent.reason)
+                        .withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+                plans.set(i, retainedParent);
+                plans.set(j, child.withVisualAction(VisualAction.DROP_VISUAL,
+                        "owned_by_clipped_decoration_parent"));
+                parent = retainedParent;
+            }
+        }
+    }
+
+    private boolean isRenderedClippingParentCandidate(ObjectPlan plan) {
+        if (plan == null || plan.renderId == null || plan.file == null || plan.file.isBlank()) return false;
+        if (plan.placement != Placement.FLOATING) return false;
+        if (!plan.kind.startsWith("rendered_floating_item:")) return false;
+        String reason = safe(plan.reason);
+        if (!reason.contains("complex_graphic")) return false;
+        ResolvedPageItem item = data.getPageItem(String.valueOf(plan.domId));
+        if (item == null) return false;
+        String type = safe(item.type());
+        return "Polygon".equals(type) || "Rectangle".equals(type) || "Oval".equals(type);
+    }
+
+    private boolean isUnclippedDecorationChild(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        if (!safe(child.reason).contains("decoration")) return false;
+        if (!isStrictChildPlan(parent, child)) return false;
+        if (!hasSourceParentRelation(parent, child)) return false;
+        double parentArea = area(parent.bounds);
+        double childArea = area(child.bounds);
+        if (parentArea <= 0.0 || childArea <= 0.0) return false;
+        return childArea > parentArea * 1.35
+                || !boundsContains(parent.bounds, child.bounds, 2.0);
+    }
+
+    private boolean hasSourceParentRelation(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null || data == null) return false;
+        for (int sourceId : child.sourceObjectIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.parentId() == null) continue;
+            if (item.parentId().equals(String.valueOf(parent.domId))) {
+                return true;
+            }
+            ResolvedPageItem directParent = data.getPageItem(item.parentId());
+            if (directParent != null && String.valueOf(parent.domId).equals(directParent.parentId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void resolveContainerMasksOverIntrudingLabelBackdrops() {
+        List<ObjectPlan> labels = new ArrayList<>();
+        for (ObjectPlan plan : plans) {
+            if (!isVisibleRenderedVisual(plan)) continue;
+            if (plan.visualLayer == VisualLayer.LABEL_BACKDROP) {
+                labels.add(plan);
+            }
+        }
+        if (labels.isEmpty()) return;
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan container = plans.get(i);
+            if (!isVisibleRenderedVisual(container)) continue;
+            if (container.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
+            if (container.visualLayer != VisualLayer.CONTAINER_BACKDROP) continue;
+            if (!isPaperLikeContainerFace(container)) continue;
+            for (ObjectPlan label : labels) {
+                if (label.pageIndex != container.pageIndex) continue;
+                if (!labelIntrudesIntoContainerFace(label.bounds, container.bounds)) continue;
+                plans.set(i, container.withVisualLayer(VisualLayer.CONTAINER_OUTLINE));
+                break;
             }
         }
     }
@@ -938,12 +1103,84 @@ public final class OwnershipPlanner {
         return false;
     }
 
-    private static boolean isLabelBackdropLike(RenderedGroup rg, TextAction textAction) {
+    private boolean isRuleLineGroup(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        String reason = safe(rg.reason());
+        if (!reason.contains("decoration") && !reason.contains("line")) return false;
+        int graphicLines = 0;
+        int filledShapes = 0;
+        for (int id : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item == null) continue;
+            String type = safe(item.type());
+            if ("GraphicLine".equals(type)) {
+                graphicLines++;
+                continue;
+            }
+            if (isSimpleDrawableShape(item)
+                    && !isPaperColor(item.fillColorName())
+                    && !isNoneColor(item.fillColorName())) {
+                filledShapes++;
+            }
+        }
+        return graphicLines > 0 && filledShapes == 0;
+    }
+
+    private boolean isLabelBackdropLike(RenderedGroup rg, TextAction textAction) {
         if (rg == null || isLargeVisual(rg)) return false;
         if (textAction == TextAction.OWNED_BY_PNG) return false;
         if (looksLikeShortLabel(rg)) return true;
+        if (isBackdropOfEditableShortLabel(rg)) return true;
         String reason = safe(rg.reason());
         return reason.contains("label") || reason.contains("visual_label");
+    }
+
+    private boolean isBackdropOfEditableShortLabel(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!isLabelShapeCandidate(rg)) return false;
+        double[] rb = rg.bounds();
+        if (rb == null || rb.length < 4) return false;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (tf == null || tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (tf.pageIndex() != rg.pageIndex()) continue;
+            if (!isShortEditableLabelTextFrame(tf)) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (overlapRatio(rb, tb) >= 0.60 || containsCenter(rb, tb)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isLabelShapeCandidate(RenderedGroup rg) {
+        if (rg == null || isLargeVisual(rg)) return false;
+        if (isLineLikeVisual(rg) || isMaskLikeVisual(rg)) return false;
+        String reason = safe(rg.reason());
+        if (!"vector_shape".equals(reason)
+                && !"pure_decoration_group".equals(reason)
+                && !"decoration_group".equals(reason)) {
+            return false;
+        }
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        double h = Math.abs(b[2] - b[0]);
+        double w = Math.abs(b[3] - b[1]);
+        if (w < 8.0 || h < 3.0 || h > 40.0 || w > 140.0) return false;
+        if (w / Math.max(1.0, h) < 1.15) return false;
+        return true;
+    }
+
+    private static boolean isShortEditableLabelTextFrame(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        String text = safe(tf.frameVisibleText()).replace('\n', ' ').replace('\r', ' ').trim();
+        if (text.isEmpty()) return false;
+        if (text.length() > 24) return false;
+        double[] b = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+        if (b == null || b.length < 4) return false;
+        double h = Math.abs(b[2] - b[0]);
+        double w = Math.abs(b[3] - b[1]);
+        if (w < 4.0 || h < 2.0 || h > 18.0 || w > 90.0) return false;
+        return true;
     }
 
     private static boolean isImageBackedContentShell(RenderedGroup rg) {
@@ -959,6 +1196,48 @@ public final class OwnershipPlanner {
     private boolean isBackdropDominantImageShell(RenderedGroup rg) {
         if (rg == null || !isLargeVisual(rg)) return false;
         return whiteOpaqueScore(rg.file()) >= 0.25;
+    }
+
+    private boolean isTextFrameBackdropVector(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!"vector_shape".equals(safe(rg.reason()))) return false;
+        double[] rb = rg.bounds();
+        if (rb == null || rb.length < 4) return false;
+        if (!hasDrawableBackdropShapeSource(rg)) return false;
+
+        double rArea = area(rb);
+        if (rArea < 20.0) return false;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (tf == null || tf.id() == null) continue;
+            if (tf.pageIndex() != rg.pageIndex()) continue;
+            if (tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (data.isTextOwnedByIndesignPng(tf.id())) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb == null || tb.length < 4) continue;
+            double tArea = area(tb);
+            if (tArea < 10.0) continue;
+            if (overlapRatio(rb, tb) < 0.58) continue;
+            if (rArea > tArea * 1.65 && !boundsContains(rb, tb, 2.0)) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean hasDrawableBackdropShapeSource(RenderedGroup rg) {
+        for (int id : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item == null) continue;
+            String type = safe(item.type());
+            if (!("Rectangle".equals(type) || "Polygon".equals(type) || "Oval".equals(type))) {
+                continue;
+            }
+            boolean hasFill = !isNoneColor(item.fillColorName());
+            boolean hasStroke = !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
+            if (hasFill || hasStroke || item.cornerRadius() > 0.01) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isContainerBackdropLike(RenderedGroup rg) {
@@ -1267,6 +1546,14 @@ public final class OwnershipPlanner {
                 && centerX >= container[1] && centerX <= container[3];
     }
 
+    private static boolean containsCenter(double[] container, double[] item) {
+        if (container == null || item == null || container.length < 4 || item.length < 4) return false;
+        double centerY = (item[0] + item[2]) / 2.0;
+        double centerX = (item[1] + item[3]) / 2.0;
+        return centerY >= container[0] && centerY <= container[2]
+                && centerX >= container[1] && centerX <= container[3];
+    }
+
     private static boolean partiallyClips(double[] container, double[] item) {
         if (container == null || item == null || container.length < 4 || item.length < 4) return false;
         double overlapTop = Math.max(container[0], item[0]);
@@ -1517,6 +1804,30 @@ public final class OwnershipPlanner {
         return visualInkScore(plan) <= 0.035;
     }
 
+    private boolean isLargeLayeredImageExportPair(ObjectPlan a, ObjectPlan b) {
+        if (!isImageExportVisual(a) || !isImageExportVisual(b)) return false;
+        if (a.pageIndex != b.pageIndex) return false;
+        if (a.domId == b.domId) return false;
+        if (!boundsMostlyOverlap(a.bounds, b.bounds, 0.55)) return false;
+        double aArea = area(a.bounds);
+        double bArea = area(b.bounds);
+        if (Math.min(aArea, bArea) < 6000.0) return false;
+        double pageArea = pageArea(a.pageIndex);
+        if (pageArea > 0.0) {
+            double aRatio = aArea / pageArea;
+            double bRatio = bArea / pageArea;
+            if (Math.min(aRatio, bRatio) < 0.12 && Math.min(aArea, bArea) < 10000.0) return false;
+            if (Math.max(aRatio, bRatio) < 0.18 && Math.max(aArea, bArea) < 14000.0) return false;
+        }
+
+        double areaRatio = Math.min(aArea, bArea) / Math.max(1.0, Math.max(aArea, bArea));
+        boolean nearSameGeometry = areaRatio >= 0.94 && boundsMostlyOverlap(a.bounds, b.bounds, 0.96);
+        boolean nearSamePixels = Math.abs(visualInkScore(a) - visualInkScore(b)) < 0.04
+                && Math.abs(whiteOpaqueScore(a.file) - whiteOpaqueScore(b.file)) < 0.04;
+        if (sharesAnySource(a, b) && nearSameGeometry) return false;
+        return !(nearSameGeometry && nearSamePixels);
+    }
+
     private boolean isFlatImageExportBackdrop(RenderedGroup rg) {
         if (rg == null) return false;
         if (!"image_export".equals(safe(rg.reason()))) return false;
@@ -1529,14 +1840,18 @@ public final class OwnershipPlanner {
         return score <= 0.035;
     }
 
-    private static boolean isLikelyDuplicateImageExport(ObjectPlan a, ObjectPlan b) {
+    private boolean isLikelyDuplicateImageExport(ObjectPlan a, ObjectPlan b) {
         if (sharesAnySource(a, b)) return true;
         double aArea = area(a != null ? a.bounds : null);
         double bArea = area(b != null ? b.bounds : null);
         if (aArea <= 0.0 || bArea <= 0.0) return false;
         double areaRatio = Math.min(aArea, bArea) / Math.max(aArea, bArea);
         if (areaRatio < 0.70) return false;
-        return boundsMostlyOverlap(a.bounds, b.bounds, 0.86);
+        if (!boundsMostlyOverlap(a.bounds, b.bounds, 0.86)) return false;
+        boolean nearSameGeometry = areaRatio >= 0.94 && boundsMostlyOverlap(a.bounds, b.bounds, 0.96);
+        boolean nearSamePixels = Math.abs(visualInkScore(a) - visualInkScore(b)) < 0.04
+                && Math.abs(whiteOpaqueScore(a.file) - whiteOpaqueScore(b.file)) < 0.04;
+        return nearSameGeometry && nearSamePixels;
     }
 
     private static boolean boundsMostlyOverlap(double[] a, double[] b, double threshold) {
@@ -1574,6 +1889,50 @@ public final class OwnershipPlanner {
 
     private static boolean isVisualBackdropCluster(ObjectPlan plan) {
         return plan != null && "visual_backdrop_cluster".equals(plan.reason);
+    }
+
+    private boolean isPaperLikeContainerFace(ObjectPlan plan) {
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
+        if (isLineLikePlan(plan)) return false;
+        double h = Math.abs(plan.bounds[2] - plan.bounds[0]);
+        double w = Math.abs(plan.bounds[3] - plan.bounds[1]);
+        if (w < 18.0 || h < 18.0 || (w * h) < 800.0) return false;
+        for (int sourceId : plan.sourceObjectIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (isPaperStrokeBoxItem(item) || isPaperFillBackdropPatchItem(item)) {
+                return true;
+            }
+        }
+        return whiteOpaqueScore(plan.file) >= 0.45;
+    }
+
+    private static boolean isLineLikePlan(ObjectPlan plan) {
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
+        double h = Math.abs(plan.bounds[2] - plan.bounds[0]);
+        double w = Math.abs(plan.bounds[3] - plan.bounds[1]);
+        double min = Math.min(w, h);
+        double max = Math.max(w, h);
+        return min <= 3.5 && max >= 8.0;
+    }
+
+    private static boolean labelIntrudesIntoContainerFace(double[] label, double[] container) {
+        if (label == null || container == null || label.length < 4 || container.length < 4) return false;
+        double y1 = Math.max(label[0], container[0]);
+        double x1 = Math.max(label[1], container[1]);
+        double y2 = Math.min(label[2], container[2]);
+        double x2 = Math.min(label[3], container[3]);
+        if (y2 <= y1 || x2 <= x1) return false;
+        double labelH = Math.max(1.0, label[2] - label[0]);
+        double labelW = Math.max(1.0, label[3] - label[1]);
+        double overlapH = y2 - y1;
+        double overlapW = x2 - x1;
+        double labelCenterY = (label[0] + label[2]) / 2.0;
+        boolean crossesContainerTop = label[0] < container[0] && label[2] > container[0];
+        boolean centerNearContainerTop = labelCenterY <= container[0] + labelH * 0.25;
+        boolean substantialHorizontalOverlap = overlapW / labelW >= 0.45;
+        boolean shallowVerticalOverlap = overlapH / labelH >= 0.12 && overlapH / labelH <= 0.72;
+        return crossesContainerTop && centerNearContainerTop
+                && substantialHorizontalOverlap && shallowVerticalOverlap;
     }
 
     private static double area(double[] b) {

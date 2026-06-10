@@ -315,7 +315,8 @@ public final class BackgroundInjector {
                 if (img != null && shouldCompositeTfInlineVisuals(rg)) {
                     imageData = encodePng(img);
                 }
-                boolean keepPlannedContainerBackdropFill = "CONTAINER_BACKDROP".equals(visualLayer)
+                boolean keepPlannedContainerBackdropFill =
+                        ("CONTAINER_BACKDROP".equals(visualLayer) || "CONTAINER_FACE".equals(visualLayer))
                         && isPaperOnlyContainerShell(ctx, rg);
                 if (img != null
                         && !planKeepsForegroundZ
@@ -656,6 +657,91 @@ public final class BackgroundInjector {
                             fig2.fromGroup(false);
                             fig2.sourceId("page_obj_" + rg.id() + "_ov");
                             sections.get(nextPageIdx).addBlockAtFront(fig2);
+                        }
+                    }
+                }
+            }
+            // 스프레드를 가로질러 이전 페이지로 넘치는 경우: 왼쪽 반을 이전 페이지에 별도 배치.
+            // InDesign은 오른쪽 페이지에 소유된 큰 장식/이미지가 왼쪽 페이지 영역까지
+            // 보이도록 둘 수 있다. HWPX는 페이지 단위로 잘리므로 교차한 각 페이지에
+            // 같은 source visual의 page-local 인스턴스를 만들어야 한다.
+            boolean overflowsLeft = !pageAnchoredStripCrop
+                    && rawLeft < -10.0 && pageIdx - 1 >= 0;
+            if (overflowsLeft) {
+                int prevPageIdx = pageIdx - 1;
+                double prevPageWidthMm = 1e9, prevPageHeightMm = 1e9;
+                if (ctx.resolvedData.pages() != null && prevPageIdx < ctx.resolvedData.pages().size()) {
+                    double[] ppB = ctx.resolvedData.pages().get(prevPageIdx).bounds();
+                    if (ppB != null && ppB.length >= 4) {
+                        prevPageWidthMm = (ppB[3] - ppB[1]) / ctx.scaleFactor;
+                        prevPageHeightMm = (ppB[2] - ppB[0]) / ctx.scaleFactor;
+                    }
+                }
+                double prevVisLeft = Math.max(0.0, rawLeft + pageWidthMm);
+                double prevVisTop = Math.max(0.0, rawTop);
+                double prevVisRight = Math.min(rawRight + pageWidthMm, prevPageWidthMm);
+                double prevVisBottom = Math.min(rawBottom, prevPageHeightMm);
+                if (prevVisLeft < prevVisRight && prevVisTop < prevVisBottom) {
+                    byte[] overflowData = loadPng(ctx, rg);
+                    if (overflowData != null) {
+                        int ovPixelW = 0, ovPixelH = 0;
+                        try {
+                            File pngFile2 = new File(ctx.basePath, rg.file());
+                            BufferedImage ovImg = ImageIO.read(pngFile2);
+                            if (ovImg != null) {
+                                // 이전 페이지 가시 영역을 현재 페이지-local raw 좌표계로 되돌려 크롭한다.
+                                double cropLeft = prevVisLeft - pageWidthMm;
+                                double cropTop = prevVisTop;
+                                double cropRight = prevVisRight - pageWidthMm;
+                                double cropBottom = prevVisBottom;
+                                int pxX2 = (int) Math.round((cropLeft - rawLeft) / fullW * ovImg.getWidth());
+                                int pxY2 = (int) Math.round((cropTop - rawTop) / fullH * ovImg.getHeight());
+                                int pxW2 = (int) Math.round((cropRight - rawLeft) / fullW * ovImg.getWidth()) - pxX2;
+                                int pxH2 = (int) Math.round((cropBottom - rawTop) / fullH * ovImg.getHeight()) - pxY2;
+                                pxX2 = Math.max(0, Math.min(pxX2, ovImg.getWidth() - 1));
+                                pxY2 = Math.max(0, Math.min(pxY2, ovImg.getHeight() - 1));
+                                pxW2 = Math.max(1, Math.min(ovImg.getWidth() - pxX2, pxW2));
+                                pxH2 = Math.max(1, Math.min(ovImg.getHeight() - pxY2, pxH2));
+                                try {
+                                    BufferedImage ovCropped = ovImg.getSubimage(pxX2, pxY2, pxW2, pxH2);
+                                    java.io.ByteArrayOutputStream baos2 = new java.io.ByteArrayOutputStream();
+                                    ImageIO.write(ovCropped, "png", baos2);
+                                    overflowData = baos2.toByteArray();
+                                    ovPixelW = ovCropped.getWidth();
+                                    ovPixelH = ovCropped.getHeight();
+                                    ovCropped.flush();
+                                } catch (Exception ignored3) {
+                                    ovPixelW = ovImg.getWidth();
+                                    ovPixelH = ovImg.getHeight();
+                                }
+                                ovImg.flush();
+                            }
+                        } catch (Exception ignored2) {}
+
+                        long px = CoordinateConverter.pointsToHwpunits(prevVisLeft * ctx.scaleFactor);
+                        long py = CoordinateConverter.pointsToHwpunits(prevVisTop * ctx.scaleFactor);
+                        long pw = CoordinateConverter.pointsToHwpunits((prevVisRight - prevVisLeft) * ctx.scaleFactor);
+                        long ph = CoordinateConverter.pointsToHwpunits((prevVisBottom - prevVisTop) * ctx.scaleFactor);
+                        if (pw > 0 && ph > 0) {
+                            ASTFigure figPrev = new ASTFigure();
+                            figPrev.x(px);
+                            figPrev.y(py);
+                            figPrev.width(pw);
+                            figPrev.height(ph);
+                            figPrev.imageData(overflowData);
+                            String fmt2 = rg.imageFormat();
+                            figPrev.imageFormat((fmt2 != null && !fmt2.isEmpty()) ? fmt2 : "png");
+                            figPrev.pixelWidth(ovPixelW);
+                            figPrev.pixelHeight(ovPixelH);
+                            figPrev.zOrder(0);
+                            figPrev.fromGroup(false);
+                            if (visualLayer != null) {
+                                figPrev.visualLayer(visualLayer);
+                            }
+                            figPrev.sourceId("page_obj_" + rg.id() + "_ov_prev");
+                            sections.get(prevPageIdx).addBlockAtFront(figPrev);
+                            ctx.recordRenderedDecision(rg, "Phase6", "PLACE_OVERFLOW_PREVIOUS_PAGE",
+                                    "spread-crossing visual placed on previous page");
                         }
                     }
                 }

@@ -4,6 +4,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership;
 public enum VisualLayer {
     PAGE_BACKGROUND,
     CONTAINER_BACKDROP,
+    CONTAINER_FACE,
     CONTAINER_OUTLINE,
     LABEL_BACKDROP,
     CONTENT_VISUAL,

@@ -328,7 +328,8 @@ public final class ResolvedBuildContext {
     public Boolean inFrontLayerByOwnershipPlan(RenderedGroup rg) {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         if (plan == null || !plan.hasVisibleVisual() || plan.visualLayer == null) return null;
-        return plan.visualLayer == VisualLayer.LABEL_BACKDROP
+        return plan.visualLayer == VisualLayer.CONTAINER_FACE
+                || plan.visualLayer == VisualLayer.LABEL_BACKDROP
                 || plan.visualLayer == VisualLayer.CONTENT_VISUAL
                 || plan.visualLayer == VisualLayer.CONTAINER_OUTLINE
                 || plan.visualLayer == VisualLayer.FOREGROUND_MASK;

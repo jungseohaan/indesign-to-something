@@ -279,11 +279,9 @@ public class ASTToHwpxConverter {
 
         // 1) BEHIND_TEXT FIGURE: 배경 이미지 (그룹 외부)를 먼저 배치
         //
-        // HWPX에서는 같은 BEHIND_TEXT 객체끼리도 출력 순서가 체감 레이어에 영향을 준다.
-        // Phase 6/7이 section 앞쪽에 삽입한 순서를 그대로 쓰면, 페이지 전체 배경 PNG가
-        // 내부의 흰색 패널/외곽선보다 늦게 출력되어 위로 올라오는 케이스가 생긴다.
-        // 따라서 z-order를 1차 기준으로 삼고, 같은 z-order 안에서는 넓은 배경을 먼저 깔아
-        // 작은 패널/마스크가 그 위에 놓이도록 안정화한다.
+        // HWPX에서는 같은 BEHIND_TEXT 평면 안에서 XML에 먼저 나온 객체가 위로 보이는
+        // 케이스가 있다. 따라서 출력용 zOrder가 큰(=더 앞 레이어인) 객체를 먼저 쓰고,
+        // 페이지 배경처럼 낮은 zOrder의 객체는 뒤에 써서 실제로 아래에 깔리게 한다.
         List<ASTFigure> behindFigures = new ArrayList<>();
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
@@ -296,10 +294,10 @@ public class ASTToHwpxConverter {
         Collections.sort(behindFigures, new Comparator<ASTFigure>() {
             @Override
             public int compare(ASTFigure a, ASTFigure b) {
-                int z = Integer.compare(a.zOrder(), b.zOrder());
+                int z = Integer.compare(b.zOrder(), a.zOrder());
                 if (z != 0) return z;
 
-                int area = Long.compare(figureArea(b), figureArea(a));
+                int area = Long.compare(figureArea(a), figureArea(b));
                 if (area != 0) return area;
 
                 int y = Long.compare(a.y(), b.y());
