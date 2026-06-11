@@ -604,154 +604,160 @@ export const useAppStore = create<AppState>((set, get) => ({
       batchCancelled: false,
     });
 
-    for (let i = 0; i < selectedPaths.length; i++) {
-      // 중단 확인
-      if (get().batchCancelled) break;
+    await invoke("begin_sleep_prevention").catch(() => {});
 
-      // 배치 파일 간 딜레이 (InDesign 안정화)
-      if (i > 0) {
-        await new Promise((r) => setTimeout(r, 3000));
-      }
-
-      const inddPath = selectedPaths[i];
-      set({ batchCurrentIndex: i });
-
-      // 상태 업데이트: extracting + 시작 시각 기록
-      const startedAt = Date.now();
-      set((s) => ({
-        batchResults: s.batchResults.map((r, idx) =>
-          idx === i ? { ...r, status: "extracting" as const, startedAt, extractStartedAt: startedAt } : r
-        ),
-      }));
-
-      // 추출 진행 이벤트: 캐시 적중 감지 + phase 메시지 저장
-      const unlistenExtractProgress = await listen<InddExtractionProgress>(
-        "indd-extraction-progress",
-        (event) => {
-          if (event.payload.phase === "cached") {
-            const idx = get().batchCurrentIndex;
-            set((s) => ({
-              batchResults: s.batchResults.map((r, j) =>
-                j === idx ? { ...r, cached: true } : r
-              ),
-            }));
-          }
-          set({ batchCurrentPhaseMessage: event.payload.message });
-        }
-      );
-
-      try {
-        const { debugStartPage, debugEndPage, perfMode, extractChunkSize } = get();
-        // 1. InDesign으로 추출 (디버그 페이지 범위가 있으면 일부만)
-        const extractResult = await invoke<InddExtractResult>("extract_indd", {
-          inddPath,
-          jarPath,
-          spreadMode: spreadBased,
-          startPage: debugStartPage,
-          endPage: debugEndPage,
-          perfMode,
-          chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
-        });
-
+    try {
+      for (let i = 0; i < selectedPaths.length; i++) {
+        // 중단 확인
         if (get().batchCancelled) break;
 
-        if (extractResult.extract_stats) {
-          set({ lastExtractStats: extractResult.extract_stats });
+        // 배치 파일 간 딜레이 (InDesign 안정화)
+        if (i > 0) {
+          await new Promise((r) => setTimeout(r, 3000));
         }
 
-        // 상태 업데이트: converting + 변환 시작 시각
-        const convertStartedAt = Date.now();
+        const inddPath = selectedPaths[i];
+        set({ batchCurrentIndex: i });
+
+        // 상태 업데이트: extracting + 시작 시각 기록
+        const startedAt = Date.now();
         set((s) => ({
           batchResults: s.batchResults.map((r, idx) =>
-            idx === i ? { ...r, status: "converting" as const, convertStartedAt } : r
+            idx === i ? { ...r, status: "extracting" as const, startedAt, extractStartedAt: startedAt } : r
           ),
         }));
 
-        // 2. 출력 경로 계산 (원본 폴더 구조 유지)
-        let relativeSubdir = "";
-        if (batchBasePath) {
-          const inddDir = inddPath.replace(/[/\\][^/\\]+$/, "");
-          if (inddDir.startsWith(batchBasePath)) {
-            relativeSubdir = inddDir.substring(batchBasePath.length).replace(/^[/\\]/, "");
+        // 추출 진행 이벤트: 캐시 적중 감지 + phase 메시지 저장
+        const unlistenExtractProgress = await listen<InddExtractionProgress>(
+          "indd-extraction-progress",
+          (event) => {
+            if (event.payload.phase === "cached") {
+              const idx = get().batchCurrentIndex;
+              set((s) => ({
+                batchResults: s.batchResults.map((r, j) =>
+                  j === idx ? { ...r, cached: true } : r
+                ),
+              }));
+            }
+            set({ batchCurrentPhaseMessage: event.payload.message });
           }
-        }
+        );
 
-        const outputSubdir = relativeSubdir
-          ? `${outputDir}/${relativeSubdir}`
-          : outputDir;
+        try {
+          const { debugStartPage, debugEndPage, perfMode, extractChunkSize } = get();
+          // 1. InDesign으로 추출 (디버그 페이지 범위가 있으면 일부만)
+          const extractResult = await invoke<InddExtractResult>("extract_indd", {
+            inddPath,
+            jarPath,
+            spreadMode: spreadBased,
+            startPage: debugStartPage,
+            endPage: debugEndPage,
+            perfMode,
+            skipPdf: perfMode === "fast",
+            chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
+          });
 
-        // 디렉토리 생성
-        await invoke("create_dir", { path: outputSubdir });
+          if (get().batchCancelled) break;
 
-        const inddFilename = inddPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
-        const batchOutputPath = `${outputSubdir}/${inddFilename}.hwpx`;
-
-        // 3. 변환 (HWPX 또는 Markdown)
-        const batchLinksDir = inddPath.replace(/[/\\][^/\\]+$/, "") + "/Links";
-        await invoke<ConvertResult>("convert_idml", {
-          inputPath: extractResult.idml_path,
-          outputPath: batchOutputPath,
-          options: {
-            spread_based: spreadBased,
-            vector_dpi: vectorDpi,
-            include_images: true,
-            resolved_json_path: extractResult.resolved_json_path,
-            layout_mode: layoutMode,
-            font_map: Object.keys(fontMappings).length > 0 ? fontMappings : null,
-            links_directory: batchLinksDir,
-          },
-          jarPath,
-        });
-
-        // 4. preview PDF 복사
-        let pdfOutputPath: string | null = null;
-        if (extractResult.preview_pdf_path) {
-          try {
-            pdfOutputPath = `${outputSubdir}/${inddFilename}.pdf`;
-            await invoke("copy_file", { src: extractResult.preview_pdf_path, dst: pdfOutputPath });
-          } catch {
-            pdfOutputPath = null;
+          if (extractResult.extract_stats) {
+            set({ lastExtractStats: extractResult.extract_stats });
           }
-        }
 
-        // 성공 + 완료 시각
-        set((s) => ({
-          batchResults: s.batchResults.map((r, idx) =>
-            idx === i ? { ...r, status: "done" as const, completedAt: Date.now() } : r
-          ),
-          batchCurrentPhaseMessage: null,
-        }));
+          // 상태 업데이트: converting + 변환 시작 시각
+          const convertStartedAt = Date.now();
+          set((s) => ({
+            batchResults: s.batchResults.map((r, idx) =>
+              idx === i ? { ...r, status: "converting" as const, convertStartedAt } : r
+            ),
+          }));
 
-        // 변환된 파일을 즉시 열기 (noPreview 모드 시 건너뜀)
-        if (!get().noPreview) {
-          try { await invoke("open_file", { path: batchOutputPath }); } catch {}
-          if (pdfOutputPath) {
-            try { await invoke("open_file", { path: pdfOutputPath }); } catch {}
+          // 2. 출력 경로 계산 (원본 폴더 구조 유지)
+          let relativeSubdir = "";
+          if (batchBasePath) {
+            const inddDir = inddPath.replace(/[/\\][^/\\]+$/, "");
+            if (inddDir.startsWith(batchBasePath)) {
+              relativeSubdir = inddDir.substring(batchBasePath.length).replace(/^[/\\]/, "");
+            }
           }
-        }
 
-        // 단일 파일일 때 AST 자동 로드 (시멘틱 레이어 탭용)
-        if (selectedPaths.length === 1 && jarPath) {
-          useAstStore.getState().loadAST(extractResult.idml_path, jarPath);
-          if (extractResult.resolved_json_path) {
-            useAstStore.getState().loadResolved(extractResult.resolved_json_path);
+          const outputSubdir = relativeSubdir
+            ? `${outputDir}/${relativeSubdir}`
+            : outputDir;
+
+          // 디렉토리 생성
+          await invoke("create_dir", { path: outputSubdir });
+
+          const inddFilename = inddPath.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
+          const batchOutputPath = `${outputSubdir}/${inddFilename}.hwpx`;
+
+          // 3. 변환 (HWPX 또는 Markdown)
+          const batchLinksDir = inddPath.replace(/[/\\][^/\\]+$/, "") + "/Links";
+          await invoke<ConvertResult>("convert_idml", {
+            inputPath: extractResult.idml_path,
+            outputPath: batchOutputPath,
+            options: {
+              spread_based: spreadBased,
+              vector_dpi: vectorDpi,
+              include_images: true,
+              resolved_json_path: extractResult.resolved_json_path,
+              layout_mode: layoutMode,
+              font_map: Object.keys(fontMappings).length > 0 ? fontMappings : null,
+              links_directory: batchLinksDir,
+            },
+            jarPath,
+          });
+
+          // 4. preview PDF 복사
+          let pdfOutputPath: string | null = null;
+          if (extractResult.preview_pdf_path) {
+            try {
+              pdfOutputPath = `${outputSubdir}/${inddFilename}.pdf`;
+              await invoke("copy_file", { src: extractResult.preview_pdf_path, dst: pdfOutputPath });
+            } catch {
+              pdfOutputPath = null;
+            }
           }
-          set({ idmlPath: extractResult.idml_path, resolvedJsonPath: extractResult.resolved_json_path ?? null });
+
+          // 성공 + 완료 시각
+          set((s) => ({
+            batchResults: s.batchResults.map((r, idx) =>
+              idx === i ? { ...r, status: "done" as const, completedAt: Date.now() } : r
+            ),
+            batchCurrentPhaseMessage: null,
+          }));
+
+          // 변환된 파일을 즉시 열기 (noPreview 모드 시 건너뜀)
+          if (!get().noPreview) {
+            try { await invoke("open_file", { path: batchOutputPath }); } catch {}
+            if (pdfOutputPath) {
+              try { await invoke("open_file", { path: pdfOutputPath }); } catch {}
+            }
+          }
+
+          // 단일 파일일 때 AST 자동 로드 (시멘틱 레이어 탭용)
+          if (selectedPaths.length === 1 && jarPath) {
+            useAstStore.getState().loadAST(extractResult.idml_path, jarPath);
+            if (extractResult.resolved_json_path) {
+              useAstStore.getState().loadResolved(extractResult.resolved_json_path);
+            }
+            set({ idmlPath: extractResult.idml_path, resolvedJsonPath: extractResult.resolved_json_path ?? null });
+          }
+        } catch (e: any) {
+          // 실패 — 다음 파일 계속
+          set((s) => ({
+            batchResults: s.batchResults.map((r, idx) =>
+              idx === i ? { ...r, status: "error" as const, error: String(e), completedAt: Date.now() } : r
+            ),
+            batchCurrentPhaseMessage: null,
+          }));
+        } finally {
+          unlistenExtractProgress();
         }
-      } catch (e: any) {
-        // 실패 — 다음 파일 계속
-        set((s) => ({
-          batchResults: s.batchResults.map((r, idx) =>
-            idx === i ? { ...r, status: "error" as const, error: String(e), completedAt: Date.now() } : r
-          ),
-          batchCurrentPhaseMessage: null,
-        }));
-      } finally {
-        unlistenExtractProgress();
       }
+    } finally {
+      await invoke("end_sleep_prevention").catch(() => {});
+      set({ isBatchProcessing: false, batchCurrentIndex: -1 });
     }
-
-    set({ isBatchProcessing: false, batchCurrentIndex: -1 });
   },
 
   closeBatchModal: () => set({

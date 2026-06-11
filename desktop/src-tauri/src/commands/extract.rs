@@ -30,6 +30,9 @@ pub async fn extract_indd(
     // debug page range(start_page/end_page)가 지정된 경우 무시.
     chunk_size: Option<i32>,
 ) -> Result<crate::indesign::InddExtractResult, String> {
+    let sleep = app.state::<crate::SleepPreventionHandle>();
+    let _sleep_lease = sleep.acquire("extract_indd");
+
     let sp = start_page.unwrap_or(0);
     let ep = end_page.unwrap_or(0);
     let debug_range = sp > 0 || ep > 0;
@@ -127,7 +130,11 @@ pub async fn extract_indd(
             &output_dir,
             &jsx_path,
             &indesign_app_path,
-            sp, ep, sm, &pm_normalized, sk,
+            sp,
+            ep,
+            sm,
+            &pm_normalized,
+            sk,
         )
         .await
     } else {
@@ -141,8 +148,15 @@ pub async fn extract_indd(
         let cs = chunk_size.unwrap_or(0);
         if !debug_range && cs > 0 {
             crate::indesign::run_extraction_chunked(
-                &app, &indd_path, &output_dir, &jsx_path, &indesign_app_path,
-                sm, &pm_normalized, sk, cs,
+                &app,
+                &indd_path,
+                &output_dir,
+                &jsx_path,
+                &indesign_app_path,
+                sm,
+                &pm_normalized,
+                sk,
+                cs,
             )
             .await
             .map_err(|e| {
@@ -150,25 +164,25 @@ pub async fn extract_indd(
                 e
             })?
         } else {
-    crate::indesign::run_extraction(
-        &app,
-        &indd_path,
-        &output_dir,
-        &jsx_path,
-        &indesign_app_path,
-        sp,
-        ep,
-        sm,
-        &pm_normalized,
-        sk,
-        false,
-    )
-    .await
-    .map_err(|e| {
-        // 추출 실패 시 임시 디렉토리 정리
-        let _ = std::fs::remove_dir_all(&output_dir);
-        e
-    })?
+            crate::indesign::run_extraction(
+                &app,
+                &indd_path,
+                &output_dir,
+                &jsx_path,
+                &indesign_app_path,
+                sp,
+                ep,
+                sm,
+                &pm_normalized,
+                sk,
+                false,
+            )
+            .await
+            .map_err(|e| {
+                // 추출 실패 시 임시 디렉토리 정리
+                let _ = std::fs::remove_dir_all(&output_dir);
+                e
+            })?
         }
     }; // end partial_result else branch
 
@@ -195,10 +209,7 @@ pub async fn extract_indd(
     }
     match extract_cache::store(&cache_key, &indd_path, &output_dir) {
         Ok(moved) => {
-            extract_cache::write_extractor_fingerprint(
-                &cache_key,
-                std::path::Path::new(&jsx_path),
-            );
+            extract_cache::write_extractor_fingerprint(&cache_key, std::path::Path::new(&jsx_path));
             // 캐시 이동 성공 시 Links 링크 다시 연결
             if let Some(src_links) = links_dir.as_deref() {
                 let target_links = std::path::Path::new(&moved.temp_dir).join("Links");
@@ -267,7 +278,8 @@ fn parse_ast_json_from_stdout(stdout: &str, stderr: &str) -> Result<serde_json::
             continue;
         }
         let candidate = &stdout[idx..];
-        let mut stream = serde_json::Deserializer::from_str(candidate).into_iter::<serde_json::Value>();
+        let mut stream =
+            serde_json::Deserializer::from_str(candidate).into_iter::<serde_json::Value>();
         if let Some(Ok(value)) = stream.next() {
             if is_ast_json(&value) {
                 return Ok(value);
@@ -286,7 +298,11 @@ fn parse_ast_json_from_stdout(stdout: &str, stderr: &str) -> Result<serde_json::
 fn is_ast_json(value: &serde_json::Value) -> bool {
     value
         .as_object()
-        .map(|obj| obj.contains_key("sections") || obj.contains_key("stories") || obj.contains_key("sourceFormat"))
+        .map(|obj| {
+            obj.contains_key("sections")
+                || obj.contains_key("stories")
+                || obj.contains_key("sourceFormat")
+        })
         .unwrap_or(false)
 }
 
@@ -316,10 +332,7 @@ async fn try_partial_extraction(
     // 1. 이전 캐시 키 조회
     let indd = std::path::Path::new(indd_path);
     let prev_key = extract_cache::lookup_previous_cache_key(indd)?;
-    if !extract_cache::is_extractor_fingerprint_current(
-        &prev_key,
-        std::path::Path::new(jsx_path),
-    ) {
+    if !extract_cache::is_extractor_fingerprint_current(&prev_key, std::path::Path::new(jsx_path)) {
         eprintln!("[B.2] extractor 변경 감지 → 부분 캐시 재사용 생략");
         return None;
     }
@@ -328,25 +341,19 @@ async fn try_partial_extraction(
 
     // 2. pre-scan: 현재 페이지 해시 계산 (경량 InDesign 실행)
     let scan_dir = crate::indesign::create_extraction_temp_dir().ok()?;
-    let scan_ok = crate::indesign::run_page_hash_scan(
-        app,
-        indd_path,
-        &scan_dir,
-        jsx_path,
-        indesign_app_path,
-    )
-    .await;
+    let scan_ok =
+        crate::indesign::run_page_hash_scan(app, indd_path, &scan_dir, jsx_path, indesign_app_path)
+            .await;
     if scan_ok.is_err() {
         let _ = std::fs::remove_dir_all(&scan_dir);
         return None;
     }
 
     // 3. 현재 해시 읽기
-    let current_hashes: std::collections::HashMap<String, String> = std::fs::read_to_string(
-        scan_dir.join("page_hashes.json"),
-    )
-    .ok()
-    .and_then(|c| serde_json::from_str(&c).ok())?;
+    let current_hashes: std::collections::HashMap<String, String> =
+        std::fs::read_to_string(scan_dir.join("page_hashes.json"))
+            .ok()
+            .and_then(|c| serde_json::from_str(&c).ok())?;
     let _ = std::fs::remove_dir_all(&scan_dir);
 
     // 4. 변경되지 않은 페이지 계산
@@ -390,12 +397,8 @@ async fn try_partial_extraction(
     .ok()?;
 
     // 7. 이전 캐시에서 변경되지 않은 페이지 PNG 복사
-    let copied = extract_cache::copy_cached_pages(
-        &prev_key,
-        output_dir,
-        &unchanged,
-        &cached_item_map,
-    );
+    let copied =
+        extract_cache::copy_cached_pages(&prev_key, output_dir, &unchanged, &cached_item_map);
     eprintln!("[B.2] 캐시에서 {} 파일 복사", copied);
 
     // 8. SPEC-030: partial resolved.json + 캐시된 complete resolved.json 병합

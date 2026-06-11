@@ -16,6 +16,9 @@ pub async fn convert_idml(
     options: ConvertOptions,
     jar_path: String,
 ) -> Result<ConvertResult, String> {
+    let sleep = app.state::<crate::SleepPreventionHandle>();
+    let _sleep_lease = sleep.acquire("convert_idml");
+
     let input_path_ref = input_path.clone();
     let mut args = vec![
         "-jar".to_string(),
@@ -72,10 +75,7 @@ pub async fn convert_idml(
     let mut config_found = false;
     if let Ok(resource_dir) = app.path().resource_dir() {
         // Tauri 번들에서 리소스는 _up_/_up_/ 하위에 위치할 수 있음
-        let candidates = vec![
-            resource_dir.clone(),
-            resource_dir.join("_up_").join("_up_"),
-        ];
+        let candidates = vec![resource_dir.clone(), resource_dir.join("_up_").join("_up_")];
         for dir in &candidates {
             let config_path = dir.join("conversion-config.json");
             if config_path.exists() {
@@ -139,10 +139,13 @@ pub async fn convert_idml(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64;
-            let _ = app_clone.emit("conversion-log", LogEvent {
-                message: line,
-                timestamp,
-            });
+            let _ = app_clone.emit(
+                "conversion-log",
+                LogEvent {
+                    message: line,
+                    timestamp,
+                },
+            );
         }
     });
 
@@ -201,7 +204,10 @@ pub async fn convert_idml(
     }
 
     if !status.success() {
-        let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
+        let code = status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
         return Err(format!("Conversion failed (exit code {})", code));
     }
 
@@ -216,6 +222,9 @@ pub async fn convert_hwpx_to_idml(
     output_path: String,
     jar_path: String,
 ) -> Result<ConvertResult, String> {
+    let sleep = app.state::<crate::SleepPreventionHandle>();
+    let _sleep_lease = sleep.acquire("convert_hwpx_to_idml");
+
     let args = vec![
         "-jar".to_string(),
         jar_path,
@@ -247,10 +256,13 @@ pub async fn convert_hwpx_to_idml(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64;
-            let _ = app_clone.emit("conversion-log", LogEvent {
-                message: line,
-                timestamp,
-            });
+            let _ = app_clone.emit(
+                "conversion-log",
+                LogEvent {
+                    message: line,
+                    timestamp,
+                },
+            );
         }
     });
 
@@ -376,10 +388,13 @@ pub async fn generate_teaching(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64;
-            let _ = app_clone.emit("teaching-log", super::LogEvent {
-                message: line,
-                timestamp,
-            });
+            let _ = app_clone.emit(
+                "teaching-log",
+                super::LogEvent {
+                    message: line,
+                    timestamp,
+                },
+            );
         }
     });
 
@@ -395,11 +410,14 @@ pub async fn generate_teaching(
                             json.get("total").and_then(|v| v.as_i64()),
                             json.get("message").and_then(|v| v.as_str()),
                         ) {
-                            let _ = app.emit("teaching-progress", super::ProgressEvent {
-                                current: current as i32,
-                                total: total as i32,
-                                message: message.to_string(),
-                            });
+                            let _ = app.emit(
+                                "teaching-progress",
+                                super::ProgressEvent {
+                                    current: current as i32,
+                                    total: total as i32,
+                                    message: message.to_string(),
+                                },
+                            );
                         }
                     }
                     "complete" => {
@@ -423,10 +441,15 @@ pub async fn generate_teaching(
     let status = child.wait().await.map_err(|e| e.to_string())?;
 
     if !status.success() {
-        let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-        return Err(format!("Teaching material generation failed (exit code {})", code));
+        let code = status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        return Err(format!(
+            "Teaching material generation failed (exit code {})",
+            code
+        ));
     }
 
     final_result.ok_or_else(|| "No result received".to_string())
 }
-

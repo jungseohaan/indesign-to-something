@@ -44,8 +44,7 @@ impl ProcessKillHandle {
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled
-            .load(std::sync::atomic::Ordering::SeqCst)
+        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// 취소 플래그 설정 + 현재 프로세스 SIGKILL
@@ -71,6 +70,90 @@ impl ProcessKillHandle {
     }
 }
 
+struct SleepPreventionState {
+    child: Option<std::process::Child>,
+    leases: usize,
+}
+
+/// macOS idle sleep prevention for long InDesign/Java operations.
+pub struct SleepPreventionHandle {
+    state: std::sync::Mutex<SleepPreventionState>,
+}
+
+pub struct SleepPreventionLease<'a> {
+    handle: &'a SleepPreventionHandle,
+}
+
+impl SleepPreventionHandle {
+    pub fn new() -> Self {
+        Self {
+            state: std::sync::Mutex::new(SleepPreventionState {
+                child: None,
+                leases: 0,
+            }),
+        }
+    }
+
+    pub fn acquire(&self, reason: &str) -> SleepPreventionLease<'_> {
+        self.begin(reason);
+        SleepPreventionLease { handle: self }
+    }
+
+    pub fn begin(&self, reason: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            if state.leases == 0 {
+                state.child = Self::spawn_caffeinate();
+                if state.child.is_some() {
+                    eprintln!("[sleep] caffeinate started: {}", reason);
+                } else {
+                    eprintln!(
+                        "[sleep] caffeinate unavailable; continuing without sleep prevention: {}",
+                        reason
+                    );
+                }
+            }
+            state.leases += 1;
+        }
+    }
+
+    pub fn end(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            if state.leases > 0 {
+                state.leases -= 1;
+            }
+            if state.leases == 0 {
+                if let Some(mut child) = state.child.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    eprintln!("[sleep] caffeinate stopped");
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn spawn_caffeinate() -> Option<std::process::Child> {
+        std::process::Command::new("/usr/bin/caffeinate")
+            .args(["-dimsu"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .ok()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn spawn_caffeinate() -> Option<std::process::Child> {
+        None
+    }
+}
+
+impl Drop for SleepPreventionLease<'_> {
+    fn drop(&mut self) {
+        self.handle.end();
+    }
+}
+
 /// 현재 실행 중인 subprocess를 즉시 종료한다.
 #[tauri::command]
 async fn cancel_current(app: tauri::AppHandle) -> Result<(), String> {
@@ -79,11 +162,26 @@ async fn cancel_current(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn begin_sleep_prevention(app: tauri::AppHandle) -> Result<(), String> {
+    let sleep = app.state::<SleepPreventionHandle>();
+    sleep.begin("frontend batch");
+    Ok(())
+}
+
+#[tauri::command]
+async fn end_sleep_prevention(app: tauri::AppHandle) -> Result<(), String> {
+    let sleep = app.state::<SleepPreventionHandle>();
+    sleep.end();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(ProcessKillHandle::new())
+        .manage(SleepPreventionHandle::new())
         .menu(|handle| create_menu(handle))
         .on_menu_event(|app, event| {
             // SPEC-019 M1: 메뉴 ID → 프론트엔드 이벤트 단순 라우팅.
@@ -126,6 +224,8 @@ pub fn run() {
             commands::scan_indd_folder,
             commands::read_file_base64,
             cancel_current,
+            begin_sleep_prevention,
+            end_sleep_prevention,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -158,21 +258,47 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     // File 메뉴 (SPEC-019 M1)
     // ────────────────────────────────────────────────────────────
     // 단축키 정리: ⌘⇧I 충돌 회피 → InDesign Open은 ⌘⌥I로 이동
-    let open_indd = MenuItem::with_id(handle, "open-indd", "Open InDesign...", true, Some("CmdOrCtrl+Alt+I"))?;
-    let open_indd_folder = MenuItem::with_id(handle, "open-indd-folder", "Open InDesign Folder...", true, Some("CmdOrCtrl+Alt+F"))?;
-    let open_idml = MenuItem::with_id(handle, "open-idml", "Open IDML...", true, Some("CmdOrCtrl+O"))?;
-    let open_hwpx = MenuItem::with_id(handle, "open-hwpx", "Open HWPX...", true, Some("CmdOrCtrl+Shift+O"))?;
-
-    // Export 서브메뉴
-    let export_hwpx = MenuItem::with_id(handle, "export-hwpx", "HWPX...", true, Some("CmdOrCtrl+E"))?;
-    let export_submenu = Submenu::with_items(
+    let open_indd = MenuItem::with_id(
         handle,
-        "Export",
+        "open-indd",
+        "Open InDesign...",
         true,
-        &[&export_hwpx],
+        Some("CmdOrCtrl+Alt+I"),
+    )?;
+    let open_indd_folder = MenuItem::with_id(
+        handle,
+        "open-indd-folder",
+        "Open InDesign Folder...",
+        true,
+        Some("CmdOrCtrl+Alt+F"),
+    )?;
+    let open_idml = MenuItem::with_id(
+        handle,
+        "open-idml",
+        "Open IDML...",
+        true,
+        Some("CmdOrCtrl+O"),
+    )?;
+    let open_hwpx = MenuItem::with_id(
+        handle,
+        "open-hwpx",
+        "Open HWPX...",
+        true,
+        Some("CmdOrCtrl+Shift+O"),
     )?;
 
-    let clear_cache = MenuItem::with_id(handle, "clear-extract-cache", "Clear Extract Cache", true, None::<&str>)?;
+    // Export 서브메뉴
+    let export_hwpx =
+        MenuItem::with_id(handle, "export-hwpx", "HWPX...", true, Some("CmdOrCtrl+E"))?;
+    let export_submenu = Submenu::with_items(handle, "Export", true, &[&export_hwpx])?;
+
+    let clear_cache = MenuItem::with_id(
+        handle,
+        "clear-extract-cache",
+        "Clear Extract Cache",
+        true,
+        None::<&str>,
+    )?;
 
     #[cfg(not(target_os = "macos"))]
     let quit = MenuItem::with_id(handle, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
@@ -234,12 +360,30 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     // ────────────────────────────────────────────────────────────
     // View 메뉴 (SPEC-019 M1)
     // ────────────────────────────────────────────────────────────
-    let tab_converter = MenuItem::with_id(handle, "tab-converter", "HWPX Converter Tab", true, Some("CmdOrCtrl+1"))?;
-    let tab_teaching = MenuItem::with_id(handle, "tab-teaching", "Teaching Material Tab", true, Some("CmdOrCtrl+2"))?;
+    let tab_converter = MenuItem::with_id(
+        handle,
+        "tab-converter",
+        "HWPX Converter Tab",
+        true,
+        Some("CmdOrCtrl+1"),
+    )?;
+    let tab_teaching = MenuItem::with_id(
+        handle,
+        "tab-teaching",
+        "Teaching Material Tab",
+        true,
+        Some("CmdOrCtrl+2"),
+    )?;
 
     #[cfg(debug_assertions)]
     let view_menu = {
-        let devtools = MenuItem::with_id(handle, "devtools", "Toggle DevTools", true, Some("CmdOrCtrl+Shift+I"))?;
+        let devtools = MenuItem::with_id(
+            handle,
+            "devtools",
+            "Toggle DevTools",
+            true,
+            Some("CmdOrCtrl+Shift+I"),
+        )?;
         Submenu::with_items(
             handle,
             "View",
@@ -286,12 +430,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     #[cfg(not(target_os = "macos"))]
     let help_menu = {
         let about = MenuItem::with_id(handle, "about", "About IDML to HWPX", true, None::<&str>)?;
-        Submenu::with_items(
-            handle,
-            "Help",
-            true,
-            &[&about],
-        )?
+        Submenu::with_items(handle, "Help", true, &[&about])?
     };
 
     // 메뉴바 생성
@@ -302,10 +441,7 @@ fn create_menu(handle: &tauri::AppHandle) -> Result<Menu<tauri::Wry>, tauri::Err
     )?;
 
     #[cfg(not(target_os = "macos"))]
-    let menu = Menu::with_items(
-        handle,
-        &[&file_menu, &edit_menu, &view_menu, &help_menu],
-    )?;
+    let menu = Menu::with_items(handle, &[&file_menu, &edit_menu, &view_menu, &help_menu])?;
 
     Ok(menu)
 }
