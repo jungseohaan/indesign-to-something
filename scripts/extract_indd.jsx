@@ -15,7 +15,7 @@
 // SPEC-011: 추출 캐시 무효화용 스크립트 버전.
 // 출력 형식이나 추출 로직이 변경되면 이 값을 올려서 모든 캐시를 강제 무효화한다.
 // (mtime/size 기반 자동 무효화와 별개로 명시적 버전 관리 채널)
-var EXTRACT_SCRIPT_VERSION = "20";
+var EXTRACT_SCRIPT_VERSION = "26";
 
 // =============================================================================
 // SECTION 1: BOOTSTRAP
@@ -227,6 +227,11 @@ function loadConversionConfig(configPath) {
             transparency: { opacityThreshold: 100, tintThreshold: 30 },
             rotation: { minAngle: 0.1 },
             pngExportResolution: 220
+        },
+        extraction: {
+            collectFonts: false,
+            measureFontMetrics: false,
+            collectFontStatus: false
         }
     };
     if (!configPath) { $.writeln("[Config] no configPath"); return defaults; }
@@ -262,6 +267,10 @@ function loadConversionConfig(configPath) {
                 ["masterPageEditable", "hashiraEditable", "rotationEditable", "nonprintingEditable",
                  "inlineTextEditable", "inlineTextMaxLen", "groupShortTextEditable", "oneCharEditable",
                  "decorativeLargeTextEditable", "decorativeStyledTextEditable", "boxLabelEditable"]);
+        }
+        if (parsed.extraction) {
+            _mergeKeys(defaults.extraction, parsed.extraction,
+                ["collectFonts", "measureFontMetrics", "collectFontStatus"]);
         }
         $.writeln("[Config] conversion-config.json loaded: " + configPath);
         return defaults;
@@ -721,12 +730,13 @@ function _runRenderPhases(doc, ctx, allItems) {
         } catch (e) {}
     }
 
+    _marker(ctx.outputDir, "10_collectResolved_done");
     _marker(ctx.outputDir, "11_writeJson");
     // chunkMode=true(후속 청크)면 resolved_START_END.json으로 저장 (Rust가 나중에 병합)
     var _resolvedFileName = ctx.chunkMode
         ? ("resolved_" + ctx.startPage + "_" + ctx.endPage + ".json")
         : "resolved.json";
-    writeJson(ctx.outputDir + "/" + _resolvedFileName, resolved);
+    writeResolvedJson(ctx.outputDir + "/" + _resolvedFileName, resolved, ctx.outputDir);
 }
 
 // PDF 프리뷰를 내보낸다. ctx.skipPdf=true이면 아무것도 하지 않는다.
@@ -1293,6 +1303,29 @@ function hideTextFrames(renderTarget) {
     return saved;
 }
 
+function hideTextFramesFromNestedItems(nested) {
+    var saved = [];
+    if (!nested) return saved;
+    for (var hi = 0; hi < nested.length; hi++) {
+        try {
+            if (nested[hi].constructor.name !== "TextFrame") continue;
+            var tf = nested[hi];
+            var contentBlend = tf.contentTransparencySettings.blendingSettings;
+            var oldOpacity = contentBlend.opacity;
+            contentBlend.opacity = 0;
+            saved.push({ tf: tf, mode: "contentOpacity", opacity: oldOpacity });
+        } catch (eOpacity) {
+            try {
+                var tfFallback = nested[hi];
+                var wasVisible = tfFallback.visible;
+                tfFallback.visible = false;
+                saved.push({ tf: tfFallback, mode: "visible", wasVisible: wasVisible });
+            } catch (eVisible) {}
+        }
+    }
+    return saved;
+}
+
 function hideRepeatedCellBackgroundCandidates(renderTarget) {
     // Mixed groups can contain both a decorative title/icon and InDesign table-cell
     // background rectangles. Later Java absorbs those cell fills into HWP table cells,
@@ -1488,6 +1521,41 @@ function collectTfInlineVisualIds(renderTarget) {
     return ids;
 }
 
+function collectTfInlineVisualIdsFromNestedItems(renderTarget, nested) {
+    if (!nested) return collectTfInlineVisualIds(renderTarget);
+    var ids = [], seen = {};
+    if (!renderTarget) return ids;
+
+    var nestedIds = {};
+    try { nestedIds[renderTarget.id] = true; } catch (e) {}
+    for (var ni = 0; ni < nested.length; ni++) {
+        try { nestedIds[nested[ni].id] = true; } catch (e2) {}
+    }
+
+    function collectFromStory(tf) {
+        try {
+            if (classifyTextFrameCached(tf) !== "editable") return;
+            var storyItems = tf.parentStory.allPageItems;
+            for (var si = 0; si < storyItems.length; si++) {
+                var it = storyItems[si];
+                if (!_isTopLevelInlineVisualItem(it)) continue;
+                if (!nestedIds[it.id]) continue;
+                _pushUniqueId(ids, seen, it.id);
+            }
+        } catch (e) {}
+    }
+
+    try {
+        if (renderTarget.constructor.name === "TextFrame") collectFromStory(renderTarget);
+    } catch (e) {}
+    for (var ai = 0; ai < nested.length; ai++) {
+        try {
+            if (nested[ai].constructor.name === "TextFrame") collectFromStory(nested[ai]);
+        } catch (e2) {}
+    }
+    return ids;
+}
+
 function hideTextFrameOwnedInlineVisuals(renderTarget) {
     var saved = [];
     var ids = collectTfInlineVisualIds(renderTarget);
@@ -1511,9 +1579,35 @@ function hideTextFrameOwnedInlineVisuals(renderTarget) {
     return saved;
 }
 
+function hideTextFrameOwnedInlineVisualsFromNestedItems(nested, ids) {
+    var saved = [];
+    if (!nested || !ids || ids.length === 0) return saved;
+    var idMap = {};
+    for (var ii = 0; ii < ids.length; ii++) idMap[ids[ii].toString()] = true;
+
+    for (var ni = 0; ni < nested.length; ni++) {
+        try {
+            var it = nested[ni];
+            if (!idMap[it.id.toString()]) continue;
+            var wasVisible = true;
+            try { wasVisible = it.visible; } catch (eVis) {}
+            it.visible = false;
+            saved.push({ tf: it, mode: "visible", wasVisible: wasVisible });
+        } catch (eHide) {}
+    }
+    return saved;
+}
+
 function hideTextFramesAndOwnedInlineVisuals(renderTarget) {
     var saved = hideTextFrames(renderTarget);
     var savedInline = hideTextFrameOwnedInlineVisuals(renderTarget);
+    for (var i = 0; i < savedInline.length; i++) saved.push(savedInline[i]);
+    return saved;
+}
+
+function hideTextFramesAndOwnedInlineVisualsFromNestedItems(nested, inlineVisualIds) {
+    var saved = hideTextFramesFromNestedItems(nested);
+    var savedInline = hideTextFrameOwnedInlineVisualsFromNestedItems(nested, inlineVisualIds);
     for (var i = 0; i < savedInline.length; i++) saved.push(savedInline[i]);
     return saved;
 }
@@ -1558,6 +1652,16 @@ function _collectSourceObjectIds(item) {
     return ids;
 }
 
+function _collectSourceObjectIdsFromNestedItems(item, nested) {
+    var ids = [], seen = {};
+    try { _pushUniqueId(ids, seen, item.id); } catch (e) {}
+    if (!nested) return ids;
+    for (var i = 0; i < nested.length; i++) {
+        try { _pushUniqueId(ids, seen, nested[i].id); } catch (e2) {}
+    }
+    return ids;
+}
+
 function _collectTextFrameIds(item, editableOnly, requireContent) {
     var ids = [], seen = {};
     function visit(tf) {
@@ -1579,6 +1683,25 @@ function _collectTextFrameIds(item, editableOnly, requireContent) {
     return ids;
 }
 
+function _collectTextFrameIdsFromNestedItems(item, nested, editableOnly, requireContent) {
+    var ids = [], seen = {};
+    function visit(tf) {
+        try {
+            if (requireContent && !_textFrameHasContent(tf)) return;
+            if (editableOnly && classifyTextFrameCached(tf) !== "editable") return;
+            _pushUniqueId(ids, seen, tf.id);
+        } catch (e) {}
+    }
+    try { if (item.constructor.name === "TextFrame") visit(item); } catch (e) {}
+    if (!nested) return ids;
+    for (var i = 0; i < nested.length; i++) {
+        try {
+            if (nested[i].constructor.name === "TextFrame") visit(nested[i]);
+        } catch (e2) {}
+    }
+    return ids;
+}
+
 function _collectVisualOnlyChildIds(item) {
     var ids = [], seen = {};
     try {
@@ -1591,6 +1714,19 @@ function _collectVisualOnlyChildIds(item) {
             } catch (e2) {}
         }
     } catch (e) {}
+    return ids;
+}
+
+function _collectVisualOnlyChildIdsFromNestedItems(nested) {
+    var ids = [], seen = {};
+    if (!nested) return ids;
+    for (var i = 0; i < nested.length; i++) {
+        try {
+            if (nested[i].constructor.name !== "TextFrame") {
+                _pushUniqueId(ids, seen, nested[i].id);
+            }
+        } catch (e2) {}
+    }
     return ids;
 }
 
@@ -1710,15 +1846,14 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
         }
         if (hasPlacedContent) continue;
 
-        var hasNestedItems = false;
-        try { hasNestedItems = item.allPageItems && item.allPageItems.length > 0; } catch (e) {}
-        if (!hasNestedItems) continue;
+        var nestedItems = null;
+        try { nestedItems = item.allPageItems; } catch (e) {}
+        if (!nestedItems || nestedItems.length === 0) continue;
 
         var onlyTextFrames = true;
         try {
-            var nested = item.allPageItems;
-            for (var ni = 0; ni < nested.length; ni++) {
-                if (nested[ni].constructor.name !== "TextFrame") {
+            for (var ni = 0; ni < nestedItems.length; ni++) {
+                if (nestedItems[ni].constructor.name !== "TextFrame") {
                     onlyTextFrames = false;
                     break;
                 }
@@ -1742,6 +1877,11 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
         var _gBounds   = null;
         var _gExportOk = false;
         var _gChildIds = [];
+        var _gTfInlineVisualIds = [];
+        var _gSourceIds = [];
+        var _gEditableTextFrameIds = [];
+        var _gTextFrameIds = [];
+        var _gVisualOnlyChildIds = [];
 
         try {
             // bounds를 try 안에서 계산 (visibleBounds/geometricBounds도 예외 가능)
@@ -1749,8 +1889,8 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
             if (!_gBounds) { try { _gBounds = arrCopy(item.geometricBounds); } catch (e) {} }
             if (_gBounds) _toPageRelativeBounds(_gBounds, parentPage);
 
-            var _gTfInlineVisualIds = collectTfInlineVisualIds(item);
-            var hiddenTFs = hideTextFramesAndOwnedInlineVisuals(item);
+            _gTfInlineVisualIds = collectTfInlineVisualIdsFromNestedItems(item, nestedItems);
+            var hiddenTFs = hideTextFramesAndOwnedInlineVisualsFromNestedItems(nestedItems, _gTfInlineVisualIds);
             try {
                 item.exportFile(ExportFormat.PNG_FORMAT, outFile);
                 _gExportOk = true;
@@ -1762,11 +1902,14 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
             if (_gExportOk) {
                 try { _gZOrder = getItemZOrder(item); } catch (e) {}
                 try {
-                    var allNested = item.allPageItems;
-                    for (var ci = 0; ci < allNested.length; ci++) {
-                        _gChildIds.push(allNested[ci].id);
+                    for (var ci = 0; ci < nestedItems.length; ci++) {
+                        _gChildIds.push(nestedItems[ci].id);
                     }
                 } catch (e2) {}
+                _gSourceIds = _collectSourceObjectIdsFromNestedItems(item, nestedItems);
+                _gEditableTextFrameIds = _collectTextFrameIdsFromNestedItems(item, nestedItems, true, true);
+                _gTextFrameIds = _collectTextFrameIdsFromNestedItems(item, nestedItems, false, true);
+                _gVisualOnlyChildIds = _collectVisualOnlyChildIdsFromNestedItems(nestedItems);
             }
 
             try { restoreTextFrames(hiddenTFs); } catch (e) {}
@@ -1787,6 +1930,10 @@ function exportComplexGraphicFrames(doc, outputDir, startPage, endPage, allItems
             }, item, {
                 textHiddenBeforeExport: true,
                 tfInlineVisualIds: _gTfInlineVisualIds,
+                sourceObjectIds: _gSourceIds,
+                editableTextFrameIds: _gEditableTextFrameIds,
+                textFrameIds: _gTextFrameIds,
+                visualOnlyChildIds: _gVisualOnlyChildIds,
                 reason: "complex_graphic_text_hidden"
             }));
         }
@@ -2674,6 +2821,80 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return h <= 14 && w <= 55;
     }
 
+    function _firstVisibleTextFrameOfGroup(grp) {
+        try {
+            var nested = grp.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                var item = nested[i];
+                if (!item || item.constructor.name !== "TextFrame") continue;
+                if (visibleTextLengthOfTextFrame(item) <= 0) continue;
+                return item;
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    function _groupHasVisibleTextFrame(grp) {
+        try {
+            if (!grp || grp.constructor.name !== "Group") return false;
+            var nested = grp.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                var item = nested[i];
+                if (!item || item.constructor.name !== "TextFrame") continue;
+                if (visibleTextLengthOfTextFrame(item) > 0) return true;
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    function _isEditableCompositeTextHiddenShellGroup(grp) {
+        if (!_isShortVisualLabelGroup(grp)) return false;
+        if (_isVisualMarkerLabelGroup(grp)) return false;
+
+        var stats = _textStatsOfGroup(grp);
+        if (stats.count !== 1 || stats.length < 2) return false;
+
+        var tf = _firstVisibleTextFrameOfGroup(grp);
+        if (!tf) return false;
+        try { if (classifyTextFrame(tf) !== "editable") return false; } catch (eClass) {}
+
+        var tfBounds = _boundsOfItem(tf);
+        if (!tfBounds) return false;
+        var tfArea = boundsArea(tfBounds);
+        if (tfArea <= 0) return false;
+
+        try {
+            var nested = grp.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                var item = nested[i];
+                if (!item) continue;
+                var cn = "";
+                try { cn = item.constructor.name; } catch (eCn) {}
+                if (cn === "TextFrame") continue;
+                if (cn === "Group" && _groupHasVisibleTextFrame(item)) continue;
+                if (cn !== "Group" && cn !== "Rectangle" && cn !== "Oval"
+                        && cn !== "Polygon" && cn !== "GraphicLine") {
+                    continue;
+                }
+                if (cn !== "Group" && !hasVisibleFill(item) && !hasVisibleStroke(item)) continue;
+                var cb = _boundsOfItem(item);
+                if (!cb) continue;
+                var candArea = boundsArea(cb);
+                if (candArea <= 0 || candArea < tfArea * 0.05) continue;
+                var overlap = boundsOverlapArea(tfBounds, cb);
+                var overlapRatio = overlap / tfArea;
+                var cx = (cb[1] + cb[3]) / 2.0;
+                var cy = (cb[0] + cb[2]) / 2.0;
+                var detachedX = cx < tfBounds[1] || cx > tfBounds[3];
+                var detachedY = cy < tfBounds[0] || cy > tfBounds[2];
+                if (overlapRatio < 0.35 && (detachedX || detachedY)) {
+                    return true;
+                }
+            }
+        } catch (e) {}
+        return false;
+    }
+
     function _isLargeMixedParentGroup(grp) {
         var stats = _textStatsOfGroup(grp);
         if (stats.count < 4) return false;
@@ -3064,7 +3285,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                         reason: "visual_marker_label_indesign_png"
                     });
                 } else {
-                    _renderEditableVisualLabelShell(child, page, "visual_label_text_hidden_shell");
+                    var shellReason = _isEditableCompositeTextHiddenShellGroup(child)
+                            ? "editable_composite_text_hidden_shell"
+                            : "visual_label_text_hidden_shell";
+                    _renderEditableVisualLabelShell(child, page, shellReason);
                 }
                 rendered++;
             }
@@ -3398,7 +3622,10 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                         reason: "visual_marker_label_indesign_png"
                     });
                 } else {
-                    _renderEditableVisualLabelShell(grp, grpPage, "visual_label_text_hidden_shell");
+                    var _shellReason = _isEditableCompositeTextHiddenShellGroup(grp)
+                            ? "editable_composite_text_hidden_shell"
+                            : "visual_label_text_hidden_shell";
+                    _renderEditableVisualLabelShell(grp, grpPage, _shellReason);
                 }
             } else if (kind === "mixedGroup" && _isLargeMixedParentGroup(grp)) {
                 _renderAtomicVisualClusters(grp, grpPage);
@@ -4271,15 +4498,27 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     if (!skipRenderPagesMap) skipRenderPagesMap = {};
 
     writeProgress(outputDir, "resolved_styles", 0, rangePageCount);
+    _marker(outputDir, "10a_documentInfo");
     var docInfo = collectDocumentInfo(doc);
+    _marker(outputDir, "10a_documentInfo_done");
+    _marker(outputDir, "10b_paragraphStyles");
     var paraStyles = collectParagraphStyles(doc);
+    _marker(outputDir, "10b_paragraphStyles_done");
     // SPEC-030 B.3: characterStyles는 Java 측 resolved 파이프라인에서 미사용 — 수집 생략
     // var charStyles = collectCharacterStyles(doc);
+    _marker(outputDir, "10c_colors");
     var colors = collectColors(doc);
-    var fonts = collectFonts(doc);
+    _marker(outputDir, "10c_colors_done");
+    _marker(outputDir, "10d_fonts");
+    var fonts = [];
+    if (CONFIG.extraction && CONFIG.extraction.collectFonts) {
+        fonts = collectFonts(doc);
+    }
+    _marker(outputDir, "10d_fonts_done");
 
     // 범위 내 페이지의 텍스트프레임에 연결된 스토리 ID 수집
     // SPEC-030: 증분 추출 시 변경 페이지의 스토리만 수집 (skipRenderPagesMap 제외)
+    _marker(outputDir, "10e_rangeStoryIds_docTextFrames");
     var rangeStoryIds = {};
     try {
         var tfs = doc.textFrames.everyItem().getElements();
@@ -4298,8 +4537,10 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
             } catch (e) {}
         }
     } catch (e) {}
+    _marker(outputDir, "10e_rangeStoryIds_docTextFrames_done");
     // 그룹 내부 TextFrame은 parentPage가 null이므로
     // 페이지의 allPageItems에서 TextFrame을 추가 수집
+    _marker(outputDir, "10f_rangeStoryIds_pageItems");
     try {
         for (var pi = 0; pi < doc.pages.length; pi++) {
             var page = doc.pages[pi];
@@ -4316,10 +4557,12 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
             }
         }
     } catch (e) {}
+    _marker(outputDir, "10f_rangeStoryIds_pageItems_done");
 
     // SPEC-025: off-canvas TF story 도 rangeStoryIds 에 추가.
     // off-canvas TF 는 parentPage=null 이므로 위 두 수집 경로에서 모두 누락됨.
     // instanceMasterFrames 가 스토리 클론을 만들려면 원본 story 가 storyById 에 있어야 함.
+    _marker(outputDir, "10g_rangeStoryIds_offCanvas");
     try {
         var _allSpreads = doc.spreads.everyItem().getElements();
         for (var _ocRsi = 0; _ocRsi < _allSpreads.length; _ocRsi++) {
@@ -4335,9 +4578,11 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
             }
         }
     } catch (e) {}
+    _marker(outputDir, "10g_rangeStoryIds_offCanvas_done");
 
     // SPEC-025: 마스터 스프레드의 TextFrame 스토리도 rangeStoryIds 에 추가 (Phase 5 master instancing 용)
     // 증분 추출에서도 마스터 스토리는 항상 수집 (변경 여부와 무관)
+    _marker(outputDir, "10h_rangeStoryIds_master");
     try {
         var _appliedMasterIds = {};
         for (var pp25 = 0; pp25 < doc.pages.length; pp25++) {
@@ -4362,22 +4607,38 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
             }
         }
     } catch (e) {}
+    _marker(outputDir, "10h_rangeStoryIds_master_done");
 
     writeProgress(outputDir, "resolved_stories", 0, rangePageCount);
+    _marker(outputDir, "10i_collectStories");
     var stories = collectStories(doc, outputDir, rangePageCount, rangeStoryIds);
+    _marker(outputDir, "10i_collectStories_done");
 
     writeProgress(outputDir, "resolved_frames", 0, rangePageCount);
+    _marker(outputDir, "10j_collectTextFrames");
     var textFrames = collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPagesMap, cachedAllItems);
+    _marker(outputDir, "10j_collectTextFrames_done");
 
     // SPEC-025 Phase 5: 마스터 스프레드 TextFrame 을 적용 페이지마다 인스턴스화 (frame + story clone)
     // 증분 추출에서도 실행 (마스터 인스턴스는 경량 연산)
+    _marker(outputDir, "10k_instanceMasterFrames");
     try { instanceMasterFrames(doc, startPage, endPage, textFrames, stories, editableIds); } catch (ePhase5) { $.writeln("[SPEC-025 Phase 5 error] " + ePhase5); }
+    _marker(outputDir, "10k_instanceMasterFrames_done");
 
     writeProgress(outputDir, "resolved_items", 0, rangePageCount);
+    _marker(outputDir, "10l_collectPages");
     var pages = collectPages(doc, startPage, endPage, skipRenderPagesMap);
+    _marker(outputDir, "10l_collectPages_done");
+    _marker(outputDir, "10m_collectPageItems");
     var pageItems = collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems);
+    _marker(outputDir, "10m_collectPageItems_done");
 
-    var fontMetrics = measureFontMetrics(doc);
+    _marker(outputDir, "10n_measureFontMetrics");
+    var fontMetrics = [];
+    if (CONFIG.extraction && CONFIG.extraction.measureFontMetrics) {
+        fontMetrics = measureFontMetrics(doc);
+    }
+    _marker(outputDir, "10n_measureFontMetrics_done");
 
     return {
         documentInfo: docInfo,
@@ -4851,16 +5112,22 @@ function collectColors(doc) {
 
 function collectFonts(doc) {
     var fonts = [];
+    var collectStatus = !!(CONFIG.extraction && CONFIG.extraction.collectFontStatus);
     for (var i = 0; i < doc.fonts.length; i++) {
         var f = doc.fonts[i];
         try {
-            fonts.push({
+            var data = {
                 name: f.name,
                 fontFamily: f.fontFamily,
                 fontStyleName: f.fontStyleName,
-                fontType: f.fontType.toString(),
-                status: f.status.toString()
-            });
+                fontType: "",
+                status: "SKIPPED"
+            };
+            if (collectStatus) {
+                try { data.fontType = f.fontType.toString(); } catch (eType) {}
+                try { data.status = f.status.toString(); } catch (eStatus) {}
+            }
+            fonts.push(data);
         } catch (e) {
             fonts.push({ name: f.name || "unknown", error: e.message });
         }
@@ -4935,7 +5202,36 @@ function collectComposedLines(tf) {
  * textStyleRange.characters는 GREP 스타일을 반영하지 않으므로,
  * story.characters의 index를 사용하여 실제 렌더링 속성을 조회.
  */
-function splitRunByStoryChars(story, rng, runData, para) {
+function paragraphNeedsCharacterCorrection(para) {
+    try {
+        var ps = para.appliedParagraphStyle;
+        if (!ps) return false;
+        try {
+            var ngs = ps.nestedGrepStyles;
+            if (ngs && ngs.length > 0) return true;
+        } catch (eGrep) {}
+        try {
+            var ns = ps.nestedStyles;
+            if (ns && ns.length > 0) return true;
+        } catch (eNested) {}
+        try {
+            var nls = ps.nestedLineStyles;
+            if (nls && nls.length > 0) return true;
+        } catch (eLine) {}
+    } catch (e) {}
+    return false;
+}
+
+function cellMayHaveAnchoredPageItems(cell) {
+    try {
+        var items = cell.allPageItems;
+        return items && items.length > 0;
+    } catch (e) {}
+    return false;
+}
+
+function splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrection) {
+    if (!needsCharacterCorrection) return [runData];
     try {
         // para.characters[idx] 개별 접근 (GREP 스타일 반영)
         // everyItem().getElements()는 GREP 미반영 가능
@@ -5000,12 +5296,8 @@ function splitRunByStoryChars(story, rng, runData, para) {
             return a.color === b.color && a.size === b.size && a.font === b.font && a.style === b.style;
         }
 
-        // ParagraphStyle에 GREP 스타일이 있으면 빠른 체크 건너뛰고 바로 이진 탐색
-        var hasGrepStyles = false;
-        try {
-            var ngs = para.appliedParagraphStyle.nestedGrepStyles;
-            if (ngs && ngs.length > 0) hasGrepStyles = true;
-        } catch (e3) {}
+        // ParagraphStyle에 GREP/중첩 스타일이 있으면 빠른 체크 건너뛰고 바로 스캔.
+        var hasGrepStyles = !!needsCharacterCorrection;
         var firstProps = getCharProps(rngStart);
         var allSame = false;
         if (!hasGrepStyles) {
@@ -5244,6 +5536,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
         var paraLimit = Math.min(paras.length, realParaCount);
         for (var p = 0; p < paraLimit; p++) {
             var para = paras[p];
+            var needsCharacterCorrection = paragraphNeedsCharacterCorrection(para);
             var paraData = {
                 styleName: "[Unknown]",
                 leading: null,
@@ -5342,21 +5635,23 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     try { runData.fontStyle = rng.fontStyle; } catch (e) {}
                     try { runData.fillColor = rng.fillColor ? rng.fillColor.name : null; } catch (e) {}
                     try { runData.charStyle = rng.appliedCharacterStyle ? rng.appliedCharacterStyle.name : null; } catch (e) {}
-                    // GREP/Nested 스타일 색상 감지: 첫 번째 비제어 문자의 fillColor 확인
-                    // textStyleRanges는 GREP 색상을 반영하지 않으므로 characters로 보정
-                    try {
-                        var rngChars = rng.characters;
-                        for (var gci = 0; gci < rngChars.length && gci < 10; gci++) {
-                            var gc = rngChars[gci].contents;
-                            if (gc === "\uFFFC" || gc === "\u0016" || gc === "\u0018"
-                                || gc === "\t" || gc === "\r" || gc === "\n" || gc === " ") continue;
-                            var charFc = rngChars[gci].fillColor ? rngChars[gci].fillColor.name : null;
-                            if (charFc && charFc !== runData.fillColor) {
-                                runData.fillColor = charFc;
+                    if (needsCharacterCorrection) {
+                        // GREP/Nested 스타일 색상 감지: 첫 번째 비제어 문자의 fillColor 확인
+                        // textStyleRanges는 GREP 색상을 반영하지 않으므로 characters로 보정
+                        try {
+                            var rngChars = rng.characters;
+                            for (var gci = 0; gci < rngChars.length && gci < 10; gci++) {
+                                var gc = rngChars[gci].contents;
+                                if (gc === "\uFFFC" || gc === "\u0016" || gc === "\u0018"
+                                    || gc === "\t" || gc === "\r" || gc === "\n" || gc === " ") continue;
+                                var charFc = rngChars[gci].fillColor ? rngChars[gci].fillColor.name : null;
+                                if (charFc && charFc !== runData.fillColor) {
+                                    runData.fillColor = charFc;
+                                }
+                                break;
                             }
-                            break;
-                        }
-                    } catch (eGrepColor) {}
+                        } catch (eGrepColor) {}
+                    }
                     // 확장 속성
                     try { runData.tracking = rng.tracking; } catch (e) {}
                     try { runData.horizontalScale = rng.horizontalScale; } catch (e) {}
@@ -5396,7 +5691,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                                 var partRun = {};
                                 for (var rk in runData) { partRun[rk] = runData[rk]; }
                                 partRun.text = parts[pi2];
-                                var partSplits = splitRunByStoryChars(story, rng, partRun, para);
+                                var partSplits = splitRunByStoryChars(story, rng, partRun, para, needsCharacterCorrection);
                                 for (var ps = 0; ps < partSplits.length; ps++) {
                                     paraData.runs.push(partSplits[ps]);
                                 }
@@ -5411,7 +5706,7 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                         }
                     } else {
                         // GREP/중첩 스타일 보정: story.characters로 문자별 색상/크기 확인
-                        var splitRuns = splitRunByStoryChars(story, rng, runData, para);
+                        var splitRuns = splitRunByStoryChars(story, rng, runData, para, needsCharacterCorrection);
                         for (var sr = 0; sr < splitRuns.length; sr++) {
                             paraData.runs.push(splitRuns[sr]);
                         }
@@ -5436,6 +5731,10 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     rowHeights: [],
                     bounds: null  // [top, left, bottom, right] page-relative
                 };
+                var tblCols = null;
+                var tblRows = null;
+                try { tblCols = tbl.columns.everyItem().getElements(); } catch (eCols) {}
+                try { tblRows = tbl.rows.everyItem().getElements(); } catch (eRows) {}
                 // 테이블 절대 위치: 첫 셀의 baseline + 행/열 크기로 bounds 계산
                 try {
                     var firstCell = tbl.cells[0];
@@ -5443,14 +5742,12 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     var baseline = firstIP.baseline;
                     var horzOffset = firstIP.horizontalOffset;
 
-                    var tblCols = tbl.columns.everyItem().getElements();
                     var tblTotalW = 0;
-                    for (var twi = 0; twi < tblCols.length; twi++) tblTotalW += tblCols[twi].width;
-                    var tblRows = tbl.rows.everyItem().getElements();
+                    for (var twi = 0; tblCols && twi < tblCols.length; twi++) tblTotalW += tblCols[twi].width;
                     var tblTotalH = 0;
-                    for (var thi = 0; thi < tblRows.length; thi++) tblTotalH += tblRows[thi].height;
+                    for (var thi = 0; tblRows && thi < tblRows.length; thi++) tblTotalH += tblRows[thi].height;
 
-                    var tblTop = baseline - tblRows[0].height;
+                    var tblTop = baseline - (tblRows && tblRows.length > 0 ? tblRows[0].height : 0);
                     var tblParentPage = null;
                     try { tblParentPage = firstCell.texts[0].parentTextFrames[0].parentPage; } catch (ep) {}
                     if (tblParentPage) {
@@ -5464,13 +5761,13 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                     }
                 } catch (e) {}
                 try {
-                    var cols = tbl.columns.everyItem().getElements();
+                    var cols = tblCols || tbl.columns.everyItem().getElements();
                     for (var ci = 0; ci < cols.length; ci++) {
                         tblData.columnWidths.push(cols[ci].width);
                     }
                 } catch (e) {}
                 try {
-                    var rows = tbl.rows.everyItem().getElements();
+                    var rows = tblRows || tbl.rows.everyItem().getElements();
                     for (var ri = 0; ri < rows.length; ri++) {
                         tblData.rowHeights.push(rows[ri].height);
                     }
@@ -5560,45 +5857,47 @@ function collectStories(doc, outputDir, rangePageCount, rangeStoryIds) {
                         // Group이 CharacterStyleRange에 직접 임베드된 경우) cell.allPageItems
                         // 로 fallback. 이미 paragraphs 에서 잡힌 anchor ID는 건너뛴다.
                         try {
-                            var capturedIds = {};
-                            for (var pp = 0; pp < cellData.paragraphs.length; pp++) {
-                                var rr = cellData.paragraphs[pp].runs;
-                                for (var rr2 = 0; rr2 < rr.length; rr2++) {
-                                    if (rr[rr2].type === "inline_anchor" && rr[rr2].anchoredObjectId != null) {
-                                        capturedIds[rr[rr2].anchoredObjectId] = true;
+                            if (cellMayHaveAnchoredPageItems(cell)) {
+                                var capturedIds = {};
+                                for (var pp = 0; pp < cellData.paragraphs.length; pp++) {
+                                    var rr = cellData.paragraphs[pp].runs;
+                                    for (var rr2 = 0; rr2 < rr.length; rr2++) {
+                                        if (rr[rr2].type === "inline_anchor" && rr[rr2].anchoredObjectId != null) {
+                                            capturedIds[rr[rr2].anchoredObjectId] = true;
+                                        }
                                     }
                                 }
-                            }
-                            // 셀에 직접 앵커된 객체만 수집: cell.characters 를 순회하며
-                            // 각 문자의 allPageItems 에서 직접 앵커 조회. allPageItems 를
-                            // 재귀적으로 쓰면 중첩 TextFrame 내부 앵커(예: 18083)까지 끌려온다.
-                            var missedAnchors = [];
-                            try {
-                                var cellChars = cell.characters.everyItem().getElements();
-                                for (var cchi = 0; cchi < cellChars.length; cchi++) {
-                                    try {
-                                        var directAnch = cellChars[cchi].pageItems;
-                                        for (var dai = 0; dai < directAnch.length; dai++) {
-                                            var daId = directAnch[dai].id;
-                                            if (!capturedIds[daId]) {
-                                                missedAnchors.push(daId);
-                                                capturedIds[daId] = true;
+                                // 셀에 직접 앵커된 객체만 수집: cell.characters 를 순회하며
+                                // 각 문자의 pageItems 에서 직접 앵커 조회. cell.allPageItems 는
+                                // 후보 존재 여부 gate 로만 쓰고, 재귀 결과를 visible anchor 로 쓰지 않는다.
+                                var missedAnchors = [];
+                                try {
+                                    var cellChars = cell.characters.everyItem().getElements();
+                                    for (var cchi = 0; cchi < cellChars.length; cchi++) {
+                                        try {
+                                            var directAnch = cellChars[cchi].pageItems;
+                                            for (var dai = 0; dai < directAnch.length; dai++) {
+                                                var daId = directAnch[dai].id;
+                                                if (!capturedIds[daId]) {
+                                                    missedAnchors.push(daId);
+                                                    capturedIds[daId] = true;
+                                                }
                                             }
-                                        }
-                                    } catch (edc) {}
-                                }
-                            } catch (ecc) {}
-                            if (missedAnchors.length > 0) {
-                                // 빈 단락이 없으면 하나 추가
-                                if (cellData.paragraphs.length === 0) {
-                                    cellData.paragraphs.push({ runs: [] });
-                                }
-                                var lastP = cellData.paragraphs[cellData.paragraphs.length - 1];
-                                for (var ma = 0; ma < missedAnchors.length; ma++) {
-                                    lastP.runs.push({
-                                        type: "inline_anchor",
-                                        anchoredObjectId: missedAnchors[ma]
-                                    });
+                                        } catch (edc) {}
+                                    }
+                                } catch (ecc) {}
+                                if (missedAnchors.length > 0) {
+                                    // 빈 단락이 없으면 하나 추가
+                                    if (cellData.paragraphs.length === 0) {
+                                        cellData.paragraphs.push({ runs: [] });
+                                    }
+                                    var lastP = cellData.paragraphs[cellData.paragraphs.length - 1];
+                                    for (var ma = 0; ma < missedAnchors.length; ma++) {
+                                        lastP.runs.push({
+                                            type: "inline_anchor",
+                                            anchoredObjectId: missedAnchors[ma]
+                                        });
+                                    }
                                 }
                             }
                         } catch (efb) {}
@@ -6505,6 +6804,117 @@ function writeJson(path, obj) {
     f.open("w");
     f.write(JSON.stringify(obj));
     f.close();
+}
+
+// SPEC-030 A.7: resolved.json 전용 hybrid streaming writer.
+// 큰 top-level 배열 전체를 한 문자열로 만들지 않고, element 단위 JSON.stringify를 버퍼링한다.
+function writeResolvedJson(path, obj, outputDir) {
+    var f = File(path);
+    f.encoding = "UTF-8";
+    f.open("w");
+    var state = { file: f, buffer: "", threshold: 65536 };
+    var keys = [
+        "documentInfo",
+        "paragraphStyles",
+        "colors",
+        "fonts",
+        "stories",
+        "textFrames",
+        "pages",
+        "pageItems",
+        "fontMetrics",
+        "renderedTextFrames",
+        "renderedPdfFrames",
+        "renderedGraphicFrames",
+        "renderedImageFrames",
+        "renderedFloatingItems",
+        "editableTextFrameIds"
+    ];
+    var written = {};
+    var first = true;
+    try {
+        _jsonStreamWrite(state, "{");
+        for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
+            if (!_jsonHasOwn(obj, key)) continue;
+            if (!first) _jsonStreamWrite(state, ",");
+            first = false;
+            _jsonStreamWrite(state, _jsonStreamQuote(key));
+            _jsonStreamWrite(state, ":");
+            _jsonStreamTopLevelValue(state, obj[key]);
+            _jsonStreamFlush(state);
+            written[key] = true;
+            if (outputDir) _marker(outputDir, "11_writeJson_" + key);
+        }
+        for (var k in obj) {
+            if (!_jsonHasOwn(obj, k) || written[k]) continue;
+            if (!first) _jsonStreamWrite(state, ",");
+            first = false;
+            _jsonStreamWrite(state, _jsonStreamQuote(k));
+            _jsonStreamWrite(state, ":");
+            _jsonStreamTopLevelValue(state, obj[k]);
+            _jsonStreamFlush(state);
+            if (outputDir) _marker(outputDir, "11_writeJson_" + k);
+        }
+        _jsonStreamWrite(state, "}");
+        _jsonStreamFlush(state);
+    } finally {
+        try { f.close(); } catch (eClose) {}
+    }
+    if (outputDir) _marker(outputDir, "11_writeJson_done");
+}
+
+function _jsonHasOwn(obj, key) {
+    return obj && obj.hasOwnProperty && obj.hasOwnProperty(key);
+}
+
+function _jsonStreamWrite(state, s) {
+    state.buffer += s;
+    if (state.buffer.length >= state.threshold) _jsonStreamFlush(state);
+}
+
+function _jsonStreamFlush(state) {
+    if (!state.buffer || state.buffer.length === 0) return;
+    state.file.write(state.buffer);
+    state.buffer = "";
+}
+
+function _jsonStreamQuote(str) {
+    str = String(str);
+    var result = '"';
+    for (var i = 0; i < str.length; i++) {
+        var c = str.charAt(i);
+        var code = str.charCodeAt(i);
+        if (c === '"') result += '\\"';
+        else if (c === '\\') result += '\\\\';
+        else if (c === '\n') result += '\\n';
+        else if (c === '\r') result += '\\r';
+        else if (c === '\t') result += '\\t';
+        else if (code === 0xFFFD || code === 0xFFFC || code === 0xFEFF ||
+                 code === 0x0016 || code === 0x0018 || code === 0x0003 ||
+                 (code < 0x0020 && code !== 0x0009)) {
+            result += '\\u' + ('0000' + code.toString(16)).slice(-4);
+        }
+        else result += c;
+    }
+    return result + '"';
+}
+
+function _jsonStreamTopLevelValue(state, val) {
+    if (val instanceof Array) {
+        _jsonStreamArrayByElement(state, val);
+        return;
+    }
+    _jsonStreamWrite(state, JSON.stringify(val));
+}
+
+function _jsonStreamArrayByElement(state, arr) {
+    _jsonStreamWrite(state, "[");
+    for (var i = 0; i < arr.length; i++) {
+        if (i > 0) _jsonStreamWrite(state, ",");
+        _jsonStreamWrite(state, JSON.stringify(arr[i]));
+    }
+    _jsonStreamWrite(state, "]");
 }
 
 // SPEC-030 B.4: desc 파라미터 추가 (아이템 ID 등 세부 정보)
