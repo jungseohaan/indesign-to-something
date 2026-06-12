@@ -95,6 +95,19 @@ public class ResolvedData {
      */
     public void addColor(String name, String hex) {
         if (name != null && hex != null) {
+            putColorAlias(name, hex);
+            putColorAlias("Color/" + name, hex);
+            putColorAlias("Swatch/" + name, hex);
+            if (name.startsWith("#") && name.length() > 1) {
+                putColorAlias(name.substring(1), hex);
+            } else {
+                putColorAlias("#" + name, hex);
+            }
+        }
+    }
+
+    private void putColorAlias(String name, String hex) {
+        if (name != null && !name.isEmpty()) {
             colorHexMap.put(name, hex);
         }
     }
@@ -107,11 +120,74 @@ public class ResolvedData {
         if (colorName == null) return null;
         String hex = colorHexMap.get(colorName);
         if (hex != null) return hex;
+        String name = normalizeColorName(colorName);
+        if (name != null && !name.equals(colorName)) {
+            hex = colorHexMap.get(name);
+            if (hex != null) return hex;
+        }
         // 기본 색상 폴백 (resolved.json colors 배열에 누락된 경우)
-        if ("Paper".equals(colorName)) return "#FFFFFF";
-        if ("Black".equals(colorName)) return "#000000";
-        if ("White".equals(colorName)) return "#FFFFFF";
+        if ("Paper".equals(name)) return "#FFFFFF";
+        if ("Black".equals(name)) return "#000000";
+        if ("검정".equals(name)) return "#000000";
+        if ("Text_Color".equals(name) || "Text Color".equals(name)
+                || "$ID/Text_Color".equals(name) || "$ID/Text Color".equals(name)) return "#000000";
+        if ("White".equals(name)) return "#FFFFFF";
+        if ("흰색".equals(name)) return "#FFFFFF";
+        hex = resolveTintedNamedColor(name);
+        if (hex != null) return hex;
+        hex = resolveCmykColorHex(name);
+        if (hex != null) return hex;
         return null;
+    }
+
+    private static String normalizeColorName(String colorName) {
+        String name = colorName;
+        if (name.startsWith("Color/")) name = name.substring("Color/".length());
+        if (name.startsWith("Swatch/")) name = name.substring("Swatch/".length());
+        if (name.startsWith("Tint/")) name = name.substring("Tint/".length());
+        if (name.contains("%25")) name = name.replace("%25", "%");
+        if (name.startsWith("#") && name.length() > 1) name = name.substring(1);
+        return name;
+    }
+
+    private static String resolveTintedNamedColor(String name) {
+        if (name == null || name.indexOf('%') < 0) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^\\[?([^\\]]+)\\]?\\s+(\\d+\\.?\\d*)%$")
+                .matcher(name.trim());
+        if (!m.find()) return null;
+        String base = m.group(1).trim();
+        double tint;
+        try {
+            tint = Double.parseDouble(m.group(2));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        String baseHex = null;
+        if ("Black".equals(base) || "검정".equals(base)) baseHex = "#000000";
+        else if ("Paper".equals(base) || "White".equals(base) || "흰색".equals(base)) baseHex = "#FFFFFF";
+        if (baseHex == null) return null;
+        return ColorResolver.applyTintToHex(baseHex, Math.max(0.0, Math.min(100.0, tint)));
+    }
+
+    private static String resolveCmykColorHex(String name) {
+        if (name == null || !name.contains("C=") || !name.contains("M=")) return null;
+        try {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("C=(\\d+\\.?\\d*)\\s+M=(\\d+\\.?\\d*)\\s+Y=(\\d+\\.?\\d*)\\s+K=(\\d+\\.?\\d*)")
+                    .matcher(name);
+            if (!m.find()) return null;
+            double c = Double.parseDouble(m.group(1)) / 100.0;
+            double mm = Double.parseDouble(m.group(2)) / 100.0;
+            double y = Double.parseDouble(m.group(3)) / 100.0;
+            double k = Double.parseDouble(m.group(4)) / 100.0;
+            int r = (int) (255 * (1 - c) * (1 - k));
+            int g = (int) (255 * (1 - mm) * (1 - k));
+            int b = (int) (255 * (1 - y) * (1 - k));
+            return String.format("#%02X%02X%02X", r, g, b);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public String resolveTintedColorHex(String colorName, double tint) {

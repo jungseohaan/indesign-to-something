@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
@@ -80,18 +81,17 @@ class RunBuilder {
         // GREP 적용 캐릭터 스타일이 있으면 색상/글리프 매핑에 활용
         String effectiveIdmlColor = cr.fillColor();
         kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef grepCharStyle = null;
-        if (cr.grepAppliedCharStyle() != null && ctx.idmlDocumentSupplier.get() != null) {
-            ctx.ensureIdmlInfra.run();
-            if (ctx.idmlDocumentSupplier.get() != null) {
-                grepCharStyle = ctx.idmlDocumentSupplier.get().charStyles().get(cr.grepAppliedCharStyle());
-                if (grepCharStyle == null) {
-                    String shortRef = cr.grepAppliedCharStyle();
-                    if (shortRef.startsWith("CharacterStyle/")) shortRef = shortRef.substring("CharacterStyle/".length());
-                    grepCharStyle = ctx.idmlDocumentSupplier.get().charStyles().get(shortRef);
+        if (cr.grepAppliedCharStyle() != null && ctx.styleResolver != null) {
+            grepCharStyle = ctx.styleResolver.getResolvedCharacterStyle(cr.grepAppliedCharStyle());
+            if (grepCharStyle == null) {
+                String shortRef = cr.grepAppliedCharStyle();
+                if (shortRef.startsWith("CharacterStyle/")) {
+                    shortRef = shortRef.substring("CharacterStyle/".length());
                 }
-                if (grepCharStyle != null && grepCharStyle.fillColor() != null) {
-                    effectiveIdmlColor = grepCharStyle.fillColor();
-                }
+                grepCharStyle = ctx.styleResolver.getResolvedCharacterStyle(shortRef);
+            }
+            if (grepCharStyle != null && grepCharStyle.fillColor() != null) {
+                effectiveIdmlColor = grepCharStyle.fillColor();
             }
         }
 
@@ -572,19 +572,22 @@ class RunBuilder {
         }
         // IDML 스와치: "Color/Paper" → "Paper"
         String name = color.startsWith("Color/") ? color.substring(6) : color;
+        if (name.startsWith("Swatch/")) name = name.substring("Swatch/".length());
+        if (name.startsWith("Tint/")) name = name.substring("Tint/".length());
+        if (name.contains("%25")) name = name.replace("%25", "%");
+        if (name.startsWith("#") && name.length() > 1) name = name.substring(1);
+        if ("None".equals(name) || "[None]".equals(name) || "n".equals(name)) return null;
+        if ("Paper".equals(name)) return "#FFFFFF";
+        if ("Black".equals(name)) return "#000000";
+        if ("검정".equals(name)) return "#000000";
+        if ("Text_Color".equals(name) || "Text Color".equals(name)
+                || "$ID/Text_Color".equals(name) || "$ID/Text Color".equals(name)) return "#000000";
+        if ("White".equals(name)) return "#FFFFFF";
         // resolvedData에서 조회
         String hex = ctx.resolvedData.resolveColorHex(name);
         if (hex != null) return hex;
-        // IDML color ID (예: "Color/u1fc", "u1fc") → colorResolver로 해석
-        ctx.ensureIdmlInfra.run();
-        if (ctx.colorResolverSupplier.get() != null) {
-            String crHex = ctx.colorResolverSupplier.get().resolve(color);
-            if (crHex != null) return crHex;
-            crHex = ctx.colorResolverSupplier.get().resolve("Color/" + name);
-            if (crHex != null) return crHex;
-            crHex = ctx.colorResolverSupplier.get().resolve(name);
-            if (crHex != null) return crHex;
-        }
+        hex = resolveTintedNamedColor(name);
+        if (hex != null) return hex;
         // CMYK 문자열 파싱: "C=0 M=15 Y=80 K=0"
         if (name.contains("C=") && name.contains("M=")) {
             try {
@@ -603,7 +606,49 @@ class RunBuilder {
                 }
             } catch (Exception e) {}
         }
+        ConversionTiming.addCounter("phase3.colorResolverFallback.calls", 1);
+        if (name.startsWith("u") || name.startsWith("U")) {
+            ConversionTiming.addCounter("phase3.colorResolverFallback.idColors", 1);
+        } else if (name.startsWith("[") && name.endsWith("]")) {
+            ConversionTiming.addCounter("phase3.colorResolverFallback.bracketNames", 1);
+        } else {
+            ConversionTiming.addCounter("phase3.colorResolverFallback.namedColors", 1);
+        }
+        // IDML color ID (예: "Color/u1fc", "u1fc") → colorResolver로 해석
+        if (ctx.ensureColorInfra != null) {
+            ctx.ensureColorInfra.run();
+        } else if (ctx.ensureIdmlInfra != null) {
+            ctx.ensureIdmlInfra.run();
+        }
+        if (ctx.colorResolverSupplier.get() != null) {
+            String crHex = ctx.colorResolverSupplier.get().resolve(color);
+            if (crHex != null) return crHex;
+            crHex = ctx.colorResolverSupplier.get().resolve("Color/" + name);
+            if (crHex != null) return crHex;
+            crHex = ctx.colorResolverSupplier.get().resolve(name);
+            if (crHex != null) return crHex;
+        }
         return null;
+    }
+
+    private static String resolveTintedNamedColor(String name) {
+        if (name == null || name.indexOf('%') < 0) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^\\[?([^\\]]+)\\]?\\s+(\\d+\\.?\\d*)%$")
+                .matcher(name.trim());
+        if (!m.find()) return null;
+        String base = m.group(1).trim();
+        double tint;
+        try {
+            tint = Double.parseDouble(m.group(2));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        String baseHex = null;
+        if ("Black".equals(base) || "검정".equals(base)) baseHex = "#000000";
+        else if ("Paper".equals(base) || "White".equals(base) || "흰색".equals(base)) baseHex = "#FFFFFF";
+        if (baseHex == null) return null;
+        return blendWithWhite(baseHex, Math.max(0.0, Math.min(100.0, tint)) / 100.0);
     }
 
     /**

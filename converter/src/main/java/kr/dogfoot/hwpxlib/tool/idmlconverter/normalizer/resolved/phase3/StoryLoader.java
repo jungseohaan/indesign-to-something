@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
@@ -49,25 +50,54 @@ class StoryLoader {
         String sourceStoryId = sourceStoryId(storyId);
         String hexId;
         try {
-            hexId = "u" + Integer.toHexString(Integer.parseInt(sourceStoryId));
+            if (sourceStoryId.startsWith("u") || sourceStoryId.startsWith("U")) {
+                hexId = "u" + sourceStoryId.substring(1).toLowerCase();
+            } else {
+                hexId = "u" + Integer.toHexString(Integer.parseInt(sourceStoryId));
+            }
         } catch (NumberFormatException e) {
             return null;
         }
 
         // 캐시 확인
-        IDMLStory idmlStory = ctx.idmlStoryCache.get(hexId);
+        IDMLStory idmlStory = null;
+        if (ctx.idmlStoryCache != null) {
+            idmlStory = ctx.idmlStoryCache.get(storyId);
+            if (idmlStory == null) idmlStory = ctx.idmlStoryCache.get(sourceStoryId);
+            if (idmlStory == null) idmlStory = ctx.idmlStoryCache.get(hexId);
+        }
+        if (idmlStory != null) {
+            ConversionTiming.addCounter("phase3.storyLoader.cacheHits", 1);
+        }
+        if (idmlStory == null && ctx.loadIDMLStory != null) {
+            idmlStory = ctx.loadIDMLStory.apply(storyId);
+            if (idmlStory != null) {
+                ConversionTiming.addCounter("phase3.storyLoader.sharedLoaderHits", 1);
+            }
+        }
         if (idmlStory == null) {
             File storyFile = new File(new File(ctx.idmlDir, "Stories"), "Story_" + hexId + ".xml");
             if (!storyFile.exists()) return null;
             try {
+                long parseStart = System.nanoTime();
                 DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
                 DocumentBuilder db = dbf.newDocumentBuilder();
                 org.w3c.dom.Document xmlDoc = db.parse(storyFile);
                 idmlStory = IDMLStoryParser.parseStory(xmlDoc, hexId);
-                ctx.idmlStoryCache.put(hexId, idmlStory);
+                ConversionTiming.addCounter("phase3.storyLoader.xmlParseNanos", System.nanoTime() - parseStart);
+                ConversionTiming.addCounter("phase3.storyLoader.xmlParses", 1);
+                if (ctx.idmlStoryCache != null) {
+                    ctx.idmlStoryCache.put(storyId, idmlStory);
+                    ctx.idmlStoryCache.put(sourceStoryId, idmlStory);
+                    ctx.idmlStoryCache.put(hexId, idmlStory);
+                }
             } catch (Exception e) {
                 return null;
             }
+        } else if (ctx.idmlStoryCache != null) {
+            ctx.idmlStoryCache.putIfAbsent(storyId, idmlStory);
+            ctx.idmlStoryCache.putIfAbsent(sourceStoryId, idmlStory);
+            ctx.idmlStoryCache.putIfAbsent(hexId, idmlStory);
         }
 
         if (idmlStory == null || idmlStory.paragraphs() == null) return null;
@@ -87,6 +117,7 @@ class StoryLoader {
             ResolvedParagraph resolvedParagraph = (resolvedStory != null && i < resolvedStory.paragraphs().size())
                     ? resolvedStory.paragraphs().get(i)
                     : null;
+            long paragraphSetupStart = System.nanoTime();
 
             // 칼럼 브레이크 (ACE 8)
             if (ip.columnBreakAfter()) {
@@ -222,27 +253,33 @@ class StoryLoader {
                     }
                 }
             }
+            ConversionTiming.addCounter("phase3.storyLoader.paragraphSetupNanos",
+                    System.nanoTime() - paragraphSetupStart);
 
             // ParagraphStyle에서 FillColor/Tracking/FontFamily 미리 구해둠 (런에서 없을 때 사용)
-            StoryConverter.StyleContext sc = new StoryConverter.StyleContext(
-                    RunBuilder.getStyleFillColor(ctx, ip.appliedParagraphStyle()),
-                    RunBuilder.getStyleTracking(ctx, ip.appliedParagraphStyle()),
-                    RunBuilder.getStyleFontFamily(ctx, ip.appliedParagraphStyle()),
-                    RunBuilder.getStyleFontSize(ctx, ip.appliedParagraphStyle()),
-                    RunBuilder.getStyleUnderlineColor(ctx, ip.appliedParagraphStyle()));
+            long styleContextStart = System.nanoTime();
+            StoryConverter.StyleContext sc = styleContextFor(ctx, ip.appliedParagraphStyle());
             // tabStop이 있으면 \t 문자를 보존 (HwpxParagraphBuilder가 <hp:tab>으로 변환)
             sc.hasTabStops = para.hasTabStops();
+            ConversionTiming.addCounter("phase3.storyLoader.styleContextNanos",
+                    System.nanoTime() - styleContextStart);
 
             // 런 변환: IDML CharacterRun → ASTTextRun + 수식 그룹화
             // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
             ResolvedRun defaultRR = RunBuilder.findDefaultResolvedRun(ctx, resolvedRuns);
             int resolvedRunIdx = 0;
+            boolean resolvedStyleVaries = resolvedRuns != null
+                    && resolvedRuns.size() > 1
+                    && RunBuilder.hasStyleVariation(ctx, resolvedRuns);
 
             // 전처리: 한국어+수식마커 혼합 런 분리 + 원문자 변환
+            long runPrepStart = System.nanoTime();
             List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(ip.characterRuns());
             ASTRunConverter.convertCircledNumberRuns(runs);
             addUnderlineBlankTabStop(ctx, storyId, i, para, runs);
             sc.hasTabStops = para.hasTabStops();
+            ConversionTiming.addCounter("phase3.storyLoader.runPrepNanos",
+                    System.nanoTime() - runPrepStart);
 
             // 수식 그룹화 상태
             List<IDMLCharacterRun> mathGroup = new ArrayList<>();
@@ -253,6 +290,7 @@ class StoryLoader {
             boolean paraHasBTRuns = false;
             boolean paraHasNPStructuralRuns = false;
             boolean paraHasMathSymbols = false;
+            long runLoopStart = System.nanoTime();
             // IDML 원본 CharacterRun에서 수식 기호 유무 확인 (GREP 분리 전 기준)
             for (IDMLCharacterRun r : ip.characterRuns()) {
                 if (r.isBTFont() || r.isNPFont() || r.isEHFont()) { paraHasMathSymbols = true; break; }
@@ -422,7 +460,7 @@ class StoryLoader {
                             if (!partText.isEmpty()) {
                                 // resolved 런 스타일 차이가 있으면 분할 시도
                                 boolean partSplit = false;
-                                if (resolvedRuns != null && resolvedRuns.size() > 1 && RunBuilder.hasStyleVariation(ctx, resolvedRuns)) {
+                                if (resolvedStyleVaries) {
                                     partSplit = RunBuilder.splitIdmlRunByResolvedRuns(ctx, run, partText, resolvedRuns, resolvedRunIdx,
                                             para, sc);
                                 }
@@ -537,7 +575,7 @@ class StoryLoader {
                         // GREP 스타일 분할: IDML 단일 런이 resolved에서 여러 런(다른 색상/폰트)으로 분할된 경우
                         // resolved 런 경계에서 IDML 런을 분할하여 각각의 색상을 적용
                         boolean splitByResolved = false;
-                        if (resolvedRuns != null && resolvedRuns.size() > 1 && RunBuilder.hasStyleVariation(ctx, resolvedRuns)) {
+                        if (resolvedStyleVaries) {
                             splitByResolved = RunBuilder.splitIdmlRunByResolvedRuns(ctx, run, text, resolvedRuns, resolvedRunIdx,
                                     para, sc);
                         }
@@ -557,7 +595,10 @@ class StoryLoader {
                     }
                 }
             }
+            ConversionTiming.addCounter("phase3.storyLoader.runLoopNanos",
+                    System.nanoTime() - runLoopStart);
             // 단락 끝 잔여 수식 그룹 flush
+            long paragraphPostStart = System.nanoTime();
             MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
             applyTrailingPageNumberLeader(ctx, ip, para);
 
@@ -588,10 +629,33 @@ class StoryLoader {
             }
 
             paragraphs.add(para);
+            ConversionTiming.addCounter("phase3.storyLoader.paragraphPostNanos",
+                    System.nanoTime() - paragraphPostStart);
+            ConversionTiming.addCounter("phase3.storyLoader.paragraphs", 1);
         }
 
         StoryConverter.removeDuplicateDoviraLeadingMarkers(ctx, storyId, paragraphs);
         return paragraphs;
+    }
+
+    private static StoryConverter.StyleContext styleContextFor(ResolvedBuildContext ctx, String styleRef) {
+        String key = styleRef != null ? styleRef : "";
+        ResolvedBuildContext.ParagraphStyleContext cached = ctx.paragraphStyleContextCache.get(key);
+        if (cached == null) {
+            cached = new ResolvedBuildContext.ParagraphStyleContext(
+                    RunBuilder.getStyleFillColor(ctx, styleRef),
+                    RunBuilder.getStyleTracking(ctx, styleRef),
+                    RunBuilder.getStyleFontFamily(ctx, styleRef),
+                    RunBuilder.getStyleFontSize(ctx, styleRef),
+                    RunBuilder.getStyleUnderlineColor(ctx, styleRef));
+            ctx.paragraphStyleContextCache.put(key, cached);
+        }
+        return new StoryConverter.StyleContext(
+                cached.fillColor,
+                cached.tracking,
+                cached.fontFamily,
+                cached.fontSize,
+                cached.underlineColor);
     }
 
     private static String sourceStoryId(String storyId) {
@@ -861,17 +925,7 @@ class StoryLoader {
     }
 
     private static boolean hasInlineObjectPng(ResolvedBuildContext ctx, int objectId) {
-        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) {
-            return false;
-        }
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg == null || rg.id() != objectId) continue;
-            if (!"inline_object".equals(rg.itemType())) continue;
-            String file = rg.file();
-            if (file == null || file.isEmpty()) continue;
-            return ctx.basePath == null || new File(ctx.basePath, file).exists();
-        }
-        return false;
+        return ctx != null && ctx.hasInlineObjectPng(objectId);
     }
 
     private static boolean isInlinePageNumberFrame(ResolvedBuildContext ctx, IDMLCharacterRun run, String inlineHexId) {

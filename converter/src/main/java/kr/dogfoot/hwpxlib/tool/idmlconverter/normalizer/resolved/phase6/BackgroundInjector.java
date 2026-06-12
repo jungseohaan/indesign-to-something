@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.VisualSourcePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
@@ -245,6 +246,7 @@ public final class BackgroundInjector {
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_PNG_LOAD_FAILED", "png file missing or unreadable");
                 continue;
             }
+            byte[] originalImageData = imageData;
 
             // bounds: [top, left, bottom, right] in document units (mm)
             double rawLeft = bounds[1], rawTop = bounds[0];
@@ -310,14 +312,37 @@ public final class BackgroundInjector {
             Double stripCropLeftOverride = null;
             Double stripCropWidthOverride = null;
             boolean pageAnchoredStripCrop = false;
+            boolean shouldCompositeTfInlineVisuals = shouldCompositeTfInlineVisuals(rg);
+            boolean keepPlannedContainerBackdropFill =
+                    ("CONTAINER_BACKDROP".equals(visualLayer) || "CONTAINER_FACE".equals(visualLayer))
+                    && isPaperOnlyContainerShell(ctx, rg);
+            boolean mayNeedContainerShellKnockout = !planKeepsForegroundZ
+                    && !keepPlannedContainerBackdropFill
+                    && isContainerVisualShell
+                    && !isInferredTextFrameVisualShell;
+            boolean needsAlphaCrop = shouldCropOwnedTextFrameShellToAlpha(rg);
+            boolean needsPageCrop = (fullW > 1.0 && fullH > 1.0
+                    && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
+                        || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5))
+                    || (hasCropSourceBounds && cropRefW > 1.0 && cropRefH > 1.0);
+            boolean needsFullImageDecode = shouldCompositeTfInlineVisuals
+                    || mayNeedContainerShellKnockout
+                    || rg.isWhiteStroke()
+                    || needsAlphaCrop
+                    || needsPageCrop;
             try {
-                BufferedImage img = loadImageForPlacement(ctx, rg);
-                if (img != null && shouldCompositeTfInlineVisuals(rg)) {
+                BufferedImage img = needsFullImageDecode ? loadImageForPlacement(ctx, rg, imageData) : null;
+                if (img == null && !needsFullImageDecode) {
+                    int[] dims = readPngDimensions(imageData);
+                    if (dims != null) {
+                        pixelW = dims[0];
+                        pixelH = dims[1];
+                        ConversionTiming.addCounter("phase6.pngBytes.headerDimensionReads", 1);
+                    }
+                }
+                if (img != null && shouldCompositeTfInlineVisuals) {
                     imageData = encodePng(img);
                 }
-                boolean keepPlannedContainerBackdropFill =
-                        ("CONTAINER_BACKDROP".equals(visualLayer) || "CONTAINER_FACE".equals(visualLayer))
-                        && isPaperOnlyContainerShell(ctx, rg);
                 if (img != null
                         && !planKeepsForegroundZ
                         && !keepPlannedContainerBackdropFill
@@ -356,7 +381,7 @@ public final class BackgroundInjector {
                     } catch (Exception ignored2) {}
                 }
                 if (img != null) {
-                    if (shouldCropOwnedTextFrameShellToAlpha(rg)) {
+                    if (needsAlphaCrop) {
                         int[] alphaBounds = alphaBounds(img);
                         if (alphaBounds != null && shouldApplyAlphaCrop(img, alphaBounds)) {
                             int pxX = alphaBounds[0];
@@ -602,12 +627,11 @@ public final class BackgroundInjector {
                 double nextVisRight = Math.min(rawRight - pageWidthMm, nextPageWidthMm);
                 double nextVisBottom = Math.min(rawBottom, nextPageHeightMm);
                 if (nextVisLeft < nextVisRight && nextVisTop < nextVisBottom) {
-                    byte[] overflowData = loadPng(ctx, rg);
+                    byte[] overflowData = originalImageData;
                     if (overflowData != null) {
                         int ovPixelW = 0, ovPixelH = 0;
                         try {
-                            File pngFile2 = new File(ctx.basePath, rg.file());
-                            BufferedImage ovImg = ImageIO.read(pngFile2);
+                            BufferedImage ovImg = decodePngBytes(overflowData);
                             if (ovImg != null) {
                                 // 다음 페이지 가시 영역을 page-0 좌표계로 변환하여 크롭
                                 double cropLeft = nextVisLeft + pageWidthMm;
@@ -682,12 +706,11 @@ public final class BackgroundInjector {
                 double prevVisRight = Math.min(rawRight + pageWidthMm, prevPageWidthMm);
                 double prevVisBottom = Math.min(rawBottom, prevPageHeightMm);
                 if (prevVisLeft < prevVisRight && prevVisTop < prevVisBottom) {
-                    byte[] overflowData = loadPng(ctx, rg);
+                    byte[] overflowData = originalImageData;
                     if (overflowData != null) {
                         int ovPixelW = 0, ovPixelH = 0;
                         try {
-                            File pngFile2 = new File(ctx.basePath, rg.file());
-                            BufferedImage ovImg = ImageIO.read(pngFile2);
+                            BufferedImage ovImg = decodePngBytes(overflowData);
                             if (ovImg != null) {
                                 // 이전 페이지 가시 영역을 현재 페이지-local raw 좌표계로 되돌려 크롭한다.
                                 double cropLeft = prevVisLeft - pageWidthMm;
@@ -873,6 +896,21 @@ public final class BackgroundInjector {
                   | ((header[22] & 0xFF) << 8)  |  (header[23] & 0xFF);
             return new int[]{w, h};
         } catch (Exception e) { return null; }
+    }
+
+    /** Read PNG width/height from cached bytes without decoding pixel data. */
+    private static int[] readPngDimensions(byte[] pngData) {
+        if (pngData == null || pngData.length < 24) return null;
+        try {
+            if ((pngData[0] & 0xFF) != 0x89 || pngData[1] != 'P') return null;
+            int w = ((pngData[16] & 0xFF) << 24) | ((pngData[17] & 0xFF) << 16)
+                  | ((pngData[18] & 0xFF) << 8)  |  (pngData[19] & 0xFF);
+            int h = ((pngData[20] & 0xFF) << 24) | ((pngData[21] & 0xFF) << 16)
+                  | ((pngData[22] & 0xFF) << 8)  |  (pngData[23] & 0xFF);
+            return new int[]{w, h};
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** Generate a 100×4 solid-color PNG from the pageItem's stroke color and opacity. */
@@ -1135,6 +1173,7 @@ public final class BackgroundInjector {
         // decoration children owned by a parent visual shell. This prevents
         // "triangle fill only" renders from replacing the full rounded-label shell.
         return "visual_label_text_hidden_shell".equals(child.reason())
+                || "editable_composite_text_hidden_shell".equals(child.reason())
                 || "concept_label_shell".equals(child.reason())
                 || "editable_textframe_visual_shell".equals(child.reason());
     }
@@ -1163,6 +1202,7 @@ public final class BackgroundInjector {
         if (!rg.hasEditableTextHiddenFromPng()) return false;
         String reason = rg.reason() == null ? "" : rg.reason();
         if (!reason.contains("text_composite_editable_text_hidden")
+                && !reason.contains("editable_composite_text_hidden_shell")
                 && !reason.contains("concept_label_shell")) {
             return false;
         }
@@ -1377,7 +1417,8 @@ public final class BackgroundInjector {
         // (text hidden, editable TF overlaid). Do not decompose it to smaller child
         // decoration renders, otherwise outlines/shadows can disappear and only a
         // partial fill child remains.
-        if ("visual_label_text_hidden_shell".equals(reason)) return false;
+        if ("visual_label_text_hidden_shell".equals(reason)
+                || "editable_composite_text_hidden_shell".equals(reason)) return false;
         if (rg.childIds() == null || rg.childIds().length == 0) return false;
         boolean ownsEditableText = "hwpx_tf".equals(rg.textOwner())
                 || Boolean.TRUE.equals(rg.containsEditableText())
@@ -1684,28 +1725,46 @@ public final class BackgroundInjector {
 
 
     private static byte[] loadPng(ResolvedBuildContext ctx, RenderedGroup rg) {
-        if (rg.file() == null) return null;
+        if (ctx == null || rg == null || rg.file() == null) return null;
         try {
             File pngFile = new File(ctx.basePath, rg.file());
             if (!pngFile.exists()) return null;
-            return java.nio.file.Files.readAllBytes(pngFile.toPath());
+            String key = pngFile.getAbsolutePath();
+            byte[] cached = ctx.renderedPngByteCache.get(key);
+            if (cached != null) {
+                ConversionTiming.addCounter("phase6.pngBytes.cacheHits", 1);
+                return cached;
+            }
+            ConversionTiming.addCounter("phase6.pngBytes.diskReads", 1);
+            byte[] data = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            ctx.renderedPngByteCache.put(key, data);
+            ConversionTiming.addCounter("phase6.pngBytes.readBytes", data.length);
+            return data;
         } catch (Exception e) {
             System.err.println("[BackgroundInjector] PNG 로드 실패: " + e.getMessage());
             return null;
         }
     }
 
-    private static BufferedImage loadImageForPlacement(ResolvedBuildContext ctx, RenderedGroup rg) {
+    private static BufferedImage loadImageForPlacement(ResolvedBuildContext ctx, RenderedGroup rg, byte[] pngData) {
         if (ctx == null || rg == null || rg.file() == null) return null;
         try {
-            File pngFile = new File(ctx.basePath, rg.file());
-            if (!pngFile.exists()) return null;
-            BufferedImage base = ImageIO.read(pngFile);
+            BufferedImage base = decodePngBytes(pngData);
             if (base == null || !shouldCompositeTfInlineVisuals(rg)) return base;
             BufferedImage merged = compositeTfInlineVisuals(ctx, rg, base);
             return merged != null ? merged : base;
         } catch (Exception e) {
             System.err.println("[BackgroundInjector] PNG 합성 실패: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static BufferedImage decodePngBytes(byte[] pngData) {
+        if (pngData == null || pngData.length == 0) return null;
+        try {
+            ConversionTiming.addCounter("phase6.pngBytes.imageDecodes", 1);
+            return ImageIO.read(new java.io.ByteArrayInputStream(pngData));
+        } catch (Exception e) {
             return null;
         }
     }
@@ -2721,6 +2780,7 @@ public final class BackgroundInjector {
         if (reason == null) return false;
         String r = reason.toLowerCase();
         return r.contains("visual_label_text_hidden_shell")
+                || r.contains("editable_composite_text_hidden_shell")
                 || r.contains("concept_label_shell");
     }
 

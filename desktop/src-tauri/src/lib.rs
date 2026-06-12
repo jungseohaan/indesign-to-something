@@ -206,6 +206,8 @@ pub fn run() {
             commands::generate_teaching,
             commands::get_jar_path,
             commands::generate_preview,
+            commands::generate_pdf_preview,
+            commands::generate_pdf_page_preview,
             commands::generate_image_preview,
             commands::generate_vector_preview,
             commands::generate_master_preview,

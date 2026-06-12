@@ -65,7 +65,7 @@ interface AppState {
   layoutMode: "preserve" | "editable";
   outputFormat: "hwpx";
   lastOutputPath: string | null;
-  // SPEC-030: InDesign 추출 성능 모드. fast=150dpi+pdf skip, standard=220dpi+pdf, high=300dpi+pdf
+  // SPEC-030: InDesign 추출 성능 모드. fast=150dpi, standard=220dpi, high=300dpi. PDF preview는 캐시 재사용.
   perfMode: "fast" | "standard" | "high";
   // SPEC-011: 디버그용 페이지 범위 추출 (0=전체)
   debugStartPage: number;
@@ -245,6 +245,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       // IDML 직접 열기: resolved 사이드카 없음
       useAstStore.getState().clearResolved();
+      useAstStore.getState().clearSemanticBlocks();
     } catch (e: any) {
       set({ isAnalyzing: false, error: String(e) });
     }
@@ -449,6 +450,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         jarPath,
       });
       set({ result, isConverting: false, lastOutputPath: outputPath });
+      const semanticBlocksPath = outputPath.replace(/\.[^.]+$/, ".semantic-blocks.json");
+      useAstStore.getState().loadSemanticBlocks(semanticBlocksPath);
 
       // 변환 완료 후: preview PDF를 HWPX와 같은 폴더에 복사
       const { previewPdfPath } = get();
@@ -653,7 +656,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             startPage: debugStartPage,
             endPage: debugEndPage,
             perfMode,
-            skipPdf: perfMode === "fast",
+            skipPdf: false,
             chunkSize: extractChunkSize > 0 ? extractChunkSize : null,
           });
 
@@ -740,7 +743,13 @@ export const useAppStore = create<AppState>((set, get) => ({
             if (extractResult.resolved_json_path) {
               useAstStore.getState().loadResolved(extractResult.resolved_json_path);
             }
-            set({ idmlPath: extractResult.idml_path, resolvedJsonPath: extractResult.resolved_json_path ?? null });
+            useAstStore.getState().loadSemanticBlocks(batchOutputPath.replace(/\.[^.]+$/, ".semantic-blocks.json"));
+            set({
+              idmlPath: extractResult.idml_path,
+              resolvedJsonPath: extractResult.resolved_json_path ?? null,
+              previewPdfPath: extractResult.preview_pdf_path ?? null,
+              lastOutputPath: batchOutputPath,
+            });
           }
         } catch (e: any) {
           // 실패 — 다음 파일 계속

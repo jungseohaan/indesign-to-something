@@ -94,6 +94,12 @@ function App() {
       .catch(() => setCacheStats(null));
   }, [showAbout]);
 
+  useEffect(() => {
+    if (previewPdfPath) {
+      setRightPanel("pdf");
+    }
+  }, [previewPdfPath]);
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "converter", label: "HWPX 내보내기" },
     { key: "teaching", label: "교수자료 생성" },
@@ -130,32 +136,30 @@ function App() {
               <ASTTreePanel />
             </div>
             <div className="w-1/2 overflow-hidden flex flex-col">
-              {previewPdfPath && (
-                <div className="flex border-b bg-gray-50 shrink-0">
-                  <button
-                    onClick={() => setRightPanel("ast")}
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                      rightPanel === "ast"
-                        ? "text-blue-600 border-b-2 border-blue-500"
-                        : "text-gray-500 hover:text-gray-700"
-                    }`}
-                  >
-                    AST 상세
-                  </button>
-                  <button
-                    onClick={() => setRightPanel("pdf")}
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                      rightPanel === "pdf"
-                        ? "text-blue-600 border-b-2 border-blue-500"
-                        : "text-gray-500 hover:text-gray-700"
-                    }`}
-                  >
-                    원본 레이아웃
-                  </button>
-                </div>
-              )}
+              <div className="flex border-b bg-gray-50 shrink-0">
+                <button
+                  onClick={() => setRightPanel("ast")}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    rightPanel === "ast"
+                      ? "text-blue-600 border-b-2 border-blue-500"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  AST 상세
+                </button>
+                <button
+                  onClick={() => setRightPanel("pdf")}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    rightPanel === "pdf"
+                      ? "text-blue-600 border-b-2 border-blue-500"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  원본 레이아웃
+                </button>
+              </div>
               <div className="flex-1 min-h-0">
-                {rightPanel === "pdf" && previewPdfPath ? (
+                {rightPanel === "pdf" ? (
                   <PdfPreviewPanel />
                 ) : (
                   <ASTDetailPanel />

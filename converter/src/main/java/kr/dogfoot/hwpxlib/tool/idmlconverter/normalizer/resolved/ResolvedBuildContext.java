@@ -65,8 +65,17 @@ public final class ResolvedBuildContext {
      * Phase 클래스가 호출하면 ResolvedToASTBuilder의 인스턴스 필드(idmlDocument 등)가 초기화된다.
      * 호출 직후 {@link #idmlDocumentSupplier}/{@link #colorResolverSupplier}/{@link #imageLoaderSupplier}
      * 가 최신 값을 반환한다.
+     *
+     * <p>새 코드에서는 필요한 범위에 맞춰 {@link #ensureColorInfra} 또는
+     * {@link #ensureImageInfra}를 우선 사용한다. 이 필드는 legacy 호출 호환용이다.</p>
      */
     public Runnable ensureIdmlInfra;
+
+    /** 색상 fallback 해석에 필요한 IDMLDocument + ColorResolver만 lazy 초기화한다. */
+    public Runnable ensureColorInfra;
+
+    /** IDMLDocument + ColorResolver + ASTImageLoader를 lazy 초기화한다. */
+    public Runnable ensureImageInfra;
 
     /** lazy 초기화된 IDMLDocument 공급. ensureIdmlInfra 호출 후 사용. */
     public Supplier<IDMLDocument> idmlDocumentSupplier;
@@ -150,6 +159,45 @@ public final class ResolvedBuildContext {
     /** RenderedGroup/page_object ID → PNG 처리 소유권 결정. */
     public java.util.Map<Integer, FrameDisposition> renderedItemDispositions = new java.util.HashMap<>();
 
+    /**
+     * 변환 1회 동안 렌더 PNG 원본 바이트를 재사용한다.
+     *
+     * <p>같은 파일을 Phase 6/7 또는 overflow 처리에서 반복해서 읽는 비용을 줄이기 위한
+     * 실행 캐시이며, ownership/placement 결정에는 참여하지 않는다.</p>
+     */
+    public final java.util.Map<String, byte[]> renderedPngByteCache = new java.util.HashMap<>();
+
+    /** ParagraphStyle → Story text run fallback style 값 캐시. */
+    public final java.util.Map<String, ParagraphStyleContext> paragraphStyleContextCache = new java.util.HashMap<>();
+
+    public static final class ParagraphStyleContext {
+        public final String fillColor;
+        public final Double tracking;
+        public final String fontFamily;
+        public final Double fontSize;
+        public final String underlineColor;
+
+        public ParagraphStyleContext(String fillColor, Double tracking, String fontFamily,
+                                     Double fontSize, String underlineColor) {
+            this.fillColor = fillColor;
+            this.tracking = tracking;
+            this.fontFamily = fontFamily;
+            this.fontSize = fontSize;
+            this.underlineColor = underlineColor;
+        }
+    }
+
+    /**
+     * rendered group 조회용 실행 인덱스.
+     *
+     * <p>legacy Phase 여러 곳에서 {@code allRenderedFloatingItems()}를 반복 선형 탐색한다.
+     * 아래 인덱스는 같은 첫 매칭 결과를 빠르게 돌려주는 캐시일 뿐이며,
+     * ownership/placement 결정을 새로 만들지 않는다.</p>
+     */
+    private java.util.Map<Integer, RenderedGroup> renderedFloatingById;
+    private java.util.Map<Integer, RenderedGroup> inlineObjectById;
+    private java.util.Map<String, RenderedGroup> tfInlineVisualOwnerByTextFrameId;
+
     /** inline_object ID → 인라인 PNG 처리 소유권 결정. */
     public java.util.Map<Integer, FrameDisposition> inlineObjectDispositions = new java.util.HashMap<>();
 
@@ -193,6 +241,64 @@ public final class ResolvedBuildContext {
     /** inline_object domId가 지정된 disposition으로 등록되어 있으면 true. */
     public boolean isInlineDisposed(int domId, FrameDisposition d) {
         return d.equals(inlineObjectDispositions.get(domId));
+    }
+
+    public RenderedGroup renderedFloatingById(int id) {
+        ensureRenderedGroupIndexes();
+        return renderedFloatingById != null ? renderedFloatingById.get(id) : null;
+    }
+
+    public RenderedGroup inlineObjectById(int id) {
+        ensureRenderedGroupIndexes();
+        return inlineObjectById != null ? inlineObjectById.get(id) : null;
+    }
+
+    public RenderedGroup tfInlineVisualOwnerForTextFrame(String domId) {
+        if (domId == null) return null;
+        ensureRenderedGroupIndexes();
+        return tfInlineVisualOwnerByTextFrameId != null
+                ? tfInlineVisualOwnerByTextFrameId.get(domId)
+                : null;
+    }
+
+    public boolean hasInlineObjectPng(int objectId) {
+        RenderedGroup rg = inlineObjectById(objectId);
+        if (rg == null) return false;
+        String file = rg.file();
+        if (file == null || file.isEmpty()) return false;
+        if (basePath == null) return true;
+        try {
+            return new File(basePath, file).exists();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void ensureRenderedGroupIndexes() {
+        if (renderedFloatingById != null) return;
+        renderedFloatingById = new java.util.HashMap<>();
+        inlineObjectById = new java.util.HashMap<>();
+        tfInlineVisualOwnerByTextFrameId = new java.util.HashMap<>();
+        java.util.List<RenderedGroup> groups = resolvedData != null
+                ? resolvedData.allRenderedFloatingItems()
+                : null;
+        if (groups == null) return;
+        for (RenderedGroup rg : groups) {
+            if (rg == null) continue;
+            renderedFloatingById.putIfAbsent(rg.id(), rg);
+            if ("inline_object".equals(rg.itemType()) || "inline_object".equals(rg.type())) {
+                inlineObjectById.putIfAbsent(rg.id(), rg);
+            }
+            if (rg.tfInlineVisualIds() == null || rg.tfInlineVisualIds().length == 0) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            String[] tfIds = rg.editableTextFrameIds();
+            if (tfIds == null) continue;
+            for (String tfId : tfIds) {
+                if (tfId != null) {
+                    tfInlineVisualOwnerByTextFrameId.putIfAbsent(tfId, rg);
+                }
+            }
+        }
     }
 
     /**
@@ -254,9 +360,20 @@ public final class ResolvedBuildContext {
      * 정확히 매칭한다.</p>
      */
     public java.util.List<ObjectPlan> ownershipPlans = new java.util.ArrayList<>();
+    private final java.util.Map<String, ObjectPlan> ownershipPlanRenderedCache = new java.util.HashMap<>();
+    private java.util.Map<String, ObjectPlan> ownershipPlanByRenderFileKey;
+    private java.util.Map<String, ObjectPlan> ownershipPlanByRenderKey;
+    private java.util.Map<String, ObjectPlan> ownershipPlanByDomKey;
+    private java.util.Map<String, ObjectPlan> ownershipPlanByFileBoundsKey;
+    private java.util.Map<String, ObjectPlan> ownershipPlanByFileKey;
+    private boolean ownershipPlanIndexDirty = true;
 
     public void addOwnershipPlan(ObjectPlan plan) {
-        if (plan != null) ownershipPlans.add(plan);
+        if (plan != null) {
+            ownershipPlans.add(plan);
+            ownershipPlanIndexDirty = true;
+            ownershipPlanRenderedCache.clear();
+        }
     }
 
     public boolean shouldDropVisualByOwnershipPlan(RenderedGroup rg) {
@@ -352,27 +469,99 @@ public final class ResolvedBuildContext {
 
     public ObjectPlan findOwnershipPlanForRendered(RenderedGroup rg) {
         if (rg == null) return null;
-        ObjectPlan sameDom = null;
-        ObjectPlan sameFileAndBounds = null;
-        ObjectPlan sameFile = null;
-        Placement placement = placementOf(rg);
-        for (ObjectPlan plan : ownershipPlans) {
-            if (plan.pageIndex != rg.pageIndex()) continue;
-            boolean fileMatches = safeEquals(plan.file, rg.file());
-            boolean placementMatches = plan.placement == placement;
-            boolean renderMatches = plan.renderId != null && plan.renderId.intValue() == rg.id();
-            boolean domMatches = plan.domId == rg.id();
-            if (renderMatches && fileMatches && placementMatches) return plan;
-            if (renderMatches && placementMatches) return plan;
-            if (sameDom == null && domMatches && placementMatches) sameDom = plan;
-            if (sameFileAndBounds == null && fileMatches && placementMatches && sameRoundedBounds(plan.bounds, rg.bounds())) {
-                sameFileAndBounds = plan;
-            }
-            if (sameFile == null && fileMatches && placementMatches) sameFile = plan;
+        String cacheKey = renderedPlanCacheKey(rg);
+        if (ownershipPlanRenderedCache.containsKey(cacheKey)) {
+            return ownershipPlanRenderedCache.get(cacheKey);
         }
-        if (sameDom != null) return sameDom;
-        if (sameFileAndBounds != null) return sameFileAndBounds;
-        return sameFile;
+        ensureOwnershipPlanIndexes();
+        Placement placement = placementOf(rg);
+        ObjectPlan plan = ownershipPlanByRenderFileKey.get(renderFileKey(rg.pageIndex(), placement, rg.id(), rg.file()));
+        if (plan == null) {
+            plan = ownershipPlanByFileBoundsKey.get(fileBoundsKey(rg.pageIndex(), placement, rg.file(), rg.bounds()));
+        }
+        if (plan == null) {
+            plan = ownershipPlanByFileKey.get(fileKey(rg.pageIndex(), placement, rg.file()));
+        }
+        if (plan == null) {
+            plan = ownershipPlanByRenderKey.get(renderKey(rg.pageIndex(), placement, rg.id()));
+        }
+        if (plan == null) {
+            plan = ownershipPlanByDomKey.get(domKey(rg.pageIndex(), placement, rg.id()));
+        }
+        ownershipPlanRenderedCache.put(cacheKey, plan);
+        return plan;
+    }
+
+    private void ensureOwnershipPlanIndexes() {
+        if (!ownershipPlanIndexDirty && ownershipPlanByRenderFileKey != null) return;
+        ownershipPlanByRenderFileKey = new java.util.HashMap<>();
+        ownershipPlanByRenderKey = new java.util.HashMap<>();
+        ownershipPlanByDomKey = new java.util.HashMap<>();
+        ownershipPlanByFileBoundsKey = new java.util.HashMap<>();
+        ownershipPlanByFileKey = new java.util.HashMap<>();
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.renderId != null) {
+                putFirst(ownershipPlanByRenderFileKey,
+                        renderFileKey(plan.pageIndex, plan.placement, plan.renderId, plan.file),
+                        plan);
+                putFirst(ownershipPlanByRenderKey,
+                        renderKey(plan.pageIndex, plan.placement, plan.renderId),
+                        plan);
+            }
+            putFirst(ownershipPlanByDomKey, domKey(plan.pageIndex, plan.placement, plan.domId), plan);
+            putFirst(ownershipPlanByFileBoundsKey,
+                    fileBoundsKey(plan.pageIndex, plan.placement, plan.file, plan.bounds),
+                    plan);
+            putFirst(ownershipPlanByFileKey, fileKey(plan.pageIndex, plan.placement, plan.file), plan);
+        }
+        ownershipPlanIndexDirty = false;
+        ownershipPlanRenderedCache.clear();
+    }
+
+    private static void putFirst(java.util.Map<String, ObjectPlan> map, String key, ObjectPlan plan) {
+        if (key != null && !map.containsKey(key)) {
+            map.put(key, plan);
+        }
+    }
+
+    private static String renderedPlanCacheKey(RenderedGroup rg) {
+        Placement placement = placementOf(rg);
+        return rg.pageIndex() + "|" + placement + "|" + rg.id() + "|"
+                + nullSafe(rg.file()) + "|" + roundedBoundsKey(rg.bounds());
+    }
+
+    private static String renderFileKey(int pageIndex, Placement placement, int renderId, String file) {
+        return pageIndex + "|" + placement + "|" + renderId + "|" + nullSafe(file);
+    }
+
+    private static String renderKey(int pageIndex, Placement placement, int renderId) {
+        return pageIndex + "|" + placement + "|" + renderId;
+    }
+
+    private static String domKey(int pageIndex, Placement placement, int domId) {
+        return pageIndex + "|" + placement + "|" + domId;
+    }
+
+    private static String fileBoundsKey(int pageIndex, Placement placement, String file, double[] bounds) {
+        if (bounds == null || bounds.length < 4) return null;
+        return pageIndex + "|" + placement + "|" + nullSafe(file) + "|" + roundedBoundsKey(bounds);
+    }
+
+    private static String fileKey(int pageIndex, Placement placement, String file) {
+        return pageIndex + "|" + placement + "|" + nullSafe(file);
+    }
+
+    private static String roundedBoundsKey(double[] bounds) {
+        if (bounds == null || bounds.length < 4) return "";
+        return Math.round(bounds[0] * 100.0) + ","
+                + Math.round(bounds[1] * 100.0) + ","
+                + Math.round(bounds[2] * 100.0) + ","
+                + Math.round(bounds[3] * 100.0);
+    }
+
+    private static String nullSafe(String value) {
+        return value != null ? value : "";
     }
 
     private static Placement placementOf(RenderedGroup rg) {
@@ -380,19 +569,6 @@ public final class ResolvedBuildContext {
             return Placement.INLINE;
         }
         return Placement.FLOATING;
-    }
-
-    private static boolean safeEquals(String a, String b) {
-        if (a == null) return b == null;
-        return a.equals(b);
-    }
-
-    private static boolean sameRoundedBounds(double[] a, double[] b) {
-        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
-        for (int i = 0; i < 4; i++) {
-            if (Math.round(a[i] * 100.0) != Math.round(b[i] * 100.0)) return false;
-        }
-        return true;
     }
 
     public void recordRenderedDecision(RenderedGroup rg, String phase, String decision, String detail) {

@@ -1,0 +1,172 @@
+{
+  "version": "sbd-1",
+  "draft_status": "schema_only_pending_actual_ast_ids",
+  "source": {
+    "document_name": "22개정_중등국어(박)_3-2학기-1단원(1)(006~031)수정본",
+    "sample_pages": [6, 7, 8],
+    "ast_source": "ASTDocument",
+    "notes": [
+      "샘플 변환 캐시가 삭제되어 실제 AST member id는 다음 변환 후 채운다.",
+      "v1 expected는 block_type보다 member_ids 그룹핑 검수에 집중한다."
+    ]
+  },
+  "review_policy": {
+    "primary_metric": "member_ids",
+    "block_type_policy": "weak_hint",
+    "needs_review_below_confidence": 0.8
+  },
+  "expected_member_grouping_notes": [
+    "단원/소단원 제목과 그 제목을 감싸는 보이는 장식은 같은 block 후보로 본다.",
+    "본문 문단이 이어지는 영역은 다음 anchor가 나오기 전까지 같은 block 후보로 본다.",
+    "활동, 문제, 예시처럼 시작 신호가 강한 텍스트는 새 block anchor 후보로 본다.",
+    "이미지는 group, container, caption 신호가 있으면 근접 거리보다 그 신호를 우선한다.",
+    "페이지 배경, 마스터 반복 장식, 머리말/꼬리말은 기본적으로 block member에서 제외한다."
+  ],
+  "blocks": [
+    {
+      "id": "sb_draft_0001",
+      "member_ids": ["TODO_REPLACE_WITH_ACTUAL_AST_ID"],
+      "member_boxes": [
+        {
+          "id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+          "page": 6,
+          "bbox": null,
+          "kind": "text",
+          "role": "text_frame"
+        }
+      ],
+      "anchor_id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+      "page_start": 6,
+      "page_end": 6,
+      "bbox": null,
+      "reading_order": 1,
+      "block_type": "unknown",
+      "confidence": 0.0,
+      "signals": {
+        "anchor_score": 0.0,
+        "container_score": 0.0,
+        "image_score": 0.0
+      },
+      "review": {
+        "needs_review": true,
+        "note": "첫 페이지 대표 제목/도입 블록. 실제 AST 생성 후 제목, 보이는 제목 장식, 관련 이미지 여부를 확인한다."
+      }
+    },
+    {
+      "id": "sb_draft_0002",
+      "member_ids": ["TODO_REPLACE_WITH_ACTUAL_AST_ID"],
+      "member_boxes": [
+        {
+          "id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+          "page": 6,
+          "bbox": null,
+          "kind": "text",
+          "role": "text_frame"
+        }
+      ],
+      "anchor_id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+      "page_start": 6,
+      "page_end": 6,
+      "bbox": null,
+      "reading_order": 2,
+      "block_type": "unknown",
+      "confidence": 0.0,
+      "signals": {
+        "anchor_score": 0.0,
+        "container_score": 0.0,
+        "image_score": 0.0
+      },
+      "review": {
+        "needs_review": true,
+        "note": "학습 목표 또는 개념 도입 성격의 텍스트 묶음 후보. 다음 anchor 전까지의 텍스트만 포함하는지 검수한다."
+      }
+    },
+    {
+      "id": "sb_draft_0003",
+      "member_ids": ["TODO_REPLACE_WITH_ACTUAL_AST_ID"],
+      "member_boxes": [
+        {
+          "id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+          "page": 7,
+          "bbox": null,
+          "kind": "text",
+          "role": "text_frame"
+        }
+      ],
+      "anchor_id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+      "page_start": 7,
+      "page_end": 7,
+      "bbox": null,
+      "reading_order": 3,
+      "block_type": "unknown",
+      "confidence": 0.0,
+      "signals": {
+        "anchor_score": 0.0,
+        "container_score": 0.0,
+        "image_score": 0.0
+      },
+      "review": {
+        "needs_review": true,
+        "note": "본문/읽기 자료 블록 후보. column 또는 story thread가 끊기는 지점에서 과병합되지 않았는지 확인한다."
+      }
+    },
+    {
+      "id": "sb_draft_0004",
+      "member_ids": ["TODO_REPLACE_WITH_ACTUAL_AST_ID"],
+      "member_boxes": [
+        {
+          "id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+          "page": 7,
+          "bbox": null,
+          "kind": "figure",
+          "role": "visual"
+        }
+      ],
+      "anchor_id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+      "page_start": 7,
+      "page_end": 8,
+      "bbox": null,
+      "reading_order": 4,
+      "block_type": "unknown",
+      "confidence": 0.0,
+      "signals": {
+        "anchor_score": 0.0,
+        "container_score": 0.0,
+        "image_score": 0.0
+      },
+      "review": {
+        "needs_review": true,
+        "note": "이미지/삽화와 캡션이 있는 block 후보. 같은 group/container/caption 신호가 있으면 물리적으로 가까운 다른 텍스트보다 우선한다."
+      }
+    },
+    {
+      "id": "sb_draft_0005",
+      "member_ids": ["TODO_REPLACE_WITH_ACTUAL_AST_ID"],
+      "member_boxes": [
+        {
+          "id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+          "page": 8,
+          "bbox": null,
+          "kind": "text",
+          "role": "text_frame"
+        }
+      ],
+      "anchor_id": "TODO_REPLACE_WITH_ACTUAL_AST_ID",
+      "page_start": 8,
+      "page_end": 8,
+      "bbox": null,
+      "reading_order": 5,
+      "block_type": "unknown",
+      "confidence": 0.0,
+      "signals": {
+        "anchor_score": 0.0,
+        "container_score": 0.0,
+        "image_score": 0.0
+      },
+      "review": {
+        "needs_review": true,
+        "note": "활동/문항 블록 후보. 다음 활동/문항 anchor까지 포함하되 다음 문제까지 합쳐지지 않는지 검수한다."
+      }
+    }
+  ]
+}

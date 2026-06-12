@@ -19,8 +19,10 @@ export function ConversionPanel() {
     setDebugPageRange,
     startConversion,
     noPreview,
+    perfMode,
     setVectorDpi,
     setNoPreview,
+    setPerfMode,
     clearError,
     openFontMappingModal,
     lastExtractStats,
@@ -265,7 +267,7 @@ export function ConversionPanel() {
 
       <div className="flex items-center justify-between">
         {/* Options */}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-1.5 text-sm">
             DPI:
             <select
@@ -275,6 +277,21 @@ export function ConversionPanel() {
             >
               <option value={96}>96</option>
               <option value={150}>150</option>
+            </select>
+          </label>
+          <label
+            className="flex items-center gap-1.5 text-xs text-gray-500"
+            title="INDD 추출 렌더링 모드. 빠름은 150dpi, 표준은 220dpi, 고품질은 300dpi로 PNG를 렌더링합니다. PDF preview는 생성 후 캐시됩니다."
+          >
+            추출모드:
+            <select
+              value={perfMode}
+              onChange={(e) => setPerfMode(e.target.value as "fast" | "standard" | "high")}
+              className="border border-gray-300 rounded px-1 py-0.5 text-xs"
+            >
+              <option value="fast">빠름</option>
+              <option value="standard">표준</option>
+              <option value="high">고품질</option>
             </select>
           </label>
           <label className="flex items-center gap-1.5 text-sm">

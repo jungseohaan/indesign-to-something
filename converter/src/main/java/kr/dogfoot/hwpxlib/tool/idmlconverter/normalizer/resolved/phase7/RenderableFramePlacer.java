@@ -365,6 +365,7 @@ public final class RenderableFramePlacer {
                 || reason.contains("mixed_group_text_hidden")
                 || reason.contains("image_group_text_hidden")
                 || reason.contains("visual_label_text_hidden_shell")
+                || reason.contains("editable_composite_text_hidden_shell")
                 || reason.contains("textframe_visual_shell");
     }
 

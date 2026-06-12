@@ -241,7 +241,7 @@ public class ASTTableConverter {
                     cell = convertTableCell(idmlCell, rowIdx, idmlCell.columnIndex(),
                             idmlDoc, colorResolver, imageLoader, resolvedData);
                 } else {
-                    cell = convertTableCellSimple(idmlCell, rowIdx, idmlCell.columnIndex());
+                    cell = convertTableCellSimple(idmlCell, rowIdx, idmlCell.columnIndex(), resolvedData);
                 }
                 row.addCell(cell);
             }
@@ -344,16 +344,16 @@ public class ASTTableConverter {
      * 간소화 셀 변환 (ColorResolver 없이).
      */
     private static ASTTableCell convertTableCellSimple(IDMLTableCell idmlCell,
-                                                        int rowIdx, int colIdx) {
+                                                        int rowIdx, int colIdx,
+                                                        ResolvedData resolvedData) {
         ASTTableCell cell = new ASTTableCell();
         cell.rowIndex(rowIdx);
         cell.columnIndex(colIdx);
         cell.rowSpan(idmlCell.rowSpan());
         cell.columnSpan(idmlCell.columnSpan());
 
-        // 색상: IDML 색상 이름을 그대로 저장 (HwpxTableBuilder에서 해석)
         if (idmlCell.fillColor() != null) {
-            cell.fillColor(idmlCell.fillColor());
+            cell.fillColor(resolveTableColor(resolvedData, idmlCell.fillColor(), idmlCell.fillTint()));
         }
         cell.verticalAlign(idmlCell.verticalJustification());
 
@@ -364,15 +364,15 @@ public class ASTTableConverter {
         cell.marginRight(CoordinateConverter.pointsToHwpunits(idmlCell.rightInset()));
 
         // 셀 테두리 (색상 해석 없이)
-        cell.topBorder(convertCellBorderSimple(idmlCell.topBorder()));
-        cell.bottomBorder(convertCellBorderSimple(idmlCell.bottomBorder()));
-        cell.leftBorder(convertCellBorderSimple(idmlCell.leftBorder()));
-        cell.rightBorder(convertCellBorderSimple(idmlCell.rightBorder()));
+        cell.topBorder(convertCellBorderSimple(idmlCell.topBorder(), resolvedData));
+        cell.bottomBorder(convertCellBorderSimple(idmlCell.bottomBorder(), resolvedData));
+        cell.leftBorder(convertCellBorderSimple(idmlCell.leftBorder(), resolvedData));
+        cell.rightBorder(convertCellBorderSimple(idmlCell.rightBorder(), resolvedData));
 
         // 대각선
         cell.topLeftDiagonalLine(idmlCell.topLeftDiagonalLine());
         cell.topRightDiagonalLine(idmlCell.topRightDiagonalLine());
-        cell.diagonalBorder(convertCellBorderSimple(idmlCell.diagonalBorder()));
+        cell.diagonalBorder(convertCellBorderSimple(idmlCell.diagonalBorder(), resolvedData));
 
         // 셀 내용: 단락 변환 (간소화 — 텍스트만)
         for (IDMLParagraph cellPara : idmlCell.paragraphs()) {
@@ -396,6 +396,12 @@ public class ASTTableConverter {
                 if (run.fontStyle() != null) {
                     textRun.fontStyle(run.fontStyle());
                 }
+                if (run.fillColor() != null) {
+                    textRun.textColor(resolveTableColor(resolvedData, run.fillColor(), 100.0));
+                }
+                if (run.underline() != null && run.underline()) {
+                    textRun.underline(true);
+                }
                 astPara.addItem(textRun);
             }
             cell.addParagraph(astPara);
@@ -404,16 +410,25 @@ public class ASTTableConverter {
         return cell;
     }
 
-    private static ASTTableCell.CellBorder convertCellBorderSimple(IDMLTableCell.CellBorder src) {
+    private static ASTTableCell.CellBorder convertCellBorderSimple(IDMLTableCell.CellBorder src,
+                                                                   ResolvedData resolvedData) {
         if (src == null || src.strokeWeight <= 0) return null;
         ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
         border.weight(src.strokeWeight);
         border.strokeType(src.strokeType);
         border.tint(src.strokeTint);
         if (src.strokeColor != null) {
-            border.color(src.strokeColor); // 색상 이름 그대로 (hex 미해석)
+            border.color(resolveTableColor(resolvedData, src.strokeColor, src.strokeTint));
         }
         return border;
+    }
+
+    private static String resolveTableColor(ResolvedData resolvedData, String color, double tint) {
+        if (color == null) return null;
+        if (resolvedData == null) return color;
+        String hex = resolvedData.resolveColorHex(color);
+        if (hex == null) return color;
+        return ColorResolver.applyTintToHex(hex, tint);
     }
 
     // ── 그리드 TextFrame 감지 및 ASTTable 변환 ──

@@ -30,11 +30,10 @@ pub struct CacheMeta {
 /// 캐시 루트 디렉토리. 없으면 생성.
 pub fn cache_root() -> Result<PathBuf, String> {
     // dirs::cache_dir() = ~/Library/Caches on macOS
-    let base = dirs::cache_dir()
-        .ok_or_else(|| "사용자 캐시 디렉토리를 찾을 수 없습니다.".to_string())?;
+    let base =
+        dirs::cache_dir().ok_or_else(|| "사용자 캐시 디렉토리를 찾을 수 없습니다.".to_string())?;
     let dir = base.join("idml-to-hwpx").join("extracts");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("캐시 디렉토리 생성 실패: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("캐시 디렉토리 생성 실패: {}", e))?;
     Ok(dir)
 }
 
@@ -75,14 +74,22 @@ fn file_meta_fingerprint(path: &Path) -> Option<String> {
 }
 
 pub fn write_extractor_fingerprint(cache_key: &str, jsx_path: &Path) {
-    let Some(fingerprint) = file_meta_fingerprint(jsx_path) else { return };
-    let Ok(dir) = cache_entry_dir(cache_key) else { return };
+    let Some(fingerprint) = file_meta_fingerprint(jsx_path) else {
+        return;
+    };
+    let Ok(dir) = cache_entry_dir(cache_key) else {
+        return;
+    };
     let _ = std::fs::write(dir.join("_extractor_fingerprint.txt"), fingerprint);
 }
 
 pub fn is_extractor_fingerprint_current(cache_key: &str, jsx_path: &Path) -> bool {
-    let Some(current) = file_meta_fingerprint(jsx_path) else { return false };
-    let Ok(dir) = cache_entry_dir(cache_key) else { return false };
+    let Some(current) = file_meta_fingerprint(jsx_path) else {
+        return false;
+    };
+    let Ok(dir) = cache_entry_dir(cache_key) else {
+        return false;
+    };
     let Ok(cached) = std::fs::read_to_string(dir.join("_extractor_fingerprint.txt")) else {
         return false;
     };
@@ -226,8 +233,7 @@ pub fn store(
     }
     // rename은 동일 파일시스템에서만 동작. 캐시는 보통 동일 볼륨이므로 시도 후 실패 시 복사.
     if std::fs::rename(temp_dir, &target).is_err() {
-        copy_dir_recursive(temp_dir, &target)
-            .map_err(|e| format!("캐시 복사 실패: {}", e))?;
+        copy_dir_recursive(temp_dir, &target).map_err(|e| format!("캐시 복사 실패: {}", e))?;
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
@@ -378,8 +384,7 @@ fn path_index_file() -> Result<PathBuf, String> {
 pub fn lookup_previous_cache_key(indd_path: &Path) -> Option<String> {
     let index_path = path_index_file().ok()?;
     let content = std::fs::read_to_string(&index_path).ok()?;
-    let map: std::collections::HashMap<String, String> =
-        serde_json::from_str(&content).ok()?;
+    let map: std::collections::HashMap<String, String> = serde_json::from_str(&content).ok()?;
     let canonical = indd_path
         .canonicalize()
         .unwrap_or_else(|_| indd_path.to_path_buf());
@@ -388,7 +393,9 @@ pub fn lookup_previous_cache_key(indd_path: &Path) -> Option<String> {
 
 /// 경로 인덱스에 최신 캐시 키를 기록한다.
 pub fn update_path_index(indd_path: &Path, cache_key: &str) {
-    let Ok(index_path) = path_index_file() else { return };
+    let Ok(index_path) = path_index_file() else {
+        return;
+    };
     let mut map: std::collections::HashMap<String, String> = std::fs::read_to_string(&index_path)
         .ok()
         .and_then(|c| serde_json::from_str(&c).ok())
@@ -396,7 +403,10 @@ pub fn update_path_index(indd_path: &Path, cache_key: &str) {
     let canonical = indd_path
         .canonicalize()
         .unwrap_or_else(|_| indd_path.to_path_buf());
-    map.insert(canonical.to_string_lossy().to_string(), cache_key.to_string());
+    map.insert(
+        canonical.to_string_lossy().to_string(),
+        cache_key.to_string(),
+    );
     if let Ok(json) = serde_json::to_string(&map) {
         let _ = std::fs::write(&index_path, json);
     }
@@ -412,9 +422,7 @@ pub fn load_page_hashes(cache_key: &str) -> Option<std::collections::HashMap<Str
 
 /// 캐시 엔트리에서 page_item_map.json을 읽어 반환한다.
 /// 키: 1-based 페이지 인덱스 문자열 → item DOM ID 배열
-pub fn load_page_item_map(
-    cache_key: &str,
-) -> Option<std::collections::HashMap<String, Vec<u64>>> {
+pub fn load_page_item_map(cache_key: &str) -> Option<std::collections::HashMap<String, Vec<u64>>> {
     let dir = cache_entry_dir(cache_key).ok()?;
     let content = std::fs::read_to_string(dir.join("page_item_map.json")).ok()?;
     serde_json::from_str(&content).ok()
@@ -458,8 +466,7 @@ pub fn copy_cached_pages(
     };
 
     // 변경되지 않은 페이지 index set (0-based for page_bg_N naming)
-    let page_set: std::collections::HashSet<u32> =
-        unchanged_pages.iter().copied().collect();
+    let page_set: std::collections::HashSet<u32> = unchanged_pages.iter().copied().collect();
 
     // unchanged pages 의 item ID set 구축
     let mut item_id_set: std::collections::HashSet<u64> = std::collections::HashSet::new();
@@ -567,12 +574,9 @@ fn extract_item_id_from_filename(name: &str) -> Option<u64> {
 /// - editableTextFrameIds: 합산 후 중복 제거
 ///
 /// 변경된 페이지의 항목은 새 파일에, 변경 없는 페이지의 항목은 캐시에 있다.
-pub fn merge_resolved_json(
-    new_path: &Path,
-    cached_cache_key: &str,
-) -> Result<(), String> {
-    let cached_dir = cache_entry_dir(cached_cache_key)
-        .map_err(|e| format!("캐시 디렉토리 조회 실패: {}", e))?;
+pub fn merge_resolved_json(new_path: &Path, cached_cache_key: &str) -> Result<(), String> {
+    let cached_dir =
+        cache_entry_dir(cached_cache_key).map_err(|e| format!("캐시 디렉토리 조회 실패: {}", e))?;
     let cached_path = cached_dir.join("resolved.json");
 
     if !cached_path.exists() {
@@ -619,13 +623,11 @@ pub fn merge_resolved_json(
             .collect();
         // cached에만 있는 항목 추가
         for item in cached_arr {
-            let item_id = item
-                .get(id_key)
-                .and_then(|v| match v {
-                    serde_json::Value::String(s) => Some(s.clone()),
-                    serde_json::Value::Number(n) => Some(n.to_string()),
-                    _ => None,
-                });
+            let item_id = item.get(id_key).and_then(|v| match v {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            });
             if let Some(id) = item_id {
                 if !new_ids.contains(&id) {
                     new_arr.push(item.clone());
@@ -645,10 +647,7 @@ pub fn merge_resolved_json(
             .and_then(|v| v.as_i64())
             .map(|v| v.to_string())
             .unwrap_or_else(|| "-".to_string());
-        let file = item
-            .get("file")
-            .and_then(|v| v.as_str())
-            .unwrap_or("-");
+        let file = item.get("file").and_then(|v| v.as_str()).unwrap_or("-");
         Some(format!("{}:{}:{}", id, page, file))
     }
 
@@ -656,18 +655,22 @@ pub fn merge_resolved_json(
         new_val: &mut serde_json::Value,
         cached_val: &serde_json::Value,
     ) {
-        let new_arr = match new_val.get_mut("renderedFloatingItems").and_then(|v| v.as_array_mut()) {
+        let new_arr = match new_val
+            .get_mut("renderedFloatingItems")
+            .and_then(|v| v.as_array_mut())
+        {
             Some(a) => a,
             None => return,
         };
-        let cached_arr = match cached_val.get("renderedFloatingItems").and_then(|v| v.as_array()) {
+        let cached_arr = match cached_val
+            .get("renderedFloatingItems")
+            .and_then(|v| v.as_array())
+        {
             Some(a) => a,
             None => return,
         };
-        let mut new_keys: std::collections::HashSet<String> = new_arr
-            .iter()
-            .filter_map(rendered_item_key)
-            .collect();
+        let mut new_keys: std::collections::HashSet<String> =
+            new_arr.iter().filter_map(rendered_item_key).collect();
         for item in cached_arr {
             if let Some(key) = rendered_item_key(item) {
                 if !new_keys.contains(&key) {
@@ -703,18 +706,22 @@ pub fn merge_resolved_json(
 
     // editableTextFrameIds: 두 배열 합산 후 중복 제거
     fn merge_editable_ids(new_val: &mut serde_json::Value, cached_val: &serde_json::Value) {
-        let new_arr = match new_val.get_mut("editableTextFrameIds").and_then(|v| v.as_array_mut()) {
+        let new_arr = match new_val
+            .get_mut("editableTextFrameIds")
+            .and_then(|v| v.as_array_mut())
+        {
             Some(a) => a,
             None => return,
         };
-        let cached_arr = match cached_val.get("editableTextFrameIds").and_then(|v| v.as_array()) {
+        let cached_arr = match cached_val
+            .get("editableTextFrameIds")
+            .and_then(|v| v.as_array())
+        {
             Some(a) => a,
             None => return,
         };
-        let existing: std::collections::HashSet<String> = new_arr
-            .iter()
-            .map(|v| v.to_string())
-            .collect();
+        let existing: std::collections::HashSet<String> =
+            new_arr.iter().map(|v| v.to_string()).collect();
         for item in cached_arr {
             if !existing.contains(&item.to_string()) {
                 new_arr.push(item.clone());
@@ -738,7 +745,10 @@ pub fn merge_resolved_json(
     std::fs::write(new_path, merged)
         .map_err(|e| format!("merged resolved.json 쓰기 실패: {}", e))?;
 
-    eprintln!("[SPEC-030] resolved.json 병합 완료 (캐시: {})", cached_cache_key);
+    eprintln!(
+        "[SPEC-030] resolved.json 병합 완료 (캐시: {})",
+        cached_cache_key
+    );
     Ok(())
 }
 
@@ -781,7 +791,12 @@ pub fn merge_chunk_resolved_files(output_dir: &Path) -> Result<usize, String> {
     let mut merged: serde_json::Value = serde_json::from_str(&base_content)
         .map_err(|e| format!("resolved.json 파싱 실패: {}", e))?;
 
-    fn append_array(base: &mut serde_json::Value, other: &serde_json::Value, field: &str, id_key: &str) {
+    fn append_array(
+        base: &mut serde_json::Value,
+        other: &serde_json::Value,
+        field: &str,
+        id_key: &str,
+    ) {
         let base_arr = match base.get_mut(field).and_then(|v| v.as_array_mut()) {
             Some(a) => a,
             None => return,
@@ -822,26 +837,27 @@ pub fn merge_chunk_resolved_files(output_dir: &Path) -> Result<usize, String> {
             .and_then(|v| v.as_i64())
             .map(|v| v.to_string())
             .unwrap_or_else(|| "-".to_string());
-        let file = item
-            .get("file")
-            .and_then(|v| v.as_str())
-            .unwrap_or("-");
+        let file = item.get("file").and_then(|v| v.as_str()).unwrap_or("-");
         Some(format!("{}:{}:{}", id, page, file))
     }
 
     fn append_rendered_floating_items(base: &mut serde_json::Value, other: &serde_json::Value) {
-        let base_arr = match base.get_mut("renderedFloatingItems").and_then(|v| v.as_array_mut()) {
+        let base_arr = match base
+            .get_mut("renderedFloatingItems")
+            .and_then(|v| v.as_array_mut())
+        {
             Some(a) => a,
             None => return,
         };
-        let other_arr = match other.get("renderedFloatingItems").and_then(|v| v.as_array()) {
+        let other_arr = match other
+            .get("renderedFloatingItems")
+            .and_then(|v| v.as_array())
+        {
             Some(a) => a,
             None => return,
         };
-        let mut existing: std::collections::HashSet<String> = base_arr
-            .iter()
-            .filter_map(rendered_item_key)
-            .collect();
+        let mut existing: std::collections::HashSet<String> =
+            base_arr.iter().filter_map(rendered_item_key).collect();
         for item in other_arr {
             if let Some(key) = rendered_item_key(item) {
                 if !existing.contains(&key) {

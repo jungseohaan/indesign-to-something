@@ -216,7 +216,8 @@ public final class OwnershipPlanner {
             if (isCalloutOrOutlineTextShell(rg)) {
                 return VisualLayer.CONTAINER_OUTLINE;
             }
-            if ("visual_label_text_hidden_shell".equals(rg.reason())) {
+            if ("visual_label_text_hidden_shell".equals(rg.reason())
+                    || "editable_composite_text_hidden_shell".equals(rg.reason())) {
                 // This is not a passive backdrop behind a text frame. The
                 // extractor exported the complete label chrome with text hidden,
                 // and the editable TextFrame is placed above it. These labels
@@ -314,7 +315,8 @@ public final class OwnershipPlanner {
         // text pixels are already hidden and the editable TextFrame is expected
         // to be placed above it.  Absorbing it into drawText style drops the
         // shell, and small badge labels lose both their backdrop and alignment.
-        if ("visual_label_text_hidden_shell".equals(rg.reason())) return false;
+        if ("visual_label_text_hidden_shell".equals(rg.reason())
+                || "editable_composite_text_hidden_shell".equals(rg.reason())) return false;
         if (isCalloutOrOutlineTextShell(rg)) return false;
         if (isLargeVisual(rg) || isLineLikeVisual(rg) || isMaskLikeVisual(rg)) return false;
         if (isImageBackedContentShell(rg) || isPlacedContentImage(rg)) return false;

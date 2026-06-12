@@ -441,7 +441,7 @@ function _parseArgs(args) {
         // 아래는 _computePageRange에서 채워짐
         pageCount: 0, rangePageCount: 0
     };
-    ctx.skipPdf = (args[8] === "1") || (ctx.perfMode === "fast");
+    ctx.skipPdf = (args[8] === "1");
 
     var skipRenderPagesRaw = args[9] || "";
     if (skipRenderPagesRaw) {

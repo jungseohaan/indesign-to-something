@@ -45,7 +45,6 @@ import java.util.Set;
  * </ul>
  *
  * <p>의존: ctx.idmlDir, resolvedData, scaleFactor, basePath, toSectionIndex, loadIDMLStory,
- * ensureIdmlInfra + idmlDocumentSupplier/colorResolverSupplier/imageLoaderSupplier,
  * tableQualityGate, debugAst.</p>
  */
 public final class TableBuilder {
@@ -214,12 +213,11 @@ public final class TableBuilder {
                 }
 
                 // 분기 3 (기본): ASTTable로 변환
-                ctx.ensureIdmlInfra.run();
                 ASTTable astTable = ASTTableConverter.convertTableSimple(
                         idmlTable, thisX, thisY, tf.zOrder(),
-                        ctx.idmlDocumentSupplier.get(), ctx.colorResolverSupplier.get(),
-                        ctx.imageLoaderSupplier.get(), ctx.resolvedData);
+                        null, null, null, ctx.resolvedData);
                 restoreAnchorOnlyEditableInlineGraphics(ctx, astTable, idmlTable);
+                restoreRenderedCellInlineGraphics(ctx, astTable, idmlTable);
 
                 // 테이블 셀에 포함된 인라인 그룹 → 컬럼 분할 (예: 문장 성분의 종류 마인드맵)
                 ASTTable expandedTable = tryExpandInlineGroupColumns(ctx, astTable, idmlTable);
@@ -348,6 +346,160 @@ public final class TableBuilder {
                 return -1;
             }
         }
+    }
+
+    private static void restoreRenderedCellInlineGraphics(
+            ResolvedBuildContext ctx,
+            ASTTable astTable,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable) {
+        if (ctx == null || astTable == null || idmlTable == null) return;
+        if (astTable.rows() == null || idmlTable.rows() == null) return;
+
+        int rowCount = Math.min(astTable.rows().size(), idmlTable.rows().size());
+        for (int ri = 0; ri < rowCount; ri++) {
+            ASTTableRow astRow = astTable.rows().get(ri);
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow idmlRow = idmlTable.rows().get(ri);
+            if (astRow == null || idmlRow == null || astRow.cells() == null || idmlRow.cells() == null) continue;
+            int cellCount = Math.min(astRow.cells().size(), idmlRow.cells().size());
+            for (int ci = 0; ci < cellCount; ci++) {
+                ASTTableCell astCell = astRow.cells().get(ci);
+                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell = idmlRow.cells().get(ci);
+                if (astCell == null || idmlCell == null || astCell.paragraphs() == null || idmlCell.paragraphs() == null) {
+                    continue;
+                }
+                int paraCount = Math.min(astCell.paragraphs().size(), idmlCell.paragraphs().size());
+                for (int pi = 0; pi < paraCount; pi++) {
+                    IDMLParagraph idmlPara = idmlCell.paragraphs().get(pi);
+                    int anchorOnlyId = anchorOnlyGraphicDomId(idmlPara);
+                    if (anchorOnlyId > 0
+                            && !isAtomicRenderedInlineGraphic(ctx, anchorOnlyId)
+                            && !kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                    .buildChildEditableBoxes(ctx, anchorOnlyId)
+                                    .isEmpty()) {
+                        continue;
+                    }
+                    ASTParagraph astPara = astCell.paragraphs().get(pi);
+                    if (astPara == null) continue;
+                    restoreRenderedCellInlineGraphics(ctx, astPara, idmlPara);
+                }
+            }
+        }
+    }
+
+    private static void restoreRenderedCellInlineGraphics(
+            ResolvedBuildContext ctx,
+            ASTParagraph astPara,
+            IDMLParagraph idmlPara) {
+        if (idmlPara == null || idmlPara.characterRuns() == null) return;
+        Set<Integer> restoredIds = new HashSet<>();
+        for (IDMLCharacterRun run : idmlPara.characterRuns()) {
+            if (run == null || run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) continue;
+            for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+                if (anchor == null || anchor.type() != IDMLCharacterRun.InlineAnchorType.GRAPHIC) continue;
+                if (run.inlineGraphics() == null || anchor.index() < 0 || anchor.index() >= run.inlineGraphics().size()) {
+                    continue;
+                }
+                int domId = parseInlineGraphicDomId(run.inlineGraphics().get(anchor.index()));
+                if (domId <= 0 || !restoredIds.add(domId)) continue;
+                if (isExpandableCellInlineGroup(ctx, domId, idmlPara)) {
+                    continue;
+                }
+                if (!isAtomicRenderedInlineGraphic(ctx, domId)) {
+                    continue;
+                }
+                ASTInlineObject inline =
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                .loadInlineObject(ctx, domId);
+                if (inline == null) {
+                    inline = loadOwnershipPlannedAtomicInline(ctx, domId);
+                    if (inline == null) continue;
+                }
+                inline.keepInline(true);
+                astPara.addItem(inline);
+            }
+        }
+    }
+
+    private static ASTInlineObject loadOwnershipPlannedAtomicInline(ResolvedBuildContext ctx, int domId) {
+        RenderedGroup rg = findRenderedInlineObject(ctx, domId);
+        if (rg == null || !isAtomicRenderedInlineGraphic(ctx, domId)) return null;
+        if (!ctx.hasOwnershipPlan(rg) || !ctx.shouldPlaceInlinePngByOwnershipPlan(rg)) return null;
+        if (Boolean.FALSE.equals(rg.placementAllowed())) return null;
+        if (!"indesign_png".equals(rg.visualOwner())) return null;
+        if (Boolean.TRUE.equals(rg.containsEditableText())) return null;
+        String textOwner = rg.textOwner();
+        if (textOwner != null && !"none".equals(textOwner)) return null;
+
+        File pngFile = new File(ctx.basePath, rg.file());
+        if (!pngFile.exists()) return null;
+
+        try {
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(pngFile);
+            if (img == null || (img.getWidth() <= 2 && img.getHeight() <= 2)) return null;
+
+            ASTInlineObject obj = new ASTInlineObject();
+            obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+            obj.imageData(imageData);
+            obj.imageFormat("png");
+            obj.pixelWidth(img.getWidth());
+            obj.pixelHeight(img.getHeight());
+            obj.sourceId("u" + Integer.toHexString(domId));
+            obj.keepInline(true);
+
+            double[] bounds = rg.bounds();
+            if (bounds != null && bounds.length >= 4) {
+                double bw = Math.abs(bounds[3] - bounds[1]) * ctx.scaleFactor;
+                double bh = Math.abs(bounds[2] - bounds[0]) * ctx.scaleFactor;
+                obj.boundsX(bounds[1]);
+                obj.width(CoordinateConverter.pointsToHwpunits(bw));
+                obj.height(CoordinateConverter.pointsToHwpunits(bh));
+            } else if (ctx.pngExportDpi > 0) {
+                obj.width(CoordinateConverter.pointsToHwpunits(img.getWidth() * 72.0 / ctx.pngExportDpi));
+                obj.height(CoordinateConverter.pointsToHwpunits(img.getHeight() * 72.0 / ctx.pngExportDpi));
+            }
+            return obj;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean isAtomicRenderedInlineGraphic(ResolvedBuildContext ctx, int domId) {
+        RenderedGroup rg = findRenderedInlineObject(ctx, domId);
+        if (rg == null) return false;
+        int[] sourceIds = rg.sourceObjectIds();
+        return sourceIds == null || sourceIds.length <= 1;
+    }
+
+    private static RenderedGroup findRenderedInlineObject(ResolvedBuildContext ctx, int domId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != domId) continue;
+            if (!"inline_object".equals(rg.type()) && !"inline_object".equals(rg.itemType())) continue;
+            if (rg.file() == null) continue;
+            return rg;
+        }
+        return null;
+    }
+
+    private static boolean isExpandableCellInlineGroup(
+            ResolvedBuildContext ctx,
+            int domId,
+            IDMLParagraph para) {
+        List<ASTInlineObject> boxList =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                        .tryInlineGroupAsBoxList(ctx, domId);
+        if (boxList == null || boxList.size() < 2) return false;
+        if (para == null || para.characterRuns() == null) return true;
+        for (IDMLCharacterRun otherRun : para.characterRuns()) {
+            String ct = otherRun.content();
+            if (ct != null && !ct.trim().isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

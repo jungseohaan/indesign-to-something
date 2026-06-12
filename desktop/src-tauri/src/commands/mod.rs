@@ -1,11 +1,11 @@
-mod preview;
 mod conversion;
 mod extract;
+mod preview;
 
 // Re-export all commands for lib.rs
-pub use preview::*;
 pub use conversion::*;
 pub use extract::*;
+pub use preview::*;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -173,8 +173,8 @@ pub struct PageInfo {
     // Page layout details
     #[serde(default)]
     pub page_number: i32,
-    pub geometric_bounds: Option<Vec<f64>>,  // [top, left, bottom, right]
-    pub item_transform: Option<Vec<f64>>,    // 6-element transform matrix
+    pub geometric_bounds: Option<Vec<f64>>, // [top, left, bottom, right]
+    pub item_transform: Option<Vec<f64>>,   // 6-element transform matrix
     #[serde(default)]
     pub margin_top: f64,
     #[serde(default)]
@@ -302,7 +302,7 @@ pub struct LogEvent {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ImagePreview {
     pub original_path: String,
-    pub data_url: String,  // base64 data URL
+    pub data_url: String, // base64 data URL
     pub filename: String,
     pub width: i32,
     pub height: i32,
@@ -316,7 +316,12 @@ pub struct ImagePreview {
 #[tauri::command]
 pub async fn get_jar_path(app: AppHandle) -> Result<String, String> {
     // JAR file name pattern (cli jar has Main-Class manifest)
-    let jar_names = ["idml-to-something-1.0.9-cli.jar", "hwpxlib-1.0.9-cli.jar", "hwpxlib-cli.jar", "idml-converter.jar"];
+    let jar_names = [
+        "idml-to-something-1.0.9-cli.jar",
+        "hwpxlib-1.0.9-cli.jar",
+        "hwpxlib-cli.jar",
+        "idml-converter.jar",
+    ];
 
     // Try bundled resource first
     if let Ok(resource_dir) = app.path().resource_dir() {
@@ -335,19 +340,20 @@ pub async fn get_jar_path(app: AppHandle) -> Result<String, String> {
     // Try from desktop/src-tauri (when running cargo directly)
     // After multi-module split, converter JAR lives in converter/target/
     let paths_to_try = [
-        current_dir.join("../../converter/target"),  // from src-tauri (multi-module)
-        current_dir.join("../converter/target"),     // from desktop (multi-module)
-        current_dir.join("converter/target"),        // from project root (multi-module)
-        current_dir.join("../../target"),            // from src-tauri (legacy)
-        current_dir.join("../target"),               // from desktop (legacy)
-        current_dir.join("target"),                  // from project root (legacy)
+        current_dir.join("../../converter/target"), // from src-tauri (multi-module)
+        current_dir.join("../converter/target"),    // from desktop (multi-module)
+        current_dir.join("converter/target"),       // from project root (multi-module)
+        current_dir.join("../../target"),           // from src-tauri (legacy)
+        current_dir.join("../target"),              // from desktop (legacy)
+        current_dir.join("target"),                 // from project root (legacy)
     ];
 
     for base_path in &paths_to_try {
         for name in &jar_names {
             let path = base_path.join(name);
             if path.exists() {
-                return Ok(path.canonicalize()
+                return Ok(path
+                    .canonicalize()
                     .unwrap_or(path)
                     .to_string_lossy()
                     .to_string());
@@ -416,8 +422,7 @@ pub async fn read_resolved_json(path: String) -> Result<serde_json::Value, Strin
     let content = tokio::fs::read_to_string(&path)
         .await
         .map_err(|e| format!("resolved.json 읽기 실패: {}", e))?;
-    serde_json::from_str(&content)
-        .map_err(|e| format!("resolved.json 파싱 실패: {}", e))
+    serde_json::from_str(&content).map_err(|e| format!("resolved.json 파싱 실패: {}", e))
 }
 
 /// InDesign 설치 여부 확인. 설치되어 있으면 앱 경로 반환.
@@ -503,12 +508,9 @@ pub fn scan_indd_folder(path: String) -> Result<InddFolderScanResult, String> {
     let mut direct_files: Vec<String> = Vec::new();
     let mut subfolder_files: Vec<InddSubfolderEntry> = Vec::new();
 
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| format!("디렉토리 읽기 실패: {}", e))?;
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("디렉토리 읽기 실패: {}", e))?;
 
-    let mut sorted_entries: Vec<_> = entries
-        .filter_map(|e| e.ok())
-        .collect();
+    let mut sorted_entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
     sorted_entries.sort_by_key(|e| e.file_name());
 
     for entry in &sorted_entries {
@@ -523,9 +525,7 @@ pub fn scan_indd_folder(path: String) -> Result<InddFolderScanResult, String> {
             // 1 depth: 서브폴더 내 .indd 파일 수집
             let mut indd_files: Vec<InddFileEntry> = Vec::new();
             if let Ok(sub_entries) = std::fs::read_dir(&entry_path) {
-                let mut sorted_sub: Vec<_> = sub_entries
-                    .filter_map(|e| e.ok())
-                    .collect();
+                let mut sorted_sub: Vec<_> = sub_entries.filter_map(|e| e.ok()).collect();
                 sorted_sub.sort_by_key(|e| e.file_name());
 
                 for sub_entry in &sorted_sub {
@@ -535,7 +535,8 @@ pub fn scan_indd_folder(path: String) -> Result<InddFolderScanResult, String> {
                             if ext.eq_ignore_ascii_case("indd") {
                                 indd_files.push(InddFileEntry {
                                     path: sub_path.to_string_lossy().to_string(),
-                                    filename: sub_path.file_name()
+                                    filename: sub_path
+                                        .file_name()
                                         .unwrap_or_default()
                                         .to_string_lossy()
                                         .to_string(),
@@ -547,7 +548,8 @@ pub fn scan_indd_folder(path: String) -> Result<InddFolderScanResult, String> {
             }
             if !indd_files.is_empty() {
                 subfolder_files.push(InddSubfolderEntry {
-                    folder_name: entry_path.file_name()
+                    folder_name: entry_path
+                        .file_name()
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string(),

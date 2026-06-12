@@ -28,6 +28,10 @@ export function InddBatchModal() {
     batchError,
     noPreview,
     setNoPreview,
+    perfMode,
+    setPerfMode,
+    extractChunkSize,
+    setExtractChunkSize,
     outputFormat,
     setOutputFormat,
     closeBatchModal,
@@ -321,8 +325,8 @@ export function InddBatchModal() {
           </div>
 
           {/* Actions */}
-          <div className="px-5 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="px-5 py-4 flex items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={toggleAll}
                 className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
@@ -337,6 +341,40 @@ export function InddBatchModal() {
                   className="rounded border-gray-300"
                 />
                 변환 후 열지 않음
+              </label>
+              <label
+                className="flex items-center gap-1.5 text-xs text-gray-600"
+                title="INDD 추출 렌더링 모드. 빠름은 150dpi, 표준은 220dpi, 고품질은 300dpi로 PNG를 렌더링합니다. PDF preview는 생성 후 캐시됩니다."
+              >
+                추출모드:
+                <select
+                  value={perfMode}
+                  onChange={(e) => setPerfMode(e.target.value as "fast" | "standard" | "high")}
+                  className="border border-gray-300 rounded px-1 py-0.5 text-xs"
+                >
+                  <option value="fast">빠름</option>
+                  <option value="standard">표준</option>
+                  <option value="high">고품질</option>
+                </select>
+              </label>
+              <label
+                className="flex items-center gap-1.5 text-xs text-gray-600"
+                title="긴 문서에서 InDesign 연결이 끊기는 경우 N페이지 단위로 분할 추출합니다."
+              >
+                분할추출:
+                <select
+                  value={extractChunkSize}
+                  onChange={(e) => setExtractChunkSize(Number(e.target.value))}
+                  className="border border-gray-300 rounded px-1 py-0.5 text-xs"
+                >
+                  <option value={0}>끄기</option>
+                  <option value={5}>5p</option>
+                  <option value={10}>10p</option>
+                  <option value={20}>20p</option>
+                  <option value={30}>30p</option>
+                  <option value={50}>50p</option>
+                  <option value={100}>100p</option>
+                </select>
               </label>
               <div className="flex items-center gap-1 text-xs text-gray-600">
                 <label className="flex items-center gap-0.5 cursor-pointer">

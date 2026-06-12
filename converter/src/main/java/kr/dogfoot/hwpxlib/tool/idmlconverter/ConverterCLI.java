@@ -9,6 +9,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSerializer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTToHwpxConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.IDMLPageRenderer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.PdfPageRenderer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy.IDMLNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.devtool.IDMLTemplateCreator;
@@ -23,6 +24,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.ArrayList;
 import java.util.List;
+import java.io.File;
 
 /**
  * IDML to HWPX 변환기 CLI 진입점.
@@ -84,6 +86,8 @@ public class ConverterCLI {
                 runRenderImage(args);
             } else if ("--render-master-spread".equals(command)) {
                 runRenderMasterSpread(args);
+            } else if ("--render-pdf-page".equals(command)) {
+                runRenderPdfPage(args);
             } else if ("--text-frame-detail".equals(command)) {
                 runTextFrameDetail(args);
             } else if ("--hwpx-to-idml".equals(command)) {
@@ -123,6 +127,38 @@ public class ConverterCLI {
             e.printStackTrace(System.err);
             System.exit(1);
         }
+    }
+
+    private static void runRenderPdfPage(String[] args) throws Exception {
+        if (args.length < 3) {
+            System.err.println("Usage: --render-pdf-page <pdf-path> <page-number> [--dpi <dpi>]");
+            System.exit(1);
+        }
+
+        String pdfPath = args[1];
+        int pageNumber = Integer.parseInt(args[2]);
+        int dpi = 110;
+        for (int i = 3; i < args.length; i++) {
+            if ("--dpi".equals(args[i]) && i + 1 < args.length) {
+                dpi = Integer.parseInt(args[++i]);
+            }
+        }
+        if (pageNumber < 1) {
+            throw new IllegalArgumentException("page-number must be 1 or greater");
+        }
+
+        byte[] jpeg = PdfPageRenderer.renderPage(new File(pdfPath), pageNumber - 1, dpi);
+        String dataUrl = "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(jpeg);
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        json.append("\"original_path\":\"").append(escapeJson(pdfPath)).append("\",");
+        json.append("\"data_url\":\"").append(dataUrl).append("\",");
+        json.append("\"filename\":\"").append(escapeJson(new File(pdfPath).getName()))
+                .append(".page").append(pageNumber).append(".jpg\",");
+        json.append("\"width\":0,");
+        json.append("\"height\":0");
+        json.append("}");
+        System.out.println(json);
     }
 
     private static void runConvert(String[] args) throws Exception {

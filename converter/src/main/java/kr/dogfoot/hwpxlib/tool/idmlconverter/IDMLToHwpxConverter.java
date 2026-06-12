@@ -71,9 +71,15 @@ public class IDMLToHwpxConverter {
     public static ConvertResult convert(String idmlPath, String hwpxPath,
                                          ConvertOptions options,
                                          ProgressReporter reporter) throws ConvertException {
+        ConversionTiming timing = ConversionTiming.start(idmlPath, hwpxPath, options.resolvedJsonPath());
+        boolean success = false;
+        IDMLDocument idmlDoc = null;
+        try {
         // Phase 1: IDML 로드
         reporter.reportProgress(0, 100, "IDML 파일 로딩 중...");
-        IDMLDocument idmlDoc = IDMLLoader.load(idmlPath);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("phase1.idmlLoad")) {
+            idmlDoc = IDMLLoader.load(idmlPath);
+        }
         try {
             String sourceFileName = new File(idmlPath).getName();
 
@@ -85,10 +91,15 @@ public class IDMLToHwpxConverter {
             if (options.resolvedJsonPath() != null) {
                 try {
                     reporter.reportProgress(3, 100, "resolved 데이터 로딩 중...");
-                    resolvedData = ResolvedDataReader.read(options.resolvedJsonPath());
-                    resolvedData.basePath(getResolvedDir(options));
-                    ResolvedZOrderNormalizer.applyFromIdml(resolvedData, idmlDoc);
-                    applyCropManifest(resolvedData.basePath());
+                    try (ConversionTiming.Scope ignored = ConversionTiming.time("phase1_5.resolved.read")) {
+                        resolvedData = ResolvedDataReader.read(options.resolvedJsonPath());
+                    }
+                    recordResolvedSummary(resolvedData);
+                    try (ConversionTiming.Scope ignored = ConversionTiming.time("phase1_5.resolved.indexAndCrop")) {
+                        resolvedData.basePath(getResolvedDir(options));
+                        ResolvedZOrderNormalizer.applyFromIdml(resolvedData, idmlDoc);
+                        applyCropManifest(resolvedData.basePath());
+                    }
                 } catch (Exception e) {
                     System.err.println("Warning: resolved.json 로드 실패 (무시): " + e.getMessage());
                     earlyWarnings.add("[Resolved] resolved.json 로드 실패: " + e.getMessage());
@@ -99,31 +110,38 @@ public class IDMLToHwpxConverter {
             // InDesign DOM은 문서 측정 단위로 좌표를 반환하므로,
             // IDML 페이지 치수(항상 pt)와 비교하여 스케일 팩터를 계산한다.
             if (resolvedData != null) {
-                List<IDMLPage> idmlPages = idmlDoc.getAllPages();
-                if (!idmlPages.isEmpty()) {
-                    resolvedData.normalizeToPoints(idmlPages.get(0).widthPoints());
+                try (ConversionTiming.Scope ignored = ConversionTiming.time("phase1_6.resolved.normalizeCoordinates")) {
+                    List<IDMLPage> idmlPages = idmlDoc.getAllPages();
+                    if (!idmlPages.isEmpty()) {
+                        resolvedData.normalizeToPoints(idmlPages.get(0).widthPoints());
+                    }
                 }
             }
 
             // Phase 1.6b: ExtendScript 렌더 ID 통합 인덱스 빌드
             if (resolvedData != null) {
-                resolvedData.buildRenderedIdSet();
+                try (ConversionTiming.Scope ignored = ConversionTiming.time("phase1_6b.resolved.buildRenderedIdSet")) {
+                    resolvedData.buildRenderedIdSet();
+                }
             }
 
             // Phase 2: AST 빌드
             reporter.reportProgress(5, 100, "AST 빌드 중...");
             ASTDocument astDoc;
             boolean isNewPipeline = resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty();
-            if (isNewPipeline) {
-                astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(resolvedData, idmlDoc.tempDir(), options.config().pngExportResolution())
-                        .debugAst(options.debugAst())
-                        .tableQualityGate(options.config().tableQualityGate())
-                        .build();
-            } else {
-                // 레거시: IDML 기반 4단계 정규화 + Resolved 보강
-                astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
-                runLegacyPostProcessing(astDoc, resolvedData, options, earlyWarnings, reporter);
+            try (ConversionTiming.Scope ignored = ConversionTiming.time("phase2.astBuild.total")) {
+                if (isNewPipeline) {
+                    astDoc = new kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ResolvedToASTBuilder(resolvedData, idmlDoc.tempDir(), options.config().pngExportResolution())
+                            .debugAst(options.debugAst())
+                            .tableQualityGate(options.config().tableQualityGate())
+                            .build();
+                } else {
+                    // 레거시: IDML 기반 4단계 정규화 + Resolved 보강
+                    astDoc = IDMLNormalizer.normalize(idmlDoc, options, sourceFileName, resolvedData, reporter);
+                    runLegacyPostProcessing(astDoc, resolvedData, options, earlyWarnings, reporter);
+                }
             }
+            recordAstSummary(astDoc);
 
             // 정규화 완료 summary
             {
@@ -158,30 +176,49 @@ public class IDMLToHwpxConverter {
                 }
             }
             if (autoFontMapPath != null || !config.fontMappings().isEmpty()) {
-                fontMapper = new FontMapper();
-                // config 기반 초기화 (기본 폰트, 매핑, 메트릭)
-                fontMapper.loadFromConfig(config);
-                // font-mapping.json 로드 (명시 또는 자동 발견)
-                if (autoFontMapPath != null) {
-                    fontMapper.loadFontMapping(autoFontMapPath);
-                }
-                if (resolvedData != null) {
-                    fontMapper.setIdmlMetrics(resolvedData.fontMetrics(), resolvedData.scaleFactor());
+                try (ConversionTiming.Scope ignored = ConversionTiming.time("phase2_8.fontMapper.init")) {
+                    fontMapper = new FontMapper();
+                    // config 기반 초기화 (기본 폰트, 매핑, 메트릭)
+                    fontMapper.loadFromConfig(config);
+                    // font-mapping.json 로드 (명시 또는 자동 발견)
+                    if (autoFontMapPath != null) {
+                        fontMapper.loadFontMapping(autoFontMapPath);
+                    }
+                    if (resolvedData != null) {
+                        fontMapper.setIdmlMetrics(resolvedData.fontMetrics(), resolvedData.scaleFactor());
+                    }
                 }
             }
 
             // Phase 3: AST -> HWPX 직접 변환
-            ConvertResult result = ASTToHwpxConverter.convert(astDoc, reporter, null, fontMapper, config);
+            ConvertResult result;
+            try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3.astToHwpx.convert")) {
+                result = ASTToHwpxConverter.convert(astDoc, reporter, null, fontMapper, config);
+            }
 
             // 초기 단계 경고 + AST 정규화 경고를 결과에 병합
             for (String w : earlyWarnings) { result.addWarning(w); }
             for (String w : astDoc.warnings()) { result.addWarning(w); }
 
+            // Phase 3.4: Semantic Block Discovery (development default: always write)
+            try {
+                reporter.reportProgress(92, 100, "Semantic Block 추출 중...");
+                try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3_4.semanticBlocks.extract")) {
+                    extractSemanticBlocks(astDoc, resolvedData, hwpxPath, result);
+                }
+            } catch (Exception e) {
+                String msg = "[SemanticBlock] 추출 실패 (HWPX 변환은 계속 진행): " + e.getMessage();
+                System.err.println(msg);
+                result.addWarning(msg);
+            }
+
             // Phase 3.5: 시멘틱 레이어 추출 (SPEC-018 M3, 옵션)
             if (options.extractSemantics()) {
                 try {
                     reporter.reportProgress(93, 100, "시멘틱 레이어 추출 중...");
-                    extractSemanticLayer(astDoc, hwpxPath, options, result);
+                    try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3_5.semantic.extract")) {
+                        extractSemanticLayer(astDoc, hwpxPath, options, result);
+                    }
                 } catch (Exception e) {
                     String msg = "[Semantic] 시멘틱 추출 실패 (HWPX 변환은 계속 진행): " + e.getMessage();
                     System.err.println(msg);
@@ -192,7 +229,9 @@ public class IDMLToHwpxConverter {
             // Phase 4: HWPX 파일 저장
             reporter.reportProgress(95, 100, "HWPX 파일 저장 중...");
             try {
-                HWPXWriter.toFilepath(result.hwpxFile(), hwpxPath);
+                try (ConversionTiming.Scope ignored = ConversionTiming.time("phase4.hwpx.writeFile")) {
+                    HWPXWriter.toFilepath(result.hwpxFile(), hwpxPath);
+                }
             } catch (Exception e) {
                 throw new ConvertException(ConvertException.Phase.HWPX_GENERATION,
                         "Failed to write HWPX file: " + e.getMessage(), e);
@@ -201,9 +240,183 @@ public class IDMLToHwpxConverter {
             // 변환 완료 보고
             reporter.reportComplete(result);
 
+            success = true;
             return result;
         } finally {
-            idmlDoc.cleanup();
+            if (idmlDoc != null) {
+                try (ConversionTiming.Scope ignored = ConversionTiming.time("cleanup.idmlTempDir")) {
+                    idmlDoc.cleanup();
+                }
+            }
+        }
+        } catch (ConvertException e) {
+            timing.failed(e);
+            throw e;
+        } catch (RuntimeException e) {
+            timing.failed(e);
+            throw e;
+        } finally {
+            if (success) {
+                timing.succeeded();
+            }
+            timing.writeAdjacentTo(hwpxPath);
+            ConversionTiming.clear();
+        }
+    }
+
+    private static void recordResolvedSummary(ResolvedData resolvedData) {
+        if (resolvedData == null) return;
+        ConversionTiming.metric("resolved.pages", resolvedData.pages().size());
+        ConversionTiming.metric("resolved.stories", resolvedData.stories().size());
+        ConversionTiming.metric("resolved.textFrames", resolvedData.textFrames().size());
+        ConversionTiming.metric("resolved.pageItems", resolvedData.pageItems().size());
+        ConversionTiming.metric("resolved.renderedFloatingItems", resolvedData.allRenderedFloatingItems().size());
+        ConversionTiming.metric("resolved.renderedGraphicFrames", resolvedData.allRenderedGraphicFrames().size());
+        ConversionTiming.metric("resolved.renderedImageFrames", resolvedData.allRenderedImageFrames().size());
+        ConversionTiming.metric("resolved.renderedPdfFrames", resolvedData.allRenderedPdfFrames().size());
+        ConversionTiming.metric("resolved.renderedCandidatesTotal",
+                resolvedData.allRenderedFloatingItems().size()
+                        + resolvedData.allRenderedGraphicFrames().size()
+                        + resolvedData.allRenderedImageFrames().size()
+                        + resolvedData.allRenderedPdfFrames().size());
+        ConversionTiming.metric("resolved.fontMetrics", resolvedData.fontMetrics().size());
+    }
+
+    private static void recordAstSummary(ASTDocument astDoc) {
+        if (astDoc == null) return;
+        int textFrames = 0;
+        int figures = 0;
+        int tables = 0;
+        int otherBlocks = 0;
+        int figureImages = 0;
+        long figureImageBytes = 0;
+        int inlineImages = 0;
+        long inlineImageBytes = 0;
+        int textFrameImageFills = 0;
+        long textFrameImageFillBytes = 0;
+        java.util.Set<String> visibleImageSourceIds = new java.util.HashSet<>();
+        for (ASTSection sec : astDoc.sections()) {
+            for (ASTBlock blk : sec.blocks()) {
+                if (blk instanceof ASTTextFrameBlock) {
+                    textFrames++;
+                    ASTTextFrameBlock tf = (ASTTextFrameBlock) blk;
+                    if (tf.imageFillData() != null && tf.imageFillData().length > 0) {
+                        textFrameImageFills++;
+                        textFrameImageFillBytes += tf.imageFillData().length;
+                        if (tf.sourceId() != null) visibleImageSourceIds.add(tf.sourceId());
+                    }
+                    InlineImageStats stats = collectInlineImageStats(tf.paragraphs());
+                    inlineImages += stats.count;
+                    inlineImageBytes += stats.bytes;
+                    visibleImageSourceIds.addAll(stats.sourceIds);
+                } else if (blk instanceof ASTFigure) {
+                    figures++;
+                    ASTFigure fig = (ASTFigure) blk;
+                    if (fig.imageData() != null && fig.imageData().length > 0) {
+                        figureImages++;
+                        figureImageBytes += fig.imageData().length;
+                        if (fig.sourceId() != null) visibleImageSourceIds.add(fig.sourceId());
+                    }
+                } else if (blk instanceof ASTTable) {
+                    tables++;
+                    InlineImageStats stats = collectTableImageStats((ASTTable) blk);
+                    inlineImages += stats.count;
+                    inlineImageBytes += stats.bytes;
+                    visibleImageSourceIds.addAll(stats.sourceIds);
+                } else {
+                    otherBlocks++;
+                }
+            }
+        }
+        ConversionTiming.metric("ast.sections", astDoc.sections().size());
+        ConversionTiming.metric("ast.backgrounds", astDoc.backgrounds().size());
+        ConversionTiming.metric("ast.fonts", astDoc.fonts().size());
+        ConversionTiming.metric("ast.paragraphStyles", astDoc.paragraphStyles().size());
+        ConversionTiming.metric("ast.characterStyles", astDoc.characterStyles().size());
+        ConversionTiming.metric("ast.textFrameBlocks", textFrames);
+        ConversionTiming.metric("ast.figures", figures);
+        ConversionTiming.metric("ast.tables", tables);
+        ConversionTiming.metric("ast.otherBlocks", otherBlocks);
+        ConversionTiming.metric("ast.warnings", astDoc.warnings().size());
+        ConversionTiming.metric("ast.figureImages", figureImages);
+        ConversionTiming.metric("ast.figureImageBytes", figureImageBytes);
+        ConversionTiming.metric("ast.inlineImages", inlineImages);
+        ConversionTiming.metric("ast.inlineImageBytes", inlineImageBytes);
+        ConversionTiming.metric("ast.textFrameImageFills", textFrameImageFills);
+        ConversionTiming.metric("ast.textFrameImageFillBytes", textFrameImageFillBytes);
+        ConversionTiming.metric("ast.visibleImageSourceIds", visibleImageSourceIds.size());
+        // Keep this estimate local to AST creation: it compares source-level visible image
+        // outputs after planning/legacy bridges have run, without changing placement.
+        ConversionTiming.metric("ast.visibleImageOutputs",
+                figureImages + inlineImages + textFrameImageFills);
+    }
+
+    private static InlineImageStats collectInlineImageStats(java.util.List<ASTParagraph> paragraphs) {
+        InlineImageStats stats = new InlineImageStats();
+        if (paragraphs == null) return stats;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTInlineObject) {
+                    collectInlineObjectImageStats((ASTInlineObject) item, stats);
+                }
+            }
+            if (paragraph.inlineTable() != null) {
+                stats.add(collectTableImageStats(paragraph.inlineTable()));
+            }
+        }
+        return stats;
+    }
+
+    private static InlineImageStats collectTableImageStats(ASTTable table) {
+        InlineImageStats stats = new InlineImageStats();
+        if (table == null || table.rows() == null) return stats;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell != null) {
+                    stats.add(collectInlineImageStats(cell.paragraphs()));
+                }
+            }
+        }
+        return stats;
+    }
+
+    private static void collectInlineObjectImageStats(ASTInlineObject obj, InlineImageStats stats) {
+        if (obj == null || stats == null) return;
+        if (obj.imageData() != null && obj.imageData().length > 0) {
+            stats.count++;
+            stats.bytes += obj.imageData().length;
+            if (obj.sourceId() != null) stats.sourceIds.add(obj.sourceId());
+        }
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
+            stats.count++;
+            stats.bytes += obj.imageFillData().length;
+            if (obj.sourceId() != null) stats.sourceIds.add(obj.sourceId());
+        }
+        if (obj.overlayFrames() != null) {
+            for (ASTInlineObject overlay : obj.overlayFrames()) {
+                collectInlineObjectImageStats(overlay, stats);
+            }
+        }
+        stats.add(collectInlineImageStats(obj.paragraphs()));
+        if (obj.inlineTables() != null) {
+            for (ASTTable table : obj.inlineTables()) {
+                stats.add(collectTableImageStats(table));
+            }
+        }
+    }
+
+    private static final class InlineImageStats {
+        int count;
+        long bytes;
+        final java.util.Set<String> sourceIds = new java.util.HashSet<>();
+
+        void add(InlineImageStats other) {
+            if (other == null) return;
+            this.count += other.count;
+            this.bytes += other.bytes;
+            this.sourceIds.addAll(other.sourceIds);
         }
     }
 
@@ -426,6 +639,7 @@ public class IDMLToHwpxConverter {
                 || reason.contains("mixed_group_text_hidden")
                 || reason.contains("image_group_text_hidden")
                 || reason.contains("visual_label_text_hidden_shell")
+                || reason.contains("editable_composite_text_hidden_shell")
                 || reason.contains("textframe_visual_shell");
     }
 
@@ -1191,6 +1405,39 @@ public class IDMLToHwpxConverter {
                 + layer.relations.size() + " relations → " + outputPath);
         result.addWarning("[Semantic] 추출 완료: " + layer.nodes.size() + " 노드, "
                 + classified + " 분류 → " + outputPath);
+    }
+
+    /**
+     * Semantic Block Discovery JSON을 HWPX 옆에 생성한다.
+     *
+     * <p>개발 중에는 항상 생성하고, 안정화 후 ConvertOptions로 옵션화한다.</p>
+     */
+    private static void extractSemanticBlocks(
+            ASTDocument astDoc,
+            ResolvedData resolvedData,
+            String hwpxPath,
+            ConvertResult result) throws java.io.IOException {
+        String documentName = astDoc != null && astDoc.sourceFile() != null
+                ? astDoc.sourceFile()
+                : (hwpxPath == null ? "out" : new File(hwpxPath).getName());
+        kr.dogfoot.hwpxlib.tool.idmlconverter.semanticblock.SemanticBlockDocument document =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.semanticblock.SemanticBlockDetector.detect(
+                        astDoc, documentName, resolvedData);
+        java.nio.file.Path outPath = java.nio.file.Paths.get(defaultSemanticBlocksOutputPath(hwpxPath));
+        kr.dogfoot.hwpxlib.tool.idmlconverter.semanticblock.SemanticBlockWriter.write(document, outPath);
+        ConversionTiming.metric("semanticBlocks.blocks", document.summary.blocks);
+        ConversionTiming.metric("semanticBlocks.members", document.summary.members);
+        ConversionTiming.metric("semanticBlocks.anchors", document.summary.anchors);
+        result.addWarning("[SemanticBlock] " + outPath + " 생성 완료: "
+                + document.summary.blocks + " blocks, " + document.summary.members + " members");
+    }
+
+    /** hwpx 경로 → 같은 디렉토리의 .semantic-blocks.json. */
+    private static String defaultSemanticBlocksOutputPath(String hwpxPath) {
+        if (hwpxPath == null) return "out.semantic-blocks.json";
+        int dot = hwpxPath.lastIndexOf('.');
+        if (dot < 0) return hwpxPath + ".semantic-blocks.json";
+        return hwpxPath.substring(0, dot) + ".semantic-blocks.json";
     }
 
     /** hwpx 경로 → 같은 디렉토리의 .semantic.json. */

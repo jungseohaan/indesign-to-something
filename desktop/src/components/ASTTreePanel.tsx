@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useAstStore } from "../stores/useAstStore";
 import { useAppStore } from "../stores/useAppStore";
+import type { SemanticBlock } from "../types";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -44,6 +45,76 @@ function highlightText(text: string, query: string): React.ReactNode {
       {text.substring(idx + query.length)}
     </>
   );
+}
+
+function nodeSourceIds(node: any): string[] {
+  const ids: string[] = [];
+  if (!node || typeof node !== "object") return ids;
+  if (node.sourceId) ids.push(String(node.sourceId));
+  if (node.id) ids.push(String(node.id));
+  if (node.frameId) ids.push(String(node.frameId));
+  if (node._frameList) {
+    for (const item of node._frameList as any[]) {
+      if (item?.block?.sourceId) ids.push(String(item.block.sourceId));
+    }
+  }
+  if (node._figureList) {
+    for (const item of node._figureList as any[]) {
+      if (item?.block?.sourceId) ids.push(String(item.block.sourceId));
+    }
+  }
+  if (node._tableList) {
+    for (const item of node._tableList as any[]) {
+      if (item?.block?.sourceId) ids.push(String(item.block.sourceId));
+    }
+  }
+  if (node._storyView) {
+    const story = node._storyView as StoryView;
+    for (const frame of story.frames) {
+      if (frame?.block?.sourceId) ids.push(String(frame.block.sourceId));
+    }
+  }
+  return ids;
+}
+
+function semanticPathForOutput(outputPath: string | null): string | null {
+  if (!outputPath) return null;
+  return outputPath.replace(/\.[^.]+$/, ".semantic-blocks.json");
+}
+
+function addPath(index: Map<string, string[]>, id: unknown, path: string) {
+  if (typeof id !== "string" || !id) return;
+  const paths = index.get(id) ?? [];
+  paths.push(path);
+  index.set(id, paths);
+}
+
+function collectNestedSourcePaths(node: any, path: string, index: Map<string, string[]>) {
+  if (!node || typeof node !== "object") return;
+  addPath(index, node.sourceId, path);
+  addPath(index, node.id, path);
+  addPath(index, node.frameId, path);
+
+  if (Array.isArray(node.items)) {
+    node.items.forEach((item: any, i: number) => {
+      collectNestedSourcePaths(item, `${path}.items[${i}]`, index);
+    });
+  }
+  if (Array.isArray(node.overlayFrames)) {
+    node.overlayFrames.forEach((frame: any, i: number) => {
+      collectNestedSourcePaths(frame, `${path}.overlayFrames[${i}]`, index);
+    });
+  }
+  if (Array.isArray(node.paragraphs)) {
+    node.paragraphs.forEach((para: any, i: number) => {
+      collectNestedSourcePaths(para, `${path}.paragraphs[${i}]`, index);
+    });
+  }
+  if (Array.isArray(node.inlineTables)) {
+    node.inlineTables.forEach((table: any, i: number) => {
+      collectNestedSourcePaths(table, `${path}.inlineTables[${i}]`, index);
+    });
+  }
 }
 
 // ─── Story data builder ─────────────────────────────────────────────
@@ -113,6 +184,35 @@ function buildStoryViews(astDoc: any): {
   return { stories, standaloneTables, figures };
 }
 
+function buildMemberPathIndex(view: ReturnType<typeof buildStoryViews> | null): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+  if (!view) return index;
+
+  view.stories.forEach((sv, storyIndex) => {
+    const storyPath = `root.story[${storyIndex}]`;
+    sv.frames.forEach((frameInfo, frameIndex) => {
+      addPath(index, frameInfo.block?.sourceId, `${storyPath}._frames.frame[${frameIndex}]`);
+    });
+    sv.paragraphs.forEach((para, paraIndex) => {
+      collectNestedSourcePaths(para, `${storyPath}.para[${paraIndex}]`, index);
+    });
+  });
+
+  view.standaloneTables.forEach((tableInfo, tableIndex) => {
+    const path = `root._tables.table[${tableIndex}]`;
+    addPath(index, tableInfo.block?.sourceId, path);
+    collectNestedSourcePaths(tableInfo.block, path, index);
+  });
+
+  view.figures.forEach((figureInfo, figureIndex) => {
+    const path = `root._figures.figure[${figureIndex}]`;
+    addPath(index, figureInfo.block?.sourceId, path);
+    collectNestedSourcePaths(figureInfo.block, path, index);
+  });
+
+  return index;
+}
+
 // ─── Tree View ──────────────────────────────────────────────────────
 
 function TreeNode({
@@ -132,6 +232,7 @@ function TreeNode({
 }) {
   const { selectedPath, selectPath, expandedPaths, toggleExpand, searchQuery, filterType } =
     useAstStore();
+  const selectedSemanticMemberIds = useAstStore((s) => s.selectedSemanticMemberIds);
   const isSelected = selectedPath === path;
   const isExpanded = expandedPaths.has(path);
   const children = getChildren(node, path);
@@ -141,13 +242,14 @@ function TreeNode({
   const isMatch = nodeMatchesSearch(node, label, sub, searchQuery);
   const isFilterMatch = nodeMatchesFilter(node, filterType);
   const dimmed = (searchQuery && !isMatch) || (filterType && !isFilterMatch);
+  const semanticHit = nodeSourceIds(node).some((id) => selectedSemanticMemberIds.has(id));
 
   return (
     <div>
       <div
         className={`flex items-center gap-1 px-1 py-0.5 cursor-pointer text-xs hover:bg-blue-50 ${
           isSelected ? "bg-blue-100 text-blue-800" : ""
-        } ${dimmed ? "opacity-30" : ""}`}
+        } ${semanticHit ? "bg-amber-100 text-amber-900 ring-1 ring-inset ring-amber-300" : ""} ${dimmed ? "opacity-30" : ""}`}
         style={{ paddingLeft: depth * 14 + 4 }}
         onClick={() => {
           selectPath(path);
@@ -628,6 +730,139 @@ function StatusPill({ status }: { status: "ok" | "warn" | "error" | "missing" | 
   );
 }
 
+function SemanticBlocksPanel({
+  memberPathIndex,
+}: {
+  memberPathIndex: Map<string, string[]>;
+}) {
+  const {
+    semanticBlocksDoc,
+    semanticBlocksPath,
+    semanticBlocksError,
+    selectedSemanticBlockId,
+    selectSemanticBlock,
+    loadSemanticBlocks,
+    clearSemanticBlocks,
+  } = useAstStore();
+  const lastOutputPath = useAppStore((s) => s.lastOutputPath);
+  const result = useAppStore((s) => s.result);
+  const computedPath = semanticPathForOutput(lastOutputPath);
+  const blocks = semanticBlocksDoc?.blocks ?? [];
+
+  const loadComputed = () => {
+    if (computedPath) loadSemanticBlocks(computedPath);
+  };
+
+  return (
+    <div className="border-t bg-white shrink-0">
+      <div className="flex items-center gap-2 border-b bg-gray-50 px-2 py-1 text-xs">
+        <span className="font-medium text-gray-700">Semantic Blocks</span>
+        {semanticBlocksDoc && (
+          <span className="text-[10px] text-gray-500">
+            {semanticBlocksDoc.summary.blocks} blocks · {semanticBlocksDoc.summary.members} members
+          </span>
+        )}
+        <div className="flex-1" />
+        {computedPath && (
+          <button
+            onClick={loadComputed}
+            className="rounded border px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-100"
+            title={computedPath}
+          >
+            로드
+          </button>
+        )}
+        {semanticBlocksDoc && (
+          <button
+            onClick={clearSemanticBlocks}
+            className="rounded border px-1.5 py-0.5 text-[10px] text-gray-600 hover:bg-gray-100"
+          >
+            해제
+          </button>
+        )}
+      </div>
+
+      <div className="max-h-52 overflow-auto text-xs">
+        {!semanticBlocksDoc && !semanticBlocksError && (
+          <div className="px-2 py-2 text-[11px] text-gray-400">
+            {result ? "semantic-blocks JSON을 로드해 주세요." : "변환 후 block 구성을 확인할 수 있습니다."}
+          </div>
+        )}
+        {semanticBlocksError && (
+          <div className="px-2 py-2 text-[11px] text-amber-700">
+            {fileName(semanticBlocksPath || computedPath)} 로드 실패
+          </div>
+        )}
+        {blocks.map((block) => {
+          const revealPaths = memberRevealPaths(block, memberPathIndex);
+          return (
+          <SemanticBlockRow
+            key={block.id}
+            block={block}
+            selected={selectedSemanticBlockId === block.id}
+            matchCount={revealPaths.length}
+            onSelect={() => selectSemanticBlock(block, revealPaths)}
+          />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function memberRevealPaths(block: SemanticBlock, memberPathIndex: Map<string, string[]>): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const id of block.member_ids ?? []) {
+    for (const path of memberPathIndex.get(id) ?? []) {
+      if (!seen.has(path)) {
+        seen.add(path);
+        paths.push(path);
+      }
+    }
+  }
+  return paths;
+}
+
+function SemanticBlockRow({
+  block,
+  selected,
+  matchCount,
+  onSelect,
+}: {
+  block: SemanticBlock;
+  selected: boolean;
+  matchCount: number;
+  onSelect: () => void;
+}) {
+  const page = block.page_start === block.page_end
+    ? `p.${block.page_start}`
+    : `p.${block.page_start}-${block.page_end}`;
+  const confidence = Math.round((block.confidence ?? 0) * 100);
+  const label = block.display_name || (block.member_ids?.length ? block.block_type || "unknown" : "그래픽");
+  const memberCount = block.member_ids?.length ?? 0;
+  const memberPreview = (block.member_ids ?? []).slice(0, 3).join(", ");
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`flex w-full items-center gap-2 border-b px-2 py-1.5 text-left hover:bg-amber-50 ${
+        selected ? "bg-amber-100 text-amber-900" : "text-gray-700"
+      }`}
+    >
+      <span className="w-16 shrink-0 font-mono text-[10px]">{block.id}</span>
+      <span className="w-16 shrink-0 text-[10px] text-gray-500">{page}</span>
+      <span className="min-w-0 flex-1 truncate" title={block.member_ids?.join(", ")}>
+        {label} · {memberCount} members · {matchCount} visible · {memberPreview}
+      </span>
+      <span className="shrink-0 rounded border border-gray-200 bg-white px-1 py-0.5 text-[10px] text-gray-500">
+        {confidence}%
+      </span>
+    </button>
+  );
+}
+
 function DiagnosticRow({
   label,
   value,
@@ -794,6 +1029,7 @@ export function ASTTreePanel() {
     if (!astDoc) return null;
     return buildStoryViews(astDoc);
   }, [astDoc]);
+  const memberPathIndex = useMemo(() => buildMemberPathIndex(docView), [docView]);
 
   const sectionCount = astDoc?.sections?.length || 0;
   const storyCount = docView?.stories.length || 0;
@@ -883,6 +1119,7 @@ export function ASTTreePanel() {
           sub={`${sectionCount}p ${storyCount} stories`}
         />
       </div>
+      <SemanticBlocksPanel memberPathIndex={memberPathIndex} />
     </div>
   );
 }

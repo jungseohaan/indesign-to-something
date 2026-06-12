@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase0.InfraSetup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase1.MasterHashiraPlacer;
@@ -56,26 +57,56 @@ public class ResolvedToASTBuilder {
     }
 
 
-    // Lazy-loaded IDML 인프라 (테이블 셀 변환용)
+    // Lazy-loaded IDML 인프라 (색상 fallback / 테이블 셀 변환용)
     private kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDocument;
     private kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver colorResolver;
     private kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader imageLoader;
 
-    private void ensureIdmlInfra() {
+    private void ensureIdmlDocument() {
         if (idmlDocument != null || idmlDir == null) return;
         try {
-            idmlDocument = kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader.loadFromDirectory(idmlDir);
-            colorResolver = new kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver(idmlDocument);
+            try (ConversionTiming.Scope ignored = ConversionTiming.time("infra.idmlDocumentLoad")) {
+                idmlDocument = kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLLoader.loadFromDirectory(idmlDir);
+            }
+        } catch (Exception e) {
+            System.err.println("[ResolvedToASTBuilder] IDML document load failed: " + e.getMessage());
+        }
+    }
+
+    private void ensureColorInfra() {
+        if (colorResolver != null || idmlDir == null) return;
+        ensureIdmlDocument();
+        if (idmlDocument == null) return;
+        try {
+            try (ConversionTiming.Scope ignored = ConversionTiming.time("infra.colorResolverInit")) {
+                colorResolver = new kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver(idmlDocument);
+            }
+        } catch (Exception e) {
+            System.err.println("[ResolvedToASTBuilder] color resolver init failed: " + e.getMessage());
+        }
+    }
+
+    private void ensureImageInfra() {
+        if (imageLoader != null || idmlDir == null) return;
+        ensureColorInfra();
+        if (idmlDocument == null) return;
+        try {
             // imageLoader: 테이블 셀 내 인라인 이미지/그래픽 렌더링용
             kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions opts = new kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertOptions();
             opts.includeImages(true);
             if (resolvedData.basePath() != null) {
                 opts.linksDirectory(resolvedData.basePath() + "/Links");
             }
-            imageLoader = new kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader(idmlDocument, opts);
+            try (ConversionTiming.Scope ignored = ConversionTiming.time("infra.imageLoaderInit")) {
+                imageLoader = new kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader(idmlDocument, opts);
+            }
         } catch (Exception e) {
-            System.err.println("[ResolvedToASTBuilder] IDML infra load failed: " + e.getMessage());
+            System.err.println("[ResolvedToASTBuilder] image infra init failed: " + e.getMessage());
         }
+    }
+
+    private void ensureIdmlInfra() {
+        ensureImageInfra();
     }
 
     public ResolvedToASTBuilder(ResolvedData resolvedData) {
@@ -98,23 +129,43 @@ public class ResolvedToASTBuilder {
      * resolved.json → ASTDocument 변환.
      */
     public ASTDocument build() {
+        ConversionTiming.Scope totalScope = ConversionTiming.time("phase2.resolvedAstBuilder.total");
+        try {
         ASTDocument doc = new ASTDocument();
         this.astDoc = doc;
         doc.sourceFormat("Resolved");
-        this.styleResolver = StylePropertyResolver.fromIdmlDir(idmlDir);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("phase2.resolvedAstBuilder.styleResolver")) {
+            this.styleResolver = StylePropertyResolver.fromIdmlDir(idmlDir);
+        }
         this.ctx = newContext();
 
-        List<ASTSection> sections = prepareInput(doc);
-        planOwnership();
-        buildTextContent(sections);
-        postprocessLayout(sections);
-        placeVisuals(sections);
+        List<ASTSection> sections;
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare")) {
+            sections = prepareInput(doc);
+        }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage1.ownershipPlanner")) {
+            planOwnership();
+        }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder")) {
+            buildTextContent(sections);
+        }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess")) {
+            postprocessLayout(sections);
+        }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage3.visualBuilder")) {
+            placeVisuals(sections);
+        }
 
-        writeOwnershipPlanLog();
-        writeRenderDecisionLog();
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.validate.writeDecisionLogs")) {
+            writeOwnershipPlanLog();
+            writeRenderDecisionLog();
+        }
         System.err.println("[ResolvedToASTBuilder] Built " + sections.size() + " sections");
         reportSpec016Counts();
         return doc;
+        } finally {
+            totalScope.close();
+        }
     }
 
     /**
@@ -125,20 +176,31 @@ public class ResolvedToASTBuilder {
      * 입력으로 넘겨 Stage 2/3에서 실행한다.</p>
      */
     private List<ASTSection> prepareInput(ASTDocument doc) {
-        InfraSetup.copyIDMLDefinitions(this.ctx);
-        InfraSetup.enrichStyleAlignmentFromResolved(this.ctx);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare.copyIdmlDefinitions")) {
+            InfraSetup.copyIDMLDefinitions(this.ctx);
+        }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare.enrichStyleAlignment")) {
+            InfraSetup.enrichStyleAlignmentFromResolved(this.ctx);
+        }
 
-        List<ASTSection> sections = PageLayoutBuilder.build(this.ctx);
+        List<ASTSection> sections;
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare.pageLayoutBuilder")) {
+            sections = PageLayoutBuilder.build(this.ctx);
+        }
         this.pageDocOffsetToSection = this.ctx.pageDocOffsetToSection; // toSectionIndex() 호환
         for (ASTSection sec : sections) {
             doc.addSection(sec);
         }
 
         // Phase 1.5: 마스터 페이지 쪽 번호 배치
-        MasterPageNumberPlacer.place(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare.masterPageNumberPlacer")) {
+            MasterPageNumberPlacer.place(this.ctx, sections);
+        }
 
         // Phase 1.6: 마스터 페이지 하시라(러닝 헤더) 배치
-        MasterHashiraPlacer.place(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage0.inputPrepare.masterHashiraPlacer")) {
+            MasterHashiraPlacer.place(this.ctx, sections);
+        }
 
         return sections;
     }
@@ -162,13 +224,19 @@ public class ResolvedToASTBuilder {
      * 로직은 이 메서드 안의 legacy Phase가 아니라 Planner로 이동해야 한다.</p>
      */
     private void buildTextContent(List<ASTSection> sections) {
-        FramePlacer.placeTextFrames(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder.framePlacer")) {
+            FramePlacer.placeTextFrames(this.ctx, sections);
+        }
         tagPhase(sections, "Stage2.TextBuilder.legacyFramePlacer");
 
-        StoryConverter.convertStories(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder.storyConverter")) {
+            StoryConverter.convertStories(this.ctx, sections);
+        }
         tagPhase(sections, "Stage2.TextBuilder.legacyStoryConverter");
 
-        TableBuilder.placeTablesFromIDML(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2.textBuilder.tableBuilder")) {
+            TableBuilder.placeTablesFromIDML(this.ctx, sections);
+        }
         tagPhase(sections, "Stage2.TextBuilder.legacyTableBuilder");
     }
 
@@ -179,13 +247,19 @@ public class ResolvedToASTBuilder {
      * 새 visible 객체를 만들거나 ownership을 뒤집는 로직을 추가하지 않는다.</p>
      */
     private void postprocessLayout(List<ASTSection> sections) {
-        BulletInserter.run(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.bulletInserter")) {
+            BulletInserter.run(this.ctx, sections);
+        }
         tagPhase(sections, "Stage4.LayoutPostprocess.insertBullets");
 
-        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.SingleLineExpander.run(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.singleLineExpander")) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.SingleLineExpander.run(this.ctx, sections);
+        }
         tagPhase(sections, "Stage4.LayoutPostprocess.singleLineExpand");
 
-        WrapPhase5.splitByWrapIndent(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.wrapPhase5")) {
+            WrapPhase5.splitByWrapIndent(this.ctx, sections);
+        }
         tagPhase(sections, "Stage4.LayoutPostprocess.splitByWrapIndent");
     }
 
@@ -197,10 +271,14 @@ public class ResolvedToASTBuilder {
      * 흡수하고, ObjectPlan의 visualAction/zOrder만 실행하게 만든다.</p>
      */
     private void placeVisuals(List<ASTSection> sections) {
-        BackgroundInjector.inject(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage3.visualBuilder.backgroundInjector")) {
+            BackgroundInjector.inject(this.ctx, sections);
+        }
         tagPhase(sections, "Stage3.VisualBuilder.legacyBackgroundInjector");
 
-        RenderableFramePlacer.place(this.ctx, sections);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage3.visualBuilder.renderableFramePlacer")) {
+            RenderableFramePlacer.place(this.ctx, sections);
+        }
         tagPhase(sections, "Stage3.VisualBuilder.legacyRenderableFramePlacer");
     }
 
@@ -309,6 +387,7 @@ public class ResolvedToASTBuilder {
             IDMLStory story = IDMLStoryParser.parseStory(xmlDoc, "u" + hexId);
             idmlStoryCache.put(storyId, story);
             if (!sourceStoryId.equals(storyId)) idmlStoryCache.put(sourceStoryId, story);
+            idmlStoryCache.put("u" + hexId, story);
             return story;
         } catch (Exception e) {
             return null;
@@ -345,6 +424,8 @@ public class ResolvedToASTBuilder {
         ctx.pageDocOffsetToSection = this.pageDocOffsetToSection;
         ctx.toSectionIndex = this::toSectionIndex;
         ctx.ensureIdmlInfra = this::ensureIdmlInfra;
+        ctx.ensureColorInfra = this::ensureColorInfra;
+        ctx.ensureImageInfra = this::ensureImageInfra;
         ctx.idmlDocumentSupplier = () -> this.idmlDocument;
         ctx.colorResolverSupplier = () -> this.colorResolver;
         ctx.imageLoaderSupplier = () -> this.imageLoader;

@@ -3,11 +3,9 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLSpread;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLVectorShape;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
@@ -1607,14 +1605,11 @@ public class InlineFrameHandler {
                 IDMLStory idmlStoryRule = ctx.loadIDMLStory.apply(tf.storyId());
                 if (idmlStoryRule != null && !idmlStoryRule.paragraphs().isEmpty()) {
                     boolean hasRuleBelow = false;
-                    if (ctx.ensureIdmlInfra != null) ctx.ensureIdmlInfra.run();
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idmlDoc =
-                            ctx.idmlDocumentSupplier != null ? ctx.idmlDocumentSupplier.get() : null;
                     for (IDMLParagraph p : idmlStoryRule.paragraphs()) {
                         if (p.ruleBelowOn()) { hasRuleBelow = true; break; }
                         String psRef = p.appliedParagraphStyle();
-                        if (psRef != null && idmlDoc != null) {
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef sd = idmlDoc.getParagraphStyle(psRef);
+                        if (psRef != null && ctx.styleResolver != null) {
+                            IDMLStyleDef sd = ctx.styleResolver.getResolvedParagraphStyle(psRef);
                             if (sd != null && Boolean.TRUE.equals(sd.ruleBelowOn())) { hasRuleBelow = true; break; }
                         }
                     }
@@ -1711,14 +1706,12 @@ public class InlineFrameHandler {
                 // 인라인 텍스트에 char-level underline 적용 (예: "소단원 도입 예(1103)" style)
                 IDMLParagraph ip0 = idmlStory.paragraphs().get(0);
                 boolean hasRuleBelow = ip0.ruleBelowOn();
-                if (!hasRuleBelow && ctx.idmlDocumentSupplier != null) {
-                    if (ctx.ensureIdmlInfra != null) ctx.ensureIdmlInfra.run();
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idoc = ctx.idmlDocumentSupplier.get();
-                    if (idoc != null) {
-                        String psRef = ip0.appliedParagraphStyle();
-                        if (psRef != null) {
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef sd = idoc.getParagraphStyle(psRef);
-                            if (sd != null && Boolean.TRUE.equals(sd.ruleBelowOn())) hasRuleBelow = true;
+                if (!hasRuleBelow && ctx.styleResolver != null) {
+                    String psRef = ip0.appliedParagraphStyle();
+                    if (psRef != null) {
+                        IDMLStyleDef sd = ctx.styleResolver.getResolvedParagraphStyle(psRef);
+                        if (sd != null && Boolean.TRUE.equals(sd.ruleBelowOn())) {
+                            hasRuleBelow = true;
                         }
                     }
                 }
@@ -1771,15 +1764,11 @@ public class InlineFrameHandler {
             if (cs != null && (cs.contains("밑줄") || cs.toLowerCase().contains("underline"))) return true;
         }
 
-        if (ctx.idmlDocumentSupplier != null) {
-            if (ctx.ensureIdmlInfra != null) ctx.ensureIdmlInfra.run();
-            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument idoc = ctx.idmlDocumentSupplier.get();
-            if (idoc != null) {
-                String psRef = ip0.appliedParagraphStyle();
-                if (psRef != null) {
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef sd = idoc.getParagraphStyle(psRef);
-                    if (sd != null && Boolean.TRUE.equals(sd.ruleBelowOn())) return true;
-                }
+        if (ctx.styleResolver != null) {
+            String psRef = ip0.appliedParagraphStyle();
+            if (psRef != null) {
+                IDMLStyleDef sd = ctx.styleResolver.getResolvedParagraphStyle(psRef);
+                if (sd != null && Boolean.TRUE.equals(sd.ruleBelowOn())) return true;
             }
         }
         return false;
@@ -2234,7 +2223,7 @@ public class InlineFrameHandler {
     /**
      * renderedFloatingItems에서 인라인 객체 PNG를 로드하여 ASTInlineObject로 변환.
      */
-    static ASTInlineObject loadInlineObject(ResolvedBuildContext ctx, int anchoredObjectId) {
+    public static ASTInlineObject loadInlineObject(ResolvedBuildContext ctx, int anchoredObjectId) {
         if (ctx.basePath == null) return null;
 
         // Phase 2 가 이 inline_object 의 자손 TF 를 floating 으로 전환했으면
@@ -2300,7 +2289,7 @@ public class InlineFrameHandler {
         // inline PNG로 임베드하여 텍스트 baseline과 수평 정렬 보장.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg.id() != anchoredObjectId) continue;
-            boolean proceed = "inline_object".equals(rg.itemType());
+            boolean proceed = isInlineRenderedGroupType(rg);
             if (!proceed && rg.itemType() == null) {
                 ResolvedTextFrame ancTf = ctx.resolvedData.getTextFrame(String.valueOf(anchoredObjectId));
                 proceed = ancTf != null && ancTf.isInline();
@@ -2982,23 +2971,9 @@ public class InlineFrameHandler {
 
     /** resolved.json에 없는 cornerRadius를 IDML spread의 vectorShapes에서 조회. */
     private static double lookupIdmlShapeCornerRadius(ResolvedBuildContext ctx, String decimalId) {
-        if (decimalId == null || ctx.idmlDocumentSupplier == null) return 0;
-        if (ctx.ensureIdmlInfra != null) ctx.ensureIdmlInfra.run();
-        IDMLDocument idoc = ctx.idmlDocumentSupplier.get();
-        if (idoc == null) return 0;
-        String hexId;
-        try { hexId = "u" + Integer.toHexString(Integer.parseInt(decimalId)); }
-        catch (NumberFormatException e) { return 0; }
-        for (IDMLSpread spread : idoc.spreads()) {
-            for (IDMLVectorShape shape : spread.vectorShapes()) {
-                if (hexId.equals(shape.selfId())) return shape.cornerRadius();
-            }
-        }
-        for (IDMLSpread master : idoc.masterSpreads().values()) {
-            for (IDMLVectorShape shape : master.vectorShapes()) {
-                if (hexId.equals(shape.selfId())) return shape.cornerRadius();
-            }
-        }
+        if (decimalId == null || ctx == null || ctx.resolvedData == null) return 0;
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(decimalId);
+        if (item != null && item.cornerRadius() > 0) return item.cornerRadius();
         return 0;
     }
 

@@ -601,7 +601,9 @@ public final class FramePlacer {
             block.storyId(tf.storyId());
             // \uFFFC 로 시작하는 TF에 inline TF가 좌측 가장자리를 공유하는 경우
             // (예: 단락 번호 "1" TF가 본문 TF 왼쪽에 맞닿음)
-            // → x는 이동하지 않고, inline TF top이 더 위에 있으면 y를 그 위치로 올림
+            // → inline marker 는 자신의 원래 위치를 가진 별도 객체다. body TF 의 물리 bounds 를
+            //    marker 까지 확장하면 번호/본문 묶음이 과도하게 커지고 원본 anchor 가 무너진다.
+            //    따라서 여기서는 단락 left-indent 정책만 판단하고 x/y/w/h 는 원본 frame bounds 를 보존한다.
             {
                 String _fvtInl = tf.frameVisibleText();
                 if (_fvtInl != null && _fvtInl.startsWith("\uFFFC")) {
@@ -616,12 +618,6 @@ public final class FramePlacer {
                         double _iTfTop = gb[0] - pageTop;
                         if (_igb[0] - pageTop > _iTfTop + 5.0) continue;
                         if (_igb[2] - pageTop < _iTfTop) continue;
-                        // 인라인 TF top이 부모 TF top보다 위에 있으면 y를 그 위치로 올림
-                        double _inlineTop = _igb[0] - pageTop;
-                        if (_inlineTop < y) {
-                            h += (y - _inlineTop);
-                            y = _inlineTop;
-                        }
                         // IndentToHere(ACE 7/8)가 있으면 본문은 선행 인라인 번호 오른쪽에서
                         // 시작해야 한다. 이 경우 left indent 억제를 적용하면 번호와 본문이 겹친다.
                         boolean _hasIndentToHere = _fvtInl.indexOf('\u0007') >= 0
@@ -2467,7 +2463,8 @@ public final class FramePlacer {
         String reason = rg.reason();
         if (reason == null) return false;
         return reason.contains("mixed_group_text_hidden")
-                || reason.contains("visual_label_text_hidden_shell");
+                || reason.contains("visual_label_text_hidden_shell")
+                || reason.contains("editable_composite_text_hidden_shell");
     }
 
     private static boolean isSyntheticGroupWideLabel(

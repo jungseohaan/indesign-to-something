@@ -23,7 +23,7 @@ pub async fn extract_indd(
     start_page: Option<i32>,
     end_page: Option<i32>,
     // SPEC-030: 성능 옵션. perf_mode = "fast" | "standard" | "high" (기본 "standard").
-    // skip_pdf = preview.pdf 생성 스킵 (기본 false; perf_mode="fast" 면 자동 true).
+    // skip_pdf = preview.pdf 생성 스킵. 기본 false이며 fast도 PDF는 생성/캐시한다.
     perf_mode: Option<String>,
     skip_pdf: Option<bool>,
     // 분할 추출: chunk_size > 0 이면 해당 페이지 수 단위로 청크 추출.
@@ -38,7 +38,7 @@ pub async fn extract_indd(
     let debug_range = sp > 0 || ep > 0;
     let pm = perf_mode.unwrap_or_else(|| "standard".to_string());
     let pm_normalized = pm.to_lowercase();
-    let sk = skip_pdf.unwrap_or(false) || pm_normalized == "fast";
+    let sk = skip_pdf.unwrap_or(false);
 
     // 0. INDD 옆에 이미 IDML + resolved.json이 있으면 InDesign 추출 스킵 (기존 동작 유지)
     //    단, 디버그 페이지 범위가 지정되면 항상 신규 추출.

@@ -538,17 +538,19 @@ public class ResolvedFrameDistributor {
                         target.addParagraph(para);
                     }
 
-                    long targetRight = target.x() + target.width();
-                    long targetBottom = target.y() + target.height();
-                    long srcRight = src.x() + src.width();
-                    long srcBottom = src.y() + src.height();
+                    if (shouldUnionMergedBounds(target, src)) {
+                        long targetRight = target.x() + target.width();
+                        long targetBottom = target.y() + target.height();
+                        long srcRight = src.x() + src.width();
+                        long srcBottom = src.y() + src.height();
 
-                    long newX = Math.min(target.x(), src.x());
-                    long newY = Math.min(target.y(), src.y());
-                    target.x(newX);
-                    target.y(newY);
-                    target.width(Math.max(targetRight, srcRight) - newX);
-                    target.height(Math.max(targetBottom, srcBottom) - newY);
+                        long newX = Math.min(target.x(), src.x());
+                        long newY = Math.min(target.y(), src.y());
+                        target.x(newX);
+                        target.y(newY);
+                        target.width(Math.max(targetRight, srcRight) - newX);
+                        target.height(Math.max(targetBottom, srcBottom) - newY);
+                    }
 
                     toRemove.add(src);
                 }
@@ -563,6 +565,45 @@ public class ResolvedFrameDistributor {
                 section.blocks().removeAll(toRemove);
             }
         }
+    }
+
+    private static boolean shouldUnionMergedBounds(ASTTextFrameBlock target, ASTTextFrameBlock src) {
+        if (target == null || src == null) return true;
+        if (isSameLinePrefixMerge(target, src) || isSameLinePrefixMerge(src, target)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean isSameLinePrefixMerge(ASTTextFrameBlock prefix, ASTTextFrameBlock body) {
+        if (prefix == null || body == null) return false;
+        String text = normalizeText(extractBlockText(prefix));
+        if (!isSimplePrefixMarker(text)) return false;
+        long overlap = Math.min(prefix.y() + prefix.height(), body.y() + body.height())
+                - Math.max(prefix.y(), body.y());
+        if (overlap <= 0) return false;
+        long minHeight = Math.max(1L, Math.min(prefix.height(), body.height()));
+        if (overlap * 100L < minHeight * 25L) return false;
+        return prefix.x() <= body.x() + Math.max(1L, body.width() / 8L);
+    }
+
+    private static boolean isSimplePrefixMarker(String text) {
+        if (text == null) return false;
+        String t = text.replaceAll("\\s+", "");
+        return t.matches("[0-9]{1,2}")
+                || t.matches("[가-힣]")
+                || t.matches("[ㄱ-ㅎ]")
+                || t.matches("\\([0-9]{1,2}\\)")
+                || t.matches("[0-9]{1,2}[.)]");
+    }
+
+    private static String extractBlockText(ASTTextFrameBlock block) {
+        StringBuilder sb = new StringBuilder();
+        if (block == null || block.paragraphs() == null) return "";
+        for (ASTParagraph para : block.paragraphs()) {
+            sb.append(extractAstText(para));
+        }
+        return sb.toString();
     }
 
     // ─── 프레임/블록 수집 ────────────────────────────────────

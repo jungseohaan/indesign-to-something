@@ -123,6 +123,63 @@ fn app_name_from_path(app_path: &str) -> String {
         .unwrap_or_else(|| "Adobe InDesign".to_string())
 }
 
+async fn collect_open_stall_diagnostics(
+    app_name: &str,
+    progress_path: &Path,
+    output_dir: &Path,
+) -> String {
+    let progress = std::fs::read_to_string(progress_path)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|e| format!("읽기 실패: {}", e));
+    let script_path = output_dir.join("_extract.applescript");
+
+    let shell = r#"
+set -u
+echo "progress_path=$PROGRESS_PATH"
+echo "progress=$PROGRESS_TEXT"
+echo "output_dir=$OUTPUT_DIR"
+echo "script_path=$SCRIPT_PATH"
+pid="$(pgrep -x "$APP_NAME" | head -1 || true)"
+if [ -z "$pid" ]; then
+  echo "indesign_pid=not_found"
+  exit 0
+fi
+echo "indesign_pid=$pid"
+ps -p "$pid" -o pid,etime,stat,%cpu,%mem,command
+echo "--- open linked files ---"
+lsof -p "$pid" 2>/dev/null \
+  | grep -E '/Links/|/Document fonts/|\.indd|\.idml|\.psd|\.ai|\.pdf|\.png|\.jpg|\.jpeg|\.tif|\.tiff' \
+  | head -40 || true
+echo "--- sample summary ---"
+sample "$pid" 2 1 2>/dev/null \
+  | grep -E 'Call graph|Thread_|Links|Open Place|Photoshop|PSD|AdobeExtendScript|condition_variable|ReadAttributes|Scripting' \
+  | head -120 || true
+"#;
+
+    match Command::new("sh")
+        .arg("-c")
+        .arg(shell)
+        .env("APP_NAME", app_name)
+        .env("PROGRESS_PATH", progress_path.to_string_lossy().to_string())
+        .env("PROGRESS_TEXT", progress)
+        .env("OUTPUT_DIR", output_dir.to_string_lossy().to_string())
+        .env("SCRIPT_PATH", script_path.to_string_lossy().to_string())
+        .output()
+        .await
+    {
+        Ok(output) => {
+            let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.trim().is_empty() {
+                text.push_str("\n--- diagnostic stderr ---\n");
+                text.push_str(stderr.trim());
+            }
+            text.trim().to_string()
+        }
+        Err(e) => format!("진단 정보 수집 실패: {}", e),
+    }
+}
+
 /// 추출용 임시 디렉토리를 생성한다.
 pub fn create_extraction_temp_dir() -> Result<PathBuf, String> {
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -133,8 +190,7 @@ pub fn create_extraction_temp_dir() -> Result<PathBuf, String> {
         .as_millis();
     let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp = std::env::temp_dir().join(format!("indd-extract-{}-{}", timestamp, seq));
-    std::fs::create_dir_all(&temp)
-        .map_err(|e| format!("임시 디렉토리 생성 실패: {}", e))?;
+    std::fs::create_dir_all(&temp).map_err(|e| format!("임시 디렉토리 생성 실패: {}", e))?;
     Ok(temp)
 }
 
@@ -199,7 +255,9 @@ async fn ensure_indesign_running(app_name: &str, output_dir: &Path) {
             // 프로브 실패: SDEF 미준비 또는 -609. 9초 대기 후 재시도.
             // attempt 5 이후에는 hung 프로세스일 가능성 → killall 후 재기동
             if attempt == 5 {
-                eprintln!("[ensure_indesign_running] probe 5회 실패 → hung 의심, killall 후 재기동");
+                eprintln!(
+                    "[ensure_indesign_running] probe 5회 실패 → hung 의심, killall 후 재기동"
+                );
                 let _ = tokio::process::Command::new("killall")
                     .arg(app_name)
                     .output()
@@ -243,7 +301,9 @@ pub async fn run_extraction(
     emit_progress(app, "launching", "InDesign을 실행하는 중...");
 
     // AppleScript 생성
-    // - `do script ... language javascript`: InDesign ExtendScript 실행
+    // - `do script ... language «constant ScLgJSLg»`: InDesign ExtendScript 실행
+    //   InDesign 2026 동적 SDEF가 흔들리면 `javascript` 이름이 `java script`처럼
+    //   토큰화되어 -2741 문법 오류가 날 수 있어 enum 코드를 직접 사용한다.
     // - `with arguments`: ExtendScript의 arguments 변수로 전달
     // - arguments[2] = startPage (0=전체), arguments[3] = endPage (0=전체)
     // - arguments[4] = spreadMode ("1"=스프레드 PDF, "0"=페이지별 PDF)
@@ -258,14 +318,17 @@ pub async fn run_extraction(
     // 디버그 로그: config 경로를 추출 디렉토리에 기록
     let _ = std::fs::write(
         output_dir.join("_config_debug.log"),
-        format!("config_path={}\nperfMode={}\nskipPdf={}\n", config_path, perf_mode, skip_pdf),
+        format!(
+            "config_path={}\nperfMode={}\nskipPdf={}\n",
+            config_path, perf_mode, skip_pdf
+        ),
     );
     let applescript = format!(
         r#"using terms from application "{app_name}"
     tell application "{app_name}"
         activate
         with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "full", "", "{physical_range_flag}"}}
+            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "full", "", "{physical_range_flag}"}}
         end timeout
     end tell
 end using terms from"#,
@@ -309,6 +372,7 @@ end using terms from"#,
     let progress_path = output_dir.join(".progress");
     let done_path = output_dir.join(".done");
     let mut last_message = String::new();
+    let mut last_progress_step = String::new();
     let timeout_secs = 3600u64;
     // SPEC-030 B.4: phase별 stale 타임아웃 차등 적용
     // - open: 300s (대용량 파일은 열기만 수분 소요)
@@ -342,6 +406,11 @@ end using terms from"#,
         let elapsed = started.elapsed().as_secs();
         let stale = last_progress_at.elapsed().as_secs();
         if elapsed > timeout_secs || stale > current_phase_stale {
+            let diagnostics = if last_progress_step == "open" {
+                Some(collect_open_stall_diagnostics(&app_name, &progress_path, output_dir).await)
+            } else {
+                None
+            };
             // osascript 프로세스 강제 종료
             let _ = child.kill().await;
             // InDesign 자체도 종료 (hung 상태 유지 방지 — 다음 추출 시 -2741 오류 예방)
@@ -363,10 +432,17 @@ end using terms from"#,
             } else {
                 format!("진행률 정체 {}초 초과", current_phase_stale)
             };
-            return Err(format!(
+            let mut message = format!(
                 "InDesign 추출 중단 ({}). 마지막 단계: {}",
                 reason, last_step
-            ));
+            );
+            if let Some(diag) = diagnostics {
+                if !diag.trim().is_empty() {
+                    message.push_str("\n\n[open 단계 진단]\n");
+                    message.push_str(diag.trim());
+                }
+            }
+            return Err(message);
         }
 
         // .progress 파일에서 상세 진행률 읽기
@@ -376,11 +452,13 @@ end using terms from"#,
                 let current = prog.get("current").and_then(|v| v.as_i64()).unwrap_or(0);
                 let total = prog.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
                 let desc = prog.get("desc").and_then(|v| v.as_str()).unwrap_or("");
+                last_progress_step = step.to_string();
 
                 // SPEC-030 B.4: phase별 stale 타임아웃 갱신
                 current_phase_stale = match step {
                     "close_docs" => 60,
-                    "open" => 1200,
+                    // 테스트/진단용: open 단계 정체 시 링크/sample 정보를 빨리 노출한다.
+                    "open" => 250,
                     "idml" => 120,
                     // PDF 내보내기는 48페이지 복잡한 파일에서 3~4분 소요 가능
                     "pdf" => 600,
@@ -396,18 +474,32 @@ end using terms from"#,
                     "idml" => "IDML 내보내기 중...".to_string(),
                     "resolved" if total > 0 => format!("resolved 수집 중... ({}페이지)", total),
                     "resolved" => "resolved 수집 중...".to_string(),
-                    "resolved_styles" if total > 0 => format!("스타일/색상 수집 중... ({}페이지)", total),
+                    "resolved_styles" if total > 0 => {
+                        format!("스타일/색상 수집 중... ({}페이지)", total)
+                    }
                     "resolved_styles" => "스타일/색상 수집 중...".to_string(),
-                    "resolved_stories" if current > 0 && total > 0 => format!("스토리 수집 중... ({}/{})", current, total),
+                    "resolved_stories" if current > 0 && total > 0 => {
+                        format!("스토리 수집 중... ({}/{})", current, total)
+                    }
                     "resolved_stories" => "스토리 수집 중...".to_string(),
                     "resolved_frames" => "텍스트프레임 수집 중...".to_string(),
                     "resolved_items" => "페이지 아이템 수집 중...".to_string(),
-                    "rendered_frames" if current > 0 && total > 0 => format!("배경/도형 렌더링 중... ({}/{})", current, total),
+                    "rendered_frames" if current > 0 && total > 0 => {
+                        format!("배경/도형 렌더링 중... ({}/{})", current, total)
+                    }
                     "rendered_frames" => "배경/도형 렌더링 중...".to_string(),
-                    "render_badge" if !desc.is_empty() && total > 0 => format!("배지 렌더링 중... ({}/{}) {}", current, total, desc),
-                    "render_badge" if total > 0 => format!("배지 렌더링 중... ({}/{})", current, total),
-                    "render_frame" if !desc.is_empty() && total > 0 => format!("프레임 렌더링 중... ({}/{}) {}", current, total, desc),
-                    "render_frame" if total > 0 => format!("프레임 렌더링 중... ({}/{})", current, total),
+                    "render_badge" if !desc.is_empty() && total > 0 => {
+                        format!("배지 렌더링 중... ({}/{}) {}", current, total, desc)
+                    }
+                    "render_badge" if total > 0 => {
+                        format!("배지 렌더링 중... ({}/{})", current, total)
+                    }
+                    "render_frame" if !desc.is_empty() && total > 0 => {
+                        format!("프레임 렌더링 중... ({}/{}) {}", current, total, desc)
+                    }
+                    "render_frame" if total > 0 => {
+                        format!("프레임 렌더링 중... ({}/{})", current, total)
+                    }
                     "pdf" => "PDF 프리뷰 생성 중...".to_string(),
                     _ => format!("추출 중... ({})", step),
                 };
@@ -434,7 +526,11 @@ end using terms from"#,
                         _ => display.clone(),
                     };
                     last_heartbeat_at = std::time::Instant::now();
-                    let phase = if step == "pdf" { "checking" } else { "exporting" };
+                    let phase = if step == "pdf" {
+                        "checking"
+                    } else {
+                        "exporting"
+                    };
                     emit_progress(app, phase, &heartbeat_msg);
                 }
             }
@@ -446,7 +542,9 @@ end using terms from"#,
     kill.deregister_pid();
 
     // osascript 결과 수집
-    let output = child.wait_with_output().await
+    let output = child
+        .wait_with_output()
+        .await
         .map_err(|e| format!("osascript 결과 수집 실패: {}", e))?;
 
     if !output.status.success() {
@@ -462,7 +560,9 @@ end using terms from"#,
                 .stderr(std::process::Stdio::piped())
                 .spawn()
                 .map_err(|e| format!("osascript 재시도 실행 실패: {}", e))?;
-            let output2 = child2.wait_with_output().await
+            let output2 = child2
+                .wait_with_output()
+                .await
                 .map_err(|e| format!("osascript 재시도 결과 수집 실패: {}", e))?;
             if !output2.status.success() {
                 let stderr2 = String::from_utf8_lossy(&output2.stderr);
@@ -484,7 +584,9 @@ end using terms from"#,
             .map_err(|e| format!(".done 파일 파싱 실패: {}", e))?;
 
         if done_signal.status == "error" {
-            let msg = done_signal.message.unwrap_or_else(|| "알 수 없는 오류".to_string());
+            let msg = done_signal
+                .message
+                .unwrap_or_else(|| "알 수 없는 오류".to_string());
             return Err(format!("InDesign 추출 오류: {}", msg));
         }
     } else {
@@ -501,7 +603,9 @@ end using terms from"#,
                 .map_err(|e| format!(".done 파일 파싱 실패: {}", e))?;
 
             if done_signal.status == "error" {
-                let msg = done_signal.message.unwrap_or_else(|| "알 수 없는 오류".to_string());
+                let msg = done_signal
+                    .message
+                    .unwrap_or_else(|| "알 수 없는 오류".to_string());
                 return Err(format!("InDesign 추출 오류: {}", msg));
             }
         }
@@ -572,7 +676,7 @@ pub async fn run_extraction_with_skip(
     tell application "{app_name}"
         activate
         with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "{skip_render_pages}", "full"}}
+            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "{skip_render_pages}", "full"}}
         end timeout
     end tell
 end using terms from"#,
@@ -627,7 +731,11 @@ end using terms from"#,
             });
             return Err(format!(
                 "부분 추출 타임아웃. 마지막 단계: {}",
-                if last_message.is_empty() { "시작 중".to_string() } else { last_message.clone() }
+                if last_message.is_empty() {
+                    "시작 중".to_string()
+                } else {
+                    last_message.clone()
+                }
             ));
         }
         if let Ok(content) = std::fs::read_to_string(&progress_path) {
@@ -653,7 +761,11 @@ end using terms from"#,
                             _ => format!("추출 중... ({}초 경과)", stale),
                         };
                         last_heartbeat_at = std::time::Instant::now();
-                        let phase = if step == "pdf" { "checking" } else { "exporting" };
+                        let phase = if step == "pdf" {
+                            "checking"
+                        } else {
+                            "exporting"
+                        };
                         emit_progress(app, phase, &heartbeat_msg);
                     }
                 }
@@ -666,7 +778,10 @@ end using terms from"#,
         let done_content = std::fs::read_to_string(&done_path).unwrap_or_default();
         if let Ok(sig) = serde_json::from_str::<DoneSignal>(&done_content) {
             if sig.status == "error" {
-                return Err(format!("부분 추출 오류: {}", sig.message.unwrap_or_default()));
+                return Err(format!(
+                    "부분 추출 오류: {}",
+                    sig.message.unwrap_or_default()
+                ));
             }
         }
     }
@@ -718,7 +833,7 @@ pub async fn run_page_hash_scan(
     tell application "{app_name}"
         activate
         with timeout of 300 seconds
-            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "0", "0", "0", "0", "{config_path}", "standard", "0", "", "pre_scan"}}
+            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "0", "0", "0", "0", "{config_path}", "standard", "0", "", "pre_scan"}}
         end timeout
     end tell
 end using terms from"#,
@@ -778,23 +893,35 @@ pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
     // src별 max(x+w) 계산
     let mut src_max_xw: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     for entry in &entries {
-        let src_rel = match entry["src"].as_str() { Some(s) => s, None => continue };
+        let src_rel = match entry["src"].as_str() {
+            Some(s) => s,
+            None => continue,
+        };
         let x = entry["x"].as_i64().unwrap_or(0);
         let w = entry["w"].as_i64().unwrap_or(0);
         let xw = x + w;
         let cur = src_max_xw.entry(src_rel.to_string()).or_insert(0);
-        if xw > *cur { *cur = xw; }
+        if xw > *cur {
+            *cur = xw;
+        }
     }
     // src별 스케일 감지 (PNG 너비를 읽어 ratio 계산)
     let mut src_scale: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     for (src_rel, max_xw) in &src_max_xw {
-        if *max_xw <= 0 { src_scale.insert(src_rel.clone(), 1.0); continue; }
+        if *max_xw <= 0 {
+            src_scale.insert(src_rel.clone(), 1.0);
+            continue;
+        }
         let src_path = output_dir.join(src_rel);
         let png_w = read_png_width(&src_path).unwrap_or(0);
         if png_w > 0 {
             let ratio = png_w as f64 / *max_xw as f64;
             // 1.3~4.0 범위면 구 JSX 버그 보정 필요 (mm 단위)
-            let scale = if ratio >= 1.3 && ratio <= 4.0 { ratio } else { 1.0 };
+            let scale = if ratio >= 1.3 && ratio <= 4.0 {
+                ratio
+            } else {
+                1.0
+            };
             src_scale.insert(src_rel.clone(), scale);
         } else {
             src_scale.insert(src_rel.clone(), 1.0);
@@ -802,15 +929,35 @@ pub fn apply_crop_manifest(output_dir: &std::path::Path) -> usize {
     }
     let mut count = 0usize;
     for entry in &entries {
-        let src_rel = match entry["src"].as_str() { Some(s) => s, None => continue };
-        let dst_rel = match entry["dst"].as_str() { Some(s) => s, None => continue };
-        let x = match entry["x"].as_i64() { Some(v) => v, None => continue };
-        let y = match entry["y"].as_i64() { Some(v) => v, None => continue };
-        let w = match entry["w"].as_i64() { Some(v) if v > 0 => v, _ => continue };
-        let h = match entry["h"].as_i64() { Some(v) if v > 0 => v, _ => continue };
+        let src_rel = match entry["src"].as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        let dst_rel = match entry["dst"].as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        let x = match entry["x"].as_i64() {
+            Some(v) => v,
+            None => continue,
+        };
+        let y = match entry["y"].as_i64() {
+            Some(v) => v,
+            None => continue,
+        };
+        let w = match entry["w"].as_i64() {
+            Some(v) if v > 0 => v,
+            _ => continue,
+        };
+        let h = match entry["h"].as_i64() {
+            Some(v) if v > 0 => v,
+            _ => continue,
+        };
         let src = output_dir.join(src_rel);
         let dst = output_dir.join(dst_rel);
-        if !src.exists() { continue; }
+        if !src.exists() {
+            continue;
+        }
         let scale = *src_scale.get(src_rel).unwrap_or(&1.0);
         let sx = ((x as f64 * scale).round() as i64).max(0) as u32;
         let sy = ((y as f64 * scale).round() as i64).max(0) as u32;
@@ -848,7 +995,9 @@ fn read_png_width(path: &std::path::Path) -> Option<u32> {
     let mut buf = [0u8; 24];
     f.read_exact(&mut buf).ok()?;
     // PNG signature: 8 bytes, IHDR length: 4 bytes, IHDR type: 4 bytes, width: 4 bytes BE
-    if &buf[0..8] != b"\x89PNG\r\n\x1a\n" { return None; }
+    if &buf[0..8] != b"\x89PNG\r\n\x1a\n" {
+        return None;
+    }
     Some(u32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]))
 }
 
@@ -880,11 +1029,25 @@ pub async fn run_extraction_chunked(
     chunk_size: i32,
 ) -> Result<InddExtractResult, String> {
     // ── 청크 1: 정상 추출 (IDML + 렌더링 + resolved.json) ─────────────────
-    emit_progress(app, "chunk_1", &format!("청크 1 추출 중 (페이지 1..{})...", chunk_size));
+    emit_progress(
+        app,
+        "chunk_1",
+        &format!("청크 1 추출 중 (페이지 1..{})...", chunk_size),
+    );
     let chunk1_result = run_extraction(
-        app, indd_path, output_dir, jsx_path, indesign_app_path,
-        1, chunk_size, spread_mode, perf_mode, skip_pdf, true,
-    ).await?;
+        app,
+        indd_path,
+        output_dir,
+        jsx_path,
+        indesign_app_path,
+        1,
+        chunk_size,
+        spread_mode,
+        perf_mode,
+        skip_pdf,
+        true,
+    )
+    .await?;
 
     // 청크 1 통계에서 total_page_count 읽기
     let total_pages: i32 = chunk1_result
@@ -906,13 +1069,26 @@ pub async fn run_extraction_chunked(
     while start <= total_pages {
         let end = (start + chunk_size - 1).min(total_pages);
         emit_progress(
-            app, "chunk_n",
-            &format!("청크 {} 추출 중 (페이지 {}..{} / {})...", chunk_idx, start, end, total_pages),
+            app,
+            "chunk_n",
+            &format!(
+                "청크 {} 추출 중 (페이지 {}..{} / {})...",
+                chunk_idx, start, end, total_pages
+            ),
         );
         run_extraction_followup_chunk(
-            app, indd_path, output_dir, jsx_path, indesign_app_path,
-            start, end, spread_mode, perf_mode, skip_pdf,
-        ).await?;
+            app,
+            indd_path,
+            output_dir,
+            jsx_path,
+            indesign_app_path,
+            start,
+            end,
+            spread_mode,
+            perf_mode,
+            skip_pdf,
+        )
+        .await?;
         start = end + 1;
         chunk_idx += 1;
     }
@@ -973,7 +1149,7 @@ async fn run_extraction_followup_chunk(
     tell application "{app_name}"
         activate
         with timeout of 3600 seconds
-            do script POSIX file "{jsx_path}" language javascript with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "1", "", "full", "1", "1"}}
+            do script POSIX file "{jsx_path}" language «constant ScLgJSLg» with arguments {{"{indd_path}", "{output_dir}", "{start_page}", "{end_page}", "{spread_flag}", "0", "{config_path}", "{perf_mode}", "{skip_pdf_flag}", "", "full", "1", "1"}}
         end timeout
     end tell
 end using terms from"#,
@@ -986,8 +1162,12 @@ end using terms from"#,
         spread_flag = spread_flag,
         config_path = config_path,
         perf_mode = perf_mode,
+        skip_pdf_flag = skip_pdf_flag,
     );
-    let script_file = output_dir.join(format!("_extract_chunk_{}_{}.applescript", start_page, end_page));
+    let script_file = output_dir.join(format!(
+        "_extract_chunk_{}_{}.applescript",
+        start_page, end_page
+    ));
     std::fs::write(&script_file, &applescript)
         .map_err(|e| format!("AppleScript 파일 쓰기 실패: {}", e))?;
 
@@ -1049,7 +1229,8 @@ end using terms from"#,
             if sig.status == "error" {
                 return Err(format!(
                     "청크 추출 실패 (페이지 {}..{}): {}",
-                    start_page, end_page,
+                    start_page,
+                    end_page,
                     sig.message.unwrap_or_else(|| "알 수 없는 오류".to_string())
                 ));
             }
@@ -1140,12 +1321,11 @@ fn find_pdf_bg_script(app: &AppHandle) -> Result<String, String> {
     for rel_path in dev_paths {
         let path = Path::new(rel_path);
         if path.exists() {
-            return Ok(
-                path.canonicalize()
-                    .map_err(|e| format!("경로 해석 실패: {}", e))?
-                    .to_string_lossy()
-                    .to_string(),
-            );
+            return Ok(path
+                .canonicalize()
+                .map_err(|e| format!("경로 해석 실패: {}", e))?
+                .to_string_lossy()
+                .to_string());
         }
     }
     Err("export_pdf_bg.jsx를 찾을 수 없습니다".into())
@@ -1164,12 +1344,11 @@ pub fn find_extendscript(app: &AppHandle) -> Result<String, String> {
     for rel_path in dev_paths {
         let path = Path::new(rel_path);
         if path.exists() {
-            return Ok(
-                path.canonicalize()
-                    .map_err(|e| format!("경로 해석 실패: {}", e))?
-                    .to_string_lossy()
-                    .to_string(),
-            );
+            return Ok(path
+                .canonicalize()
+                .map_err(|e| format!("경로 해석 실패: {}", e))?
+                .to_string_lossy()
+                .to_string());
         }
     }
 

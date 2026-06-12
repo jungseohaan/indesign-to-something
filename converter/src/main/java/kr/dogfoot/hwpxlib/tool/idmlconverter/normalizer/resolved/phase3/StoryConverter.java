@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
@@ -71,6 +72,10 @@ public final class StoryConverter {
 
     private StoryConverter() {}
 
+    private static double millis(long nanos) {
+        return Math.round(nanos / 10000.0) / 100.0;
+    }
+
     /** ParagraphStyle에서 미리 구한 스타일 속성 (런에서 없을 때 폴백용) */
     static class StyleContext {
         final String fillColor;
@@ -95,17 +100,35 @@ public final class StoryConverter {
     // ═══════════════════════════════════════════════════
 
     public static void convertStories(ResolvedBuildContext ctx, List<ASTSection> sections) {
+        long prepopulateNanos;
+        long textPathScanNanos;
+        long storyBlockMapNanos;
+        long storyLoopNanos;
+        long idmlConvertNanos = 0L;
+        long fallbackCheckNanos = 0L;
+        long resolvedConvertNanos = 0L;
+        long distributeNanos = 0L;
+        long restoreInlineNanos = 0L;
+        long postprocessNanos = 0L;
+        long injectInnerNanos;
+        long deferredFloatingNanos;
+
         // PRE: IDML 의 AnchoredPosition="Anchored" + TextWrapMode="None" InlineGraphic 들을
         // 미리 스캔해서 deferredAnchoredFloatingIds 에 등록. 두 경로(IDML/resolved) 모두
         // 인라인 배치 시 이 ID 들을 건너뛰고, 후처리가 floating ASTFigure 로 배치한다.
+        long t0 = System.nanoTime();
         prepopulateAnchoredFloatingIds(ctx);
+        prepopulateNanos = System.nanoTime() - t0;
 
         // PRE: Spread XML 에서 TextPath 매핑 (TF id → TextPath storyId) 미리 추출.
         // curved text 가 부모 TF 의 빈 콘텐츠를 채우도록 한다 (직선으로 그대로 표시).
+        t0 = System.nanoTime();
         Map<String, String> textPathStorySub = scanTextPathStorySubstitutions(ctx);
+        textPathScanNanos = System.nanoTime() - t0;
 
         // TextFrameBlock에 Story 텍스트 연결
         // storyId → TextFrameBlock 매핑
+        t0 = System.nanoTime();
         Map<String, List<ASTTextFrameBlock>> storyToBlocks = new HashMap<>();
         for (ASTSection sec : sections) {
             for (ASTBlock blk : sec.blocks()) {
@@ -152,6 +175,7 @@ public final class StoryConverter {
                 }
             }
         }
+        storyBlockMapNanos = System.nanoTime() - t0;
 
         System.err.println("[ResolvedToASTBuilder] Phase 3: " + storyToBlocks.size() + " stories matched to TextFrameBlocks");
 
@@ -160,19 +184,23 @@ public final class StoryConverter {
         int totalParas = 0;
         int idmlCount = 0;
         int resolvedCount = 0;
+        t0 = System.nanoTime();
         for (Map.Entry<String, List<ASTTextFrameBlock>> entry : storyToBlocks.entrySet()) {
             String storyId = entry.getKey();
             List<ASTTextFrameBlock> blocks = entry.getValue();
             if (isStoryFullyOwnedByIndesignPng(ctx, storyId)) continue;
             // 1차: IDML Story XML에서 단락 파싱 (정확한 단락 구조)
             boolean suppressLeftInd = blocks.stream().anyMatch(b -> b.suppressParaLeftIndent());
+            long stepStart = System.nanoTime();
             List<ASTParagraph> paragraphs = StoryLoader.convertStoryFromIDML(ctx, storyId, suppressLeftInd);
+            idmlConvertNanos += System.nanoTime() - stepStart;
             boolean useIdml = paragraphs != null && !paragraphs.isEmpty();
 
             // IDML-SHORT/PARA-MISMATCH 감지: resolved fallback 전환 조건
             // 1) IDML 텍스트가 resolved의 30% 미만 (불릿 전용 Story 등)
             // 2) IDML 단락 수가 resolved의 50% 미만 (강제 줄바꿈이 단락으로 처리되지 않는 경우)
             // 단, EH/BT/NP 수식 폰트가 포함된 story는 fallback하지 않음 (IDML 수식 변환이 우수)
+            stepStart = System.nanoTime();
             if (useIdml) {
                 if (!hasEquationFont(paragraphs)) {
                     ResolvedStory rs = ctx.resolvedData.getStory(storyId);
@@ -193,6 +221,7 @@ public final class StoryConverter {
                     }
                 }
             }
+            fallbackCheckNanos += System.nanoTime() - stepStart;
 
             if (useIdml) {
                 idmlCount++;
@@ -202,7 +231,9 @@ public final class StoryConverter {
                 if (story == null) {
                     continue;
                 }
+                stepStart = System.nanoTime();
                 paragraphs = convertStoryParagraphs(ctx, story, suppressLeftInd);
+                resolvedConvertNanos += System.nanoTime() - stepStart;
                 resolvedCount++;
             }
             totalParas += paragraphs.size();
@@ -229,14 +260,20 @@ public final class StoryConverter {
             }
 
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
+            stepStart = System.nanoTime();
             ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, storyId);
+            distributeNanos += System.nanoTime() - stepStart;
+            stepStart = System.nanoTime();
             restoreTfInlineVisuals(ctx, blocks);
+            restoreInlineNanos += System.nanoTime() - stepStart;
+            stepStart = System.nanoTime();
             preserveComposedLineBreaksForTrailingAnswerVisuals(ctx, blocks);
             replaceDottedInlineImagesWithTabLeaders(ctx, blocks);
             coalesceDotLeaderAnswerVisualBreaks(blocks);
             normalizeDotLeaderPageNumberTabs(blocks);
             expandBlocksForDotLeaderTabs(blocks);
             forceSingleLineJustifiedFramesLeft(ctx, blocks);
+            postprocessNanos += System.nanoTime() - stepStart;
             // 다중 블록 스토리는 ParagraphDistributor가 각 블록에 단락을 직접 배분했으므로
             // HWP 연결 글상자 링크(overflow) 불필요 → distributed=true로 linkListIDRef=0 보장
             if (blocks.size() > 1) {
@@ -245,14 +282,32 @@ public final class StoryConverter {
                 }
             }
         }
+        storyLoopNanos = System.nanoTime() - t0;
         System.err.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
 
         // Phase 3 후처리: inner TF 오버레이 패턴 — inner story 런을 outer block 마지막 단락에 주입.
+        t0 = System.nanoTime();
         injectInnerStoryContents(ctx, sections);
+        injectInnerNanos = System.nanoTime() - t0;
 
         // Phase 3 후처리: AnchoredPosition="Anchored" + TextWrapMode="None" Group 들을
         // BEHIND_TEXT 위치-절대 ASTFigure 로 배치 (텍스트 겹침, 밀지 않음).
+        t0 = System.nanoTime();
         placeDeferredAnchoredFloating(ctx, sections);
+        deferredFloatingNanos = System.nanoTime() - t0;
+
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.prepopulateAnchorsMs", millis(prepopulateNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.textPathScanMs", millis(textPathScanNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.storyBlockMapMs", millis(storyBlockMapNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.storyLoopMs", millis(storyLoopNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.idmlConvertMs", millis(idmlConvertNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.fallbackCheckMs", millis(fallbackCheckNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.resolvedConvertMs", millis(resolvedConvertNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.distributeMs", millis(distributeNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.restoreInlineVisualsMs", millis(restoreInlineNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.postprocessMs", millis(postprocessNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.injectInnerMs", millis(injectInnerNanos));
+        ConversionTiming.metric("stage2.textBuilder.storyConverter.deferredFloatingMs", millis(deferredFloatingNanos));
     }
 
     private static boolean isStoryFullyOwnedByIndesignPng(ResolvedBuildContext ctx, String storyId) {
@@ -622,20 +677,7 @@ public final class StoryConverter {
     }
 
     private static RenderedGroup findTfInlineVisualOwner(ResolvedBuildContext ctx, String domId) {
-        if (ctx == null || ctx.resolvedData == null || domId == null
-                || ctx.resolvedData.allRenderedFloatingItems() == null) {
-            return null;
-        }
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg == null || rg.tfInlineVisualIds() == null || rg.tfInlineVisualIds().length == 0) continue;
-            if (!"hwpx_tf".equals(rg.textOwner())) continue;
-            String[] tfIds = rg.editableTextFrameIds();
-            if (tfIds == null) continue;
-            for (String tfId : tfIds) {
-                if (domId.equals(tfId)) return rg;
-            }
-        }
-        return null;
+        return ctx != null ? ctx.tfInlineVisualOwnerForTextFrame(domId) : null;
     }
 
     private static boolean shouldDropUnabsorbedTextStyleInlineVisual(
@@ -713,16 +755,22 @@ public final class StoryConverter {
         File pngFile = new File(ctx.basePath, rg.file());
         if (!pngFile.exists()) return null;
         try {
-            byte[] data = Files.readAllBytes(pngFile.toPath());
-            BufferedImage img = ImageIO.read(pngFile);
-            if (img == null || img.getWidth() <= 1 || img.getHeight() <= 1) return null;
+            byte[] data = loadRenderedPng(ctx, rg, "phase3.tfInlinePng");
+            int[] dims = readPngDimensions(data);
+            if (dims == null) {
+                BufferedImage img = decodePngBytes(data, "phase3.tfInlinePng");
+                if (img != null) dims = new int[] { img.getWidth(), img.getHeight() };
+            } else {
+                ConversionTiming.addCounter("phase3.tfInlinePng.headerDimensionReads", 1);
+            }
+            if (dims == null || dims[0] <= 1 || dims[1] <= 1) return null;
             ASTInlineObject obj = new ASTInlineObject();
             obj.kind(ASTInlineObject.ObjectKind.IMAGE);
             obj.sourceId("u" + Integer.toHexString(inlineId));
             obj.imageData(data);
             obj.imageFormat("png");
-            obj.pixelWidth(img.getWidth());
-            obj.pixelHeight(img.getHeight());
+            obj.pixelWidth(dims[0]);
+            obj.pixelHeight(dims[1]);
             obj.keepInline(true);
             double[] b = rg.bounds();
             if (b != null && b.length >= 4) {
@@ -736,8 +784,8 @@ public final class StoryConverter {
             }
             if (obj.width() <= 0 || obj.height() <= 0) {
                 double dpi = ctx.pngExportDpi > 0 ? ctx.pngExportDpi : 220.0;
-                obj.width(CoordinateConverter.pointsToHwpunits(img.getWidth() * 72.0 / dpi));
-                obj.height(CoordinateConverter.pointsToHwpunits(img.getHeight() * 72.0 / dpi));
+                obj.width(CoordinateConverter.pointsToHwpunits(dims[0] * 72.0 / dpi));
+                obj.height(CoordinateConverter.pointsToHwpunits(dims[1] * 72.0 / dpi));
             }
             return obj;
         } catch (Exception e) {
@@ -745,15 +793,70 @@ public final class StoryConverter {
         }
     }
 
-    private static RenderedGroup findRenderedGroup(ResolvedBuildContext ctx, int id) {
-        if (ctx == null || ctx.resolvedData == null
-                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+    private static byte[] loadRenderedPng(ResolvedBuildContext ctx, RenderedGroup rg, String metricPrefix) {
+        if (ctx == null || rg == null || rg.file() == null || ctx.basePath == null) return null;
+        try {
+            File pngFile = new File(ctx.basePath, rg.file());
+            if (!pngFile.exists()) return null;
+            String key = pngFile.getAbsolutePath();
+            byte[] cached = ctx.renderedPngByteCache.get(key);
+            if (cached != null) {
+                ConversionTiming.addCounter(metricPrefix + ".cacheHits", 1);
+                return cached;
+            }
+            byte[] data = Files.readAllBytes(pngFile.toPath());
+            ctx.renderedPngByteCache.put(key, data);
+            ConversionTiming.addCounter(metricPrefix + ".diskReads", 1);
+            ConversionTiming.addCounter(metricPrefix + ".readBytes", data.length);
+            return data;
+        } catch (Exception e) {
             return null;
         }
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg != null && rg.id() == id) return rg;
+    }
+
+    private static BufferedImage decodePngBytes(byte[] data, String metricPrefix) {
+        if (data == null || data.length == 0) return null;
+        try {
+            ConversionTiming.addCounter(metricPrefix + ".imageDecodes", 1);
+            return ImageIO.read(new ByteArrayInputStream(data));
+        } catch (Exception e) {
+            return null;
         }
-        return null;
+    }
+
+    private static int[] readPngDimensions(byte[] pngData) {
+        if (pngData == null || pngData.length < 24) return null;
+        if ((pngData[0] & 0xFF) != 0x89
+                || pngData[1] != 0x50
+                || pngData[2] != 0x4E
+                || pngData[3] != 0x47
+                || pngData[4] != 0x0D
+                || pngData[5] != 0x0A
+                || pngData[6] != 0x1A
+                || pngData[7] != 0x0A) {
+            return null;
+        }
+        if (pngData[12] != 0x49
+                || pngData[13] != 0x48
+                || pngData[14] != 0x44
+                || pngData[15] != 0x52) {
+            return null;
+        }
+        int w = readBigEndianInt(pngData, 16);
+        int h = readBigEndianInt(pngData, 20);
+        return w > 0 && h > 0 ? new int[] { w, h } : null;
+    }
+
+    private static int readBigEndianInt(byte[] data, int offset) {
+        if (data == null || offset < 0 || offset + 3 >= data.length) return -1;
+        return ((data[offset] & 0xFF) << 24)
+                | ((data[offset + 1] & 0xFF) << 16)
+                | ((data[offset + 2] & 0xFF) << 8)
+                | (data[offset + 3] & 0xFF);
+    }
+
+    private static RenderedGroup findRenderedGroup(ResolvedBuildContext ctx, int id) {
+        return ctx != null ? ctx.renderedFloatingById(id) : null;
     }
 
     private static boolean containsInlineSource(ASTTextFrameBlock block, int inlineId) {
@@ -811,17 +914,7 @@ public final class StoryConverter {
     }
 
     private static boolean hasInlineObjectPng(ResolvedBuildContext ctx, int objectId) {
-        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) {
-            return false;
-        }
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg == null || rg.id() != objectId) continue;
-            if (!"inline_object".equals(rg.itemType())) continue;
-            String file = rg.file();
-            if (file == null || file.isEmpty()) continue;
-            return ctx.basePath == null || new File(ctx.basePath, file).exists();
-        }
-        return false;
+        return ctx != null && ctx.hasInlineObjectPng(objectId);
     }
 
     private static InsertPoint findInlineInsertPoint(
@@ -1601,12 +1694,6 @@ public final class StoryConverter {
     private static void placeDeferredAnchoredFloating(ResolvedBuildContext ctx, List<ASTSection> sections) {
         if (ctx.deferredAnchoredFloatingIds == null || ctx.deferredAnchoredFloatingIds.isEmpty()) return;
         if (ctx.basePath == null) return;
-        // C2: inline_object 항목을 루프 밖에서 미리 Map으로 수집 (O(N) → O(1) 조회)
-        Map<Integer, RenderedGroup> inlineObjectById = new HashMap<>();
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if ("inline_object".equals(rg.itemType()))
-                inlineObjectById.put(rg.id(), rg);
-        }
         int placed = 0;
         for (Integer domId : ctx.deferredAnchoredFloatingIds) {
             // pageItem 조회 (페이지 인덱스 + bounds)
@@ -1633,7 +1720,7 @@ public final class StoryConverter {
             double h = Math.abs(gb[2] - gb[0]);
             if (w <= 0 || h <= 0) continue;
 
-            RenderedGroup matchedRg = inlineObjectById.get(domId.intValue());
+            RenderedGroup matchedRg = ctx.inlineObjectById(domId.intValue());
             if (matchedRg != null && ctx.hasOwnershipPlan(matchedRg)
                     && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(matchedRg)) {
                 ctx.recordRenderedDecision(matchedRg, "Phase3.DeferredAnchoredFloating",
@@ -1647,16 +1734,22 @@ public final class StoryConverter {
                 pngFile = new File(ctx.basePath, matchedRg.file());
             if (pngFile == null || !pngFile.exists()) continue;
             try {
-                byte[] imageData = Files.readAllBytes(pngFile.toPath());
-                BufferedImage img = ImageIO.read(pngFile);
-                if (img == null) continue;
+                byte[] imageData = loadRenderedPng(ctx, matchedRg, "phase3.deferredAnchoredPng");
+                int[] dims = readPngDimensions(imageData);
+                if (dims == null) {
+                    BufferedImage img = decodePngBytes(imageData, "phase3.deferredAnchoredPng");
+                    if (img != null) dims = new int[] { img.getWidth(), img.getHeight() };
+                } else {
+                    ConversionTiming.addCounter("phase3.deferredAnchoredPng.headerDimensionReads", 1);
+                }
+                if (dims == null) continue;
 
                 ASTFigure fig = new ASTFigure();
                 fig.kind(ASTFigure.FigureKind.IMAGE);
                 fig.imageData(imageData);
                 fig.imageFormat("png");
-                fig.pixelWidth(img.getWidth());
-                fig.pixelHeight(img.getHeight());
+                fig.pixelWidth(dims[0]);
+                fig.pixelHeight(dims[1]);
                 fig.x(CoordinateConverter.pointsToHwpunits(x));
                 fig.y(CoordinateConverter.pointsToHwpunits(y));
                 fig.width(CoordinateConverter.pointsToHwpunits(w));

@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.ImageEffect;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Picture;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -53,6 +54,8 @@ public class ImageInserter {
      * @return 등록된 itemId (insertInline에서 사용)
      */
     public static String registerImage(HWPXFile hwpxFile, byte[] imageData, String format) {
+        ConversionTiming.addCounter("hwpx.images.registered", 1);
+        ConversionTiming.addCounter("hwpx.images.registeredBytes", imageData != null ? imageData.length : 0);
         String itemId = nextImageId(hwpxFile);
         String ext = toExtension(format);
         String mediaType = toMediaType(format);

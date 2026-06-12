@@ -11,6 +11,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.secpr.SecPr;
 import kr.dogfoot.hwpxlib.tool.blankfilemaker.BlankFileMaker;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertException;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConvertResult;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ProgressReporter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.registry.FontRegistry;
@@ -112,17 +113,27 @@ public class ASTToHwpxConverter {
     // ── 변환 메인 ──
 
     private ConvertResult doConvert() throws ConvertException {
+        ConversionTiming.Scope totalScope = ConversionTiming.time("phase3.astToHwpx.internalTotal");
+        try {
         System.err.println("[ASTToHwpxConverter] Starting conversion...");
+        recordInputSummary();
 
         // 1. 기본 HWPX 구조 생성
-        HWPXFile hwpxFile = BlankFileMaker.make();
+        HWPXFile hwpxFile;
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3.astToHwpx.blankFile")) {
+            hwpxFile = BlankFileMaker.make();
+        }
 
         // 2. 레지스트리 초기화
-        FontRegistry fontRegistry = new FontRegistry(hwpxFile, customFontMap);
-        if (fontMapper != null) {
-            fontRegistry.setFontMapper(fontMapper);
+        FontRegistry fontRegistry;
+        StyleRegistry styleRegistry;
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3.astToHwpx.registryInit")) {
+            fontRegistry = new FontRegistry(hwpxFile, customFontMap);
+            if (fontMapper != null) {
+                fontRegistry.setFontMapper(fontMapper);
+            }
+            styleRegistry = new StyleRegistry(hwpxFile, fontRegistry);
         }
-        StyleRegistry styleRegistry = new StyleRegistry(hwpxFile, fontRegistry);
 
         // 3. 컨텍스트 + 빌더 생성
         ctx = new HwpxConverterContext(hwpxFile, styleRegistry, fontRegistry, doc.paragraphStyles());
@@ -138,32 +149,42 @@ public class ASTToHwpxConverter {
         ctx.tableBuilderRef = tableBuilder;
 
         // 4. 폰트 등록
-        registerFonts();
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3.astToHwpx.registerFonts")) {
+            registerFonts();
+        }
 
         // 5. 스타일 등록
-        registerStyles();
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3.astToHwpx.registerStyles")) {
+            registerStyles();
+        }
 
         // 6. 연결 글상자 사전 스캔 — 같은 storyId를 공유하는 블록들에 linkId 사전 할당
-        buildStoryLinkMap();
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3.astToHwpx.storyLinkScan")) {
+            buildStoryLinkMap();
+        }
 
         // 7. 섹션/블록 변환
         SectionXMLFile section0 = hwpxFile.sectionXMLFileList().get(0);
         section0.removeAllParas();
 
         int totalSections = doc.sections().size();
-        for (ASTSection section : doc.sections()) {
-            convertSection(section0, section);
-            pagesConverted++;
-            // 진행률: progressOffset~(progressOffset+80)% 구간에 페이지 진행률 매핑
-            int progress = progressOffset + (int)(80.0 * pagesConverted / Math.max(progressTotal, 1));
-            reporter.reportProgress(progress, 100,
-                    "페이지 변환 중... (" + pagesConverted + "/" + totalSections + ")");
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3.astToHwpx.convertSections")) {
+            for (ASTSection section : doc.sections()) {
+                convertSection(section0, section);
+                pagesConverted++;
+                // 진행률: progressOffset~(progressOffset+80)% 구간에 페이지 진행률 매핑
+                int progress = progressOffset + (int)(80.0 * pagesConverted / Math.max(progressTotal, 1));
+                reporter.reportProgress(progress, 100,
+                        "페이지 변환 중... (" + pagesConverted + "/" + totalSections + ")");
+            }
         }
 
         // 7. 배경 PNG 배치
-        for (ASTPageBackground bg : doc.backgrounds()) {
-            if (bg.pngData() != null && bg.pngData().length > 0) {
-                imageBuilder.addBackgroundImage(section0, bg);
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("phase3.astToHwpx.addBackgrounds")) {
+            for (ASTPageBackground bg : doc.backgrounds()) {
+                if (bg.pngData() != null && bg.pngData().length > 0) {
+                    imageBuilder.addBackgroundImage(section0, bg);
+                }
             }
         }
 
@@ -183,6 +204,30 @@ public class ASTToHwpxConverter {
 
         System.err.println("[ASTToHwpxConverter] Done. " + result.summary());
         return result;
+        } finally {
+            totalScope.close();
+        }
+    }
+
+    private void recordInputSummary() {
+        int blocks = 0;
+        int textFrames = 0;
+        int figures = 0;
+        int tables = 0;
+        for (ASTSection section : doc.sections()) {
+            for (ASTBlock block : section.blocks()) {
+                blocks++;
+                if (block instanceof ASTTextFrameBlock) textFrames++;
+                else if (block instanceof ASTFigure) figures++;
+                else if (block instanceof ASTTable) tables++;
+            }
+        }
+        ConversionTiming.metric("hwpxInput.sections", doc.sections().size());
+        ConversionTiming.metric("hwpxInput.blocks", blocks);
+        ConversionTiming.metric("hwpxInput.textFrameBlocks", textFrames);
+        ConversionTiming.metric("hwpxInput.figures", figures);
+        ConversionTiming.metric("hwpxInput.tables", tables);
+        ConversionTiming.metric("hwpxInput.backgrounds", doc.backgrounds().size());
     }
 
     // ── 폰트 등록 ──

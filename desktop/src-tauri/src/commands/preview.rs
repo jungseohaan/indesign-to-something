@@ -4,6 +4,199 @@ use tokio::process::Command;
 
 use super::{find_java, ImagePreview};
 
+/// Generate a first-page PNG preview for a PDF using macOS Quick Look.
+#[tauri::command]
+pub async fn generate_pdf_preview(pdf_path: String) -> Result<ImagePreview, String> {
+    let source_path = std::path::Path::new(&pdf_path);
+    if !source_path.exists() {
+        return Err(format!("PDF file not found: {}", source_path.display()));
+    }
+
+    let preview_dir = source_path
+        .parent()
+        .ok_or("Invalid PDF path")?
+        .join(".previews");
+    std::fs::create_dir_all(&preview_dir)
+        .map_err(|e| format!("Failed to create preview directory: {}", e))?;
+
+    let preview_filename = format!(
+        "{}.page1.png",
+        source_path
+            .file_name()
+            .ok_or("Invalid PDF filename")?
+            .to_string_lossy()
+    );
+    let preview_path = preview_dir.join(&preview_filename);
+
+    if !preview_path.exists() {
+        let output = Command::new("qlmanage")
+            .args([
+                "-t",
+                "-s",
+                "1600",
+                "-o",
+                preview_dir.to_str().ok_or("Invalid preview dir")?,
+                source_path.to_str().ok_or("Invalid PDF path")?,
+            ])
+            .output()
+            .await
+            .map_err(|e| format!("Failed to run qlmanage: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Failed to generate PDF preview: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let ql_preview = preview_dir.join(format!(
+            "{}.png",
+            source_path
+                .file_name()
+                .ok_or("Invalid PDF filename")?
+                .to_string_lossy()
+        ));
+        if ql_preview.exists() && ql_preview != preview_path {
+            std::fs::rename(&ql_preview, &preview_path)
+                .map_err(|e| format!("Failed to rename PDF preview: {}", e))?;
+        }
+    }
+
+    if !preview_path.exists() {
+        return Err("PDF preview image was not created".to_string());
+    }
+
+    let size_output = Command::new("sips")
+        .args([
+            "-g",
+            "pixelWidth",
+            "-g",
+            "pixelHeight",
+            preview_path.to_str().ok_or("Invalid preview path")?,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to get PDF preview size: {}", e))?;
+
+    let size_str = String::from_utf8_lossy(&size_output.stdout);
+    let mut width = 0i32;
+    let mut height = 0i32;
+    for line in size_str.lines() {
+        if line.contains("pixelWidth") {
+            if let Some(w) = line.split(':').nth(1) {
+                width = w.trim().parse().unwrap_or(0);
+            }
+        } else if line.contains("pixelHeight") {
+            if let Some(h) = line.split(':').nth(1) {
+                height = h.trim().parse().unwrap_or(0);
+            }
+        }
+    }
+
+    let image_bytes = std::fs::read(&preview_path)
+        .map_err(|e| format!("Failed to read PDF preview file: {}", e))?;
+    let data_url = format!("data:image/png;base64,{}", STANDARD.encode(&image_bytes));
+
+    Ok(ImagePreview {
+        original_path: pdf_path,
+        data_url,
+        filename: preview_filename,
+        width,
+        height,
+    })
+}
+
+/// Render one PDF page through the Java/PDFBox renderer and cache it beside the PDF.
+#[tauri::command]
+pub async fn generate_pdf_page_preview(
+    pdf_path: String,
+    page_number: i32,
+    jar_path: String,
+) -> Result<ImagePreview, String> {
+    if page_number < 1 {
+        return Err("page_number must be 1 or greater".to_string());
+    }
+    let source_path = std::path::Path::new(&pdf_path);
+    if !source_path.exists() {
+        return Err(format!("PDF file not found: {}", source_path.display()));
+    }
+
+    let preview_dir = source_path
+        .parent()
+        .ok_or("Invalid PDF path")?
+        .join(".previews");
+    std::fs::create_dir_all(&preview_dir)
+        .map_err(|e| format!("Failed to create preview directory: {}", e))?;
+
+    let preview_filename = format!(
+        "{}.page{}.jpg",
+        source_path
+            .file_name()
+            .ok_or("Invalid PDF filename")?
+            .to_string_lossy(),
+        page_number
+    );
+    let preview_path = preview_dir.join(&preview_filename);
+
+    if !preview_path.exists() {
+        let java = find_java();
+        let output = Command::new(&java)
+            .args([
+                "-jar",
+                &jar_path,
+                "--render-pdf-page",
+                &pdf_path,
+                &page_number.to_string(),
+                "--dpi",
+                "120",
+            ])
+            .output()
+            .await
+            .map_err(|e| format!("Failed to execute Java PDF renderer: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "PDF page render failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let json_line = stdout
+            .lines()
+            .filter(|line| line.trim_start().starts_with('{'))
+            .last()
+            .ok_or_else(|| format!("Missing PDF render JSON: {}", stdout))?;
+        let json: serde_json::Value = serde_json::from_str(json_line)
+            .map_err(|e| format!("Failed to parse PDF render output: {}", e))?;
+        let data_url = json
+            .get("data_url")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing data_url in PDF render output")?;
+        let base64_part = data_url
+            .split_once(',')
+            .map(|(_, data)| data)
+            .ok_or("Invalid data_url in PDF render output")?;
+        let bytes = STANDARD
+            .decode(base64_part)
+            .map_err(|e| format!("Failed to decode PDF preview: {}", e))?;
+        std::fs::write(&preview_path, bytes)
+            .map_err(|e| format!("Failed to write PDF preview cache: {}", e))?;
+    }
+
+    let image_bytes = std::fs::read(&preview_path)
+        .map_err(|e| format!("Failed to read PDF preview file: {}", e))?;
+    let data_url = format!("data:image/jpeg;base64,{}", STANDARD.encode(&image_bytes));
+
+    Ok(ImagePreview {
+        original_path: pdf_path,
+        data_url,
+        filename: preview_filename,
+        width: 0,
+        height: 0,
+    })
+}
+
 /// Generate a preview PNG for PSD/AI/EPS images using macOS sips/qlmanage
 #[tauri::command]
 pub async fn generate_preview(
@@ -59,8 +252,12 @@ pub async fn generate_preview(
     // macOS sips 명령으로 PNG 변환 (투명도 유지)
     let output = Command::new("sips")
         .args([
-            "-s", "format", "png",
-            "-s", "formatOptions", "best",
+            "-s",
+            "format",
+            "png",
+            "-s",
+            "formatOptions",
+            "best",
             source_path.to_str().ok_or("Invalid source path")?,
             "--out",
             preview_path.to_str().ok_or("Invalid preview path")?,
@@ -74,8 +271,10 @@ pub async fn generate_preview(
         let ql_output = Command::new("qlmanage")
             .args([
                 "-t",
-                "-s", "1024",
-                "-o", preview_dir.to_str().ok_or("Invalid preview dir")?,
+                "-s",
+                "1024",
+                "-o",
+                preview_dir.to_str().ok_or("Invalid preview dir")?,
                 source_path.to_str().ok_or("Invalid source path")?,
             ])
             .output()
@@ -87,7 +286,10 @@ pub async fn generate_preview(
         }
 
         // qlmanage는 파일명.png 형식으로 저장
-        let ql_preview = preview_dir.join(format!("{}.png", source_path.file_name().unwrap().to_string_lossy()));
+        let ql_preview = preview_dir.join(format!(
+            "{}.png",
+            source_path.file_name().unwrap().to_string_lossy()
+        ));
         if ql_preview.exists() && ql_preview != preview_path {
             std::fs::rename(&ql_preview, &preview_path)
                 .map_err(|e| format!("Failed to rename preview: {}", e))?;
@@ -96,7 +298,13 @@ pub async fn generate_preview(
 
     // 이미지 크기 가져오기
     let size_output = Command::new("sips")
-        .args(["-g", "pixelWidth", "-g", "pixelHeight", preview_path.to_str().unwrap()])
+        .args([
+            "-g",
+            "pixelWidth",
+            "-g",
+            "pixelHeight",
+            preview_path.to_str().unwrap(),
+        ])
         .output()
         .await
         .map_err(|e| format!("Failed to get image size: {}", e))?;
@@ -118,8 +326,8 @@ pub async fn generate_preview(
     }
 
     // 이미지 파일을 읽어서 base64 인코딩
-    let image_bytes = std::fs::read(&preview_path)
-        .map_err(|e| format!("Failed to read preview file: {}", e))?;
+    let image_bytes =
+        std::fs::read(&preview_path).map_err(|e| format!("Failed to read preview file: {}", e))?;
     let base64_data = STANDARD.encode(&image_bytes);
     let data_url = format!("data:image/png;base64,{}", base64_data);
 
@@ -189,14 +397,8 @@ pub async fn generate_image_preview(
         .and_then(|v| v.as_str())
         .ok_or("Missing data_url in response")?
         .to_string();
-    let width = json
-        .get("width")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0) as i32;
-    let height = json
-        .get("height")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0) as i32;
+    let width = json.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let height = json.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let filename = json
         .get("filename")
         .and_then(|v| v.as_str())
@@ -223,13 +425,7 @@ pub async fn generate_vector_preview(
 
     // Java converter를 사용하여 벡터를 PNG로 렌더링
     let output = Command::new(&java)
-        .args([
-            "-jar",
-            &jar_path,
-            "--render-vector",
-            &idml_path,
-            &frame_id,
-        ])
+        .args(["-jar", &jar_path, "--render-vector", &idml_path, &frame_id])
         .output()
         .await
         .map_err(|e| format!("Failed to execute Java: {}", e))?;
@@ -249,14 +445,8 @@ pub async fn generate_vector_preview(
         .and_then(|v| v.as_str())
         .ok_or("Missing data_url in response")?
         .to_string();
-    let width = json
-        .get("width")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0) as i32;
-    let height = json
-        .get("height")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0) as i32;
+    let width = json.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let height = json.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let filename = json
         .get("filename")
         .and_then(|v| v.as_str())
@@ -326,14 +516,8 @@ pub async fn generate_master_preview(
         .and_then(|v| v.as_str())
         .ok_or("Missing data_url in response")?
         .to_string();
-    let width = json
-        .get("width")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0) as i32;
-    let height = json
-        .get("height")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0) as i32;
+    let width = json.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let height = json.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let filename = json
         .get("filename")
         .and_then(|v| v.as_str())
@@ -460,7 +644,13 @@ pub async fn get_text_frame_detail(
 ) -> Result<TextFrameDetail, String> {
     let java = find_java();
     let output = Command::new(&java)
-        .args(["-jar", &jar_path, "--text-frame-detail", &idml_path, &frame_id])
+        .args([
+            "-jar",
+            &jar_path,
+            "--text-frame-detail",
+            &idml_path,
+            &frame_id,
+        ])
         .output()
         .await
         .map_err(|e| format!("Failed to execute Java: {}", e))?;
@@ -479,5 +669,6 @@ pub async fn get_text_frame_detail(
         .collect::<Vec<_>>()
         .join("\n");
 
-    serde_json::from_str(&json_output).map_err(|e| format!("Failed to parse output: {} - {}", e, json_output))
+    serde_json::from_str(&json_output)
+        .map_err(|e| format!("Failed to parse output: {} - {}", e, json_output))
 }

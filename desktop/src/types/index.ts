@@ -135,6 +135,61 @@ export interface ConvertResult {
   html_path?: string | null;
 }
 
+export interface SemanticBlockDocument {
+  version: string;
+  source: {
+    document_name: string;
+    ast_source: string;
+    coordinate_unit: string;
+    generated_at: string;
+  };
+  summary: {
+    pages: number;
+    blocks: number;
+    members: number;
+    anchors: number;
+    unattached_visuals: number;
+  };
+  blocks: SemanticBlock[];
+}
+
+export interface SemanticBlock {
+  id: string;
+  member_ids: string[];
+  member_boxes?: SemanticBlockMemberBox[];
+  anchor_id: string | null;
+  display_name?: string | null;
+  page_start: number;
+  page_end: number;
+  bbox: number[] | null;
+  reading_order: number;
+  block_type: string;
+  confidence: number;
+  signals: {
+    anchor_score: number;
+    container_score: number;
+    image_score: number;
+  };
+  debug?: {
+    anchor_type?: string;
+    anchor_reason?: string;
+    text_members?: number;
+    visual_members?: number;
+    table_members?: number;
+  };
+}
+
+export interface SemanticBlockMemberBox {
+  id: string;
+  page: number;
+  bbox: number[] | null;
+  kind: "text" | "table" | "figure" | string;
+  role: "text_frame" | "table" | "visual" | "decoration" | "inline_object" | string;
+  parent_id?: string | null;
+  visual_layer?: string | null;
+  group_id?: string | null;
+}
+
 export interface ProgressEvent {
   current: number;
   total: number;
@@ -382,4 +437,3 @@ export interface ResolvedTextFrame {
   overflows: boolean;
   lineCount: number;
 }
-

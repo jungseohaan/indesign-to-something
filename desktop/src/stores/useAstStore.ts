@@ -8,6 +8,8 @@ import type {
   ResolvedParagraphStyle,
   ResolvedCharacterStyle,
   ResolvedTextFrame,
+  SemanticBlock,
+  SemanticBlockDocument,
 } from "../types";
 
 interface AstStore {
@@ -19,6 +21,13 @@ interface AstStore {
   currentSectionIndex: number;
   searchQuery: string;
   filterType: string | null;
+
+  // Semantic Block Discovery
+  semanticBlocksPath: string | null;
+  semanticBlocksDoc: SemanticBlockDocument | null;
+  semanticBlocksError: string | null;
+  selectedSemanticBlockId: string | null;
+  selectedSemanticMemberIds: Set<string>;
 
   // Resolved 사이드카
   resolvedData: ResolvedData | null;
@@ -33,6 +42,9 @@ interface AstStore {
   loadAST: (idmlPath: string, jarPath: string) => Promise<void>;
   loadResolved: (path: string) => Promise<void>;
   clearResolved: () => void;
+  loadSemanticBlocks: (path: string) => Promise<void>;
+  clearSemanticBlocks: () => void;
+  selectSemanticBlock: (block: SemanticBlock | null, revealPaths?: string[]) => void;
   selectPath: (path: string | null) => void;
   toggleExpand: (path: string) => void;
   setSection: (index: number) => void;
@@ -187,6 +199,11 @@ export const useAstStore = create<AstStore>((set, get) => ({
   currentSectionIndex: 0,
   searchQuery: "",
   filterType: null,
+  semanticBlocksPath: null,
+  semanticBlocksDoc: null,
+  semanticBlocksError: null,
+  selectedSemanticBlockId: null,
+  selectedSemanticMemberIds: new Set<string>(),
 
   // Resolved 사이드카
   resolvedData: null,
@@ -251,6 +268,54 @@ export const useAstStore = create<AstStore>((set, get) => ({
       resolvedFrameMap: null,
     }),
 
+  loadSemanticBlocks: async (path: string) => {
+    set({
+      semanticBlocksPath: path,
+      semanticBlocksError: null,
+      semanticBlocksDoc: null,
+      selectedSemanticBlockId: null,
+      selectedSemanticMemberIds: new Set<string>(),
+    });
+    try {
+      const raw = await invoke<string>("read_text_file", { path });
+      const data = JSON.parse(raw) as SemanticBlockDocument;
+      set({
+        semanticBlocksDoc: data,
+        semanticBlocksError: null,
+      });
+    } catch (e: any) {
+      set({
+        semanticBlocksDoc: null,
+        semanticBlocksError: String(e),
+      });
+    }
+  },
+
+  clearSemanticBlocks: () =>
+    set({
+      semanticBlocksPath: null,
+      semanticBlocksDoc: null,
+      semanticBlocksError: null,
+      selectedSemanticBlockId: null,
+      selectedSemanticMemberIds: new Set<string>(),
+    }),
+
+  selectSemanticBlock: (block, revealPaths = []) => {
+    const expanded = new Set(get().expandedPaths);
+    for (const path of revealPaths) {
+      const parts = path.split(".");
+      for (let i = 1; i <= parts.length; i++) {
+        expanded.add(parts.slice(0, i).join("."));
+      }
+    }
+    set({
+      selectedSemanticBlockId: block?.id ?? null,
+      selectedSemanticMemberIds: new Set(block?.member_ids ?? []),
+      selectedPath: revealPaths[0] ?? get().selectedPath,
+      expandedPaths: expanded,
+    });
+  },
+
   selectPath: (path) => set({ selectedPath: path }),
 
   toggleExpand: (path) => {
@@ -290,6 +355,11 @@ export const useAstStore = create<AstStore>((set, get) => ({
       currentSectionIndex: 0,
       searchQuery: "",
       filterType: null,
+      semanticBlocksPath: null,
+      semanticBlocksDoc: null,
+      semanticBlocksError: null,
+      selectedSemanticBlockId: null,
+      selectedSemanticMemberIds: new Set<string>(),
       resolvedData: null,
       resolvedStoryMap: null,
       resolvedFontMap: null,
