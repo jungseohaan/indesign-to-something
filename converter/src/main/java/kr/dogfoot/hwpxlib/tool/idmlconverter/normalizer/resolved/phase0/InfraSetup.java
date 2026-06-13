@@ -4,6 +4,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFontDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -78,22 +79,37 @@ public final class InfraSetup {
                 String self = ps.getAttribute("Self");
                 String name = ps.getAttribute("Name");
                 if (self != null && name != null) {
-                    // 폰트 정보 추출
-                    org.w3c.dom.NodeList appliedFonts = ps.getElementsByTagName("AppliedFont");
-                    String font = null;
-                    if (appliedFonts.getLength() > 0) {
-                        font = appliedFonts.item(0).getTextContent();
-                    }
+                    IDMLStyleDef resolvedStyle = ctx.styleResolver != null
+                            ? ctx.styleResolver.getResolvedParagraphStyle(self) : null;
                     ASTStyleDef sd = new ASTStyleDef();
                     sd.styleId(self);
                     sd.styleName(name);
-                    if (font != null) sd.fontFamily(font);
-                    String fontSize = ps.getAttribute("PointSize");
-                    if (fontSize != null && !fontSize.isEmpty()) {
-                        try { sd.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(Double.parseDouble(fontSize))); } catch (NumberFormatException e) {}
+                    if (resolvedStyle != null) {
+                        if (resolvedStyle.fontFamily() != null) sd.fontFamily(resolvedStyle.fontFamily());
+                        if (resolvedStyle.fontSize() != null && resolvedStyle.fontSize() > 0) {
+                            sd.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(resolvedStyle.fontSize()));
+                        }
+                        if (resolvedStyle.fillColor() != null) sd.textColor(resolvedStyle.fillColor());
+                        if (resolvedStyle.fontStyle() != null) sd.fontStyle(resolvedStyle.fontStyle());
+                        if (resolvedStyle.textAlignment() != null) sd.alignment(resolvedStyle.textAlignment());
+                        if (resolvedStyle.leftIndent() != null) sd.leftMargin(CoordinateConverter.pointsToHwpunits(resolvedStyle.leftIndent()));
+                        if (resolvedStyle.firstLineIndent() != null) sd.firstLineIndent(CoordinateConverter.pointsToHwpunits(resolvedStyle.firstLineIndent()));
+                        if (resolvedStyle.rightIndent() != null) sd.rightMargin(CoordinateConverter.pointsToHwpunits(resolvedStyle.rightIndent()));
+                    } else {
+                        // 폰트 정보 추출
+                        org.w3c.dom.NodeList appliedFonts = ps.getElementsByTagName("AppliedFont");
+                        String font = null;
+                        if (appliedFonts.getLength() > 0) {
+                            font = appliedFonts.item(0).getTextContent();
+                        }
+                        if (font != null) sd.fontFamily(font);
+                        String fontSize = ps.getAttribute("PointSize");
+                        if (fontSize != null && !fontSize.isEmpty()) {
+                            try { sd.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(Double.parseDouble(fontSize))); } catch (NumberFormatException e) {}
+                        }
+                        sd.textColor(ps.getAttribute("FillColor"));
+                        sd.fontStyle(ps.getAttribute("FontStyle"));
                     }
-                    sd.textColor(ps.getAttribute("FillColor"));
-                    sd.fontStyle(ps.getAttribute("FontStyle"));
                     // 정렬 (Justification)
                     String justification = ps.getAttribute("Justification");
                     if (justification != null && !justification.isEmpty()) {

@@ -271,6 +271,7 @@ public class ResolvedDataReader {
 
         tf.onHiddenLayer(getBool(o, "onHiddenLayer", false));
         tf.nonprinting(getBool(o, "nonprinting", false));
+        tf.masterSourceId(getString(o, "masterSourceId"));
         tf.isMasterInstance(getBool(o, "isMasterInstance", false));
 
         return tf;

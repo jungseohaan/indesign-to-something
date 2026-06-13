@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
@@ -10,19 +11,27 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.SimpleButtonLabelInlineFactory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -61,7 +70,20 @@ public final class TableBuilder {
         int wholeTablePngForced;        // 중첩 테이블 등 정책상 강제 PNG
         int pngMissingFallback;         // 인라인 있지만 PNG 없어서 ASTTable로 떨어진 케이스 (배지 중복 위험)
         int cellBackgroundsAbsorbed;    // 별도 page_object → 실제 셀 fill로 흡수한 수
+        int tableBordersAbsorbed;       // 별도 page_object 선분/외곽선 → 실제 셀 border로 흡수한 수
+        int detachedInlinePageLevel;    // table-only inline TF → page-level table
+        int duplicateInlineTablesRemoved;
         int total;
+    }
+
+    private static final class TablePlacement {
+        final ASTTable table;
+        final int pageIdx;
+
+        TablePlacement(ASTTable table, int pageIdx) {
+            this.table = table;
+            this.pageIdx = pageIdx;
+        }
     }
 
     public static void placeTablesFromIDML(ResolvedBuildContext ctx, List<ASTSection> sections) {
@@ -72,19 +94,25 @@ public final class TableBuilder {
         Phase4Report report = new Phase4Report();
         // 같은 Table이 연결 글상자 체인의 복수 TF에서 중복 처리되는 것을 방지
         Set<String> processedTableIds = new HashSet<>();
+        Set<String> pageLevelTableSourceIds = new HashSet<>();
 
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             String storyId = tf.storyId();
             if (storyId == null) continue;
             IDMLStory idmlStory = ctx.loadIDMLStory.apply(storyId);
             if (idmlStory == null || !idmlStory.hasTables()) continue;
+            if (allTablesConsumedByAnchoredPlan(ctx, idmlStory)) continue;
 
             if (tf.onHiddenLayer() || tf.nonprinting()) continue;
             boolean editableTextFrame = ctx.resolvedData.isEditableTextFrame(tf.id());
-            boolean tableAnchorOnlyFrame = isTableAnchorOnlyFrame(tf);
+            boolean tableAnchorOnlyFrame = TableFrameOwnershipPolicy.isTableAnchorOnlyFrame(tf);
+            boolean detachedInlineTableFrame =
+                    TableFrameOwnershipPolicy.shouldPlaceInlineTableAsPageLevel(ctx, tf, idmlStory);
+            if (detachedInlineTableFrame) report.detachedInlinePageLevel++;
             // Inline TextFrame에 포함된 table은 해당 anchor 위치에서 ASTInlineObject.inlineTables로
-            // 배치한다. 여기서 다시 page-level floating table로 만들면 동일 셀이 중복된다.
-            if (tf.isInline()) continue;
+            // 배치한다. 단, 부모 page item 없이 자기 pageIndex/bounds만 가진 table-only inline
+            // frame은 anchor flow가 아니라 frame 자체가 배치 소유자다.
+            if (tf.isInline() && !detachedInlineTableFrame) continue;
             if (!tf.isInline() && !editableTextFrame && !tableAnchorOnlyFrame) continue;
 
             int pageIdx = ctx.toSectionIndex.applyAsInt(tf.pageIndex());
@@ -132,16 +160,33 @@ public final class TableBuilder {
 
             long tableYOffset = 0;
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable : allTables) {
+                if (ctx.isAnchoredTableSource(idmlTable.selfId())) continue;
                 // 같은 Table이 TF 연결 체인에서 중복 배치되는 것을 방지
                 if (!processedTableIds.add(idmlTable.selfId())) continue;
 
+                int tablePageIdx = tablePlacementPageIndex(ctx, idmlTable, pageIdx);
+                if (tablePageIdx < 0 || tablePageIdx >= sections.size()) continue;
+
                 long thisX = hx;
                 long thisY = hy;
+                boolean placedFromResolvedTableBounds = false;
+
+                double[] resolvedTableBounds = ctx.resolvedData != null
+                        ? ctx.resolvedData.getTablePlacementBounds(idmlTable.selfId()) : null;
+                if (resolvedTableBounds != null && resolvedTableBounds.length >= 4) {
+                    double scale = ctx.resolvedData.scaleFactor();
+                    thisX = CoordinateConverter.pointsToHwpunits(resolvedTableBounds[1] * scale);
+                    thisY = CoordinateConverter.pointsToHwpunits(resolvedTableBounds[0] * scale);
+                    placedFromResolvedTableBounds = true;
+                }
 
                 kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable parentTable = parentTableMap.get(idmlTable.selfId());
                 boolean isNested = parentTable != null;
 
-                if (isNested) {
+                if (placedFromResolvedTableBounds) {
+                    // InDesign DOM already gave the table's page-relative bounds.
+                    // Prefer that over story-flow estimates so tables stay below their preceding text.
+                } else if (isNested) {
                     String parentId = parentTable.selfId();
                     String remainder = idmlTable.selfId().substring(parentId.length());
                     int cellRowIdx = -1;
@@ -171,13 +216,14 @@ public final class TableBuilder {
                 }
 
                 report.total++;
-                ASTSection section = sections.get(pageIdx);
+                ASTSection section = sections.get(tablePageIdx);
+                if (detachedInlineTableFrame) pageLevelTableSourceIds.add(idmlTable.selfId());
 
                 // 분기 1: 중첩 테이블 + 정책상 강제 PNG
                 if (isNested && policy.nestedTableForcesPng) {
-                    ASTFigure fig = renderTableAsImage(ctx, idmlTable, tf, thisX, thisY, pageIdx);
+                    ASTFigure fig = renderTableAsImage(ctx, idmlTable, tf, thisX, thisY, tablePageIdx);
                     if (fig == null && policy.fallbackToBackgroundCrop) {
-                        fig = cropTableFromPageBackground(ctx, idmlTable, thisX, thisY, tf.zOrder(), pageIdx);
+                        fig = cropTableFromPageBackground(ctx, idmlTable, thisX, thisY, tf.zOrder(), tablePageIdx);
                     }
                     if (fig != null) {
                         if (ctx.debugAst) fig.debugOrNew().note("nested table forced to PNG");
@@ -191,9 +237,9 @@ public final class TableBuilder {
                 // 분기 2: 레거시 모드 (preferCellLevel=false) — 표 단위 게이트 + 표 전체 PNG
                 if (!policy.preferCellLevel) {
                     if (idmlTableHasInlineWithShortText(idmlTable, policy.maxTextLengthWithInline)) {
-                        ASTFigure fig = renderTableAsImage(ctx, idmlTable, tf, thisX, thisY, pageIdx);
+                        ASTFigure fig = renderTableAsImage(ctx, idmlTable, tf, thisX, thisY, tablePageIdx);
                         if (fig == null && policy.fallbackToBackgroundCrop) {
-                            fig = cropTableFromPageBackground(ctx, idmlTable, thisX, thisY, tf.zOrder(), pageIdx);
+                            fig = cropTableFromPageBackground(ctx, idmlTable, thisX, thisY, tf.zOrder(), tablePageIdx);
                             if (fig != null) {
                                 section.addBlock(fig);
                                 report.wholeTablePngRendered++; // crop도 같은 카운터 (rendered로 간주)
@@ -213,27 +259,32 @@ public final class TableBuilder {
                 }
 
                 // 분기 3 (기본): ASTTable로 변환
-                ASTTable astTable = ASTTableConverter.convertTableSimple(
-                        idmlTable, thisX, thisY, tf.zOrder(),
-                        null, null, null, ctx.resolvedData);
-                restoreAnchorOnlyEditableInlineGraphics(ctx, astTable, idmlTable);
-                restoreRenderedCellInlineGraphics(ctx, astTable, idmlTable);
+                ASTTable astTable = buildPreparedAstTable(ctx, idmlTable, thisX, thisY, tf.zOrder());
+                absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
 
-                // 테이블 셀에 포함된 인라인 그룹 → 컬럼 분할 (예: 문장 성분의 종류 마인드맵)
-                ASTTable expandedTable = tryExpandInlineGroupColumns(ctx, astTable, idmlTable);
-                if (expandedTable != null) astTable = expandedTable;
+                report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(ctx, astTable, tablePageIdx);
+                report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
+                completeVisibleTableOuterBorder(astTable);
 
-                report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(ctx, astTable, pageIdx);
-
-                section.addBlock(astTable);
+                List<TablePlacement> tablePlacements = splitSpreadWideTable(
+                        ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
+                for (TablePlacement placement : tablePlacements) {
+                    if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
+                    sections.get(placement.pageIdx).addBlock(placement.table);
+                }
+                suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
 
                 // 분기 3a: cell-level 모드 — 트리거 셀의 인라인 객체를 floating으로 추출
                 int extractedInThisTable = 0;
                 int triggerCells = 0;
                 if (policy.preferCellLevel) {
-                    int[] result = extractInlinesFromCells(astTable, section, policy, ctx);
-                    extractedInThisTable = result[0];
-                    triggerCells = result[1];
+                    for (TablePlacement placement : tablePlacements) {
+                        if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
+                        int[] result = extractInlinesFromCells(
+                                placement.table, sections.get(placement.pageIdx), policy, ctx);
+                        extractedInThisTable += result[0];
+                        triggerCells += result[1];
+                    }
                     report.totalInlinesExtracted += extractedInThisTable;
                     report.totalCellsExtracted += triggerCells;
                 }
@@ -247,21 +298,745 @@ public final class TableBuilder {
             }
         }
 
+        report.duplicateInlineTablesRemoved =
+                removeInlineTablesBySourceId(sections, pageLevelTableSourceIds);
         printReport(report);
     }
 
-    private static boolean isTableAnchorOnlyFrame(ResolvedTextFrame tf) {
-        if (tf == null) return false;
-        String text = tf.frameVisibleText();
-        if (text == null || text.isEmpty()) return true;
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            if (Character.isWhitespace(ch)) continue;
-            if (Character.isISOControl(ch)) continue;
-            if (ch == '\uFFFC') continue; // Object Replacement Character
-            return false;
+    private static int tablePlacementPageIndex(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable,
+            int fallbackPageIdx) {
+        if (ctx == null || ctx.resolvedData == null || idmlTable == null) return fallbackPageIdx;
+        Integer placementPageIndex = ctx.resolvedData.getTablePlacementPageIndex(idmlTable.selfId());
+        if (placementPageIndex == null) return fallbackPageIdx;
+        return ctx.toSectionIndex.applyAsInt(placementPageIndex);
+    }
+
+    private static boolean allTablesConsumedByAnchoredPlan(ResolvedBuildContext ctx, IDMLStory idmlStory) {
+        if (ctx == null || idmlStory == null || idmlStory.tables() == null || idmlStory.tables().isEmpty()) return false;
+        for (IDMLTable table : idmlStory.tables()) {
+            if (table == null || !ctx.isAnchoredTableSource(table.selfId())) return false;
         }
         return true;
+    }
+
+    public static ASTTable buildPreparedAstTable(
+            ResolvedBuildContext ctx,
+            IDMLTable idmlTable,
+            long x,
+            long y,
+            int zOrder) {
+        ASTTable astTable = ASTTableConverter.convertTableSimple(
+                idmlTable, x, y, zOrder,
+                null, null, null,
+                ctx != null ? ctx.resolvedData : null,
+                ctx != null ? ctx.styleResolver : null);
+        restoreNestedTextFrameTables(ctx, astTable, idmlTable);
+        restoreAnchorOnlyEditableInlineGraphics(ctx, astTable, idmlTable);
+        restoreRenderedCellInlineGraphics(ctx, astTable, idmlTable);
+        promoteNestedTextFrameParagraphsInCells(ctx, astTable);
+
+        ASTTable expandedTable = tryExpandInlineGroupColumns(ctx, astTable, idmlTable);
+        ASTTable result = expandedTable != null ? expandedTable : astTable;
+        completeVisibleTableOuterBorder(result);
+        return result;
+    }
+
+    private static List<TablePlacement> splitSpreadWideTable(
+            ResolvedBuildContext ctx,
+            ASTTable table,
+            int pageIdx,
+            double[] visibleBounds,
+            int sectionCount) {
+        List<TablePlacement> result = new ArrayList<>();
+        if (ctx == null || ctx.resolvedData == null || table == null
+                || table.columnWidths() == null || table.columnWidths().size() < 2
+                || pageIdx + 1 >= sectionCount) {
+            result.add(new TablePlacement(table, pageIdx));
+            return result;
+        }
+
+        ResolvedPage page = pageIdx >= 0 && pageIdx < ctx.resolvedData.pages().size()
+                ? ctx.resolvedData.pages().get(pageIdx) : null;
+        if (page == null || page.width() <= 0) {
+            result.add(new TablePlacement(table, pageIdx));
+            return result;
+        }
+
+        long pageWidth = CoordinateConverter.pointsToHwpunits(page.width());
+        long totalWidth = tableWidth(table);
+        long availableOnPage = pageWidth - Math.max(0L, table.x());
+        if (availableOnPage <= 0 || totalWidth <= availableOnPage) {
+            result.add(new TablePlacement(table, pageIdx));
+            return result;
+        }
+
+        long visibleWidth = visibleBoundsWidthHwpunits(ctx, visibleBounds);
+        long targetFirstSliceWidth = visibleWidth > 0
+                ? Math.min(visibleWidth, availableOnPage)
+                : Math.max(1L, availableOnPage);
+        int splitCol = nearestColumnBoundary(table.columnWidths(), targetFirstSliceWidth);
+        if (splitCol <= 0 || splitCol >= table.columnWidths().size()) {
+            result.add(new TablePlacement(table, pageIdx));
+            return result;
+        }
+
+        long firstWidth = columnWidthSum(table.columnWidths(), 0, splitCol);
+        long secondWidth = totalWidth - firstWidth;
+        long minSecondWidth = Math.max(1L, pageWidth / 8);
+        if (secondWidth < minSecondWidth) {
+            result.add(new TablePlacement(table, pageIdx));
+            return result;
+        }
+
+        int rightStartCol = skipLeadingEmptySplitColumns(table, splitCol, table.columnWidths().size());
+        ASTTable left = sliceTableColumns(table, 0, splitCol);
+        ASTTable right = sliceTableColumns(table, rightStartCol, table.columnWidths().size());
+        long rightSourceX = table.x() + columnWidthSum(table.columnWidths(), 0, rightStartCol) - pageWidth;
+        right.x(Math.max(0L, rightSourceX));
+        fitTableToPage(left, pageWidth);
+        fitTableToPage(right, pageWidth);
+        if (ctx.debugAst) {
+            left.debugOrNew().note("spread-wide table slice: columns 0-" + (splitCol - 1));
+            right.debugOrNew().note("spread-wide table slice: columns " + splitCol
+                    + "-" + (table.columnWidths().size() - 1));
+        }
+        result.add(new TablePlacement(left, pageIdx));
+        result.add(new TablePlacement(right, pageIdx + 1));
+        return result;
+    }
+
+    private static int skipLeadingEmptySplitColumns(ASTTable table, int startCol, int endCol) {
+        if (table == null || table.columnWidths() == null) return startCol;
+        int col = Math.max(0, startCol);
+        int end = Math.min(endCol, table.columnWidths().size());
+        while (col + 1 < end && !columnHasVisibleContent(table, col)) {
+            col++;
+        }
+        return col;
+    }
+
+    private static boolean columnHasVisibleContent(ASTTable table, int columnIndex) {
+        if (table == null || table.rows() == null) return false;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int start = cell.columnIndex();
+                int end = start + Math.max(1, cell.columnSpan());
+                if (columnIndex < start || columnIndex >= end) continue;
+                if (cellHasVisibleContent(cell)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean cellHasVisibleContent(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null) return false;
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null) continue;
+            if (paragraph.inlineTable() != null) return true;
+            if (paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item == null) continue;
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null && !text.replace("\r", "").replace("\n", "").trim().isEmpty()) {
+                        return true;
+                    }
+                } else {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static long visibleBoundsWidthHwpunits(ResolvedBuildContext ctx, double[] visibleBounds) {
+        if (ctx == null || visibleBounds == null || visibleBounds.length < 4) return 0;
+        double width = visibleBounds[3] - visibleBounds[1];
+        if (width <= 0) return 0;
+        return CoordinateConverter.pointsToHwpunits(width);
+    }
+
+    private static int nearestColumnBoundary(List<Long> columnWidths, long targetWidth) {
+        if (columnWidths == null || columnWidths.size() < 2 || targetWidth <= 0) return -1;
+        int best = -1;
+        long x = 0;
+        long bestDelta = Long.MAX_VALUE;
+        for (int i = 0; i < columnWidths.size() - 1; i++) {
+            x += Math.max(0L, columnWidths.get(i));
+            long delta = Math.abs(x - targetWidth);
+            if (delta < bestDelta) {
+                bestDelta = delta;
+                best = i + 1;
+            }
+        }
+        return best;
+    }
+
+    private static ASTTable sliceTableColumns(ASTTable src, int startCol, int endCol) {
+        ASTTable out = new ASTTable();
+        out.sourceId(src.sourceId());
+        out.x(src.x());
+        out.y(src.y());
+        out.zOrder(src.zOrder());
+        out.appliedTableStyle(src.appliedTableStyle());
+        out.borderColor(src.borderColor());
+        out.borderWidth(src.borderWidth());
+        for (int c = startCol; c < endCol && c < src.columnWidths().size(); c++) {
+            out.addColumnWidth(src.columnWidths().get(c));
+        }
+        out.colCount(out.columnWidths().size());
+
+        int rowCount = 0;
+        if (src.rows() != null) {
+            for (ASTTableRow srcRow : src.rows()) {
+                ASTTableRow outRow = new ASTTableRow();
+                outRow.rowIndex(srcRow.rowIndex());
+                outRow.rowHeight(srcRow.rowHeight());
+                outRow.autoGrow(srcRow.autoGrow());
+                if (srcRow.cells() != null) {
+                    for (ASTTableCell srcCell : srcRow.cells()) {
+                        ASTTableCell sliced = sliceCell(srcCell, startCol, endCol, src.columnWidths());
+                        if (sliced != null) outRow.addCell(sliced);
+                    }
+                }
+                out.addRow(outRow);
+                rowCount++;
+            }
+        }
+        out.rowCount(rowCount);
+        out.width(tableWidth(out));
+        out.height(tableHeight(out));
+        completeVisibleTableOuterBorder(out);
+        return out;
+    }
+
+    private static ASTTableCell sliceCell(
+            ASTTableCell src,
+            int startCol,
+            int endCol,
+            List<Long> sourceColumnWidths) {
+        if (src == null) return null;
+        int cellStart = src.columnIndex();
+        int cellEnd = cellStart + Math.max(1, src.columnSpan());
+        int clippedStart = Math.max(cellStart, startCol);
+        int clippedEnd = Math.min(cellEnd, endCol);
+        if (clippedStart >= clippedEnd) return null;
+
+        ASTTableCell out = cloneCellFull(src);
+        out.columnIndex(clippedStart - startCol);
+        out.columnSpan(clippedEnd - clippedStart);
+        out.width(columnWidthSum(sourceColumnWidths, clippedStart, clippedEnd));
+        return out;
+    }
+
+    private static void fitTableToPage(ASTTable table, long pageWidth) {
+        if (table == null || table.columnWidths() == null || table.columnWidths().isEmpty()) return;
+        long available = pageWidth - Math.max(0L, table.x());
+        long width = tableWidth(table);
+        if (available <= 0 || width <= available) return;
+        double scale = (double) available / (double) width;
+        long scaledTotal = 0;
+        for (int i = 0; i < table.columnWidths().size(); i++) {
+            long oldWidth = table.columnWidths().get(i);
+            long newWidth = Math.max(1L, Math.round(oldWidth * scale));
+            table.columnWidths().set(i, newWidth);
+            scaledTotal += newWidth;
+        }
+        if (table.rows() != null) {
+            for (ASTTableRow row : table.rows()) {
+                if (row == null || row.cells() == null) continue;
+                for (ASTTableCell cell : row.cells()) {
+                    int start = Math.max(0, cell.columnIndex());
+                    int end = Math.min(table.columnWidths().size(), start + Math.max(1, cell.columnSpan()));
+                    cell.width(columnWidthSum(table.columnWidths(), start, end));
+                }
+            }
+        }
+        table.width(scaledTotal);
+    }
+
+    private static long tableWidth(ASTTable table) {
+        return table != null ? columnWidthSum(table.columnWidths(), 0,
+                table.columnWidths() != null ? table.columnWidths().size() : 0) : 0;
+    }
+
+    private static long tableHeight(ASTTable table) {
+        long h = 0;
+        if (table == null || table.rows() == null) return 0;
+        for (ASTTableRow row : table.rows()) {
+            if (row != null) h += row.rowHeight();
+        }
+        return h;
+    }
+
+    private static long columnWidthSum(List<Long> widths, int startInclusive, int endExclusive) {
+        if (widths == null) return 0;
+        long sum = 0;
+        int start = Math.max(0, startInclusive);
+        int end = Math.min(widths.size(), Math.max(start, endExclusive));
+        for (int i = start; i < end; i++) sum += Math.max(0L, widths.get(i));
+        return sum;
+    }
+
+    private static void suppressRenderedVisualsOwnedByTable(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            ASTTable table) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return;
+        int tfId;
+        try {
+            tfId = Integer.parseInt(tf.id());
+        } catch (NumberFormatException ignored) {
+            return;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.sourceObjectIds() == null) continue;
+            if (!containsSourceId(rg.sourceObjectIds(), tfId)) continue;
+            if (!isTableCompositeVisual(rg)) continue;
+            ctx.setRenderedDisposition(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+            ctx.phase6PlacedIds.add(rg.id());
+            if (ctx.debugAst && table != null) {
+                table.debugOrNew().note("table composite visual suppressed: rendered " + rg.id());
+            }
+        }
+    }
+
+    private static boolean isTableCompositeVisual(RenderedGroup rg) {
+        String itemType = rg.itemType();
+        String type = rg.type();
+        if ("inline_object".equals(itemType) || "inline_object".equals(type)) return false;
+        if (!"page_object".equals(itemType) && !"page_object".equals(type)) return false;
+        String textOwner = rg.textOwner();
+        if (textOwner != null && !"hwpx_tf".equals(textOwner)) return false;
+        String reason = rg.reason();
+        return reason == null
+                || reason.contains("text_hidden")
+                || reason.contains("text_composite")
+                || reason.contains("mixed_group")
+                || reason.contains("complex_graphic");
+    }
+
+    private static boolean containsSourceId(int[] sourceIds, int id) {
+        if (sourceIds == null) return false;
+        for (int sourceId : sourceIds) {
+            if (sourceId == id) return true;
+        }
+        return false;
+    }
+
+    private static void absorbTextFrameOutlineIntoTable(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            ASTTable table) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || table == null) return;
+        ResolvedPageItem outline = findTextFrameOutlineItem(ctx, tf.id());
+        if (!hasVisibleStroke(outline)) return;
+        ASTTableCell.CellBorder border = pageItemStrokeBorder(ctx, outline);
+        if (border == null) return;
+        applyOuterBorder(table, border);
+        int outlineId = parseId(outline.id());
+        if (outlineId >= 0) {
+            markPageItemHandled(ctx, outlineId);
+        }
+        if (ctx.debugAst) {
+            table.debugOrNew().note("text frame outline absorbed into table: page_item " + outline.id());
+        }
+    }
+
+    private static ResolvedPageItem findTextFrameOutlineItem(ResolvedBuildContext ctx, String textFrameId) {
+        if (textFrameId == null) return null;
+        Map<Integer, ResolvedPageItem> pageItemById = new HashMap<>();
+        ResolvedPageItem textFrameItem = null;
+        int tfId = parseId(textFrameId);
+        for (ResolvedPageItem item : ctx.resolvedData.pageItems()) {
+            int id = parseId(item != null ? item.id() : null);
+            if (id < 0) continue;
+            pageItemById.put(id, item);
+            if (id == tfId) textFrameItem = item;
+        }
+        if (hasVisibleStroke(textFrameItem)) return textFrameItem;
+        if (textFrameItem == null || textFrameItem.parentId() == null) return null;
+        ResolvedPageItem parent = pageItemById.get(parseId(textFrameItem.parentId()));
+        return hasVisibleStroke(parent) ? parent : null;
+    }
+
+    private static boolean hasVisibleStroke(ResolvedPageItem item) {
+        if (item == null || item.strokeWeight() <= 0) return false;
+        String color = item.strokeColorName();
+        return color != null && !color.contains("None");
+    }
+
+    private static ASTTableCell.CellBorder pageItemStrokeBorder(
+            ResolvedBuildContext ctx,
+            ResolvedPageItem item) {
+        if (!hasVisibleStroke(item)) return null;
+        ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
+        border.weight(item.strokeWeight());
+        border.strokeType("Solid");
+        border.tint(item.strokeTint());
+        String color = ctx.resolvedData.resolveTintedColorHex(item.strokeColorName(), item.strokeTint());
+        if (color == null || color.isEmpty() || !color.startsWith("#")) color = "#000000";
+        border.color(color);
+        return border;
+    }
+
+    private static void applyOuterBorder(ASTTable table, ASTTableCell.CellBorder border) {
+        if (table.rows() == null || table.rows().isEmpty()) return;
+        int lastRow = Math.max(0, table.rowCount() - 1);
+        int lastCol = Math.max(0, table.colCount() - 1);
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int rowStart = cell.rowIndex();
+                int rowEnd = rowStart + Math.max(1, cell.rowSpan()) - 1;
+                int colStart = cell.columnIndex();
+                int colEnd = colStart + Math.max(1, cell.columnSpan()) - 1;
+                if (rowStart <= 0) cell.topBorder(preferExistingBorder(cell.topBorder(), border));
+                if (rowEnd >= lastRow) cell.bottomBorder(preferExistingBorder(cell.bottomBorder(), border));
+                if (colStart <= 0) cell.leftBorder(preferExistingBorder(cell.leftBorder(), border));
+                if (colEnd >= lastCol) cell.rightBorder(preferExistingBorder(cell.rightBorder(), border));
+            }
+        }
+    }
+
+    private static ASTTableCell.CellBorder preferExistingBorder(
+            ASTTableCell.CellBorder existing,
+            ASTTableCell.CellBorder fallback) {
+        if (isVisibleCellBorder(existing)) return existing;
+        return cloneBorder(fallback);
+    }
+
+    private static boolean isVisibleCellBorder(ASTTableCell.CellBorder border) {
+        if (border == null || border.weight() <= 0) return false;
+        if (isNoneLike(border.color())) return false;
+        return !isNoneLike(border.strokeType());
+    }
+
+    private static boolean isNoneLike(String value) {
+        return value != null && value.toLowerCase().contains("none");
+    }
+
+    private static ASTTableCell.CellBorder cloneBorder(ASTTableCell.CellBorder src) {
+        if (src == null) return null;
+        ASTTableCell.CellBorder copy = new ASTTableCell.CellBorder();
+        copy.color(src.color());
+        copy.weight(src.weight());
+        copy.strokeType(src.strokeType());
+        copy.tint(src.tint());
+        return copy;
+    }
+
+    private static int parseId(String id) {
+        if (id == null) return -1;
+        try {
+            return Integer.parseInt(id);
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    private static int removeInlineTablesBySourceId(List<ASTSection> sections, Set<String> sourceIds) {
+        if (sections == null || sourceIds == null || sourceIds.isEmpty()) return 0;
+        int removed = 0;
+        for (ASTSection section : sections) {
+            if (section == null || section.blocks() == null) continue;
+            for (ASTBlock block : section.blocks()) {
+                removed += removeInlineTablesFromBlock(block, sourceIds);
+            }
+        }
+        return removed;
+    }
+
+    private static int removeInlineTablesFromBlock(ASTBlock block, Set<String> sourceIds) {
+        if (block instanceof ASTTextFrameBlock) {
+            return removeInlineTablesFromParagraphs(((ASTTextFrameBlock) block).paragraphs(), sourceIds);
+        }
+        if (block instanceof ASTTable) {
+            return removeInlineTablesFromTable((ASTTable) block, sourceIds);
+        }
+        return 0;
+    }
+
+    private static int removeInlineTablesFromTable(ASTTable table, Set<String> sourceIds) {
+        if (table == null || table.rows() == null) return 0;
+        int removed = 0;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                removed += removeInlineTablesFromParagraphs(cell.paragraphs(), sourceIds);
+            }
+        }
+        return removed;
+    }
+
+    private static int removeInlineTablesFromParagraphs(List<ASTParagraph> paragraphs, Set<String> sourceIds) {
+        if (paragraphs == null) return 0;
+        int removed = 0;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null) continue;
+            if (paragraph.inlineTable() != null && sourceIds.contains(paragraph.inlineTable().sourceId())) {
+                paragraph.inlineTable(null);
+                removed++;
+            }
+            if (paragraph.items() == null) continue;
+            Iterator<ASTInlineItem> it = paragraph.items().iterator();
+            while (it.hasNext()) {
+                ASTInlineItem item = it.next();
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject obj = (ASTInlineObject) item;
+                int before = obj.inlineTables() != null ? obj.inlineTables().size() : 0;
+                if (before > 0) {
+                    obj.inlineTables().removeIf(t -> t != null && sourceIds.contains(t.sourceId()));
+                    int after = obj.inlineTables().size();
+                    removed += before - after;
+                }
+                removed += removeInlineTablesFromParagraphs(obj.paragraphs(), sourceIds);
+                if ((obj.paragraphs() == null || obj.paragraphs().isEmpty())
+                        && (obj.inlineTables() == null || obj.inlineTables().isEmpty())
+                        && obj.imageData() == null && obj.imagePath() == null) {
+                    it.remove();
+                }
+            }
+        }
+        return removed;
+    }
+
+    private static void restoreNestedTextFrameTables(
+            ResolvedBuildContext ctx,
+            ASTTable astTable,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable) {
+        if (ctx == null || ctx.loadIDMLStory == null || astTable == null || idmlTable == null) return;
+        List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow> idmlRows = idmlTable.rows();
+        for (int ri = 0; ri < idmlRows.size() && ri < astTable.rows().size(); ri++) {
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow idmlRow = idmlRows.get(ri);
+            ASTTableRow astRow = astTable.rows().get(ri);
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell : idmlRow.cells()) {
+                if (idmlCell.textFrameStoryRefs() == null || idmlCell.textFrameStoryRefs().isEmpty()) continue;
+                ASTTableCell astCell = findAstCell(astRow, idmlCell.columnIndex());
+                if (astCell == null) continue;
+                for (String storyRef : idmlCell.textFrameStoryRefs()) {
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory nestedStory =
+                            ctx.loadIDMLStory.apply(storyRef);
+                    if (nestedStory == null) continue;
+                    if (!nestedStory.hasTables()) {
+                        if (replaceCellWithTextFrameStory(ctx, astCell, storyRef)) {
+                            continue;
+                        }
+                    }
+                    if (!nestedStory.hasTables()) continue;
+                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable nestedTable : nestedStory.tables()) {
+                        ASTTable nestedAst = ASTTableConverter.convertTableSimple(
+                                nestedTable, 0, 0, 0, null, null, null,
+                                ctx.resolvedData, ctx.styleResolver);
+                        if (nestedAst == null) continue;
+                        restoreNestedTextFrameTables(ctx, nestedAst, nestedTable);
+                        restoreAnchorOnlyEditableInlineGraphics(ctx, nestedAst, nestedTable);
+                        restoreRenderedCellInlineGraphics(ctx, nestedAst, nestedTable);
+                        ASTParagraph paragraph = new ASTParagraph();
+                        paragraph.inlineTable(nestedAst);
+                        astCell.addParagraph(paragraph);
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean replaceCellWithTextFrameStory(
+            ResolvedBuildContext ctx,
+            ASTTableCell astCell,
+            String storyRef) {
+        if (ctx == null || ctx.resolvedData == null || astCell == null || storyRef == null) return false;
+        ResolvedStory story = ctx.resolvedData.getStory(toDecimalStoryId(storyRef));
+        if (story == null) {
+            story = ctx.resolvedData.getStory(storyRef);
+        }
+        if (!hasAuthoritativeResolvedStructure(story)) return false;
+
+        List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story, false);
+        if (paragraphs == null || paragraphs.isEmpty()) return false;
+
+        astCell.paragraphs().clear();
+        astCell.paragraphs().addAll(paragraphs);
+        return true;
+    }
+
+    private static boolean hasAuthoritativeResolvedStructure(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return false;
+        int nonEmptyParagraphs = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph para : story.paragraphs()) {
+            if (para == null || para.runs() == null) continue;
+            int visibleRuns = 0;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun run : para.runs()) {
+                if (run == null || run.isInlineAnchor()) continue;
+                String text = run.text();
+                if (text != null && !text.trim().isEmpty()) visibleRuns++;
+            }
+            if (visibleRuns > 0) nonEmptyParagraphs++;
+            if (visibleRuns > 1) return true;
+        }
+        return nonEmptyParagraphs > 1;
+    }
+
+    private static void promoteNestedTextFrameParagraphsInCells(ResolvedBuildContext ctx, ASTTable table) {
+        if (table == null || table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null || cell.paragraphs().isEmpty()) continue;
+                List<ASTParagraph> paragraphs = cell.paragraphs();
+                for (int i = 0; i < paragraphs.size(); i++) {
+                    ASTInlineObject nested = firstNestedTextFrame(paragraphs.get(i));
+                    if (nested == null || nested.paragraphs() == null || nested.paragraphs().isEmpty()) continue;
+                    List<ASTParagraph> authoritative = authoritativeParagraphsForNestedTextFrame(ctx, nested);
+                    List<ASTParagraph> sourceParagraphs =
+                            authoritative != null && !authoritative.isEmpty() ? authoritative : nested.paragraphs();
+                    if (shouldReplaceAnchorParagraphWithNestedFirst(paragraphs, i, sourceParagraphs)) {
+                        paragraphs.set(i, sourceParagraphs.get(0));
+                    } else if (paragraphs.size() == 1
+                            && isParagraphOnlyNestedTextFrame(paragraphs.get(i), nested)) {
+                        paragraphs.clear();
+                        paragraphs.addAll(sourceParagraphs);
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean isParagraphOnlyNestedTextFrame(ASTParagraph paragraph, ASTInlineObject nested) {
+        if (paragraph == null || paragraph.items() == null || nested == null) return false;
+        boolean foundNested = false;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item == nested) {
+                foundNested = true;
+                continue;
+            }
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !normalizedTextWithoutControl(text).isEmpty()) {
+                    return false;
+                }
+                continue;
+            }
+            return false;
+        }
+        return foundNested;
+    }
+
+    private static String normalizedTextWithoutControl(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008') continue;
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
+            sb.append(ch);
+        }
+        return sb.toString();
+    }
+
+    private static List<ASTParagraph> authoritativeParagraphsForNestedTextFrame(
+            ResolvedBuildContext ctx,
+            ASTInlineObject nested) {
+        if (ctx == null || ctx.resolvedData == null || nested == null || nested.sourceId() == null) return null;
+        String domId = toDecimalStoryId(nested.sourceId());
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+        if (tf == null || tf.storyId() == null) return null;
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (!hasAuthoritativeResolvedStructure(story)) return null;
+        List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story, false);
+        return paragraphs == null || paragraphs.isEmpty() ? null : paragraphs;
+    }
+
+    private static ASTInlineObject firstNestedTextFrame(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null) return null;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME
+                    && obj.paragraphs() != null
+                    && !obj.paragraphs().isEmpty()) {
+                return obj;
+            }
+        }
+        return null;
+    }
+
+    private static boolean shouldReplaceAnchorParagraphWithNestedFirst(
+            List<ASTParagraph> cellParagraphs,
+            int anchorIndex,
+            List<ASTParagraph> nestedParagraphs) {
+        if (cellParagraphs == null || nestedParagraphs == null || nestedParagraphs.size() < 2) return false;
+        int comparable = Math.min(nestedParagraphs.size() - 1, cellParagraphs.size() - anchorIndex - 1);
+        if (comparable <= 0) return false;
+        int matches = 0;
+        for (int offset = 1; offset <= comparable; offset++) {
+            String expected = normalizedParagraphText(nestedParagraphs.get(offset));
+            String actual = normalizedParagraphText(cellParagraphs.get(anchorIndex + offset));
+            if (!expected.isEmpty() && expected.equals(actual)) {
+                matches++;
+            }
+        }
+        return matches >= Math.min(2, comparable);
+    }
+
+    private static String normalizedParagraphText(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.items() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        appendParagraphText(paragraph, sb);
+        String raw = sb.toString();
+        StringBuilder normalized = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008') continue;
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
+            normalized.append(ch);
+        }
+        return normalized.toString();
+    }
+
+    private static void appendParagraphText(ASTParagraph paragraph, StringBuilder sb) {
+        if (paragraph == null || paragraph.items() == null || sb == null) return;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null) sb.append(text);
+            } else if (item instanceof ASTInlineObject) {
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (obj.paragraphs() == null) continue;
+                for (ASTParagraph child : obj.paragraphs()) {
+                    appendParagraphText(child, sb);
+                }
+            }
+        }
+    }
+
+    private static String toDecimalStoryId(String storyRef) {
+        if (storyRef == null || storyRef.isEmpty()) return null;
+        String s = storyRef;
+        if (s.startsWith("child_")) s = s.substring("child_".length());
+        if (s.startsWith("Story_")) s = s.substring("Story_".length());
+        if (s.startsWith("u") && s.length() > 1) {
+            try {
+                return String.valueOf(Integer.parseInt(s.substring(1), 16));
+            } catch (NumberFormatException ignored) {
+                return storyRef;
+            }
+        }
+        return storyRef;
+    }
+
+    private static ASTTableCell findAstCell(ASTTableRow row, int columnIndex) {
+        if (row == null || row.cells() == null) return null;
+        for (ASTTableCell cell : row.cells()) {
+            if (cell.columnIndex() == columnIndex) return cell;
+        }
+        return null;
     }
 
     private static void restoreAnchorOnlyEditableInlineGraphics(
@@ -401,6 +1176,18 @@ public final class TableBuilder {
                 }
                 int domId = parseInlineGraphicDomId(run.inlineGraphics().get(anchor.index()));
                 if (domId <= 0 || !restoredIds.add(domId)) continue;
+
+                if (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                        .isSimpleButtonLabelAnchor(ctx, domId)) {
+                    ASTInlineObject labelObject = SimpleButtonLabelInlineFactory.create(ctx, domId);
+                    if (labelObject != null) {
+                        labelObject.keepInline(true);
+                        SimpleButtonLabelPlan plan = ctx.simpleButtonLabelPlan(domId);
+                        replaceLabelTextWithInlineObject(astPara, plan != null ? plan.labelText : null, labelObject);
+                        continue;
+                    }
+                }
+
                 if (isExpandableCellInlineGroup(ctx, domId, idmlPara)) {
                     continue;
                 }
@@ -418,6 +1205,51 @@ public final class TableBuilder {
                 astPara.addItem(inline);
             }
         }
+    }
+
+    private static void replaceLabelTextWithInlineObject(ASTParagraph astPara,
+                                                         String labelText,
+                                                         ASTInlineObject inline) {
+        if (astPara == null || inline == null || astPara.items() == null) return;
+        if (containsInlineSource(astPara, inline.sourceId())) return;
+        if (labelText == null || labelText.trim().isEmpty()) {
+            astPara.items().add(0, inline);
+            return;
+        }
+        String label = labelText.trim();
+        for (int i = 0; i < astPara.items().size(); i++) {
+            ASTInlineItem item = astPara.items().get(i);
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text == null || text.isEmpty()) continue;
+            String compact = text.replaceAll("\\s+", "");
+            if (label.equals(compact)) {
+                astPara.items().set(i, inline);
+                return;
+            }
+            if (text.startsWith(label)) {
+                String rest = text.substring(label.length());
+                if (rest.isEmpty()) {
+                    astPara.items().set(i, inline);
+                } else {
+                    run.text(rest);
+                    astPara.items().add(i, inline);
+                }
+                return;
+            }
+        }
+        astPara.items().add(0, inline);
+    }
+
+    private static boolean containsInlineSource(ASTParagraph astPara, String sourceId) {
+        if (astPara == null || astPara.items() == null || sourceId == null) return false;
+        for (ASTInlineItem item : astPara.items()) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            ASTInlineObject inline = (ASTInlineObject) item;
+            if (sourceId.equals(inline.sourceId())) return true;
+        }
+        return false;
     }
 
     private static ASTInlineObject loadOwnershipPlannedAtomicInline(ResolvedBuildContext ctx, int domId) {
@@ -779,6 +1611,347 @@ public final class TableBuilder {
         return absorbed;
     }
 
+    /**
+     * 테이블화된 영역 위에 남아 있는 InDesign 선분/외곽선을 HWP 셀 border로 흡수한다.
+     * 셀 자체의 IDML edge 정보가 없고 별도 GraphicLine/Rectangle이 선을 소유하는
+     * 문서가 있으므로, 테이블 grid와 실제 source object bounds가 맞는 경우만 처리한다.
+     */
+    private static int absorbTableBorderPageObjects(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            ASTTable table,
+            int pageIdx) {
+        if (ctx == null || ctx.resolvedData == null || table == null) return 0;
+
+        Map<Integer, ResolvedPageItem> pageItemById = new HashMap<>();
+        for (ResolvedPageItem item : ctx.resolvedData.pageItems()) {
+            int itemId = parseId(item != null ? item.id() : null);
+            if (itemId >= 0) pageItemById.put(itemId, item);
+        }
+        if (pageItemById.isEmpty()) return 0;
+
+        double tableLeftPt = CoordinateConverter.hwpunitsToPoints(table.x());
+        double tableTopPt = CoordinateConverter.hwpunitsToPoints(table.y());
+        long[] colLeft = buildColumnOffsets(table.columnWidths());
+        long[] rowTop = buildRowOffsets(table.rows());
+
+        int absorbed = 0;
+        Set<Integer> absorbedItemIds = new HashSet<>();
+        for (ResolvedPageItem item : ctx.resolvedData.pageItems()) {
+            if (!isAbsorbableTableBorderItem(ctx, item)) continue;
+            int itemPageIdx = ctx.toSectionIndex.applyAsInt(item.pageIndex());
+            boolean sourceLinked = isTableBorderSourceLinkedToFrame(item, tf, pageItemById);
+            if (itemPageIdx != pageIdx && !sourceLinked) continue;
+            int itemId = parseId(item.id());
+            if (itemId < 0) continue;
+
+            double[] b = pageRelativeBoundsInPoints(ctx, item);
+            if (b == null || b.length < 4) continue;
+            ASTTableCell.CellBorder border = pageItemStrokeBorder(ctx, item);
+            if (border == null) continue;
+
+            boolean matched = applyBorderItemToTable(
+                    table, colLeft, rowTop, tableLeftPt, tableTopPt, item, b, border);
+            if (!matched) continue;
+
+            markPageItemHandled(ctx, itemId);
+            absorbedItemIds.add(itemId);
+            absorbed++;
+            if (ctx.debugAst) {
+                table.debugOrNew().note("table border absorbed: page_item " + itemId
+                        + " type=" + item.type());
+            }
+        }
+
+        suppressRenderedGroupsCoveredByAbsorbedCellBackgrounds(ctx, absorbedItemIds, pageItemById);
+        return absorbed;
+    }
+
+    private static void completeVisibleTableOuterBorder(ASTTable table) {
+        ASTTableCell.CellBorder border = representativeVisibleBorder(table);
+        if (border == null || table == null || table.rows() == null || table.rows().isEmpty()) return;
+        int lastRow = Math.max(0, table.rowCount() - 1);
+        int lastCol = Math.max(0, table.colCount() - 1);
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int rowStart = cell.rowIndex();
+                int rowEnd = rowStart + Math.max(1, cell.rowSpan()) - 1;
+                int colStart = cell.columnIndex();
+                int colEnd = colStart + Math.max(1, cell.columnSpan()) - 1;
+                if (rowStart <= 0) cell.topBorder(preferExistingBorder(cell.topBorder(), border));
+                if (rowEnd >= lastRow) cell.bottomBorder(preferExistingBorder(cell.bottomBorder(), border));
+                if (colStart <= 0) cell.leftBorder(preferExistingBorder(cell.leftBorder(), border));
+                if (colEnd >= lastCol) cell.rightBorder(preferExistingBorder(cell.rightBorder(), border));
+            }
+        }
+    }
+
+    private static ASTTableCell.CellBorder representativeVisibleBorder(ASTTable table) {
+        if (table == null || table.rows() == null) return null;
+        ASTTableCell.CellBorder best = null;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                best = strongerBorder(best, cell.leftBorder());
+                best = strongerBorder(best, cell.rightBorder());
+                best = strongerBorder(best, cell.topBorder());
+                best = strongerBorder(best, cell.bottomBorder());
+            }
+        }
+        return best != null ? cloneBorder(best) : null;
+    }
+
+    private static ASTTableCell.CellBorder strongerBorder(
+            ASTTableCell.CellBorder current,
+            ASTTableCell.CellBorder candidate) {
+        if (!isVisibleCellBorder(candidate)) return current;
+        if (current == null || candidate.weight() > current.weight()) return candidate;
+        return current;
+    }
+
+    private static boolean isTableBorderSourceLinkedToFrame(
+            ResolvedPageItem item,
+            ResolvedTextFrame tf,
+            Map<Integer, ResolvedPageItem> pageItemById) {
+        if (item == null || tf == null) return false;
+        int itemId = parseId(item.id());
+        int tfId = parseId(tf.id());
+        if (itemId < 0 || tfId < 0) return false;
+        if (itemId == tfId) return true;
+        if (item.parentId() != null && parseId(item.parentId()) == tfId) return true;
+        ResolvedPageItem tfItem = pageItemById != null ? pageItemById.get(tfId) : null;
+        if (tfItem != null && tfItem.parentId() != null && parseId(tfItem.parentId()) == itemId) return true;
+        if (item.childIds() != null) {
+            for (int childId : item.childIds()) {
+                if (childId == tfId) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isAbsorbableTableBorderItem(ResolvedBuildContext ctx, ResolvedPageItem item) {
+        if (ctx == null || ctx.resolvedData == null || item == null) return false;
+        int itemId = parseId(item.id());
+        if (itemId >= 0 && ctx.resolvedData.isInlineObjectId(itemId)) return false;
+        if (item.isInline()) return false;
+        if (!hasVisibleStroke(item)) return false;
+        if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
+        if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
+        if (item.hasDropShadow()) return false;
+        if (item.gradientFeatherApplied()) return false;
+
+        String type = item.type();
+        return "Rectangle".equals(type)
+                || "TextFrame".equals(type)
+                || "GraphicLine".equals(type);
+    }
+
+    private static boolean applyBorderItemToTable(
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            ResolvedPageItem item,
+            double[] bounds,
+            ASTTableCell.CellBorder border) {
+        double top = bounds[0];
+        double left = bounds[1];
+        double bottom = bounds[2];
+        double right = bounds[3];
+        if (right < left) {
+            double tmp = left;
+            left = right;
+            right = tmp;
+        }
+        if (bottom < top) {
+            double tmp = top;
+            top = bottom;
+            bottom = tmp;
+        }
+        double width = right - left;
+        double height = bottom - top;
+        if (width < 0 || height < 0) return false;
+
+        double tolerance = borderMatchTolerance(border);
+        if ("GraphicLine".equals(item.type()) || width <= tolerance || height <= tolerance) {
+            return applyLineBorderToTable(
+                    table, colLeft, rowTop, tableLeftPt, tableTopPt,
+                    left, top, right, bottom, border, tolerance);
+        }
+        return applyRectangleBorderToTable(
+                table, colLeft, rowTop, tableLeftPt, tableTopPt,
+                left, top, right, bottom, border, tolerance);
+    }
+
+    private static boolean applyRectangleBorderToTable(
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            double left,
+            double top,
+            double right,
+            double bottom,
+            ASTTableCell.CellBorder border,
+            double tolerance) {
+        int c0 = findGridEdgeIndex(colLeft, tableLeftPt, left, tolerance);
+        int c1 = findGridEdgeIndex(colLeft, tableLeftPt, right, tolerance);
+        int r0 = findGridEdgeIndex(rowTop, tableTopPt, top, tolerance);
+        int r1 = findGridEdgeIndex(rowTop, tableTopPt, bottom, tolerance);
+        if (c0 < 0 || c1 < 0 || r0 < 0 || r1 < 0 || c1 <= c0 || r1 <= r0) return false;
+
+        boolean matched = false;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int rowStart = cell.rowIndex();
+                int rowEnd = rowStart + Math.max(1, cell.rowSpan());
+                int colStart = cell.columnIndex();
+                int colEnd = colStart + Math.max(1, cell.columnSpan());
+                if (!spansOverlap(rowStart, rowEnd, r0, r1)
+                        || !spansOverlap(colStart, colEnd, c0, c1)) {
+                    continue;
+                }
+                if (rowStart == r0) {
+                    cell.topBorder(preferExistingBorder(cell.topBorder(), border));
+                    matched = true;
+                }
+                if (rowEnd == r1) {
+                    cell.bottomBorder(preferExistingBorder(cell.bottomBorder(), border));
+                    matched = true;
+                }
+                if (colStart == c0) {
+                    cell.leftBorder(preferExistingBorder(cell.leftBorder(), border));
+                    matched = true;
+                }
+                if (colEnd == c1) {
+                    cell.rightBorder(preferExistingBorder(cell.rightBorder(), border));
+                    matched = true;
+                }
+            }
+        }
+        return matched;
+    }
+
+    private static boolean applyLineBorderToTable(
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            double left,
+            double top,
+            double right,
+            double bottom,
+            ASTTableCell.CellBorder border,
+            double tolerance) {
+        double width = right - left;
+        double height = bottom - top;
+        if (width <= 0 && height <= 0) return false;
+
+        if (width >= height) {
+            int rowEdge = findGridEdgeIndex(rowTop, tableTopPt, (top + bottom) / 2.0, tolerance);
+            int c0 = findGridEdgeIndex(colLeft, tableLeftPt, left, tolerance);
+            int c1 = findGridEdgeIndex(colLeft, tableLeftPt, right, tolerance);
+            if (rowEdge < 0 || c0 < 0 || c1 < 0 || c1 <= c0) return false;
+            return applyHorizontalGridBorder(table, rowEdge, c0, c1, border);
+        }
+
+        int colEdge = findGridEdgeIndex(colLeft, tableLeftPt, (left + right) / 2.0, tolerance);
+        int r0 = findGridEdgeIndex(rowTop, tableTopPt, top, tolerance);
+        int r1 = findGridEdgeIndex(rowTop, tableTopPt, bottom, tolerance);
+        if (colEdge < 0 || r0 < 0 || r1 < 0 || r1 <= r0) return false;
+        return applyVerticalGridBorder(table, colEdge, r0, r1, border);
+    }
+
+    private static boolean applyHorizontalGridBorder(
+            ASTTable table,
+            int rowEdge,
+            int c0,
+            int c1,
+            ASTTableCell.CellBorder border) {
+        boolean matched = false;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int rowStart = cell.rowIndex();
+                int rowEnd = rowStart + Math.max(1, cell.rowSpan());
+                int colStart = cell.columnIndex();
+                int colEnd = colStart + Math.max(1, cell.columnSpan());
+                if (!spansOverlap(colStart, colEnd, c0, c1)) continue;
+                if (rowEnd == rowEdge) {
+                    cell.bottomBorder(preferExistingBorder(cell.bottomBorder(), border));
+                    matched = true;
+                }
+                if (rowStart == rowEdge) {
+                    cell.topBorder(preferExistingBorder(cell.topBorder(), border));
+                    matched = true;
+                }
+            }
+        }
+        return matched;
+    }
+
+    private static boolean applyVerticalGridBorder(
+            ASTTable table,
+            int colEdge,
+            int r0,
+            int r1,
+            ASTTableCell.CellBorder border) {
+        boolean matched = false;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int rowStart = cell.rowIndex();
+                int rowEnd = rowStart + Math.max(1, cell.rowSpan());
+                int colStart = cell.columnIndex();
+                int colEnd = colStart + Math.max(1, cell.columnSpan());
+                if (!spansOverlap(rowStart, rowEnd, r0, r1)) continue;
+                if (colEnd == colEdge) {
+                    cell.rightBorder(preferExistingBorder(cell.rightBorder(), border));
+                    matched = true;
+                }
+                if (colStart == colEdge) {
+                    cell.leftBorder(preferExistingBorder(cell.leftBorder(), border));
+                    matched = true;
+                }
+            }
+        }
+        return matched;
+    }
+
+    private static int findGridEdgeIndex(long[] offsets, double originPt, double valuePt, double tolerancePt) {
+        if (offsets == null) return -1;
+        int best = -1;
+        double bestDelta = Double.MAX_VALUE;
+        for (int i = 0; i < offsets.length; i++) {
+            double edge = originPt + CoordinateConverter.hwpunitsToPoints(offsets[i]);
+            double delta = Math.abs(edge - valuePt);
+            if (delta < bestDelta) {
+                bestDelta = delta;
+                best = i;
+            }
+        }
+        return bestDelta <= tolerancePt ? best : -1;
+    }
+
+    private static boolean spansOverlap(int a0, int a1, int b0, int b1) {
+        return Math.max(a0, b0) < Math.min(a1, b1);
+    }
+
+    private static double borderMatchTolerance(ASTTableCell.CellBorder border) {
+        double weight = border != null ? Math.max(0.0, border.weight()) : 0.0;
+        return Math.max(3.0, weight * 3.0 + 1.0);
+    }
+
     private static long[] buildColumnOffsets(List<Long> widths) {
         int n = widths == null ? 0 : widths.size();
         long[] offsets = new long[n + 1];
@@ -813,10 +1986,18 @@ public final class TableBuilder {
     private static double[] pageRelativeBoundsInPoints(ResolvedBuildContext ctx, ResolvedPageItem item) {
         double[] b = item.pageRelativeBounds();
         if (b != null && b.length >= 4) {
-            double sf = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
-            return new double[]{b[0] * sf, b[1] * sf, b[2] * sf, b[3] * sf};
+            return new double[]{b[0], b[1], b[2], b[3]};
         }
-        return item.geometricBounds() != null ? item.geometricBounds() : item.visibleBounds();
+        double[] fallback = item.geometricBounds() != null ? item.geometricBounds() : item.visibleBounds();
+        if (fallback == null || fallback.length < 4) return fallback;
+        double sf = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        if (Math.abs(sf - 1.0) < 0.01) return fallback;
+        return new double[]{
+                fallback[0] / sf,
+                fallback[1] / sf,
+                fallback[2] / sf,
+                fallback[3] / sf
+        };
     }
 
     private static ASTTableCell findCoveredCell(
@@ -949,7 +2130,7 @@ public final class TableBuilder {
         }
         if ("TextFrame".equals(type)) {
             ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(item.id());
-            return isTableAnchorOnlyFrame(tf);
+            return TableFrameOwnershipPolicy.isTableAnchorOnlyFrame(tf);
         }
         return !isVisiblePageItem(item);
     }
@@ -1366,6 +2547,18 @@ public final class TableBuilder {
         if (r.cellBackgroundsAbsorbed > 0) {
             System.err.println("  · " + r.cellBackgroundsAbsorbed
                     + " page_object backgrounds absorbed into table cells");
+        }
+        if (r.tableBordersAbsorbed > 0) {
+            System.err.println("  · " + r.tableBordersAbsorbed
+                    + " page_object borders absorbed into table cell borders");
+        }
+        if (r.detachedInlinePageLevel > 0) {
+            System.err.println("  · " + r.detachedInlinePageLevel
+                    + " detached inline table frames placed page-level");
+        }
+        if (r.duplicateInlineTablesRemoved > 0) {
+            System.err.println("  · " + r.duplicateInlineTablesRemoved
+                    + " duplicate inline tables removed by source ownership");
         }
         if (r.pngMissingFallback > 0) {
             System.err.println("  · WARNING: " + r.pngMissingFallback

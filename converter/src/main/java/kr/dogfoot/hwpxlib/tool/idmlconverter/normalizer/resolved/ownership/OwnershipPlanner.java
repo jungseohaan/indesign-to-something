@@ -64,6 +64,7 @@ public final class OwnershipPlanner {
         resolveClusterOwnedTextFrameShells();
         resolveDroppedRenderedTextOwnership();
         resolveNonTextVisualEditableTextSources();
+        resolveMasterGraphicsWithHwpxTextFallbacks();
         writePlans();
         validate();
         System.err.println("[OwnershipPlanner] observation plans=" + plans.size()
@@ -780,6 +781,25 @@ public final class OwnershipPlanner {
                 plans.set(j, layerB);
                 a = layerA;
             }
+        }
+    }
+
+    private void resolveMasterGraphicsWithHwpxTextFallbacks() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan complete = plans.get(i);
+            if (!isMasterGraphicCompleteRender(complete)) continue;
+            if (!containsVisibleHwpxMasterTextSourceOnPage(complete)) continue;
+
+            int fallbackIndex = findMasterGraphicFallbackIndex(complete);
+            if (fallbackIndex < 0) continue;
+
+            ObjectPlan fallback = plans.get(fallbackIndex);
+            plans.set(i, complete.withVisualAction(VisualAction.DROP_VISUAL,
+                    "master_graphic_text_owned_by_hwpx"));
+            plans.set(fallbackIndex, fallback
+                    .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
+                            "master_graphic_text_hidden_fallback")
+                    .withVisualLayer(complete.visualLayer));
         }
     }
 
@@ -1942,6 +1962,85 @@ public final class OwnershipPlanner {
         if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) return false;
         if (plan.placement == Placement.INLINE) return false;
         return plan.sourceObjectIds.length > 1;
+    }
+
+    private static boolean isMasterGraphicCompleteRender(ObjectPlan plan) {
+        return isMasterGraphicRender(plan)
+                && plan.hasVisibleVisual()
+                && !isFallbackRenderFile(plan.file);
+    }
+
+    private static boolean isMasterGraphicFallbackRender(ObjectPlan plan) {
+        return isMasterGraphicRender(plan) && isFallbackRenderFile(plan.file);
+    }
+
+    private static boolean isMasterGraphicRender(ObjectPlan plan) {
+        return plan != null
+                && plan.renderId != null
+                && !"text_frame".equals(plan.kind)
+                && "master_graphic".equals(plan.reason)
+                && plan.placement == Placement.FLOATING;
+    }
+
+    private static boolean isFallbackRenderFile(String file) {
+        return file != null && file.contains("_fallback_");
+    }
+
+    private boolean containsVisibleHwpxMasterTextSourceOnPage(ObjectPlan plan) {
+        if (plan == null || plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) return false;
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (!isVisibleHwpxMasterTextFrameOnPage(tf, plan.pageIndex)) continue;
+            int sourceId = masterSourceDomId(tf);
+            if (sourceId >= 0 && contains(plan.sourceObjectIds, sourceId)) return true;
+        }
+        return false;
+    }
+
+    private boolean isVisibleHwpxMasterTextFrameOnPage(ResolvedTextFrame tf, int pageIndex) {
+        if (tf == null || !tf.isMasterInstance()) return false;
+        if (tf.pageIndex() != pageIndex) return false;
+        if (tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (tf.id() != null && data.isTextOwnedByIndesignPng(tf.id())) return false;
+        String text = tf.frameVisibleText();
+        return text != null && !text.isBlank();
+    }
+
+    private static int masterSourceDomId(ResolvedTextFrame tf) {
+        if (tf == null) return -1;
+        int fromField = parseInt(tf.masterSourceId(), -1);
+        if (fromField >= 0) return fromField;
+        String id = tf.id();
+        if (id == null) return -1;
+        int pi = id.indexOf("_pi");
+        int oc = id.indexOf("_oc");
+        int suffix = -1;
+        if (pi >= 0 && oc >= 0) suffix = Math.min(pi, oc);
+        else if (pi >= 0) suffix = pi;
+        else if (oc >= 0) suffix = oc;
+        return suffix > 0 ? parseInt(id.substring(0, suffix), -1) : parseInt(id, -1);
+    }
+
+    private int findMasterGraphicFallbackIndex(ObjectPlan complete) {
+        int best = -1;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan fallback = plans.get(i);
+            if (!isMasterGraphicFallbackRender(fallback)) continue;
+            if (fallback.pageIndex != complete.pageIndex) continue;
+            if (fallback.domId == complete.domId) continue;
+            if (!sharesAnySource(complete, fallback)) continue;
+            if (!boundsContains(complete.bounds, fallback.bounds, 1.0)
+                    && !boundsMostlyOverlap(complete.bounds, fallback.bounds, 0.70)) {
+                continue;
+            }
+            if (!containsVisibleHwpxMasterTextSourceOnPage(fallback)) continue;
+            double score = overlapRatio(complete.bounds, fallback.bounds);
+            if (score > bestScore) {
+                bestScore = score;
+                best = i;
+            }
+        }
+        return best;
     }
 
     private static boolean isStrictChildPlan(ObjectPlan parent, ObjectPlan child) {

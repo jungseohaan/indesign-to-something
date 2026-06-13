@@ -399,7 +399,7 @@ public class ASTRunConverter {
             // 그리드 테이블 감지 시도 (2×2 이상의 TextFrame 그리드 → ASTTable)
             ASTTable gridTable = hasHwpxOwnedChildTextFrame ? null
                     : ASTTableConverter.tryBuildGridTable(
-                            ig, idmlDoc, colorResolver, imageLoader, bg);
+                            ig, idmlDoc, colorResolver, imageLoader, bg, resolvedData);
             if (gridTable != null) {
                 if (inlineObj == null) {
                     inlineObj = new ASTInlineObject();

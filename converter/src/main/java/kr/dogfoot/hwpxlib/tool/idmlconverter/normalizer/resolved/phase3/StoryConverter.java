@@ -24,6 +24,10 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.RunPropertyResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextRunSegmenter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 
 import javax.imageio.ImageIO;
 import javax.xml.parsers.DocumentBuilder;
@@ -134,8 +138,16 @@ public final class StoryConverter {
             for (ASTBlock blk : sec.blocks()) {
                 if (blk instanceof ASTTextFrameBlock) {
                     ASTTextFrameBlock tfb = (ASTTextFrameBlock) blk;
-                    // composedLines 경로에서 이미 단락이 생성된 블록은 건너뜀
-                    if (tfb.paragraphs() != null && !tfb.paragraphs().isEmpty()) continue;
+                    // composedLines 분할처럼 Stage 2가 의도적으로 만든 블록은 유지한다.
+                    // 그 외 prebuilt 단락은 frameVisibleText 기반 placeholder일 수 있으므로,
+                    // resolved story가 더 풍부한 paragraph/run 구조를 제공하면 Stage 3가 다시 소유한다.
+                    if (tfb.paragraphs() != null && !tfb.paragraphs().isEmpty()) {
+                        if (shouldRebuildPrebuiltParagraphsFromResolved(ctx, tfb, textPathStorySub)) {
+                            tfb.paragraphs().clear();
+                        } else {
+                            continue;
+                        }
+                    }
                     String sourceId = tfb.sourceId();
                     if (sourceId == null) {
                         // domId=None TF: sourceId 없지만 Phase 2가 storyId를 직접 설정했으면 사용
@@ -155,12 +167,15 @@ public final class StoryConverter {
                     if (rtf != null && rtf.storyId() != null) {
                         String storyId = rtf.storyId();
                         if (isStoryFullyOwnedByIndesignPng(ctx, storyId)) continue;
-                        // IDML story에 테이블이 있으면 Phase 4가 ASTTable로 처리 → Phase 3 skip
-                        // (동일 TF에 대해 1×1 래퍼 TextBox 중복 생성 방지)
+                        // IDML story가 table-only이면 Phase 4가 ASTTable로 처리 → Phase 3 skip
+                        // (동일 TF에 대해 1×1 래퍼 TextBox 중복 생성 방지).
+                        // 단, Story 루트에 본문 텍스트와 Table이 함께 있으면 본문 TF까지
+                        // 통째로 누락되므로 텍스트는 Phase 3에서 유지한다.
                         if (ctx.loadIDMLStory != null) {
                             IDMLStory _chk =
                                     ctx.loadIDMLStory.apply(storyId);
-                            if (_chk != null && _chk.hasTables()) continue;
+                            if (_chk != null && _chk.hasTables()
+                                    && !hasStandaloneStoryText(_chk)) continue;
                         }
                         // 빈 본문 스토리이고 TextPath 매핑이 있으면 TextPath 스토리로 대체.
                         // frameVisibleTextLength 도 TextPath 스토리 길이로 보정하여 단락 분배 필터를 통과시킨다.
@@ -262,6 +277,8 @@ public final class StoryConverter {
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
             stepStart = System.nanoTime();
             ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, storyId);
+            insertAnchoredTables(ctx, blocks);
+            annotateParagraphPageBounds(ctx, blocks);
             distributeNanos += System.nanoTime() - stepStart;
             stepStart = System.nanoTime();
             restoreTfInlineVisuals(ctx, blocks);
@@ -283,6 +300,7 @@ public final class StoryConverter {
             }
         }
         storyLoopNanos = System.nanoTime() - t0;
+        insertAnchoredTables(ctx, textFrameBlocks(sections));
         System.err.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
 
         // Phase 3 후처리: inner TF 오버레이 패턴 — inner story 런을 outer block 마지막 단락에 주입.
@@ -310,6 +328,129 @@ public final class StoryConverter {
         ConversionTiming.metric("stage2.textBuilder.storyConverter.deferredFloatingMs", millis(deferredFloatingNanos));
     }
 
+    private static List<ASTTextFrameBlock> textFrameBlocks(List<ASTSection> sections) {
+        List<ASTTextFrameBlock> blocks = new ArrayList<>();
+        if (sections == null) return blocks;
+        for (ASTSection section : sections) {
+            if (section == null || section.blocks() == null) continue;
+            for (ASTBlock block : section.blocks()) {
+                if (block instanceof ASTTextFrameBlock) {
+                    blocks.add((ASTTextFrameBlock) block);
+                }
+            }
+        }
+        return blocks;
+    }
+
+    private static boolean shouldRebuildPrebuiltParagraphsFromResolved(
+            ResolvedBuildContext ctx, ASTTextFrameBlock block, Map<String, String> textPathStorySub) {
+        if (ctx == null || ctx.resolvedData == null || block == null) return false;
+        if (block.composedCharStart() >= 0) return false;
+        if (containsStructuralInlineContent(block)) return false;
+
+        String storyId = resolvedStoryIdForBlock(ctx, block, textPathStorySub);
+        if (storyId == null || isStoryFullyOwnedByIndesignPng(ctx, storyId)) return false;
+        ResolvedStory story = ctx.resolvedData.getStory(storyId);
+        if (!hasAuthoritativeResolvedStructure(story)) return false;
+
+        String existing = normalizedComparableText(plainText(block.paragraphs()));
+        String resolved = normalizedComparableText(resolvedStoryPlainText(story));
+        if (resolved.isEmpty()) return false;
+        if (existing.isEmpty()) return true;
+
+        // The prebuilt path is allowed only when it represents deliberate structure.
+        // If it is just the same story flattened into fewer paragraphs/runs, resolved
+        // owns the source text structure.
+        return resolved.equals(existing)
+                || resolved.startsWith(existing)
+                || existing.startsWith(resolved);
+    }
+
+    private static String resolvedStoryIdForBlock(
+            ResolvedBuildContext ctx, ASTTextFrameBlock block, Map<String, String> textPathStorySub) {
+        String direct = block.storyId();
+        String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+        if (domId == null) domId = block.sourceId();
+        if (domId != null) {
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+            if (tf != null && tf.storyId() != null) {
+                direct = tf.storyId();
+                String subStoryId = textPathStorySub != null ? textPathStorySub.get(domId) : null;
+                if (subStoryId != null && isStoryEmpty(ctx, direct)) {
+                    direct = subStoryId;
+                }
+            }
+        }
+        return direct;
+    }
+
+    private static boolean hasAuthoritativeResolvedStructure(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return false;
+        int nonEmptyParagraphs = 0;
+        for (ResolvedParagraph para : story.paragraphs()) {
+            if (para == null) continue;
+            int visibleRuns = 0;
+            for (ResolvedRun run : para.runs()) {
+                if (run == null || run.isInlineAnchor()) continue;
+                String text = normalizedComparableText(run.text());
+                if (!text.isEmpty()) visibleRuns++;
+            }
+            if (visibleRuns > 0) nonEmptyParagraphs++;
+            if (visibleRuns > 1) return true;
+        }
+        return nonEmptyParagraphs > 1;
+    }
+
+    private static boolean containsStructuralInlineContent(ASTTextFrameBlock block) {
+        if (block == null || block.paragraphs() == null) return false;
+        for (ASTParagraph para : block.paragraphs()) {
+            if (para == null) continue;
+            if (para.inlineTable() != null) return true;
+            if (para.items() == null) continue;
+            for (ASTInlineItem item : para.items()) {
+                if (item instanceof ASTInlineObject || item instanceof ASTEquation) return true;
+            }
+        }
+        return false;
+    }
+
+    private static String plainText(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ASTParagraph para : paragraphs) {
+            if (para == null) continue;
+            String text = ParagraphTextHelpers.getParaPlainText(para);
+            if (text != null) sb.append(text);
+        }
+        return sb.toString();
+    }
+
+    private static String resolvedStoryPlainText(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ResolvedParagraph para : story.paragraphs()) {
+            if (para == null || para.runs() == null) continue;
+            for (ResolvedRun run : para.runs()) {
+                if (run == null || run.isInlineAnchor()) continue;
+                String text = run.text();
+                if (text != null) sb.append(text);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String normalizedComparableText(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008') continue;
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
+            sb.append(ch);
+        }
+        return sb.toString();
+    }
+
     private static boolean isStoryFullyOwnedByIndesignPng(ResolvedBuildContext ctx, String storyId) {
         if (ctx == null || ctx.resolvedData == null || storyId == null) return false;
         List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
@@ -321,6 +462,232 @@ public final class StoryConverter {
             hasOwnedFrame = true;
         }
         return hasOwnedFrame;
+    }
+
+    private static void insertAnchoredTables(ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || blocks == null || ctx.loadIDMLStory == null) return;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null) continue;
+            String domIdText = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+            int domId = parseInt(domIdText, -1);
+            if (domId < 0) continue;
+            List<AnchoredTablePlan> plans = ctx.anchoredTablePlansForOwnerTextFrame(domId);
+            if (plans == null || plans.isEmpty()) continue;
+            plans = new ArrayList<>(plans);
+            plans.sort(Comparator.comparingInt((AnchoredTablePlan p) -> p.afterParagraphIndex).reversed());
+            for (AnchoredTablePlan plan : plans) {
+                if (hasInlineTable(block.paragraphs(), plan.nestedTableId)) continue;
+                IDMLTable table = loadPlannedTable(ctx, plan);
+                if (table == null) continue;
+                ASTTable astTable = TableBuilder.buildPreparedAstTable(ctx, table, 0, 0, 0);
+                if (astTable == null) continue;
+                applyAnchoredTableBounds(ctx, plan, astTable);
+                ASTParagraph paragraph = new ASTParagraph();
+                paragraph.inlineTable(astTable);
+                int insertAt = Math.max(0, Math.min(block.paragraphs().size(), plan.afterParagraphIndex + 1));
+                consumeMarkerOnlyParagraphAt(block.paragraphs(), insertAt);
+                block.paragraphs().add(insertAt, paragraph);
+            }
+        }
+    }
+
+    private static void consumeMarkerOnlyParagraphAt(List<ASTParagraph> paragraphs, int index) {
+        if (paragraphs == null || index < 0 || index >= paragraphs.size()) return;
+        ASTParagraph candidate = paragraphs.get(index);
+        if (!isMarkerOnlyParagraph(candidate)) return;
+        paragraphs.remove(index);
+    }
+
+    private static boolean isMarkerOnlyParagraph(ASTParagraph paragraph) {
+        if (paragraph == null || paragraph.inlineTable() != null) return false;
+        if (paragraph.items() == null || paragraph.items().isEmpty()) return true;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (!(item instanceof ASTTextRun)) return false;
+            String text = ((ASTTextRun) item).text();
+            if (!isMarkerOnlyText(text)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isMarkerOnlyText(String text) {
+        if (text == null || text.isEmpty()) return true;
+        String normalized = text
+                .replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\u0008", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+        return normalized.isEmpty();
+    }
+
+    private static void applyAnchoredTableBounds(
+            ResolvedBuildContext ctx,
+            AnchoredTablePlan plan,
+            ASTTable astTable) {
+        if (ctx == null || ctx.resolvedData == null || plan == null || astTable == null) return;
+        if (plan.anchoredTextFrameDomId < 0) return;
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(plan.anchoredTextFrameDomId));
+        if (tf == null || tf.pageRelativeBounds() == null || tf.pageRelativeBounds().length < 4) return;
+        double[] b = tf.pageRelativeBounds();
+        double scale = ctx.resolvedData.scaleFactor();
+        long y = CoordinateConverter.pointsToHwpunits(b[0] * scale);
+        long x = CoordinateConverter.pointsToHwpunits(b[1] * scale);
+        long h = CoordinateConverter.pointsToHwpunits(Math.max(0, b[2] - b[0]) * scale);
+        long w = CoordinateConverter.pointsToHwpunits(Math.max(0, b[3] - b[1]) * scale);
+        astTable.x(x);
+        astTable.y(y);
+        if (w > 0) astTable.width(w);
+        if (h > 0) astTable.height(h);
+        astTable.zOrder(tf.zOrder());
+    }
+
+    private static void annotateParagraphPageBounds(
+            ResolvedBuildContext ctx,
+            List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null) return;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
+            String domIdText = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domIdText);
+            if (tf == null || tf.composedLines() == null || tf.composedLines().isEmpty()) continue;
+            Map<Integer, List<ResolvedTextFrame.ComposedLine>> byParagraph =
+                    composedLinesByParagraph(tf);
+            if (byParagraph.isEmpty()) continue;
+            Set<ASTParagraph> processed = new HashSet<>();
+            for (List<ResolvedTextFrame.ComposedLine> lines : byParagraph.values()) {
+                ASTParagraph para = findParagraphForComposedLines(block.paragraphs(), lines, processed);
+                if (para == null) continue;
+                long[] bounds = pageRelativeLineBounds(tf, lines, ctx.resolvedData.scaleFactor());
+                if (bounds == null) continue;
+                para.pageX(bounds[0]);
+                para.pageY(bounds[1]);
+                para.pageWidth(Math.max(1, bounds[2] - bounds[0]));
+                para.pageHeight(Math.max(1, bounds[3] - bounds[1]));
+                processed.add(para);
+            }
+        }
+    }
+
+    private static long[] pageRelativeLineBounds(
+            ResolvedTextFrame tf,
+            List<ResolvedTextFrame.ComposedLine> lines,
+            double outputScale) {
+        if (tf == null || lines == null || lines.isEmpty()
+                || tf.geometricBounds() == null || tf.pageRelativeBounds() == null) return null;
+        double[] gb = tf.geometricBounds();
+        double[] pb = tf.pageRelativeBounds();
+        if (gb.length < 4 || pb.length < 4) return null;
+        double scaleY = coordinateScale(gb[2] - gb[0], pb[2] - pb[0]);
+        double scaleX = coordinateScale(gb[3] - gb[1], pb[3] - pb[1]);
+        double top = Double.POSITIVE_INFINITY;
+        double left = Double.POSITIVE_INFINITY;
+        double bottom = Double.NEGATIVE_INFINITY;
+        double right = Double.NEGATIVE_INFINITY;
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
+            double[] b = line.bounds();
+            top = Math.min(top, pb[0] + (b[0] - gb[0]) / scaleY);
+            left = Math.min(left, pb[1] + (b[1] - gb[1]) / scaleX);
+            bottom = Math.max(bottom, pb[0] + (b[2] - gb[0]) / scaleY);
+            right = Math.max(right, pb[1] + (b[3] - gb[1]) / scaleX);
+        }
+        if (!Double.isFinite(top) || !Double.isFinite(left)
+                || !Double.isFinite(bottom) || !Double.isFinite(right)
+                || bottom <= top || right <= left) {
+            return null;
+        }
+        return new long[] {
+                CoordinateConverter.pointsToHwpunits(left * outputScale),
+                CoordinateConverter.pointsToHwpunits(top * outputScale),
+                CoordinateConverter.pointsToHwpunits(right * outputScale),
+                CoordinateConverter.pointsToHwpunits(bottom * outputScale)
+        };
+    }
+
+    private static double coordinateScale(double sourceSize, double targetSize) {
+        if (!Double.isFinite(sourceSize) || !Double.isFinite(targetSize)
+                || sourceSize <= 0 || targetSize <= 0) return 1.0;
+        return sourceSize / targetSize;
+    }
+
+    private static IDMLTable loadPlannedTable(ResolvedBuildContext ctx, AnchoredTablePlan plan) {
+        if (ctx == null || plan == null || ctx.loadIDMLStory == null) return null;
+        IDMLTable nested = findTable(loadStoryByAnyId(ctx, plan.nestedStoryId), plan.nestedTableId);
+        if (nested != null) return nested;
+        IDMLTable wrapper = findTable(loadStoryByAnyId(ctx, plan.ownerStoryId), plan.wrapperTableId);
+        if (wrapper != null) return wrapper;
+        return findTable(loadStoryByAnyId(ctx, plan.ownerStoryId), plan.nestedTableId);
+    }
+
+    private static IDMLStory loadStoryByAnyId(ResolvedBuildContext ctx, String storyId) {
+        if (ctx == null || ctx.loadIDMLStory == null || storyId == null || storyId.isEmpty()) return null;
+        IDMLStory story = ctx.loadIDMLStory.apply(storyId);
+        if (story != null) return story;
+        String sourceId = ParagraphTextHelpers.domIdToSourceId(storyId);
+        if (sourceId != null && !sourceId.equals(storyId)) {
+            story = ctx.loadIDMLStory.apply(sourceId);
+            if (story != null) return story;
+        }
+        if (storyId.startsWith("u")) {
+            String decimal = ParagraphTextHelpers.domIdFromSourceId(storyId);
+            if (decimal != null && !decimal.equals(storyId)) {
+                story = ctx.loadIDMLStory.apply(decimal);
+            }
+        }
+        return story;
+    }
+
+    private static IDMLTable findTable(IDMLStory story, String tableId) {
+        if (story == null || tableId == null || story.tables() == null) return null;
+        for (IDMLTable table : story.tables()) {
+            if (table != null && tableId.equals(table.selfId())) return table;
+        }
+        return null;
+    }
+
+    private static boolean hasInlineTable(List<ASTParagraph> paragraphs, String sourceId) {
+        if (paragraphs == null || sourceId == null) return false;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph != null && paragraph.inlineTable() != null
+                    && sourceId.equals(paragraph.inlineTable().sourceId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int parseInt(String value, int fallback) {
+        if (value == null) return fallback;
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static boolean hasStandaloneStoryText(IDMLStory story) {
+        if (story == null || story.paragraphs() == null) return false;
+        for (IDMLParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null) continue;
+            String text = paragraph.getPlainText();
+            if (text == null) continue;
+            String normalized = text
+                    .replace("\uFFFC", "")
+                    .replace("\u0016", "")
+                    .replace("\u0018", "")
+                    .replace("\u0003", "")
+                    .replace("\u0007", "")
+                    .replace("\u0008", "")
+                    .trim();
+            if (!normalized.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1850,7 +2217,7 @@ public final class StoryConverter {
                 + " story=" + innerTf.storyId() + " items=" + innerFirstPara.items().size());
     }
 
-    private static List<ASTParagraph> convertStoryParagraphs(ResolvedBuildContext ctx, ResolvedStory story, boolean suppressLeftIndent) {
+    public static List<ASTParagraph> convertStoryParagraphs(ResolvedBuildContext ctx, ResolvedStory story, boolean suppressLeftIndent) {
         List<ASTParagraph> paragraphs = new ArrayList<>();
 
         if (story.paragraphs() == null) return paragraphs;
@@ -2004,7 +2371,7 @@ public final class StoryConverter {
                             }
                             if (InlineFrameHandler.isSimpleButtonLabelAnchor(ctx, anchoredId)) {
                                 ASTInlineObject inlineObj =
-                                        InlineFrameHandler.loadCompleteSimpleButtonLabelInlineObject(ctx, anchoredId);
+                                        SimpleButtonLabelInlineFactory.create(ctx, anchoredId);
                                 if (inlineObj != null) {
                                     para.addItem(inlineObj);
                                     continue;
@@ -2052,7 +2419,6 @@ public final class StoryConverter {
                         continue; // 로드 실패 시 건너뜀
                     }
 
-                    ASTTextRun textRun = new ASTTextRun();
                     String runText = run.text();
                     // 단락 경계 넘김 방지: \r 이후는 다음 단락 내용 → 잘라내고 루프 종료
                     if (truncateAtCR && runText != null) {
@@ -2083,57 +2449,25 @@ public final class StoryConverter {
                                 }
                             }
                         }
-                        runText = runText.replace("\u0003", "");
-                        runText = runText.replace("\u0007", "");
-                        runText = runText.replace("\t\u0008", preserveUnderlineBlank ? RunBuilder.underlineBlankUnit() : "");
-                        runText = runText.replace("\u0008", preserveUnderlineBlank ? RunBuilder.underlineBlankUnit() : "");
-                        runText = runText.replace("\n", "");
-                        runText = runText.replace("\r", "");
-                        // Yoon 폰트 PUA 글리프 → 안전한 유니코드 치환 (□ 빈 정답 칸)
-                        runText = runText.replace('\uE285', '\u25A1').replace('\uE287', '\u25A1').replace('\uE288', '\u25A1');
-                        // overline marker: Ó(0xD3) → \uE000{letters}\uE001 마커로 치환
-                        if (runText.indexOf('\u00D3') >= 0) {
-                            runText = RunPostProcessor.markOverlineSegments(runText);
-                        }
-                        if (!para.hasTabStops()) {
-                            runText = runText.replace("\t", " ");
-                        }
                     }
                     firstTextRunAfterLeadingAnchor = false;
-                    textRun.text(runText);
-                    if (run.charStyle() != null) {
-                        textRun.characterStyleRef(run.charStyle());
-                    }
-                    textRun.fontFamily(run.fontFamily());
-                    if (run.fontSize() != null && run.fontSize() > 0) {
-                        textRun.fontSizeHwpunits((int) Math.round(run.fontSize() * 100));
-                    }
-                    textRun.fontStyle(run.fontStyle());
-                    textRun.textColor(RunBuilder.resolveColorToHex(ctx, run.fillColor()));
-                    if (run.tracking() != null && run.tracking() != 0) {
-                        textRun.letterSpacing((short) Math.round(run.tracking() / 10.0));
-                    }
-                    if (run.horizontalScale() != null && run.horizontalScale() != 0 && run.horizontalScale() != 100) {
-                        Double vs = run.verticalScale();
-                        if (vs != null && Math.abs(run.horizontalScale() - vs) < 1.0) {
-                            // 비례 확대: fontSize에 반영
-                            if (textRun.fontSizeHwpunits() != null) {
-                                textRun.fontSizeHwpunits((int) Math.round(textRun.fontSizeHwpunits() * run.horizontalScale() / 100.0));
-                            }
-                        } else {
-                            textRun.horizontalScale((short) run.horizontalScale().doubleValue());
+                    TextStyleApplicator.ResolvedStyleOptions styleOptions =
+                            new TextStyleApplicator.ResolvedStyleOptions();
+                    styleOptions.proportionalScaleAsFontSize = true;
+                    styleOptions.applyVerticalScale = false;
+                    List<ASTTextRun> textRuns = TextRunSegmenter.fromResolvedText(
+                            runText,
+                            run,
+                            color -> RunBuilder.resolveColorToHex(ctx, color),
+                            para.hasTabStops(),
+                            preserveUnderlineBlank,
+                            styleOptions);
+                    for (ASTTextRun textRun : textRuns) {
+                        if (preserveUnderlineBlank || Boolean.TRUE.equals(run.underline())) {
+                            textRun.underline(true);
                         }
+                        para.addItem(textRun);
                     }
-                    if (run.baselineShift() != null && run.baselineShift() != 0) {
-                        textRun.baselineShift((short) run.baselineShift().doubleValue());
-                    }
-                    if (preserveUnderlineBlank || Boolean.TRUE.equals(run.underline())) {
-                        textRun.underline(true);
-                    }
-                    if (Boolean.TRUE.equals(run.strikeThru())) {
-                        textRun.strikeThrough(true);
-                    }
-                    para.addItem(textRun);
                 }
             }
 

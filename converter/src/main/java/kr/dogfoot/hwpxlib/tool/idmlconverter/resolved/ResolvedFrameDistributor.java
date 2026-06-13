@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 
 import java.util.*;
 
@@ -211,6 +212,7 @@ public class ResolvedFrameDistributor {
 
         // 같은 페이지(섹션) 내 연결 프레임들을 하나의 프레임으로 병합
         mergeSamePageFrames(astDoc);
+        annotateParagraphPageBounds(astDoc, resolved);
     }
 
     // ─── 인덱스 매핑 ────────────────────────────────────────
@@ -393,7 +395,117 @@ public class ResolvedFrameDistributor {
                    .replace("\u2009", "")   // Thin Space
                    .replace("\u0008", "")   // Backspace
                    .replace("\u00A0", "")   // Non-breaking Space
+                   .replace("\r", "")
+                   .replace("\n", "")
                    .trim();
+    }
+
+    private static void annotateParagraphPageBounds(ASTDocument astDoc, ResolvedData resolved) {
+        if (astDoc == null || resolved == null || resolved.textFrameCount() == 0) return;
+        List<ResolvedTextFrame> allFrames = resolved.textFrames();
+        for (ASTSection section : astDoc.sections()) {
+            for (ASTBlock block : section.blocks()) {
+                if (!(block instanceof ASTTextFrameBlock)) continue;
+                ASTTextFrameBlock tfb = (ASTTextFrameBlock) block;
+                if (tfb.paragraphs() == null || tfb.paragraphs().isEmpty()) continue;
+                ResolvedTextFrame rtf = matchFrame(tfb.sourceId(), allFrames);
+                if (rtf == null || rtf.composedLines() == null || rtf.composedLines().isEmpty()) continue;
+                Map<Integer, List<ResolvedTextFrame.ComposedLine>> byPara = composedLinesByParagraph(rtf);
+                Set<ASTParagraph> processed = new HashSet<>();
+                for (List<ResolvedTextFrame.ComposedLine> lines : byPara.values()) {
+                    ASTParagraph para = findParagraphForComposedLines(tfb.paragraphs(), lines, processed);
+                    if (para == null) continue;
+                    long[] bounds = pageRelativeLineBounds(rtf, lines, resolved.scaleFactor());
+                    if (bounds == null) continue;
+                    para.pageX(bounds[0]);
+                    para.pageY(bounds[1]);
+                    para.pageWidth(Math.max(1, bounds[2] - bounds[0]));
+                    para.pageHeight(Math.max(1, bounds[3] - bounds[1]));
+                    processed.add(para);
+                }
+            }
+        }
+    }
+
+    private static Map<Integer, List<ResolvedTextFrame.ComposedLine>> composedLinesByParagraph(
+            ResolvedTextFrame tf) {
+        Map<Integer, List<ResolvedTextFrame.ComposedLine>> result = new LinkedHashMap<>();
+        if (tf == null || tf.composedLines() == null) return result;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || line.paraIndex() < 0) continue;
+            result.computeIfAbsent(line.paraIndex(), k -> new ArrayList<>()).add(line);
+        }
+        return result;
+    }
+
+    private static ASTParagraph findParagraphForComposedLines(
+            List<ASTParagraph> paragraphs,
+            List<ResolvedTextFrame.ComposedLine> lines,
+            Set<ASTParagraph> processed) {
+        String expected = normalizeText(combinedComposedLineText(lines));
+        if (expected.isEmpty() || paragraphs == null) return null;
+        for (ASTParagraph para : paragraphs) {
+            if (para == null || processed.contains(para)) continue;
+            String actual = normalizeText(extractAstText(para));
+            if (actual.isEmpty()) continue;
+            if (actual.equals(expected)
+                    || actual.contains(expected)
+                    || expected.contains(actual)) {
+                return para;
+            }
+        }
+        return null;
+    }
+
+    private static String combinedComposedLineText(List<ResolvedTextFrame.ComposedLine> lines) {
+        StringBuilder sb = new StringBuilder();
+        if (lines == null) return "";
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line != null && line.text() != null) sb.append(line.text());
+        }
+        return sb.toString();
+    }
+
+    private static long[] pageRelativeLineBounds(
+            ResolvedTextFrame tf,
+            List<ResolvedTextFrame.ComposedLine> lines,
+            double outputScale) {
+        if (tf == null || lines == null || lines.isEmpty()
+                || tf.geometricBounds() == null || tf.pageRelativeBounds() == null) return null;
+        double[] gb = tf.geometricBounds();
+        double[] pb = tf.pageRelativeBounds();
+        if (gb.length < 4 || pb.length < 4) return null;
+        double scaleY = coordinateScale(gb[2] - gb[0], pb[2] - pb[0]);
+        double scaleX = coordinateScale(gb[3] - gb[1], pb[3] - pb[1]);
+        double top = Double.POSITIVE_INFINITY;
+        double left = Double.POSITIVE_INFINITY;
+        double bottom = Double.NEGATIVE_INFINITY;
+        double right = Double.NEGATIVE_INFINITY;
+        for (ResolvedTextFrame.ComposedLine line : lines) {
+            if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
+            double[] b = line.bounds();
+            top = Math.min(top, pb[0] + (b[0] - gb[0]) / scaleY);
+            left = Math.min(left, pb[1] + (b[1] - gb[1]) / scaleX);
+            bottom = Math.max(bottom, pb[0] + (b[2] - gb[0]) / scaleY);
+            right = Math.max(right, pb[1] + (b[3] - gb[1]) / scaleX);
+        }
+        if (!Double.isFinite(top) || !Double.isFinite(left)
+                || !Double.isFinite(bottom) || !Double.isFinite(right)
+                || bottom <= top || right <= left) {
+            return null;
+        }
+        return new long[] {
+                CoordinateConverter.pointsToHwpunits(left * outputScale),
+                CoordinateConverter.pointsToHwpunits(top * outputScale),
+                CoordinateConverter.pointsToHwpunits(right * outputScale),
+                CoordinateConverter.pointsToHwpunits(bottom * outputScale)
+        };
+    }
+
+    private static double coordinateScale(double sourceSize, double targetSize) {
+        if (!Double.isFinite(sourceSize) || !Double.isFinite(targetSize)
+                || sourceSize <= 0 || targetSize <= 0) return 1.0;
+        return sourceSize / targetSize;
     }
 
     // ─── 문단 분할 (프레임 경계) ─────────────────────────────
@@ -528,6 +640,7 @@ public class ResolvedFrameDistributor {
             for (Map.Entry<String, List<ASTTextFrameBlock>> mergeEntry : storyBlocks.entrySet()) {
                 List<ASTTextFrameBlock> blocks = mergeEntry.getValue();
                 if (blocks.size() < 2) continue;
+                if (shouldKeepSeparateFlowBlocks(section, blocks)) continue;
 
                 ASTTextFrameBlock target = blocks.get(0);
 
@@ -573,6 +686,75 @@ public class ResolvedFrameDistributor {
             return false;
         }
         return true;
+    }
+
+    private static boolean shouldKeepSeparateFlowBlocks(
+            ASTSection section,
+            List<ASTTextFrameBlock> blocks) {
+        if (section == null || blocks == null || blocks.size() < 2) return false;
+        if (blocksContainInlineTable(blocks)) return true;
+        return hasTableBetweenTextFrames(section, blocks);
+    }
+
+    private static boolean blocksContainInlineTable(List<ASTTextFrameBlock> blocks) {
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null) continue;
+            for (ASTParagraph paragraph : block.paragraphs()) {
+                if (paragraph == null) continue;
+                if (paragraph.inlineTable() != null) return true;
+                if (itemsContainInlineTable(paragraph.items())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean itemsContainInlineTable(List<ASTInlineItem> items) {
+        if (items == null) return false;
+        for (ASTInlineItem item : items) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return true;
+            if (paragraphsContainInlineTable(obj.paragraphs())) return true;
+        }
+        return false;
+    }
+
+    private static boolean paragraphsContainInlineTable(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null) return false;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null) continue;
+            if (paragraph.inlineTable() != null) return true;
+            if (itemsContainInlineTable(paragraph.items())) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasTableBetweenTextFrames(ASTSection section, List<ASTTextFrameBlock> blocks) {
+        long minTop = Long.MAX_VALUE;
+        long maxBottom = Long.MIN_VALUE;
+        long minLeft = Long.MAX_VALUE;
+        long maxRight = Long.MIN_VALUE;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null) continue;
+            minTop = Math.min(minTop, block.y());
+            maxBottom = Math.max(maxBottom, block.y() + block.height());
+            minLeft = Math.min(minLeft, block.x());
+            maxRight = Math.max(maxRight, block.x() + block.width());
+        }
+        if (minTop == Long.MAX_VALUE || maxBottom == Long.MIN_VALUE) return false;
+
+        for (ASTBlock block : section.blocks()) {
+            if (!(block instanceof ASTTable)) continue;
+            ASTTable table = (ASTTable) block;
+            long tableTop = table.y();
+            long tableBottom = table.y() + table.height();
+            long tableLeft = table.x();
+            long tableRight = table.x() + table.width();
+            boolean verticallyBetween = tableBottom >= minTop && tableTop <= maxBottom;
+            boolean horizontallyRelated = tableRight >= minLeft && tableLeft <= maxRight;
+            if (verticallyBetween && horizontallyRelated) return true;
+        }
+        return false;
     }
 
     private static boolean isSameLinePrefixMerge(ASTTextFrameBlock prefix, ASTTextFrameBlock body) {

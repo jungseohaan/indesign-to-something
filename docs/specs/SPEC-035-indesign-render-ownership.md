@@ -204,6 +204,9 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
   Phase 2에서 floating fallback으로 재배치하지 않는다.
 - parentId가 없는 inline TF라도 ObjectPlan이 inline text 소유를 명시하면 Phase 3 inline story 흐름이 소유한다.
 - parentless inline fallback은 ObjectPlan이 없거나, ObjectPlan이 명시적으로 floating 배치를 요구하는 경우에만 허용한다.
+- anchored table plan이 있는 TextFrame은 Y-gap/wrap split으로 여러 TextFrameBlock으로 쪼개지 않는다.
+- anchored table plan이 있는 TextFrame은 page-relative 원본 frame bounds를 보존한다. sibling visual shell이나
+  composed-line 기반 보정이 anchor flow의 기준 frame을 다시 확장/축소하면 안 된다.
 - Phase 2/3/6/7은 inline/floating 여부를 새로 판정하지 않고 plan을 실행한다.
 
 ---
@@ -234,6 +237,71 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 - 회전/기울임/복합 경계선처럼 HWPX drawText 도형 속성으로 표현하기 어려운 라벨 배경
 - 여러 visual source가 하나의 라벨 껍데기를 만들고, extractor가 텍스트 없는 shell PNG를
   안정적으로 export한 경우
+
+## Master Page Running Title
+
+마스터 페이지의 러닝 타이틀도 본문과 같은 ownership 원칙을 따른다.
+
+- 마스터 TextFrame 인스턴스가 검색/편집 가치가 있는 텍스트를 가진 경우 텍스트는 HWPX TF가 소유한다.
+- 같은 master source를 포함한 complete master PNG는 텍스트 픽셀을 포함하므로 `DROP_VISUAL`이다.
+- extractor가 같은 source 묶음의 text-free `_fallback_` master PNG를 제공하면 그 fallback만 visual을 소유한다.
+- complete master PNG와 HWPX 마스터 TF가 동시에 보이면 ownership 오류다.
+- complete master PNG와 fallback master PNG가 동시에 보이면 ownership 오류다.
+
+---
+
+## Anchored Table Flow
+
+InDesign Story 안의 table marker가 실제 표를 가리키는 경우, source concept는 독립 page table이 아니라
+"이 TextFrame의 본문 흐름 중 이 문단 뒤에 표가 온다"이다.
+
+대표 구조:
+
+- owner TextFrame의 Story 본문에 table marker가 있다.
+- marker table 또는 wrapper table의 셀 안에 nested TextFrame/table이 있다.
+- nested table의 시각 위치는 owner TextFrame의 본문 흐름 안에서 anchor로 결정된다.
+
+Ownership:
+
+- owner TextFrame의 본문 단락은 `OWNED_BY_HWPX_TEXT`다.
+- nested table의 텍스트/셀/선은 HWPX table이 소유한다.
+- wrapper table, nested table, anchored child TextFrame은 하나의 anchored table plan으로 묶는다.
+- 같은 anchored source를 floating table, inline table, PNG fallback으로 동시에 배치하지 않는다.
+
+배치 원칙:
+
+- owner TextFrame은 하나의 HWPX 글상자다.
+- anchored table은 owner 글상자 내부 flow의 inline table로 삽입한다.
+- anchored table로 소비된 marker-only paragraph는 별도 빈 HWPX 문단으로 남기지 않는다.
+- inline table만 담는 carrier paragraph는 본문/기본 문단 행간을 상속하지 않는다. carrier paragraph는 0 margin + table height fixed line spacing을 사용하고, 같은 높이의 `linesegarray`를 명시해 line box 자체가 table 높이를 소유하게 한다.
+- table-only carrier의 table object는 `treatAsChar=true`, `flowWithText=true`, `allowOverlap=false`, `affectLSpacing=true`, `horzRelTo=COLUMN`, `vertRelTo=PARA`, `vertAlign=TOP`로 배치한다. 즉 table을 강제 좌표로 끼우지 않고 carrier line top에 붙여 다음 paragraph가 table bottom 뒤에서 흐르게 한다.
+- table 앞/뒤 단락을 독립 floating TextFrame으로 분리하지 않는다.
+- `A-TF → B-table → C-TF`처럼 보이는 경우라도 원본 Story가 하나의 TextFrame flow이면
+  A/B/C를 하나의 글상자 내부 순서로 유지한다.
+- HWPX가 nested table을 별도 `<hp:tbl>`로 표현하더라도 그것은 owner 글상자 내부의 inline table이어야 한다.
+
+금지되는 보정:
+
+- anchored table을 본문 글상자 밖의 floating table로 승격
+- table 앞/뒤 paragraph를 개별 TF로 물리 분리
+- Y-gap split, wrap split, composed-line split으로 owner TextFrame을 여러 block으로 쪼개기
+- table bbox에 맞추기 위해 owner TextFrame bounds를 sibling shell 기준으로 재확장
+- table을 좌표 기반으로 끼워 맞추고 Story 순서를 무시하는 배치
+- HWPX 렌더러의 nested inline table flow 문제를 피하려고 owner 글상자 내부를 `text rows → table row → text rows` 같은 물리 행으로 강제 분리
+
+좌표 정책:
+
+- owner TextFrame의 page-relative bounds가 anchor flow의 기준이다.
+- table-only owner TextFrame이 있는 IDML Table은 그 owner TextFrame이 placement owner다.
+  resolved table bounds는 paragraph/story 기반 추정값일 수 있으므로 owner frame보다 우선하지 않는다.
+- table-only owner bounds를 적용할 때는 x/y뿐 아니라 outer width/height도 함께 적용하고,
+  column/row 크기는 그 외곽 크기에 비례해 정규화한다.
+- composedLine bounds는 paragraph diagnostics와 line-level 보조 정보로만 사용한다.
+- composedLine bounds가 필요할 때도 owner TextFrame의 page-relative 좌표계로 환산해야 한다.
+- coordinate normalization 차이 때문에 `geometricBounds`와 `pageRelativeBounds`를 직접 섞어
+  page origin을 추정하지 않는다.
+
+예외가 필요해 보이면 table ownership plan이 틀린 것이다. 페이지/문구/좌표로 table 위치를 보정하지 않는다.
 
 ---
 

@@ -7,6 +7,13 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTabStop;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 
@@ -652,8 +659,9 @@ public class ASTStoryConverter {
                 if (hasRuleBelowOn(p, idmlDoc)) { hasRuleBelow = true; break; }
             }
             if (hasRuleBelow) {
-                double w0 = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
-                double h0 = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+                double[] sizePt = inlineTextFrameSizePoints(tf, resolvedData);
+                double w0 = sizePt[0];
+                double h0 = sizePt[1];
                 ASTInlineObject obj0 = new ASTInlineObject();
                 obj0.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
                 obj0.sourceId(tf.selfId());
@@ -674,8 +682,9 @@ public class ASTStoryConverter {
                 return obj0;
             }
             // 채움색이 있는 시각 요소는 빈 콘텐츠여도 유지 (핑크 원 등)
-            double w0 = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
-            double h0 = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+            double[] sizePt = inlineTextFrameSizePoints(tf, resolvedData);
+            double w0 = sizePt[0];
+            double h0 = sizePt[1];
             if (w0 > 0 && h0 > 0 && tf.fillColor() != null
                     && !"Swatch/None".equals(tf.fillColor())) {
                 String fill = colorResolver.resolve(tf.fillColor());
@@ -697,8 +706,9 @@ public class ASTStoryConverter {
         obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
         obj.sourceId(tf.selfId());
 
-        double w = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
-        double h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+        double[] sizePt = inlineTextFrameSizePoints(tf, resolvedData);
+        double w = sizePt[0];
+        double h = sizePt[1];
         obj.width(CoordinateConverter.pointsToHwpunits(w));
         obj.height(CoordinateConverter.pointsToHwpunits(h));
 
@@ -716,38 +726,52 @@ public class ASTStoryConverter {
         obj.verticalJustification(tf.verticalJustification());
 
         // 내부 여백 전달
-        if (tf.insetSpacing() != null) {
-            double[] inset = tf.insetSpacing();
+        double[] inset = inlineTextFrameInsetPoints(tf, resolvedData);
+        if (inset != null) {
             obj.textMarginTop(CoordinateConverter.pointsToHwpunits(inset[0]));
             obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
             obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
             obj.textMarginRight(CoordinateConverter.pointsToHwpunits(inset[3]));
         }
 
-        // 인라인 스토리의 단락을 ASTParagraph로 변환 (큰 이미지는 별도 단락으로 분리)
-        FlattenedObjectPool emptyPool = new FlattenedObjectPool();
-        for (IDMLParagraph idmlPara : inlineStory.paragraphs()) {
-            ASTParagraph astPara = convertParagraph(idmlPara, emptyPool, idmlDoc, colorResolver, imageLoader, false, resolvedData);
-            if (astPara != null && !astPara.items().isEmpty()) {
-                // RuleBelow → 텍스트 런에 밑줄 전파 (답안 밑줄선)
-                if (hasRuleBelowOn(idmlPara, idmlDoc)) {
-                    for (ASTInlineItem item : astPara.items()) {
-                        if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
-                            ((ASTTextRun) item).underline(true);
+        ResolvedTextFrame resolvedTf = findResolvedTextFrame(resolvedData, tf.selfId());
+        ResolvedStory resolvedStory = resolvedInlineStory(resolvedData, resolvedTf);
+        if (shouldUseResolvedInlineStory(inlineStory, resolvedStory)) {
+            for (ASTParagraph astPara : convertResolvedInlineStory(resolvedStory, colorResolver)) {
+                if (astPara != null && !astPara.items().isEmpty()) {
+                    obj.addParagraph(astPara);
+                }
+            }
+        } else {
+            // 인라인 스토리의 단락을 ASTParagraph로 변환 (큰 이미지는 별도 단락으로 분리)
+            FlattenedObjectPool emptyPool = new FlattenedObjectPool();
+            for (IDMLParagraph idmlPara : inlineStory.paragraphs()) {
+                ASTParagraph astPara = convertParagraph(idmlPara, emptyPool, idmlDoc, colorResolver, imageLoader, false, resolvedData);
+                if (astPara != null && !astPara.items().isEmpty()) {
+                    // RuleBelow → 텍스트 런에 밑줄 전파 (답안 밑줄선)
+                    if (hasRuleBelowOn(idmlPara, idmlDoc)) {
+                        for (ASTInlineItem item : astPara.items()) {
+                            if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                                ((ASTTextRun) item).underline(true);
+                            }
                         }
                     }
-                }
-                for (ASTParagraph split : splitParagraphAtLargeImages(astPara)) {
-                    obj.addParagraph(split);
+                    for (ASTParagraph split : splitParagraphAtLargeImages(astPara)) {
+                        obj.addParagraph(split);
+                    }
                 }
             }
         }
-
-        // 인라인 스토리의 테이블을 ASTTable로 변환
-        for (IDMLTable idmlTable : inlineStory.tables()) {
-            ASTTable table = convertInlineTable(idmlTable, idmlDoc, colorResolver, imageLoader);
-            if (table != null) {
-                obj.addInlineTable(table);
+        boolean tableOwnedByPageLevel =
+                TableFrameOwnershipPolicy.shouldPlaceInlineTableAsPageLevel(resolvedTf, inlineStory);
+        if (!tableOwnedByPageLevel) {
+            // 인라인 스토리의 테이블을 ASTTable로 변환
+            for (IDMLTable idmlTable : inlineStory.tables()) {
+                ASTTable table = convertInlineTable(idmlTable, idmlDoc, colorResolver, imageLoader);
+                if (table != null) {
+                    replaceInlineTableCellTextWithResolvedStory(table, resolvedStory, colorResolver);
+                    obj.addInlineTable(table);
+                }
             }
         }
 
@@ -758,6 +782,257 @@ public class ASTStoryConverter {
         boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
         boolean hasTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
         return (hasParagraphs || hasTables) ? obj : null;
+    }
+
+    private static void replaceInlineTableCellTextWithResolvedStory(
+            ASTTable table, ResolvedStory resolvedStory, ColorResolver colorResolver) {
+        if (table == null || !shouldUseResolvedInlineStory(null, resolvedStory)) return;
+        if (!isSingleCellTableShell(table)) return;
+        String tableText = normalizeComparableText(plainText(table));
+        String storyText = normalizeComparableText(resolvedStoryText(resolvedStory));
+        if (tableText.isEmpty() || storyText.isEmpty()) return;
+        if (!tableText.equals(storyText) && !storyText.startsWith(tableText) && !tableText.startsWith(storyText)) return;
+
+        ASTTableCell cell = firstContentCell(table);
+        if (cell == null) return;
+        List<ASTParagraph> resolvedParagraphs = convertResolvedInlineStory(resolvedStory, colorResolver);
+        if (resolvedParagraphs == null || resolvedParagraphs.isEmpty()) return;
+        cell.paragraphs().clear();
+        cell.paragraphs().addAll(resolvedParagraphs);
+    }
+
+    private static ASTTableCell firstContentCell(ASTTable table) {
+        if (table.rows() == null) return null;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell != null && cell.paragraphs() != null && !cell.paragraphs().isEmpty()) return cell;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isSingleCellTableShell(ASTTable table) {
+        if (table == null || table.rows() == null) return false;
+        int cells = 0;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            cells += row.cells().size();
+            if (cells > 1) return false;
+        }
+        return cells == 1;
+    }
+
+    private static String plainText(ASTTable table) {
+        StringBuilder sb = new StringBuilder();
+        if (table.rows() == null) return "";
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                for (ASTParagraph paragraph : cell.paragraphs()) {
+                    if (paragraph == null) continue;
+                    String text = ParagraphTextHelpers.getParaPlainText(paragraph);
+                    if (text != null) sb.append(text);
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String resolvedStoryText(ResolvedStory story) {
+        StringBuilder sb = new StringBuilder();
+        if (story == null || story.paragraphs() == null) return "";
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+                sb.append(run.text());
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String normalizeComparableText(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008') continue;
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
+            sb.append(ch);
+        }
+        return sb.toString();
+    }
+
+    private static ResolvedStory resolvedInlineStory(ResolvedData resolvedData, ResolvedTextFrame resolvedTf) {
+        if (resolvedData == null || resolvedTf == null || resolvedTf.storyId() == null) {
+            return null;
+        }
+        return resolvedData.getStory(resolvedTf.storyId());
+    }
+
+    private static boolean shouldUseResolvedInlineStory(IDMLStory inlineStory, ResolvedStory resolvedStory) {
+        if (resolvedStory == null || resolvedStory.paragraphs() == null || resolvedStory.paragraphs().isEmpty()) {
+            return false;
+        }
+        if (inlineStory == null || inlineStory.paragraphs() == null || inlineStory.paragraphs().isEmpty()) {
+            return true;
+        }
+        if (resolvedStory.paragraphs().size() > inlineStory.paragraphs().size()) {
+            return true;
+        }
+        for (IDMLParagraph para : inlineStory.paragraphs()) {
+            if (para == null || para.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : para.characterRuns()) {
+                String text = run != null ? run.content() : null;
+                if (hasEmbeddedParagraphBreak(text)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasEmbeddedParagraphBreak(String text) {
+        if (text == null) return false;
+        int idx = text.indexOf('\r');
+        return idx >= 0 && idx + 1 < text.length();
+    }
+
+    private static List<ASTParagraph> convertResolvedInlineStory(ResolvedStory story,
+                                                                  ColorResolver colorResolver) {
+        List<ASTParagraph> paragraphs = new ArrayList<>();
+        for (ResolvedParagraph resolvedPara : story.paragraphs()) {
+            ASTParagraph para = new ASTParagraph();
+            if (resolvedPara.styleName() != null) {
+                para.paragraphStyleRef(resolvedPara.styleName());
+            }
+            if (resolvedPara.justification() != null) {
+                para.alignment(resolvedPara.justification());
+            }
+            Double fixedLeading = resolvedPara.fixedLeading();
+            if (fixedLeading != null && fixedLeading > 0) {
+                para.lineSpacingType("fixed");
+                para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
+            }
+            if (resolvedPara.spaceBefore() != null && resolvedPara.spaceBefore() > 0) {
+                para.spaceBefore(CoordinateConverter.pointsToHwpunits(resolvedPara.spaceBefore()));
+            }
+            if (resolvedPara.spaceAfter() != null && resolvedPara.spaceAfter() > 0) {
+                para.spaceAfter(CoordinateConverter.pointsToHwpunits(resolvedPara.spaceAfter()));
+            }
+            if (resolvedPara.leftIndent() != null && resolvedPara.leftIndent() != 0) {
+                para.leftMargin(CoordinateConverter.pointsToHwpunits(resolvedPara.leftIndent()));
+            }
+            if (resolvedPara.rightIndent() != null && resolvedPara.rightIndent() != 0) {
+                para.rightMargin(CoordinateConverter.pointsToHwpunits(resolvedPara.rightIndent()));
+            }
+            if (resolvedPara.firstLineIndent() != null && resolvedPara.firstLineIndent() != 0) {
+                para.firstLineIndent(CoordinateConverter.pointsToHwpunits(resolvedPara.firstLineIndent()));
+            }
+            if (resolvedPara.hasTabStops()) {
+                double leftPt = resolvedPara.leftIndent() != null ? resolvedPara.leftIndent() : 0;
+                for (ResolvedTabStop tabStop : resolvedPara.tabStops()) {
+                    if (tabStop.position() == null || tabStop.position() <= 0) continue;
+                    double posPt = tabStop.position() - leftPt;
+                    if (posPt < 0) posPt = 0;
+                    para.addTabStop(new ASTTabStop(
+                            CoordinateConverter.pointsToHwpunits(posPt),
+                            mapTabAlignment(tabStop.alignment()),
+                            tabStop.leader()));
+                }
+            }
+            addResolvedRuns(para, resolvedPara, colorResolver);
+            paragraphs.add(para);
+        }
+        return paragraphs;
+    }
+
+    private static void addResolvedRuns(ASTParagraph para,
+                                        ResolvedParagraph resolvedPara,
+                                        ColorResolver colorResolver) {
+        if (resolvedPara.runs() == null) return;
+        for (ResolvedRun resolvedRun : resolvedPara.runs()) {
+            TextRunSegmenter.Result result = TextRunSegmenter.fromResolvedRun(
+                    resolvedRun,
+                    colorResolver,
+                    para.hasTabStops(),
+                    false,
+                    true);
+            for (ASTTextRun run : result.runs()) {
+                para.addItem(run);
+            }
+            if (result.stopAfterRun()) break;
+        }
+    }
+
+    /**
+     * Inline/nested TextFrame의 authored size는 resolved Stage의 page-relative bounds를 우선한다.
+     * IDML Story 안에 중첩된 TextFrame은 local geometry가 문서 측정 단위(mm 등)로 파싱될 수 있어,
+     * raw geometry만 사용하면 HWPX drawText 박스가 scaleFactor만큼 작아진다.
+     */
+    private static double[] inlineTextFrameSizePoints(IDMLTextFrame tf, ResolvedData resolvedData) {
+        ResolvedTextFrame resolvedTf = findResolvedTextFrame(resolvedData, tf != null ? tf.selfId() : null);
+        double[] pageRelative = resolvedTf != null ? resolvedTf.pageRelativeBounds() : null;
+        if (validBounds(pageRelative)) {
+            double scale = resolvedData != null && resolvedData.scaleFactor() > 0
+                    ? resolvedData.scaleFactor() : 1.0;
+            double w = Math.abs(pageRelative[3] - pageRelative[1]) * scale;
+            double h = Math.abs(pageRelative[2] - pageRelative[0]) * scale;
+            if (w > 0 && h > 0) return new double[]{w, h};
+        }
+
+        double[] resolvedGb = resolvedTf != null ? resolvedTf.geometricBounds() : null;
+        if (validBounds(resolvedGb)) {
+            double w = Math.abs(resolvedGb[3] - resolvedGb[1]);
+            double h = Math.abs(resolvedGb[2] - resolvedGb[0]);
+            if (w > 0 && h > 0) return new double[]{w, h};
+        }
+
+        if (tf == null) return new double[]{0, 0};
+        double w = IDMLGeometry.transformedWidth(tf.geometricBounds(), tf.itemTransform());
+        double h = IDMLGeometry.transformedHeight(tf.geometricBounds(), tf.itemTransform());
+        return new double[]{w, h};
+    }
+
+    private static double[] inlineTextFrameInsetPoints(IDMLTextFrame tf, ResolvedData resolvedData) {
+        ResolvedTextFrame resolvedTf = findResolvedTextFrame(resolvedData, tf != null ? tf.selfId() : null);
+        if (resolvedTf != null && resolvedTf.insetSpacing() != null
+                && resolvedTf.insetSpacing().length >= 4) {
+            return resolvedTf.insetSpacing();
+        }
+        return tf != null ? tf.insetSpacing() : null;
+    }
+
+    private static boolean validBounds(double[] bounds) {
+        return bounds != null && bounds.length >= 4
+                && Double.isFinite(bounds[0])
+                && Double.isFinite(bounds[1])
+                && Double.isFinite(bounds[2])
+                && Double.isFinite(bounds[3])
+                && bounds[2] > bounds[0]
+                && bounds[3] > bounds[1];
+    }
+
+    private static ResolvedTextFrame findResolvedTextFrame(ResolvedData resolvedData, String idmlSelfId) {
+        if (resolvedData == null || idmlSelfId == null) return null;
+        String id = decimalDomId(idmlSelfId);
+        if (id == null) return null;
+        return resolvedData.getTextFrame(id);
+    }
+
+    private static String decimalDomId(String idmlSelfId) {
+        if (idmlSelfId == null) return null;
+        String value = idmlSelfId;
+        if (value.startsWith("u") || value.startsWith("U")) value = value.substring(1);
+        int i = value.lastIndexOf('i');
+        if (i >= 0 && i + 1 < value.length()) value = value.substring(i + 1);
+        try {
+            return String.valueOf(Integer.parseInt(value, 16));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**

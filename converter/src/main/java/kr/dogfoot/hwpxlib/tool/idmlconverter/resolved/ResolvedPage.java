@@ -51,12 +51,13 @@ public class ResolvedPage {
      * - page.bounds는 항상 spread 좌표 (오른쪽 페이지: left=pageWidth)
      * - pageItem.geometricBounds는 rulerOrigin에 따라 page-relative일 수 있음
      *
-     * 감지 방법: 아이템 오른쪽 끝(gb[3])이 페이지 left(pb[1])보다 작으면
-     * 아이템 좌표가 이미 페이지 상대 → offset 적용 안 함.
+     * 감지 방법: 오른쪽 페이지에서 아이템 left가 페이지 left보다 작으면
+     * 아이템 좌표가 이미 페이지 상대이거나 spread를 가로지르는 page-local
+     * geometry이다. 이 경우 offset을 적용하지 않는다.
      */
     public double[] toPageRelative(double[] gb) {
         if (bounds == null || gb == null) return null;
-        boolean pageRelativeCoords = bounds[1] > 1.0 && gb[3] < bounds[1];
+        boolean pageRelativeCoords = bounds[1] > 1.0 && gb[1] < bounds[1];
         double x = pageRelativeCoords ? gb[1] : (gb[1] - bounds[1]);
         double y = pageRelativeCoords ? gb[0] : (gb[0] - bounds[0]);
         return new double[]{x, y};

@@ -15,6 +15,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase5.WrapPhas
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7.RenderableFramePlacer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
@@ -213,6 +215,8 @@ public class ResolvedToASTBuilder {
      */
     private void planOwnership() {
         OwnershipPlanner.runObservation(this.ctx);
+        AnchoredTablePlanner.plan(this.ctx);
+        SimpleButtonLabelPlanner.plan(this.ctx);
     }
 
     /**

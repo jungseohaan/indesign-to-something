@@ -5,13 +5,17 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextRunSegmenter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -325,22 +329,7 @@ public class InlineFrameHandler {
             String jamoText = childTf.frameVisibleText().replace("￼", "").replace("\r", "").replace("\n", "").trim();
             ASTParagraph paraInner = new ASTParagraph();
             paraInner.alignment("CENTER");
-            ASTTextRun textRun = new ASTTextRun();
-            textRun.text(jamoText);
-            ResolvedStory story = childTf.storyId() != null ? ctx.resolvedData.getStory(childTf.storyId()) : null;
-            if (story != null && !story.paragraphs().isEmpty()) {
-                ResolvedParagraph rp = story.paragraphs().get(0);
-                if (rp.runs() != null && !rp.runs().isEmpty()) {
-                    ResolvedRun rr = rp.runs().get(0);
-                    if (rr.fontFamily() != null) textRun.fontFamily(rr.fontFamily());
-                    if (rr.fontStyle() != null) textRun.fontStyle(rr.fontStyle());
-                    if (rr.fontSize() != null && rr.fontSize() > 0) {
-                        textRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
-                    }
-                    if (rr.fillColor() != null) textRun.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
-                }
-            }
-            paraInner.addItem(textRun);
+            addSyntheticRunsFromTextFrame(ctx, paraInner, childTf, jamoText);
             obj.addParagraph(paraInner);
             obj.verticalJustification("CenterAlign");
 
@@ -408,22 +397,7 @@ public class InlineFrameHandler {
 
                 ASTParagraph paraInner = new ASTParagraph();
                 paraInner.alignment("CENTER");
-                ASTTextRun textRun = new ASTTextRun();
-                textRun.text(cleaned);
-                ResolvedStory story = nestedTf.storyId() != null ? ctx.resolvedData.getStory(nestedTf.storyId()) : null;
-                if (story != null && !story.paragraphs().isEmpty()) {
-                    ResolvedParagraph rp = story.paragraphs().get(0);
-                    if (rp.runs() != null && !rp.runs().isEmpty()) {
-                        ResolvedRun rr = rp.runs().get(0);
-                        if (rr.fontFamily() != null) textRun.fontFamily(rr.fontFamily());
-                        if (rr.fontStyle() != null) textRun.fontStyle(rr.fontStyle());
-                        if (rr.fontSize() != null && rr.fontSize() > 0) {
-                            textRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
-                        }
-                        if (rr.fillColor() != null) textRun.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
-                    }
-                }
-                paraInner.addItem(textRun);
+                addSyntheticRunsFromTextFrame(ctx, paraInner, nestedTf, cleaned);
                 obj.addParagraph(paraInner);
                 obj.verticalJustification("CenterAlign");
 
@@ -528,22 +502,7 @@ public class InlineFrameHandler {
 
             ASTParagraph paraInner = new ASTParagraph();
             paraInner.alignment("CENTER");
-            ASTTextRun textRun = new ASTTextRun();
-            textRun.text(cleaned);
-            ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
-            if (story != null && !story.paragraphs().isEmpty()) {
-                ResolvedParagraph rp = story.paragraphs().get(0);
-                if (rp.runs() != null && !rp.runs().isEmpty()) {
-                    ResolvedRun rr = rp.runs().get(0);
-                    if (rr.fontFamily() != null) textRun.fontFamily(rr.fontFamily());
-                    if (rr.fontStyle() != null) textRun.fontStyle(rr.fontStyle());
-                    if (rr.fontSize() != null && rr.fontSize() > 0) {
-                        textRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
-                    }
-                    if (rr.fillColor() != null) textRun.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
-                }
-            }
-            paraInner.addItem(textRun);
+            addSyntheticRunsFromTextFrame(ctx, paraInner, tf, cleaned);
             obj.addParagraph(paraInner);
             obj.verticalJustification("CenterAlign");
 
@@ -1331,14 +1290,7 @@ public class InlineFrameHandler {
     }
 
     public static boolean isSimpleButtonLabelAnchor(ResolvedBuildContext ctx, int anchoredObjectId) {
-        if (ctx == null || ctx.resolvedData == null) return false;
-        if (ctx.resolvedData.isSimpleButtonLabelTextFrame(String.valueOf(anchoredObjectId))) {
-            return true;
-        }
-        if (findCompleteSimpleButtonLabelRender(ctx, anchoredObjectId) != null) {
-            return true;
-        }
-        return findSimpleButtonLabelChildTextFrame(ctx, anchoredObjectId) != null;
+        return SimpleButtonLabelInlineFactory.hasPlan(ctx, anchoredObjectId);
     }
 
     private static ResolvedTextFrame findSimpleButtonLabelChildTextFrame(
@@ -1363,26 +1315,85 @@ public class InlineFrameHandler {
 
     /** 배지 텍스트 단락 빌드 (CENTER 정렬, 폰트 속성 복사). INLINE_TEXT_FRAME/INLINE_BADGE_GROUP 공용. */
     private static void buildBadgeParagraph(ResolvedBuildContext ctx, ResolvedTextFrame childTf, ASTInlineObject obj) {
+        if (ctx != null && ctx.resolvedData != null && childTf != null && childTf.storyId() != null) {
+            ResolvedStory story = ctx.resolvedData.getStory(childTf.storyId());
+            if (shouldUseResolvedParagraphsForInlineShell(story)) {
+                List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story, false);
+                if (paragraphs != null && !paragraphs.isEmpty()) {
+                    for (ASTParagraph paragraph : paragraphs) {
+                        obj.addParagraph(paragraph);
+                    }
+                    return;
+                }
+            }
+        }
         String text = childTf.frameVisibleText().replace("￼", "").replace("\r", "").replace("\n", "").trim();
         ASTParagraph paraInner = new ASTParagraph();
         paraInner.alignment("CENTER");
-        ASTTextRun textRun = new ASTTextRun();
-        textRun.text(text);
-        ResolvedStory story = childTf.storyId() != null ? ctx.resolvedData.getStory(childTf.storyId()) : null;
+        addSyntheticRunsFromTextFrame(ctx, paraInner, childTf, text);
+        obj.addParagraph(paraInner);
+    }
+
+    private static boolean shouldUseResolvedParagraphsForInlineShell(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return false;
+        int visibleParagraphs = 0;
+        int visibleRuns = 0;
+        int visibleChars = 0;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            boolean hasText = false;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+                String text = run.text().replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+                if (text.isEmpty()) continue;
+                visibleRuns++;
+                visibleChars += text.length();
+                hasText = true;
+            }
+            if (hasText) visibleParagraphs++;
+        }
+        return visibleParagraphs > 1 || visibleRuns > 1 || visibleChars > 20;
+    }
+
+    private static void addSyntheticRunsFromTextFrame(ResolvedBuildContext ctx,
+                                                      ASTParagraph paragraph,
+                                                      ResolvedTextFrame textFrame,
+                                                      String text) {
+        if (paragraph == null || text == null || text.isEmpty()) return;
+        ResolvedRun sourceRun = firstResolvedRun(ctx, textFrame);
+        List<ASTTextRun> runs;
+        if (sourceRun != null) {
+            runs = TextRunSegmenter.fromResolvedText(
+                    text,
+                    sourceRun,
+                    color -> RunBuilder.resolveColorToHex(ctx, color),
+                    paragraph.hasTabStops(),
+                    false,
+                    null);
+        } else {
+            runs = TextRunSegmenter.fromSyntheticText(text, null, paragraph.hasTabStops());
+        }
+        for (ASTTextRun run : runs) {
+            paragraph.addItem(run);
+        }
+    }
+
+    private static ResolvedRun firstResolvedRun(ResolvedBuildContext ctx, ResolvedTextFrame textFrame) {
+        if (ctx == null || ctx.resolvedData == null || textFrame == null || textFrame.storyId() == null) {
+            return null;
+        }
+        ResolvedStory story = ctx.resolvedData.getStory(textFrame.storyId());
         if (story != null && !story.paragraphs().isEmpty()) {
             ResolvedParagraph rp = story.paragraphs().get(0);
             if (rp.runs() != null && !rp.runs().isEmpty()) {
-                ResolvedRun rr = rp.runs().get(0);
-                if (rr.fontFamily() != null) textRun.fontFamily(rr.fontFamily());
-                if (rr.fontStyle() != null) textRun.fontStyle(rr.fontStyle());
-                if (rr.fontSize() != null && rr.fontSize() > 0) {
-                    textRun.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+                for (ResolvedRun run : rp.runs()) {
+                    if (run != null && !run.isInlineAnchor() && run.text() != null && !run.text().isEmpty()) {
+                        return run;
+                    }
                 }
-                if (rr.fillColor() != null) textRun.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
             }
         }
-        paraInner.addItem(textRun);
-        obj.addParagraph(paraInner);
+        return null;
     }
 
     /**
@@ -1413,10 +1424,10 @@ public class InlineFrameHandler {
         String fillName = tf.fillColor();
         if (fillName == null || "None".equals(fillName) || "[None]".equals(fillName)) return null;
 
-        double[] gb = tf.geometricBounds();
-        if (gb == null || gb.length < 4) return null;
-        double w = Math.abs(gb[3] - gb[1]);
-        double h = Math.abs(gb[2] - gb[0]);
+        double[] sizePt = textFrameSizePoints(ctx, tf);
+        if (sizePt == null) return null;
+        double w = sizePt[0];
+        double h = sizePt[1];
         if (w <= 0 || h <= 0) return null;
 
         ASTInlineObject obj = new ASTInlineObject();
@@ -1507,6 +1518,12 @@ public class InlineFrameHandler {
                     continue;
                 }
 
+                ASTInlineObject inlineTableFrame = tryInlineTextFrameWithTables(ctx, childId);
+                if (inlineTableFrame != null) {
+                    items.add(inlineTableFrame);
+                    continue;
+                }
+
                 ASTInlineObject emptyBox = tryInlineEmptyFilledBoxAsFrame(ctx, childId);
                 if (emptyBox != null) {
                     items.add(emptyBox);
@@ -1532,17 +1549,260 @@ public class InlineFrameHandler {
 
             String text = rr.text();
             if (text == null || text.isEmpty()) continue;
-            text = text.replace("\r", "").replace("\n", "");
-            if (text.isEmpty()) continue;
-            ASTTextRun textRun = new ASTTextRun();
-            textRun.text(text);
-            applyResolvedRunStyle(ctx, textRun, rr);
-            if (parentFrameUnderline) textRun.underline(true);
-            items.add(textRun);
+            List<ASTTextRun> textRuns = TextRunSegmenter.fromResolvedText(
+                    text,
+                    rr,
+                    color -> RunBuilder.resolveColorToHex(ctx, color),
+                    false,
+                    false,
+                    null);
+            for (ASTTextRun textRun : textRuns) {
+                if (parentFrameUnderline) textRun.underline(true);
+                items.add(textRun);
+            }
         }
 
         if (!hasNestedAnchor || items.isEmpty()) return null;
         return items;
+    }
+
+    static ASTInlineObject tryInlineTextFrameWithTables(ResolvedBuildContext ctx, int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.loadIDMLStory == null) return null;
+        if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+
+        String domId = String.valueOf(anchoredObjectId);
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
+
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(domId);
+        double[] sizePt = tf != null ? textFrameSizePoints(ctx, tf) : null;
+        if (sizePt == null) {
+            ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(domId);
+            double[] gb = anchorItem != null ? anchorItem.geometricBounds() : null;
+            if (validBounds(gb)) {
+                sizePt = new double[]{
+                        Math.abs(gb[3] - gb[1]),
+                        Math.abs(gb[2] - gb[0])
+                };
+            }
+        }
+        if (sizePt != null) {
+            obj.width(CoordinateConverter.pointsToHwpunits(sizePt[0]));
+            obj.height(CoordinateConverter.pointsToHwpunits(sizePt[1]));
+        }
+
+        if (tf != null) {
+            appendInlineTablesFromTextFrame(ctx, obj, tf);
+        } else {
+            for (ResolvedTextFrame childTf : findInlineTableTextFrameDescendants(ctx, domId)) {
+                appendInlineTablesFromTextFrame(ctx, obj, childTf);
+            }
+        }
+
+        return obj.inlineTables() != null && !obj.inlineTables().isEmpty() ? obj : null;
+    }
+
+    private static java.util.List<ResolvedTextFrame> findInlineTableTextFrameDescendants(
+            ResolvedBuildContext ctx, String anchorIdStr) {
+        java.util.List<ResolvedTextFrame> result = new java.util.ArrayList<>();
+        for (ResolvedTextFrame childTf : ctx.resolvedData.textFrames()) {
+            if (childTf == null || !childTf.isInline()) continue;
+            if (!ctx.resolvedData.isEditableTextFrame(childTf.id())) continue;
+            if (childTf.storyId() == null) continue;
+            IDMLStory story = ctx.loadIDMLStory.apply(childTf.storyId());
+            if (story == null || !story.hasTables()) continue;
+            String curId = childTf.id();
+            int depth = 0;
+            boolean isDesc = false;
+            while (curId != null && depth < 8) {
+                ResolvedPageItem pi = ctx.resolvedData.getPageItem(curId);
+                if (pi == null) break;
+                String pid = pi.parentId();
+                if (pid == null) break;
+                if (anchorIdStr.equals(pid)) { isDesc = true; break; }
+                curId = pid;
+                depth++;
+            }
+            if (isDesc) result.add(childTf);
+        }
+        result.sort((a, b) -> {
+            double[] ab = a.geometricBounds();
+            double[] bb = b.geometricBounds();
+            if (ab == null || bb == null) return 0;
+            double ay = ab[0], by = bb[0];
+            if (Math.abs(ay - by) > 1.0) return Double.compare(ay, by);
+            return Double.compare(ab[1], bb[1]);
+        });
+        return result;
+    }
+
+    private static void appendInlineTablesFromTextFrame(
+            ResolvedBuildContext ctx, ASTInlineObject obj, ResolvedTextFrame tf) {
+        if (tf == null || !tf.isInline() || tf.storyId() == null) return;
+        if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return;
+        IDMLStory story = ctx.loadIDMLStory.apply(tf.storyId());
+        if (story == null || !story.hasTables()) return;
+        if (TableFrameOwnershipPolicy.shouldPlaceInlineTableAsPageLevel(ctx, tf, story)) return;
+
+        for (IDMLTable idmlTable : story.tables()) {
+            ASTTable table = TableBuilder.buildPreparedAstTable(ctx, idmlTable, 0, 0, 0);
+            if (table != null) {
+                replaceInlineTableCellTextWithResolvedStory(ctx, tf, table);
+                obj.addInlineTable(table);
+                if (obj.width() <= 0) obj.width(table.width());
+                if (obj.height() <= 0) obj.height(table.height());
+            }
+        }
+    }
+
+    private static void replaceInlineTableCellTextWithResolvedStory(
+            ResolvedBuildContext ctx, ResolvedTextFrame tf, ASTTable table) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.storyId() == null || table == null) return;
+        if (replaceCellContentWithNestedTextFrame(table)) return;
+
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (!shouldUseResolvedParagraphsForInlineShell(story)) return;
+        if (!isSingleCellTableShell(table)) return;
+        List<ASTParagraph> resolvedParagraphs = StoryConverter.convertStoryParagraphs(ctx, story, false);
+        if (resolvedParagraphs == null || resolvedParagraphs.isEmpty()) return;
+
+        String tableText = normalizeInlineTableText(plainText(table));
+        String storyText = normalizeInlineTableText(resolvedStoryText(story));
+        if (tableText.isEmpty() || storyText.isEmpty()) return;
+        if (!tableText.equals(storyText) && !storyText.startsWith(tableText) && !tableText.startsWith(storyText)) return;
+
+        ASTTableCell target = firstContentCell(table);
+        if (target == null) return;
+        target.paragraphs().clear();
+        target.paragraphs().addAll(resolvedParagraphs);
+    }
+
+    /**
+     * IDML 1x1 table cells often use a nested TextFrame as the real text owner
+     * while the table supplies only the visual cell shell.  Keeping that nested
+     * TF as an inline object makes HWPX flatten its paragraphs into one cell
+     * paragraph, losing run boundaries and paragraph breaks.  Promote the nested
+     * TF paragraphs to the cell content once at AST ownership time.
+     */
+    private static boolean replaceCellContentWithNestedTextFrame(ASTTable table) {
+        if (table == null || table.rows() == null) return false;
+        boolean replaced = false;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                ASTInlineObject nested = onlySemanticNestedTextFrame(cell.paragraphs());
+                if (nested == null || nested.paragraphs() == null || nested.paragraphs().isEmpty()) continue;
+                cell.paragraphs().clear();
+                cell.paragraphs().addAll(nested.paragraphs());
+                replaced = true;
+            }
+        }
+        return replaced;
+    }
+
+    private static ASTInlineObject onlySemanticNestedTextFrame(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.size() != 1) return null;
+        ASTParagraph paragraph = paragraphs.get(0);
+        if (paragraph == null || paragraph.items() == null) return null;
+        ASTInlineObject nested = null;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !normalizeInlineTableText(text).isEmpty()) return null;
+                continue;
+            }
+            if (!(item instanceof ASTInlineObject)) return null;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) return null;
+            if (!hasAuthoritativeParagraphStructure(obj.paragraphs())) return null;
+            if (nested != null) return null;
+            nested = obj;
+        }
+        return nested;
+    }
+
+    private static boolean hasAuthoritativeParagraphStructure(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return false;
+        int visibleParagraphs = 0;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            int visibleRuns = 0;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null && !text.trim().isEmpty()) visibleRuns++;
+                }
+            }
+            if (visibleRuns > 0) visibleParagraphs++;
+            if (visibleRuns > 1) return true;
+        }
+        return visibleParagraphs > 1;
+    }
+
+    private static ASTTableCell firstContentCell(ASTTable table) {
+        if (table.rows() == null) return null;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell != null && cell.paragraphs() != null && !cell.paragraphs().isEmpty()) return cell;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isSingleCellTableShell(ASTTable table) {
+        if (table == null || table.rows() == null) return false;
+        int cells = 0;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            cells += row.cells().size();
+            if (cells > 1) return false;
+        }
+        return cells == 1;
+    }
+
+    private static String plainText(ASTTable table) {
+        StringBuilder sb = new StringBuilder();
+        if (table.rows() == null) return "";
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                for (ASTParagraph paragraph : cell.paragraphs()) {
+                    if (paragraph == null) continue;
+                    String text = ParagraphTextHelpers.getParaPlainText(paragraph);
+                    if (text != null) sb.append(text);
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String resolvedStoryText(ResolvedStory story) {
+        StringBuilder sb = new StringBuilder();
+        if (story == null || story.paragraphs() == null) return "";
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+                sb.append(run.text());
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String normalizeInlineTableText(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008') continue;
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
+            sb.append(ch);
+        }
+        return sb.toString();
     }
 
     static ASTTextRun tryInlineTextFrameAsRun(ResolvedBuildContext ctx, int anchoredObjectId,
@@ -1729,18 +1989,6 @@ public class InlineFrameHandler {
         }
 
         return run;
-    }
-
-    private static void applyResolvedRunStyle(ResolvedBuildContext ctx, ASTTextRun run, ResolvedRun rr) {
-        if (run == null || rr == null) return;
-        if (rr.fontFamily() != null) run.fontFamily(rr.fontFamily());
-        if (rr.fontStyle() != null) run.fontStyle(rr.fontStyle());
-        if (rr.fontSize() != null && rr.fontSize() > 0) {
-            run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
-        }
-        if (rr.fillColor() != null) run.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
-        if (rr.underline() != null && rr.underline()) run.underline(true);
-        if (rr.strikeThru() != null && rr.strikeThru()) run.strikeThrough(true);
     }
 
     private static boolean inlineTextFrameHasParagraphUnderline(ResolvedBuildContext ctx, String storyId, ResolvedStory story) {
@@ -2730,8 +2978,8 @@ public class InlineFrameHandler {
             if (vt == null) continue;
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) continue;
-            double[] gb = tf.geometricBounds();
-            if (gb == null || gb.length < 4) continue;
+            double[] gb = textFrameBoundsPoints(ctx, tf);
+            if (!validBounds(gb)) continue;
             editableChildren.add(tf);
         }
 
@@ -2744,7 +2992,8 @@ public class InlineFrameHandler {
         for (ResolvedTextFrame tf : editableChildren) {
             String vt = tf.frameVisibleText();
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
-            double[] gb = tf.geometricBounds();
+            double[] gb = textFrameBoundsPoints(ctx, tf);
+            if (!validBounds(gb)) continue;
             double w = Math.abs(gb[3] - gb[1]);
             double h = Math.abs(gb[2] - gb[0]);
             if (w <= 0 || h <= 0) continue;
@@ -2757,14 +3006,15 @@ public class InlineFrameHandler {
             double marginLeft = 0;
             double marginBottom = 0;
             double marginRight = 0;
-            if (inlineBackdropData != null && inlineBackdropBounds != null && inlineBackdropBounds.length >= 4) {
-                boxW = Math.abs(inlineBackdropBounds[3] - inlineBackdropBounds[1]);
-                boxH = Math.abs(inlineBackdropBounds[2] - inlineBackdropBounds[0]);
+            double[] backdropBoundsPt = renderedBoundsPoints(ctx, inlineBackdropBounds);
+            if (inlineBackdropData != null && validBounds(backdropBoundsPt)) {
+                boxW = Math.abs(backdropBoundsPt[3] - backdropBoundsPt[1]);
+                boxH = Math.abs(backdropBoundsPt[2] - backdropBoundsPt[0]);
                 if (boxW > 0 && boxH > 0) {
-                    marginTop = Math.max(0, gb[0] - inlineBackdropBounds[0]);
-                    marginLeft = Math.max(0, gb[1] - inlineBackdropBounds[1]);
-                    marginBottom = Math.max(0, inlineBackdropBounds[2] - gb[2]);
-                    marginRight = Math.max(0, inlineBackdropBounds[3] - gb[3]);
+                    marginTop = Math.max(0, gb[0] - backdropBoundsPt[0]);
+                    marginLeft = Math.max(0, gb[1] - backdropBoundsPt[1]);
+                    marginBottom = Math.max(0, backdropBoundsPt[2] - gb[2]);
+                    marginRight = Math.max(0, backdropBoundsPt[3] - gb[3]);
                 } else {
                     boxW = w;
                     boxH = h;
@@ -3041,6 +3291,60 @@ public class InlineFrameHandler {
             if (isCompletePngSimpleButtonLabel(ctx, rg)) return rg;
         }
         return null;
+    }
+
+    private static double[] textFrameSizePoints(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        double[] boundsPt = textFrameBoundsPoints(ctx, tf);
+        if (!validBounds(boundsPt)) return null;
+        return new double[]{
+                Math.abs(boundsPt[3] - boundsPt[1]),
+                Math.abs(boundsPt[2] - boundsPt[0])
+        };
+    }
+
+    /**
+     * Inline/nested TextFrame의 authored bounds는 resolved page-relative bounds를 우선한다.
+     * resolved geometricBounds는 normalizeToPoints를 거친 값이지만, 일부 인라인 TF는
+     * 원본 측정 단위로 들어와 HWPX rect가 scaleFactor만큼 작아질 수 있다.
+     */
+    private static double[] textFrameBoundsPoints(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (tf == null) return null;
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double[] pageRelative = tf.pageRelativeBounds();
+        if (validBounds(pageRelative)) {
+            return new double[]{
+                    pageRelative[0] * scale,
+                    pageRelative[1] * scale,
+                    pageRelative[2] * scale,
+                    pageRelative[3] * scale
+            };
+        }
+        double[] gb = tf.geometricBounds();
+        if (validBounds(gb)) {
+            return new double[]{gb[0], gb[1], gb[2], gb[3]};
+        }
+        return null;
+    }
+
+    private static double[] renderedBoundsPoints(ResolvedBuildContext ctx, double[] bounds) {
+        if (!validBounds(bounds)) return null;
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        return new double[]{
+                bounds[0] * scale,
+                bounds[1] * scale,
+                bounds[2] * scale,
+                bounds[3] * scale
+        };
+    }
+
+    private static boolean validBounds(double[] bounds) {
+        return bounds != null && bounds.length >= 4
+                && Double.isFinite(bounds[0])
+                && Double.isFinite(bounds[1])
+                && Double.isFinite(bounds[2])
+                && Double.isFinite(bounds[3])
+                && bounds[2] > bounds[0]
+                && bounds[3] > bounds[1];
     }
 
     private static double localPageWidth(ResolvedBuildContext ctx, int pageIndex) {

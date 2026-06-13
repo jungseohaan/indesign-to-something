@@ -513,7 +513,7 @@ class StoryLoader {
                                         } else {
                                             if (InlineFrameHandler.isSimpleButtonLabelAnchor(ctx, domId)) {
                                                 ASTInlineObject inlineObj =
-                                                        InlineFrameHandler.loadCompleteSimpleButtonLabelInlineObject(ctx, domId);
+                                                        SimpleButtonLabelInlineFactory.create(ctx, domId);
                                                 if (inlineObj != null) {
                                                     para.addItem(inlineObj);
                                                     anchorIdx++;
@@ -530,6 +530,14 @@ class StoryLoader {
                                             }
                                             // 하위 인라인 TF 안에 다시 ORC 앵커가 있는 경우
                                             // 텍스트 런으로 평탄화하지 말고 배지/박스 + 텍스트 순서를 보존한다.
+                                            ASTInlineObject inlineTableFrame =
+                                                    InlineFrameHandler.tryInlineTextFrameWithTables(ctx, domId);
+                                            if (inlineTableFrame != null) {
+                                                para.addItem(inlineTableFrame);
+                                                anchorIdx++;
+                                                continue;
+                                            }
+
                                             List<ASTInlineItem> nestedItems =
                                                     InlineFrameHandler.tryInlineTextFrameAsItems(ctx, domId,
                                                             partText, nextPartText);

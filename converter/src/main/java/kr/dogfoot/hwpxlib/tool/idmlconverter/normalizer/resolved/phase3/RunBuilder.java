@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.MatchConfidence;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.RunPropertyResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextControlNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 
@@ -20,7 +21,6 @@ import java.util.List;
  */
 class RunBuilder {
     private RunBuilder() {}
-    private static final String UNDERLINE_BLANK_UNIT = "\t";
 
     /** 기본 매칭 신뢰도(LOW)로 createRunFromIDML 호출 — 호환용 래퍼. */
     static ASTTextRun createRunFromIDML(ResolvedBuildContext ctx, IDMLCharacterRun cr, String text, ResolvedRun rr, StoryConverter.StyleContext sc) {
@@ -41,37 +41,11 @@ class RunBuilder {
         // 단독 \t: tabStop이 있으면 유지 (HwpxParagraphBuilder가 <hp:tab>으로 변환), 없으면 공백 치환
         if (text != null) {
             boolean preserveUnderlineBlank = hasUnderlineIntent(cr, rr);
-            text = text.replace("\t\u0008", preserveUnderlineBlank ? UNDERLINE_BLANK_UNIT : ""); // \t + IndentToHere 조합 제거
-            text = text.replace("\u0003", "");   // Frame Break 제거
-            text = text.replace("\u0007", "");   // IndentToHere 제거
-            text = text.replace("\u0008", preserveUnderlineBlank ? UNDERLINE_BLANK_UNIT : "");   // 단독 IndentToHere 제거
-            text = text.replace("\n", "");       // Frame Break 제거
-            if (!sc.hasTabStops) {
-                text = text.replace("\t", " ");  // 탭 → 공백 (탭스톱 없는 경우 간격 방지)
-            }
-            text = text.replace("\u2009", " ");   // Thin Space → 공백
-            text = text.replace("\u2002", " ");  // En Space → 공백 (단어 구분자 보존)
-            text = text.replace("\u2003", " ");  // Em Space → 공백 (단어 구분자 보존)
-            text = text.replace("\u200A", "");   // Hair Space 제거 (타이포 조정용, 시각상 무의미)
-            text = text.replace("\u200B", "");   // Zero Width Space 제거
-            text = text.replace("\u200C", "");   // Zero Width Non-Joiner 제거
-            text = text.replace("\u200D", "");   // Zero Width Joiner 제거
-            text = text.replace("\u200E", "");   // Left-to-Right Mark 제거 (HWPX BiDi 미지원)
-            text = text.replace("\u200F", "");   // Right-to-Left Mark 제거
-            text = text.replace("\u202A", "");   // LRE 제거
-            text = text.replace("\u202B", "");   // RLE 제거
-            text = text.replace("\u202C", "");   // PDF(Pop Directional Formatting) 제거
-            text = text.replace("\u202D", "");   // LRO 제거
-            text = text.replace("\u202E", "");   // RLO 제거
-            text = text.replace("\uFFE3", "~");  // Fullwidth Macron → 물결 (한글 호환)
-            // Yoon 폰트 (윤명조/윤고딕) 의 PUA 글리프 → 안전한 유니코드 치환
-            // U+E287 = 빈 정답 칸 (□). 매핑 폰트에서 잘못된 글자 (예: 늣) 로 렌더링되는 회귀 방지.
-            text = text.replace('\uE285', '\u25A1').replace('\uE287', '\u25A1').replace('\uE288', '\u25A1'); // □ White Square
-            // EH상부자 overline marker: Ó(0xD3) → \uE000{letters}\uE001 마커로 치환
-            // 단락 후처리(splitOverlineRuns)에서 ASTEquation overline{AB}로 변환
-            if (text.indexOf('\u00D3') >= 0) {
-                text = RunPostProcessor.markOverlineSegments(text);
-            }
+            text = TextControlNormalizer.normalize(
+                    text,
+                    sc.hasTabStops,
+                    preserveUnderlineBlank,
+                    true);
         }
 
         // ── 속성 적용: SPEC-012 RunPropertyResolver 사용 ──
@@ -280,7 +254,7 @@ class RunBuilder {
     }
 
     static String underlineBlankUnit() {
-        return UNDERLINE_BLANK_UNIT;
+        return TextControlNormalizer.underlineBlankUnit();
     }
 
     /** 한국어 폰트 이름 판별: 한글 문자가 포함되어 있으면 한국어 폰트 */

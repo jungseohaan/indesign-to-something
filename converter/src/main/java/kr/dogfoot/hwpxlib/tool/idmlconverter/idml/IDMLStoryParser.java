@@ -267,6 +267,15 @@ public class IDMLStoryParser {
             }
         }
 
+        NodeList nestedTextFrames = cellElem.getElementsByTagName("TextFrame");
+        for (int i = 0; i < nestedTextFrames.getLength(); i++) {
+            Element textFrame = (Element) nestedTextFrames.item(i);
+            String parentStory = getAttrOrNull(textFrame, "ParentStory");
+            if (parentStory != null && !parentStory.isEmpty()) {
+                cell.addTextFrameStoryRef(parentStory);
+            }
+        }
+
         return cell;
     }
 

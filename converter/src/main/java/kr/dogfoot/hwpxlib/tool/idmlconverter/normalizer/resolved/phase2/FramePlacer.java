@@ -342,6 +342,7 @@ public final class FramePlacer {
             // 연결 글상자 체인이면 인접한 프레임만 bounds 합산 (복사본 사용)
             // hasNextPageChain: 체인 중 다른 페이지 프레임이 있으면 YGap 분할 금지
             boolean hasNextPageChain = false;
+            boolean mergedChainBounds = false;
             if (tf.nextFrameId() != null) {
                 gb = new double[]{gb[0], gb[1], gb[2], gb[3]};
                 String nextId = tf.nextFrameId();
@@ -362,20 +363,39 @@ public final class FramePlacer {
                     if (ngb[1] < gb[1]) gb[1] = ngb[1];
                     if (ngb[2] > gb[2]) gb[2] = ngb[2];
                     if (ngb[3] > gb[3]) gb[3] = ngb[3];
+                    mergedChainBounds = true;
                     nextId = next.nextFrameId();
                 }
             }
 
-            // facing pages: spread 상대 x(= gb[1] - pageLeft)가 음수이면 ExtendScript가
-            // page-relative 좌표를 반환한 것으로 간주 → gb[1]을 그대로 page x로 사용.
-            double spreadX = gb[1] - pageLeft;
-            double x = (spreadX >= 0) ? spreadX : gb[1];
-            double y = gb[0] - pageTop;
-            double w = gb[3] - gb[1];
-            double h = gb[2] - gb[0];
+            LocalFrameBounds localBounds = computeLocalFrameBounds(
+                    gb, pageLeft, pageTop);
+            double x = localBounds.x;
+            double y = localBounds.y;
+            double w = localBounds.w;
+            double h = localBounds.h;
+            if (hasAnchoredTablePlan(ctx, tfDomId)) {
+                LocalFrameBounds pageRelativeBounds = computeScaledPageRelativeFrameBounds(ctx, tf);
+                if (pageRelativeBounds != null) {
+                    x = pageRelativeBounds.x;
+                    y = pageRelativeBounds.y;
+                    w = pageRelativeBounds.w;
+                    h = pageRelativeBounds.h;
+                }
+            }
             boolean expandedToTitleShell = false;
 
             ASTSection section = sections.get(pageIdx);
+            boolean hasVisibleText = hasVisibleTextExcludingObjectControls(tf.frameVisibleText());
+            if (!hasVisibleText && !mergedChainBounds) {
+                LocalFrameBounds pageRelativeBounds = computePageRelativeFrameBounds(tf);
+                if (pageRelativeBounds != null) {
+                    x = pageRelativeBounds.x;
+                    y = pageRelativeBounds.y;
+                    w = pageRelativeBounds.w;
+                    h = pageRelativeBounds.h;
+                }
+            }
 
             // 음수 좌표 클램핑
             if (x < 0) { w += x; x = 0; }
@@ -389,6 +409,17 @@ public final class FramePlacer {
             }
             if (w <= 0 || h <= 0) {
                 continue;
+            }
+
+            if (!hasVisibleText) {
+                double[] clipped = clipEmptyTextFrameToPage(x, y, w, h, rPage);
+                if (clipped == null) {
+                    continue;
+                }
+                x = clipped[0];
+                y = clipped[1];
+                w = clipped[2];
+                h = clipped[3];
             }
 
             // 타이틀 오버레이 패턴 사전 검사: 본문 TF 의 단락이 별도 타이틀 TF 로 덮여 있으면
@@ -576,6 +607,15 @@ public final class FramePlacer {
                 System.err.println("[FramePlacer] 형제 도형 X-shift 오류 tf=" + tf.id() + ": " + e);
             }
 
+            if (hasAnchoredTablePlan(ctx, tfDomId)) {
+                LocalFrameBounds pageRelativeBounds = computeScaledPageRelativeFrameBounds(ctx, tf);
+                if (pageRelativeBounds != null) {
+                    x = pageRelativeBounds.x;
+                    y = pageRelativeBounds.y;
+                    w = pageRelativeBounds.w;
+                    h = pageRelativeBounds.h;
+                }
+            }
             if (w <= 0) continue;
 
             // composedLines 기반 글상자 분할
@@ -584,6 +624,7 @@ public final class FramePlacer {
             // 단락 배분에서 제외되어 텍스트가 다음 페이지로 흐르지 못하는 버그 발생.
             // (hasNextPageChain은 위 chain merge loop에서 이미 계산됨)
             if (!conceptDiagramTf
+                    && !hasAnchoredTablePlan(ctx, tfDomId)
                     && tf.columnCount() <= 1
                     && !hasNextPageChain && tf.composedLines() != null && tf.composedLines().size() > 1) {
                 // 1) wrap indent 기반 분할 (텍스트가 이미지를 비껴가는 경우)
@@ -827,6 +868,13 @@ public final class FramePlacer {
             }
         }
         return false;
+    }
+
+    private static boolean hasAnchoredTablePlan(ResolvedBuildContext ctx, int tfDomId) {
+        return ctx != null
+                && tfDomId >= 0
+                && ctx.anchoredTablePlansForOwnerTextFrame(tfDomId) != null
+                && !ctx.anchoredTablePlansForOwnerTextFrame(tfDomId).isEmpty();
     }
 
     private static boolean isInferredTextFrameVisualShell(
@@ -2508,6 +2556,85 @@ public final class FramePlacer {
         double[] b = tf.pageRelativeBounds();
         if (b == null || b.length < 4) b = tf.geometricBounds();
         return b != null && b.length >= 4 ? b : null;
+    }
+
+    private static LocalFrameBounds computeLocalFrameBounds(
+            double[] geometricBounds,
+            double pageLeft,
+            double pageTop) {
+        double spreadX = geometricBounds[1] - pageLeft;
+        double x = (spreadX >= 0) ? spreadX : geometricBounds[1];
+        double y = geometricBounds[0] - pageTop;
+        return new LocalFrameBounds(
+                x,
+                y,
+                geometricBounds[3] - geometricBounds[1],
+                geometricBounds[2] - geometricBounds[0]);
+    }
+
+    private static LocalFrameBounds computePageRelativeFrameBounds(ResolvedTextFrame tf) {
+        double[] local = tf.pageRelativeBounds();
+        if (!isValidBounds(local)) {
+            return null;
+        }
+        return new LocalFrameBounds(
+                local[1],
+                local[0],
+                local[3] - local[1],
+                local[2] - local[0]);
+    }
+
+    private static LocalFrameBounds computeScaledPageRelativeFrameBounds(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf) {
+        LocalFrameBounds raw = computePageRelativeFrameBounds(tf);
+        if (raw == null) return null;
+        double scale = (ctx != null && ctx.scaleFactor > 0) ? ctx.scaleFactor : 1.0;
+        return new LocalFrameBounds(
+                raw.x * scale,
+                raw.y * scale,
+                raw.w * scale,
+                raw.h * scale);
+    }
+
+    private static boolean isValidBounds(double[] bounds) {
+        return bounds != null
+                && bounds.length >= 4
+                && Double.isFinite(bounds[0])
+                && Double.isFinite(bounds[1])
+                && Double.isFinite(bounds[2])
+                && Double.isFinite(bounds[3])
+                && bounds[3] > bounds[1]
+                && bounds[2] > bounds[0];
+    }
+
+    private static double[] clipEmptyTextFrameToPage(
+            double x, double y, double w, double h, ResolvedPage page) {
+        if (page == null || page.width() <= 0.0 || page.height() <= 0.0) {
+            return new double[] { x, y, w, h };
+        }
+        double left = Math.max(0.0, x);
+        double top = Math.max(0.0, y);
+        double right = Math.min(page.width(), x + w);
+        double bottom = Math.min(page.height(), y + h);
+        if (right <= left || bottom <= top) {
+            return null;
+        }
+        return new double[] { left, top, right - left, bottom - top };
+    }
+
+    private static final class LocalFrameBounds {
+        final double x;
+        final double y;
+        final double w;
+        final double h;
+
+        LocalFrameBounds(double x, double y, double w, double h) {
+            this.x = x;
+            this.y = y;
+            this.w = w;
+            this.h = h;
+        }
     }
 
     private static boolean containsBounds(double[] outer, double[] inner, double tolerancePt) {

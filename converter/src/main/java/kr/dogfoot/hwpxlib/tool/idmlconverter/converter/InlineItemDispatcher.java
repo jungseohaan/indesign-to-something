@@ -46,6 +46,9 @@ final class InlineItemDispatcher {
                         paragraphBuilder.textBoxBuilder, paragraphBuilder);
             }
         } else if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) {
+            if (deferTableCellOverlay(obj)) {
+                return;
+            }
             if (isTableOnlyInlineTextFrame(obj)) {
                 for (ASTTable table : obj.inlineTables()) {
                     paragraphBuilder.tableBuilder.addInlineTableToPara(para, table);
@@ -59,7 +62,13 @@ final class InlineItemDispatcher {
             // 단락 콘텐츠 또는 인라인 테이블이 있는 그룹은 글상자로, 없으면 이미지로
             boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
             boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
-            if (hasParagraphs || hasInlineTables) {
+            if (hasInlineTables && !hasParagraphs) {
+                for (ASTTable table : obj.inlineTables()) {
+                    paragraphBuilder.tableBuilder.addInlineTableToPara(para, table);
+                }
+            } else if (hasParagraphs && shouldFlattenInlineTextFrame(obj)) {
+                flattenInlineTextFrame(para, obj);
+            } else if (hasParagraphs || hasInlineTables) {
                 paragraphBuilder.textBoxBuilder.addInlineTextFrame(para, obj);
             } else if (obj.imageData() != null && obj.imageData().length > 0) {
                 paragraphBuilder.imageBuilder.addInlineImage(para, obj);
@@ -78,6 +87,16 @@ final class InlineItemDispatcher {
         } else if (obj.kind() == ASTInlineObject.ObjectKind.SPACER_RECT) {
             paragraphBuilder.textBoxBuilder.addSpacerRect(para, obj);
         }
+    }
+
+    private boolean deferTableCellOverlay(ASTInlineObject obj) {
+        if (obj == null || !obj.isOverlay() || !ctx.insideTableCell) return false;
+        HwpxConverterContext.DeferredOverlay d = new HwpxConverterContext.DeferredOverlay();
+        d.overlay = obj;
+        d.pageX = ctx.blockPageX + ctx.blockInsetLeft + obj.overlayX();
+        d.pageY = ctx.blockPageY + ctx.blockInsetTop + obj.overlayY();
+        ctx.deferredOverlays.add(d);
+        return true;
     }
 
     private static boolean isImageOnlyInlineBadgeGroup(ASTInlineObject obj) {
@@ -107,85 +126,120 @@ final class InlineItemDispatcher {
     // ── 인라인 TextFrame 펼침 (단순 구조일 때 hp:rect 없이 부모 문단에 직접 삽입) ──
 
     /**
-     * 단순 인라인 TextFrame인지 판별:
-     * - 단일 문단, 테이블 없음, 배경/테두리 없음, 오버레이 아님
+     * 시각 shell이 없는 인라인 TextFrame인지 판별한다.
+     *
+     * <p>의미 텍스트는 부모 흐름에 직접 펼쳐야 한다.  rect+drawText는 문단/run 구조를
+     * 별도 drawing object 안에 가두므로, 배경/테두리/이미지처럼 실제 시각 shell이
+     * 필요한 경우에만 허용한다.</p>
      */
     boolean shouldFlattenInlineTextFrame(ASTInlineObject obj) {
         if (obj.isOverlay()) return false;
         if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
-        if (obj.paragraphs() == null || obj.paragraphs().size() != 1) return false;
-        if (obj.imageFillData() != null && obj.imageFillData().length > 0) return false;
-        if (obj.fillColor() != null && !obj.fillColor().isEmpty()) return false;
-        if (obj.strokeWeight() > 0.5) return false;
-        // anchoredPosition이 있는 앵커 객체는 펼치지 않음
-        String ap = obj.anchoredPosition();
-        if (ap != null && !"InlinePosition".equals(ap)) return false;
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return false;
+        if (obj.imageData() != null && obj.imageData().length > 0) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0 && !hasSemanticText(obj)) return false;
+        if (hasVisibleFill(obj)) return false;
+        if (hasVisibleStroke(obj)) return false;
         // 공백만 있거나 비어있는 인라인 TextFrame(빈칸박스)은 단어 사이 간격을 확보해야 하므로
         // 납작화하지 않음 — 실제 폭을 가진 인라인 박스로 렌더링해서
         // 배경 PNG 위에 그려진 빈칸 밑줄과 위치를 맞춘다.
-        ASTParagraph innerParaW = obj.paragraphs().get(0);
         boolean onlyWhitespace = true;  // 비어있어도 빈칸으로 간주
-        for (ASTInlineItem item : innerParaW.items()) {
-            if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) { onlyWhitespace = false; break; }
-            String t = ((ASTTextRun) item).text();
-            if (t == null || !t.trim().isEmpty()) { onlyWhitespace = false; break; }
+        for (ASTParagraph innerParaW : obj.paragraphs()) {
+            if (innerParaW == null) continue;
+            for (ASTInlineItem item : innerParaW.items()) {
+                if (item.itemType() != ASTInlineItem.ItemType.TEXT_RUN) { onlyWhitespace = false; break; }
+                String t = ((ASTTextRun) item).text();
+                if (t == null || !t.trim().isEmpty()) { onlyWhitespace = false; break; }
+            }
+            if (!onlyWhitespace) break;
         }
         if (onlyWhitespace && obj.width() >= 800) return false; // 8pt 이상 공백 박스
-        // 프레임 폭이 텍스트 내용 대비 과도하게 크면 펼치지 않음
-        // (숫자 배지 등 시각적 간격을 제공하는 컨테이너)
-        if (obj.width() > 1500) {
-            ASTParagraph innerPara = obj.paragraphs().get(0);
-            int charCount = 0;
-            for (ASTInlineItem item : innerPara.items()) {
-                if (item.itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
-                    String text = ((ASTTextRun) item).text();
-                    if (text != null) charCount += text.length();
-                }
-            }
-            // 프레임 폭 > 추정 텍스트 폭의 2배이면 컨테이너로 간주
-            if (charCount > 0 && obj.width() > charCount * 700 * 2) return false;
-        }
         return true;
     }
 
+    private static boolean hasSemanticText(ASTInlineObject obj) {
+        if (obj == null || obj.paragraphs() == null) return false;
+        int visibleChars = 0;
+        int visibleRuns = 0;
+        int visibleParagraphs = 0;
+        for (ASTParagraph paragraph : obj.paragraphs()) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            boolean paraHasText = false;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null && !text.trim().isEmpty()) {
+                        visibleRuns++;
+                        visibleChars += text.trim().length();
+                        paraHasText = true;
+                    }
+                } else if (item instanceof ASTInlineObject && hasSemanticText((ASTInlineObject) item)) {
+                    visibleRuns++;
+                    visibleChars += 20;
+                    paraHasText = true;
+                }
+            }
+            if (paraHasText) visibleParagraphs++;
+        }
+        return visibleParagraphs > 1 || visibleRuns > 1 || visibleChars > 20;
+    }
+
+    private static boolean hasVisibleFill(ASTInlineObject obj) {
+        String fill = obj.fillColor();
+        return fill != null && fill.startsWith("#");
+    }
+
+    private static boolean hasVisibleStroke(ASTInlineObject obj) {
+        String stroke = obj.strokeColor();
+        return stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0.5;
+    }
+
     /**
-     * 인라인 TextFrame의 단일 문단 콘텐츠를 부모 문단에 직접 삽입.
+     * 인라인 TextFrame의 콘텐츠를 부모 문단에 직접 삽입.
      * 작은 글꼴의 짧은 텍스트(어휘 번호 등)는 위첨자로 표시.
      */
     void flattenInlineTextFrame(Para para, ASTInlineObject obj) {
-        ASTParagraph innerPara = obj.paragraphs().get(0);
-
         // 인라인 TextFrame이 위첨자 후보인지 판별:
         // - 단일 텍스트 런, 3글자 이하, 글꼴 크기 ≤ 8pt (800 HWPUNIT)
         boolean applySuperscript = false;
-        if (innerPara.items().size() == 1
-                && innerPara.items().get(0).itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
-            ASTTextRun tr = (ASTTextRun) innerPara.items().get(0);
-            String text = tr.text();
-            int fontSize = tr.fontSizeHwpunits() != null ? tr.fontSizeHwpunits() : 0;
-            if (text != null && text.trim().length() <= 3 && fontSize > 0 && fontSize <= 800) {
-                applySuperscript = true;
+        if (obj.paragraphs().size() == 1) {
+            ASTParagraph innerPara = obj.paragraphs().get(0);
+            if (innerPara.items().size() == 1
+                    && innerPara.items().get(0).itemType() == ASTInlineItem.ItemType.TEXT_RUN) {
+                ASTTextRun tr = (ASTTextRun) innerPara.items().get(0);
+                String text = tr.text();
+                int fontSize = tr.fontSizeHwpunits() != null ? tr.fontSizeHwpunits() : 0;
+                if (text != null && text.trim().length() <= 3 && fontSize > 0 && fontSize <= 800) {
+                    applySuperscript = true;
+                }
             }
         }
 
-        for (int i = 0; i < innerPara.items().size(); i++) {
-            ASTInlineItem item = innerPara.items().get(i);
-            switch (item.itemType()) {
-                case TEXT_RUN:
-                    ASTTextRun textRun = (ASTTextRun) item;
-                    if (applySuperscript) textRun.superscript(true);
-                    paragraphBuilder.addTextRun(para, textRun, "0");
-                    break;
-                case INLINE_OBJECT:
-                    addInlineObject(para, (ASTInlineObject) item,
-                            hasMeaningfulFollowingInlineContent(innerPara.items(), i + 1));
-                    break;
-                case BREAK:
-                    addBreak(para, (ASTBreak) item);
-                    break;
-                case EQUATION:
-                    addEquationRun(para, (ASTEquation) item);
-                    break;
+        for (int pIdx = 0; pIdx < obj.paragraphs().size(); pIdx++) {
+            ASTParagraph innerPara = obj.paragraphs().get(pIdx);
+            if (innerPara == null) continue;
+            for (int i = 0; i < innerPara.items().size(); i++) {
+                ASTInlineItem item = innerPara.items().get(i);
+                switch (item.itemType()) {
+                    case TEXT_RUN:
+                        ASTTextRun textRun = (ASTTextRun) item;
+                        if (applySuperscript) textRun.superscript(true);
+                        paragraphBuilder.addTextRun(para, textRun, "0");
+                        break;
+                    case INLINE_OBJECT:
+                        addInlineObject(para, (ASTInlineObject) item,
+                                hasMeaningfulFollowingInlineContent(innerPara.items(), i + 1));
+                        break;
+                    case BREAK:
+                        addBreak(para, (ASTBreak) item);
+                        break;
+                    case EQUATION:
+                        addEquationRun(para, (ASTEquation) item);
+                        break;
+                }
+            }
+            if (pIdx < obj.paragraphs().size() - 1) {
+                addBreak(para, new ASTBreak());
             }
         }
     }

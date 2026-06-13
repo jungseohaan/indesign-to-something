@@ -50,6 +50,11 @@ final class InlineFrameBuilder {
         boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
         if (!hasParagraphs && !hasInlineTables) return;
 
+        if (shouldFlattenToParentRuns(obj)) {
+            flattenToParentRuns(para, obj);
+            return;
+        }
+
         // 테이블 셀 내부 오버레이 → 페이지 레벨로 승격
         // 한글(HWPX 렌더러)이 테이블 셀 SubList 내부의 플로팅 객체를 지원하지 않으므로
         // 페이지 레벨 PAPER 기준 절대 좌표로 변환한다.
@@ -284,5 +289,102 @@ final class InlineFrameBuilder {
         } else {
             rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
         }
+    }
+
+    private boolean shouldFlattenToParentRuns(ASTInlineObject obj) {
+        if (obj == null || obj.isOverlay()) return false;
+        if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
+        if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return false;
+        if (obj.imageData() != null && obj.imageData().length > 0) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0 && !hasSemanticText(obj)) return false;
+        if (hasVisibleFill(obj)) return false;
+        if (hasVisibleStroke(obj)) return false;
+
+        boolean hasVisibleText = false;
+        boolean onlyWhitespaceText = true;
+        for (ASTParagraph paragraph : obj.paragraphs()) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null && !text.trim().isEmpty()) {
+                        hasVisibleText = true;
+                        onlyWhitespaceText = false;
+                    }
+                } else if (item instanceof ASTBreak) {
+                    onlyWhitespaceText = false;
+                } else if (item instanceof ASTInlineObject) {
+                    if (!shouldFlattenToParentRuns((ASTInlineObject) item)) return false;
+                    hasVisibleText = true;
+                    onlyWhitespaceText = false;
+                } else {
+                    return false;
+                }
+            }
+        }
+        if (onlyWhitespaceText && obj.width() >= 800) return false;
+        return hasVisibleText;
+    }
+
+    private static boolean hasSemanticText(ASTInlineObject obj) {
+        if (obj == null || obj.paragraphs() == null) return false;
+        int visibleChars = 0;
+        int visibleRuns = 0;
+        int visibleParagraphs = 0;
+        for (ASTParagraph paragraph : obj.paragraphs()) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            boolean paraHasText = false;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTTextRun) {
+                    String text = ((ASTTextRun) item).text();
+                    if (text != null && !text.trim().isEmpty()) {
+                        visibleRuns++;
+                        visibleChars += text.trim().length();
+                        paraHasText = true;
+                    }
+                } else if (item instanceof ASTInlineObject && hasSemanticText((ASTInlineObject) item)) {
+                    visibleRuns++;
+                    visibleChars += 20;
+                    paraHasText = true;
+                }
+            }
+            if (paraHasText) visibleParagraphs++;
+        }
+        return visibleParagraphs > 1 || visibleRuns > 1 || visibleChars > 20;
+    }
+
+    private static boolean hasVisibleFill(ASTInlineObject obj) {
+        String fill = obj.fillColor();
+        return fill != null && fill.startsWith("#");
+    }
+
+    private static boolean hasVisibleStroke(ASTInlineObject obj) {
+        String stroke = obj.strokeColor();
+        return stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0.5;
+    }
+
+    private void flattenToParentRuns(Para para, ASTInlineObject obj) {
+        for (int pIdx = 0; pIdx < obj.paragraphs().size(); pIdx++) {
+            ASTParagraph paragraph = obj.paragraphs().get(pIdx);
+            if (paragraph == null || paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTTextRun) {
+                    paragraphBuilder.addTextRun(para, (ASTTextRun) item, "0");
+                } else if (item instanceof ASTBreak) {
+                    addLineBreak(para);
+                } else if (item instanceof ASTInlineObject) {
+                    flattenToParentRuns(para, (ASTInlineObject) item);
+                }
+            }
+            if (pIdx < obj.paragraphs().size() - 1) {
+                addLineBreak(para);
+            }
+        }
+    }
+
+    private void addLineBreak(Para para) {
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+        run.addNewT().addNewLineBreak();
     }
 }

@@ -1,16 +1,24 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.ParaPr;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.BorderFill;
 import kr.dogfoot.hwpxlib.object.content.header_xml.references.borderfill.Border;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.LineSeg;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * ASTTable → HWPX Table(플로팅 또는 인라인)로 변환한다.
@@ -19,6 +27,7 @@ public class HwpxTableBuilder {
 
     private final HwpxConverterContext ctx;
     private final HwpxParagraphBuilder paragraphBuilder;
+    private final Map<Long, String> inlineTableCarrierParaPrIds = new LinkedHashMap<>();
 
     public HwpxTableBuilder(HwpxConverterContext ctx, HwpxParagraphBuilder paragraphBuilder) {
         this.ctx = ctx;
@@ -102,15 +111,64 @@ public class HwpxTableBuilder {
      * SubList 내에 인라인 테이블을 추가한다 (treatAsChar=true).
      */
     void addInlineTableToSubList(SubList subList, ASTTable astTable) {
-        Para tablePara = subList.addNewPara();
-        tablePara.idAnd(HwpxUtil.nextParaId())
-                .paraPrIDRefAnd("3")
-                .styleIDRefAnd("0")
-                .pageBreakAnd(false)
-                .columnBreakAnd(false)
-                .merged(false);
+        for (ASTTable flowChunk : inlineFlowChunks(astTable)) {
+            Para tablePara = subList.addNewPara();
+            tablePara.idAnd(HwpxUtil.nextParaId())
+                    .paraPrIDRefAnd(inlineTableCarrierParaPrId(flowChunk.height()))
+                    .styleIDRefAnd("0")
+                    .pageBreakAnd(false)
+                    .columnBreakAnd(false)
+                    .merged(false);
 
-        addInlineTableToPara(tablePara, astTable);
+            addInlineTableCarrierLineSeg(tablePara, flowChunk);
+            addInlineTableToPara(tablePara, flowChunk, true, VertAlign.TOP);
+        }
+    }
+
+    private void addInlineTableCarrierLineSeg(Para para, ASTTable astTable) {
+        int tableHeight = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, astTable.height()));
+        int tableWidth = (int) Math.min(Integer.MAX_VALUE, Math.max(1L, astTable.width()));
+        para.createLineSegArray();
+        LineSeg lineSeg = para.lineSegArray().addNew();
+        lineSeg.textposAnd(0)
+                .vertposAnd(0)
+                .vertsizeAnd(tableHeight)
+                .textheightAnd(tableHeight)
+                .baselineAnd(tableHeight)
+                .spacingAnd(0)
+                .horzposAnd(0)
+                .horzsizeAnd(tableWidth)
+                .flagsAnd(393216);
+    }
+
+    private String inlineTableCarrierParaPrId(long tableHeight) {
+        long lineHeight = Math.max(1, tableHeight);
+        String cached = inlineTableCarrierParaPrIds.get(lineHeight);
+        if (cached != null) {
+            return cached;
+        }
+
+        String paraPrId = ctx.styleRegistry.nextParaPrId();
+        ParaPr paraPr = ctx.hwpxFile.headerXMLFile().refList().paraProperties().addNew();
+        paraPr.idAnd(paraPrId);
+        paraPr.createLineSpacing();
+        paraPr.lineSpacing()
+                .typeAnd(LineSpacingType.FIXED)
+                .valueAnd((int) Math.min(Integer.MAX_VALUE, lineHeight))
+                .unitAnd(ValueUnit2.HWPUNIT);
+        paraPr.createMargin();
+        paraPr.margin().createIntent();
+        paraPr.margin().intent().valueAnd(0).unit(ValueUnit2.HWPUNIT);
+        paraPr.margin().createLeft();
+        paraPr.margin().left().valueAnd(0).unit(ValueUnit2.HWPUNIT);
+        paraPr.margin().createRight();
+        paraPr.margin().right().valueAnd(0).unit(ValueUnit2.HWPUNIT);
+        paraPr.margin().createPrev();
+        paraPr.margin().prev().valueAnd(0).unit(ValueUnit2.HWPUNIT);
+        paraPr.margin().createNext();
+        paraPr.margin().next().valueAnd(0).unit(ValueUnit2.HWPUNIT);
+        inlineTableCarrierParaPrIds.put(lineHeight, paraPrId);
+        return paraPrId;
     }
 
     /**
@@ -118,6 +176,10 @@ public class HwpxTableBuilder {
      * table-only inline TextFrame을 hp:rect로 한 번 더 감싸면 HWP에서 셀/텍스트가 중복 표시될 수 있다.
      */
     void addInlineTableToPara(Para para, ASTTable astTable) {
+        addInlineTableToPara(para, astTable, true, VertAlign.BOTTOM);
+    }
+
+    private void addInlineTableToPara(Para para, ASTTable astTable, boolean affectLineSpacing, VertAlign vertAlign) {
         long totalWidth = astTable.width();
 
         Run run = para.addNewRun();
@@ -150,13 +212,13 @@ public class HwpxTableBuilder {
         // 인라인 위치 (글자처럼 취급)
         table.createPos();
         table.pos().treatAsCharAnd(true)
-                .affectLSpacingAnd(true)
+                .affectLSpacingAnd(affectLineSpacing)
                 .flowWithTextAnd(true)
                 .allowOverlapAnd(false)
                 .holdAnchorAndSOAnd(false)
                 .vertRelToAnd(VertRelTo.PARA)
-                .horzRelToAnd(HorzRelTo.PARA)
-                .vertAlignAnd(VertAlign.BOTTOM)
+                .horzRelToAnd(HorzRelTo.COLUMN)
+                .vertAlignAnd(vertAlign)
                 .horzAlignAnd(HorzAlign.LEFT)
                 .vertOffsetAnd(0L)
                 .horzOffset(0L);
@@ -174,6 +236,105 @@ public class HwpxTableBuilder {
 
         // 테이블 뒤에 빈 텍스트 요소 추가 (한글 렌더링 필수)
         run.addNewT().addText("");
+    }
+
+    private List<ASTTable> inlineFlowChunks(ASTTable table) {
+        if (!shouldSplitInlineFlowTable(table)) {
+            return Collections.singletonList(table);
+        }
+
+        List<ASTTable> chunks = new ArrayList<>();
+        long rowYOffset = 0;
+        for (ASTTableRow row : table.rows()) {
+            chunks.add(singleRowInlineFlowChunk(table, row, rowYOffset, chunks.size()));
+            rowYOffset += Math.max(0L, row.rowHeight());
+        }
+        return chunks;
+    }
+
+    private boolean shouldSplitInlineFlowTable(ASTTable table) {
+        if (table == null || table.rowCount() <= 1 || table.rows() == null || table.rows().size() <= 1) {
+            return false;
+        }
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) {
+                return false;
+            }
+            for (ASTTableCell cell : row.cells()) {
+                if (cell != null && Math.max(1, cell.rowSpan()) > 1) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private ASTTable singleRowInlineFlowChunk(ASTTable source, ASTTableRow sourceRow, long rowYOffset, int chunkIndex) {
+        ASTTable chunk = new ASTTable();
+        chunk.sourceId(source.sourceId() == null ? null : source.sourceId() + "#flow-row-" + chunkIndex);
+        chunk.debug(source.debug());
+        chunk.x(source.x());
+        chunk.y(source.y() + rowYOffset);
+        chunk.width(source.width());
+        chunk.height(Math.max(1L, sourceRow.rowHeight()));
+        chunk.zOrder(source.zOrder());
+        chunk.rowCount(1);
+        chunk.colCount(source.colCount());
+        chunk.appliedTableStyle(source.appliedTableStyle());
+        chunk.borderColor(source.borderColor());
+        chunk.borderWidth(source.borderWidth());
+        for (Long width : source.columnWidths()) {
+            chunk.addColumnWidth(width);
+        }
+
+        ASTTableRow row = new ASTTableRow();
+        row.rowIndex(0);
+        row.rowHeight(Math.max(1L, sourceRow.rowHeight()));
+        row.autoGrow(sourceRow.autoGrow());
+        for (ASTTableCell sourceCell : sourceRow.cells()) {
+            row.addCell(copyCellForSingleRow(sourceCell, row.rowHeight()));
+        }
+        chunk.addRow(row);
+        return chunk;
+    }
+
+    private ASTTableCell copyCellForSingleRow(ASTTableCell source, long rowHeight) {
+        ASTTableCell copy = new ASTTableCell();
+        copy.rowIndex(0);
+        copy.columnIndex(source.columnIndex());
+        copy.rowSpan(1);
+        copy.columnSpan(source.columnSpan());
+        copy.width(source.width());
+        copy.height(source.height() > 0 ? source.height() : rowHeight);
+        copy.fillColor(source.fillColor());
+        copy.topBorder(copyBorder(source.topBorder()));
+        copy.bottomBorder(copyBorder(source.bottomBorder()));
+        copy.leftBorder(copyBorder(source.leftBorder()));
+        copy.rightBorder(copyBorder(source.rightBorder()));
+        copy.topLeftDiagonalLine(source.topLeftDiagonalLine());
+        copy.topRightDiagonalLine(source.topRightDiagonalLine());
+        copy.diagonalBorder(copyBorder(source.diagonalBorder()));
+        copy.marginTop(source.marginTop());
+        copy.marginBottom(source.marginBottom());
+        copy.marginLeft(source.marginLeft());
+        copy.marginRight(source.marginRight());
+        copy.verticalAlign(source.verticalAlign());
+        for (ASTParagraph paragraph : source.paragraphs()) {
+            copy.addParagraph(paragraph);
+        }
+        return copy;
+    }
+
+    private ASTTableCell.CellBorder copyBorder(ASTTableCell.CellBorder source) {
+        if (source == null) {
+            return null;
+        }
+        ASTTableCell.CellBorder copy = new ASTTableCell.CellBorder();
+        copy.color(source.color());
+        copy.weight(source.weight());
+        copy.strokeType(source.strokeType());
+        copy.tint(source.tint());
+        return copy;
     }
 
     // ── 공통 행/셀 생성 ──
@@ -274,7 +435,11 @@ public class HwpxTableBuilder {
 
                 // 셀 내용 (단락) 추가
                 for (ASTParagraph astPara : astCell.paragraphs()) {
-                    paragraphBuilder.addParagraphToSubList(subList, astPara, astCell.height());
+                    if (astPara.inlineTable() != null) {
+                        addInlineTableToSubList(subList, astPara.inlineTable());
+                    } else {
+                        paragraphBuilder.addParagraphToSubList(subList, astPara, astCell.height());
+                    }
                 }
                 // 빈 셀 방지
                 if (subList.countOfPara() == 0) {

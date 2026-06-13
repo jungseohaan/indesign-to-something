@@ -82,23 +82,6 @@ final class SingleColumnTableConverter {
                 .lockAnd(false)
                 .dropcapstyleAnd(resolveDropCapStyle(paragraphs));
 
-        // 테이블 속성 — 1행 1열
-        table.pageBreakAnd(TablePageBreak.CELL)
-                .repeatHeaderAnd(false)
-                .rowCntAnd((short) 1)
-                .colCntAnd((short) 1)
-                .cellSpacingAnd(0)
-                .borderFillIDRefAnd("1")
-                .noAdjustAnd(false);
-
-        // ShapeSize — 실제 프레임 높이를 명시한다.
-        // TOP 정렬 표도 height=0(auto)로 두면 일부 HWPX 렌더러에서 겹침/표시 누락이 발생한다.
-        long _tblHeight = h > 0 ? h : 0L;
-        table.createSZ();
-        table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(_tblHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
-
         // BaselineShift → 컨테이너 Y 오프셋 보정.
         // HWPX charPr offset으로는 baseline 위치 보정이 불완전하므로,
         // 프레임 전체의 Y 위치를 직접 조정하고 charPr offset은 제거한다.
@@ -145,69 +128,9 @@ final class SingleColumnTableConverter {
         table.createInMargin();
         table.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
 
-        // 1행 1열 셀 생성
-        Tr tr = table.addNewTr();
-        Tc tc = tr.addNewTc();
-
-        // suppressBorder: 배경 사각형이 테두리를 담당하므로 개별 컬럼은 테두리/배경 없이
-        String cellBfId = suppressBorder ? "1" : textBoxBuilder.createTextFrameBorderFill(block);
-
-        tc.nameAnd("")
-                .headerAnd(false)
-                .hasMarginAnd(true)
-                .protectAnd(false)
-                .editableAnd(true)
-                .dirtyAnd(false)
-                .borderFillIDRefAnd(cellBfId);
-
-        // 셀 주소
-        tc.createCellAddr();
-        tc.cellAddr().colAddrAnd((short) 0).rowAddrAnd((short) 0);
-
-        // 셀 병합 (1x1이므로 span=1)
-        tc.createCellSpan();
-        tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
-
-        // 셀 크기 — 표 높이와 동일하게 실제 프레임 높이를 명시한다.
-        tc.createCellSz();
-        long cellHeight = h > 0 ? h : 0L;
-        tc.cellSz().widthAnd(w).heightAnd(cellHeight);
-
-        // 셀 여백 — 블록 인셋 적용 (InDesign insetSpacing).
-        tc.createCellMargin();
-        tc.cellMargin().leftAnd(block.insetLeft())
-                .rightAnd(block.insetRight())
-                .topAnd(block.insetTop())
-                .bottomAnd(block.insetBottom());
-
-        // 셀 내부 SubList
-        tc.createSubList();
-        SubList subList = tc.subList();
-        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
-        VerticalAlign2 cellVAlign = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
-        subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(HwpxTextBoxBuilder.textFrameLineWrap(block))
-                .vertAlignAnd(cellVAlign);
-
-        // 연결 글상자 링크 설정
-        // resolved 기반 문단 재배치가 완료된 프레임은 링크 해제 (각 프레임이 독립적으로 표시)
-        if (block.distributed()) {
-            subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
-        } else {
-            textBoxBuilder.applySubListLink(subList, block.storyId());
-        }
-
-        // 블록 위치 추적 (오버레이 좌표 계산용)
-        ctx.blockPageX = x;
-        ctx.blockPageY = y;
-        ctx.blockInsetLeft = block.insetLeft();
-        ctx.blockInsetTop = block.insetTop();
-        ctx.cellContentYCursor = 0;
-        // 셀 내부 콘텐츠 폭 (인라인 텍스트 프레임 균등 분배용)
-        ctx.currentContainerWidth = w - block.insetLeft() - block.insetRight();
-
         // 인라인 텍스트 프레임 균등 분배: 연속 단락에 각각 1개씩 인라인 TextFrame이 있으면
         // 부모 컨테이너 폭 기준으로 균등 분배
+        ctx.currentContainerWidth = w - block.insetLeft() - block.insetRight();
         HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(paragraphs, ctx.currentContainerWidth);
 
         // lineSpacing이 셀 높이를 초과하면 셀 높이로 제한.
@@ -225,17 +148,86 @@ final class SingleColumnTableConverter {
         }
         suppressFirstParagraphSpaceBefore(paragraphs);
 
-        // 단락 추가 (인라인 테이블 포함)
-        for (ASTParagraph para : paragraphs) {
-            if (para.inlineTable() != null && ctx.tableBuilderRef != null) {
-                ctx.tableBuilderRef.addInlineTableToSubList(subList, para.inlineTable());
-            } else {
-                paragraphBuilder.addParagraphToSubList(subList, para);
-            }
+        // 테이블 속성
+        // This 1x1 table is a text-frame carrier, not a semantic table.
+        // Let page breaks happen inside the carrier so paragraphs after inline tables
+        // continue from the visible table row instead of reserving the whole cell.
+        table.pageBreakAnd(TablePageBreak.TABLE)
+                .repeatHeaderAnd(false)
+                .rowCntAnd((short) 1)
+                .colCntAnd((short) 1)
+                .cellSpacingAnd(0)
+                .borderFillIDRefAnd("1")
+                .noAdjustAnd(false);
+
+        // ShapeSize — 실제 프레임 높이를 명시한다.
+        // TOP 정렬 표도 height=0(auto)로 두면 일부 HWPX 렌더러에서 겹침/표시 누락이 발생한다.
+        long _tblHeight = h > 0 ? h : 0L;
+        table.createSZ();
+        table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(_tblHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        // suppressBorder: 배경 사각형이 테두리를 담당하므로 개별 컬럼은 테두리/배경 없이
+        String cellBfId = suppressBorder ? "1" : textBoxBuilder.createTextFrameBorderFill(block);
+
+        // 블록 위치 추적 (오버레이 좌표 계산용)
+        ctx.blockPageX = x;
+        ctx.blockPageY = y;
+        ctx.blockInsetLeft = block.insetLeft();
+        ctx.blockInsetTop = block.insetTop();
+        ctx.cellContentYCursor = 0;
+
+        Tr tr = table.addNewTr();
+        Tc tc = tr.addNewTc();
+        tc.nameAnd("")
+                .headerAnd(false)
+                .hasMarginAnd(true)
+                .protectAnd(false)
+                .editableAnd(true)
+                .dirtyAnd(false)
+                .borderFillIDRefAnd(cellBfId);
+
+        tc.createCellAddr();
+        tc.cellAddr().colAddrAnd((short) 0).rowAddrAnd((short) 0);
+        tc.createCellSpan();
+        tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
+        tc.createCellSz();
+        tc.cellSz().widthAnd(w).heightAnd(h);
+        tc.createCellMargin();
+        tc.cellMargin().leftAnd(block.insetLeft())
+                .rightAnd(block.insetRight())
+                .topAnd(block.insetTop())
+                .bottomAnd(block.insetBottom());
+
+        tc.createSubList();
+        SubList subList = tc.subList();
+        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
+        VerticalAlign2 cellVAlign = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
+        subList.idAnd("").textDirectionAnd(textDir)
+                .lineWrapAnd(HwpxTextBoxBuilder.textFrameLineWrap(block))
+                .vertAlignAnd(cellVAlign);
+        if (block.distributed()) {
+            subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+        } else {
+            textBoxBuilder.applySubListLink(subList, block.storyId());
         }
-        // 빈 텍스트 프레임 방지
-        if (subList.countOfPara() == 0) {
-            paragraphBuilder.addEmptySubListPara(subList);
+
+        boolean savedInsideTableCell = ctx.insideTableCell;
+        ctx.insideTableCell = true;
+        try {
+            for (ASTParagraph para : paragraphs) {
+                if (para.inlineTable() != null && ctx.tableBuilderRef != null) {
+                    ctx.tableBuilderRef.addInlineTableToSubList(subList, para.inlineTable());
+                } else {
+                    paragraphBuilder.addParagraphToSubList(subList, para);
+                }
+            }
+            if (subList.countOfPara() == 0) {
+                paragraphBuilder.addEmptySubListPara(subList);
+            }
+        } finally {
+            ctx.insideTableCell = savedInsideTableCell;
         }
     }
 

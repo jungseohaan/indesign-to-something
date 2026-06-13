@@ -241,6 +241,218 @@ public class ResolvedData {
         return null;
     }
 
+    /**
+     * IDML Table의 실제 page placement bounds를 조회한다.
+     *
+     * 우선순위:
+     * 1. table-only owner TextFrame bounds가 있으면 그것을 사용한다.
+     * 2. 없으면 resolved table bounds를 사용한다.
+     *
+     * IDML Table은 Story XML 안에만 있고 page 좌표를 직접 갖지 않는 경우가 많다.
+     * 이때 table content의 좌표 소유자는 Table 자체가 아니라 그것을 담는 TextFrame이다.
+     * resolved table bounds는 paragraph/story 기반으로 추정된 보조값일 수 있으므로,
+     * marker-only/table-only TextFrame이 명확하면 그 frame이 placement owner다.
+     *
+     * @return [top, left, bottom, right] page-relative, resolved 좌표 단위(mm), 없으면 null
+     */
+    public double[] getTablePlacementBounds(String idmlTableId) {
+        ResolvedTextFrame owner = getTableOwnerTextFrame(idmlTableId);
+        if (owner != null && isMarkerOnlyTextFrame(owner)) {
+            double[] ownerBounds = tableOwnerPlacementBounds(owner);
+            if (validBounds(ownerBounds)) return ownerBounds;
+        }
+
+        double[] tableBounds = getTableBounds(idmlTableId);
+        if (validBounds(tableBounds)) return tableBounds;
+        return null;
+    }
+
+    /**
+     * IDML Table의 page placement owner를 조회한다.
+     *
+     * Spread를 가로지르는 table-only frame은 InDesign export상 오른쪽 페이지
+     * 객체로 귀속될 수 있지만, frame geometry는 spread 시작 페이지 기준으로
+     * 배치된다. 이 경우 Table content의 owner page도 frame이 시작되는 페이지다.
+     */
+    public Integer getTablePlacementPageIndex(String idmlTableId) {
+        ResolvedTextFrame owner = getTableOwnerTextFrame(idmlTableId);
+        if (owner == null || !isMarkerOnlyTextFrame(owner)) return null;
+        if (startsOnPreviousSpreadPage(owner)) {
+            return Math.max(0, owner.pageIndex() - 1);
+        }
+        return owner.pageIndex();
+    }
+
+    private double[] tableOwnerPlacementBounds(ResolvedTextFrame owner) {
+        if (owner == null) return null;
+        double[] pageRelative = owner.pageRelativeBounds();
+        if (validBounds(pageRelative) && !isImplausiblyOffPageTableBounds(owner, pageRelative)) {
+            return pageRelative;
+        }
+        double[] geometric = owner.geometricBounds();
+        if (validBounds(geometric) && looksLikePageLocalTableGeometry(owner, geometric)) {
+            return pointBoundsToResolvedUnits(geometric);
+        }
+        double[] converted = textFrameGeometricBoundsToPageRelativeResolvedUnits(owner);
+        if (validBounds(converted)) return converted;
+        return validBounds(pageRelative) ? pageRelative : null;
+    }
+
+    private boolean isImplausiblyOffPageTableBounds(ResolvedTextFrame owner, double[] bounds) {
+        ResolvedPage page = owner != null ? getPage(owner.pageIndex()) : null;
+        if (page == null || page.width() <= 0 || bounds == null || bounds.length < 4) return false;
+        double pageWidth = page.width();
+        double left = bounds[1];
+        double right = bounds[3];
+        return left < -pageWidth * 0.25 && right > 0 && right <= pageWidth * 1.25;
+    }
+
+    private boolean startsOnPreviousSpreadPage(ResolvedTextFrame owner) {
+        ResolvedPage page = owner != null ? getPage(owner.pageIndex()) : null;
+        if (page == null || page.width() <= 0 || page.bounds() == null || page.bounds().length < 4) {
+            return false;
+        }
+        if (owner.pageIndex() <= 0 || page.bounds()[1] <= 1.0) return false;
+        double[] rel = owner.pageRelativeBounds();
+        double[] geometric = owner.geometricBounds();
+        if (!validBounds(rel) || !validBounds(geometric)) return false;
+
+        double pageWidth = page.width();
+        double relLeft = rel[1];
+        double relRight = rel[3];
+        double geoLeft = geometric[1];
+        double geoRight = geometric[3];
+
+        return relLeft < -pageWidth * 0.25
+                && relRight > 0
+                && geoLeft >= 0
+                && geoLeft < pageWidth
+                && geoRight > page.bounds()[1];
+    }
+
+    private boolean looksLikePageLocalTableGeometry(ResolvedTextFrame owner, double[] bounds) {
+        ResolvedPage page = owner != null ? getPage(owner.pageIndex()) : null;
+        if (page == null || page.width() <= 0 || bounds == null || bounds.length < 4) return false;
+        double pageWidth = page.width();
+        double left = bounds[1];
+        double width = bounds[3] - bounds[1];
+        return left >= 0 && left < pageWidth && width > pageWidth * 0.75;
+    }
+
+    private double[] pointBoundsToResolvedUnits(double[] bounds) {
+        if (!validBounds(bounds)) return null;
+        double scale = scaleFactor > 0 ? scaleFactor : 1.0;
+        return new double[] {
+                bounds[0] / scale,
+                bounds[1] / scale,
+                bounds[2] / scale,
+                bounds[3] / scale
+        };
+    }
+
+    /**
+     * IDML Table이 속한 Story를 배치하는 TextFrame을 찾는다.
+     *
+     * Table id는 보통 "u{storyHex}i{tableHex}" 형태다. Story id를 통해
+     * TextFrame 후보를 찾고, object marker만 가진 table-only frame을 우선한다.
+     */
+    public ResolvedTextFrame getTableOwnerTextFrame(String idmlTableId) {
+        String storyId = idmlTableOwnerStoryDomId(idmlTableId);
+        if (storyId == null) return null;
+        List<ResolvedTextFrame> candidates = getTextFramesForStory(storyId);
+        if (candidates.isEmpty()) return null;
+
+        ResolvedTextFrame best = null;
+        for (ResolvedTextFrame tf : candidates) {
+            if (tf == null || tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (best == null) {
+                best = tf;
+                continue;
+            }
+            boolean tfMarker = isMarkerOnlyTextFrame(tf);
+            boolean bestMarker = isMarkerOnlyTextFrame(best);
+            if (tfMarker && !bestMarker) {
+                best = tf;
+                continue;
+            }
+            if (tfMarker == bestMarker && textFrameComesBefore(tf, best)) {
+                best = tf;
+            }
+        }
+        return best;
+    }
+
+    private String idmlTableOwnerStoryDomId(String idmlTableId) {
+        if (idmlTableId == null || idmlTableId.length() < 2 || idmlTableId.charAt(0) != 'u') return null;
+        int iIdx = idmlTableId.indexOf('i');
+        if (iIdx <= 1) return null;
+        String storyHex = idmlTableId.substring(1, iIdx);
+        try {
+            return String.valueOf(Integer.parseInt(storyHex, 16));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private boolean isMarkerOnlyTextFrame(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        String text = tf.frameVisibleText();
+        if (text == null || text.isEmpty()) return true;
+        String normalized = text
+                .replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\u0008", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+        return normalized.isEmpty();
+    }
+
+    private boolean textFrameComesBefore(ResolvedTextFrame a, ResolvedTextFrame b) {
+        if (a == null) return false;
+        if (b == null) return true;
+        if (a.pageIndex() != b.pageIndex()) return a.pageIndex() < b.pageIndex();
+        double[] ab = bestTextFrameBounds(a);
+        double[] bb = bestTextFrameBounds(b);
+        if (ab == null || bb == null) return false;
+        if (Math.abs(ab[0] - bb[0]) > 0.01) return ab[0] < bb[0];
+        return ab[1] < bb[1];
+    }
+
+    private double[] bestTextFrameBounds(ResolvedTextFrame tf) {
+        if (tf == null) return null;
+        if (validBounds(tf.pageRelativeBounds())) return tf.pageRelativeBounds();
+        return tf.geometricBounds();
+    }
+
+    private double[] textFrameGeometricBoundsToPageRelativeResolvedUnits(ResolvedTextFrame tf) {
+        if (tf == null || !validBounds(tf.geometricBounds())) return null;
+        ResolvedPage page = getPage(tf.pageIndex());
+        if (page == null || page.bounds() == null || page.bounds().length < 4) return null;
+        double[] rel = page.toPageRelative(tf.geometricBounds());
+        if (rel == null || rel.length < 2) return null;
+        double scale = scaleFactor > 0 ? scaleFactor : 1.0;
+        double top = rel[1] / scale;
+        double left = rel[0] / scale;
+        double height = (tf.geometricBounds()[2] - tf.geometricBounds()[0]) / scale;
+        double width = (tf.geometricBounds()[3] - tf.geometricBounds()[1]) / scale;
+        if (width <= 0 || height <= 0) return null;
+        return new double[] { top, left, top + height, left + width };
+    }
+
+    private static boolean validBounds(double[] bounds) {
+        return bounds != null && bounds.length >= 4
+                && Double.isFinite(bounds[0])
+                && Double.isFinite(bounds[1])
+                && Double.isFinite(bounds[2])
+                && Double.isFinite(bounds[3])
+                && bounds[2] > bounds[0]
+                && bounds[3] > bounds[1];
+    }
+
     // --- PageItem ---
 
     public void addPageItem(ResolvedPageItem item) {
@@ -701,21 +913,32 @@ public class ResolvedData {
         return isSimpleButtonLabelText(getTextFrame(textFrameId));
     }
 
+    public String simpleButtonLabelText(String textFrameId) {
+        return simpleButtonLabelText(getTextFrame(textFrameId));
+    }
+
     private static boolean isSimpleButtonLabelText(ResolvedTextFrame tf) {
-        if (tf == null) return false;
+        return simpleButtonLabelText(tf) != null;
+    }
+
+    private static String simpleButtonLabelText(ResolvedTextFrame tf) {
+        if (tf == null) return null;
         String text = tf.frameVisibleText();
-        if (text == null) return false;
+        if (text == null) return null;
         text = text.replace("\uFFFC", "")
                 .replace("\r", "")
                 .replace("\n", "")
                 .replaceAll("\\s+", "")
                 .trim();
-        if (text.isEmpty()) return false;
-        if (text.matches("\\d{1,2}")) return true;
-        if (text.codePointCount(0, text.length()) != 1) return false;
+        if (text.isEmpty()) return null;
+        if (text.matches("\\d{1,2}")) return text;
+        if (text.codePointCount(0, text.length()) != 1) return null;
         int cp = text.codePointAt(0);
-        return (cp >= 0xAC00 && cp <= 0xD7A3)
-                || (cp >= 0x3131 && cp <= 0x318E);
+        if ((cp >= 0xAC00 && cp <= 0xD7A3)
+                || (cp >= 0x3131 && cp <= 0x318E)) {
+            return text;
+        }
+        return null;
     }
 
     /**

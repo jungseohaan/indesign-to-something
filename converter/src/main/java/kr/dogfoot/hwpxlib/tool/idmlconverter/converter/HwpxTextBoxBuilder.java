@@ -359,7 +359,7 @@ public class HwpxTextBoxBuilder {
             boolean hasStroke = nativeTextBoxGraphicsEnabled()
                     && block.strokeColor() != null && block.strokeColor().startsWith("#")
                     && block.strokeWeight() > 0;
-            if (hasFill || hasStroke) {
+            if ((hasFill || hasStroke) && !containsInlineTable(block.paragraphs())) {
                 frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
                 return;
             }
@@ -378,7 +378,7 @@ public class HwpxTextBoxBuilder {
             }
             // 둥근 모서리 래퍼: Table 대신 Rectangle+DrawText 단일 객체 사용
             // (Table은 사각형이라 래퍼 Rectangle의 둥근 모서리를 덮어버림)
-            if (hasWrapper && block.cornerRadius() > 0) {
+            if (hasWrapper && block.cornerRadius() > 0 && !containsInlineTable(block.paragraphs())) {
                 convertRoundedWrapperDrawText(framePara, block, w, h);
             } else {
                 // 단락 하나 + inlineTable만 있는 경우: 1x1 외곽 래퍼 없이 표를 직접 배치
@@ -434,16 +434,10 @@ public class HwpxTextBoxBuilder {
 
     private boolean shouldUseFloatingDrawTextBox(ASTTextFrameBlock block) {
         if (block == null || block.isBackgroundOnly()) return false;
-        if (block.columnCount() > 1) return false;
-        if (block.hasWrapperFill()) return false;
-        if (block.fillColor() != null && block.fillColor().startsWith("#")) return false;
-        if (block.strokeColor() != null && block.strokeColor().startsWith("#") && block.strokeWeight() > 0) {
-            return false;
-        }
-        if (block.imageFillData() != null && block.imageFillData().length > 0) return false;
-        if (block.paragraphs() == null || block.paragraphs().isEmpty()) return false;
-        if (containsInlineTable(block.paragraphs())) return false;
-        return true;
+        // drawText is intentionally a last-resort representation.  Plain editable
+        // InDesign text frames must flow through the table/text path so paragraph
+        // boundaries, run colors, tabs, and inline tables stay editable.
+        return false;
     }
 
     private boolean containsInlineTable(java.util.List<ASTParagraph> paragraphs) {

@@ -162,13 +162,21 @@ public final class WrapPhase5 {
                         }
                         double maxShrink = frameW0 * 0.15; // 최대 축소량
                         List<Double> indRs2 = new ArrayList<>(), indLs2 = new ArrayList<>();
-                        for (ResolvedTextFrame.ComposedLine cl : lines) {
-                            if (cl.wrapIndentRight() > 10) indRs2.add(cl.wrapIndentRight());
+                        int rightEligibleLines = 0;
+                        for (int li = 0; li < lines.size(); li++) {
+                            ResolvedTextFrame.ComposedLine cl = lines.get(li);
+                            boolean isLast = li >= lines.size() - 1;
+                            boolean isParagraphEnd = isParagraphEndLine(cl);
+                            if (!isLast && !isParagraphEnd) {
+                                rightEligibleLines++;
+                                if (cl.wrapIndentRight() > 10) indRs2.add(cl.wrapIndentRight());
+                            }
                             if (cl.wrapIndentLeft() > 10) indLs2.add(cl.wrapIndentLeft());
                         }
-                        if (indRs2.size() >= lines.size() / 2) {
+                        if (rightEligibleLines > 0
+                                && indRs2.size() >= Math.max(2, rightEligibleLines / 2)) {
                             java.util.Collections.sort(indRs2);
-                            // 최소값 사용 (문단 끝 줄의 큰 indR 무시)
+                            // 최소값 사용. 문단 끝/마지막 줄의 오른쪽 빈 공간은 wrap obstacle이 아니다.
                             double shrinkR = Math.min(indRs2.get(0), maxShrink);
                             tfb.width(tfb.width() - CoordinateConverter.pointsToHwpunits(shrinkR));
                         }
@@ -538,5 +546,10 @@ public final class WrapPhase5 {
             if (t != null) len += t.replace("\r", "").length();
         }
         return len;
+    }
+
+    private static boolean isParagraphEndLine(ResolvedTextFrame.ComposedLine line) {
+        String text = line != null ? line.text() : null;
+        return text != null && (text.endsWith("\r") || text.endsWith("\n"));
     }
 }

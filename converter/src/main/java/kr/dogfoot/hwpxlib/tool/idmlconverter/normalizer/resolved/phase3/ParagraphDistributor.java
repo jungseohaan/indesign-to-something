@@ -175,7 +175,9 @@ class ParagraphDistributor {
             // visibleText의 앞부분을 storyText에서 검색하여 시작 위치 결정
             String startKey = visibleText.length() > 20 ? visibleText.substring(0, 20) : visibleText;
             int foundStart = storyText.indexOf(startKey, searchFrom);
-            if (foundStart < 0) foundStart = searchFrom;
+            if (foundStart < 0) {
+                foundStart = resolvedFrameStartOffset(rtf, searchFrom, storyText.length());
+            }
 
             // visibleText의 끝부분을 storyText에서 검색하여 종료 위치 결정
             String endKey = visibleText.length() > 20 ? visibleText.substring(visibleText.length() - 20) : visibleText;
@@ -190,6 +192,7 @@ class ParagraphDistributor {
             frameRanges[fi][1] = Math.min(foundEnd, storyText.length());
             searchFrom = frameRanges[fi][1];
         }
+        closeThreadedStoryRangeGaps(frameRanges, storyText.length());
 
         // 프레임별 단락 할당
         for (int fi = 0; fi < ordered.size(); fi++) {
@@ -258,5 +261,29 @@ class ParagraphDistributor {
                 }
             }
         }
+    }
+
+    private static void closeThreadedStoryRangeGaps(int[][] frameRanges, int storyLength) {
+        if (frameRanges == null || frameRanges.length <= 1 || storyLength <= 0) return;
+        for (int i = 0; i < frameRanges.length - 1; i++) {
+            int currentEnd = clamp(frameRanges[i][1], 0, storyLength);
+            int nextStart = clamp(frameRanges[i + 1][0], 0, storyLength);
+            if (nextStart > currentEnd) {
+                frameRanges[i][1] = nextStart;
+            }
+            if (frameRanges[i + 1][0] < frameRanges[i][1]) {
+                frameRanges[i + 1][0] = frameRanges[i][1];
+            }
+        }
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int resolvedFrameStartOffset(ResolvedTextFrame frame, int fallback, int storyLength) {
+        if (frame == null || frame.paragraphStart() < 0) return fallback;
+        int resolvedStart = clamp(frame.paragraphStart(), 0, storyLength);
+        return resolvedStart >= fallback ? resolvedStart : fallback;
     }
 }

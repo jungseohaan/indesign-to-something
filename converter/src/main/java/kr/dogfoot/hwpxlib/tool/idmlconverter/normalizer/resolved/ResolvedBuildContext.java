@@ -5,9 +5,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLDocument;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.StylePropertyResolver;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.PolicyLayer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
@@ -367,6 +369,59 @@ public final class ResolvedBuildContext {
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileBoundsKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileKey;
     private boolean ownershipPlanIndexDirty = true;
+
+    /** Stage 1 simple marker label plans. Key: inline anchor DOM id. */
+    public final java.util.Map<Integer, SimpleButtonLabelPlan> simpleButtonLabelPlans =
+            new java.util.LinkedHashMap<>();
+
+    /** Stage 1 simple marker label reverse index. Key: label TextFrame DOM id. */
+    public final java.util.Map<Integer, SimpleButtonLabelPlan> simpleButtonLabelPlansByTextFrameId =
+            new java.util.HashMap<>();
+
+    /** Stage 1 anchored table plans. Key: owner TextFrame DOM id. */
+    private final java.util.Map<Integer, java.util.List<AnchoredTablePlan>> anchoredTablePlansByOwnerTextFrameId =
+            new java.util.LinkedHashMap<>();
+
+    /** Anchored table source ids consumed by StoryConverter, including wrapper and nested table ids. */
+    private final java.util.Set<String> anchoredTableSourceIds =
+            new java.util.HashSet<>();
+
+    public void addSimpleButtonLabelPlan(SimpleButtonLabelPlan plan) {
+        if (plan == null) return;
+        simpleButtonLabelPlans.put(plan.anchorDomId, plan);
+        if (plan.labelTextFrameDomId >= 0) {
+            simpleButtonLabelPlansByTextFrameId.put(plan.labelTextFrameDomId, plan);
+        }
+    }
+
+    public SimpleButtonLabelPlan simpleButtonLabelPlan(int anchorDomId) {
+        return simpleButtonLabelPlans.get(anchorDomId);
+    }
+
+    public void addAnchoredTablePlan(AnchoredTablePlan plan) {
+        if (plan == null) return;
+        anchoredTablePlansByOwnerTextFrameId
+                .computeIfAbsent(plan.ownerTextFrameDomId, k -> new java.util.ArrayList<>())
+                .add(plan);
+        addAnchoredTableSourceId(plan.wrapperTableId);
+        addAnchoredTableSourceId(plan.nestedTableId);
+    }
+
+    public java.util.List<AnchoredTablePlan> anchoredTablePlansForOwnerTextFrame(int domId) {
+        java.util.List<AnchoredTablePlan> plans = anchoredTablePlansByOwnerTextFrameId.get(domId);
+        if (plans == null || plans.isEmpty()) return java.util.Collections.emptyList();
+        return plans;
+    }
+
+    public boolean isAnchoredTableSource(String tableSourceId) {
+        return tableSourceId != null && anchoredTableSourceIds.contains(tableSourceId);
+    }
+
+    private void addAnchoredTableSourceId(String tableSourceId) {
+        if (tableSourceId != null && !tableSourceId.isEmpty()) {
+            anchoredTableSourceIds.add(tableSourceId);
+        }
+    }
 
     public void addOwnershipPlan(ObjectPlan plan) {
         if (plan != null) {

@@ -36,6 +36,12 @@ public class ASTParagraph {
     // 프레임 내 Y 오프셋 (points, resolved.json에서 전파, -1 = 미설정)
     private double yOffsetInFrame = -1;
 
+    // 원본 조판 line bounds의 page-relative union (HWPUNIT, -1 = 미설정)
+    private long pageX = -1;
+    private long pageY = -1;
+    private long pageWidth = -1;
+    private long pageHeight = -1;
+
     // 인라인 테이블 (이 문단이 테이블 자리표시자인 경우)
     private ASTTable inlineTable;
 
@@ -132,6 +138,22 @@ public class ASTParagraph {
 
     public double yOffsetInFrame() { return yOffsetInFrame; }
     public void yOffsetInFrame(double v) { this.yOffsetInFrame = v; }
+
+    public long pageX() { return pageX; }
+    public void pageX(long v) { this.pageX = v; }
+
+    public long pageY() { return pageY; }
+    public void pageY(long v) { this.pageY = v; }
+
+    public long pageWidth() { return pageWidth; }
+    public void pageWidth(long v) { this.pageWidth = v; }
+
+    public long pageHeight() { return pageHeight; }
+    public void pageHeight(long v) { this.pageHeight = v; }
+
+    public boolean hasPageBounds() {
+        return pageX >= 0 && pageY >= 0 && pageWidth > 0 && pageHeight > 0;
+    }
 
     public ASTTable inlineTable() { return inlineTable; }
     public void inlineTable(ASTTable v) { this.inlineTable = v; }
