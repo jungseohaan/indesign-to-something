@@ -16,6 +16,8 @@ import java.util.List;
  */
 class ParagraphDistributor {
 
+    private static final int FRAME_RANGE_REWIND_TOLERANCE = 32;
+
     private ParagraphDistributor() {}
 
     /**
@@ -151,7 +153,7 @@ class ParagraphDistributor {
                 visibleText = (rtf != null) ? rtf.frameVisibleText() : null;
             }
             if (visibleText != null) {
-                visibleText = visibleText.replace("\uFFFC", "").replace("\n", "");
+                visibleText = normalizeFrameTextForRangeMatching(visibleText);
             }
 
             if (visibleText == null || visibleText.isEmpty()) {
@@ -160,7 +162,7 @@ class ParagraphDistributor {
                 if (frameTexts != null && !frameTexts.isEmpty()) {
                     StringBuilder sb = new StringBuilder();
                     for (String ft : frameTexts) {
-                        if (ft != null) sb.append(ft.replace("\uFFFC", ""));
+                        if (ft != null) sb.append(normalizeFrameTextForRangeMatching(ft));
                     }
                     visibleText = sb.toString();
                 }
@@ -172,9 +174,11 @@ class ParagraphDistributor {
                 continue;
             }
 
-            // visibleText의 앞부분을 storyText에서 검색하여 시작 위치 결정
-            String startKey = visibleText.length() > 20 ? visibleText.substring(0, 20) : visibleText;
-            int foundStart = storyText.indexOf(startKey, searchFrom);
+            // visibleText의 앞부분을 storyText에서 검색하여 시작 위치 결정.
+            // Frame boundaries can contain paragraph-boundary spacing/control chars that are
+            // normalized differently from the AST story text, so progressively shorten the
+            // prefix before falling back to resolved offsets.
+            int foundStart = findFrameStart(storyText, visibleText, searchFrom);
             if (foundStart < 0) {
                 foundStart = resolvedFrameStartOffset(rtf, searchFrom, storyText.length());
             }
@@ -271,14 +275,62 @@ class ParagraphDistributor {
             if (nextStart > currentEnd) {
                 frameRanges[i][1] = nextStart;
             }
-            if (frameRanges[i + 1][0] < frameRanges[i][1]) {
-                frameRanges[i + 1][0] = frameRanges[i][1];
+            if (nextStart < frameRanges[i][1]) {
+                frameRanges[i][1] = nextStart;
             }
         }
     }
 
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static int findFrameStart(String storyText, String visibleText, int searchFrom) {
+        if (storyText == null || visibleText == null || visibleText.isEmpty()) return -1;
+        int from = Math.max(0, searchFrom - FRAME_RANGE_REWIND_TOLERANCE);
+        int maxLen = Math.min(20, visibleText.length());
+        for (int len = maxLen; len >= 4; len--) {
+            String key = trimTrailingFrameBoundaryChars(visibleText.substring(0, len));
+            if (key.length() < 4) continue;
+            int found = storyText.indexOf(key, from);
+            if (found >= 0) return found;
+        }
+        return -1;
+    }
+
+    private static String trimTrailingFrameBoundaryChars(String text) {
+        if (text == null || text.isEmpty()) return text;
+        int end = text.length();
+        while (end > 0) {
+            char c = text.charAt(end - 1);
+            if (Character.isWhitespace(c) || Character.isISOControl(c)
+                    || c == '\u2003' || c == '\u2007' || c == '\u2009' || c == '\u00A0') {
+                end--;
+            } else {
+                break;
+            }
+        }
+        return text.substring(0, end);
+    }
+
+    private static String normalizeFrameTextForRangeMatching(String text) {
+        if (text == null || text.isEmpty()) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\uFFFC' || c == '\n' || c == '\r') {
+                continue;
+            }
+            // InDesign frameVisibleText can include layout/object sentinels such as
+            // U+0016 or U+0018 that are not part of the Story text. Keeping them
+            // shifts frame ranges and can make the next linked frame's first
+            // characters belong to the previous frame.
+            if (Character.isISOControl(c) && c != '\t' && c != '\u0007' && c != '\u0008') {
+                continue;
+            }
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     private static int resolvedFrameStartOffset(ResolvedTextFrame frame, int fallback, int storyLength) {

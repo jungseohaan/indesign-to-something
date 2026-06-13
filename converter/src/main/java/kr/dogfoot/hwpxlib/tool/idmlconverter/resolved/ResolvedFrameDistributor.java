@@ -2,6 +2,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.resolved;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 
 import java.util.*;
 
@@ -57,9 +58,19 @@ public class ResolvedFrameDistributor {
             List<ASTParagraph> allParas = new ArrayList<>(sourceBlock.paragraphs());
             if (allParas.isEmpty()) continue;
 
+            ResolvedStory resolvedStory = resolved.getStory(decimalStoryId);
+            if (shouldUseVisibleTextRangeDistribution(resolvedStory, resolvedFrames)) {
+                boolean distributed = distributeByVisibleTextRanges(allParas, blocks, resolvedFrames);
+                if (distributed) {
+                    System.out.println("[FrameDistributor] Story " + idmlStoryId
+                            + ": " + allParas.size() + " AST paras → "
+                            + blocks.size() + " frames (visible-text ranges)");
+                }
+                continue;
+            }
+
             // resolved→AST 문단 인덱스 매핑 구축 (텍스트 내용 기반)
             int[] idxMap = null;
-            ResolvedStory resolvedStory = resolved.getStory(decimalStoryId);
             if (resolvedStory != null && !resolvedStory.paragraphs().isEmpty()) {
                 idxMap = buildIndexMapping(resolvedStory, allParas);
                 if (idxMap != null) {
@@ -213,6 +224,230 @@ public class ResolvedFrameDistributor {
         // 같은 페이지(섹션) 내 연결 프레임들을 하나의 프레임으로 병합
         mergeSamePageFrames(astDoc);
         annotateParagraphPageBounds(astDoc, resolved);
+    }
+
+    private static final int FRAME_RANGE_REWIND_TOLERANCE = 32;
+
+    /**
+     * Some resolved.json versions expose paragraphStart/paragraphEnd as story
+     * character offsets, despite the field names. In that shape, treating the
+     * numbers as paragraph indices moves the next frame's first paragraph back
+     * into the previous linked frame.
+     */
+    private static boolean shouldUseVisibleTextRangeDistribution(
+            ResolvedStory story,
+            List<ResolvedTextFrame> frames) {
+        int paragraphCount = story != null && story.paragraphs() != null
+                ? story.paragraphs().size()
+                : 0;
+        if (paragraphCount <= 0 || frames == null) return false;
+        for (ResolvedTextFrame frame : frames) {
+            if (frame == null) continue;
+            if (frame.paragraphStart() >= paragraphCount || frame.paragraphEnd() >= paragraphCount) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean distributeByVisibleTextRanges(
+            List<ASTParagraph> paragraphs,
+            List<ASTTextFrameBlock> blocks,
+            List<ResolvedTextFrame> resolvedFrames) {
+        if (paragraphs == null || paragraphs.isEmpty()
+                || blocks == null || blocks.isEmpty()
+                || resolvedFrames == null || resolvedFrames.isEmpty()) {
+            return false;
+        }
+
+        List<ResolvedTextFrame> sortedFrames = new ArrayList<>(resolvedFrames);
+        sortedFrames.sort(Comparator.comparingInt(ResolvedTextFrame::paragraphStart));
+
+        List<ASTTextFrameBlock> orderedBlocks = new ArrayList<>();
+        for (ResolvedTextFrame frame : sortedFrames) {
+            ASTTextFrameBlock block = findBlockForFrame(blocks, frame);
+            if (block != null && !orderedBlocks.contains(block)) {
+                orderedBlocks.add(block);
+            }
+        }
+        if (orderedBlocks.size() < 2) return false;
+
+        StringBuilder storyTextBuilder = new StringBuilder();
+        List<int[]> paraRanges = new ArrayList<>();
+        for (ASTParagraph paragraph : paragraphs) {
+            int start = storyTextBuilder.length();
+            String text = ParagraphTextHelpers.getParaPlainText(paragraph);
+            storyTextBuilder.append(text != null ? text : "");
+            paraRanges.add(new int[] { start, storyTextBuilder.length() });
+        }
+        String storyText = storyTextBuilder.toString();
+        if (storyText.isEmpty()) return false;
+
+        int[][] frameRanges = new int[orderedBlocks.size()][2];
+        int searchFrom = 0;
+        for (int i = 0; i < orderedBlocks.size(); i++) {
+            ASTTextFrameBlock block = orderedBlocks.get(i);
+            ResolvedTextFrame frame = matchFrame(block.sourceId(), resolvedFrames);
+            String visibleText = normalizeFrameTextForRangeMatching(
+                    frame != null ? frame.frameVisibleText() : null);
+            if (visibleText == null || visibleText.isEmpty()) {
+                visibleText = normalizeFrameTextForRangeMatching(joinFrameParaTexts(frame));
+            }
+
+            if (visibleText == null || visibleText.isEmpty()) {
+                frameRanges[i][0] = searchFrom;
+                frameRanges[i][1] = i == orderedBlocks.size() - 1 ? storyText.length() : searchFrom;
+                continue;
+            }
+
+            int foundStart = findFrameStart(storyText, visibleText, searchFrom);
+            if (foundStart < 0) {
+                foundStart = clamp(frame != null ? frame.paragraphStart() : searchFrom, 0, storyText.length());
+            }
+
+            String endKey = visibleText.length() > 20
+                    ? visibleText.substring(visibleText.length() - 20)
+                    : visibleText;
+            int foundEnd = storyText.indexOf(endKey, foundStart);
+            if (foundEnd >= 0) {
+                foundEnd += endKey.length();
+            } else {
+                foundEnd = foundStart + visibleText.length();
+            }
+
+            frameRanges[i][0] = clamp(foundStart, 0, storyText.length());
+            frameRanges[i][1] = clamp(foundEnd, frameRanges[i][0], storyText.length());
+            searchFrom = frameRanges[i][1];
+        }
+        closeThreadedStoryRangeGaps(frameRanges, storyText.length());
+
+        for (ASTTextFrameBlock block : orderedBlocks) {
+            block.paragraphs().clear();
+        }
+        for (int i = 0; i < orderedBlocks.size(); i++) {
+            ASTTextFrameBlock block = orderedBlocks.get(i);
+            int frameStart = frameRanges[i][0];
+            int frameEnd = frameRanges[i][1];
+            for (int pi = 0; pi < paragraphs.size(); pi++) {
+                int paraStart = paraRanges.get(pi)[0];
+                int paraEnd = paraRanges.get(pi)[1];
+                if (paraEnd <= frameStart) continue;
+                if (paraStart >= frameEnd) break;
+
+                ASTParagraph paragraph = paragraphs.get(pi);
+                if (paraStart >= frameStart && paraEnd <= frameEnd) {
+                    block.addParagraph(paragraph);
+                    continue;
+                }
+
+                int localStart = Math.max(0, frameStart - paraStart);
+                int localEnd = Math.min(paraEnd - paraStart, frameEnd - paraStart);
+                ASTParagraph slice = sliceParagraph(paragraph, localStart, localEnd);
+                if (slice != null) {
+                    block.addParagraph(slice);
+                }
+            }
+            block.distributed(true);
+        }
+        return true;
+    }
+
+    private static ASTTextFrameBlock findBlockForFrame(List<ASTTextFrameBlock> blocks, ResolvedTextFrame frame) {
+        if (blocks == null || frame == null) return null;
+        for (ASTTextFrameBlock block : blocks) {
+            if (frame.equals(matchFrame(block.sourceId(), Collections.singletonList(frame)))) {
+                return block;
+            }
+        }
+        return null;
+    }
+
+    private static ASTParagraph sliceParagraph(ASTParagraph original, int start, int end) {
+        if (original == null) return null;
+        String text = ParagraphTextHelpers.getParaPlainText(original);
+        if (text == null) text = "";
+        start = clamp(start, 0, text.length());
+        end = clamp(end, start, text.length());
+        if (start == 0 && end >= text.length()) return original;
+        if (start >= end) return null;
+        if (start == 0) {
+            return ParagraphTextHelpers.createSplitParagraph(original, text.substring(0, end));
+        }
+        ASTParagraph continuation = ParagraphTextHelpers.createContinuationParagraph(
+                original, start, text.substring(start, end));
+        if (continuation == null || end >= text.length()) {
+            return continuation;
+        }
+        return ParagraphTextHelpers.createSplitParagraph(continuation, text.substring(start, end));
+    }
+
+    private static String joinFrameParaTexts(ResolvedTextFrame frame) {
+        if (frame == null || frame.frameParaTexts() == null || frame.frameParaTexts().isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String text : frame.frameParaTexts()) {
+            if (text != null) sb.append(text);
+        }
+        return sb.toString();
+    }
+
+    private static void closeThreadedStoryRangeGaps(int[][] frameRanges, int storyLength) {
+        if (frameRanges == null || frameRanges.length <= 1 || storyLength <= 0) return;
+        for (int i = 0; i < frameRanges.length - 1; i++) {
+            int currentEnd = clamp(frameRanges[i][1], 0, storyLength);
+            int nextStart = clamp(frameRanges[i + 1][0], 0, storyLength);
+            if (nextStart > currentEnd) {
+                frameRanges[i][1] = nextStart;
+            }
+            if (nextStart < frameRanges[i][1]) {
+                frameRanges[i][1] = nextStart;
+            }
+        }
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int findFrameStart(String storyText, String visibleText, int searchFrom) {
+        if (storyText == null || visibleText == null || visibleText.isEmpty()) return -1;
+        int from = Math.max(0, searchFrom - FRAME_RANGE_REWIND_TOLERANCE);
+        int maxLen = Math.min(20, visibleText.length());
+        for (int len = maxLen; len >= 4; len--) {
+            String key = trimTrailingFrameBoundaryChars(visibleText.substring(0, len));
+            if (key.length() < 4) continue;
+            int found = storyText.indexOf(key, from);
+            if (found >= 0) return found;
+        }
+        return -1;
+    }
+
+    private static String trimTrailingFrameBoundaryChars(String text) {
+        if (text == null || text.isEmpty()) return text;
+        int end = text.length();
+        while (end > 0) {
+            char c = text.charAt(end - 1);
+            if (Character.isWhitespace(c) || Character.isISOControl(c)
+                    || c == '\u2003' || c == '\u2007' || c == '\u2009' || c == '\u00A0') {
+                end--;
+            } else {
+                break;
+            }
+        }
+        return text.substring(0, end);
+    }
+
+    private static String normalizeFrameTextForRangeMatching(String text) {
+        if (text == null || text.isEmpty()) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\uFFFC' || c == '\n' || c == '\r') continue;
+            if (Character.isISOControl(c) && c != '\t' && c != '\u0007' && c != '\u0008') continue;
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     // ─── 인덱스 매핑 ────────────────────────────────────────

@@ -15,6 +15,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
@@ -141,6 +142,71 @@ public class StoryConverterTest {
         Assert.assertEquals(3, obj.inlineTables().get(0).rowCount());
     }
 
+    @Test
+    public void linkedFrameRangeMatchingIgnoresNonStoryControlSentinels() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame first = linkedTextFrame("15275", "15278", 12,
+                null, "29630", 0, 6, "\t성취기준\u0016\u0016");
+        ResolvedTextFrame second = linkedTextFrame("29630", "15278", 13,
+                "15275", null, 6, 20, "(가) 성취기준 해설");
+        data.addTextFrame(first);
+        data.addTextFrame(second);
+
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = data;
+
+        ASTParagraph title = paragraphWithText("성취기준");
+        ASTParagraph heading = paragraphWithText("(가) 성취기준 해설");
+        java.util.List<ASTParagraph> paragraphs = new java.util.ArrayList<>();
+        paragraphs.add(title);
+        paragraphs.add(heading);
+
+        ASTTextFrameBlock firstBlock = linkedBlock("15275", "15278", "\t성취기준\u0016\u0016");
+        ASTTextFrameBlock secondBlock = linkedBlock("29630", "15278", "(가) 성취기준 해설");
+        java.util.List<ASTTextFrameBlock> blocks = new java.util.ArrayList<>();
+        blocks.add(firstBlock);
+        blocks.add(secondBlock);
+
+        ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, "15278");
+
+        Assert.assertEquals("성취기준", blockText(firstBlock));
+        Assert.assertEquals("(가) 성취기준 해설", blockText(secondBlock));
+    }
+
+    @Test
+    public void linkedFrameRangeMatchingShortensBoundaryPrefixBeforeOffsetFallback() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame first = linkedTextFrame("15275", "15278", 12,
+                null, "29630", 0, 7, "\uFFFC\t성취기준\n\u0016\n");
+        ResolvedTextFrame second = linkedTextFrame("29630", "15278", 13,
+                "15275", null, 9, 40, "(가) 성취기준 해설\u2003\n•\u0007[12문학01-02] 본문");
+        data.addTextFrame(first);
+        data.addTextFrame(second);
+
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = data;
+
+        ASTParagraph title = paragraphWithText("성취기준");
+        ASTParagraph heading = paragraphWithText("(가) 성취기준 해설");
+        ASTParagraph body = paragraphWithText("•[12문학01-02] 본문");
+        java.util.List<ASTParagraph> paragraphs = new java.util.ArrayList<>();
+        paragraphs.add(title);
+        paragraphs.add(heading);
+        paragraphs.add(body);
+
+        ASTTextFrameBlock firstBlock = linkedBlock("15275", "15278", "\uFFFC\t성취기준\n\u0016\n");
+        ASTTextFrameBlock secondBlock = linkedBlock("29630", "15278",
+                "(가) 성취기준 해설\u2003\n•\u0007[12문학01-02] 본문");
+        java.util.List<ASTTextFrameBlock> blocks = new java.util.ArrayList<>();
+        blocks.add(firstBlock);
+        blocks.add(secondBlock);
+
+        ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, "15278");
+
+        Assert.assertEquals("성취기준", blockText(firstBlock));
+        Assert.assertEquals("(가) 성취기준 해설•[12문학01-02] 본문", blockText(secondBlock));
+    }
+
     private static ResolvedTextFrame textFrameWithVisibleBodyText() {
         ResolvedTextFrame tf = new ResolvedTextFrame();
         tf.id("13913");
@@ -204,6 +270,40 @@ public class StoryConverterTest {
         run.fontSize(9.0);
         run.fillColor("Black");
         paragraph.addCharacterRun(run);
+        return paragraph;
+    }
+
+    private static ResolvedTextFrame linkedTextFrame(String id, String storyId, int pageIndex,
+                                                     String previousFrameId, String nextFrameId,
+                                                     int start, int end, String visibleText) {
+        ResolvedTextFrame tf = new ResolvedTextFrame();
+        tf.id(id);
+        tf.storyId(storyId);
+        tf.pageIndex(pageIndex);
+        tf.previousFrameId(previousFrameId);
+        tf.nextFrameId(nextFrameId);
+        tf.paragraphStart(start);
+        tf.paragraphEnd(end);
+        tf.lineCount(1);
+        tf.frameVisibleText(visibleText);
+        tf.frameParaTexts(Collections.singletonList(visibleText));
+        return tf;
+    }
+
+    private static ASTTextFrameBlock linkedBlock(String domId, String storyId, String visibleText) {
+        ASTTextFrameBlock block = new ASTTextFrameBlock();
+        block.sourceId(ParagraphTextHelpers.domIdToSourceId(domId));
+        block.storyId(storyId);
+        block.frameVisibleText(visibleText);
+        block.frameVisibleTextLength(visibleText.length());
+        return block;
+    }
+
+    private static ASTParagraph paragraphWithText(String text) {
+        ASTParagraph paragraph = new ASTParagraph();
+        ASTTextRun run = new ASTTextRun();
+        run.text(text);
+        paragraph.addItem(run);
         return paragraph;
     }
 
