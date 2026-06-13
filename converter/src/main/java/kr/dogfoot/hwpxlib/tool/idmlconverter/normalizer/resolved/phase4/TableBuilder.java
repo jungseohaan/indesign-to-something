@@ -262,7 +262,6 @@ public final class TableBuilder {
                 ASTTable astTable = buildPreparedAstTable(ctx, idmlTable, thisX, thisY, tf.zOrder());
                 absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
 
-                report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(ctx, astTable, tablePageIdx);
                 report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
                 completeVisibleTableOuterBorder(astTable);
 
@@ -270,6 +269,9 @@ public final class TableBuilder {
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
+                    report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
+                            ctx, placement.table, placement.pageIdx);
+                    completeVisibleTableOuterBorder(placement.table);
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
@@ -1051,10 +1053,8 @@ public final class TableBuilder {
             ASTTableRow astRow = astTable.rows().get(ri);
             kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow idmlRow = idmlTable.rows().get(ri);
             if (astRow == null || idmlRow == null || astRow.cells() == null || idmlRow.cells() == null) continue;
-            int cellCount = Math.min(astRow.cells().size(), idmlRow.cells().size());
-            for (int ci = 0; ci < cellCount; ci++) {
-                ASTTableCell astCell = astRow.cells().get(ci);
-                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell = idmlRow.cells().get(ci);
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell : idmlRow.cells()) {
+                ASTTableCell astCell = findAstCell(astRow, idmlCell.columnIndex());
                 if (astCell == null || idmlCell == null || astCell.paragraphs() == null || idmlCell.paragraphs() == null) {
                     continue;
                 }
@@ -1135,10 +1135,8 @@ public final class TableBuilder {
             ASTTableRow astRow = astTable.rows().get(ri);
             kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow idmlRow = idmlTable.rows().get(ri);
             if (astRow == null || idmlRow == null || astRow.cells() == null || idmlRow.cells() == null) continue;
-            int cellCount = Math.min(astRow.cells().size(), idmlRow.cells().size());
-            for (int ci = 0; ci < cellCount; ci++) {
-                ASTTableCell astCell = astRow.cells().get(ci);
-                kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell = idmlRow.cells().get(ci);
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell : idmlRow.cells()) {
+                ASTTableCell astCell = findAstCell(astRow, idmlCell.columnIndex());
                 if (astCell == null || idmlCell == null || astCell.paragraphs() == null || idmlCell.paragraphs() == null) {
                     continue;
                 }
@@ -1299,8 +1297,13 @@ public final class TableBuilder {
     private static boolean isAtomicRenderedInlineGraphic(ResolvedBuildContext ctx, int domId) {
         RenderedGroup rg = findRenderedInlineObject(ctx, domId);
         if (rg == null) return false;
-        int[] sourceIds = rg.sourceObjectIds();
-        return sourceIds == null || sourceIds.length <= 1;
+        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
+        if (rg.file() == null || rg.file().isEmpty()) return false;
+        String visualOwner = rg.visualOwner();
+        if (visualOwner != null && !"indesign_png".equals(visualOwner)) return false;
+        if (Boolean.TRUE.equals(rg.containsEditableText())) return false;
+        String textOwner = rg.textOwner();
+        return textOwner == null || "none".equals(textOwner);
     }
 
     private static RenderedGroup findRenderedInlineObject(ResolvedBuildContext ctx, int domId) {
@@ -1593,18 +1596,26 @@ public final class TableBuilder {
             String fill = resolveFillHex(ctx, item);
             if (fill == null) continue;
 
-            ASTTableCell matched = findCoveredCell(
+            List<ASTTableCell> matchedCells = findCoveredCells(
                     table, colLeft, rowTop, tableLeftPt, tableTopPt,
                     rectLeft, rectTop, rectRight, rectBottom);
-            if (matched == null) continue;
+            if (matchedCells.isEmpty()) {
+                ASTTableCell matched = findCoveredCell(
+                        table, colLeft, rowTop, tableLeftPt, tableTopPt,
+                        rectLeft, rectTop, rectRight, rectBottom);
+                if (matched != null) matchedCells.add(matched);
+            }
+            if (matchedCells.isEmpty()) continue;
 
-            matched.fillColor(fill);
+            for (ASTTableCell matched : matchedCells) {
+                matched.fillColor(fill);
+            }
             markPageItemHandled(ctx, itemId);
             absorbedItemIds.add(itemId);
             absorbed++;
             if (ctx.debugAst) {
                 table.debugOrNew().note("cell background absorbed: page_item " + itemId
-                        + " -> r=" + matched.rowIndex() + " c=" + matched.columnIndex());
+                        + " -> cells=" + matchedCells.size());
             }
         }
         suppressRenderedGroupsCoveredByAbsorbedCellBackgrounds(ctx, absorbedItemIds, pageItemById);
@@ -1990,14 +2001,114 @@ public final class TableBuilder {
         }
         double[] fallback = item.geometricBounds() != null ? item.geometricBounds() : item.visibleBounds();
         if (fallback == null || fallback.length < 4) return fallback;
-        double sf = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
-        if (Math.abs(sf - 1.0) < 0.01) return fallback;
-        return new double[]{
-                fallback[0] / sf,
-                fallback[1] / sf,
-                fallback[2] / sf,
-                fallback[3] / sf
+        double pageTop = 0.0;
+        double pageLeft = 0.0;
+        if (ctx != null && ctx.resolvedData != null
+                && item.pageIndex() >= 0
+                && item.pageIndex() < ctx.resolvedData.pages().size()) {
+            ResolvedPage page = ctx.resolvedData.pages().get(item.pageIndex());
+            if (page != null && page.bounds() != null && page.bounds().length >= 4) {
+                pageTop = page.bounds()[0];
+                pageLeft = page.bounds()[1];
+            }
+        }
+        double[] pageRelative = new double[]{
+                fallback[0] - pageTop,
+                fallback[1] - pageLeft,
+                fallback[2] - pageTop,
+                fallback[3] - pageLeft
         };
+        return pageRelative;
+    }
+
+    private static List<ASTTableCell> findCoveredCells(
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            double rectLeft,
+            double rectTop,
+            double rectRight,
+            double rectBottom) {
+        List<ASTTableCell> matches = new ArrayList<>();
+        double tolerance = 4.0;
+        int c0 = findGridEdgeIndex(colLeft, tableLeftPt, rectLeft, tolerance);
+        int c1 = findGridEdgeIndex(colLeft, tableLeftPt, rectRight, tolerance);
+        int r0 = findGridEdgeIndex(rowTop, tableTopPt, rectTop, tolerance);
+        int r1 = findGridEdgeIndex(rowTop, tableTopPt, rectBottom, tolerance);
+        if (c0 < 0 || c1 < 0 || r0 < 0 || r1 < 0 || c1 <= c0 || r1 <= r0) {
+            return findMostlyCoveredCells(
+                    table, colLeft, rowTop, tableLeftPt, tableTopPt,
+                    rectLeft, rectTop, rectRight, rectBottom);
+        }
+
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int rowStart = cell.rowIndex();
+                int rowEnd = rowStart + Math.max(1, cell.rowSpan());
+                int colStart = cell.columnIndex();
+                int colEnd = colStart + Math.max(1, cell.columnSpan());
+                if (spansOverlap(rowStart, rowEnd, r0, r1)
+                        && spansOverlap(colStart, colEnd, c0, c1)) {
+                    matches.add(cell);
+                }
+            }
+        }
+        return matches;
+    }
+
+    private static List<ASTTableCell> findMostlyCoveredCells(
+            ASTTable table,
+            long[] colLeft,
+            long[] rowTop,
+            double tableLeftPt,
+            double tableTopPt,
+            double rectLeft,
+            double rectTop,
+            double rectRight,
+            double rectBottom) {
+        List<ASTTableCell> matches = new ArrayList<>();
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                int c0 = cell.columnIndex();
+                int c1 = Math.min(c0 + Math.max(1, cell.columnSpan()), colLeft.length - 1);
+                int r0 = cell.rowIndex();
+                int r1 = Math.min(r0 + Math.max(1, cell.rowSpan()), rowTop.length - 1);
+                if (c0 < 0 || c0 >= colLeft.length || r0 < 0 || r0 >= rowTop.length) continue;
+
+                double cellLeft = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c0]);
+                double cellRight = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c1]);
+                double cellTop = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r0]);
+                double cellBottom = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r1]);
+                if (mostlyCoversCell(
+                        rectLeft, rectTop, rectRight, rectBottom,
+                        cellLeft, cellTop, cellRight, cellBottom)) {
+                    matches.add(cell);
+                }
+            }
+        }
+        return matches;
+    }
+
+    private static boolean mostlyCoversCell(
+            double rectLeft, double rectTop, double rectRight, double rectBottom,
+            double cellLeft, double cellTop, double cellRight, double cellBottom) {
+        double ix = Math.max(0, Math.min(rectRight, cellRight) - Math.max(rectLeft, cellLeft));
+        double iy = Math.max(0, Math.min(rectBottom, cellBottom) - Math.max(rectTop, cellTop));
+        double cellWidth = Math.max(0, cellRight - cellLeft);
+        double cellHeight = Math.max(0, cellBottom - cellTop);
+        if (ix <= 0 || iy <= 0 || cellWidth <= 0 || cellHeight <= 0) return false;
+        double horizontalCoverage = ix / cellWidth;
+        double verticalCoverage = iy / cellHeight;
+        double areaCoverage = (ix * iy) / (cellWidth * cellHeight);
+        return horizontalCoverage >= 0.82
+                && verticalCoverage >= 0.72
+                && areaCoverage >= 0.72;
     }
 
     private static ASTTableCell findCoveredCell(
