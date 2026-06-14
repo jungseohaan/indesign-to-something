@@ -40,14 +40,11 @@ public final class RenderableFramePlacer {
             if (!"page_object".equals(rg3.itemType())) {
                 continue;
             }
-            if (ctx.shouldDropVisualByOwnershipPlan(rg3)) {
-                ctx.recordRenderedDecision(rg3, "Stage3.VisualBuilder.Phase7", "SKIP_OBJECT_PLAN_DROP_VISUAL",
-                        "OwnershipPlanner visualAction=DROP_VISUAL");
-                continue;
-            }
-            if (ctx.hasOwnershipPlan(rg3) && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg3)) {
-                ctx.recordRenderedDecision(rg3, "Stage3.VisualBuilder.Phase7", "SKIP_OBJECT_PLAN_NOT_FLOATING_VISUAL",
-                        "OwnershipPlanner placement/action is not handled by floating visual executor");
+            // SPEC-036: plan 권위 억제 판정 (Phase 6/7 공용 VisualPlacementResolver로 통합)
+            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.VisualPlacementResolver.PlanRejection planRej3 =
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.VisualPlacementResolver.planRejection(ctx, rg3);
+            if (planRej3 != null) {
+                ctx.recordRenderedDecision(rg3, "Stage3.VisualBuilder.Phase7", planRej3.code, planRej3.detail);
                 continue;
             }
             if (rg3.file() == null) {

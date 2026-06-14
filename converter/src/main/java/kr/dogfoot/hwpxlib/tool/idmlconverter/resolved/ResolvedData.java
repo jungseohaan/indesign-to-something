@@ -1301,6 +1301,11 @@ public class ResolvedData {
         }
     }
 
+    /** DOM(decimal) id가 renderedImageFrame(실제 래스터 이미지 프레임)으로 등록됐는지. suppress 무시 판단용. */
+    public boolean isRenderedImageFrameDomId(int domId) {
+        return renderedImageFrameMap.containsKey(String.valueOf(domId));
+    }
+
     // --- 좌표 단위 정규화 ---
 
     /**

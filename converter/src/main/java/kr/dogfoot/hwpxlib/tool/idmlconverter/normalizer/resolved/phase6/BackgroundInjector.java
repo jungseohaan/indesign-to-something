@@ -14,6 +14,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.VisualSourcePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
@@ -74,11 +75,16 @@ public final class BackgroundInjector {
             int parentPage = rg.pageIndex();
             boolean parentKeepsContainerShell = hasSubstantialVisualOutsideEditableLabelShell(
                     rg, editableLabelShellIds, idToRendered);
+            // PLACE_TEXT_SHELL 부모는 배경/텍스트 셸만 렌더하고 자식 이미지를 PNG에 굽지 않는다.
+            // → 자체 래스터 이미지 렌더를 가진 자식(renderedImageFrame)은 억제하면 영영 사라지므로 보존.
+            boolean parentIsTextShellOnly =
+                    ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
             if (rg.childIds() != null) {
                 for (int cid : rg.childIds()) {
                     if (editableLabelShellIds.contains(cid) && !parentKeepsContainerShell) continue;
                     if (conceptDiagramLabelShellIds.contains(cid)) continue;
                     if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
+                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
                     Integer cp = idToPage.get(cid);
                     if (cp != null && cp == parentPage)
                         childOfGroup.add(cid);
@@ -89,6 +95,7 @@ public final class BackgroundInjector {
                     if (editableLabelShellIds.contains(cid) && !parentKeepsContainerShell) continue;
                     if (conceptDiagramLabelShellIds.contains(cid)) continue;
                     if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
+                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
                     Integer cp = idToPage.get(cid);
                     if (cp != null && cp == parentPage)
                         childOfGroup.add(cid);
@@ -99,6 +106,7 @@ public final class BackgroundInjector {
                     if (cid == rg.id()) continue;
                     if (conceptDiagramLabelShellIds.contains(cid)) continue;
                     if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
+                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
                     childOfGroup.add(cid);
                 }
             }
@@ -128,15 +136,11 @@ public final class BackgroundInjector {
                         "badge embedded inline in table cell");
                 continue;
             }
-            if (ctx.shouldDropVisualByOwnershipPlan(rg)) {
-                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", "SKIP_OBJECT_PLAN_DROP_VISUAL",
-                        "OwnershipPlanner visualAction=DROP_VISUAL");
-                continue;
-            }
-            if (ctx.hasOwnershipPlan(rg) && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) {
-                ctx.phase6PlacedIds.add(rg.id());
-                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", "SKIP_OBJECT_PLAN_NOT_FLOATING_VISUAL",
-                        "OwnershipPlanner placement/action is not handled by floating visual executor");
+            // SPEC-036: plan 권위 억제 판정 (Phase 6/7 공용 VisualPlacementResolver로 통합)
+            VisualPlacementResolver.PlanRejection planRej = VisualPlacementResolver.planRejection(ctx, rg);
+            if (planRej != null) {
+                if (planRej.markPhase6Placed) ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", planRej.code, planRej.detail);
                 continue;
             }
             if (shouldDecomposeToEditableLabelShell(rg, editableLabelShellIds, idToRendered)) {
@@ -1533,6 +1537,9 @@ public final class BackgroundInjector {
                 if (rg == null) continue;
                 boolean inlineObject = "inline_object".equals(rg.itemType())
                         || "inline_object".equals(rg.type());
+                // 시각이 드롭(DROP_VISUAL)된 inline_object는 실제로 인라인 배치되지 않으므로
+                // 같은 id의 page_object를 "인라인이 덮는다"고 보면 안 된다(그 page_object가 유일한 시각).
+                if (inlineObject && ctx.shouldDropVisualByOwnershipPlan(rg)) continue;
                 if ((inlineObject && hasPageVisibleInlineBounds(ctx, rg))
                         || coveredIds.contains(rg.id())) {
                     addCoverageIds(rg, coveredIds);

@@ -23,6 +23,7 @@
 | **[SPEC-markdown](SPEC-markdown-export.md)** | AST → Markdown 내보내기 | **신규(2026-06-04)**. 계층 구조 파악 목적. 글/이미지 블럭 Y순 배치 + 단락 스타일 이름 주석 보존 |
 | **[SPEC-034](SPEC-034-llm-semantic-extraction.md)** | LLM 기반 시멘틱 구조 추출 | **신규(2026-06-04)**. GROQ/Anthropic API로 SemanticNode 분류 보강 + 계층형 JSON 출력. M1~M3 단계 |
 | **[SPEC-035](SPEC-035-indesign-render-ownership.md)** | InDesign 렌더 Ownership 기반 중복 방지 | **신규(2026-06-05)**. 텍스트 포함 PNG 기본 배치 금지, source id 기반 ownership gating, composedLines 줄 보존 |
+| **[SPEC-036](SPEC-036-render-ownership-consolidation.md)** | Render Ownership 실행 일원화 | **신규(2026-06-14)**. SPEC-035 ObjectPlan을 실행 단계 단일 권위로 승격. BackgroundInjector 3182 LOC/58 헬퍼/22 suppress 신호 → plan.visualAction 1개로 수렴. Tier 0(캐릭터화)→1(VisualPlacementResolver)→2(Planner 권위화)→3(정리) |
 
 ## Pending (제안/검토 대기)
 
