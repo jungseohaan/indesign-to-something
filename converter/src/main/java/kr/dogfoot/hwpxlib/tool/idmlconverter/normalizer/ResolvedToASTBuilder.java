@@ -241,6 +241,13 @@ public class ResolvedToASTBuilder {
                 BackgroundInjector.computeChildOfGroupSuppression(this.ctx, sections);
         this.ctx.dropVisualForDomIds(cog.nonProtected, "child_baked_into_renderable_parent_group");
         this.ctx.phase6PlacedIds.addAll(cog.all);
+        // 3) coveredByInlineObjects: inline_object가 소유한 시각. 게이트 통과분만 DROP_VISUAL,
+        //    전체는 phase6PlacedIds 선등록(기존 addAll과 동일). childOfGroup 마킹 이후에 계산해야
+        //    collectInlineObjectCoverage가 Phase 6과 동일 plan 상태를 본다.
+        BackgroundInjector.InlineCoverageSuppression cov =
+                BackgroundInjector.computeInlineCoverageSuppression(this.ctx);
+        this.ctx.dropVisualForDomIds(cov.dropVisual, "visual_owned_by_inline_object_coverage");
+        this.ctx.phase6PlacedIds.addAll(cov.all);
     }
 
     /**

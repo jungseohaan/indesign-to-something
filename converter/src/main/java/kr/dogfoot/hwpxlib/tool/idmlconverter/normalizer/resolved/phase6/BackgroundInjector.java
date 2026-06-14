@@ -70,8 +70,8 @@ public final class BackgroundInjector {
         // 비보호 항목을 plan(DROP_VISUAL)으로 확정 + 전체를 phase6PlacedIds 선등록.
         // → 아래 VisualPlacementResolver.planRejection이 처리하므로 여기서 별도 체크 불필요.
 
-        Set<Integer> coveredByInlineObjects = collectInlineObjectCoverage(ctx, floatingItems);
-        ctx.phase6PlacedIds.addAll(coveredByInlineObjects);
+        // (SPEC-036 (가)) coveredByInlineObjects(inline_object 소유 커버리지) 억제도 Stage 2.5
+        // refinement가 plan(DROP_VISUAL) 확정 + phase6PlacedIds 선등록 → 아래 별도 체크 불필요.
         Set<Integer> completeInlineSimpleButtonLabels = ctx.inlineCompleteSimpleButtonLabelIds;
         Set<Integer> inlineEditableLabelShells = ctx.inlineEditableLabelShellIds;
 
@@ -126,25 +126,8 @@ public final class BackgroundInjector {
                         "editable label shell is owned by inline text frame");
                 continue;
             }
-            // (SPEC-036 (가)) SKIP_CHILD_OF_GROUP은 Stage 2.5 refinement가 plan(DROP_VISUAL)으로
-            // 확정 → 위 planRejection이 처리. (protected 항목은 비대상이라 여기 흐름 영향 없음.)
-            if (isCoveredByInlineObject(rg, coveredByInlineObjects)
-                    && !protectedEditableLabelShell
-                    && !isCompletePngSimpleButtonLabel(ctx, rg)) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_COVERAGE", "covered by inline_object ownership");
-                continue;
-            }
-            // 같은 ID가 inline_object로도 등록된 경우: 대개 Phase 3가 인라인으로 처리하므로
-            // floating 중복을 막는다. 다만 텍스트가 숨겨진 라벨/버튼 껍데기 page_object는
-            // HWPX 텍스트의 배경으로 필요하므로 살리고 뒤쪽 레이어로 배치한다.
-            if (isPageObject(rg)
-                    && ctx.resolvedData.isInlineObjectId(rg.id())
-                    && coveredByInlineObjects.contains(rg.id())
-                    && !isCompletePngSimpleButtonLabel(ctx, rg)
-                    && !shouldKeepPairedInlinePageShell(rg)) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_OBJECT", "inline object handled by story flow");
-                continue;
-            }
+            // (SPEC-036 (가)) SKIP_CHILD_OF_GROUP / SKIP_INLINE_COVERAGE / SKIP_INLINE_OBJECT은
+            // Stage 2.5 refinement가 plan(DROP_VISUAL)으로 확정 → 위 planRejection이 처리.
             if (ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg) && !protectedEditableLabelShell) {
                 ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_VISUAL_LABEL_TEXT_EDITABLE", "text label kept editable");
@@ -1149,6 +1132,52 @@ public final class BackgroundInjector {
     }
 
     /**
+     * SPEC-036 (가): Stage 2.5 refinement용. inline_object 소유 커버리지 억제.
+     * coveredByInlineObjects 전체(Phase 7 dedup)와, SKIP_INLINE_COVERAGE/SKIP_INLINE_OBJECT 두 체크의
+     * 실제 억제 대상(게이트 적용 합집합)을 분리 반환 → 후자만 plan(DROP_VISUAL)으로 확정.
+     */
+    public static final class InlineCoverageSuppression {
+        public final Set<Integer> all;
+        public final Set<Integer> dropVisual;
+
+        InlineCoverageSuppression(Set<Integer> all, Set<Integer> dropVisual) {
+            this.all = all;
+            this.dropVisual = dropVisual;
+        }
+    }
+
+    public static InlineCoverageSuppression computeInlineCoverageSuppression(ResolvedBuildContext ctx) {
+        Set<Integer> empty = new HashSet<>();
+        if (ctx == null || ctx.resolvedData == null) {
+            return new InlineCoverageSuppression(empty, new HashSet<>());
+        }
+        List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
+        if (floatingItems == null || floatingItems.isEmpty()) {
+            return new InlineCoverageSuppression(empty, new HashSet<>());
+        }
+        Set<Integer> covered = collectInlineObjectCoverage(ctx, floatingItems);
+        Set<Integer> editableLabelShellIds = collectEditableLabelShells(ctx, floatingItems);
+        Set<Integer> conceptDiagramLabelShellIds = collectConceptDiagramLabelShells(ctx, floatingItems);
+        Set<Integer> dropVisual = new HashSet<>();
+        for (RenderedGroup rg : floatingItems) {
+            if (!covered.contains(rg.id())) continue;
+            if (isCompletePngSimpleButtonLabel(ctx, rg)) continue; // 두 체크 공통 제외
+            boolean conceptDiagramInlineShell = isConceptDiagramInlineVisualShell(ctx, rg);
+            boolean protectedEditableLabelShell = conceptDiagramLabelShellIds.contains(rg.id())
+                    || conceptDiagramInlineShell
+                    || shouldPreserveEditableLabelShell(rg, editableLabelShellIds);
+            // SKIP_INLINE_COVERAGE: covered ∧ !protected ∧ !isCompletePng
+            boolean coverageSuppress = !protectedEditableLabelShell;
+            // SKIP_INLINE_OBJECT: pageObject ∧ isInlineObjectId ∧ covered ∧ !isCompletePng ∧ !pairedShell
+            boolean inlineObjectSuppress = isPageObject(rg)
+                    && ctx.resolvedData.isInlineObjectId(rg.id())
+                    && !shouldKeepPairedInlinePageShell(rg);
+            if (coverageSuppress || inlineObjectSuppress) dropVisual.add(rg.id());
+        }
+        return new InlineCoverageSuppression(covered, dropVisual);
+    }
+
+    /**
      * SPEC-036: 부모 그룹 PNG에 이미 구워진 자식 렌더 id를 모은다(childOfGroup).
      * Phase 6/7은 이 집합의 항목을 독립 배치하지 않는다. (단, PLACE_TEXT_SHELL 부모 아래
      * 자체 래스터 렌더를 가진 자식은 부모가 굽지 않으므로 보존.)
@@ -1714,40 +1743,6 @@ public final class BackgroundInjector {
         addAll(rg.tfInlineVisualIds(), coveredIds);
     }
 
-    private static boolean shouldPreferInlineCompleteLabelPair(ResolvedBuildContext ctx, RenderedGroup pageObject) {
-        RenderedGroup inline = findInlinePair(ctx, pageObject);
-        if (inline == null || inline.bounds() == null || pageObject == null || pageObject.bounds() == null) {
-            return false;
-        }
-        double[] ib = inline.bounds();
-        double[] pb = pageObject.bounds();
-        if (ib.length < 4 || pb.length < 4) return false;
-        double dx = Math.abs(ib[1] - pb[1]);
-        double dy = Math.abs(ib[0] - pb[0]);
-        if (dx <= 1.0 && dy <= 1.0) return true;
-
-        double pageWidth = localPageWidth(ctx, pageObject.pageIndex());
-        double pageHeight = localPageHeight(ctx, pageObject.pageIndex());
-        boolean shiftedByPageWidth = pageWidth > 0.0 && Math.abs(dx - pageWidth) <= 2.0;
-        boolean shiftedByPageHeight = pageHeight > 0.0 && Math.abs(dy - pageHeight) <= 2.0;
-        if (shiftedByPageWidth || shiftedByPageHeight) return false;
-        return dx <= 4.0 && dy <= 4.0;
-    }
-
-    private static RenderedGroup findInlinePair(ResolvedBuildContext ctx, RenderedGroup pageObject) {
-        if (ctx == null || ctx.resolvedData == null || pageObject == null
-                || ctx.resolvedData.allRenderedFloatingItems() == null) {
-            return null;
-        }
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg == null || rg.id() != pageObject.id()) continue;
-            if ("inline_object".equals(rg.itemType()) || "inline_object".equals(rg.type())) {
-                return rg;
-            }
-        }
-        return null;
-    }
-
     private static double localPageWidth(ResolvedBuildContext ctx, int pageIndex) {
         double[] bounds = pageBounds(ctx, pageIndex);
         if (bounds == null) return 0.0;
@@ -1775,11 +1770,6 @@ public final class BackgroundInjector {
         for (int id : ids) {
             target.add(id);
         }
-    }
-
-    private static boolean isCoveredByInlineObject(RenderedGroup rg, Set<Integer> coveredIds) {
-        if (rg == null || coveredIds == null || coveredIds.isEmpty()) return false;
-        return coveredIds.contains(rg.id());
     }
 
     private static boolean hasRenderablePng(ResolvedBuildContext ctx, RenderedGroup rg) {
@@ -1956,21 +1946,6 @@ public final class BackgroundInjector {
         return ctx != null
                 && ctx.resolvedData != null
                 && ctx.resolvedData.shouldUseCompletePngForSimpleButtonLabel(rg);
-    }
-
-    private static Set<Integer> collectCompleteInlineSimpleButtonLabels(
-            ResolvedBuildContext ctx,
-            List<RenderedGroup> items) {
-        Set<Integer> ids = new HashSet<>();
-        if (items == null) return ids;
-        for (RenderedGroup rg : items) {
-            if (rg == null) continue;
-            if (!isCompletePngSimpleButtonLabel(ctx, rg)) continue;
-            boolean inlineOwned = "inline_object".equals(rg.itemType())
-                    || "inline_object".equals(rg.type());
-            if (inlineOwned) ids.add(rg.id());
-        }
-        return ids;
     }
 
     private static int effectiveZOrder(ResolvedBuildContext ctx, RenderedGroup rg) {
