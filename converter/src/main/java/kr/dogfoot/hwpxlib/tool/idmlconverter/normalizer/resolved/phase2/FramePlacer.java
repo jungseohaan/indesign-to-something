@@ -45,6 +45,10 @@ public final class FramePlacer {
     // ---- 튜닝 상수 --------------------------------------------------------
     /** 임시 비활성화: occlusion 오탐이 많아 TF 누락을 유발하므로 필터를 끈다. */
     private static final boolean ENABLE_OCCLUSION_FILTER = false;
+
+    // SPEC-035 A: 렌더 그룹의 text-hidden editable 텍스트(hwpxOwnedTextFrame)를 TEXT 최상위
+    // 밴드로 올리기 위한 zOrder 베이스. Phase7 렌더 PNG(zOrder≈10000-idx)보다 위에 둔다.
+    private static final int HWPX_OWNED_TEXT_Z_BASE = 20000;
     /** TOP_ALIGN → CENTER_ALIGN 보정: 텍스트가 프레임 높이의 이 비율 이상 아래에 있을 때 */
     private static final double TOP_ALIGN_OFFSET_RATIO = 0.15;
     /** 원본에서 한 줄인 라벨/제목형 짧은 문장은 HWP 폰트폭 차이로 두 줄이 되지 않도록 SQUEEZE를 적용한다. */
@@ -218,7 +222,12 @@ public final class FramePlacer {
                     // - 자기 텍스트 ≥ 2 자: Phase 3 가 인라인 텍스트 런으로 임베드 → 플로팅 스킵
                     // - 멀티 child 배지 (Phase 3 가 자손 텍스트 결합 ≥ 2자): Phase 3 가 결합 인라인 임베드 → 플로팅 스킵
                     // - 단일 1자 라벨 (예: "1", "예"): Phase 3 가 PNG 임베드 (텍스트 누락) → 플로팅으로 검색 가능 텍스트 보강
-                    if (tfDomId >= 0 && isDescendantOfInlineObject(ctx, idx, tf.id())) {
+                    // hwpxOwnedTextFrame(렌더 그룹의 text-hidden editable 자식)은 인라인 그룹의
+                    // 자손이라도 floating HWPX 텍스트로 확정 배치한다. PNG는 텍스트를 숨겼고
+                    // Phase 3 inline run 임베드도 복합 그룹에서는 자식 TF를 누락/오배치시키므로,
+                    // descendant 스킵을 hwpxOwned가 아닐 때로 한정해 배치 경로를 단일화한다.
+                    // (예: page 52 '구절풀이' 주석 박스의 시 본문 TF)
+                    if (tfDomId >= 0 && !hwpxOwnedTextFrame && isDescendantOfInlineObject(ctx, idx, tf.id())) {
                         continue;
                     }
                     if (hwpxOwnedTextFrame) {
@@ -698,7 +707,15 @@ public final class FramePlacer {
             // 부모 Group이 Phase7 렌더 PNG로 배치되면 그 위에 올라가야 함.
             // Phase7은 zOrder=10000-pageItemIdx 로 역매핑하므로 동일한 방식으로 계산하여
             // 부모 PNG 바로 위에 배치한다.
-            block.zOrder(tf.zOrder());
+            if (hwpxOwnedTextFrame) {
+                // SPEC-035 A: 렌더 그룹의 text-hidden editable 텍스트는 TEXT 최상위 레이어다.
+                // tf.zOrder()는 그룹 내부 z라 이웃 주석/해설 셸(DECORATION)보다 낮을 수 있어
+                // 시 본문 등 읽어야 할 텍스트가 가려진다(예: page 52 '구절풀이' 박스의 시 본문).
+                // 충분히 높은 밴드로 올려 occlusion을 방지하되, editable 끼리의 상대 순서는 보존한다.
+                block.zOrder(HWPX_OWNED_TEXT_Z_BASE + tf.zOrder());
+            } else {
+                block.zOrder(tf.zOrder());
+            }
             block.columnCount(tf.columnCount() > 0 ? tf.columnCount() : 1);
             block.columnGutter(CoordinateConverter.pointsToHwpunits(tf.columnGutter() * ctx.scaleFactor));
 
