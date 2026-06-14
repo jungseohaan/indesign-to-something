@@ -495,7 +495,11 @@ public final class StoryConverter {
                 applyAnchoredTableBounds(ctx, plan, astTable);
                 int insertAt = Math.max(0, Math.min(block.paragraphs().size(), plan.afterParagraphIndex + 1));
                 consumeMarkerOnlyParagraphAt(block.paragraphs(), insertAt);
-                List<ASTParagraph> wrapperFlow = wrapperFlowParagraphs(ctx, plan, astTable, table);
+                // wrapper flow(실제 nested table을 감싼 표)만 셀 단위로 평탄화한다.
+                // 데이터/레이아웃 표는 인라인 표(else 분기)로 통째 삽입해 셀 구조를 보존한다.
+                List<ASTParagraph> wrapperFlow = wrapperFlowTable
+                        ? wrapperFlowParagraphs(ctx, plan, astTable, table)
+                        : java.util.Collections.emptyList();
                 if (!wrapperFlow.isEmpty()) {
                     if (containsEquivalentFlow(block.paragraphs(), wrapperFlow)) {
                         continue;
@@ -834,7 +838,10 @@ public final class StoryConverter {
 
     private static boolean hasWrapperFlowContent(IDMLTable wrapper, AnchoredTablePlan plan) {
         if (wrapper == null || wrapper.rows() == null) return false;
-        if (wrapper.rows().size() > 1 && plan != null && plan.nestedTableId != null) {
+        // 실제 nested table(별도 story)을 감싼 wrapper만 평탄화 대상. nestedStoryId가 없으면
+        // (nestedTableId가 wrapper 자기 자신으로 채워진 경우) 셀에 직접 텍스트를 담은 데이터/레이아웃
+        // 표이므로 평탄화하면 셀이 흩어진다 → wrapper flow 아님.
+        if (wrapper.rows().size() > 1 && plan != null && plan.nestedStoryId != null) {
             return true;
         }
         int meaningfulCells = 0;
