@@ -87,14 +87,8 @@ public final class BackgroundInjector {
             if (!isPageObject(rg) && !conceptDiagramInlineShell) {
                 continue;
             }
-            // 셀 단락에 inline 객체(배지 drawText 등)로 이미 임베드된 id는 page_object 플로팅 배치 금지.
-            // (텍스트가 셀 흐름에 들어갔으므로, 원본 절대 좌표의 배지 배경 PNG를 또 얹으면 어긋난 위치로 가림)
-            if (isPageObject(rg) && ctx.cellInlineEmbeddedDomIds.contains(rg.id())) {
-                ctx.phase6PlacedIds.add(rg.id());
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_CELL_INLINE_EMBEDDED",
-                        "badge embedded inline in table cell");
-                continue;
-            }
+            // (SPEC-036 (가)) 셀 인라인 임베드 배지의 floating PNG 억제는 Stage 2.5 refinement가
+            // plan(DROP_VISUAL)으로 확정 → 위 VisualPlacementResolver.planRejection이 처리한다.
             // SPEC-036: plan 권위 억제 판정 (Phase 6/7 공용 VisualPlacementResolver로 통합)
             VisualPlacementResolver.PlanRejection planRej = VisualPlacementResolver.planRejection(ctx, rg);
             if (planRej != null) {

@@ -154,6 +154,9 @@ public class ResolvedToASTBuilder {
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess")) {
             postprocessLayout(sections);
         }
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2_5.visualOwnershipRefine")) {
+            refineVisualOwnership();
+        }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage3.visualBuilder")) {
             placeVisuals(sections);
         }
@@ -217,6 +220,20 @@ public class ResolvedToASTBuilder {
         OwnershipPlanner.runObservation(this.ctx);
         AnchoredTablePlanner.plan(this.ctx);
         SimpleButtonLabelPlanner.plan(this.ctx);
+    }
+
+    /**
+     * Stage 2.5 (SPEC-036 (가)): Stage 2(텍스트/인라인 분류) 이후, 시각 배치(Phase 6/7) 이전에
+     * visual ownership을 refine한다. Phase 0 planner는 Stage 2 산출물(셀 인라인 임베드, 컨셉
+     * 다이어그램 TF 등)을 볼 수 없으므로, 그에 의존하는 suppress 결정을 여기서 plan(DROP_VISUAL)으로
+     * 확정한다. 이렇게 하면 Phase 6/7은 휴리스틱 대신 plan 권위만 실행한다.
+     *
+     * <p>현재 이전 완료: cellInlineEmbeddedDomIds(셀에 인라인 임베드된 배지의 원본 floating PNG).
+     * 후속: childOfGroup(부모에 구워진 자식) 등 — 각 클래스 골든디프 게이트로 단계 이전.</p>
+     */
+    private void refineVisualOwnership() {
+        if (this.ctx == null) return;
+        this.ctx.dropVisualForDomIds(this.ctx.cellInlineEmbeddedDomIds, "cell_inline_embedded_visual_owned_by_inline");
     }
 
     /**

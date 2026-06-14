@@ -103,6 +103,24 @@ Tier 0 불일치 클래스를 빈도순으로 하나씩:
 → (가)/(나)는 아키텍처 변경이므로 **사용자 결정 필요**. 그 전까지 Tier 2는 *Phase-3 비의존* 클래스
 (master_graphic, complex_graphic 단독 등)부터 이전한다.
 
+#### ✅ (가) 채택·구현 (2026-06-14)
+
+사용자가 **(가)** 선택. ObjectPlan 소비자 조사 결과 Stage 2(Phase 2/3/4)도 plan을 소비하므로
+(placement/inline 결정), planner 전체 이동은 불가 → **2-패스로 실현**:
+- Phase 0 `planOwnership()`: Stage 2가 쓰는 텍스트/placement 결정 (유지)
+- **Stage 2.5 `refineVisualOwnership()`** (신규, `ResolvedToASTBuilder`): Stage 2 이후·Phase 6 이전.
+  Stage 2 산출물에 의존하는 시각 suppress 결정을 `ctx.dropVisualForDomIds()`로 plan(DROP_VISUAL) 확정.
+  Phase 6/7은 `VisualPlacementResolver.planRejection`으로 실행만.
+
+**이전 완료 클래스**:
+- `cellInlineEmbeddedDomIds`(셀 인라인 임베드 배지의 원본 floating PNG) — `SKIP_CELL_INLINE_EMBEDDED`
+  휴리스틱 삭제, plan DROP_VISUAL로 전환. **골든디프 0** 검증.
+
+**다음 클래스 — childOfGroup 이전 시 주의(2026-06-14 발견)**:
+`SKIP_CHILD_OF_GROUP`은 `childOfGroup.contains(id) && !protectedEditableLabelShell(id)`로 게이트됨.
+즉 childOfGroup 멤버라도 protectedEditableLabelShell이면 억제 안 함 → 단순히 childOfGroup 전체를
+DROP_VISUAL 마킹하면 회귀. refinement에서 `!protectedEditableLabelShell` 게이트를 동일 적용해야 함.
+
 ### Tier 3 — 잔여 정리
 - 이전 완료로 dead가 된 헬퍼 삭제(데드코드 분석).
 - BackgroundInjector를 *실행*만 남겨 결정 로직 0.

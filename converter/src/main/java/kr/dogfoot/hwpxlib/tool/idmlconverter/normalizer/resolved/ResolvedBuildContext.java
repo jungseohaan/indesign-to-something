@@ -467,6 +467,27 @@ public final class ResolvedBuildContext {
         }
     }
 
+    /**
+     * SPEC-036 (가): Stage 2 이후 visual-ownership refinement에서 주어진 DOM id들의 plan을
+     * DROP_VISUAL로 확정한다. Stage 2 산출물에 의존하는 suppress 결정(셀 인라인 임베드 등)을
+     * 휴리스틱 대신 plan 권위로 옮길 때 사용. 인덱스/캐시를 무효화한다.
+     */
+    public void dropVisualForDomIds(java.util.Set<Integer> domIds, String reason) {
+        if (domIds == null || domIds.isEmpty()) return;
+        boolean changed = false;
+        for (int i = 0; i < ownershipPlans.size(); i++) {
+            ObjectPlan p = ownershipPlans.get(i);
+            if (domIds.contains(p.domId) && p.visualAction != VisualAction.DROP_VISUAL) {
+                ownershipPlans.set(i, p.withVisualAction(VisualAction.DROP_VISUAL, reason));
+                changed = true;
+            }
+        }
+        if (changed) {
+            ownershipPlanIndexDirty = true;
+            ownershipPlanRenderedCache.clear();
+        }
+    }
+
     public boolean shouldDropVisualByOwnershipPlan(RenderedGroup rg) {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         return plan != null && !plan.hasVisibleVisual();
