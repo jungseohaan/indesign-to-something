@@ -17,6 +17,10 @@ public class ASTTableCell {
     // 셀 내용
     private List<ASTParagraph> paragraphs;
 
+    // 셀이 nested TextFrame/table 콘텐츠를 가짐(복원 예정) — spacer 병합에서 제외용.
+    // convertTableSimple 시점엔 직접 텍스트만 변환되어 빈 셀처럼 보이지만 실제로는 콘텐츠가 있다.
+    private boolean reservedForNestedContent;
+
     // 셀 스타일
     private String fillColor;
     private CellBorder topBorder;
@@ -46,6 +50,9 @@ public class ASTTableCell {
 
     public int rowSpan() { return rowSpan; }
     public void rowSpan(int v) { this.rowSpan = v; }
+
+    public boolean reservedForNestedContent() { return reservedForNestedContent; }
+    public void reservedForNestedContent(boolean v) { this.reservedForNestedContent = v; }
 
     public int columnSpan() { return columnSpan; }
     public void columnSpan(int v) { this.columnSpan = v; }

@@ -141,6 +141,8 @@ public class ASTTableSpacerMerger {
      * 텍스트 런의 내용까지 확인한다.
      */
     static boolean isCellEmpty(ASTTableCell cell) {
+        // nested TextFrame/table 콘텐츠가 복원될 셀은 비어 있지 않다 (spacer 병합 금지).
+        if (cell.reservedForNestedContent()) return false;
         if (cell.paragraphs().isEmpty()) return true;
         for (ASTParagraph p : cell.paragraphs()) {
             if (p.items() == null || p.items().isEmpty()) continue;

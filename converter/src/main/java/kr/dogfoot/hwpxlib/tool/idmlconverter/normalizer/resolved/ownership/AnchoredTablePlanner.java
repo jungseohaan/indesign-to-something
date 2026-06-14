@@ -105,6 +105,14 @@ public final class AnchoredTablePlanner {
             IDMLTable wrapperTable) {
         NestedTableRef nested = findNestedTable(ctx, wrapperTable);
         if (nested == null && !hasStandaloneStoryText(ownerStory)) return null;
+
+        // table_only owner(본문 텍스트 없음)이고 wrapper가 실제 다행 레이아웃 테이블이면
+        // anchored inline-flow로 평탄화하지 않는다. 이 경우 table은 owner 프레임 자체의 내용이며,
+        // Phase 4가 프레임 bounds에 정상 테이블로 렌더(셀 내 nested table은 restoreNestedTextFrameTables로 복원)
+        // 해야 행 위치/셀 폭이 보존된다. wrapperFlow 평탄화는 7행 사이드바를 한 칸으로 뭉개 위치/폭을 깬다.
+        if (!hasStandaloneStoryText(ownerStory) && isMultiRowLayoutTable(wrapperTable)) {
+            return null;
+        }
         String nestedStoryId = nested != null ? nested.storyId : null;
         String nestedTableId = nested != null ? nested.tableId : wrapperTable.selfId();
         int anchoredTfDomId = nested != null ? nested.textFrameDomId : -1;
@@ -121,6 +129,37 @@ public final class AnchoredTablePlanner {
                 nestedTableId,
                 ownerTf.pageIndex(),
                 "story_table_marker_after_paragraph");
+    }
+
+    /**
+     * 실제 다행 레이아웃 테이블 여부: 2행 이상이고, nested-table 셀 외에도
+     * 독립 콘텐츠(텍스트/그래픽/자식 TextFrame)를 가진 셀이 2개 이상.
+     * thin carrier(단일 행으로 nested table만 감싸는 래퍼)는 false.
+     */
+    private static boolean isMultiRowLayoutTable(IDMLTable wrapperTable) {
+        if (wrapperTable == null || wrapperTable.rows() == null) return false;
+        if (wrapperTable.rows().size() <= 1) return false;
+        int contentCells = 0;
+        for (IDMLTableRow row : wrapperTable.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (IDMLTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                boolean hasContent = (cell.textFrameStoryRefs() != null && !cell.textFrameStoryRefs().isEmpty())
+                        || cellHasText(cell);
+                if (hasContent) contentCells++;
+            }
+        }
+        return contentCells >= 2;
+    }
+
+    private static boolean cellHasText(IDMLTableCell cell) {
+        if (cell == null || cell.paragraphs() == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph p : cell.paragraphs()) {
+            if (p == null) continue;
+            String t = p.getPlainText();
+            if (t != null && !t.replace("￼", "").trim().isEmpty()) return true;
+        }
+        return false;
     }
 
     private static boolean hasStandaloneStoryText(IDMLStory story) {
