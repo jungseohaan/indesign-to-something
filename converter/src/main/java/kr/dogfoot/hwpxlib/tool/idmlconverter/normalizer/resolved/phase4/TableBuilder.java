@@ -493,12 +493,9 @@ public final class TableBuilder {
                 String currentText = normalizedCellText(cell);
                 if (currentText.contains(sourceText)) continue;
 
-                List<ASTInlineItem> preservedInlineObjects = collectNonTextInlineItems(cell.paragraphs());
                 List<ASTParagraph> restored = copyTextParagraphs(sourceParagraphs);
-                if (!preservedInlineObjects.isEmpty() && !restored.isEmpty()) {
-                    restored.get(0).items().addAll(0, preservedInlineObjects);
-                }
                 if (!restored.isEmpty()) {
+                    reinsertInlineObjectsByParagraphText(cell.paragraphs(), restored);
                     cell.paragraphs().clear();
                     cell.paragraphs().addAll(restored);
                 }
@@ -510,18 +507,39 @@ public final class TableBuilder {
         return rowIndex + ":" + columnIndex;
     }
 
-    private static List<ASTInlineItem> collectNonTextInlineItems(List<ASTParagraph> paragraphs) {
-        List<ASTInlineItem> result = new ArrayList<>();
-        if (paragraphs == null) return result;
-        for (ASTParagraph paragraph : paragraphs) {
-            if (paragraph == null || paragraph.items() == null) continue;
-            for (ASTInlineItem item : paragraph.items()) {
-                if (item != null && !(item instanceof ASTTextRun)) {
-                    result.add(item);
+    /**
+     * 원래 셀 단락들의 인라인 객체(배지/라벨 박스 등)를, 텍스트가 일치하는 복원 단락에 재배치한다.
+     * 모든 박스를 첫 단락에 몰아넣던 기존 방식은 다단락 셀에서 라벨을 엉뚱한 단락(예: 교사 지도문)으로
+     * 옮겨 "예시 답안" 곡선 라벨이 답안과 분리되는 버그를 유발했다 → 단락별 텍스트 매칭으로 보존.
+     */
+    private static void reinsertInlineObjectsByParagraphText(
+            List<ASTParagraph> originalParagraphs, List<ASTParagraph> restored) {
+        if (originalParagraphs == null || restored == null || restored.isEmpty()) return;
+        boolean[] used = new boolean[restored.size()];
+        List<ASTInlineItem> unmatched = new ArrayList<>();
+        for (ASTParagraph origPara : originalParagraphs) {
+            if (origPara == null || origPara.items() == null) continue;
+            List<ASTInlineItem> boxes = new ArrayList<>();
+            for (ASTInlineItem item : origPara.items()) {
+                if (item != null && !(item instanceof ASTTextRun)) boxes.add(item);
+            }
+            if (boxes.isEmpty()) continue;
+            String origText = normalizedParagraphText(copyParagraphTextOnly(origPara));
+            int target = -1;
+            if (!origText.isEmpty()) {
+                for (int r = 0; r < restored.size(); r++) {
+                    if (used[r]) continue;
+                    if (origText.equals(normalizedParagraphText(restored.get(r)))) { target = r; break; }
                 }
             }
+            if (target >= 0) {
+                used[target] = true;
+                restored.get(target).items().addAll(0, boxes);
+            } else {
+                unmatched.addAll(boxes); // 텍스트 없는 박스 단독 단락 등 → 첫 단락 폴백
+            }
         }
-        return result;
+        if (!unmatched.isEmpty()) restored.get(0).items().addAll(0, unmatched);
     }
 
     private static List<ASTParagraph> copyTextParagraphs(List<ASTParagraph> paragraphs) {

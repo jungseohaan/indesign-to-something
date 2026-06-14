@@ -459,6 +459,15 @@ public class StoryLoader {
                                             anchorIdx++;
                                             continue;
                                         }
+                                        // 곡선/말풍선 Group 셸(렌더 PNG 배경) + 편집 텍스트 → 인라인 박스로
+                                        // (번호 "1"/"2"와 같은 줄에 자연 흐름 + 텍스트 검색 가능)
+                                        ASTInlineObject groupShell =
+                                                InlineFrameHandler.tryInlineGroupShellWithEditableChild(ctx, domId);
+                                        if (groupShell != null) {
+                                            para.addItem(groupShell);
+                                            anchorIdx++;
+                                            continue;
+                                        }
                                         // 분수 구조 인라인 TextFrame(2단락) → 수식으로 변환
                                         ASTEquation fracEq = InlineFrameHandler.tryInlineFractionAsEquation(ctx, domId);
                                         if (fracEq != null) {

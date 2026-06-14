@@ -700,6 +700,42 @@ public class InlineFrameHandler {
         return loadRenderedTextHiddenInlineShell(ctx, anchoredObjectId, anchorItem, childTf);
     }
 
+    /**
+     * Group 앵커(예: 곡선 브래킷 도형 + 편집 텍스트 TF가 한 그룹)를 렌더 셸 PNG를 배경으로 한
+     * INLINE_TEXT_FRAME으로 변환. tryInlineShapeWithEditableChildAsShell의 Group 버전.
+     * 곡선/말풍선 PNG가 박스 배경(imageFill)이 되고 텍스트는 검색가능하게 그 위에 흐른다 →
+     * 앞의 번호 "1"/"2"와 같은 줄에 자연스럽게 인라인 플로우.
+     */
+    public static ASTInlineObject tryInlineGroupShellWithEditableChild(
+            ResolvedBuildContext ctx, int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
+        if (anchorItem == null || !"Group".equals(anchorItem.type()) || !anchorItem.isInline()) return null;
+        // 그룹은 resolved 에서 자식 TF 와 parentId 로 연결되지 않는 경우가 많다(parentId=null).
+        // 대신 렌더 셸 PNG 의 editableTextFrameIds 로 편집 자식을 찾는다.
+        // 곡선/말풍선 그룹은 텍스트를 숨긴 채 렌더된 셸 PNG(예: reason=*text_hidden, page_object)로 들어온다.
+        RenderedGroup shell = null;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != anchoredObjectId || rg.file() == null) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            String reason = rg.reason();
+            if (reason == null || !reason.contains("text_hidden")) continue;
+            String[] eids = rg.editableTextFrameIds();
+            if (eids == null || eids.length != 1) continue;
+            shell = rg;
+            break;
+        }
+        if (shell == null) return null;
+        ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(shell.editableTextFrameIds()[0]);
+        if (childTf == null || ctx.resolvedData.isTextOwnedByIndesignPng(childTf.id())) return null;
+        String vt = childTf.frameVisibleText();
+        String cleaned = vt == null ? "" : vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+        if (cleaned.isEmpty()) return null;
+        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, shell, true);
+    }
+
     private static boolean isInlineShellShape(ResolvedPageItem item) {
         if (item == null) return false;
         if (!item.isInline()) return false;
@@ -1235,6 +1271,24 @@ public class InlineFrameHandler {
             ResolvedPageItem anchorItem,
             ResolvedTextFrame childTf) {
         RenderedGroup shell = findTextHiddenInlineShell(ctx, anchoredObjectId, childTf);
+        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, shell, false);
+    }
+
+    /**
+     * 셸 PNG(렌더된 배경) + 편집 자식 TF → INLINE_TEXT_FRAME 인라인 객체.
+     * 셸 탐색 방식과 무관하게 빌드 본문을 공유한다(말풍선/배지/그래픽 셸 공통).
+     *
+     * forcePngFill=true: 전역 native-textbox-graphics 정책과 무관하게 셸 PNG를 도형 배경(imgBrush)으로
+     * 강제 emit + 알파를 흰색으로 평탄화. 한글 imgBrush는 PNG 알파 영역을 검정으로 칠하므로,
+     * 흰 배경 셀 위의 장식(곡선 꺾쇠 등) PNG는 흰색 합성이 필요하다.
+     */
+    private static ASTInlineObject buildInlineShellObject(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedPageItem anchorItem,
+            ResolvedTextFrame childTf,
+            RenderedGroup shell,
+            boolean forcePngFill) {
         if (shell == null || ctx.basePath == null || shell.file() == null) return null;
         File pngFile = new File(ctx.basePath, shell.file());
         if (!pngFile.exists() || !pngFile.isFile()) return null;
@@ -1242,6 +1296,9 @@ public class InlineFrameHandler {
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+            if (forcePngFill) {
+                imageData = flattenOntoWhite(img);
+            }
 
             double[] shellBounds = shell.bounds();
             double w = 0;
@@ -1266,6 +1323,7 @@ public class InlineFrameHandler {
             obj.height(CoordinateConverter.pointsToHwpunits(h));
             obj.imageFillData(imageData);
             obj.nativeGraphicsAllowed(true);
+            obj.forceImageFill(forcePngFill);
             applyInlineShellShapeStyle(ctx, anchorItem, obj);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
             obj.verticalJustification("CenterAlign");
@@ -1274,6 +1332,20 @@ public class InlineFrameHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** RGBA PNG를 흰 배경에 합성해 불투명 PNG 바이트로 반환(한글 imgBrush 알파→검정 회피). */
+    private static byte[] flattenOntoWhite(BufferedImage src) throws java.io.IOException {
+        BufferedImage flat = new BufferedImage(
+                src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = flat.createGraphics();
+        g.setColor(java.awt.Color.WHITE);
+        g.fillRect(0, 0, src.getWidth(), src.getHeight());
+        g.drawImage(src, 0, 0, null);
+        g.dispose();
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        ImageIO.write(flat, "png", bos);
+        return bos.toByteArray();
     }
 
     private static void applyInlineShellShapeStyle(

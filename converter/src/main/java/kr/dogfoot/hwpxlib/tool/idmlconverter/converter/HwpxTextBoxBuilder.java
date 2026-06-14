@@ -231,7 +231,17 @@ public class HwpxTextBoxBuilder {
      * @return 등록 성공 여부
      */
     boolean setupTextBoxImgBrush(Rectangle rect, byte[] pngData) {
-        if (!nativeTextBoxGraphicsEnabled()) return false;
+        return setupTextBoxImgBrush(rect, pngData, false);
+    }
+
+    /**
+     * forceNativeGraphics: 명시적 imageFill(InDesign 추출 PNG를 도형 배경으로)의 경우,
+     * 전역 native-textbox-graphics OFF(SPEC-025: Java 텍스트 래스터화 방지)와 무관하게
+     * 이미지 fill 브러시를 emit한다. 텍스트는 그대로 검색 가능한 런으로 남으므로
+     * "텍스트 래스터화 금지" 정책에 위배되지 않는다(곡선/말풍선 라벨 인라인 박스).
+     */
+    boolean setupTextBoxImgBrush(Rectangle rect, byte[] pngData, boolean forceNativeGraphics) {
+        if (!nativeTextBoxGraphicsEnabled() && !forceNativeGraphics) return false;
         if (pngData == null || pngData.length == 0) return false;
         try {
             String itemId = ImageInserter.registerImage(ctx.hwpxFile, pngData, "png");

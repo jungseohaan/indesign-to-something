@@ -49,6 +49,7 @@ final class DrawTextBoxComposer {
         double fillTint = 100;
         byte[] imageFillData;
         boolean nativeGraphicsAllowed;
+        boolean forceImageFill;
         long marginLeft;
         long marginRight;
         long marginTop;
@@ -95,6 +96,7 @@ final class DrawTextBoxComposer {
         spec.fillTint = obj.fillTint();
         spec.imageFillData = obj.imageFillData();
         spec.nativeGraphicsAllowed = obj.nativeGraphicsAllowed();
+        spec.forceImageFill = obj.forceImageFill();
         spec.marginLeft = obj.textMarginLeft();
         spec.marginRight = obj.textMarginRight();
         spec.marginTop = obj.textMarginTop();
@@ -125,7 +127,8 @@ final class DrawTextBoxComposer {
 
         boolean imgBrushSet = false;
         if (spec.imageFillData != null && spec.imageFillData.length > 0) {
-            imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(rect, spec.imageFillData);
+            imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(
+                    rect, spec.imageFillData, spec.forceImageFill);
         }
         if (!imgBrushSet) {
             textBoxBuilder.setupTextBoxFillBrush(
