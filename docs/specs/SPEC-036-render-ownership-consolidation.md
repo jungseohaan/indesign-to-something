@@ -115,11 +115,14 @@ Tier 0 불일치 클래스를 빈도순으로 하나씩:
 **이전 완료 클래스**:
 - `cellInlineEmbeddedDomIds`(셀 인라인 임베드 배지의 원본 floating PNG) — `SKIP_CELL_INLINE_EMBEDDED`
   휴리스틱 삭제, plan DROP_VISUAL로 전환. **골든디프 0** 검증.
+- **`childOfGroup`(부모 PNG에 구워진 자식, 최대 클래스)** — `SKIP_CHILD_OF_GROUP` 체크 삭제.
+  `computeChildOfGroupSuppression()`이 비보호(`childOfGroup ∧ !protectedEditableLabelShell`)를
+  분리 → refinement가 DROP_VISUAL 확정, 전체는 phase6PlacedIds 선등록(보호 항목 Phase 7 parity).
+  **골든디프 0** 검증. 불일치 리포트 **132건 → 15건**(잔여는 SKIP_RENDERED_DISPOSED/SKIP_OUTSIDE_PAGE
+  등 실행 단계 skip으로 plan 충돌 아님).
 
-**다음 클래스 — childOfGroup 이전 시 주의(2026-06-14 발견)**:
-`SKIP_CHILD_OF_GROUP`은 `childOfGroup.contains(id) && !protectedEditableLabelShell(id)`로 게이트됨.
-즉 childOfGroup 멤버라도 protectedEditableLabelShell이면 억제 안 함 → 단순히 childOfGroup 전체를
-DROP_VISUAL 마킹하면 회귀. refinement에서 `!protectedEditableLabelShell` 게이트를 동일 적용해야 함.
+> childOfGroup 게이트 주의: `SKIP_CHILD_OF_GROUP`은 `!protectedEditableLabelShell`로 게이트되므로
+> 비보호 항목만 DROP_VISUAL 마킹해야 한다(보호 항목 마킹 시 회귀).
 
 ### Tier 3 — 잔여 정리
 - 이전 완료로 dead가 된 헬퍼 삭제(데드코드 분석).

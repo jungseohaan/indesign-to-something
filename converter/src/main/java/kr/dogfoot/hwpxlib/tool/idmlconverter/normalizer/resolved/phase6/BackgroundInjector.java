@@ -66,13 +66,9 @@ public final class BackgroundInjector {
             idToRendered.putIfAbsent(rg.id(), rg);
         }
 
-        // Pass 1b: 부모 그룹 PNG에 구워진 자식 렌더는 독립 배치하지 않는다(SPEC-036: child suppression 응집).
-        Set<Integer> childOfGroup = computeChildOfGroup(
-                ctx, sections, floatingItems, editableLabelShellIds, conceptDiagramLabelShellIds,
-                idToPage, idToRendered);
-
-        // childOfGroup 항목은 Phase 7c도 배치하지 않도록 phase6PlacedIds에 선제 등록
-        ctx.phase6PlacedIds.addAll(childOfGroup);
+        // (SPEC-036 (가)) childOfGroup(부모 PNG에 구워진 자식) 억제는 Stage 2.5 refinement가
+        // 비보호 항목을 plan(DROP_VISUAL)으로 확정 + 전체를 phase6PlacedIds 선등록.
+        // → 아래 VisualPlacementResolver.planRejection이 처리하므로 여기서 별도 체크 불필요.
 
         Set<Integer> coveredByInlineObjects = collectInlineObjectCoverage(ctx, floatingItems);
         ctx.phase6PlacedIds.addAll(coveredByInlineObjects);
@@ -130,11 +126,8 @@ public final class BackgroundInjector {
                         "editable label shell is owned by inline text frame");
                 continue;
             }
-            // 상위 그룹 PNG의 자식 항목은 그룹 PNG에 이미 포함됨 → 개별 렌더링 skip
-            if (childOfGroup.contains(rg.id()) && !protectedEditableLabelShell) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_CHILD_OF_GROUP", "covered by renderable parent group");
-                continue;
-            }
+            // (SPEC-036 (가)) SKIP_CHILD_OF_GROUP은 Stage 2.5 refinement가 plan(DROP_VISUAL)으로
+            // 확정 → 위 planRejection이 처리. (protected 항목은 비대상이라 여기 흐름 영향 없음.)
             if (isCoveredByInlineObject(rg, coveredByInlineObjects)
                     && !protectedEditableLabelShell
                     && !isCompletePngSimpleButtonLabel(ctx, rg)) {
@@ -1104,6 +1097,56 @@ public final class BackgroundInjector {
         return new int[]{left, right};
     }
 
+
+    /**
+     * SPEC-036 (가): Stage 2.5 refinement용. childOfGroup 전체(Phase 7 dedup용)와,
+     * 그중 SKIP_CHILD_OF_GROUP 실제 억제 대상(비보호 = !protectedEditableLabelShell)을 분리 반환.
+     * 비보호 집합만 plan(DROP_VISUAL)으로 확정하면 Phase 6/7이 휴리스틱 없이 동일 결과를 낸다.
+     */
+    public static final class ChildOfGroupSuppression {
+        public final Set<Integer> all;
+        public final Set<Integer> nonProtected;
+
+        ChildOfGroupSuppression(Set<Integer> all, Set<Integer> nonProtected) {
+            this.all = all;
+            this.nonProtected = nonProtected;
+        }
+    }
+
+    public static ChildOfGroupSuppression computeChildOfGroupSuppression(
+            ResolvedBuildContext ctx, List<ASTSection> sections) {
+        Set<Integer> empty = new HashSet<>();
+        if (ctx == null || ctx.resolvedData == null) {
+            return new ChildOfGroupSuppression(empty, new HashSet<>());
+        }
+        List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
+        if (floatingItems == null || floatingItems.isEmpty()) {
+            return new ChildOfGroupSuppression(empty, new HashSet<>());
+        }
+        Set<Integer> editableLabelShellIds = collectEditableLabelShells(ctx, floatingItems);
+        Set<Integer> conceptDiagramLabelShellIds = collectConceptDiagramLabelShells(ctx, floatingItems);
+        Map<Integer, Integer> idToPage = new HashMap<>();
+        Map<Integer, RenderedGroup> idToRendered = new HashMap<>();
+        for (RenderedGroup rg : floatingItems) {
+            idToPage.put(rg.id(), rg.pageIndex());
+            idToRendered.putIfAbsent(rg.id(), rg);
+        }
+        Set<Integer> childOfGroup = computeChildOfGroup(
+                ctx, sections, floatingItems, editableLabelShellIds, conceptDiagramLabelShellIds,
+                idToPage, idToRendered);
+        // SKIP_CHILD_OF_GROUP 게이트와 동일: childOfGroup ∧ !protectedEditableLabelShell
+        Set<Integer> nonProtected = new HashSet<>();
+        for (RenderedGroup rg : floatingItems) {
+            if (!childOfGroup.contains(rg.id())) continue;
+            boolean conceptDiagramInlineShell = isConceptDiagramInlineVisualShell(ctx, rg);
+            boolean conceptDiagramLabelShell = conceptDiagramLabelShellIds.contains(rg.id());
+            boolean protectedEditableLabelShell = conceptDiagramLabelShell
+                    || conceptDiagramInlineShell
+                    || shouldPreserveEditableLabelShell(rg, editableLabelShellIds);
+            if (!protectedEditableLabelShell) nonProtected.add(rg.id());
+        }
+        return new ChildOfGroupSuppression(childOfGroup, nonProtected);
+    }
 
     /**
      * SPEC-036: 부모 그룹 PNG에 이미 구워진 자식 렌더 id를 모은다(childOfGroup).

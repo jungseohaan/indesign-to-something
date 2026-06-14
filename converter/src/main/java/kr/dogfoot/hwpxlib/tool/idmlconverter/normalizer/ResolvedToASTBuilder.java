@@ -155,7 +155,7 @@ public class ResolvedToASTBuilder {
             postprocessLayout(sections);
         }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2_5.visualOwnershipRefine")) {
-            refineVisualOwnership();
+            refineVisualOwnership(sections);
         }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage3.visualBuilder")) {
             placeVisuals(sections);
@@ -231,9 +231,16 @@ public class ResolvedToASTBuilder {
      * <p>현재 이전 완료: cellInlineEmbeddedDomIds(셀에 인라인 임베드된 배지의 원본 floating PNG).
      * 후속: childOfGroup(부모에 구워진 자식) 등 — 각 클래스 골든디프 게이트로 단계 이전.</p>
      */
-    private void refineVisualOwnership() {
+    private void refineVisualOwnership(List<ASTSection> sections) {
         if (this.ctx == null) return;
+        // 1) 셀 인라인 임베드 배지: 원본 floating PNG는 인라인이 소유 → DROP_VISUAL
         this.ctx.dropVisualForDomIds(this.ctx.cellInlineEmbeddedDomIds, "cell_inline_embedded_visual_owned_by_inline");
+        // 2) childOfGroup: 부모 PNG에 구워진 자식. 비보호(SKIP_CHILD_OF_GROUP 대상)는 DROP_VISUAL,
+        //    전체는 phase6PlacedIds 선등록(보호 항목의 Phase 7 중복 방지 — 기존 addAll과 동일).
+        BackgroundInjector.ChildOfGroupSuppression cog =
+                BackgroundInjector.computeChildOfGroupSuppression(this.ctx, sections);
+        this.ctx.dropVisualForDomIds(cog.nonProtected, "child_baked_into_renderable_parent_group");
+        this.ctx.phase6PlacedIds.addAll(cog.all);
     }
 
     /**
