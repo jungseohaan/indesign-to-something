@@ -67,12 +67,91 @@ PNG가 텍스트까지 소유할 수 있는 것은 단순 위치 표식뿐이다
 HWPX 텍스트로 유지하는 것:
 
 - 제목, 본문, 문항, 출처
+- 단원명, 소단원명, 차례/목차성 제목
 - 개념어, 활동명, 표/박스 라벨
 - `주장`, `이유 1`, `근거 1`
 - `최근 사회·문화적 맥락`
 - `쟁점 분석`, `사안이 발생한 사회·문화적 맥락`
 
 판단 기준은 문자열 예외가 아니다. "편집/검색 가치가 있는가"가 기준이다.
+
+`visual_label_indesign_png`처럼 텍스트가 박힌 완성형 PNG가 있더라도,
+editable/searchable 의미 텍스트라면 PNG가 텍스트를 소유하지 않는다.
+
+- 텍스트: `OWNED_BY_HWPX_TEXT`
+- 텍스트가 박힌 complete PNG: `DROP_VISUAL`
+- 별도 text-hidden shell이 있으면 shell만 `PLACE_TEXT_SHELL`로 남긴다.
+
+PNG가 텍스트까지 소유할 수 있는 라벨은 atomic marker뿐이다.
+atomic marker는 공백/줄바꿈/단어가 없는 단일 위치 표식이어야 한다.
+두 글자 이상이거나 단어/구/제목/단원명으로 읽히면 항상 HWPX 텍스트다.
+
+### 1.1 Contained TF merge gate
+
+TextFrame이 다른 TextFrame의 bounds 안에 들어 있어도 포함 관계만으로 머지하지 않는다.
+contained TF merge는 빈칸 위에 얹힌 짧은 답안/번호/표식처럼 한 줄의 단순 텍스트일 때만 허용한다.
+
+허용:
+
+- `1`, `01`, `가`, `ㄱ` 같은 atomic marker
+- 공백/줄바꿈이 없는 아주 짧은 답안 텍스트
+
+금지:
+
+- 제목, 활동명, 라벨, 본문성 문장
+- 공백 또는 줄바꿈이 있는 문자열
+- bullet/화살표/장식 기호가 붙은 구문
+- parent TF와 시각적으로 같은 영역에 있을 뿐인 독립 안내문/라벨
+
+예: `이 단원에서 알고 싶은 내용을 스스로 질문해 보자.`와
+`스스로 질문하기` 라벨은 bounds 관계가 있어도 머지하지 않는다.
+
+### 1.2 Inline semantic label group gate
+
+인라인 Group 안에 editable TextFrame이 여러 개 있어도 곧바로 본문 문단에 머지하지 않는다.
+
+본문 inline으로 분해할 수 있는 것은 단순 위치 표식/선택지 표식뿐이다.
+
+허용:
+
+- `가/나/다/라`, `ㄱ/ㄴ/ㄷ`, `1/2/3`, `01/02/03`처럼 각 TF가 atomic marker인 경우
+- 작은 선택지 번호, 체크박스 번호, 낱글자 배지처럼 본문 의미가 아니라 위치 표식인 경우
+
+금지:
+
+- `스스로` + `질문하기`처럼 두 개 이상의 TF가 합쳐져 독립 활동 라벨이 되는 경우
+- `활동 안내`, `질문하기`, `생각 열기`처럼 사용자가 읽는 의미 라벨
+- 다중 TF를 outer inline text frame 하나로 감싸 본문 첫머리에 붙이는 변환
+
+이 경우 Stage 1/2는 각 TF를 원래 좌표의 editable floating text로 보존하고, Stage 3는 해당 Group을 본문 paragraph에 inline item으로 삽입하지 않는다.
+
+editable TF가 없더라도 여러 visual 조각으로 구성된 compact `inline_graphic_only` Group이
+독립 의미 라벨처럼 동작하면 본문 TF에 머지하지 않는다.
+
+- 해당 Group은 `PLACE_FLOATING_PNG`로 원본 page 좌표에 배치한다.
+- 같은 source의 page_object 복제본은 `DROP_VISUAL`로 제거한다.
+- 작은 bullet/번호/낱글자 atomic marker는 이 규칙에 포함하지 않는다.
+
+### 1.3 Placed PDF의 텍스트 성격
+
+InDesign에 배치된 PDF는 원본 시각 객체로 그대로 유지한다.
+
+PDF 내부에 selectable text layer가 있더라도, converter가 PDF 내부 텍스트를
+별도 HWPX TextFrame으로 임의 추출하지 않는다. PDF는 하나의 placed visual source이며,
+PDF 내부 텍스트를 제거한 배경 PNG를 만들거나 PDF 내부 글자를 HWPX TF로 overlay하지 않는다.
+
+다만 PDF 내부에서 선택 가능한 문자열은 "텍스트 성격"을 가진다.
+따라서 PDF에서 보이는 제목/단원명/본문성 문구를 complete PNG atomic marker 판단의 근거로
+사용하면 안 된다.
+
+- placed PDF 자체: 원본 PDF visual을 유지
+- PDF 내부 selectable title/body text: semantic text 성격으로 인식
+- converter 동작: PDF 내부 텍스트를 HWPX TF로 재생성하지 않음
+- 금지: PDF 내부 제목 문구를 단순 표식 PNG로 일반화하는 정책
+
+즉 `나를 깨우는, 문학`, `문학의 본질과 미적 기능`,
+`문학의 인식적·윤리적 기능`처럼 PDF에서 선택되는 문구는 텍스트 성격이지만,
+source가 placed PDF뿐인 경우에는 PDF visual이 그대로 소유한다.
 
 ### 2. 시각 객체는 4층만 쓴다
 
@@ -147,6 +226,7 @@ Stage 1은 모든 visible 후보에 대해 `ObjectPlan`을 만든다.
 |---|---|
 | `PAGE_BACKGROUND` | `BACKGROUND` |
 | `CONTAINER_BACKDROP` | `BACKGROUND` |
+| `TEXT_CARD_BACKDROP` | `DECORATION` |
 | `LABEL_BACKDROP` | `DECORATION` |
 | `CONTAINER_OUTLINE` | `DECORATION` |
 | `FOREGROUND_MASK` | `DECORATION` |
@@ -163,6 +243,7 @@ HWPX에는 `BEHIND_TEXT`와 `IN_FRONT_OF_TEXT` 평면 차이가 있다.
 
 - `BACKGROUND`: `BEHIND_TEXT`
 - `DECORATION`: 구현 layer별로 분리
+  - `TEXT_CARD_BACKDROP`: `BEHIND_TEXT`
   - `LABEL_BACKDROP`: `BEHIND_TEXT`
   - `CONTAINER_OUTLINE`, `FOREGROUND_MASK`: `IN_FRONT_OF_TEXT`
 - `CONTENT`: `IN_FRONT_OF_TEXT`
@@ -182,6 +263,7 @@ HWPX에는 `BEHIND_TEXT`와 `IN_FRONT_OF_TEXT` 평면 차이가 있다.
 
 2. 텍스트 뒤의 모양인가?
    - 라벨 배경, 말풍선, 외곽선, 구분선이면 `DECORATION`
+   - `Paper` fill이라도 editable TF와 강한 bbox 관계가 있으면 페이지 배경이 아니라 텍스트 카드 shell이다.
 
 3. 실제 콘텐츠 이미지인가?
    - 사진, 차트, QR, 삽화, 그래프면 `CONTENT`
@@ -208,6 +290,12 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 - anchored table plan이 있는 TextFrame은 page-relative 원본 frame bounds를 보존한다. sibling visual shell이나
   composed-line 기반 보정이 anchor flow의 기준 frame을 다시 확장/축소하면 안 된다.
 - Phase 2/3/6/7은 inline/floating 여부를 새로 판정하지 않고 plan을 실행한다.
+- outside-parent/custom-anchor 검사도 ObjectPlan보다 우선하지 않는다.
+  `placement=INLINE`이고 `visualAction=PLACE_INLINE_PNG` 또는 `PLACE_TEXT_SHELL`이면
+  Phase 3 story 흐름 안에서 처리한다.
+- duplicate suppression은 HWPX 텍스트를 포함한 inline parent PNG의 drop 결정을 먼저 반영한 뒤 실행한다.
+  나중에 drop될 inline parent를 기준으로 같은 source의 `visual_label_text_hidden_shell`을 먼저 drop하면,
+  흰색/밝은 editable 라벨 텍스트가 배경 shell 없이 남아 누락처럼 보인다.
 
 ---
 
@@ -223,6 +311,19 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 - 라벨 배경이 단순 fill/stroke/corner로 표현 가능한 Rectangle/Polygon/Oval이고,
   라벨 TF와 같은 그룹 안에서 충분히 겹치며 회전/전단이 거의 없으면 HWPX drawText의
   fill/stroke/corner 속성으로 흡수한다.
+- drawText로 흡수된 라벨/텍스트 셸은 텍스트와 그래픽 속성을 모두 보존해야 한다.
+  텍스트는 원본 run의 font family/style/size/color/tracking/scale을 공유 스타일 경로로 받고,
+  셸은 원본 shape type, fill, stroke, stroke tint/weight, corner radius를 함께 전달한다.
+- 문자 `FillTint`는 글자색의 일부다. resolved 캐시가 tint를 제공하지 못하면 IDML story의
+  CharacterStyleRange에서 `FillTint`를 보충하고, TF/drawText/inline shell 모두 같은
+  텍스트 스타일 경로에서 tint가 적용된 색을 사용한다.
+- drawTextize 실행은 inline/floating 여부와 무관하게 하나의 공통 composer를 통한다.
+  placement/wrap/anchor/position만 caller가 정하고, line/fill/image brush, drawText/subList,
+  paragraph/table 삽입, rounded rectangle geometry는 공통 경로가 처리한다.
+- fill이 있다고 stroke를 생략하지 않는다. InDesign의 채움과 외곽선은 독립 속성이므로
+  HWPX drawText 셸에서도 독립적으로 적용한다.
+- 라벨 앵커 자체가 inline Rectangle/Polygon/Oval이고 child TF를 품은 경우에도 같은 규칙을 쓴다.
+  shell 실행 단계는 parent shape의 fill/stroke/corner를 HWPX inline text frame 속성으로 반드시 전달한다.
 - `ABSORB_TEXT_STYLE`이 선택된 visual source는 별도 PNG로 배치하지 않는다.
 - `주장`, `이유 1`, `근거 1`처럼 구조 표식은 editable 텍스트로 유지하되,
   라운드 사각형 배경은 drawText 도형 속성으로 흡수하는 것이 기본이다.
@@ -237,6 +338,31 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 - 회전/기울임/복합 경계선처럼 HWPX drawText 도형 속성으로 표현하기 어려운 라벨 배경
 - 여러 visual source가 하나의 라벨 껍데기를 만들고, extractor가 텍스트 없는 shell PNG를
   안정적으로 export한 경우
+
+## Text Card Backdrop
+
+`Paper` fill 도형은 자동으로 page/container background가 아니다.
+
+원본에서 흰 도형이 텍스트 카드를 만드는 경우:
+
+- 도형은 `TEXT_CARD_BACKDROP`이다.
+- `visualAction=PLACE_TEXT_SHELL`이다.
+- 정책 layer는 `DECORATION`이다.
+- HWPX 평면은 `BEHIND_TEXT`다.
+- 큰 페이지/스프레드 배경보다는 위, editable HWPX text보다는 뒤에 배치한다.
+
+판정 기준:
+
+- 같은 page의 editable/searchable TextFrame과 bbox가 강하게 겹친다.
+- 도형이 TF를 감싸거나, TF와 거의 같은 카드 footprint를 가진다.
+- 도형은 page 전체/대형 영역 배경이 아니다.
+- 도형은 `Paper` fill이어도 원본에서 카드 shell 역할이면 visible output이다.
+
+금지:
+
+- `Paper`라는 색 이름만으로 `BACKGROUND`으로 확정하지 않는다.
+- 흰 도형이 흰 페이지 위에서 안 보인다는 이유로 임의 stroke를 추가하지 않는다.
+- 특정 페이지/문구/좌표로 카드 여부를 판단하지 않는다.
 
 ## Master Page Running Title
 
@@ -409,6 +535,7 @@ Stage 4는 아래를 검증한다.
 - 같은 source의 inline/floating 동시 visible 금지
 - 같은 file/page/bounds의 visible PNG 중복 금지
 - `PLACE_TEXT_SHELL`은 소유 TF보다 뒤
+- `TEXT_CARD_BACKDROP`은 관련 editable TF보다 뒤, page/container background보다 위
 - `BACKGROUND`은 `CONTENT`과 `TEXT`를 덮지 않음
 - `DECORATION`은 의도된 장식/외곽선/마스크 역할만 수행
 

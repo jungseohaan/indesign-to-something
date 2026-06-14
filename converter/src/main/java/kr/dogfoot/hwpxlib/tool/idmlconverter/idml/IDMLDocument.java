@@ -63,8 +63,41 @@ public class IDMLDocument {
     public void putFont(String fontRef, IDMLFontDef font) { fonts.put(fontRef, font); }
 
     public Map<String, String> colors() { return colors; }
-    public String getColor(String colorRef) { return colors.get(colorRef); }
-    public void putColor(String colorRef, String hexColor) { colors.put(colorRef, hexColor); }
+    public String getColor(String colorRef) {
+        if (colorRef == null) return null;
+        String hex = colors.get(colorRef);
+        if (hex != null) return hex;
+        String name = colorRef;
+        if (name.startsWith("Color/")) name = name.substring("Color/".length());
+        if (name.startsWith("Swatch/")) name = name.substring("Swatch/".length());
+        if (!name.equals(colorRef)) {
+            hex = colors.get(name);
+            if (hex != null) return hex;
+        }
+        if (name.startsWith("#") && name.length() > 1) {
+            hex = colors.get(name.substring(1));
+            if (hex != null) return hex;
+        } else {
+            hex = colors.get("#" + name);
+            if (hex != null) return hex;
+        }
+        return null;
+    }
+    public void putColor(String colorRef, String hexColor) {
+        if (colorRef == null || hexColor == null) return;
+        colors.put(colorRef, hexColor);
+        String name = colorRef;
+        if (name.startsWith("Color/")) name = name.substring("Color/".length());
+        if (name.startsWith("Swatch/")) name = name.substring("Swatch/".length());
+        colors.put(name, hexColor);
+        colors.put("Color/" + name, hexColor);
+        colors.put("Swatch/" + name, hexColor);
+        if (name.startsWith("#") && name.length() > 1) {
+            colors.put(name.substring(1), hexColor);
+        } else {
+            colors.put("#" + name, hexColor);
+        }
+    }
 
     /** ObjectStyle: selfRef → [strokeColor, strokeWeight, strokeTint] */
     public void putObjectStyle(String selfRef, String strokeColor, String strokeWeight, String strokeTint) {

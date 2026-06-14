@@ -385,6 +385,10 @@ public final class ResolvedBuildContext {
     /** Anchored table source ids consumed by StoryConverter, including wrapper and nested table ids. */
     private final java.util.Set<String> anchoredTableSourceIds =
             new java.util.HashSet<>();
+    private final java.util.Set<String> anchoredWrapperTableSourceIds =
+            new java.util.HashSet<>();
+    private final java.util.Set<String> anchoredNestedTableSourceIds =
+            new java.util.HashSet<>();
 
     public void addSimpleButtonLabelPlan(SimpleButtonLabelPlan plan) {
         if (plan == null) return;
@@ -395,7 +399,9 @@ public final class ResolvedBuildContext {
     }
 
     public SimpleButtonLabelPlan simpleButtonLabelPlan(int anchorDomId) {
-        return simpleButtonLabelPlans.get(anchorDomId);
+        SimpleButtonLabelPlan plan = simpleButtonLabelPlans.get(anchorDomId);
+        if (plan != null) return plan;
+        return simpleButtonLabelPlansByTextFrameId.get(anchorDomId);
     }
 
     public void addAnchoredTablePlan(AnchoredTablePlan plan) {
@@ -405,6 +411,8 @@ public final class ResolvedBuildContext {
                 .add(plan);
         addAnchoredTableSourceId(plan.wrapperTableId);
         addAnchoredTableSourceId(plan.nestedTableId);
+        addAnchoredWrapperTableSourceId(plan.wrapperTableId);
+        addAnchoredNestedTableSourceId(plan.nestedTableId);
     }
 
     public java.util.List<AnchoredTablePlan> anchoredTablePlansForOwnerTextFrame(int domId) {
@@ -417,9 +425,29 @@ public final class ResolvedBuildContext {
         return tableSourceId != null && anchoredTableSourceIds.contains(tableSourceId);
     }
 
+    public boolean isAnchoredWrapperTableSource(String tableSourceId) {
+        return tableSourceId != null && anchoredWrapperTableSourceIds.contains(tableSourceId);
+    }
+
+    public boolean isAnchoredNestedTableSource(String tableSourceId) {
+        return tableSourceId != null && anchoredNestedTableSourceIds.contains(tableSourceId);
+    }
+
     private void addAnchoredTableSourceId(String tableSourceId) {
         if (tableSourceId != null && !tableSourceId.isEmpty()) {
             anchoredTableSourceIds.add(tableSourceId);
+        }
+    }
+
+    private void addAnchoredWrapperTableSourceId(String tableSourceId) {
+        if (tableSourceId != null && !tableSourceId.isEmpty()) {
+            anchoredWrapperTableSourceIds.add(tableSourceId);
+        }
+    }
+
+    private void addAnchoredNestedTableSourceId(String tableSourceId) {
+        if (tableSourceId != null && !tableSourceId.isEmpty()) {
+            anchoredNestedTableSourceIds.add(tableSourceId);
         }
     }
 
@@ -516,7 +544,6 @@ public final class ResolvedBuildContext {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         if (plan == null || !plan.hasVisibleVisual() || plan.visualLayer == null) return null;
         return plan.visualLayer == VisualLayer.CONTAINER_FACE
-                || plan.visualLayer == VisualLayer.LABEL_BACKDROP
                 || plan.visualLayer == VisualLayer.CONTENT_VISUAL
                 || plan.visualLayer == VisualLayer.CONTAINER_OUTLINE
                 || plan.visualLayer == VisualLayer.FOREGROUND_MASK;
@@ -557,27 +584,38 @@ public final class ResolvedBuildContext {
         for (ObjectPlan plan : ownershipPlans) {
             if (plan == null) continue;
             if (plan.renderId != null) {
-                putFirst(ownershipPlanByRenderFileKey,
+                putPreferred(ownershipPlanByRenderFileKey,
                         renderFileKey(plan.pageIndex, plan.placement, plan.renderId, plan.file),
                         plan);
-                putFirst(ownershipPlanByRenderKey,
+                putPreferred(ownershipPlanByRenderKey,
                         renderKey(plan.pageIndex, plan.placement, plan.renderId),
                         plan);
             }
-            putFirst(ownershipPlanByDomKey, domKey(plan.pageIndex, plan.placement, plan.domId), plan);
-            putFirst(ownershipPlanByFileBoundsKey,
+            putPreferred(ownershipPlanByDomKey, domKey(plan.pageIndex, plan.placement, plan.domId), plan);
+            putPreferred(ownershipPlanByFileBoundsKey,
                     fileBoundsKey(plan.pageIndex, plan.placement, plan.file, plan.bounds),
                     plan);
-            putFirst(ownershipPlanByFileKey, fileKey(plan.pageIndex, plan.placement, plan.file), plan);
+            putPreferred(ownershipPlanByFileKey, fileKey(plan.pageIndex, plan.placement, plan.file), plan);
         }
         ownershipPlanIndexDirty = false;
         ownershipPlanRenderedCache.clear();
     }
 
-    private static void putFirst(java.util.Map<String, ObjectPlan> map, String key, ObjectPlan plan) {
-        if (key != null && !map.containsKey(key)) {
+    private static void putPreferred(java.util.Map<String, ObjectPlan> map, String key, ObjectPlan plan) {
+        if (key == null) return;
+        ObjectPlan existing = map.get(key);
+        if (existing == null || shouldPreferOwnershipPlan(plan, existing)) {
             map.put(key, plan);
         }
+    }
+
+    private static boolean shouldPreferOwnershipPlan(ObjectPlan candidate, ObjectPlan existing) {
+        if (candidate == null) return false;
+        if (existing == null) return true;
+        boolean candidateSimple = candidate.kind != null && candidate.kind.startsWith("simple_button_label:");
+        boolean existingSimple = existing.kind != null && existing.kind.startsWith("simple_button_label:");
+        if (candidateSimple != existingSimple) return candidateSimple;
+        return false;
     }
 
     private static String renderedPlanCacheKey(RenderedGroup rg) {

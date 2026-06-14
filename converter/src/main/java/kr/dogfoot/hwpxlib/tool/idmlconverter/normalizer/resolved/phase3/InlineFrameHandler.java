@@ -29,6 +29,7 @@ import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontEquationConverter;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
@@ -198,6 +199,9 @@ public class InlineFrameHandler {
      */
     public static java.util.List<ASTInlineObject> tryInlineGroupAsBoxList(ResolvedBuildContext ctx, int anchoredObjectId) {
         String anchorId = String.valueOf(anchoredObjectId);
+        if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(ctx.resolvedData, anchoredObjectId)) {
+            return null;
+        }
         if (containsConceptDiagramTextFrame(ctx, anchorId)) return null;
         ResolvedTextFrame anchorTf = ctx.resolvedData.getTextFrame(anchorId);
         if (anchorTf != null) return null;
@@ -213,6 +217,9 @@ public class InlineFrameHandler {
             if (vt == null) continue;
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) continue;
+            if (!ctx.resolvedData.isSimpleButtonLabelTextFrame(tf.id())) {
+                return null;
+            }
             childTfs.add(tf);
         }
         // Phase B/C가 중첩 배지를 추가할 수 있으므로 직속 TF 수로 조기 종료하지 않음
@@ -660,6 +667,47 @@ public class InlineFrameHandler {
     }
 
     /**
+     * 인라인 shape(Rectangle/Oval/Polygon)가 editable child TF를 품고 있고,
+     * Stage 1 ownership이 PLACE_TEXT_SHELL로 결정한 경우에는 shape PNG를 shell로,
+     * child TF를 HWPX 텍스트로 한 몸의 INLINE_TEXT_FRAME 안에 배치한다.
+     *
+     * Group 전용 배지 로직과 달리, 이 경로는 원본 앵커 자체가 shape인 케이스를 담당한다.
+     */
+    public static ASTInlineObject tryInlineShapeWithEditableChildAsShell(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null) return null;
+        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
+        if (anchorItem == null || !isInlineShellShape(anchorItem)) return null;
+
+        ResolvedTextFrame childTf = null;
+        String anchorId = String.valueOf(anchoredObjectId);
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
+            if (pi == null || !anchorId.equals(pi.parentId())) continue;
+            if (!tf.isInline()) continue;
+            if (!ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
+            if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return null;
+            String vt = tf.frameVisibleText();
+            String cleaned = vt == null
+                    ? ""
+                    : vt.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+            if (cleaned.isEmpty()) continue;
+            if (childTf != null) return null;
+            childTf = tf;
+        }
+        if (childTf == null) return null;
+        return loadRenderedTextHiddenInlineShell(ctx, anchoredObjectId, anchorItem, childTf);
+    }
+
+    private static boolean isInlineShellShape(ResolvedPageItem item) {
+        if (item == null) return false;
+        if (!item.isInline()) return false;
+        String type = item.type();
+        return "Rectangle".equals(type) || "Oval".equals(type) || "Polygon".equals(type);
+    }
+
+    /**
      * 인라인 Group 앵커가 "배경 도형 + 단일 짧은 텍스트프레임"으로 구성된 단일 배지
      * (예: 페이지 39 "가" / "나" 캡슐 배지) → INLINE_TEXT_FRAME 으로 변환.
      *
@@ -672,6 +720,9 @@ public class InlineFrameHandler {
      */
     public static ASTInlineObject tryInlineGroupAsSingleBadge(ResolvedBuildContext ctx, int anchoredObjectId) {
         String anchorId = String.valueOf(anchoredObjectId);
+        if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(ctx.resolvedData, anchoredObjectId)) {
+            return null;
+        }
         if (containsConceptDiagramTextFrame(ctx, anchorId)) return null;
         // AboveLine 앵커는 floating badge → Phase 7 이 처리, 인라인 변환 불가
         if (ctx.aboveLineAnchoredIds.contains(anchoredObjectId)) {
@@ -841,30 +892,12 @@ public class InlineFrameHandler {
         obj.height(CoordinateConverter.pointsToHwpunits(hForInline));
         obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
         obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
-
-        // 배경 fill 색 (없으면 stroke 색 적용)
-        String fillName = bgShape.fillColorName();
-        String fillHex = ctx.resolvedData.resolveColorHex(fillName);
-        if (fillHex != null) {
-            obj.fillColor(fillHex);
-            int tint = bgShape.fillTint() > 0 ? (int) bgShape.fillTint() : 100;
-            obj.fillTint(tint);
-        } else {
-            String strokeName = bgShape.strokeColorName();
-            String strokeHex = ctx.resolvedData.resolveColorHex(strokeName);
-            if (strokeHex != null) {
-                obj.strokeColor(strokeHex);
-                double sw = bgShape.strokeWeight();
-                if (ctx.scaleFactor > 0) sw = sw / ctx.scaleFactor;
-                obj.strokeWeight(Math.max(sw, 0.5));
-            }
-        }
+        obj.nativeGraphicsAllowed(true);
+        applyInlineShellShapeStyle(ctx, bgShape, obj);
 
         if (hasOval) {
             obj.cornerRadius(hForInline / 2.0);
-        } else if (bgShape.cornerRadius() > 0) {
-            obj.cornerRadius(bgShape.cornerRadius());
-        } else {
+        } else if (obj.cornerRadius() <= 0) {
             double crLookup = lookupIdmlShapeCornerRadius(ctx, bgShape.id());
             if (crLookup > 0) {
                 obj.cornerRadius(crLookup);
@@ -900,6 +933,14 @@ public class InlineFrameHandler {
                 return true;
             }
             if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && plan.placement == Placement.INLINE) {
+                return true;
+            }
+            if (plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                    && plan.placement == Placement.INLINE) {
+                return true;
+            }
+            if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                     && plan.placement == Placement.INLINE) {
                 return true;
             }
@@ -1225,12 +1266,50 @@ public class InlineFrameHandler {
             obj.height(CoordinateConverter.pointsToHwpunits(h));
             obj.imageFillData(imageData);
             obj.nativeGraphicsAllowed(true);
+            applyInlineShellShapeStyle(ctx, anchorItem, obj);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
             obj.verticalJustification("CenterAlign");
             buildBadgeParagraph(ctx, childTf, obj);
             return obj;
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private static void applyInlineShellShapeStyle(
+            ResolvedBuildContext ctx,
+            ResolvedPageItem anchorItem,
+            ASTInlineObject obj) {
+        if (ctx == null || ctx.resolvedData == null || anchorItem == null || obj == null) return;
+        String fillName = anchorItem.fillColorName();
+        String fillHex = ctx.resolvedData.resolveColorHex(fillName);
+        if (fillHex != null) {
+            obj.fillColor(fillHex);
+            obj.fillTint(anchorItem.fillTint() > 0 ? (int) anchorItem.fillTint() : 100);
+        }
+        String strokeName = anchorItem.strokeColorName();
+        String strokeHex = ctx.resolvedData.resolveColorHex(strokeName);
+        if (strokeHex != null && anchorItem.strokeWeight() > 0) {
+            obj.strokeColor(strokeHex);
+            double sw = anchorItem.strokeWeight();
+            if (ctx.scaleFactor > 0) sw = sw / ctx.scaleFactor;
+            obj.strokeWeight(Math.max(sw, 0.5));
+            obj.strokeTint(anchorItem.strokeTint() > 0 ? (int) anchorItem.strokeTint() : 100);
+        }
+        if (anchorItem.cornerRadius() > 0) {
+            obj.cornerRadius(anchorItem.cornerRadius());
+        } else {
+            double[] gb = anchorItem.geometricBounds();
+            if (gb != null && gb.length >= 4) {
+                double h = Math.abs(gb[2] - gb[0]);
+                if ("Oval".equals(anchorItem.type()) && h > 0) {
+                    obj.cornerRadius(h / 2.0);
+                }
+            }
+        }
+        obj.shellShapeType(anchorItem.type());
+        if (obj.fillColor() != null || obj.strokeColor() != null || obj.cornerRadius() > 0) {
+            obj.nativeGraphicsAllowed(true);
         }
     }
 
@@ -1373,6 +1452,7 @@ public class InlineFrameHandler {
         } else {
             runs = TextRunSegmenter.fromSyntheticText(text, null, paragraph.hasTabStops());
         }
+        applyIdmlRunTintFallback(ctx, textFrame, runs);
         for (ASTTextRun run : runs) {
             paragraph.addItem(run);
         }
@@ -1391,6 +1471,42 @@ public class InlineFrameHandler {
                         return run;
                     }
                 }
+            }
+        }
+        return null;
+    }
+
+    private static void applyIdmlRunTintFallback(ResolvedBuildContext ctx,
+                                                 ResolvedTextFrame textFrame,
+                                                 List<ASTTextRun> runs) {
+        if (ctx == null || ctx.loadIDMLStory == null || textFrame == null
+                || textFrame.storyId() == null || runs == null || runs.isEmpty()) {
+            return;
+        }
+        IDMLCharacterRun idmlRun = firstVisibleIdmlRun(ctx, textFrame.storyId());
+        if (idmlRun == null || idmlRun.fillColor() == null || idmlRun.fillTint() == null) {
+            return;
+        }
+        String tinted = RunBuilder.resolveColorToHex(ctx, idmlRun.fillColor(), idmlRun.fillTint());
+        if (tinted == null) return;
+        for (ASTTextRun run : runs) {
+            if (run != null) run.textColor(tinted);
+        }
+    }
+
+    private static IDMLCharacterRun firstVisibleIdmlRun(ResolvedBuildContext ctx, String storyId) {
+        IDMLStory idmlStory = ctx.loadIDMLStory.apply(storyId);
+        if (idmlStory == null || idmlStory.paragraphs() == null) return null;
+        for (IDMLParagraph paragraph : idmlStory.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null || run.content() == null) continue;
+                String visible = run.content()
+                        .replace("\uFFFC", "")
+                        .replace("\r", "")
+                        .replace("\n", "")
+                        .trim();
+                if (!visible.isEmpty()) return run;
             }
         }
         return null;
@@ -2965,6 +3081,9 @@ public class InlineFrameHandler {
      * PNG에는 editable TF 내용이 포함되지 않으므로 별도로 배치해야 한다.
      */
     public static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {
+        if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(ctx.resolvedData, groupId)) {
+            return java.util.Collections.emptyList();
+        }
         java.util.List<ASTInlineObject> result = new ArrayList<>();
         String groupIdStr = String.valueOf(groupId);
         java.util.List<ResolvedTextFrame> editableChildren = new ArrayList<>();

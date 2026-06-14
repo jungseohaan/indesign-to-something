@@ -1,6 +1,9 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -47,10 +50,11 @@ public final class OwnershipPlanner {
     private void run() {
         planRenderedItems();
         planTextFrames();
+        resolveInlineCompositeHwpxTextParents();
         resolveInlineFloatingSameDom();
         resolveFloatingChildrenOwnedByInlineParent();
         resolveDuplicateRenderedChannels();
-        resolveInlineCompositeHwpxTextParents();
+        resolveFloatingInlineObjectPageObjectDuplicates();
         resolveVisualBackdropClusterSources();
         resolveTextShellSharedSources();
         resolveCoveredParentGroups();
@@ -123,26 +127,62 @@ public final class OwnershipPlanner {
             } else {
                 textAction = TextAction.OWNED_BY_HWPX_TEXT;
             }
+            IDMLStory idmlStory = loadStory(tf.storyId());
+            boolean tableOnlyTextFrame =
+                    TableFrameOwnershipPolicy.isTableOnlyTextFrame(tf, idmlStory);
+            VisualAction visualAction = tableOnlyTextFrame
+                    ? VisualAction.PLACE_TABLE_STYLE
+                    : VisualAction.DROP_VISUAL;
+            int[] sourceIds = tableOnlyTextFrame
+                    ? tableOnlySourceIds(domId, idmlStory)
+                    : new int[] { domId };
             plans.add(new ObjectPlan(
                     domId,
-                    "text_frame",
+                    tableOnlyTextFrame ? "text_frame:table_only" : "text_frame",
                     tf.pageIndex(),
                     textAction,
-                    VisualAction.DROP_VISUAL,
+                    visualAction,
                     VisualLayer.CONTENT_VISUAL,
                     tf.isInline() ? Placement.INLINE : Placement.FLOATING,
                     null,
-                    new int[] { domId },
+                    sourceIds,
                     tf.zOrder(),
-                    textFrameReason(tf, textAction),
+                    tableOnlyTextFrame ? "table_only_text_frame" : textFrameReason(tf, textAction),
                     null,
                     tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds()));
         }
     }
 
+    private IDMLStory loadStory(String storyId) {
+        if (storyId == null || ctx == null || ctx.loadIDMLStory == null) return null;
+        try {
+            return ctx.loadIDMLStory.apply(storyId);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static int[] tableOnlySourceIds(int textFrameDomId, IDMLStory story) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        ids.add(textFrameDomId);
+        if (story != null && story.tables() != null) {
+            for (IDMLTable table : story.tables()) {
+                int tableId = parseFlexibleId(table != null ? table.selfId() : null);
+                if (tableId >= 0) ids.add(tableId);
+            }
+        }
+        int[] out = new int[ids.size()];
+        int i = 0;
+        for (Integer id : ids) out[i++] = id != null ? id : -1;
+        return out;
+    }
+
     private TextAction textActionOf(RenderedGroup rg) {
         if (data.shouldUseCompletePngForSimpleButtonLabel(rg)) {
             return TextAction.OWNED_BY_PNG;
+        }
+        if (data.shouldKeepVisualLabelTextEditable(rg)) {
+            return TextAction.OWNED_BY_HWPX_TEXT;
         }
         if ("indesign_png".equals(rg.textOwner())) {
             return TextAction.OWNED_BY_PNG;
@@ -162,8 +202,14 @@ public final class OwnershipPlanner {
         if (isCompanionShellOfCompleteSimpleLabel(rg)) {
             return VisualAction.DROP_VISUAL;
         }
+        if (isCompleteVisualLabelWithEditableText(rg)) {
+            return VisualAction.DROP_VISUAL;
+        }
         if (Boolean.FALSE.equals(rg.placementAllowed())) {
             return VisualAction.DROP_VISUAL;
+        }
+        if (isTextCardBackdropVector(rg)) {
+            return VisualAction.PLACE_TEXT_SHELL;
         }
         if (isUnabsorbedHwpxTextStyleInlineVisual(rg)) {
             return VisualAction.DROP_VISUAL;
@@ -211,6 +257,9 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTENT_VISUAL;
         }
         if (visualAction == VisualAction.PLACE_TEXT_SHELL) {
+            if (isTextCardBackdropVector(rg)) {
+                return VisualLayer.TEXT_CARD_BACKDROP;
+            }
             if (isEditableLabelCardShell(rg)) {
                 return VisualLayer.LABEL_BACKDROP;
             }
@@ -244,7 +293,10 @@ public final class OwnershipPlanner {
             return VisualLayer.FOREGROUND_MASK;
         }
         if (isPaperMaskInsideContainerBackdrop(rg)) {
-            return VisualLayer.CONTAINER_BACKDROP;
+            return VisualLayer.FOREGROUND_MASK;
+        }
+        if (isTextCardBackdropVector(rg)) {
+            return VisualLayer.TEXT_CARD_BACKDROP;
         }
         if (isFlatImageExportBackdrop(rg)) {
             return VisualLayer.CONTAINER_BACKDROP;
@@ -265,7 +317,7 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTAINER_BACKDROP;
         }
         if (isPaperStrokeBoxBackdrop(rg)) {
-            return VisualLayer.CONTAINER_FACE;
+            return VisualLayer.CONTAINER_BACKDROP;
         }
         if (isFilledContainerBoxBackdrop(rg)) {
             return VisualLayer.CONTAINER_BACKDROP;
@@ -308,6 +360,11 @@ public final class OwnershipPlanner {
         if (rg == null) return false;
         if (!"visual_label_text_hidden_shell".equals(rg.reason())) return false;
         return data.shouldUseCompletePngForSimpleButtonLabel(rg);
+    }
+
+    private boolean isCompleteVisualLabelWithEditableText(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        return data.shouldKeepVisualLabelTextEditable(rg);
     }
 
     private boolean canAbsorbEditableLabelShellAsTextStyle(RenderedGroup rg) {
@@ -501,12 +558,36 @@ public final class OwnershipPlanner {
 
     private Placement placementOf(RenderedGroup rg) {
         if ("inline_object".equals(rg.type()) || "inline_object".equals(rg.itemType())) {
+            if (InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(data, rg)) {
+                return Placement.FLOATING;
+            }
             return Placement.INLINE;
         }
         if (rg.isPageBackground()) {
             return Placement.FLOATING;
         }
         return Placement.FLOATING;
+    }
+
+    private void resolveFloatingInlineObjectPageObjectDuplicates() {
+        Map<String, Boolean> floatingInlineObjectByPageDom = new HashMap<>();
+        for (ObjectPlan plan : plans) {
+            if (!plan.hasVisibleVisual()) continue;
+            if (plan.placement != Placement.FLOATING) continue;
+            if (plan.domId < 0) continue;
+            if (!safe(plan.kind).contains("inline_object")) continue;
+            floatingInlineObjectByPageDom.put(pageDomKey(plan), Boolean.TRUE);
+        }
+        if (floatingInlineObjectByPageDom.isEmpty()) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!plan.hasVisibleVisual()) continue;
+            if (plan.domId < 0) continue;
+            if (safe(plan.kind).contains("inline_object")) continue;
+            if (!Boolean.TRUE.equals(floatingInlineObjectByPageDom.get(pageDomKey(plan)))) continue;
+            plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
+                    "page_object_duplicate_of_floating_inline_object"));
+        }
     }
 
     private void writePlans() {
@@ -1542,6 +1623,81 @@ public final class OwnershipPlanner {
         return false;
     }
 
+    private boolean isTextCardBackdropVector(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!"vector_shape".equals(safe(rg.reason()))) return false;
+        double[] rb = rg.bounds();
+        if (rb == null || rb.length < 4) return false;
+        double rArea = area(rb);
+        if (rArea < 40.0) return false;
+        double pageArea = pageArea(rg.pageIndex());
+        if (pageArea > 0.0 && rArea / pageArea > 0.30) return false;
+        if (!hasPaperFillOnlyCardShapeSource(rg)) return false;
+
+        for (ResolvedTextFrame tf : data.textFrames()) {
+            if (!isEditableHwpxTextFrameOnPage(tf, rg.pageIndex())) continue;
+            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+            if (tb == null || tb.length < 4) continue;
+            if (area(tb) < 10.0) continue;
+            if (isTextCardBackdropForTextBounds(rb, tb)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasPaperFillOnlyCardShapeSource(RenderedGroup rg) {
+        for (int id : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (isPaperFillOnlyCardShapeItem(item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isPaperFillOnlyCardShapeItem(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = safe(item.type());
+        if (!("Rectangle".equals(type) || "Polygon".equals(type) || "Oval".equals(type))) {
+            return false;
+        }
+        if (!isPaperColor(item.fillColorName())) return false;
+        if (item.strokeWeight() > 0.01 && !isNoneColor(item.strokeColorName())) return false;
+        if (item.opacity() < 0.5) return false;
+        double[] b = boundsOf(item);
+        if (b == null || b.length < 4) return false;
+        double h = Math.abs(b[2] - b[0]);
+        double w = Math.abs(b[3] - b[1]);
+        return w >= 8.0 && h >= 8.0 && (w * h) >= 80.0;
+    }
+
+    private boolean isEditableHwpxTextFrameOnPage(ResolvedTextFrame tf, int pageIndex) {
+        if (tf == null || tf.id() == null) return false;
+        if (tf.pageIndex() != pageIndex) return false;
+        if (tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (data.isTextOwnedByIndesignPng(tf.id())) return false;
+        String text = safe(tf.frameVisibleText()).trim();
+        return !text.isEmpty();
+    }
+
+    private static boolean isTextCardBackdropForTextBounds(double[] card, double[] text) {
+        double overlap = overlapRatio(card, text);
+        if (overlap < 0.52 && !containsCenter(card, text) && !containsCenter(text, card)) {
+            return false;
+        }
+        double cardH = Math.max(0.001, Math.abs(card[2] - card[0]));
+        double cardW = Math.max(0.001, Math.abs(card[3] - card[1]));
+        double textH = Math.max(0.001, Math.abs(text[2] - text[0]));
+        double textW = Math.max(0.001, Math.abs(text[3] - text[1]));
+        double hRatio = Math.min(cardH, textH) / Math.max(cardH, textH);
+        double wRatio = Math.min(cardW, textW) / Math.max(cardW, textW);
+        if (boundsContains(card, text, 8.0) || boundsContains(text, card, 8.0)) {
+            return hRatio >= 0.35 && wRatio >= 0.35;
+        }
+        return overlap >= 0.70 && hRatio >= 0.55 && wRatio >= 0.55;
+    }
+
     private boolean hasDrawableBackdropShapeSource(RenderedGroup rg) {
         for (int id : sourceIdsOrSelf(rg)) {
             ResolvedPageItem item = data.getPageItem(String.valueOf(id));
@@ -2516,6 +2672,26 @@ public final class OwnershipPlanner {
         } catch (Exception e) {
             return fallback;
         }
+    }
+
+    private static int parseFlexibleId(String value) {
+        if (value == null || value.isEmpty()) return -1;
+        int decimal = parseInt(value, -1);
+        if (decimal >= 0) return decimal;
+        String s = value;
+        int marker = Math.max(s.lastIndexOf('u'), s.lastIndexOf('U'));
+        marker = Math.max(marker, Math.max(s.lastIndexOf('i'), s.lastIndexOf('I')));
+        if (marker >= 0 && marker + 1 < s.length()) {
+            String tail = s.substring(marker + 1);
+            int slash = tail.indexOf('/');
+            if (slash >= 0) tail = tail.substring(0, slash);
+            try {
+                return Integer.parseInt(tail, 16);
+            } catch (NumberFormatException e) {
+                return -1;
+            }
+        }
+        return -1;
     }
 
     private static String roundedBounds(double[] b) {

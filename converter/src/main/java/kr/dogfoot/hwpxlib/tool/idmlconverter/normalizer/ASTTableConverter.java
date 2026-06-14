@@ -193,6 +193,7 @@ public class ASTTableConverter {
                                                       ColorResolver colorResolver) {
         if (src == null) return null;
         if (src.strokeWeight <= 0 && isNoneColor(src.strokeColor)) return null;
+        if (src.strokeWeight <= 0 && src.strokeWeightSpecified) return null;
         ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
         border.weight(src.strokeWeight);
         border.strokeType(src.strokeType);
@@ -225,6 +226,14 @@ public class ASTTableConverter {
                 idmlDoc, colorResolver, imageLoader, resolvedData, null);
     }
 
+    /**
+     * 셀 단락/런 빌드 seam. ctx를 가진 호출부(TableBuilder)가 공급하면 셀이
+     * 셀 밖과 같은 공용 런 빌더(RunBuilder.createRunFromIDML)를 쓴다.
+     */
+    public interface CellParagraphBuilder {
+        java.util.List<ASTParagraph> build(IDMLTableCell idmlCell);
+    }
+
     public static ASTTable convertTableSimple(IDMLTable idmlTable,
                                         long x, long y, int zOrder,
                                         IDMLDocument idmlDoc,
@@ -232,6 +241,18 @@ public class ASTTableConverter {
                                         kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader imageLoader,
                                         ResolvedData resolvedData,
                                         StylePropertyResolver styleResolver) {
+        return convertTableSimple(idmlTable, x, y, zOrder, idmlDoc, colorResolver,
+                imageLoader, resolvedData, styleResolver, null);
+    }
+
+    public static ASTTable convertTableSimple(IDMLTable idmlTable,
+                                        long x, long y, int zOrder,
+                                        IDMLDocument idmlDoc,
+                                        kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver colorResolver,
+                                        kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader imageLoader,
+                                        ResolvedData resolvedData,
+                                        StylePropertyResolver styleResolver,
+                                        CellParagraphBuilder cellParagraphBuilder) {
         ASTTable table = new ASTTable();
         table.sourceId(idmlTable.selfId());
         table.zOrder(zOrder);
@@ -262,7 +283,8 @@ public class ASTTableConverter {
                             idmlDoc, colorResolver, imageLoader, resolvedData);
                 } else {
                     cell = convertTableCellSimple(
-                            idmlCell, rowIdx, idmlCell.columnIndex(), resolvedData, styleResolver);
+                            idmlCell, rowIdx, idmlCell.columnIndex(), resolvedData, styleResolver,
+                            cellParagraphBuilder);
                 }
                 row.addCell(cell);
             }
@@ -517,7 +539,8 @@ public class ASTTableConverter {
     private static ASTTableCell convertTableCellSimple(IDMLTableCell idmlCell,
                                                         int rowIdx, int colIdx,
                                                         ResolvedData resolvedData,
-                                                        StylePropertyResolver styleResolver) {
+                                                        StylePropertyResolver styleResolver,
+                                                        CellParagraphBuilder cellParagraphBuilder) {
         ASTTableCell cell = new ASTTableCell();
         cell.rowIndex(rowIdx);
         cell.columnIndex(colIdx);
@@ -552,17 +575,23 @@ public class ASTTableConverter {
         cell.topRightDiagonalLine(idmlCell.topRightDiagonalLine());
         cell.diagonalBorder(convertCellBorderSimple(idmlCell.diagonalBorder(), resolvedData));
 
-        // 셀 내용: 단락 변환 (간소화 — 텍스트만)
-        for (IDMLParagraph cellPara : idmlCell.paragraphs()) {
-            ASTParagraph astPara = new ASTParagraph();
-            if (cellPara.appliedParagraphStyle() != null) {
-                astPara.paragraphStyleRef(cellPara.appliedParagraphStyle());
+        // 셀 내용: 셀 밖과 같은 공용 런 빌더(ctx 보유 호출부 제공) 우선, 없으면 간소 폴백.
+        if (cellParagraphBuilder != null) {
+            for (ASTParagraph astPara : cellParagraphBuilder.build(idmlCell)) {
+                cell.addParagraph(astPara);
             }
-            for (IDMLCharacterRun run : cellPara.characterRuns()) {
-                addSimpleTextRuns(astPara, run, cellPara.appliedParagraphStyle(),
-                        resolvedData, styleResolver);
+        } else {
+            for (IDMLParagraph cellPara : idmlCell.paragraphs()) {
+                ASTParagraph astPara = new ASTParagraph();
+                if (cellPara.appliedParagraphStyle() != null) {
+                    astPara.paragraphStyleRef(cellPara.appliedParagraphStyle());
+                }
+                for (IDMLCharacterRun run : cellPara.characterRuns()) {
+                    addSimpleTextRuns(astPara, run, cellPara.appliedParagraphStyle(),
+                            resolvedData, styleResolver);
+                }
+                cell.addParagraph(astPara);
             }
-            cell.addParagraph(astPara);
         }
         replaceFlattenedCellTextWithResolvedStory(cell, idmlCell, resolvedData);
 
@@ -773,6 +802,7 @@ public class ASTTableConverter {
                                                                    ResolvedData resolvedData) {
         if (src == null) return null;
         if (src.strokeWeight <= 0 && isNoneColor(src.strokeColor)) return null;
+        if (src.strokeWeight <= 0 && src.strokeWeightSpecified) return null;
         ASTTableCell.CellBorder border = new ASTTableCell.CellBorder();
         border.weight(src.strokeWeight);
         border.strokeType(src.strokeType);

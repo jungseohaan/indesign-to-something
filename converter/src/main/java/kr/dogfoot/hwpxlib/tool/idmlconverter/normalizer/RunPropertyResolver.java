@@ -1,5 +1,6 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer;
 
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
@@ -91,12 +92,25 @@ public final class RunPropertyResolver {
             String effectiveIdmlColor,
             String paragraphStyleColorHex,
             Function<String, String> colorResolver) {
+        return resolveTextColorHex(rr, effectiveIdmlColor, null, paragraphStyleColorHex,
+                colorResolver, null);
+    }
+
+    public static String resolveTextColorHex(
+            ResolvedRun rr,
+            String effectiveIdmlColor,
+            Double effectiveIdmlTint,
+            String paragraphStyleColorHex,
+            Function<String, String> colorResolver,
+            BiFunction<String, Double, String> tintedColorResolver) {
         if (effectiveIdmlColor != null) {
-            String hex = colorResolver.apply(effectiveIdmlColor);
+            String hex = resolveColor(effectiveIdmlColor, effectiveIdmlTint,
+                    colorResolver, tintedColorResolver);
             if (hex != null) return hex;
         }
         if (rr != null && rr.fillColor() != null) {
-            String hex = colorResolver.apply(rr.fillColor());
+            String hex = resolveColor(rr.fillColor(), effectiveIdmlTint,
+                    colorResolver, tintedColorResolver);
             if (hex != null) return hex;
         }
         if (paragraphStyleColorHex != null) {
@@ -154,12 +168,40 @@ public final class RunPropertyResolver {
             String paragraphStyleColorHex,
             Function<String, String> colorResolver,
             MatchConfidence confidence) {
+        return resolveTextColorHexWithConfidence(rr, effectiveIdmlColor, null,
+                paragraphStyleColorHex, colorResolver, null, confidence);
+    }
+
+    public static String resolveTextColorHexWithConfidence(
+            ResolvedRun rr,
+            String effectiveIdmlColor,
+            Double effectiveIdmlTint,
+            String paragraphStyleColorHex,
+            Function<String, String> colorResolver,
+            BiFunction<String, Double, String> tintedColorResolver,
+            MatchConfidence confidence) {
         if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
                 && rr != null && rr.fillColor() != null) {
-            String hex = colorResolver.apply(rr.fillColor());
+            String hex = resolveColor(rr.fillColor(), effectiveIdmlTint,
+                    colorResolver, tintedColorResolver);
             if (hex != null) return hex;
         }
-        return resolveTextColorHex(rr, effectiveIdmlColor, paragraphStyleColorHex, colorResolver);
+        return resolveTextColorHex(rr, effectiveIdmlColor, effectiveIdmlTint,
+                paragraphStyleColorHex, colorResolver, tintedColorResolver);
+    }
+
+    private static String resolveColor(String color,
+                                       Double tint,
+                                       Function<String, String> colorResolver,
+                                       BiFunction<String, Double, String> tintedColorResolver) {
+        if (color == null || colorResolver == null) return null;
+        if (tint != null) {
+            String tinted = tintedColorResolver != null
+                    ? tintedColorResolver.apply(color, tint)
+                    : null;
+            if (tinted != null) return tinted;
+        }
+        return colorResolver.apply(color);
     }
 
     /**

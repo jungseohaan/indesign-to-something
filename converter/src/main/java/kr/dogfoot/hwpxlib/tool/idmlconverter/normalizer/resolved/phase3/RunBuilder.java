@@ -54,6 +54,7 @@ class RunBuilder {
 
         // GREP 적용 캐릭터 스타일이 있으면 색상/글리프 매핑에 활용
         String effectiveIdmlColor = cr.fillColor();
+        Double effectiveIdmlTint = cr.fillTint();
         kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef grepCharStyle = null;
         if (cr.grepAppliedCharStyle() != null && ctx.styleResolver != null) {
             grepCharStyle = ctx.styleResolver.getResolvedCharacterStyle(cr.grepAppliedCharStyle());
@@ -66,6 +67,7 @@ class RunBuilder {
             }
             if (grepCharStyle != null && grepCharStyle.fillColor() != null) {
                 effectiveIdmlColor = grepCharStyle.fillColor();
+                effectiveIdmlTint = null;
             }
         }
 
@@ -104,7 +106,13 @@ class RunBuilder {
             tr.fontSizeHwpunits(resolvedFontSize);
         }
         String resolvedColor = RunPropertyResolver.resolveTextColorHexWithConfidence(
-                rr, effectiveIdmlColor, sc.fillColor, (_c) -> resolveColorToHex(ctx, _c), confidence);
+                rr,
+                effectiveIdmlColor,
+                effectiveIdmlTint,
+                sc.fillColor,
+                (_c) -> resolveColorToHex(ctx, _c),
+                (_c, _t) -> resolveColorToHex(ctx, _c, _t),
+                confidence);
         if (resolvedColor != null) {
             tr.textColor(resolvedColor);
         }
@@ -603,6 +611,12 @@ class RunBuilder {
             if (crHex != null) return crHex;
         }
         return null;
+    }
+
+    static String resolveColorToHex(ResolvedBuildContext ctx, String color, Double tint) {
+        String hex = resolveColorToHex(ctx, color);
+        if (hex == null || tint == null) return hex;
+        return kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver.applyTintToHex(hex, tint);
     }
 
     private static String resolveTintedNamedColor(String name) {

@@ -2,7 +2,11 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.util.ArrayList;
@@ -153,7 +157,7 @@ class ParagraphDistributor {
                 visibleText = (rtf != null) ? rtf.frameVisibleText() : null;
             }
             if (visibleText != null) {
-                visibleText = normalizeFrameTextForRangeMatching(visibleText);
+                visibleText = normalizeFrameTextForRangeMatching(ctx, rtf, visibleText);
             }
 
             if (visibleText == null || visibleText.isEmpty()) {
@@ -162,7 +166,7 @@ class ParagraphDistributor {
                 if (frameTexts != null && !frameTexts.isEmpty()) {
                     StringBuilder sb = new StringBuilder();
                     for (String ft : frameTexts) {
-                        if (ft != null) sb.append(normalizeFrameTextForRangeMatching(ft));
+                        if (ft != null) sb.append(normalizeFrameTextForRangeMatching(ctx, rtf, ft));
                     }
                     visibleText = sb.toString();
                 }
@@ -313,12 +317,27 @@ class ParagraphDistributor {
         return text.substring(0, end);
     }
 
-    private static String normalizeFrameTextForRangeMatching(String text) {
+    private static String normalizeFrameTextForRangeMatching(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame frame,
+            String text) {
         if (text == null || text.isEmpty()) return text;
+        List<String> inlineAnchorTexts = semanticInlineAnchorTexts(ctx, frame);
+        int inlineAnchorIndex = 0;
         StringBuilder sb = new StringBuilder(text.length());
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
-            if (c == '\uFFFC' || c == '\n' || c == '\r') {
+            if (c == '\uFFFC') {
+                String replacement = inlineAnchorIndex < inlineAnchorTexts.size()
+                        ? inlineAnchorTexts.get(inlineAnchorIndex)
+                        : null;
+                inlineAnchorIndex++;
+                if (replacement != null && !replacement.isEmpty()) {
+                    sb.append(replacement);
+                }
+                continue;
+            }
+            if (c == '\n' || c == '\r') {
                 continue;
             }
             // InDesign frameVisibleText can include layout/object sentinels such as
@@ -331,6 +350,30 @@ class ParagraphDistributor {
             sb.append(c);
         }
         return sb.toString();
+    }
+
+    private static List<String> semanticInlineAnchorTexts(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame frame) {
+        List<String> texts = new ArrayList<>();
+        if (ctx == null || ctx.resolvedData == null || frame == null || frame.storyId() == null) {
+            return texts;
+        }
+        ResolvedStory story = ctx.resolvedData.getStory(frame.storyId());
+        if (story == null || story.paragraphs() == null) return texts;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || !run.isInlineAnchor() || run.anchoredObjectId() == null) continue;
+                SimpleButtonLabelPlan plan = ctx.simpleButtonLabelPlan(run.anchoredObjectId());
+                if (plan != null && plan.labelText != null && !plan.labelText.isEmpty()) {
+                    texts.add(plan.labelText);
+                } else {
+                    texts.add("");
+                }
+            }
+        }
+        return texts;
     }
 
     private static int resolvedFrameStartOffset(ResolvedTextFrame frame, int fallback, int storyLength) {

@@ -10,6 +10,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.MatchConfidence;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.*;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.BTFontGlyphMap;
@@ -175,7 +176,8 @@ public final class StoryConverter {
                             IDMLStory _chk =
                                     ctx.loadIDMLStory.apply(storyId);
                             if (_chk != null && _chk.hasTables()
-                                    && !hasStandaloneStoryText(_chk)) continue;
+                                    && !hasStandaloneStoryText(_chk)
+                                    && !hasAnchoredTablePlanForTextFrame(ctx, domId)) continue;
                         }
                         // 빈 본문 스토리이고 TextPath 매핑이 있으면 TextPath 스토리로 대체.
                         // frameVisibleTextLength 도 TextPath 스토리 길이로 보정하여 단락 분배 필터를 통과시킨다.
@@ -464,6 +466,14 @@ public final class StoryConverter {
         return hasOwnedFrame;
     }
 
+    private static boolean hasAnchoredTablePlanForTextFrame(ResolvedBuildContext ctx, String domId) {
+        int id = parseInt(domId, -1);
+        return ctx != null
+                && id >= 0
+                && ctx.anchoredTablePlansForOwnerTextFrame(id) != null
+                && !ctx.anchoredTablePlansForOwnerTextFrame(id).isEmpty();
+    }
+
     private static void insertAnchoredTables(ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
         if (ctx == null || blocks == null || ctx.loadIDMLStory == null) return;
         for (ASTTextFrameBlock block : blocks) {
@@ -476,19 +486,214 @@ public final class StoryConverter {
             plans = new ArrayList<>(plans);
             plans.sort(Comparator.comparingInt((AnchoredTablePlan p) -> p.afterParagraphIndex).reversed());
             for (AnchoredTablePlan plan : plans) {
-                if (hasInlineTable(block.paragraphs(), plan.nestedTableId)) continue;
                 IDMLTable table = loadPlannedTable(ctx, plan);
                 if (table == null) continue;
+                boolean wrapperFlowTable = isWrapperFlowTable(table, plan);
+                if (!wrapperFlowTable && hasInlineTable(block.paragraphs(), plan.nestedTableId)) continue;
                 ASTTable astTable = TableBuilder.buildPreparedAstTable(ctx, table, 0, 0, 0);
                 if (astTable == null) continue;
                 applyAnchoredTableBounds(ctx, plan, astTable);
-                ASTParagraph paragraph = new ASTParagraph();
-                paragraph.inlineTable(astTable);
                 int insertAt = Math.max(0, Math.min(block.paragraphs().size(), plan.afterParagraphIndex + 1));
                 consumeMarkerOnlyParagraphAt(block.paragraphs(), insertAt);
-                block.paragraphs().add(insertAt, paragraph);
+                List<ASTParagraph> wrapperFlow = wrapperFlowParagraphs(ctx, plan, astTable, table);
+                if (!wrapperFlow.isEmpty()) {
+                    if (containsEquivalentFlow(block.paragraphs(), wrapperFlow)) {
+                        continue;
+                    }
+                    removeInlineTables(block.paragraphs(), plan.wrapperTableId, plan.nestedTableId);
+                    insertAt = Math.max(0, Math.min(block.paragraphs().size(), plan.afterParagraphIndex + 1));
+                    consumeMarkerOnlyParagraphAt(block.paragraphs(), insertAt);
+                    block.paragraphs().addAll(insertAt, wrapperFlow);
+                } else {
+                    ASTParagraph paragraph = new ASTParagraph();
+                    paragraph.inlineTable(astTable);
+                    block.paragraphs().add(insertAt, paragraph);
+                }
             }
         }
+    }
+
+    private static List<ASTParagraph> wrapperFlowParagraphs(
+            ResolvedBuildContext ctx,
+            AnchoredTablePlan plan,
+            ASTTable astTable,
+            IDMLTable idmlWrapperTable) {
+        List<ASTParagraph> result = new ArrayList<>();
+        if (plan == null || astTable == null || astTable.rows() == null) return result;
+        if (plan.wrapperTableId == null || !plan.wrapperTableId.equals(astTable.sourceId())) return result;
+        List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow> idmlRows =
+                idmlWrapperTable != null ? idmlWrapperTable.rows() : null;
+        if (idmlRows == null || idmlRows.size() <= 1) return result;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow idmlRow : idmlRows) {
+            if (idmlRow == null || idmlRow.cells() == null) continue;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell : idmlRow.cells()) {
+                if (idmlCell == null) continue;
+                for (ASTParagraph paragraph : astParagraphsFromIdmlCell(ctx, idmlCell)) {
+                    if (isVisibleWrapperFlowParagraph(paragraph)) result.add(paragraph);
+                }
+                if (cellHasStoryRef(idmlCell, plan.nestedStoryId)) {
+                    ASTParagraph nested = nestedTableParagraph(ctx, plan);
+                    if (nested != null) result.add(nested);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static boolean containsEquivalentFlow(
+            List<ASTParagraph> existing,
+            List<ASTParagraph> flow) {
+        if (existing == null || existing.isEmpty() || flow == null || flow.isEmpty()) return false;
+        for (ASTParagraph candidate : flow) {
+            if (candidate == null) continue;
+            ASTTable candidateTable = candidate.inlineTable();
+            String candidateTableSource = candidateTable != null ? candidateTable.sourceId() : null;
+            String candidateText = normalizedComparableText(ParagraphTextHelpers.getParaPlainText(candidate));
+            if ((candidateTableSource == null || candidateTableSource.isEmpty()) && candidateText.isEmpty()) {
+                continue;
+            }
+            for (ASTParagraph paragraph : existing) {
+                if (paragraph == null) continue;
+                ASTTable existingTable = paragraph.inlineTable();
+                if (candidateTableSource != null && !candidateTableSource.isEmpty()
+                        && existingTable != null
+                        && candidateTableSource.equals(existingTable.sourceId())) {
+                    return true;
+                }
+                if (!candidateText.isEmpty()) {
+                    String existingText =
+                            normalizedComparableText(ParagraphTextHelpers.getParaPlainText(paragraph));
+                    if (candidateText.equals(existingText)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static List<ASTParagraph> astParagraphsFromIdmlCell(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        List<ASTParagraph> result = new ArrayList<>();
+        // 셀 밖과 동일한 공용 루틴으로 빌드 후, wrapperFlow 가시성 필터만 적용
+        for (ASTParagraph para : StoryLoader.astParagraphsForCell(ctx, idmlCell)) {
+            if (isVisibleWrapperFlowParagraph(para)) result.add(para);
+        }
+        return result;
+    }
+
+    private static void copyIdmlParagraphProperties(IDMLParagraph source, ASTParagraph target) {
+        if (source == null || target == null) return;
+        target.paragraphStyleRef(source.appliedParagraphStyle());
+        target.alignment(source.justification());
+        if (source.firstLineIndent() != null && source.firstLineIndent() != 0) {
+            target.firstLineIndent(CoordinateConverter.pointsToHwpunits(source.firstLineIndent()));
+        }
+        if (source.leftIndent() != null && source.leftIndent() != 0) {
+            target.leftMargin(CoordinateConverter.pointsToHwpunits(source.leftIndent()));
+        }
+        if (source.rightIndent() != null && source.rightIndent() != 0) {
+            target.rightMargin(CoordinateConverter.pointsToHwpunits(source.rightIndent()));
+        }
+        if (source.spaceBefore() != null && source.spaceBefore() > 0) {
+            target.spaceBefore(CoordinateConverter.pointsToHwpunits(source.spaceBefore()));
+        }
+        if (source.spaceAfter() != null && source.spaceAfter() > 0) {
+            target.spaceAfter(CoordinateConverter.pointsToHwpunits(source.spaceAfter()));
+        }
+        if (source.leading() != null && source.leading() > 0 && source.leading() <= 50) {
+            target.lineSpacing((int) CoordinateConverter.pointsToHwpunits(source.leading()));
+            target.lineSpacingType("fixed");
+        }
+        if (source.columnBreakAfter()) target.columnBreakAfter(true);
+        if (source.keepWithNext()) target.keepWithNext(true);
+        if (source.keepLinesTogether()) target.keepLinesTogether(true);
+        if (source.pageBreakBefore()) target.pageBreakBefore(true);
+        if (source.tabStops() != null) {
+            for (IDMLStyleDef.TabStop tabStop : source.tabStops()) {
+                if (tabStop == null || tabStop.position() <= 0) continue;
+                target.addTabStop(new ASTTabStop(
+                        CoordinateConverter.pointsToHwpunits(tabStop.position()),
+                        tabStop.alignment(),
+                        tabStop.leader()));
+            }
+        }
+    }
+
+    private static boolean isWrapperFlowTable(IDMLTable table, AnchoredTablePlan plan) {
+        return table != null
+                && plan != null
+                && plan.wrapperTableId != null
+                && plan.wrapperTableId.equals(table.selfId())
+                && hasWrapperFlowContent(table, plan);
+    }
+
+    private static void removeInlineTables(
+            List<ASTParagraph> paragraphs,
+            String... sourceIds) {
+        if (paragraphs == null || paragraphs.isEmpty() || sourceIds == null || sourceIds.length == 0) return;
+        Set<String> ids = new HashSet<>();
+        for (String sourceId : sourceIds) {
+            if (sourceId != null && !sourceId.isEmpty()) ids.add(sourceId);
+        }
+        if (ids.isEmpty()) return;
+        paragraphs.removeIf(paragraph -> paragraph != null
+                && paragraph.inlineTable() != null
+                && ids.contains(paragraph.inlineTable().sourceId()));
+    }
+
+    private static kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell findIdmlCell(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row,
+            int columnIndex) {
+        if (row == null || row.cells() == null) return null;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell : row.cells()) {
+            if (cell != null && cell.columnIndex() == columnIndex) return cell;
+        }
+        return null;
+    }
+
+    private static boolean cellHasInlineTable(ASTTableCell cell, String sourceId) {
+        if (cell == null || cell.paragraphs() == null || sourceId == null) return false;
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            if (paragraph != null && paragraph.inlineTable() != null
+                    && sourceId.equals(paragraph.inlineTable().sourceId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ASTParagraph nestedTableParagraph(ResolvedBuildContext ctx, AnchoredTablePlan plan) {
+        if (ctx == null || plan == null) return null;
+        IDMLTable nestedTable = findTable(loadStoryByAnyId(ctx, plan.nestedStoryId), plan.nestedTableId);
+        if (nestedTable == null) return null;
+        ASTTable nestedAst = TableBuilder.buildPreparedAstTable(ctx, nestedTable, 0, 0, 0);
+        if (nestedAst == null) return null;
+        ASTParagraph paragraph = new ASTParagraph();
+        paragraph.inlineTable(nestedAst);
+        return paragraph;
+    }
+
+    private static boolean isVisibleWrapperFlowParagraph(ASTParagraph paragraph) {
+        if (paragraph == null) return false;
+        if (paragraph.inlineTable() != null) return true;
+        if (paragraph.items() == null || paragraph.items().isEmpty()) return false;
+        for (ASTInlineItem item : paragraph.items()) {
+            if (item == null) continue;
+            if (item instanceof ASTTextRun) {
+                String text = ((ASTTextRun) item).text();
+                if (text != null && !isMarkerOnlyText(text)) return true;
+                continue;
+            }
+            if (item instanceof ASTInlineObject) {
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (obj.imageData() != null || obj.imagePath() != null) return true;
+                if (obj.paragraphs() != null && !obj.paragraphs().isEmpty()) return true;
+                if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return true;
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 
     private static void consumeMarkerOnlyParagraphAt(List<ASTParagraph> paragraphs, int index) {
@@ -529,6 +734,9 @@ public final class StoryConverter {
             AnchoredTablePlan plan,
             ASTTable astTable) {
         if (ctx == null || ctx.resolvedData == null || plan == null || astTable == null) return;
+        if (plan.wrapperTableId != null && plan.wrapperTableId.equals(astTable.sourceId())) {
+            return;
+        }
         if (plan.anchoredTextFrameDomId < 0) return;
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(plan.anchoredTextFrameDomId));
         if (tf == null || tf.pageRelativeBounds() == null || tf.pageRelativeBounds().length < 4) return;
@@ -616,11 +824,98 @@ public final class StoryConverter {
 
     private static IDMLTable loadPlannedTable(ResolvedBuildContext ctx, AnchoredTablePlan plan) {
         if (ctx == null || plan == null || ctx.loadIDMLStory == null) return null;
+        IDMLTable wrapper = findTable(loadStoryByAnyId(ctx, plan.ownerStoryId), plan.wrapperTableId);
+        if (hasWrapperFlowContent(wrapper, plan)) return wrapper;
         IDMLTable nested = findTable(loadStoryByAnyId(ctx, plan.nestedStoryId), plan.nestedTableId);
         if (nested != null) return nested;
-        IDMLTable wrapper = findTable(loadStoryByAnyId(ctx, plan.ownerStoryId), plan.wrapperTableId);
         if (wrapper != null) return wrapper;
         return findTable(loadStoryByAnyId(ctx, plan.ownerStoryId), plan.nestedTableId);
+    }
+
+    private static boolean hasWrapperFlowContent(IDMLTable wrapper, AnchoredTablePlan plan) {
+        if (wrapper == null || wrapper.rows() == null) return false;
+        if (wrapper.rows().size() > 1 && plan != null && plan.nestedTableId != null) {
+            return true;
+        }
+        int meaningfulCells = 0;
+        int nestedAnchorCells = 0;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow row : wrapper.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                boolean hasNestedAnchor = cellHasStoryRef(cell, plan.nestedStoryId);
+                if (hasNestedAnchor) nestedAnchorCells++;
+                if (hasNestedAnchor) {
+                    meaningfulCells++;
+                    continue;
+                }
+                if (cellHasVisibleText(cell) || cellHasInlineGraphic(cell) || cellHasNonNestedStoryRef(cell, plan.nestedStoryId)) {
+                    meaningfulCells++;
+                }
+            }
+        }
+        return nestedAnchorCells > 0 && meaningfulCells > nestedAnchorCells;
+    }
+
+    private static boolean cellHasStoryRef(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell,
+            String storyId) {
+        if (cell == null || storyId == null || cell.textFrameStoryRefs() == null) return false;
+        for (String ref : cell.textFrameStoryRefs()) {
+            if (sameStoryId(ref, storyId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean cellHasNonNestedStoryRef(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell,
+            String nestedStoryId) {
+        if (cell == null || cell.textFrameStoryRefs() == null) return false;
+        for (String ref : cell.textFrameStoryRefs()) {
+            if (ref != null && !sameStoryId(ref, nestedStoryId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean sameStoryId(String a, String b) {
+        if (a == null || b == null) return false;
+        if (a.equals(b)) return true;
+        String da = ParagraphTextHelpers.domIdFromSourceId(a);
+        String db = ParagraphTextHelpers.domIdFromSourceId(b);
+        return da != null && da.equals(db);
+    }
+
+    private static boolean cellHasVisibleText(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell) {
+        if (cell == null || cell.paragraphs() == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null) continue;
+            String text = paragraph.getPlainText();
+            if (text == null) continue;
+            String normalized = text
+                    .replace("\uFFFC", "")
+                    .replace("\u0016", "")
+                    .replace("\u0018", "")
+                    .replace("\u0003", "")
+                    .replace("\u0007", "")
+                    .replace("\u0008", "")
+                    .trim();
+            if (!normalized.isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private static boolean cellHasInlineGraphic(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell cell) {
+        if (cell == null || cell.paragraphs() == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph paragraph : cell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null || run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) continue;
+                return true;
+            }
+        }
+        return false;
     }
 
     private static IDMLStory loadStoryByAnyId(ResolvedBuildContext ctx, String storyId) {
@@ -1493,13 +1788,7 @@ public final class StoryConverter {
             ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(
                     ParagraphTextHelpers.domIdFromSourceId(block.sourceId()));
             if (!isResolvedSingleLine(tf)) continue;
-            ASTParagraph para = block.paragraphs().get(0);
-            String alignment = para.alignment();
-            if (alignment == null) continue;
-            String lower = alignment.toLowerCase(Locale.ROOT);
-            if (lower.contains("justified") || lower.contains("justify")) {
-                para.alignment("left");
-            }
+            ParagraphPropertyResolver.normalizeSingleLineJustify(block.paragraphs().get(0));
         }
     }
 
@@ -2351,6 +2640,16 @@ public final class StoryConverter {
                             if (ctx.deferredAnchoredFloatingIds.contains(anchoredId)) {
                                 continue;
                             }
+                            if (InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(
+                                    ctx.resolvedData, anchoredId)) {
+                                ctx.deferredAnchoredFloatingIds.add(anchoredId);
+                                continue;
+                            }
+                            if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(
+                                    ctx.resolvedData, anchoredId)) {
+                                ctx.deferredAnchoredFloatingIds.add(anchoredId);
+                                continue;
+                            }
                             // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
                             // 단, inline_object PNG가 있으면 시각 장식이므로 절대 좌표 floating으로 보존한다.
                             if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, anchoredId)
@@ -2367,6 +2666,12 @@ public final class StoryConverter {
                                     InlineFrameHandler.tryInlineGroupAsBoxList(ctx, anchoredId);
                             if (boxList != null && !boxList.isEmpty()) {
                                 for (ASTInlineObject box : boxList) para.addItem(box);
+                                continue;
+                            }
+                            ASTInlineObject shapeShell =
+                                    InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, anchoredId);
+                            if (shapeShell != null) {
+                                para.addItem(shapeShell);
                                 continue;
                             }
                             if (InlineFrameHandler.isSimpleButtonLabelAnchor(ctx, anchoredId)) {

@@ -61,9 +61,10 @@ public class HwpxTableBuilder {
                 .dropcapstyleAnd(DropCapStyle.None);
 
         // 테이블 속성
+        int physicalRowCount = physicalRows(astTable).size();
         table.pageBreakAnd(TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
-                .rowCntAnd((short) astTable.rowCount())
+                .rowCntAnd((short) physicalRowCount)
                 .colCntAnd((short) astTable.colCount())
                 .cellSpacingAnd(0)
                 .borderFillIDRefAnd("1")
@@ -76,19 +77,33 @@ public class HwpxTableBuilder {
                 .heightAnd(tableHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
 
-        // ShapePosition — PAPER 기준
+        // ShapePosition
         table.createPos();
-        table.pos().treatAsCharAnd(false)
-                .affectLSpacingAnd(false)
-                .flowWithTextAnd(false)
-                .allowOverlapAnd(true)
-                .holdAnchorAndSOAnd(false)
-                .vertRelToAnd(VertRelTo.PAPER)
-                .horzRelToAnd(HorzRelTo.PAPER)
-                .vertAlignAnd(VertAlign.TOP)
-                .horzAlignAnd(HorzAlign.LEFT)
-                .vertOffsetAnd(y)
-                .horzOffset(x);
+        if (astTable.flowWithText()) {
+            table.pos().treatAsCharAnd(true)
+                    .affectLSpacingAnd(true)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.COLUMN)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(0L)
+                    .horzOffset(0L);
+        } else {
+            table.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(false)
+                    .allowOverlapAnd(true)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PAPER)
+                    .horzRelToAnd(HorzRelTo.PAPER)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(y)
+                    .horzOffset(x);
+        }
 
         // OutMargin
         table.createOutMargin();
@@ -196,9 +211,10 @@ public class HwpxTableBuilder {
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None);
 
+        int physicalRowCount = physicalRows(astTable).size();
         table.pageBreakAnd(TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
-                .rowCntAnd((short) astTable.rowCount())
+                .rowCntAnd((short) physicalRowCount)
                 .colCntAnd((short) astTable.colCount())
                 .cellSpacingAnd(0)
                 .borderFillIDRefAnd("1")
@@ -278,6 +294,7 @@ public class HwpxTableBuilder {
         chunk.width(source.width());
         chunk.height(Math.max(1L, sourceRow.rowHeight()));
         chunk.zOrder(source.zOrder());
+        chunk.flowWithText(source.flowWithText());
         chunk.rowCount(1);
         chunk.colCount(source.colCount());
         chunk.appliedTableStyle(source.appliedTableStyle());
@@ -350,8 +367,10 @@ public class HwpxTableBuilder {
 
         ctx.insideTableCell = true;
         long rowYOffset = 0;
+        java.util.List<ASTTableRow> physicalRows = physicalRows(astTable);
+        java.util.Map<Integer, Integer> rowIndexMap = physicalRowIndexMap(physicalRows);
 
-        for (ASTTableRow astRow : astTable.rows()) {
+        for (ASTTableRow astRow : physicalRows) {
             Tr tr = table.addNewTr();
 
             for (ASTTableCell astCell : astRow.cells()) {
@@ -384,17 +403,18 @@ public class HwpxTableBuilder {
                 // 셀 주소
                 tc.createCellAddr();
                 tc.cellAddr().colAddrAnd((short) astCell.columnIndex())
-                        .rowAddrAnd((short) astCell.rowIndex());
+                        .rowAddrAnd((short) physicalRowIndex(rowIndexMap, astCell.rowIndex()));
 
                 // 셀 병합 (span은 최소 1, 테이블 범위 초과 방지)
                 tc.createCellSpan();
                 int colSpan = Math.max(1, astCell.columnSpan());
-                int rowSpan = Math.max(1, astCell.rowSpan());
+                int rowSpan = physicalRowSpan(rowIndexMap, astCell.rowIndex(), astCell.rowSpan());
                 if (astCell.columnIndex() + colSpan > colWidths.size()) {
                     colSpan = Math.max(1, colWidths.size() - astCell.columnIndex());
                 }
-                if (astCell.rowIndex() + rowSpan > astTable.rowCount()) {
-                    rowSpan = Math.max(1, astTable.rowCount() - astCell.rowIndex());
+                int physicalRowIndex = physicalRowIndex(rowIndexMap, astCell.rowIndex());
+                if (physicalRowIndex + rowSpan > physicalRows.size()) {
+                    rowSpan = Math.max(1, physicalRows.size() - physicalRowIndex);
                 }
                 tc.cellSpan().colSpanAnd((short) colSpan)
                         .rowSpanAnd((short) rowSpan);
@@ -459,6 +479,47 @@ public class HwpxTableBuilder {
         ctx.cellContentYCursor = savedCellContentYCursor;
     }
 
+    private static java.util.List<ASTTableRow> physicalRows(ASTTable table) {
+        java.util.List<ASTTableRow> rows = new java.util.ArrayList<>();
+        if (table == null || table.rows() == null) return rows;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null || row.cells().isEmpty()) continue;
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private static java.util.Map<Integer, Integer> physicalRowIndexMap(java.util.List<ASTTableRow> rows) {
+        java.util.Map<Integer, Integer> map = new java.util.HashMap<>();
+        if (rows == null) return map;
+        for (int i = 0; i < rows.size(); i++) {
+            ASTTableRow row = rows.get(i);
+            if (row != null) map.put(row.rowIndex(), i);
+        }
+        return map;
+    }
+
+    private static int physicalRowIndex(java.util.Map<Integer, Integer> rowIndexMap, int originalRowIndex) {
+        Integer mapped = rowIndexMap != null ? rowIndexMap.get(originalRowIndex) : null;
+        return mapped != null ? mapped : Math.max(0, originalRowIndex);
+    }
+
+    private static int physicalRowSpan(
+            java.util.Map<Integer, Integer> rowIndexMap,
+            int originalRowIndex,
+            int originalRowSpan) {
+        if (rowIndexMap == null || rowIndexMap.isEmpty()) return Math.max(1, originalRowSpan);
+        int start = originalRowIndex;
+        int end = originalRowIndex + Math.max(1, originalRowSpan);
+        int count = 0;
+        for (Integer rowIndex : rowIndexMap.keySet()) {
+            if (rowIndex != null && rowIndex >= start && rowIndex < end) {
+                count++;
+            }
+        }
+        return Math.max(1, count);
+    }
+
     // ── 셀 BorderFill 생성 ──
 
     String createCellBorderFill(ASTTableCell cell) {
@@ -517,28 +578,17 @@ public class HwpxTableBuilder {
         String cellFill = cell.fillColor();
         if (cellFill != null && cellFill.startsWith("#")) {
             bf.createFillBrush();
-            bf.fillBrush().createWinBrush();
-            bf.fillBrush().winBrush()
-                    .faceColorAnd(cellFill)
-                    .hatchColorAnd("#FF000000")
-                    .alpha(0f);
+            VisualShellApplicator.applyWinBrushFill(bf.fillBrush(), cellFill, "#FF000000");
         }
 
         return bfId;
     }
 
     void applyCellBorder(Border hwpxBorder, ASTTableCell.CellBorder cellBorder) {
-        if (cellBorder == null || cellBorder.weight() <= 0) {
-            hwpxBorder.typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
-            return;
-        }
-        LineType2 lineType = HwpxParagraphBuilder.strokeTypeToLineType(cellBorder.strokeType());
-        hwpxBorder.typeAnd(lineType);
-        LineWidth lineWidth = HwpxParagraphBuilder.hwpunitToLineWidth(cellBorder.weight());
-        hwpxBorder.widthAnd(lineWidth);
-        String color = cellBorder.color();
-        if (color == null || color.isEmpty() || !color.startsWith("#")) color = "#000000";
-        hwpxBorder.color(color);
+        VisualShellApplicator.applyBorderEdge(hwpxBorder,
+                cellBorder != null ? cellBorder.strokeType() : null,
+                cellBorder != null ? cellBorder.weight() : 0L,
+                cellBorder != null ? cellBorder.color() : null);
     }
 
     /** 셀이 텍스트와 인라인 객체 모두 비어있는지 (TableBuilder의 인라인 추출 후 상태 검사용). */

@@ -33,7 +33,8 @@ public final class SimpleButtonLabelPlanner {
             String labelText = data.simpleButtonLabelText(labelTf.id());
             if (labelText == null) continue;
 
-            SimpleButtonLabelPlan.Mode mode = hasCompletePngRender(data, anchor, labelTf)
+            RenderedGroup completeRender = findCompletePngRender(data, anchor, labelTf);
+            SimpleButtonLabelPlan.Mode mode = completeRender != null
                     ? SimpleButtonLabelPlan.Mode.COMPLETE_PNG
                     : SimpleButtonLabelPlan.Mode.TEXT_SHELL;
             LabelStyle labelStyle = labelStyle(ctx, labelTf, labelText);
@@ -68,12 +69,14 @@ public final class SimpleButtonLabelPlanner {
                             : VisualAction.PLACE_TEXT_SHELL,
                     VisualLayer.LABEL_BACKDROP,
                     Placement.INLINE,
-                    null,
+                    completeRender != null ? completeRender.id() : null,
                     sources,
-                    anchor.zOrder(),
+                    completeRender != null ? completeRender.zOrder() : anchor.zOrder(),
                     plan.reason,
-                    null,
-                    anchor.pageRelativeBounds() != null ? anchor.pageRelativeBounds() : anchor.geometricBounds());
+                    completeRender != null ? completeRender.file() : null,
+                    completeRender != null && completeRender.bounds() != null
+                            ? completeRender.bounds()
+                            : (anchor.pageRelativeBounds() != null ? anchor.pageRelativeBounds() : anchor.geometricBounds()));
             ctx.addOwnershipPlan(objectPlan);
             ctx.ownershipPlanLines.add(objectPlan.toJson());
         }
@@ -99,7 +102,9 @@ public final class SimpleButtonLabelPlanner {
                 style.fontSizePt = run.fontSize();
                 style.tracking = run.tracking();
                 style.horizontalScale = run.horizontalScale();
-                style.textColorHex = ctx.resolvedData.resolveColorHex(run.fillColor());
+                style.textColorHex = run.fillTint() != null
+                        ? ctx.resolvedData.resolveTintedColorHex(run.fillColor(), run.fillTint())
+                        : ctx.resolvedData.resolveColorHex(run.fillColor());
                 return style;
             }
         }
@@ -185,14 +190,54 @@ public final class SimpleButtonLabelPlanner {
         return Math.abs(b[3] - b[1]) * Math.abs(b[2] - b[0]);
     }
 
-    private static boolean hasCompletePngRender(ResolvedData data, ResolvedPageItem anchor, ResolvedTextFrame labelTf) {
+    private static RenderedGroup findCompletePngRender(ResolvedData data, ResolvedPageItem anchor, ResolvedTextFrame labelTf) {
+        RenderedGroup best = null;
+        int bestPriority = Integer.MAX_VALUE;
         for (RenderedGroup rg : data.allRenderedFloatingItems()) {
             if (!data.shouldUseCompletePngForSimpleButtonLabel(rg)) continue;
-            if (rg.id() == parseInt(anchor.id())) return true;
-            String[] editableIds = rg.editableTextFrameIds();
-            if (contains(editableIds, labelTf.id())) return true;
+            int priority = completeRenderPriority(rg, anchor, labelTf);
+            if (priority < bestPriority) {
+                best = rg;
+                bestPriority = priority;
+            }
         }
-        return false;
+        return best;
+    }
+
+    private static int completeRenderPriority(RenderedGroup rg, ResolvedPageItem anchor, ResolvedTextFrame labelTf) {
+        if (rg == null || anchor == null) return Integer.MAX_VALUE;
+        int anchorId = parseInt(anchor.id());
+        boolean sameAnchor = rg.id() == anchorId;
+        boolean hasAnchorSource = false;
+        if (rg.sourceObjectIds() != null) {
+            for (int sourceId : rg.sourceObjectIds()) {
+                if (sourceId == anchorId) {
+                    hasAnchorSource = true;
+                    break;
+                }
+            }
+        }
+        boolean hasLabel = false;
+        String labelTfId = labelTf != null ? labelTf.id() : null;
+        if (labelTfId != null) {
+            String[] editableIds = rg.editableTextFrameIds();
+            hasLabel = contains(editableIds, labelTfId);
+            if (!hasLabel && rg.sourceObjectIds() != null) {
+                int parsedLabelId = parseInt(labelTfId);
+                for (int sourceId : rg.sourceObjectIds()) {
+                    if (sourceId == parsedLabelId) {
+                        hasLabel = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if ((!sameAnchor && !hasAnchorSource) || !hasLabel) return Integer.MAX_VALUE;
+        boolean inline = "inline_object".equals(rg.itemType()) || "inline_object".equals(rg.type());
+        if (inline && sameAnchor) return 0;
+        if (inline) return 1;
+        if (sameAnchor) return 2;
+        return 3;
     }
 
     private static int[] sourceIds(ResolvedPageItem anchor, ResolvedTextFrame labelTf, ResolvedPageItem shell) {

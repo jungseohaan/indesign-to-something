@@ -15,6 +15,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 
@@ -35,7 +36,7 @@ import java.util.List;
  * IDML Story XML에서 단락을 파싱하여 ASTParagraph 리스트로 변환.
  * StoryConverter에서 분리됨 — RunBuilder/InlineFrameHandler 추출 후 의존성 줄어 추출 가능.
  */
-class StoryLoader {
+public class StoryLoader {
     private StoryLoader() {}
 
 
@@ -129,101 +130,8 @@ class StoryLoader {
                 para.paragraphStyleRef(ip.appliedParagraphStyle());
             }
 
-            // 단락 속성: resolved에서 가져옴 (정확한 pt 값)
-            // 정렬 우선순위: IDML 단락(스토리) → IDML 스타일 → resolved 단락 → resolved top-level paragraphStyles
-            // IDML ParagraphStyleRange의 Justification이 스타일 정의와 다를 경우 로컬 오버라이드이므로 최우선 적용
-            {
-                String idmlStyleName = ip.appliedParagraphStyle();
-                String cleanStyleName = (idmlStyleName != null && idmlStyleName.contains("/"))
-                        ? idmlStyleName.substring(idmlStyleName.lastIndexOf('/') + 1) : idmlStyleName;
-                if (ip.justification() != null) {
-                    para.alignment(ip.justification());
-                } else {
-                    String idmlStyleJust = cleanStyleName == null ? null
-                            : styleAlignCache.computeIfAbsent(cleanStyleName,
-                                k -> StoryConverter.resolveStyleAlignment(k, ctx.astDocument));
-                    if (idmlStyleJust != null) {
-                        para.alignment(idmlStyleJust);
-                    } else if (resolvedStory != null && i < resolvedStory.paragraphs().size()
-                            && resolvedStory.paragraphs().get(i).justification() != null) {
-                        para.alignment(resolvedStory.paragraphs().get(i).justification());
-                    } else if (cleanStyleName != null && ctx.resolvedData != null
-                            && ctx.resolvedData.getParagraphStyleJustification(cleanStyleName) != null) {
-                        // resolved.json top-level paragraphStyles fallback
-                        para.alignment(ctx.resolvedData.getParagraphStyleJustification(cleanStyleName));
-                    }
-                }
-                // alignment가 null이면 HwpxParagraphBuilder에서 baseStyle 또는 기본 JUSTIFY 적용
-            }
-            if (resolvedParagraph != null) {
-                ResolvedParagraph rp = resolvedParagraph;
-                // leading: resolved 우선 (실제 렌더링 값), IDML 스타일 fallback
-                // 단, auto leading(>50pt = percentage 값)은 무시
-                Double fixedLeading = rp.fixedLeading(); // resolved (실제 렌더링 값)
-                if (fixedLeading == null || fixedLeading <= 0) {
-                    fixedLeading = RunBuilder.getStyleLeading(ctx, ip.appliedParagraphStyle()); // IDML 스타일
-                    if (fixedLeading != null && fixedLeading > 50) fixedLeading = null;
-                }
-                if (fixedLeading == null || fixedLeading <= 0) {
-                    fixedLeading = ip.leading(); // IDML CharacterRun leading
-                    if (fixedLeading != null && fixedLeading > 50) fixedLeading = null;
-                }
-                if (fixedLeading != null && fixedLeading > 0) {
-                    // InDesign Leading(pt) → HWPX 고정 줄간격(HWPUNIT)
-                    para.lineSpacing((int) CoordinateConverter.pointsToHwpunits(fixedLeading));
-                    para.lineSpacingType("fixed");
-                }
-                if (rp.spaceBefore() != null && rp.spaceBefore() > 0) {
-                    para.spaceBefore(CoordinateConverter.pointsToHwpunits(rp.spaceBefore()));
-                }
-                if (rp.spaceAfter() != null && rp.spaceAfter() > 0) {
-                    para.spaceAfter(CoordinateConverter.pointsToHwpunits(rp.spaceAfter()));
-                }
-                boolean preserveHangingTab = shouldPreserveNeutralHangingIndentForTab(rp);
-                boolean neutralHangingIndent = isNeutralHangingIndent(rp.leftIndent(), rp.firstLineIndent());
-                if (neutralHangingIndent) {
-                    para.leftMargin(0L);
-                    para.firstLineIndent(0L);
-                } else if (suppressLeftIndent) {
-                    para.leftMargin(0L); // 스타일 폴백 차단: baseStyle.leftMargin() 우선순위를 명시적 0으로 덮어씀
-                } else if (rp.leftIndent() != null && rp.leftIndent() != 0) {
-                    para.leftMargin(CoordinateConverter.pointsToHwpunits(rp.leftIndent()));
-                }
-                if (!neutralHangingIndent && rp.firstLineIndent() != null && rp.firstLineIndent() != 0) {
-                    para.firstLineIndent(CoordinateConverter.pointsToHwpunits(rp.firstLineIndent()));
-                }
-                // 탭 스톱
-                if (rp.hasTabStops()) {
-                    // normalizeToPoints() 후 tabStop position과 leftIndent는 이미 pt 단위
-                    // (applyScale에서 scaleFactor가 적용됨). 다시 scaleFactor를 곱하면 이중 적용.
-                    double leftPt = (rp.leftIndent() != null ? rp.leftIndent() : 0);
-                    for (ResolvedTabStop rts : rp.tabStops()) {
-                        if (rts.position() != null && rts.position() > 0) {
-                            double posPt = preserveHangingTab ? rts.position() : rts.position() - leftPt;
-                            if (posPt < 0) posPt = 0;
-                            String align = "left";
-                            if (rts.alignment() != null) {
-                                String a = rts.alignment().toLowerCase();
-                                if (a.contains("center")) align = "center";
-                                else if (a.contains("right")) align = "right";
-                                else if (a.contains("decimal")) align = "decimal";
-                            }
-                            para.addTabStop(new ASTTabStop(
-                                    CoordinateConverter.pointsToHwpunits(posPt), align, rts.leader()));
-                        }
-                    }
-                }
-            } else {
-                // resolvedStory 매칭 실패 → IDML 단락 스타일에서 정렬 상속
-                String idmlStyle = ip.appliedParagraphStyle();
-                if (idmlStyle != null) {
-                    // "ParagraphStyle/스타일명" → "스타일명"
-                    String styleName = idmlStyle.contains("/")
-                            ? idmlStyle.substring(idmlStyle.lastIndexOf('/') + 1) : idmlStyle;
-                    String styleJust = StoryConverter.resolveStyleAlignment(styleName, ctx.astDocument);
-                    if (styleJust != null) para.alignment(styleJust);
-                }
-            }
+            // 단락 속성(정렬/줄간격/간격/들여쓰기/탭): 셀 안/밖 공용 루틴 사용
+            ParagraphPropertyResolver.apply(para, ip, resolvedParagraph, ctx, styleAlignCache, suppressLeftIndent);
 
             // resolved 런 (스타일 상속 보강용)
             List<ResolvedRun> resolvedRuns = null;
@@ -488,6 +396,18 @@ class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
+                                    if (InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(
+                                            ctx.resolvedData, domId)) {
+                                        ctx.deferredAnchoredFloatingIds.add(domId);
+                                        anchorIdx++;
+                                        continue;
+                                    }
+                                    if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(
+                                            ctx.resolvedData, domId)) {
+                                        ctx.deferredAnchoredFloatingIds.add(domId);
+                                        anchorIdx++;
+                                        continue;
+                                    }
                                     // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
                                     // 단, inline_object PNG가 있으면 시각 장식이므로 절대 좌표 floating으로 보존한다.
                                     if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, domId)
@@ -506,6 +426,13 @@ class StoryLoader {
                                     if (boxList != null && !boxList.isEmpty()) {
                                         for (ASTInlineObject box : boxList) para.addItem(box);
                                     } else {
+                                        ASTInlineObject shapeShell =
+                                                InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, domId);
+                                        if (shapeShell != null) {
+                                            para.addItem(shapeShell);
+                                            anchorIdx++;
+                                            continue;
+                                        }
                                         // 분수 구조 인라인 TextFrame(2단락) → 수식으로 변환
                                         ASTEquation fracEq = InlineFrameHandler.tryInlineFractionAsEquation(ctx, domId);
                                         if (fracEq != null) {
@@ -644,6 +571,37 @@ class StoryLoader {
 
         StoryConverter.removeDuplicateDoviraLeadingMarkers(ctx, storyId, paragraphs);
         return paragraphs;
+    }
+
+    /**
+     * 테이블 셀 IDML 단락들을 셀 밖과 동일한 공용 루틴으로 AST 단락 빌드.
+     * 단락 속성은 {@link ParagraphPropertyResolver}, 런은 {@link RunBuilder#createRunFromIDML}.
+     * (셀은 보통 resolvedStory 매칭이 없어 ResolvedRun=null로 빌드하지만, 그래도
+     * SPEC-012 IDML→스타일 우선순위와 수식 폰트 처리를 얻어 간소 경로보다 정확하다.)
+     */
+    public static List<ASTParagraph> astParagraphsForCell(ResolvedBuildContext ctx,
+                                                          kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        List<ASTParagraph> result = new ArrayList<>();
+        if (ctx == null || idmlCell == null || idmlCell.paragraphs() == null) return result;
+        for (IDMLParagraph ip : idmlCell.paragraphs()) {
+            if (ip == null) continue;
+            ASTParagraph para = new ASTParagraph();
+            if (ip.appliedParagraphStyle() != null) {
+                para.paragraphStyleRef(ip.appliedParagraphStyle());
+            }
+            ParagraphPropertyResolver.apply(para, ip, null, ctx, null, false);
+            StoryConverter.StyleContext sc = styleContextFor(ctx, ip.appliedParagraphStyle());
+            sc.hasTabStops = para.hasTabStops();
+            if (ip.characterRuns() != null) {
+                for (IDMLCharacterRun cr : ip.characterRuns()) {
+                    if (cr == null || cr.content() == null || cr.content().isEmpty()) continue;
+                    ASTTextRun run = RunBuilder.createRunFromIDML(ctx, cr, cr.content(), null, sc);
+                    if (run != null) para.addItem(run);
+                }
+            }
+            result.add(para);
+        }
+        return result;
     }
 
     private static StoryConverter.StyleContext styleContextFor(ResolvedBuildContext ctx, String styleRef) {

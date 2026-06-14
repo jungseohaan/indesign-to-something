@@ -205,6 +205,7 @@ public class ASTDeserializer {
         table.width(getLong(o, "width"));
         table.height(getLong(o, "height"));
         table.zOrder(getInt(o, "zOrder"));
+        table.flowWithText(getBool(o, "flowWithText"));
         table.rowCount(getInt(o, "rowCount"));
         table.colCount(getInt(o, "colCount"));
         table.appliedTableStyle(getString(o, "appliedTableStyle"));
@@ -424,6 +425,7 @@ public class ASTDeserializer {
         obj.strokeWeight(getDouble(o, "strokeWeight"));
         if (o.has("strokeTint")) obj.strokeTint(getDouble(o, "strokeTint"));
         obj.cornerRadius(getDouble(o, "cornerRadius"));
+        if (o.has("shellShapeType")) obj.shellShapeType(getString(o, "shellShapeType"));
         obj.noAutoLineWrap(getBool(o, "noAutoLineWrap"));
 
         obj.textMarginTop(getLong(o, "textMarginTop"));

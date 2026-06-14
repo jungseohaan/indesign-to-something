@@ -26,9 +26,12 @@ public final class HwpxEnumMapper {
                 return HorizontalAlign2.CENTER;
             case "right": case "rightalign": case "right_align":
                 return HorizontalAlign2.RIGHT;
-            // InDesign *_JUSTIFIED: 모두 양쪽맞춤 (마지막 줄 정렬만 다를 뿐, HWPX에서는 동일)
-            case "leftjustify": case "left_justified": case "leftjustified":
+            // CenterJustified는 "가운데 정렬"이 디자인 의도다. HWPX엔 center-justify가 없고,
+            // JUSTIFY로 매핑하면 짧은 단일 줄 라벨(예: '교과서 15쪽')이 왼쪽으로 보인다 → CENTER로 매핑.
             case "centerjustify": case "center_justified": case "centerjustified":
+                return HorizontalAlign2.CENTER;
+            // 나머지 *_JUSTIFIED: 양쪽맞춤 (마지막 줄 정렬만 다를 뿐, HWPX에서는 동일)
+            case "leftjustify": case "left_justified": case "leftjustified":
             case "rightjustify": case "right_justified": case "rightjustified":
             case "justify": case "fulljustify": case "fullyjustified": case "fully_justified":
                 return HorizontalAlign2.JUSTIFY;

@@ -89,12 +89,19 @@ public final class TextStyleApplicator {
             target.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(fontSize));
         }
 
-        String colorRef = firstNonEmpty(
-                characterRun != null ? characterRun.fillColor() : null,
-                grepStyle != null ? grepStyle.fillColor() : null,
-                charStyle != null ? charStyle.fillColor() : null,
-                paraStyle != null ? paraStyle.fillColor() : null);
-        String colorHex = resolveColor(resolvedData, colorRef);
+        String colorHex = null;
+        if (characterRun != null && characterRun.fillColor() != null) {
+            colorHex = resolveColor(resolvedData, characterRun.fillColor(), characterRun.fillTint());
+        }
+        if (colorHex == null && grepStyle != null && grepStyle.fillColor() != null) {
+            colorHex = resolveColor(resolvedData, grepStyle.fillColor());
+        }
+        if (colorHex == null && charStyle != null && charStyle.fillColor() != null) {
+            colorHex = resolveColor(resolvedData, charStyle.fillColor());
+        }
+        if (colorHex == null && paraStyle != null && paraStyle.fillColor() != null) {
+            colorHex = resolveColor(resolvedData, paraStyle.fillColor());
+        }
         if (colorHex != null) target.textColor(colorHex);
 
         Double tracking = firstNonZero(
@@ -249,6 +256,13 @@ public final class TextStyleApplicator {
         if (resolvedData == null) return colorRef;
         String hex = resolvedData.resolveColorHex(colorRef);
         return hex != null ? hex : colorRef;
+    }
+
+    private static String resolveColor(ResolvedData resolvedData, String colorRef, Double tint) {
+        if (colorRef == null || colorRef.isEmpty() || colorRef.contains("None")) return null;
+        if (tint == null) return resolveColor(resolvedData, colorRef);
+        String hex = resolveColor(resolvedData, colorRef);
+        return ColorResolver.applyTintToHex(hex, tint);
     }
 
     private static String firstNonEmpty(String... values) {

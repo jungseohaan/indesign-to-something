@@ -10,6 +10,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Place
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
@@ -141,15 +142,27 @@ public final class FramePlacer {
             // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
             InlineToFloatingReason inlineToFloatingReason = InlineToFloatingReason.NONE;
             if (tf.isInline()) {
-                if (ownershipPlanKeepsInlineText(ctx, tfDomId)) {
+                Integer semanticGroupId = tfDomId >= 0
+                        ? InlineSemanticLabelPolicy.semanticMultiTextInlineGroupAncestor(
+                                ctx.resolvedData, tf.id())
+                        : null;
+                if (semanticGroupId != null) {
+                    ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+                    inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
+                    if (ctx.deferredAnchoredFloatingIds != null) {
+                        ctx.deferredAnchoredFloatingIds.add(semanticGroupId);
+                    }
+                }
+                if (inlineToFloatingReason == InlineToFloatingReason.NONE
+                        && ownershipPlanKeepsInlineText(ctx, tfDomId)) {
                     continue;
                 }
-                if (conceptDiagramTf) {
+                if (inlineToFloatingReason == InlineToFloatingReason.NONE && conceptDiagramTf) {
                     if (tfDomId >= 0) {
                         ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
                     }
                     inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                } else if (!editableForHwpx) {
+                } else if (inlineToFloatingReason == InlineToFloatingReason.NONE && !editableForHwpx) {
                     String vis = tf.frameVisibleText();
                     boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 1;
                     boolean rendered = tfDomId >= 0 && ctx.resolvedData.isRenderedByOtherChannel(tfDomId);
@@ -200,7 +213,7 @@ public final class FramePlacer {
                     } else {
                         continue;
                     }
-                } else {
+                } else if (inlineToFloatingReason == InlineToFloatingReason.NONE) {
                     // SPEC-025: inline + editable. Phase 3 처리 분기:
                     // - 자기 텍스트 ≥ 2 자: Phase 3 가 인라인 텍스트 런으로 임베드 → 플로팅 스킵
                     // - 멀티 child 배지 (Phase 3 가 자손 텍스트 결합 ≥ 2자): Phase 3 가 결합 인라인 임베드 → 플로팅 스킵
@@ -732,10 +745,12 @@ public final class FramePlacer {
                     if (fillHex != null) {
                         block.fillColor(fillHex);
                         block.fillTint(100);
+                        block.nativeGraphicsAllowed(true);
                     }
                 }
                 if (tf.cornerRadius() > 0) {
                     block.cornerRadius(tf.cornerRadius() * ctx.scaleFactor);
+                    block.nativeGraphicsAllowed(true);
                 }
                 // TF 자체 strokeColor/strokeWeight 복사 (배지 자식 override 이전 기본값).
                 // fillColor와 동일한 방식: page_bg에 border가 없는 editable 텍스트박스는
@@ -746,6 +761,7 @@ public final class FramePlacer {
                     if (strokeHex != null) {
                         block.strokeColor(strokeHex);
                         block.strokeWeight(tf.strokeWeight());
+                        block.nativeGraphicsAllowed(true);
                     }
                 }
             } catch (Exception eFill) {
@@ -1145,6 +1161,7 @@ public final class FramePlacer {
             if (fillHex != null) {
                 block.fillColor(fillHex);
                 block.fillTint(100);
+                block.nativeGraphicsAllowed(true);
             }
         }
 
@@ -1157,11 +1174,13 @@ public final class FramePlacer {
                 block.strokeColor(strokeHex);
                 block.strokeWeight(source.strokeWeight());
                 block.strokeTint(ColorResolver.normalizeTint(source.strokeTint()));
+                block.nativeGraphicsAllowed(true);
             }
         }
 
         if (block.cornerRadius() <= 0 && source.cornerRadius() > 0) {
             block.cornerRadius(source.cornerRadius());
+            block.nativeGraphicsAllowed(true);
         }
     }
 
@@ -1316,6 +1335,7 @@ public final class FramePlacer {
                 if (bGb == null || bGb.length < 4) continue;
                 if (bGb[0] >= aGb[0] - TOL && bGb[1] >= aGb[1] - TOL
                         && bGb[2] <= aGb[2] + TOL && bGb[3] <= aGb[3] + TOL) {
+                    if (!isSimpleContainedTextMergeCandidate(ctx, inner)) continue;
                     int innerDomId = parseDomIdOrNeg(inner.id());
                     boolean isBadgeChild = innerDomId >= 0 && badgeChildDomIds.contains(innerDomId);
                     if (!isBadgeChild && !hasHwpxOwnedVisualShell(ctx, inner.id())) {
@@ -1355,6 +1375,56 @@ public final class FramePlacer {
             outerToInnerMap.put(e.getValue(), e.getKey());
         }
         return new ContainmentMaps(innerToOuterMap, outerToInnerMap);
+    }
+
+    private static boolean isSimpleContainedTextMergeCandidate(
+            ResolvedBuildContext ctx, ResolvedTextFrame inner) {
+        if (inner == null || inner.id() == null) return false;
+        if (ctx != null && ctx.resolvedData != null
+                && ctx.resolvedData.isSimpleButtonLabelTextFrame(inner.id())) {
+            return true;
+        }
+        String raw = inner.frameVisibleText();
+        if (raw == null) return false;
+        if (raw.indexOf('\n') >= 0 || raw.indexOf('\r') >= 0) return false;
+        String text = normalizeContainedMergeText(raw);
+        if (text.isEmpty()) return false;
+        if (containsDecorativeOrSentenceMarker(text)) return false;
+        if (text.matches("\\d{1,3}")) return true;
+        int cpCount = text.codePointCount(0, text.length());
+        return cpCount <= 4 && !containsWhitespace(raw);
+    }
+
+    private static String normalizeContainedMergeText(String text) {
+        return text
+                .replace("\uFFFC", "")
+                .replace("\u0016", "")
+                .replace("\u0018", "")
+                .replace("\u0007", "")
+                .replace("\b", "")
+                .replaceAll("\\s+", "")
+                .trim();
+    }
+
+    private static boolean containsWhitespace(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (Character.isWhitespace(text.charAt(i))) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsDecorativeOrSentenceMarker(String text) {
+        for (int i = 0; i < text.length();) {
+            int cp = text.codePointAt(i);
+            if (cp == '▶' || cp == '▷' || cp == '•' || cp == '●'
+                    || cp == '◆' || cp == '◇' || cp == '■' || cp == '□'
+                    || cp == ',' || cp == '.' || cp == '?' || cp == '!'
+                    || cp == ':' || cp == ';' || cp == '·') {
+                return true;
+            }
+            i += Character.charCount(cp);
+        }
+        return false;
     }
 
     private static boolean hasHwpxOwnedVisualShell(ResolvedBuildContext ctx, String tfId) {

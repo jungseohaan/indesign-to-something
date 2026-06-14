@@ -38,6 +38,7 @@ public class ASTInlineObject extends ASTInlineItem {
     private double strokeWeight;   // points
     private double strokeTint = 100;
     private double cornerRadius;   // points
+    private String shellShapeType;  // Rectangle, Oval, Polygon
 
     // 텍스트 여백 (HWPUNIT) — Group 배경 사각형과 텍스트 프레임의 위치 차이에서 산출
     private long textMarginTop;
@@ -167,6 +168,9 @@ public class ASTInlineObject extends ASTInlineItem {
 
     public double cornerRadius() { return cornerRadius; }
     public void cornerRadius(double v) { this.cornerRadius = v; }
+
+    public String shellShapeType() { return shellShapeType; }
+    public void shellShapeType(String v) { this.shellShapeType = v; }
 
     public long textMarginTop() { return textMarginTop; }
     public void textMarginTop(long v) { this.textMarginTop = v; }

@@ -291,6 +291,9 @@ public class ASTSerializer {
         first = writeLongField(sb, "width", table.width(), first);
         first = writeLongField(sb, "height", table.height(), first);
         first = writeIntField(sb, "zOrder", table.zOrder(), first);
+        if (table.flowWithText()) {
+            first = writeBooleanField(sb, "flowWithText", true, first);
+        }
         first = writeIntField(sb, "rowCount", table.rowCount(), first);
         first = writeIntField(sb, "colCount", table.colCount(), first);
         first = writeStringField(sb, "appliedTableStyle", table.appliedTableStyle(), first);
@@ -646,6 +649,7 @@ public class ASTSerializer {
         if (obj.strokeWeight() != 0.0) first = writeDoubleField(sb, "strokeWeight", obj.strokeWeight(), first);
         if (obj.strokeTint() != 100.0) first = writeDoubleField(sb, "strokeTint", obj.strokeTint(), first);
         if (obj.cornerRadius() != 0.0) first = writeDoubleField(sb, "cornerRadius", obj.cornerRadius(), first);
+        if (obj.shellShapeType() != null) first = writeStringField(sb, "shellShapeType", obj.shellShapeType(), first);
         if (obj.noAutoLineWrap()) first = writeBooleanField(sb, "noAutoLineWrap", true, first);
 
         if (obj.textWrapTop() != 0) first = writeLongField(sb, "textWrapTop", obj.textWrapTop(), first);

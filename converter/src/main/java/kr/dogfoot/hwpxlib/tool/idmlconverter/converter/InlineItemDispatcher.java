@@ -49,6 +49,10 @@ final class InlineItemDispatcher {
             if (deferTableCellOverlay(obj)) {
                 return;
             }
+            if (isRasterizedInlineTextFrame(obj)) {
+                paragraphBuilder.imageBuilder.addInlineImage(para, obj);
+                return;
+            }
             if (isTableOnlyInlineTextFrame(obj)) {
                 for (ASTTable table : obj.inlineTables()) {
                     paragraphBuilder.tableBuilder.addInlineTableToPara(para, table);
@@ -104,6 +108,13 @@ final class InlineItemDispatcher {
         boolean hasInlineTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
         return !hasParagraphs
                 && !hasInlineTables
+                && obj.imageData() != null
+                && obj.imageData().length > 0;
+    }
+
+    private static boolean isRasterizedInlineTextFrame(ASTInlineObject obj) {
+        return obj != null
+                && "simple-button-label-raster".equals(obj.bundlePath())
                 && obj.imageData() != null
                 && obj.imageData().length > 0;
     }

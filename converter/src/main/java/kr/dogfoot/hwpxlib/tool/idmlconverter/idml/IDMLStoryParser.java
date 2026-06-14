@@ -289,6 +289,7 @@ public class IDMLStoryParser {
 
         // StrokeWeight (선 두께, 포인트)
         // Cell에 속성이 명시되지 않으면 CellStyle 상속 — 대부분 weight=0이므로 기본값 0
+        border.strokeWeightSpecified = cellElem.hasAttribute(prefix + "StrokeWeight");
         border.strokeWeight = parseDoubleAttrDef(cellElem, prefix + "StrokeWeight", 0);
 
         // StrokeColor (색상 참조 ID)
@@ -591,6 +592,7 @@ public class IDMLStoryParser {
         run.appliedCharacterStyle(getAttrOrNull(charRange, "AppliedCharacterStyle"));
         run.fontStyle(getAttrOrNull(charRange, "FontStyle"));
         run.fillColor(getAttrOrNull(charRange, "FillColor"));
+        run.fillTint(parseDoubleAttr(charRange, "FillTint"));
         run.position(getAttrOrNull(charRange, "Position"));
         run.fontSize(parseDoubleAttr(charRange, "PointSize"));
         run.tracking(parseDoubleAttr(charRange, "Tracking"));
@@ -1948,6 +1950,7 @@ public class IDMLStoryParser {
         clone.fontFamily(source.fontFamily());
         clone.fontSize(source.fontSize());
         clone.fillColor(source.fillColor());
+        clone.fillTint(source.fillTint());
         clone.fontStyle(source.fontStyle());
         clone.position(source.position());
         clone.tracking(source.tracking());

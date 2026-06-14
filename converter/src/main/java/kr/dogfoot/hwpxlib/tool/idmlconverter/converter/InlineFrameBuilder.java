@@ -153,41 +153,6 @@ final class InlineFrameBuilder {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        // LineShape — 부모 Group 배경 사각형의 테두리
-        boolean nativeGraphicsAllowed = obj.nativeGraphicsAllowed();
-        textBoxBuilder.setupTextBoxLineShape(rect, obj.strokeColor(), obj.strokeWeight(),
-                "Solid", obj.strokeTint(), nativeGraphicsAllowed);
-
-        // FillBrush — 배경 PNG가 있으면 imgBrush, 없으면 winBrush(solid color)
-        boolean imgBrushSet = false;
-        if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
-            imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(rect, obj.imageFillData());
-        }
-        if (!imgBrushSet) {
-            textBoxBuilder.setupTextBoxFillBrush(rect, obj.fillColor(), obj.fillTint(), nativeGraphicsAllowed);
-        }
-
-        // DrawText
-        rect.createDrawText();
-        DrawText dt = rect.drawText();
-        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
-        dt.createTextMargin();
-        dt.textMargin().leftAnd(obj.textMarginLeft()).rightAnd(obj.textMarginRight())
-                .topAnd(obj.textMarginTop()).bottomAnd(obj.textMarginBottom());
-
-        dt.createSubList();
-        SubList subList = dt.subList();
-        VerticalAlign2 inlineVAlign = HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification());
-        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
-                .lineWrapAnd(HwpxTextBoxBuilder.inlineTextFrameLineWrap(obj))
-                .vertAlignAnd(inlineVAlign)
-                .linkListIDRefAnd("0")
-                .linkListNextIDRefAnd("0")
-                .textWidthAnd(0)
-                .textHeightAnd(0)
-                .hasTextRefAnd(false)
-                .hasNumRefAnd(false);
-
         // 인라인 텍스트 프레임 균등 분배 (재귀: 인라인 프레임 안에 또 인라인 프레임)
         // 이 ITF 자신의 폭을 기준으로 분배 (부모 폭 사용 시 2-column 분할된 rightITF 내부에서 오버플로 발생)
         long savedContainerWidth = ctx.currentContainerWidth;
@@ -195,43 +160,22 @@ final class InlineFrameBuilder {
         if (obj.paragraphs() != null) {
             long redistWidth = w - obj.textMarginLeft() - obj.textMarginRight();
             if (redistWidth <= 0) redistWidth = w;
-            HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(obj.paragraphs(), redistWidth);
+                HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(obj.paragraphs(), redistWidth);
         }
 
-        // 내용 단락 (풀 버전 — 인라인 객체도 재귀 처리)
-        if (obj.paragraphs() != null) {
-            for (ASTParagraph astPara : obj.paragraphs()) {
-                paragraphBuilder.addParagraphToSubList(subList, astPara);
-            }
-        }
+        textBoxBuilder.drawTextBoxComposer().apply(
+                rect,
+                DrawTextBoxComposer.fromInlineObject(obj, w, h));
         ctx.currentContainerWidth = savedContainerWidth;
 
-        // 인라인 테이블 → SubList 내 인라인 테이블
-        if (obj.inlineTables() != null && ctx.tableBuilderRef != null) {
-            for (ASTTable astTable : obj.inlineTables()) {
-                ctx.tableBuilderRef.addInlineTableToSubList(subList, astTable);
-            }
-        }
-        if (subList.countOfPara() == 0) {
-            paragraphBuilder.addEmptySubListPara(subList);
-        }
-
-        // Rectangle 꼭짓점
-        rect.ratioAnd(HwpxTextBoxBuilder.computeCornerRatio(obj.cornerRadius(), w, h));
-        rect.createPt0();
-        rect.pt0().set(0L, 0L);
-        rect.createPt1();
-        rect.pt1().set(w, 0L);
-        rect.createPt2();
-        rect.pt2().set(w, h);
-        rect.createPt3();
-        rect.pt3().set(0L, h);
-
-        // ShapeSize
-        rect.createSZ();
-        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+        // Rectangle 꼭짓점 (Oval 셸은 완전 라운드로 렌더)
+        DrawTextBoxComposer.applyRectangleGeometry(
+                rect,
+                w,
+                h,
+                obj.cornerRadius(),
+                h,
+                obj.shellShapeType());
 
         // ShapePosition
         rect.createPos();

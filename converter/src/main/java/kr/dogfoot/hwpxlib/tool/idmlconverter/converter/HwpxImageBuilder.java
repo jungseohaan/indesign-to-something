@@ -797,12 +797,13 @@ public class HwpxImageBuilder {
 
     private static boolean isBehindTextVisualLayer(String visualLayer) {
         return "PAGE_BACKGROUND".equals(visualLayer)
-                || "CONTAINER_BACKDROP".equals(visualLayer);
+                || "CONTAINER_BACKDROP".equals(visualLayer)
+                || "TEXT_CARD_BACKDROP".equals(visualLayer)
+                || "LABEL_BACKDROP".equals(visualLayer);
     }
 
     private static boolean isInFrontVisualLayer(String visualLayer) {
         return "CONTAINER_FACE".equals(visualLayer)
-                || "LABEL_BACKDROP".equals(visualLayer)
                 || "CONTENT_VISUAL".equals(visualLayer)
                 || "CONTAINER_OUTLINE".equals(visualLayer)
                 || "FOREGROUND_MASK".equals(visualLayer);
@@ -815,6 +816,9 @@ public class HwpxImageBuilder {
         int offset = Math.max(-499, Math.min(499, originalZOrder));
         if ("CONTAINER_BACKDROP".equals(visualLayer)) {
             return -4000 + offset;
+        }
+        if ("TEXT_CARD_BACKDROP".equals(visualLayer)) {
+            return -2500 + offset;
         }
         if ("CONTAINER_FACE".equals(visualLayer)) {
             return -3000 + offset;

@@ -66,7 +66,8 @@ public final class ObjectPlan {
                 || visualLayer == VisualLayer.CONTAINER_BACKDROP) {
             return PolicyLayer.BACKGROUND;
         }
-        if (visualLayer == VisualLayer.CONTAINER_FACE
+        if (visualLayer == VisualLayer.TEXT_CARD_BACKDROP
+                || visualLayer == VisualLayer.CONTAINER_FACE
                 || visualLayer == VisualLayer.LABEL_BACKDROP
                 || visualLayer == VisualLayer.CONTAINER_OUTLINE
                 || visualLayer == VisualLayer.FOREGROUND_MASK) {

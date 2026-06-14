@@ -86,62 +86,12 @@ final class FrameTransformations {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        // LineShape (테두리)
-        textBoxBuilder.setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
-                block.strokeType(), block.strokeTint());
-
-        boolean imgBrushSet = false;
-        if (block.imageFillData() != null && block.imageFillData().length > 0) {
-            imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(rect, block.imageFillData());
-        }
-        if (!imgBrushSet) {
-            textBoxBuilder.setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint(),
-                    block.nativeGraphicsAllowed());
-        }
-
-        // DrawText (글상자 내용)
-        rect.createDrawText();
-        DrawText dt = rect.drawText();
-        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
-
-        dt.createTextMargin();
-        dt.textMargin().leftAnd(block.insetLeft())
-                .rightAnd(block.insetRight())
-                .topAnd(block.insetTop())
-                .bottomAnd(block.insetBottom());
-
-        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
-        VerticalAlign2 cellVAlign = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
-        dt.createSubList();
-        SubList subList = dt.subList();
-        subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(HwpxTextBoxBuilder.textFrameLineWrap(block))
-                .vertAlignAnd(cellVAlign);
-        subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
-
-        for (ASTParagraph para : block.paragraphs()) {
-            paragraphBuilder.addParagraphToSubList(subList, para);
-        }
-        if (subList.countOfPara() == 0) {
-            paragraphBuilder.addEmptySubListPara(subList);
-        }
+        textBoxBuilder.drawTextBoxComposer().apply(
+                rect,
+                DrawTextBoxComposer.fromTextFrameBlock(block, w, h));
 
         // Rectangle 꼭짓점 (필수 요소)
-        rect.ratioAnd((short) 0);
-        rect.createPt0();
-        rect.pt0().set(0L, 0L);
-        rect.createPt1();
-        rect.pt1().set(w, 0L);
-        rect.createPt2();
-        rect.pt2().set(w, h);
-        rect.createPt3();
-        rect.pt3().set(0L, h);
-
-        // ShapeSize — PAPER 기준 절대 좌표
-        rect.createSZ();
-        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+        DrawTextBoxComposer.applyRectangleGeometry(rect, w, h, 0, h);
 
         rect.createPos();
         rect.pos().treatAsCharAnd(false)
@@ -206,10 +156,6 @@ final class FrameTransformations {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        // LineShape (테두리)
-        textBoxBuilder.setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
-                block.strokeType(), block.strokeTint());
-
         // FillBrush (배경색) — 래퍼에 둥근 모서리가 있으면 셀 배경 투명 (래퍼 사각형이 배경 역할)
         String fillColor = block.fillColor();
         double fillTint = block.fillTint();
@@ -220,63 +166,25 @@ final class FrameTransformations {
             fillColor = "#FFFFFF";
             fillTint = 100;
         }
-        boolean imgBrushSet = false;
-        if (block.imageFillData() != null && block.imageFillData().length > 0) {
-            imgBrushSet = textBoxBuilder.setupTextBoxImgBrush(rect, block.imageFillData());
-        }
-        if (!imgBrushSet) {
-            textBoxBuilder.setupTextBoxFillBrush(rect, fillColor, fillTint,
-                    block.nativeGraphicsAllowed());
-        }
-
-        // DrawText (글상자 내용)
-        rect.createDrawText();
-        DrawText dt = rect.drawText();
-        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
-
-        dt.createTextMargin();
-        dt.textMargin().leftAnd(block.insetLeft())
-                .rightAnd(block.insetRight())
-                .topAnd(block.insetTop())
-                .bottomAnd(block.insetBottom());
-
-        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
-        VerticalAlign2 cellVAlign = HwpxEnumMapper.mapVerticalJustification(block.verticalJustification());
-        dt.createSubList();
-        SubList subList = dt.subList();
-        subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(HwpxTextBoxBuilder.textFrameLineWrap(block))
-                .vertAlignAnd(cellVAlign);
-        subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
 
         // 인라인 텍스트 프레임 균등 분배
         long roundedContentWidth = w - block.insetLeft() - block.insetRight();
-        ctx.currentContainerWidth = roundedContentWidth;
         HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(block.paragraphs(), roundedContentWidth);
-
-        for (ASTParagraph para : block.paragraphs()) {
-            paragraphBuilder.addParagraphToSubList(subList, para);
-        }
-        if (subList.countOfPara() == 0) {
-            paragraphBuilder.addEmptySubListPara(subList);
-        }
+        DrawTextBoxComposer.Spec spec = DrawTextBoxComposer.fromTextFrameBlock(block, w, h);
+        spec.fillColor = fillColor;
+        spec.fillTint = fillTint;
+        long savedContainerWidth = ctx.currentContainerWidth;
+        ctx.currentContainerWidth = roundedContentWidth;
+        textBoxBuilder.drawTextBoxComposer().apply(rect, spec);
+        ctx.currentContainerWidth = savedContainerWidth;
 
         // Rectangle 꼭짓점 + 라운드 코너
-        rect.ratioAnd(HwpxTextBoxBuilder.computeCornerRatio(block.cornerRadius(), w, h));
-        rect.createPt0();
-        rect.pt0().set(0L, 0L);
-        rect.createPt1();
-        rect.pt1().set(w, 0L);
-        rect.createPt2();
-        rect.pt2().set(w, h);
-        rect.createPt3();
-        rect.pt3().set(0L, h);
-
-        // ShapeSize — PAPER 기준 절대 좌표
-        rect.createSZ();
-        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+        DrawTextBoxComposer.applyRectangleGeometry(
+                rect,
+                w,
+                h,
+                block.cornerRadius(),
+                h);
 
         rect.createPos();
         rect.pos().treatAsCharAnd(false)

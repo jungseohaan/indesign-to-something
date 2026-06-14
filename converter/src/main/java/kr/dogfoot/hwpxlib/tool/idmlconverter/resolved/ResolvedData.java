@@ -125,6 +125,8 @@ public class ResolvedData {
             hex = colorHexMap.get(name);
             if (hex != null) return hex;
         }
+        hex = resolveTintedMappedColor(name);
+        if (hex != null) return hex;
         // 기본 색상 폴백 (resolved.json colors 배열에 누락된 경우)
         if ("Paper".equals(name)) return "#FFFFFF";
         if ("Black".equals(name)) return "#000000";
@@ -148,6 +150,30 @@ public class ResolvedData {
         if (name.contains("%25")) name = name.replace("%25", "%");
         if (name.startsWith("#") && name.length() > 1) name = name.substring(1);
         return name;
+    }
+
+    private String resolveTintedMappedColor(String name) {
+        if (name == null || name.indexOf('%') < 0) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^\\[?([^\\]]+)\\]?\\s+(\\d+\\.?\\d*)%$")
+                .matcher(name.trim());
+        if (!m.find()) return null;
+        String base = m.group(1).trim();
+        double tint;
+        try {
+            tint = Double.parseDouble(m.group(2));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        String baseHex = colorHexMap.get(base);
+        if (baseHex == null && base.startsWith("#") && base.length() > 1) {
+            baseHex = colorHexMap.get(base.substring(1));
+        }
+        if (baseHex == null && !base.startsWith("#")) {
+            baseHex = colorHexMap.get("#" + base);
+        }
+        if (baseHex == null) return null;
+        return ColorResolver.applyTintToHex(baseHex, tint);
     }
 
     private static String resolveTintedNamedColor(String name) {
@@ -825,6 +851,7 @@ public class ResolvedData {
         if (ids == null) return;
         if ("visual_marker_label_indesign_png".equals(item.reason())) return;
         if (shouldKeepVisualLabelTextEditable(item)) return;
+        if (!allEditableTextFramesAreAtomicMarkers(ids)) return;
         for (String id : ids) {
             if (id != null && !id.isEmpty()) {
                 indesignPngTextOwnerFrameIds.add(id);
@@ -956,12 +983,10 @@ public class ResolvedData {
         if (ids == null || ids.length == 0) return false;
         for (String id : ids) {
             ResolvedTextFrame tf = getTextFrame(id);
-            if (tf == null || tf.storyId() == null) continue;
-            ResolvedStory story = storyMap.get(tf.storyId());
-            if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) continue;
-            ResolvedParagraph first = story.paragraphs().get(0);
-            String style = first != null ? first.styleName() : null;
-            if (style != null && style.startsWith("#표제목")) {
+            if (tf == null) continue;
+            ResolvedStory story = tf.storyId() != null ? storyMap.get(tf.storyId()) : null;
+            String style = firstParagraphStyleName(story);
+            if (isSemanticTextFrame(tf, style)) {
                 return true;
             }
             if (isShortSemanticLabel(tf) && hasHwpxTextOwnerRenderForFrame(id)) {
@@ -972,6 +997,47 @@ public class ResolvedData {
             }
         }
         return false;
+    }
+
+    private boolean allEditableTextFramesAreAtomicMarkers(String[] ids) {
+        if (ids == null || ids.length == 0) return false;
+        for (String id : ids) {
+            if (id == null || id.isEmpty()) return false;
+            if (!isSimpleButtonLabelText(getTextFrame(id))) return false;
+        }
+        return true;
+    }
+
+    private static String firstParagraphStyleName(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) {
+            return null;
+        }
+        ResolvedParagraph first = story.paragraphs().get(0);
+        return first != null ? first.styleName() : null;
+    }
+
+    private static boolean isSemanticTextFrame(ResolvedTextFrame tf, String styleName) {
+        String text = normalizedText(tf != null ? tf.frameVisibleText() : null);
+        if (text.isEmpty()) return false;
+        if (simpleButtonLabelText(tf) != null) return false;
+        if (hasSemanticStyleName(styleName)) return true;
+        if (text.length() > 1) return true;
+        return false;
+    }
+
+    private static boolean hasSemanticStyleName(String styleName) {
+        if (styleName == null || styleName.isBlank()) return false;
+        String s = styleName.toLowerCase();
+        return s.contains("제목")
+                || s.contains("title")
+                || s.contains("heading")
+                || s.contains("단원")
+                || s.contains("소단원")
+                || s.contains("표제")
+                || s.contains("본문")
+                || s.contains("문항")
+                || s.contains("출처")
+                || s.contains("내용");
     }
 
     private void unregisterEditableLabelTextOwnersCoveredByShell(RenderedGroup shell) {

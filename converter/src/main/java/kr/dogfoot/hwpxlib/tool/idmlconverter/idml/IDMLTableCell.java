@@ -59,6 +59,7 @@ public class IDMLTableCell {
     public static class CellBorder {
         public String strokeColor;
         public double strokeWeight;
+        public boolean strokeWeightSpecified;
         public String strokeType;  // Solid, Dashed, etc.
         public double strokeTint;
 

@@ -21,8 +21,11 @@ public class ColorResolver {
      */
     public String resolve(String colorRef) {
         if (colorRef == null) return null;
-        if (colorRef.startsWith("#")) return colorRef;
+        if (isHexColor(colorRef)) return colorRef;
         if (colorRef.contains("None") || colorRef.contains("[None]")) return null;
+        if (colorRef.startsWith("Tint/")) {
+            return resolveTintReference(colorRef.substring("Tint/".length()));
+        }
 
         // IDML Color 정의에서 색상 조회
         if (idmlDoc != null) {
@@ -69,6 +72,40 @@ public class ColorResolver {
         if (colorRef.contains("White")) return "#FFFFFF";
 
         return null;
+    }
+
+    private String resolveTintReference(String tintRef) {
+        if (tintRef == null) return null;
+        String normalized = tintRef.replace("%25", "%").trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^\\[?([^\\]]+)\\]?\\s+(\\d+\\.?\\d*)%$")
+                .matcher(normalized);
+        if (!m.find()) return null;
+        String base = m.group(1).trim();
+        double tint;
+        try {
+            tint = Double.parseDouble(m.group(2));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        String baseHex = resolve(base);
+        return applyTintToHex(baseHex, tint);
+    }
+
+    private static boolean isHexColor(String colorRef) {
+        // #RGB(4) / #RRGGBB(7) / #RRGGBBAA(9) 모두 hex passthrough로 인정
+        if (colorRef == null) return false;
+        int len = colorRef.length();
+        if (len != 4 && len != 7 && len != 9) return false;
+        if (colorRef.charAt(0) != '#') return false;
+        for (int i = 1; i < len; i++) {
+            char ch = colorRef.charAt(i);
+            boolean hex = (ch >= '0' && ch <= '9')
+                    || (ch >= 'a' && ch <= 'f')
+                    || (ch >= 'A' && ch <= 'F');
+            if (!hex) return false;
+        }
+        return true;
     }
 
     public static double normalizeTint(double tint) {

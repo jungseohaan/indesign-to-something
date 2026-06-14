@@ -5,6 +5,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import org.junit.Assert;
 import org.junit.Test;
@@ -37,6 +39,58 @@ public class OwnershipPlannerTest {
         Assert.assertEquals(TextAction.OWNED_BY_PNG, plan.textAction);
         Assert.assertEquals(VisualAction.PLACE_INLINE_PNG, plan.visualAction);
         Assert.assertEquals(Placement.INLINE, plan.placement);
+    }
+
+    @Test
+    public void childMarkerRenderWithoutAnchorSourceDoesNotBecomeCompleteSimpleLabel() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame label = textFrame(101, "1");
+        label.isInline(true);
+        data.addTextFrame(label);
+
+        ResolvedPageItem anchor = pageItem(
+                100,
+                "Rectangle",
+                new double[] { 10.0, 10.0, 20.0, 20.0 },
+                "C=50 M=100 Y=0 K=6",
+                null,
+                0.0);
+        anchor.isInline(true);
+        data.addPageItem(anchor);
+
+        ResolvedPageItem labelItem = pageItem(
+                101,
+                "TextFrame",
+                new double[] { 11.0, 12.0, 19.0, 18.0 },
+                null,
+                null,
+                0.0);
+        labelItem.parentId("100");
+        labelItem.isInline(true);
+        data.addPageItem(labelItem);
+
+        RenderedGroup childMarker = rendered(
+                102,
+                "page_object",
+                "page_object",
+                "visual_marker_label_indesign_png",
+                "indesign_png",
+                "indesign_png",
+                new String[] { "101" },
+                new int[] { 102, 101 });
+        data.addRenderedFloatingItem(childMarker);
+
+        ResolvedBuildContext ctx = plan(data);
+        SimpleButtonLabelPlanner.plan(ctx);
+        SimpleButtonLabelPlan labelPlan = ctx.simpleButtonLabelPlan(100);
+        ObjectPlan objectPlan = findPlanByKind(ctx, 100, "simple_button_label:");
+
+        Assert.assertNotNull(labelPlan);
+        Assert.assertSame(labelPlan, ctx.simpleButtonLabelPlan(101));
+        Assert.assertEquals(SimpleButtonLabelPlan.Mode.TEXT_SHELL, labelPlan.mode);
+        Assert.assertNotNull(objectPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, objectPlan.textAction);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, objectPlan.visualAction);
     }
 
     @Test
@@ -87,6 +141,37 @@ public class OwnershipPlannerTest {
         Assert.assertEquals(19, plan.zOrder);
         Assert.assertFalse(ctx.shouldDropVisualByOwnershipPlan(shell));
         Assert.assertEquals(Integer.valueOf(19), ctx.zOrderByOwnershipPlan(shell));
+    }
+
+    @Test
+    public void semanticTitleLabelIsHwpxTextAndDropsCompletePng() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame title = textFrame(251, "나를 깨우는, 문학");
+        title.storyId("story-title");
+        data.addTextFrame(title);
+        data.addStory(story("story-title", "02 단원제목"));
+
+        RenderedGroup complete = rendered(
+                250,
+                "page_object",
+                "page_object",
+                "visual_label_indesign_png",
+                "indesign_png",
+                "indesign_png",
+                new String[] { "251" },
+                new int[] { 250, 251 });
+        data.addRenderedFloatingItem(complete);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan textPlan = findPlanByKind(ctx, 251, "text_frame");
+        ObjectPlan pngPlan = findRenderedPlan(ctx, 250, "visual_label_indesign_png");
+
+        Assert.assertNotNull(textPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, textPlan.textAction);
+        Assert.assertNotNull(pngPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, pngPlan.textAction);
+        Assert.assertEquals(VisualAction.DROP_VISUAL, pngPlan.visualAction);
+        Assert.assertFalse(data.isTextOwnedByIndesignPng("251"));
     }
 
     @Test
@@ -596,6 +681,43 @@ public class OwnershipPlannerTest {
         Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(patch));
     }
 
+    @Test
+    public void paperFillCardBehindEditableTextIsTextCardBackdrop() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame tf = textFrame(914, "Ⅱ\n2022 개정 문학\n교육과정\n11");
+        tf.geometricBounds(new double[] { 194.8, 58.6, 229.2, 94.6 });
+        tf.pageRelativeBounds(new double[] { 194.8, 58.6, 229.2, 94.6 });
+        data.addTextFrame(tf);
+        data.addPageItem(pageItem(
+                913,
+                "Rectangle",
+                new double[] { 191.8, 59.5, 225.7, 93.4 },
+                "Paper",
+                null,
+                0.0));
+        RenderedGroup card = rendered(
+                913,
+                "page_object",
+                "page_object",
+                "vector_shape",
+                "indesign_png",
+                "",
+                null,
+                new int[] { 913 });
+        card.containsEditableText(Boolean.FALSE);
+        card.containsText(Boolean.FALSE);
+        card.bounds(new double[] { 191.8, 59.5, 225.7, 93.4 });
+        data.addRenderedFloatingItem(card);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 913, "vector_shape");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, plan.visualAction);
+        Assert.assertEquals(VisualLayer.TEXT_CARD_BACKDROP, plan.visualLayer);
+        Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(card));
+    }
+
     private static ResolvedBuildContext plan(ResolvedData data) {
         ResolvedBuildContext ctx = new ResolvedBuildContext();
         ctx.resolvedData = data;
@@ -617,6 +739,15 @@ public class OwnershipPlannerTest {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan.renderId == null) continue;
             if (plan.renderId.intValue() == renderId && plan.kind.startsWith(kindPrefix)) {
+                return plan;
+            }
+        }
+        return null;
+    }
+
+    private static ObjectPlan findPlanByKind(ResolvedBuildContext ctx, int domId, String kindPrefix) {
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan.domId == domId && plan.kind.startsWith(kindPrefix)) {
                 return plan;
             }
         }
@@ -658,6 +789,15 @@ public class OwnershipPlannerTest {
         item.strokeColorName(strokeColorName);
         item.strokeWeight(strokeWeight);
         return item;
+    }
+
+    private static ResolvedStory story(String id, String firstParagraphStyleName) {
+        ResolvedStory story = new ResolvedStory();
+        story.id(id);
+        ResolvedParagraph paragraph = new ResolvedParagraph();
+        paragraph.styleName(firstParagraphStyleName);
+        story.addParagraph(paragraph);
+        return story;
     }
 
     private static RenderedGroup rendered(

@@ -28,10 +28,12 @@ public class HwpxTextBoxBuilder {
     private final InlineFrameBuilder inlineFrameBuilder;
     private final SingleColumnTableConverter singleColumnTableConverter;
     private final FrameTransformations frameTransformations;
+    private final DrawTextBoxComposer drawTextBoxComposer;
 
     public HwpxTextBoxBuilder(HwpxConverterContext ctx, HwpxParagraphBuilder paragraphBuilder) {
         this.ctx = ctx;
         this.paragraphBuilder = paragraphBuilder;
+        this.drawTextBoxComposer = new DrawTextBoxComposer(ctx, paragraphBuilder, this);
         this.overlayBuilder = new PageOverlayBuilder(ctx, paragraphBuilder);
         this.inlineFrameBuilder = new InlineFrameBuilder(ctx, paragraphBuilder, this);
         this.singleColumnTableConverter = new SingleColumnTableConverter(ctx, paragraphBuilder, this);
@@ -62,6 +64,10 @@ public class HwpxTextBoxBuilder {
     /** addInlineTextFrame delegate — 외부 호출자(HwpxParagraphBuilder) 호환 유지. */
     void addInlineTextFrame(Para para, ASTInlineObject obj) {
         inlineFrameBuilder.addInlineTextFrame(para, obj);
+    }
+
+    DrawTextBoxComposer drawTextBoxComposer() {
+        return drawTextBoxComposer;
     }
 
     // ── 인라인 글상자 (treatAsChar=true) ──
@@ -120,46 +126,6 @@ public class HwpxTextBoxBuilder {
         // rotationInfo가 회전 처리 → rotMatrix는 항등 행렬
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        // LineShape (테두리)
-        setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
-                block.strokeType(), block.strokeTint());
-
-        boolean imgBrushSet = false;
-        if (block.imageFillData() != null && block.imageFillData().length > 0) {
-            imgBrushSet = setupTextBoxImgBrush(rect, block.imageFillData());
-        }
-        if (!imgBrushSet) {
-            setupTextBoxFillBrush(rect, block.fillColor(), block.fillTint(),
-                    block.nativeGraphicsAllowed());
-        }
-
-        // DrawText (글상자 내용)
-        rect.createDrawText();
-        DrawText dt = rect.drawText();
-        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
-
-        dt.createTextMargin();
-        dt.textMargin()
-                .leftAnd(block.insetLeft())
-                .rightAnd(block.insetRight())
-                .topAnd(block.insetTop())
-                .bottomAnd(block.insetBottom());
-
-        dt.createSubList();
-        SubList subList = dt.subList();
-        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
-        VerticalAlign2 vAlign = mapVerticalJustification(block.verticalJustification());
-
-        subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(textFrameLineWrap(block))
-                .vertAlignAnd(vAlign)
-                .linkListIDRefAnd("0")
-                .linkListNextIDRefAnd("0")
-                .textWidthAnd(0)
-                .textHeightAnd(0)
-                .hasTextRefAnd(false)
-                .hasNumRefAnd(false);
-
         // JustifyAlign 시뮬레이션: 문단 간 간격을 균등 분배
         // HWPX에는 수직 균등 배분이 없으므로, 문단 사이 spaceAfter로 대체
         if ("JustifyAlign".equalsIgnoreCase(block.verticalJustification())
@@ -167,30 +133,17 @@ public class HwpxTextBoxBuilder {
             TextBoxLayoutHelpers.distributeVerticalSpace(block);
         }
 
-        // 내용 단락
-        for (ASTParagraph para : block.paragraphs()) {
-            paragraphBuilder.addParagraphToSubList(subList, para);
-        }
-        if (subList.countOfPara() == 0) {
-            paragraphBuilder.addEmptySubListPara(subList);
-        }
+        drawTextBoxComposer.apply(
+                rect,
+                DrawTextBoxComposer.fromTextFrameBlock(block, w, textBoxMinH));
 
         // Rectangle 꼭짓점 — 최소 높이, curSz height=0 으로 내용에 맞게 자동 확장
-        rect.ratioAnd(computeCornerRatio(block.cornerRadius(), w, block.height()));
-        rect.createPt0();
-        rect.pt0().set(0L, 0L);
-        rect.createPt1();
-        rect.pt1().set(w, 0L);
-        rect.createPt2();
-        rect.pt2().set(w, textBoxMinH);
-        rect.createPt3();
-        rect.pt3().set(0L, textBoxMinH);
-
-        // ShapeSize
-        rect.createSZ();
-        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(textBoxMinH).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+        DrawTextBoxComposer.applyRectangleGeometry(
+                rect,
+                w,
+                textBoxMinH,
+                block.cornerRadius(),
+                block.height());
 
         // ShapePosition — 글자처럼 취급 (인라인)
         rect.createPos();
@@ -268,11 +221,7 @@ public class HwpxTextBoxBuilder {
         if (fillColor != null && fillColor.startsWith("#")) {
             String tinted = blendColorWithWhite(fillColor, fillTint / 100.0);
             rect.createFillBrush();
-            rect.fillBrush().createWinBrush();
-            rect.fillBrush().winBrush()
-                    .faceColorAnd(tinted)
-                    .hatchColorAnd("#000000")
-                    .alphaAnd(0f);
+            VisualShellApplicator.applyWinBrushFill(rect.fillBrush(), tinted, "#000000");
         }
     }
 
@@ -684,59 +633,23 @@ public class HwpxTextBoxBuilder {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        // LineShape (테두리)
-        setupTextBoxLineShape(rect, block.strokeColor(), block.strokeWeight(),
-                block.strokeType(), block.strokeTint());
-
         // FillBrush — 래퍼 fill 사용
         String bgColor = block.wrapperFillColor();
         double bgTint = block.wrapperFillTint();
         if (bgTint < 0) bgTint = 100;
         String tinted = blendColorWithWhite(bgColor, bgTint / 100.0);
-        setupTextBoxFillBrush(rect, tinted, 100);
-
-        // DrawText (글상자 내용)
-        rect.createDrawText();
-        DrawText dt = rect.drawText();
-        dt.lastWidthAnd(w).nameAnd("").editableAnd(false);
-
-        dt.createTextMargin();
-        dt.textMargin().leftAnd(block.insetLeft())
-                .rightAnd(block.insetRight())
-                .topAnd(block.insetTop())
-                .bottomAnd(block.insetBottom());
-
-        TextDirection textDir = block.verticalText() ? TextDirection.VERTICAL : TextDirection.HORIZONTAL;
-        VerticalAlign2 cellVAlign = mapVerticalJustification(block.verticalJustification());
-        dt.createSubList();
-        SubList subList = dt.subList();
-        subList.idAnd("").textDirectionAnd(textDir)
-                .lineWrapAnd(textFrameLineWrap(block))
-                .vertAlignAnd(cellVAlign);
-        subList.linkListIDRefAnd("0").linkListNextIDRefAnd("0");
-
-        for (ASTParagraph para : block.paragraphs()) {
-            paragraphBuilder.addParagraphToSubList(subList, para);
-        }
-        if (subList.countOfPara() == 0) {
-            paragraphBuilder.addEmptySubListPara(subList);
-        }
+        DrawTextBoxComposer.Spec spec = DrawTextBoxComposer.fromTextFrameBlock(block, w, h);
+        spec.fillColor = tinted;
+        spec.fillTint = 100;
+        drawTextBoxComposer.apply(rect, spec);
 
         // 둥근 모서리
-        rect.ratioAnd(computeCornerRatio(block.cornerRadius(), w, h));
-        rect.createPt0();
-        rect.pt0().set(0L, 0L);
-        rect.createPt1();
-        rect.pt1().set(w, 0L);
-        rect.createPt2();
-        rect.pt2().set(w, h);
-        rect.createPt3();
-        rect.pt3().set(0L, h);
-
-        rect.createSZ();
-        rect.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
-                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
-                .protectAnd(false);
+        DrawTextBoxComposer.applyRectangleGeometry(
+                rect,
+                w,
+                h,
+                block.cornerRadius(),
+                h);
 
         rect.createPos();
         rect.pos().treatAsCharAnd(false)
@@ -906,11 +819,7 @@ public class HwpxTextBoxBuilder {
         if (nativeTextBoxGraphicsEnabled() && fill != null && fill.startsWith("#")) {
             String tinted = blendColorWithWhite(fill, block.fillTint() / 100.0);
             bf.createFillBrush();
-            bf.fillBrush().createWinBrush();
-            bf.fillBrush().winBrush()
-                    .faceColorAnd(tinted)
-                    .hatchColorAnd("#FF000000")
-                    .alphaAnd(0f);
+            VisualShellApplicator.applyWinBrushFill(bf.fillBrush(), tinted, "#FF000000");
         }
 
         return bfId;

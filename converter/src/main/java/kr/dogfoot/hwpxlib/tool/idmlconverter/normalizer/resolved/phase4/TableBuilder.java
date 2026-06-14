@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow;
@@ -20,7 +21,10 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryLoader;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.SimpleButtonLabelInlineFactory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
@@ -72,6 +76,7 @@ public final class TableBuilder {
         int cellBackgroundsAbsorbed;    // 별도 page_object → 실제 셀 fill로 흡수한 수
         int tableBordersAbsorbed;       // 별도 page_object 선분/외곽선 → 실제 셀 border로 흡수한 수
         int detachedInlinePageLevel;    // table-only inline TF → page-level table
+        int tableOnlyPlansPlaced;       // ObjectPlan(text_frame:table_only) → ASTTable
         int duplicateInlineTablesRemoved;
         int total;
     }
@@ -95,6 +100,8 @@ public final class TableBuilder {
         // 같은 Table이 연결 글상자 체인의 복수 TF에서 중복 처리되는 것을 방지
         Set<String> processedTableIds = new HashSet<>();
         Set<String> pageLevelTableSourceIds = new HashSet<>();
+
+        placeTableOnlyPlans(ctx, sections, processedTableIds, report);
 
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             String storyId = tf.storyId();
@@ -260,6 +267,9 @@ public final class TableBuilder {
 
                 // 분기 3 (기본): ASTTable로 변환
                 ASTTable astTable = buildPreparedAstTable(ctx, idmlTable, thisX, thisY, tf.zOrder());
+                if (ctx.isAnchoredNestedTableSource(idmlTable.selfId())) {
+                    astTable.flowWithText(true);
+                }
                 absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
 
                 report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
@@ -305,6 +315,104 @@ public final class TableBuilder {
         printReport(report);
     }
 
+    private static void placeTableOnlyPlans(
+            ResolvedBuildContext ctx,
+            List<ASTSection> sections,
+            Set<String> processedTableIds,
+            Phase4Report report) {
+        if (ctx == null || ctx.resolvedData == null || ctx.loadIDMLStory == null
+                || ctx.ownershipPlans == null || ctx.ownershipPlans.isEmpty()) {
+            return;
+        }
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.visualAction != VisualAction.PLACE_TABLE_STYLE) continue;
+            if (plan.kind == null || !plan.kind.startsWith("text_frame:table_only")) continue;
+
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(plan.domId));
+            if (tf == null || tf.storyId() == null) continue;
+            IDMLStory idmlStory = ctx.loadIDMLStory.apply(tf.storyId());
+            if (!TableFrameOwnershipPolicy.isTableOnlyTextFrame(tf, idmlStory)) continue;
+
+            int pageIdx = ctx.toSectionIndex.applyAsInt(tf.pageIndex());
+            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
+            long[] origin = tableOwnerOrigin(ctx, tf, pageIdx);
+            long hx = origin[0];
+            long hy = origin[1];
+
+            for (IDMLTable idmlTable : idmlStory.tables()) {
+                if (idmlTable == null || idmlTable.selfId() == null) continue;
+                if (ctx.isAnchoredWrapperTableSource(idmlTable.selfId())) {
+                    continue;
+                }
+                if (!processedTableIds.add(idmlTable.selfId())) continue;
+
+                int tablePageIdx = tablePlacementPageIndex(ctx, idmlTable, pageIdx);
+                if (tablePageIdx < 0 || tablePageIdx >= sections.size()) continue;
+
+                long thisX = hx;
+                long thisY = hy;
+                double[] resolvedTableBounds = ctx.resolvedData.getTablePlacementBounds(idmlTable.selfId());
+                if (resolvedTableBounds != null && resolvedTableBounds.length >= 4) {
+                    double scale = ctx.resolvedData.scaleFactor();
+                    thisX = CoordinateConverter.pointsToHwpunits(resolvedTableBounds[1] * scale);
+                    thisY = CoordinateConverter.pointsToHwpunits(resolvedTableBounds[0] * scale);
+                }
+
+                ASTTable astTable = buildPreparedAstTable(ctx, idmlTable, thisX, thisY, tf.zOrder());
+                if (ctx.isAnchoredNestedTableSource(idmlTable.selfId())) {
+                    astTable.flowWithText(true);
+                }
+                absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
+                report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
+                completeVisibleTableOuterBorder(astTable);
+
+                List<TablePlacement> tablePlacements = splitSpreadWideTable(
+                        ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
+                for (TablePlacement placement : tablePlacements) {
+                    if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
+                    report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
+                            ctx, placement.table, placement.pageIdx);
+                    completeVisibleTableOuterBorder(placement.table);
+                    sections.get(placement.pageIdx).addBlock(placement.table);
+                }
+                suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
+                report.asTableCleanCount++;
+                report.tableOnlyPlansPlaced++;
+                report.total++;
+            }
+        }
+    }
+
+    private static long[] tableOwnerOrigin(ResolvedBuildContext ctx, ResolvedTextFrame tf, int pageIdx) {
+        double x = 0;
+        double y = 0;
+        double[] b = tf.pageRelativeBounds();
+        if (b != null && b.length >= 4) {
+            y = b[0];
+            x = b[1];
+        } else {
+            double[] gb = tf.geometricBounds();
+            ResolvedPage rPage = (ctx.resolvedData != null && pageIdx < ctx.resolvedData.pages().size())
+                    ? ctx.resolvedData.pages().get(pageIdx) : null;
+            double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
+            double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
+            if (gb != null && gb.length >= 4) {
+                boolean gbAlreadyPageRelative = (pageLeft > 0 && gb[1] < pageLeft);
+                x = gbAlreadyPageRelative ? gb[1] : (gb[1] - pageLeft);
+                y = gb[0] - pageTop;
+            }
+        }
+
+        long hx = CoordinateConverter.pointsToHwpunits(x);
+        long hy = CoordinateConverter.pointsToHwpunits(y);
+        if (tf.insetSpacing() != null) {
+            double[] inset = tf.insetSpacing();
+            hy += CoordinateConverter.pointsToHwpunits(inset[0]);
+            hx += CoordinateConverter.pointsToHwpunits(inset[1]);
+        }
+        return new long[] { hx, hy };
+    }
+
     private static int tablePlacementPageIndex(
             ResolvedBuildContext ctx,
             kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable,
@@ -329,11 +437,14 @@ public final class TableBuilder {
             long x,
             long y,
             int zOrder) {
+        final ResolvedBuildContext cellCtx = ctx;
         ASTTable astTable = ASTTableConverter.convertTableSimple(
                 idmlTable, x, y, zOrder,
                 null, null, null,
                 ctx != null ? ctx.resolvedData : null,
-                ctx != null ? ctx.styleResolver : null);
+                ctx != null ? ctx.styleResolver : null,
+                cellCtx == null ? null : (idmlCell -> StoryLoader.astParagraphsForCell(cellCtx, idmlCell)));
+        Map<String, List<ASTParagraph>> sourceTextByCell = snapshotVisibleTextParagraphsByCell(astTable);
         restoreNestedTextFrameTables(ctx, astTable, idmlTable);
         restoreAnchorOnlyEditableInlineGraphics(ctx, astTable, idmlTable);
         restoreRenderedCellInlineGraphics(ctx, astTable, idmlTable);
@@ -341,8 +452,199 @@ public final class TableBuilder {
 
         ASTTable expandedTable = tryExpandInlineGroupColumns(ctx, astTable, idmlTable);
         ASTTable result = expandedTable != null ? expandedTable : astTable;
+        restoreLostCellTextFromSnapshot(result, sourceTextByCell);
         completeVisibleTableOuterBorder(result);
         return result;
+    }
+
+    private static Map<String, List<ASTParagraph>> snapshotVisibleTextParagraphsByCell(ASTTable table) {
+        Map<String, List<ASTParagraph>> snapshot = new HashMap<>();
+        if (table == null || table.rows() == null) return snapshot;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                String text = normalizedCellText(cell);
+                if (text.isEmpty()) continue;
+                List<ASTParagraph> paragraphs = copyTextParagraphs(cell.paragraphs());
+                if (!paragraphs.isEmpty()) {
+                    snapshot.put(cellKey(cell.rowIndex(), cell.columnIndex()), paragraphs);
+                }
+            }
+        }
+        return snapshot;
+    }
+
+    private static void restoreLostCellTextFromSnapshot(
+            ASTTable table,
+            Map<String, List<ASTParagraph>> sourceTextByCell) {
+        if (table == null || table.rows() == null || sourceTextByCell == null || sourceTextByCell.isEmpty()) {
+            return;
+        }
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                List<ASTParagraph> sourceParagraphs =
+                        sourceTextByCell.get(cellKey(cell.rowIndex(), cell.columnIndex()));
+                if (sourceParagraphs == null || sourceParagraphs.isEmpty()) continue;
+                String sourceText = normalizedParagraphsText(sourceParagraphs);
+                if (sourceText.isEmpty()) continue;
+                String currentText = normalizedCellText(cell);
+                if (currentText.contains(sourceText)) continue;
+
+                List<ASTInlineItem> preservedInlineObjects = collectNonTextInlineItems(cell.paragraphs());
+                List<ASTParagraph> restored = copyTextParagraphs(sourceParagraphs);
+                if (!preservedInlineObjects.isEmpty() && !restored.isEmpty()) {
+                    restored.get(0).items().addAll(0, preservedInlineObjects);
+                }
+                if (!restored.isEmpty()) {
+                    cell.paragraphs().clear();
+                    cell.paragraphs().addAll(restored);
+                }
+            }
+        }
+    }
+
+    private static String cellKey(int rowIndex, int columnIndex) {
+        return rowIndex + ":" + columnIndex;
+    }
+
+    private static List<ASTInlineItem> collectNonTextInlineItems(List<ASTParagraph> paragraphs) {
+        List<ASTInlineItem> result = new ArrayList<>();
+        if (paragraphs == null) return result;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item != null && !(item instanceof ASTTextRun)) {
+                    result.add(item);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static List<ASTParagraph> copyTextParagraphs(List<ASTParagraph> paragraphs) {
+        List<ASTParagraph> copies = new ArrayList<>();
+        if (paragraphs == null) return copies;
+        for (ASTParagraph paragraph : paragraphs) {
+            ASTParagraph copy = copyParagraphTextOnly(paragraph);
+            if (!normalizedParagraphText(copy).isEmpty()) {
+                copies.add(copy);
+            }
+        }
+        return copies;
+    }
+
+    private static ASTParagraph copyParagraphTextOnly(ASTParagraph source) {
+        ASTParagraph copy = new ASTParagraph();
+        if (source == null) return copy;
+        copyParagraphProperties(source, copy);
+        if (source.items() != null) {
+            for (ASTInlineItem item : source.items()) {
+                if (item instanceof ASTTextRun) {
+                    ASTTextRun run = (ASTTextRun) item;
+                    if (run.text() != null && !normalizeComparableText(run.text()).isEmpty()) {
+                        copy.addItem(copyTextRun(run, run.text()));
+                    }
+                }
+            }
+        }
+        return copy;
+    }
+
+    private static void copyParagraphProperties(ASTParagraph source, ASTParagraph copy) {
+        copy.paragraphStyleRef(source.paragraphStyleRef());
+        copy.alignment(source.alignment());
+        copy.firstLineIndent(source.firstLineIndent());
+        copy.leftMargin(source.leftMargin());
+        copy.rightMargin(source.rightMargin());
+        copy.spaceBefore(source.spaceBefore());
+        copy.spaceAfter(source.spaceAfter());
+        copy.lineSpacing(source.lineSpacing());
+        copy.lineSpacingType(source.lineSpacingType());
+        copy.letterSpacing(source.letterSpacing());
+        copy.shadingOn(source.shadingOn());
+        copy.shadingColor(source.shadingColor());
+        copy.shadingTint(source.shadingTint());
+        copy.shadingLeftOffset(source.shadingLeftOffset());
+        copy.shadingRightOffset(source.shadingRightOffset());
+        copy.shadingTopOffset(source.shadingTopOffset());
+        copy.shadingBottomOffset(source.shadingBottomOffset());
+        copy.yOffsetInFrame(source.yOffsetInFrame());
+        copy.pageX(source.pageX());
+        copy.pageY(source.pageY());
+        copy.pageWidth(source.pageWidth());
+        copy.pageHeight(source.pageHeight());
+        copy.columnBreakAfter(source.columnBreakAfter());
+        copy.keepWithNext(source.keepWithNext());
+        copy.keepLinesTogether(source.keepLinesTogether());
+        copy.pageBreakBefore(source.pageBreakBefore());
+        copy.indentToHerePosition(source.indentToHerePosition());
+        copy.pendingUnderlineColor(source.pendingUnderlineColor());
+        copy.bulletParagraph(source.bulletParagraph());
+        copy.dropLeadingSmallInlineObjects(source.dropLeadingSmallInlineObjects());
+        if (source.tabStops() != null) {
+            for (ASTTabStop tabStop : source.tabStops()) {
+                if (tabStop != null) {
+                    copy.addTabStop(new ASTTabStop(
+                            tabStop.position(), tabStop.alignment(), tabStop.leader()));
+                }
+            }
+        }
+    }
+
+    private static ASTTextRun copyTextRun(ASTTextRun source, String text) {
+        ASTTextRun copy = new ASTTextRun();
+        copy.characterStyleRef(source.characterStyleRef());
+        copy.text(text);
+        copy.fontFamily(source.fontFamily());
+        copy.fontStyle(source.fontStyle());
+        copy.fontSizeHwpunits(source.fontSizeHwpunits());
+        copy.textColor(source.textColor());
+        copy.shadeColor(source.shadeColor());
+        copy.letterSpacing(source.letterSpacing());
+        copy.subscript(source.subscript());
+        copy.superscript(source.superscript());
+        copy.grepMathFont(source.grepMathFont());
+        copy.underline(source.underline());
+        copy.underlineColor(source.underlineColor());
+        copy.underlineShape(source.underlineShape());
+        copy.strikeThrough(source.strikeThrough());
+        copy.horizontalScale(source.horizontalScale());
+        copy.verticalScale(source.verticalScale());
+        copy.baselineShift(source.baselineShift());
+        copy.grepStyleApplied(source.grepStyleApplied());
+        return copy;
+    }
+
+    private static String normalizedCellText(ASTTableCell cell) {
+        if (cell == null) return "";
+        return normalizedParagraphsText(cell.paragraphs());
+    }
+
+    private static String normalizedParagraphsText(List<ASTParagraph> paragraphs) {
+        if (paragraphs == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (ASTParagraph paragraph : paragraphs) {
+            sb.append(normalizedParagraphText(paragraph));
+        }
+        return sb.toString();
+    }
+
+    private static String normalizeComparableText(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0016' || ch == '\u0018'
+                    || ch == '\u0003' || ch == '\u0007' || ch == '\u0008') {
+                continue;
+            }
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
+            sb.append(ch);
+        }
+        return sb.toString();
     }
 
     private static List<TablePlacement> splitSpreadWideTable(
@@ -484,6 +786,7 @@ public final class TableBuilder {
         out.x(src.x());
         out.y(src.y());
         out.zOrder(src.zOrder());
+        out.flowWithText(src.flowWithText());
         out.appliedTableStyle(src.appliedTableStyle());
         out.borderColor(src.borderColor());
         out.borderWidth(src.borderWidth());
@@ -742,6 +1045,23 @@ public final class TableBuilder {
         }
     }
 
+    private static int parseFlexibleId(String id) {
+        int parsed = parseId(id);
+        if (parsed >= 0) return parsed;
+        if (id == null || id.isEmpty()) return -1;
+        int marker = Math.max(id.lastIndexOf('u'), id.lastIndexOf('U'));
+        marker = Math.max(marker, Math.max(id.lastIndexOf('i'), id.lastIndexOf('I')));
+        if (marker < 0 || marker + 1 >= id.length()) return -1;
+        String tail = id.substring(marker + 1);
+        int slash = tail.indexOf('/');
+        if (slash >= 0) tail = tail.substring(0, slash);
+        try {
+            return Integer.parseInt(tail, 16);
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
     private static int removeInlineTablesBySourceId(List<ASTSection> sections, Set<String> sourceIds) {
         if (sections == null || sourceIds == null || sourceIds.isEmpty()) return 0;
         int removed = 0;
@@ -833,9 +1153,11 @@ public final class TableBuilder {
                     }
                     if (!nestedStory.hasTables()) continue;
                     for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable nestedTable : nestedStory.tables()) {
+                        final ResolvedBuildContext nestedCtx = ctx;
                         ASTTable nestedAst = ASTTableConverter.convertTableSimple(
                                 nestedTable, 0, 0, 0, null, null, null,
-                                ctx.resolvedData, ctx.styleResolver);
+                                ctx.resolvedData, ctx.styleResolver,
+                                nestedCtx == null ? null : (nestedCell -> StoryLoader.astParagraphsForCell(nestedCtx, nestedCell)));
                         if (nestedAst == null) continue;
                         restoreNestedTextFrameTables(ctx, nestedAst, nestedTable);
                         restoreAnchorOnlyEditableInlineGraphics(ctx, nestedAst, nestedTable);
@@ -1434,6 +1756,10 @@ public final class TableBuilder {
         newTable.x(original.x());
         newTable.y(original.y());
         newTable.zOrder(original.zOrder());
+        newTable.flowWithText(original.flowWithText());
+        newTable.appliedTableStyle(original.appliedTableStyle());
+        newTable.borderColor(original.borderColor());
+        newTable.borderWidth(original.borderWidth());
         for (long cw : newColWidths) newTable.addColumnWidth(cw);
         newTable.colCount(newColWidths.size());
 
@@ -2666,6 +2992,10 @@ public final class TableBuilder {
         if (r.detachedInlinePageLevel > 0) {
             System.err.println("  · " + r.detachedInlinePageLevel
                     + " detached inline table frames placed page-level");
+        }
+        if (r.tableOnlyPlansPlaced > 0) {
+            System.err.println("  · " + r.tableOnlyPlansPlaced
+                    + " table-only ownership plans placed as ASTTable");
         }
         if (r.duplicateInlineTablesRemoved > 0) {
             System.err.println("  · " + r.duplicateInlineTablesRemoved
