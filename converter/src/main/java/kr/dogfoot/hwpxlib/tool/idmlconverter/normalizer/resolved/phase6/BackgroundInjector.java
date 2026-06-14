@@ -66,51 +66,10 @@ public final class BackgroundInjector {
             idToRendered.putIfAbsent(rg.id(), rg);
         }
 
-        // Pass 1b: page_object 아이템의 모든 자식(childIds/childImageIds)을 childOfGroup에 수집.
-        // 부모 그룹 PNG에 자식 내용이 이미 포함되어 있으므로 자식을 독립 배치하지 않는다.
-        // 같은 페이지의 자식만 수집 (다른 페이지 자식은 독립 배치 허용).
-        Set<Integer> childOfGroup = new HashSet<>();
-        for (RenderedGroup rg : floatingItems) {
-            if (!canSuppressChildren(ctx, sections, rg, editableLabelShellIds, idToRendered)) continue;
-            int parentPage = rg.pageIndex();
-            boolean parentKeepsContainerShell = hasSubstantialVisualOutsideEditableLabelShell(
-                    rg, editableLabelShellIds, idToRendered);
-            // PLACE_TEXT_SHELL 부모는 배경/텍스트 셸만 렌더하고 자식 이미지를 PNG에 굽지 않는다.
-            // → 자체 래스터 이미지 렌더를 가진 자식(renderedImageFrame)은 억제하면 영영 사라지므로 보존.
-            boolean parentIsTextShellOnly =
-                    ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
-            if (rg.childIds() != null) {
-                for (int cid : rg.childIds()) {
-                    if (editableLabelShellIds.contains(cid) && !parentKeepsContainerShell) continue;
-                    if (conceptDiagramLabelShellIds.contains(cid)) continue;
-                    if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
-                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
-                    Integer cp = idToPage.get(cid);
-                    if (cp != null && cp == parentPage)
-                        childOfGroup.add(cid);
-                }
-            }
-            if (rg.childImageIds() != null) {
-                for (int cid : rg.childImageIds()) {
-                    if (editableLabelShellIds.contains(cid) && !parentKeepsContainerShell) continue;
-                    if (conceptDiagramLabelShellIds.contains(cid)) continue;
-                    if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
-                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
-                    Integer cp = idToPage.get(cid);
-                    if (cp != null && cp == parentPage)
-                        childOfGroup.add(cid);
-                }
-            }
-            if (rg.sourceObjectIds() != null && canSuppressSourceChildren(rg)) {
-                for (int cid : rg.sourceObjectIds()) {
-                    if (cid == rg.id()) continue;
-                    if (conceptDiagramLabelShellIds.contains(cid)) continue;
-                    if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
-                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
-                    childOfGroup.add(cid);
-                }
-            }
-        }
+        // Pass 1b: 부모 그룹 PNG에 구워진 자식 렌더는 독립 배치하지 않는다(SPEC-036: child suppression 응집).
+        Set<Integer> childOfGroup = computeChildOfGroup(
+                ctx, sections, floatingItems, editableLabelShellIds, conceptDiagramLabelShellIds,
+                idToPage, idToRendered);
 
         // childOfGroup 항목은 Phase 7c도 배치하지 않도록 phase6PlacedIds에 선제 등록
         ctx.phase6PlacedIds.addAll(childOfGroup);
@@ -1149,6 +1108,64 @@ public final class BackgroundInjector {
         int right = Math.min(width - 1, selected[1] + pad);
         if (right - left + 1 > width * 0.35) return null;
         return new int[]{left, right};
+    }
+
+
+    /**
+     * SPEC-036: 부모 그룹 PNG에 이미 구워진 자식 렌더 id를 모은다(childOfGroup).
+     * Phase 6/7은 이 집합의 항목을 독립 배치하지 않는다. (단, PLACE_TEXT_SHELL 부모 아래
+     * 자체 래스터 렌더를 가진 자식은 부모가 굽지 않으므로 보존.)
+     *
+     * <p>주의: editableLabelShellIds/conceptDiagramLabelShellIds 등 Phase 3 산출물에 의존하므로
+     * Phase 0 OwnershipPlanner로 단순 이전 불가 — Tier 2 일원화의 phase-ordering 제약 지점.</p>
+     */
+    private static Set<Integer> computeChildOfGroup(
+            ResolvedBuildContext ctx, List<ASTSection> sections, List<RenderedGroup> floatingItems,
+            Set<Integer> editableLabelShellIds, Set<Integer> conceptDiagramLabelShellIds,
+            Map<Integer, Integer> idToPage, Map<Integer, RenderedGroup> idToRendered) {
+        Set<Integer> childOfGroup = new HashSet<>();
+        for (RenderedGroup rg : floatingItems) {
+            if (!canSuppressChildren(ctx, sections, rg, editableLabelShellIds, idToRendered)) continue;
+            int parentPage = rg.pageIndex();
+            boolean parentKeepsContainerShell = hasSubstantialVisualOutsideEditableLabelShell(
+                    rg, editableLabelShellIds, idToRendered);
+            // PLACE_TEXT_SHELL 부모는 배경/텍스트 셸만 렌더하고 자식 이미지를 PNG에 굽지 않는다.
+            // → 자체 래스터 이미지 렌더를 가진 자식(renderedImageFrame)은 억제하면 영영 사라지므로 보존.
+            boolean parentIsTextShellOnly =
+                    ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
+            if (rg.childIds() != null) {
+                for (int cid : rg.childIds()) {
+                    if (editableLabelShellIds.contains(cid) && !parentKeepsContainerShell) continue;
+                    if (conceptDiagramLabelShellIds.contains(cid)) continue;
+                    if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
+                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
+                    Integer cp = idToPage.get(cid);
+                    if (cp != null && cp == parentPage)
+                        childOfGroup.add(cid);
+                }
+            }
+            if (rg.childImageIds() != null) {
+                for (int cid : rg.childImageIds()) {
+                    if (editableLabelShellIds.contains(cid) && !parentKeepsContainerShell) continue;
+                    if (conceptDiagramLabelShellIds.contains(cid)) continue;
+                    if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
+                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
+                    Integer cp = idToPage.get(cid);
+                    if (cp != null && cp == parentPage)
+                        childOfGroup.add(cid);
+                }
+            }
+            if (rg.sourceObjectIds() != null && canSuppressSourceChildren(rg)) {
+                for (int cid : rg.sourceObjectIds()) {
+                    if (cid == rg.id()) continue;
+                    if (conceptDiagramLabelShellIds.contains(cid)) continue;
+                    if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
+                    if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
+                    childOfGroup.add(cid);
+                }
+            }
+        }
+        return childOfGroup;
     }
 
     private static boolean canSuppressChildren(

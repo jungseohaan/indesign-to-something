@@ -85,6 +85,24 @@ Tier 0 불일치 클래스를 빈도순으로 하나씩:
 3. 골든디프로 *그 클래스만* 변하는지(또는 0) 검증.
 - 우선순위: 배지 inline/page 쌍 → 텍스트셸/이미지자식 → 라벨셸 → master_graphic.
 
+#### ⚠️ Tier 2 설계 제약 — phase-ordering (2026-06-14 발견)
+
+불일치의 최대 단일 원인은 `childOfGroup`(SKIP_CHILD_OF_GROUP, decoration_group 97건 등)이다. 그러나
+이를 **Phase 0의 OwnershipPlanner로 단순 이전할 수 없다**:
+
+- `childOfGroup` 계산(`BackgroundInjector.computeChildOfGroup`)은 `editableLabelShellIds`,
+  `inlineEditableLabelShellIds`, `conceptDiagramLabelShellIds` 등 **Phase 3 산출물에 의존**한다.
+- OwnershipPlanner는 Phase 0(Phase 3 이전)에 돌므로, 이 입력이 아직 없다.
+
+따라서 "단일 Planner 권위" 목표는 다음 중 하나의 **phase-ordering 결정**을 요구한다:
+- **(가)** OwnershipPlanner(또는 그 2차 패스)를 **Phase 3 이후**로 옮긴다 — text/inline 분류가 끝난 뒤 시각 ownership 확정.
+- **(나)** 계획을 2단계로 분리: Phase 0(구조적 plan) + Phase 3.5(텍스트 결과 반영 refine).
+- **(다)** 본 클래스는 Phase 6에 잔류시키되 응집 단위(`computeChildOfGroup`)로 격리하고, plan은
+  "post-text visual ownership"만 별도 표면화.
+
+→ (가)/(나)는 아키텍처 변경이므로 **사용자 결정 필요**. 그 전까지 Tier 2는 *Phase-3 비의존* 클래스
+(master_graphic, complex_graphic 단독 등)부터 이전한다.
+
 ### Tier 3 — 잔여 정리
 - 이전 완료로 dead가 된 헬퍼 삭제(데드코드 분석).
 - BackgroundInjector를 *실행*만 남겨 결정 로직 0.
