@@ -31,6 +31,8 @@ public class RuleContext {
     public Double targetLeftIndentMm = null;
     /** 단락 앞 여백 (mm) */
     public Double targetSpaceBeforeMm = null;
+    /** 가로 정렬 오버라이드 (left/center/right/justify) — IDML 상속값 무시하고 강제 */
+    public String targetAlignment = null;
 
     public RuleContext(String paragraphStyleRef, String characterStyleRef, String textContent) {
         this.paragraphStyleRef = paragraphStyleRef;
@@ -48,6 +50,7 @@ public class RuleContext {
     public boolean hasParaOverride() {
         return targetLineSpacingPct != null
                 || targetLeftIndentMm != null
-                || targetSpaceBeforeMm != null;
+                || targetSpaceBeforeMm != null
+                || targetAlignment != null;
     }
 }

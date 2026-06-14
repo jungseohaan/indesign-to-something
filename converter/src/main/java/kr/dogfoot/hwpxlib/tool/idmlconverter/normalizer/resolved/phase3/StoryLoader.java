@@ -845,7 +845,10 @@ public class StoryLoader {
             }
         }
         if (rightmost == null) return false;
-        rightmost.leader(".");
+        // 이미 leader가 지정된 탭(예: 밑줄 빈칸의 "_" SOLID)은 점선으로 덮어쓰지 않는다.
+        if (rightmost.leader() == null || rightmost.leader().isEmpty()) {
+            rightmost.leader(".");
+        }
         return true;
     }
 
@@ -908,7 +911,8 @@ public class StoryLoader {
                 }
             }
         }
-        para.addTabStop(new ASTTabStop(pos, "left", null));
+        // 밑줄 빈칸은 실선("_"→SOLID)으로 채운다. 점선("."→DOT)은 가운데줄처럼 보여 부적합.
+        para.addTabStop(new ASTTabStop(pos, "left", "_"));
     }
 
     private static boolean hasUnderlineBlankAnchor(List<IDMLCharacterRun> runs) {

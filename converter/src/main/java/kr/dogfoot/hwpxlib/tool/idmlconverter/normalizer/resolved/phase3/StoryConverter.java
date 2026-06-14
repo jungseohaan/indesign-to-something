@@ -1801,10 +1801,13 @@ public final class StoryConverter {
             for (ASTParagraph para : block.paragraphs()) {
                 if (para == null || para.tabStops() == null) continue;
                 if (!hasActualTabRun(para)) continue;
+                boolean blankUnderline = hasUnderlinedTabRun(para);
                 long paraRight = para.rightMargin() != null ? Math.max(0L, para.rightMargin()) : 0L;
                 for (ASTTabStop stop : para.tabStops()) {
                     if (stop == null || stop.position() <= 0) continue;
-                    if (!".".equals(stop.leader())) continue;
+                    String ld = stop.leader();
+                    // 리더 있는 탭(점선 페이지번호 등) 또는 밑줄 빈칸 탭 run → 프레임 폭 확보
+                    if ((ld == null || ld.isEmpty()) && !blankUnderline) continue;
                     requiredInnerWidth = Math.max(requiredInnerWidth, stop.position() + paraRight);
                 }
             }
@@ -1822,6 +1825,18 @@ public final class StoryConverter {
             if (!(item instanceof ASTTextRun)) continue;
             String text = ((ASTTextRun) item).text();
             if (text != null && text.indexOf('\t') >= 0) return true;
+        }
+        return false;
+    }
+
+    /** 밑줄 속성이 걸린 탭 run(빈칸 채움선)이 있는지 — 프레임 폭 확보 판정용. */
+    static boolean hasUnderlinedTabRun(ASTParagraph para) {
+        if (para == null || para.items() == null) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text != null && text.indexOf('\t') >= 0 && run.underline()) return true;
         }
         return false;
     }
@@ -2068,6 +2083,9 @@ public final class StoryConverter {
         return Math.max(pos, CoordinateConverter.pointsToHwpunits(8.0));
     }
 
+    // 빈칸 채움선은 "탭 leader"가 아니라 "탭 run의 밑줄(UnderlineType.BOTTOM)"로 그린다.
+    // 한글의 탭 leader(DOT/SOLID)는 줄 가운데에 그려져 strike-out처럼 보이기 때문(밑줄=베이스라인 필요).
+    // 따라서 탭 정지점 leader는 NONE으로 두고, tabTextRunLike가 탭 run에 underline을 건다.
     private static void ensureDotLeaderTabStop(ASTParagraph para, long position) {
         if (para == null || position <= 0) return;
         long tol = CoordinateConverter.pointsToHwpunits(1.0);
@@ -2076,19 +2094,22 @@ public final class StoryConverter {
                 if (stop == null) continue;
                 if (Math.abs(stop.position() - position) <= tol) {
                     stop.alignment("left");
-                    stop.leader(".");
+                    stop.leader(null);
                     return;
                 }
             }
         }
-        para.addTabStop(new ASTTabStop(position, "left", "."));
+        para.addTabStop(new ASTTabStop(position, "left", null));
     }
 
     private static ASTTextRun tabTextRunLike(List<ASTInlineItem> items, int index) {
         ASTTextRun sample = nearestTextRun(items, index);
-        if (sample != null) return copyTextRun(sample, "\t");
-        ASTTextRun run = new ASTTextRun();
-        run.text("\t");
+        ASTTextRun run = sample != null ? copyTextRun(sample, "\t") : new ASTTextRun();
+        if (sample == null) run.text("\t");
+        // 빈칸 채움선 = 탭 폭만큼의 베이스라인 밑줄(실선). 인접 텍스트의 밑줄 여부와 무관하게 강제.
+        run.underline(true);
+        run.underlineShape(null); // SOLID
+        run.underlineColor("#000000");
         return run;
     }
 

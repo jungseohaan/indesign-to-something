@@ -40,6 +40,19 @@ fun loadConversionRules() {
         }
     }
 
+    // 학습활동 손글씨(빈칸 채우기 답안) 단락은 IDML 루트 [No paragraph style]=FullyJustified를
+    // 상속해 한글에서 양쪽맞춤(justify)으로 깨진다 → 디자인 의도대로 왼쪽 정렬 강제.
+    // (중앙 변형은 명시적 CenterJustify라 영향 없음)
+    r.paragraphRule("ParagraphStyle/03_학습활동_손글씨") {
+        convert { alignment = "left" }
+    }
+    r.paragraphRule("ParagraphStyle/03_학습활동_손글씨(들여쓰기)") {
+        convert { alignment = "left" }
+    }
+    r.paragraphRule("ParagraphStyle/0_도표_예시손글씨") {
+        convert { alignment = "left" }
+    }
+
     // ── 키워드 폰트 폴백 규칙 ────────────────────────────────────
     // FontMapper.keywordMapping() 대체. 등록 순서 우선 (첫 매치).
     // keyword/keyword2 는 소문자. isSerif=true → defaultSerifKo, false → defaultSansKo.

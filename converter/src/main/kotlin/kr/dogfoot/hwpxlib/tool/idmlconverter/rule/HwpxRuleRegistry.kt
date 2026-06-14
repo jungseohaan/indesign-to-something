@@ -11,6 +11,8 @@ class ParagraphRuleBuilder(val styleRef: String) {
     var letterSpacing: Short? = null
     var leftIndentMm: Double? = null
     var spaceBeforeMm: Double? = null
+    /** 가로 정렬 강제: "left" / "center" / "right" / "justify" (IDML 상속값 무시) */
+    var alignment: String? = null
 
     fun convert(block: ParagraphRuleBuilder.() -> Unit) = this.block()
 }
@@ -169,6 +171,7 @@ class HwpxRuleRegistry private constructor() {
             r.letterSpacing?.let    { ctx.targetLetterSpacing = it }
             r.leftIndentMm?.let     { ctx.targetLeftIndentMm = it }
             r.spaceBeforeMm?.let    { ctx.targetSpaceBeforeMm = it }
+            r.alignment?.let        { ctx.targetAlignment = it }
         }
     }
 

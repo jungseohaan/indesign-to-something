@@ -239,15 +239,30 @@ final class SingleColumnTableConverter {
         long requiredInnerWidth = 0L;
         for (ASTParagraph para : paragraphs) {
             if (para == null || para.tabStops() == null) continue;
+            boolean blankUnderline = hasUnderlinedTabRun(para);
             long paraRight = para.rightMargin() != null ? Math.max(0L, para.rightMargin()) : 0L;
             for (ASTTabStop stop : para.tabStops()) {
                 if (stop == null || stop.position() <= 0) continue;
-                if (!".".equals(stop.leader())) continue;
+                String ld = stop.leader();
+                // 리더 있는 탭(점선 페이지번호) 또는 밑줄 빈칸 탭 run → 폭 확보
+                if ((ld == null || ld.isEmpty()) && !blankUnderline) continue;
                 requiredInnerWidth = Math.max(requiredInnerWidth, stop.position() + paraRight);
             }
         }
         if (requiredInnerWidth <= 0L) return width;
         long requiredOuterWidth = block.insetLeft() + requiredInnerWidth + block.insetRight() + safetyPad;
         return Math.max(width, requiredOuterWidth);
+    }
+
+    /** 밑줄 속성이 걸린 탭 run(빈칸 채움선)이 있는지 — 프레임 폭 확보 판정용. */
+    private static boolean hasUnderlinedTabRun(ASTParagraph para) {
+        if (para == null || para.items() == null) return false;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTTextRun)) continue;
+            ASTTextRun run = (ASTTextRun) item;
+            String text = run.text();
+            if (text != null && text.indexOf('\t') >= 0 && run.underline()) return true;
+        }
+        return false;
     }
 }

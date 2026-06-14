@@ -125,10 +125,14 @@ final class ParaPrFactory {
             if (astPara.shadingBottomOffset() != null) paraPr.border().offsetBottom(astPara.shadingBottomOffset().intValue());
         }
 
-        // 정렬: 단락 오버라이드 → 스타일 → JUSTIFY
+        // 정렬: DSL 규칙 오버라이드 → 단락 오버라이드 → 스타일 → JUSTIFY
         String alignStr = astPara.alignment();
         if (alignStr == null && baseStyle != null) {
             alignStr = baseStyle.alignment();
+        }
+        // SPEC-031: DSL paragraphRule alignment 강제 (IDML 루트 FullyJustified 상속 등 무시)
+        if (dslCtx.targetAlignment != null) {
+            alignStr = dslCtx.targetAlignment;
         }
         HorizontalAlign2 hAlign = HwpxUtil.mapAlignment(alignStr);
         paraPr.createAlign();
