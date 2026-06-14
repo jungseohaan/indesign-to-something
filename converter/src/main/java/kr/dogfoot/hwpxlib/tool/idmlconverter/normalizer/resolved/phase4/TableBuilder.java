@@ -1521,6 +1521,10 @@ public final class TableBuilder {
                     inline = loadOwnershipPlannedAtomicInline(ctx, domId);
                     if (inline == null) continue;
                 }
+                // 셀 단락이 공용 루틴(buildParagraphContent)으로 빌드되면서 동일 앵커를 이미
+                // 인라인(배지 drawText 등)으로 임베드한 경우, 렌더 PNG를 또 얹지 않는다.
+                // (안 그러면 텍스트 없는 배지 배경 PNG가 인라인 텍스트를 가림 — 노란 박스 가림 버그)
+                if (containsInlineSource(astPara, inline.sourceId())) continue;
                 inline.keepInline(true);
                 astPara.addItem(inline);
             }

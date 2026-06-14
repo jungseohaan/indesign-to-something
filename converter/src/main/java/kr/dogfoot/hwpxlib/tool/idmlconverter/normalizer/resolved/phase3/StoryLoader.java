@@ -114,7 +114,6 @@ public class StoryLoader {
         for (int i = 0; i < idmlParas.size(); i++) {
             IDMLParagraph ip = idmlParas.get(i);
             ASTParagraph para = new ASTParagraph();
-            boolean hasIdmlInlineAnchors = false; // FFFC 앵커 순서로 인라인 삽입된 경우 true
             ResolvedParagraph resolvedParagraph = (resolvedStory != null && i < resolvedStory.paragraphs().size())
                     ? resolvedStory.paragraphs().get(i)
                     : null;
@@ -172,6 +171,32 @@ public class StoryLoader {
             ConversionTiming.addCounter("phase3.storyLoader.styleContextNanos",
                     System.nanoTime() - styleContextStart);
 
+            buildParagraphContent(ctx, ip, resolvedParagraph, resolvedRuns, storyId, i, sc, para);
+
+            paragraphs.add(para);
+            ConversionTiming.addCounter("phase3.storyLoader.paragraphs", 1);
+        }
+
+        StoryConverter.removeDuplicateDoviraLeadingMarkers(ctx, storyId, paragraphs);
+        return paragraphs;
+    }
+
+    /**
+     * 테이블 셀 IDML 단락들을 셀 밖과 동일한 공용 루틴으로 AST 단락 빌드.
+     * 단락 속성은 {@link ParagraphPropertyResolver}, 런은 {@link RunBuilder#createRunFromIDML}.
+     * (셀은 보통 resolvedStory 매칭이 없어 ResolvedRun=null로 빌드하지만, 그래도
+     * SPEC-012 IDML→스타일 우선순위와 수식 폰트 처리를 얻어 간소 경로보다 정확하다.)
+     */
+
+    /**
+     * 단락 콘텐츠(런/인라인 객체/수식/GREP) 빌드 공용 루틴 — 셀 안/밖 동일 로직.
+     * 표준(convertStoryFromIDML)과 셀(astParagraphsForCell)이 같은 인라인 앵커 처리를 쓰도록 추출.
+     * resolvedParagraph/resolvedRuns는 셀에서 null, storyId는 인라인 앵커 검사용(셀: 소유 스토리 or null).
+     */
+    static void buildParagraphContent(ResolvedBuildContext ctx, IDMLParagraph ip,
+            ResolvedParagraph resolvedParagraph, List<ResolvedRun> resolvedRuns,
+            String storyId, int paraIndex, StoryConverter.StyleContext sc, ASTParagraph para) {
+        boolean hasIdmlInlineAnchors = false;
             // 런 변환: IDML CharacterRun → ASTTextRun + 수식 그룹화
             // resolved 런 중 가장 긴 텍스트를 가진 런을 기본값으로 (불릿/특수문자 런 회피)
             ResolvedRun defaultRR = RunBuilder.findDefaultResolvedRun(ctx, resolvedRuns);
@@ -184,7 +209,7 @@ public class StoryLoader {
             long runPrepStart = System.nanoTime();
             List<IDMLCharacterRun> runs = ASTMathGrouper.splitMathKoreanMixedRuns(ip.characterRuns());
             ASTRunConverter.convertCircledNumberRuns(runs);
-            addUnderlineBlankTabStop(ctx, storyId, i, para, runs);
+            addUnderlineBlankTabStop(ctx, storyId, paraIndex, para, runs);
             sc.hasTabStops = para.hasTabStops();
             ConversionTiming.addCounter("phase3.storyLoader.runPrepNanos",
                     System.nanoTime() - runPrepStart);
@@ -411,6 +436,7 @@ public class StoryLoader {
                                     // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
                                     // 단, inline_object PNG가 있으면 시각 장식이므로 절대 좌표 floating으로 보존한다.
                                     if (!InlineFrameHandler.shouldKeepAnchoredInlineByOwnershipPlan(ctx, domId)
+                                            && storyId != null
                                             && InlineFrameHandler.isAnchoredOutsideParentByTextFrame(ctx, domId, storyId)) {
                                         if (hasInlineObjectPng(ctx, domId)) {
                                             ctx.deferredAnchoredFloatingIds.add(domId);
@@ -533,7 +559,6 @@ public class StoryLoader {
             ConversionTiming.addCounter("phase3.storyLoader.runLoopNanos",
                     System.nanoTime() - runLoopStart);
             // 단락 끝 잔여 수식 그룹 flush
-            long paragraphPostStart = System.nanoTime();
             MathProcessor.flushMathGroups(ctx, mathGroup, npMathGroup, ehMathGroup, para);
             applyTrailingPageNumberLeader(ctx, ip, para);
 
@@ -562,29 +587,27 @@ public class StoryLoader {
             if (!hasIdmlInlineAnchors) {
                 ASTTableConverter.reorderInlineObjectsByBoundsX(para);
             }
+    }
 
-            paragraphs.add(para);
-            ConversionTiming.addCounter("phase3.storyLoader.paragraphPostNanos",
-                    System.nanoTime() - paragraphPostStart);
-            ConversionTiming.addCounter("phase3.storyLoader.paragraphs", 1);
-        }
-
-        StoryConverter.removeDuplicateDoviraLeadingMarkers(ctx, storyId, paragraphs);
-        return paragraphs;
+    public static List<ASTParagraph> astParagraphsForCell(ResolvedBuildContext ctx,
+                                                          kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        return astParagraphsForCell(ctx, idmlCell, null);
     }
 
     /**
-     * 테이블 셀 IDML 단락들을 셀 밖과 동일한 공용 루틴으로 AST 단락 빌드.
-     * 단락 속성은 {@link ParagraphPropertyResolver}, 런은 {@link RunBuilder#createRunFromIDML}.
-     * (셀은 보통 resolvedStory 매칭이 없어 ResolvedRun=null로 빌드하지만, 그래도
-     * SPEC-012 IDML→스타일 우선순위와 수식 폰트 처리를 얻어 간소 경로보다 정확하다.)
+     * 셀 단락을 셀 밖과 동일한 공용 루틴({@link #buildParagraphContent})으로 빌드.
+     * resolvedParagraph/resolvedRuns는 null(셀은 보통 resolvedStory 매칭이 없음)이며,
+     * cellStoryId가 null이면 story 단위 검사(중복 마커/부모밖 앵커)는 건너뛴다(셀 내부에는 무의미).
+     * 이로써 셀 단락의 FFFC 인라인 앵커가 표준과 동일하게 ASTInlineObject(배지/라벨/inline drawText)로 임베드된다.
      */
     public static List<ASTParagraph> astParagraphsForCell(ResolvedBuildContext ctx,
-                                                          kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+                                                          kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell,
+                                                          String cellStoryId) {
         List<ASTParagraph> result = new ArrayList<>();
         if (ctx == null || idmlCell == null || idmlCell.paragraphs() == null) return result;
+        int paraIndex = 0;
         for (IDMLParagraph ip : idmlCell.paragraphs()) {
-            if (ip == null) continue;
+            if (ip == null) { paraIndex++; continue; }
             ASTParagraph para = new ASTParagraph();
             if (ip.appliedParagraphStyle() != null) {
                 para.paragraphStyleRef(ip.appliedParagraphStyle());
@@ -592,16 +615,47 @@ public class StoryLoader {
             ParagraphPropertyResolver.apply(para, ip, null, ctx, null, false);
             StoryConverter.StyleContext sc = styleContextFor(ctx, ip.appliedParagraphStyle());
             sc.hasTabStops = para.hasTabStops();
-            if (ip.characterRuns() != null) {
-                for (IDMLCharacterRun cr : ip.characterRuns()) {
-                    if (cr == null || cr.content() == null || cr.content().isEmpty()) continue;
-                    ASTTextRun run = RunBuilder.createRunFromIDML(ctx, cr, cr.content(), null, sc);
-                    if (run != null) para.addItem(run);
-                }
-            }
+            buildParagraphContent(ctx, ip, null, null, cellStoryId, paraIndex, sc, para);
+            recordCellInlineEmbeddedIds(ctx, para);
             result.add(para);
+            paraIndex++;
         }
         return result;
+    }
+
+    /**
+     * 셀 단락에 임베드된 inline 객체의 sourceId(=DOM id)를 ctx.cellInlineEmbeddedDomIds에 기록한다.
+     * Phase 6/7c가 같은 id의 page_object 플로팅 배지 PNG를 중복 배치(인라인 텍스트 가림)하지 않도록.
+     */
+    private static void recordCellInlineEmbeddedIds(ResolvedBuildContext ctx, ASTParagraph para) {
+        if (ctx == null || para == null || para.items() == null) return;
+        for (ASTInlineItem item : para.items()) {
+            if (!(item instanceof ASTInlineObject)) continue;
+            Integer domId = sourceIdToDomId(((ASTInlineObject) item).sourceId());
+            if (domId != null) ctx.cellInlineEmbeddedDomIds.add(domId);
+        }
+    }
+
+    /** "u439eb" / "child_u439eb" / "u439eb_sb" 등 sourceId에서 선행 hex DOM id를 파싱. */
+    private static Integer sourceIdToDomId(String sourceId) {
+        if (sourceId == null) return null;
+        String s = sourceId;
+        if (s.startsWith("child_")) s = s.substring(6);
+        if (!s.startsWith("u")) return null;
+        s = s.substring(1);
+        int end = 0;
+        while (end < s.length()) {
+            char c = s.charAt(end);
+            boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+            if (!hex) break;
+            end++;
+        }
+        if (end == 0) return null;
+        try {
+            return Integer.parseInt(s.substring(0, end), 16);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static StoryConverter.StyleContext styleContextFor(ResolvedBuildContext ctx, String styleRef) {

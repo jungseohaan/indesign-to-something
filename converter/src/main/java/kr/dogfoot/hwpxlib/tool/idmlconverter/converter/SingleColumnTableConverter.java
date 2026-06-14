@@ -216,16 +216,8 @@ final class SingleColumnTableConverter {
         boolean savedInsideTableCell = ctx.insideTableCell;
         ctx.insideTableCell = true;
         try {
-            for (ASTParagraph para : paragraphs) {
-                if (para.inlineTable() != null && ctx.tableBuilderRef != null) {
-                    ctx.tableBuilderRef.addInlineTableToSubList(subList, para.inlineTable());
-                } else {
-                    paragraphBuilder.addParagraphToSubList(subList, para);
-                }
-            }
-            if (subList.countOfPara() == 0) {
-                paragraphBuilder.addEmptySubListPara(subList);
-            }
+            // 셀 내용 (단락) 추가 — drawText/일반 셀과 동일한 공용 루틴
+            paragraphBuilder.fillSubListContent(subList, paragraphs, null, 0);
         } finally {
             ctx.insideTableCell = savedInsideTableCell;
         }

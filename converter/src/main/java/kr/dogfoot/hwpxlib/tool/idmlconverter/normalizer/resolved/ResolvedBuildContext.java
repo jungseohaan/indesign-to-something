@@ -215,6 +215,14 @@ public final class ResolvedBuildContext {
      */
     public java.util.Set<Integer> inlineEditableLabelShellIds = new java.util.HashSet<>();
 
+    /**
+     * Phase 4(TableBuilder)가 셀 단락을 공용 루틴으로 빌드하면서 셀 안 inline 객체(배지 drawText 등)로
+     * 임베드한 DOM id. 셀 흐름 안에 텍스트+박스가 이미 들어가므로 Phase 6/7c는 같은 id의 page_object
+     * 플로팅 PNG(원본 절대 좌표의 배지 배경)를 배치하면 안 된다 — 안 그러면 셀 흐름과 어긋난 위치의
+     * 박스 PNG가 인라인 텍스트를 가린다.
+     */
+    public java.util.Set<Integer> cellInlineEmbeddedDomIds = new java.util.HashSet<>();
+
     /** TextFrame domId의 disposition을 등록한다. */
     public void setTextDisposition(int domId, FrameDisposition d) {
         textFrameDispositions.put(domId, d);

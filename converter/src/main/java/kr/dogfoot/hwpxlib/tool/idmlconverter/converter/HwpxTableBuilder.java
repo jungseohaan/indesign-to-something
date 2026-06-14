@@ -453,18 +453,8 @@ public class HwpxTableBuilder {
                 long cellContentWidth = astCell.width() - astCell.marginLeft() - astCell.marginRight();
                 HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(astCell.paragraphs(), cellContentWidth);
 
-                // 셀 내용 (단락) 추가
-                for (ASTParagraph astPara : astCell.paragraphs()) {
-                    if (astPara.inlineTable() != null) {
-                        addInlineTableToSubList(subList, astPara.inlineTable());
-                    } else {
-                        paragraphBuilder.addParagraphToSubList(subList, astPara, astCell.height());
-                    }
-                }
-                // 빈 셀 방지
-                if (subList.countOfPara() == 0) {
-                    paragraphBuilder.addEmptySubListPara(subList, astCell.height());
-                }
+                // 셀 내용 (단락) 추가 — drawText/단일컬럼과 동일한 공용 루틴
+                paragraphBuilder.fillSubListContent(subList, astCell.paragraphs(), null, astCell.height());
             }
 
             rowYOffset += astRow.rowHeight();

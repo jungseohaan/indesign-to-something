@@ -120,6 +120,14 @@ public final class BackgroundInjector {
             if (!isPageObject(rg) && !conceptDiagramInlineShell) {
                 continue;
             }
+            // 셀 단락에 inline 객체(배지 drawText 등)로 이미 임베드된 id는 page_object 플로팅 배치 금지.
+            // (텍스트가 셀 흐름에 들어갔으므로, 원본 절대 좌표의 배지 배경 PNG를 또 얹으면 어긋난 위치로 가림)
+            if (isPageObject(rg) && ctx.cellInlineEmbeddedDomIds.contains(rg.id())) {
+                ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_CELL_INLINE_EMBEDDED",
+                        "badge embedded inline in table cell");
+                continue;
+            }
             if (ctx.shouldDropVisualByOwnershipPlan(rg)) {
                 ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", "SKIP_OBJECT_PLAN_DROP_VISUAL",
                         "OwnershipPlanner visualAction=DROP_VISUAL");

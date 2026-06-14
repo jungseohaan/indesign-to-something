@@ -282,6 +282,34 @@ public class HwpxParagraphBuilder {
         addEmptySubListPara(subList, 0);
     }
 
+    /**
+     * SubList 콘텐츠 채우기 공용 루틴 — drawText 박스와 테이블 셀(1×1 포함)이 동일 로직 사용.
+     * 단락별 inlineTable은 표로, 그 외는 단락으로 추가하고, 추가 inlineTable 목록을 이어 붙인 뒤
+     * 비어 있으면 빈 단락을 넣는다. cellHeight는 tiny-cell 보정용(0이면 미적용).
+     */
+    void fillSubListContent(SubList subList,
+                            java.util.List<ASTParagraph> paragraphs,
+                            java.util.List<ASTTable> extraInlineTables,
+                            long cellHeight) {
+        if (paragraphs != null) {
+            for (ASTParagraph para : paragraphs) {
+                if (para != null && para.inlineTable() != null && ctx.tableBuilderRef != null) {
+                    ctx.tableBuilderRef.addInlineTableToSubList(subList, para.inlineTable());
+                } else {
+                    addParagraphToSubList(subList, para, cellHeight);
+                }
+            }
+        }
+        if (extraInlineTables != null && ctx.tableBuilderRef != null) {
+            for (ASTTable table : extraInlineTables) {
+                if (table != null) ctx.tableBuilderRef.addInlineTableToSubList(subList, table);
+            }
+        }
+        if (subList.countOfPara() == 0) {
+            addEmptySubListPara(subList, cellHeight);
+        }
+    }
+
     void addEmptySubListPara(SubList subList, long cellHeight) {
         // 빈 셀은 항상 tiny 스타일(1pt 폰트 + FIXED 줄간격)을 적용하여
         // 한컴의 기본 줄 간격이 셀 높이를 늘리는 것을 방지

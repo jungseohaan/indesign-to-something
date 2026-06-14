@@ -163,19 +163,7 @@ final class DrawTextBoxComposer {
     }
 
     private void addContent(SubList subList, Spec spec) {
-        if (spec.paragraphs != null) {
-            for (ASTParagraph paragraph : spec.paragraphs) {
-                paragraphBuilder.addParagraphToSubList(subList, paragraph);
-            }
-        }
-        if (spec.inlineTables != null && ctx.tableBuilderRef != null) {
-            for (ASTTable table : spec.inlineTables) {
-                ctx.tableBuilderRef.addInlineTableToSubList(subList, table);
-            }
-        }
-        if (subList.countOfPara() == 0) {
-            paragraphBuilder.addEmptySubListPara(subList);
-        }
+        paragraphBuilder.fillSubListContent(subList, spec.paragraphs, spec.inlineTables, 0);
     }
 
     static void applyRectangleGeometry(
