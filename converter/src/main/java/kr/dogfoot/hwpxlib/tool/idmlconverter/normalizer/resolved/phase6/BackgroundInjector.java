@@ -215,10 +215,13 @@ public final class BackgroundInjector {
             double visRight = Math.min(rawRight, pageWidthMm);
             double visBottom = Math.min(rawBottom, pageHeightMm);
             if (visLeft >= visRight || visTop >= visBottom) {
-                int overflowPlaced = VisualOverflowPlacer.placeSpreadOverflowCopies(
-                        ctx, sections, rg, pageIdx,
-                        rawLeft, rawTop, rawRight, rawBottom, fullW, fullH,
-                        pageWidthMm, originalImageData, ctx.visualLayerByOwnershipPlan(rg));
+                int overflowPlaced = 0;
+                if (!ctx.shouldSkipOverflowCopyByOwnershipPlan(rg)) {
+                    overflowPlaced = VisualOverflowPlacer.placeSpreadOverflowCopies(
+                            ctx, sections, rg, pageIdx,
+                            rawLeft, rawTop, rawRight, rawBottom, fullW, fullH,
+                            pageWidthMm, originalImageData, ctx.visualLayerByOwnershipPlan(rg));
+                }
                 if (overflowPlaced > 0) {
                     ctx.recordRenderedDecision(rg, "Phase6", "PLACE_OUTSIDE_PAGE_OVERFLOW",
                             "no main page intersection, but spread overflow was placed on adjacent page");
@@ -445,6 +448,11 @@ public final class BackgroundInjector {
             }
 
             if (!prepared.pageAnchoredStripCrop) {
+                if (ctx.shouldSkipOverflowCopyByOwnershipPlan(rg)) {
+                    ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OVERFLOW_COPY_TEXT_OWNED",
+                            "text-owned source with non-text-shell visual; avoid duplicate rendering on adjacent page");
+                    continue;
+                }
                 VisualOverflowPlacer.placeSpreadOverflowCopies(
                         ctx, sections, rg, pageIdx,
                         rawLeft, rawTop, rawRight, rawBottom, fullW, fullH,

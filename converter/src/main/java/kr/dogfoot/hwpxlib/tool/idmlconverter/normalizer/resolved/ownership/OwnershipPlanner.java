@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -50,6 +51,7 @@ public final class OwnershipPlanner {
     private void run() {
         planRenderedItems();
         planTextFrames();
+        resolveHwpxTextOwnedNonShellVisuals();
         resolveInlineCompositeHwpxTextParents();
         resolveInlineFloatingSameDom();
         resolveFloatingChildrenOwnedByInlineParent();
@@ -90,6 +92,41 @@ public final class OwnershipPlanner {
         }
     }
 
+    private void resolveHwpxTextOwnedNonShellVisuals() {
+        HashSet<Integer> hwpxTextSources = new HashSet<>();
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (!"text_frame".equals(plan.kind)) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) continue;
+            for (int sourceId : plan.sourceObjectIds) {
+                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+                if (tf != null && data.isHwpxOwnedTextFrame(tf.id())) {
+                    hwpxTextSources.add(sourceId);
+                }
+            }
+        }
+        if (hwpxTextSources.isEmpty()) return;
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isVisibleRenderedVisual(plan)) continue;
+            if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    || plan.visualAction == VisualAction.ABSORB_TEXT_STYLE
+                    || plan.visualAction == VisualAction.PLACE_TABLE_STYLE) {
+                continue;
+            }
+            if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) continue;
+            for (int sourceId : plan.sourceObjectIds) {
+                if (hwpxTextSources.contains(sourceId)) {
+                    plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
+                            "owned_by_hwpx_text_frame"));
+                    break;
+                }
+            }
+        }
+    }
+
     private void addPlanForRendered(RenderedGroup rg, String channel) {
         if (rg == null) return;
         Placement placement = placementOf(rg);
@@ -101,6 +138,10 @@ public final class OwnershipPlanner {
                 && (visualAction == VisualAction.PLACE_FLOATING_PNG
                 || visualAction == VisualAction.PLACE_INLINE_PNG)) {
             sourceIds = independentContentVisualSourceIds(rg, sourceIds);
+        } else if (isEditableVisualShellWithSeparateHwpxText(rg)
+                && (visualAction == VisualAction.PLACE_FLOATING_PNG
+                || visualAction == VisualAction.PLACE_INLINE_PNG)) {
+            sourceIds = visualShellSourceIds(rg, sourceIds);
         }
         int zOrder = zOrderOf(rg, visualAction, sourceIds);
         plans.add(new ObjectPlan(
@@ -223,6 +264,11 @@ public final class OwnershipPlanner {
                 && ("hwpx_tf".equals(rg.textOwner())
                 || Boolean.TRUE.equals(rg.containsEditableText())
                 || hasEditableTextFrameIds(rg))) {
+            if (isEditableVisualShellWithSeparateHwpxText(rg)) {
+                return placement == Placement.INLINE
+                        ? VisualAction.PLACE_INLINE_PNG
+                        : VisualAction.PLACE_FLOATING_PNG;
+            }
             if (hasIndependentContentVisualBesideOwnedText(rg)) {
                 return placement == Placement.INLINE
                         ? VisualAction.PLACE_INLINE_PNG
@@ -488,6 +534,96 @@ public final class OwnershipPlanner {
             }
         }
         return false;
+    }
+
+    private boolean isEditableVisualShellWithSeparateHwpxText(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!hasEditableTextOwnerSignal(rg)) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
+            return false;
+        }
+        String reason = safe(rg.reason());
+        return "visual_label_text_hidden_shell".equals(reason)
+                || "editable_composite_text_hidden_shell".equals(reason)
+                || "concept_label_shell".equals(reason)
+                || "editable_textframe_visual_shell".equals(reason)
+                || "mixed_group_text_hidden".equals(reason)
+                || "complex_graphic_text_hidden".equals(reason)
+                || "image_group_text_hidden".equals(reason)
+                || "inline_text_hidden".equals(reason)
+                || "container_face_shadow_pair".equals(reason);
+    }
+
+    private boolean hasEditableTextOwnerSignal(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if ("hwpx_tf".equals(rg.textOwner())) return true;
+        if (hasEditableTextFrameIds(rg)) return true;
+        if (rg.sourceObjectIds() != null) {
+            for (int sourceId : rg.sourceObjectIds()) {
+                ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+                if (tf != null && !tf.onHiddenLayer() && !tf.nonprinting()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean hasTextFrameSource(ObjectPlan plan) {
+        return hasTextFrameSource(plan != null ? plan.sourceObjectIds : null);
+    }
+
+    private boolean hasTextFrameSource(int[] sourceIds) {
+        if (sourceIds == null || sourceIds.length == 0 || data == null) return false;
+        for (int sourceId : sourceIds) {
+            if (data.getTextFrame(String.valueOf(sourceId)) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int[] withoutTextFrameSourceIds(int[] sourceIds) {
+        if (sourceIds == null || sourceIds.length == 0 || data == null) return sourceIds;
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        for (int sourceId : sourceIds) {
+            if (data.getTextFrame(String.valueOf(sourceId)) == null) {
+                ids.add(sourceId);
+            }
+        }
+        if (ids.isEmpty()) return sourceIds;
+        int[] out = new int[ids.size()];
+        int i = 0;
+        for (Integer id : ids) {
+            out[i++] = id != null ? id : -1;
+        }
+        return out;
+    }
+
+    private int[] visualShellSourceIds(RenderedGroup rg, int[] fallback) {
+        if (rg == null || data == null) return fallback;
+        if (hasEditableTextOwnerSignal(rg)) {
+            int[] filtered = withoutTextFrameSourceIds(rg.sourceObjectIds());
+            if (filtered != null && filtered.length > 0) {
+                return filtered;
+            }
+        }
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        int selfId = rg.id();
+        if (selfId >= 0) ids.add(selfId);
+        int[] sources = rg.sourceObjectIds() != null ? rg.sourceObjectIds() : fallback;
+        if (sources != null) {
+            for (int id : sources) {
+                ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+                if (item != null && "TextFrame".equals(safe(item.type()))) continue;
+                ids.add(id);
+            }
+        }
+        if (ids.isEmpty()) return fallback;
+        int[] out = new int[ids.size()];
+        int i = 0;
+        for (Integer id : ids) out[i++] = id != null ? id : -1;
+        return out;
     }
 
     private boolean looksLikeAbsorbableEditableLabelShell(RenderedGroup rg) {
@@ -1096,9 +1232,26 @@ public final class OwnershipPlanner {
 
                 CombinedVisual combined = createContainerFaceShadowImage(face, shadow);
                 if (combined != null) {
-                    plans.set(i, face.withRenderedVisual(
+                    boolean hasTextSource = hasTextFrameSource(face) || hasTextFrameSource(shadow);
+                    ObjectPlan resolvedFace = face;
+                    if (face.visualAction == VisualAction.PLACE_TEXT_SHELL
+                            && face.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                            && hasTextSource) {
+                        VisualAction convertedVisual = face.placement == Placement.INLINE
+                                ? VisualAction.PLACE_INLINE_PNG
+                                : VisualAction.PLACE_FLOATING_PNG;
+                        resolvedFace = face.withVisualAction(convertedVisual, "container_face_shadow_pair");
+                    }
+                    int[] sourceObjectIds = combined.sourceObjectIds;
+                    if (hasTextSource) {
+                        sourceObjectIds = withoutTextFrameSourceIds(sourceObjectIds);
+                    }
+                    if (sourceObjectIds == null || sourceObjectIds.length == 0) {
+                        sourceObjectIds = combined.sourceObjectIds;
+                    }
+                    plans.set(i, resolvedFace.withRenderedVisual(
                             VisualLayer.CONTAINER_BACKDROP,
-                            combined.sourceObjectIds,
+                            sourceObjectIds,
                             Math.min(face.zOrder, shadow.zOrder),
                             "container_face_shadow_pair",
                             combined.file,
@@ -1162,12 +1315,26 @@ public final class OwnershipPlanner {
             if (faceGroup != null) {
                 faceGroup.file(relPath);
                 faceGroup.bounds(bounds);
-                faceGroup.sourceObjectIds(mergeSourceIds(face.sourceObjectIds, shadow.sourceObjectIds));
+                int[] sourceObjectIds = mergeSourceIds(face.sourceObjectIds, shadow.sourceObjectIds);
+                if (hasTextFrameSource(face) || hasTextFrameSource(shadow)) {
+                    sourceObjectIds = withoutTextFrameSourceIds(sourceObjectIds);
+                }
+                if (sourceObjectIds == null || sourceObjectIds.length == 0) {
+                    sourceObjectIds = mergeSourceIds(face.sourceObjectIds, shadow.sourceObjectIds);
+                }
+                faceGroup.sourceObjectIds(sourceObjectIds);
                 faceGroup.reason("container_face_shadow_pair");
                 faceGroup.zOrder(Math.min(face.zOrder, shadow.zOrder));
                 faceGroup.imageFormat("png");
             }
-            return new CombinedVisual(relPath, bounds, mergeSourceIds(face.sourceObjectIds, shadow.sourceObjectIds));
+            int[] sourceObjectIds = mergeSourceIds(face.sourceObjectIds, shadow.sourceObjectIds);
+            if (hasTextFrameSource(face) || hasTextFrameSource(shadow)) {
+                sourceObjectIds = withoutTextFrameSourceIds(sourceObjectIds);
+            }
+            if (sourceObjectIds == null || sourceObjectIds.length == 0) {
+                sourceObjectIds = mergeSourceIds(face.sourceObjectIds, shadow.sourceObjectIds);
+            }
+            return new CombinedVisual(relPath, bounds, sourceObjectIds);
         } catch (IOException e) {
             return null;
         }
@@ -1326,11 +1493,11 @@ public final class OwnershipPlanner {
     }
 
     private void resolveNonTextVisualEditableTextSources() {
-        Map<String, Boolean> hwpxTextSources = new HashMap<>();
+        HashSet<Integer> hwpxTextSources = new HashSet<>();
         for (ObjectPlan plan : plans) {
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             for (int sourceId : textFrameIdsForPlan(plan)) {
-                hwpxTextSources.put(pageSourceKey(plan.pageIndex, sourceId), Boolean.TRUE);
+                hwpxTextSources.add(sourceId);
             }
         }
         if (hwpxTextSources.isEmpty()) return;
@@ -1342,8 +1509,7 @@ public final class OwnershipPlanner {
             List<Integer> retained = new ArrayList<>();
             boolean changed = false;
             for (int sourceId : plan.sourceObjectIds) {
-                if (sourceId != plan.domId
-                        && Boolean.TRUE.equals(hwpxTextSources.get(pageSourceKey(plan.pageIndex, sourceId)))) {
+                if (sourceId != plan.domId && hwpxTextSources.contains(sourceId)) {
                     changed = true;
                     continue;
                 }

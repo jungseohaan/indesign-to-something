@@ -395,6 +395,8 @@ public final class ResolvedBuildContext {
     private java.util.Map<String, ObjectPlan> ownershipPlanByDomKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileBoundsKey;
     private java.util.Map<String, ObjectPlan> ownershipPlanByFileKey;
+    private java.util.Map<String, ObjectPlan> ownershipPlanBySourceKey;
+    private java.util.Map<String, ObjectPlan> ownershipPlanBySourceNoPlacementKey;
     private boolean ownershipPlanIndexDirty = true;
 
     /** Stage 1 simple marker label plans. Key: inline anchor DOM id. */
@@ -531,7 +533,25 @@ public final class ResolvedBuildContext {
 
     public boolean shouldDropVisualByOwnershipPlan(RenderedGroup rg) {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
-        return plan != null && !plan.hasVisibleVisual();
+        if (plan != null) {
+            if (!plan.hasVisibleVisual()) return true;
+            if (appearsToHaveHwpxTextOwnership(rg)
+                    && plan.textAction != TextAction.OWNED_BY_HWPX_TEXT
+                    && !resolvedData.shouldUseCompletePngForSimpleButtonLabel(rg)) {
+                return true;
+            }
+            return false;
+        }
+        return isTextFrameOwnedButPlanMissingForRendered(rg);
+    }
+
+    public boolean shouldSkipOverflowCopyByOwnershipPlan(RenderedGroup rg) {
+        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        if (!appearsToHaveHwpxTextOwnership(rg)) return false;
+        return plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.visualAction != VisualAction.PLACE_TEXT_SHELL
+                && !resolvedData.shouldUseCompletePngForSimpleButtonLabel(rg);
     }
 
     public VisualAction visualActionByOwnershipPlan(RenderedGroup rg) {
@@ -640,8 +660,77 @@ public final class ResolvedBuildContext {
         if (plan == null) {
             plan = ownershipPlanByDomKey.get(domKey(rg.pageIndex(), placement, rg.id()));
         }
+        if (plan == null) {
+            for (int sourceId : renderedSourceObjectIds(rg)) {
+                plan = ownershipPlanBySourceKey.get(sourcePlanKey(rg.pageIndex(), placement, sourceId));
+                if (plan != null) break;
+            }
+        }
+        if (plan == null) {
+            for (int sourceId : renderedSourceObjectIds(rg)) {
+                plan = findBestNoPlacementPlan(rg, sourceId);
+                if (plan != null) break;
+            }
+        }
         ownershipPlanRenderedCache.put(cacheKey, plan);
         return plan;
+    }
+
+    private ObjectPlan findBestNoPlacementPlan(RenderedGroup rg, int sourceId) {
+        if (rg == null || ownershipPlans == null || ownershipPlans.isEmpty()) return null;
+        Placement placement = placementOf(rg);
+        ObjectPlan best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.pageIndex != rg.pageIndex()) continue;
+            if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) continue;
+            if (!containsSource(plan.sourceObjectIds, sourceId)) continue;
+            int score = 0;
+            if (plan.placement == placement) score += 8;
+            if (plan.domId == rg.id()) score += 4;
+            if (plan.renderId != null && plan.renderId == rg.id()) score += 3;
+            if (plan.file != null && plan.file.equals(rg.file())) score += 2;
+            if (plan.bounds != null && rg.bounds() != null && overlapRatio(plan.bounds, rg.bounds()) > 0.05) score += 1;
+            if (score > bestScore || (score == bestScore && best != null
+                    && shouldPreferOwnershipPlan(plan, best))) {
+                best = plan;
+                bestScore = score;
+                if (bestScore >= 16) break;
+            }
+        }
+        return best;
+    }
+
+    private static boolean containsSource(int[] sourceIds, int sourceId) {
+        if (sourceIds == null || sourceIds.length == 0) return false;
+        for (int sid : sourceIds) {
+            if (sid == sourceId) return true;
+        }
+        return false;
+    }
+
+    private static double overlapRatio(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return 0.0;
+        double ax0 = Math.min(a[0], a[2]);
+        double ax1 = Math.max(a[0], a[2]);
+        double ay0 = Math.min(a[1], a[3]);
+        double ay1 = Math.max(a[1], a[3]);
+        double bx0 = Math.min(b[0], b[2]);
+        double bx1 = Math.max(b[0], b[2]);
+        double by0 = Math.min(b[1], b[3]);
+        double by1 = Math.max(b[1], b[3]);
+
+        double ix0 = Math.max(ax0, bx0);
+        double iy0 = Math.max(ay0, by0);
+        double ix1 = Math.min(ax1, bx1);
+        double iy1 = Math.min(ay1, by1);
+        if (ix0 >= ix1 || iy0 >= iy1) return 0.0;
+
+        double inter = (ix1 - ix0) * (iy1 - iy0);
+        double areaA = (ax1 - ax0) * (ay1 - ay0);
+        if (areaA <= 0.0) return 0.0;
+        return inter / areaA;
     }
 
     private void ensureOwnershipPlanIndexes() {
@@ -651,6 +740,8 @@ public final class ResolvedBuildContext {
         ownershipPlanByDomKey = new java.util.HashMap<>();
         ownershipPlanByFileBoundsKey = new java.util.HashMap<>();
         ownershipPlanByFileKey = new java.util.HashMap<>();
+        ownershipPlanBySourceKey = new java.util.HashMap<>();
+        ownershipPlanBySourceNoPlacementKey = new java.util.HashMap<>();
         for (ObjectPlan plan : ownershipPlans) {
             if (plan == null) continue;
             if (plan.renderId != null) {
@@ -666,9 +757,86 @@ public final class ResolvedBuildContext {
                     fileBoundsKey(plan.pageIndex, plan.placement, plan.file, plan.bounds),
                     plan);
             putPreferred(ownershipPlanByFileKey, fileKey(plan.pageIndex, plan.placement, plan.file), plan);
+            if (plan.sourceObjectIds != null) {
+                for (int sourceId : plan.sourceObjectIds) {
+                    putPreferred(ownershipPlanBySourceKey,
+                            sourcePlanKey(plan.pageIndex, plan.placement, sourceId),
+                            plan);
+                    putPreferred(ownershipPlanBySourceNoPlacementKey,
+                            sourcePlanNoPlacementKey(plan.pageIndex, sourceId),
+                            plan);
+                }
+            }
         }
         ownershipPlanIndexDirty = false;
         ownershipPlanRenderedCache.clear();
+    }
+
+    private static int[] renderedSourceObjectIds(RenderedGroup rg) {
+        if (rg == null) return new int[0];
+        if (rg.sourceObjectIds() != null && rg.sourceObjectIds().length > 0) {
+            return rg.sourceObjectIds();
+        }
+        if (rg.editableTextFrameIds() != null && rg.editableTextFrameIds().length > 0) {
+            return parseSourceObjectIds(rg.editableTextFrameIds());
+        }
+        return new int[0];
+    }
+
+    private static int[] parseSourceObjectIds(String[] sourceIds) {
+        if (sourceIds == null || sourceIds.length == 0) return new int[0];
+        java.util.List<Integer> parsed = new java.util.ArrayList<>();
+        for (String sourceId : sourceIds) {
+            if (sourceId == null) continue;
+            try {
+                int parsedId = Integer.parseInt(sourceId);
+                parsed.add(parsedId);
+            } catch (NumberFormatException ignored) {
+                // ignore non-decimal text-frame ids (e.g. malformed/hex-like ids)
+            }
+        }
+        if (parsed.isEmpty()) return new int[0];
+        int[] out = new int[parsed.size()];
+        for (int i = 0; i < parsed.size(); i++) {
+            out[i] = parsed.get(i);
+        }
+        return out;
+    }
+
+    private boolean isTextFrameOwnedButPlanMissingForRendered(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (rg.hasEditableTextHiddenFromPng()) return true;
+        if (Boolean.TRUE.equals(rg.containsEditableText()) && rg.sourceObjectIds() != null
+                && rg.sourceObjectIds().length > 0
+                && "hwpx_tf".equals(rg.textOwner())) {
+            return true;
+        }
+        return hasHwpxOwnedTextSourceId(rg);
+    }
+
+    private boolean appearsToHaveHwpxTextOwnership(RenderedGroup rg) {
+        if (rg == null || resolvedData == null) return false;
+        if (rg.hasEditableTextHiddenFromPng()) return true;
+        if (Boolean.TRUE.equals(rg.containsEditableText())
+                && "hwpx_tf".equals(rg.textOwner())) {
+            return true;
+        }
+        if (resolvedData.shouldUseCompletePngForSimpleButtonLabel(rg)) return false;
+        for (int sourceId : renderedSourceObjectIds(rg)) {
+            if (resolvedData.isEditableTextFrame(String.valueOf(sourceId))) return true;
+        }
+        return hasHwpxOwnedTextSourceId(rg);
+    }
+
+    private boolean hasHwpxOwnedTextSourceId(RenderedGroup rg) {
+        if (resolvedData == null || rg == null) return false;
+        for (int sourceId : renderedSourceObjectIds(rg)) {
+            if (sourceId < 0) continue;
+            if (resolvedData.isHwpxOwnedTextFrame(String.valueOf(sourceId))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void putPreferred(java.util.Map<String, ObjectPlan> map, String key, ObjectPlan plan) {
@@ -713,6 +881,14 @@ public final class ResolvedBuildContext {
 
     private static String fileKey(int pageIndex, Placement placement, String file) {
         return pageIndex + "|" + placement + "|" + nullSafe(file);
+    }
+
+    private static String sourcePlanKey(int pageIndex, Placement placement, int sourceId) {
+        return pageIndex + "|" + placement + "|" + sourceId;
+    }
+
+    private static String sourcePlanNoPlacementKey(int pageIndex, int sourceId) {
+        return pageIndex + "|" + sourceId;
     }
 
     private static String roundedBoundsKey(double[] bounds) {
