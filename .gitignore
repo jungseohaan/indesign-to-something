@@ -80,3 +80,8 @@ testFile/tool/idml_test_72dpi.hwpx
 testFile/tool/idml_test_page8.hwpx
 testFile/tool/idml_tracking_test.hwpx
 testFile/tool/sample_image_list.hwpx
+.badge-corpus/
+.codex_tmp/
+Contents/
+teaching_material.json
+BetterChoice.md

@@ -8,6 +8,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.VisualSourcePolicy;
@@ -135,12 +136,16 @@ public final class BackgroundInjector {
             }
             // (SPEC-036 (가)) SKIP_CHILD_OF_GROUP / SKIP_INLINE_COVERAGE / SKIP_INLINE_OBJECT은
             // Stage 2.5 refinement가 plan(DROP_VISUAL)으로 확정 → 위 planRejection이 처리.
-            if (ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg) && !protectedEditableLabelShell) {
+            // 텍스트-숨김 배지 셸(inline_badge / mixed_group_text_hidden / *_text_hidden_shell 등으로
+            // 그래픽엔 텍스트가 없고 편집 텍스트는 별도 TF로 렌더됨)은 그래픽을 "뒤에" 깔아야 하므로
+            // 소유권 스킵을 통과시킨다(스킵하면 알약/셸 그래픽이 빠져 배지가 맨 텍스트로 보임).
+            boolean _badgeShell = isBadgeShellGraphicBehind(rg);
+            if (!_badgeShell && ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg) && !protectedEditableLabelShell) {
                 ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_VISUAL_LABEL_TEXT_EDITABLE", "text label kept editable");
                 continue;
             }
-            if (rg.shouldSkipByOwnership()) {
+            if (!_badgeShell && rg.shouldSkipByOwnership()) {
                 ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OWNERSHIP", "render ownership says text is not hidden");
                 continue;
@@ -353,6 +358,16 @@ public final class BackgroundInjector {
                             rawBottom = cropBottom;
                             fullW = rawRight - rawLeft;
                             fullH = rawBottom - rawTop;
+                            // The image buffer now represents the alpha-cropped bounds.
+                            // Keep subsequent page/intersection cropping in the same
+                            // coordinate frame; otherwise a second crop can collapse a
+                            // composite visual to only its left-edge child.
+                            cropRefLeft = rawLeft;
+                            cropRefTop = rawTop;
+                            cropRefRight = rawRight;
+                            cropRefBottom = rawBottom;
+                            cropRefW = cropRefRight - cropRefLeft;
+                            cropRefH = cropRefBottom - cropRefTop;
                             visLeft = Math.max(0.0, rawLeft);
                             visTop = Math.max(0.0, rawTop);
                             visRight = Math.min(rawRight, pageWidthMm);
@@ -535,6 +550,9 @@ public final class BackgroundInjector {
                     && (!rg.zOrderKnown() || isPaperOnlyContainerShell)) {
                 resolvedZ = Math.max(1, Math.min(resolvedZ, 4));
             }
+            // 텍스트-숨김 배지 셸 그래픽(텍스트 제거됨)은 별도 배치되는 편집 텍스트프레임 "뒤"에 깔린다.
+            boolean _inlineBadgeGraphic = isBadgeShellGraphicBehind(rg);
+            if (_inlineBadgeGraphic) resolvedZ = 1;
             fig.zOrder(resolvedZ);
             boolean keepShellInFrontLayer = isContainerVisualShell
                     || (isTextFrameVisualShell && !isBackgroundLike);
@@ -542,11 +560,11 @@ public final class BackgroundInjector {
                 fig.visualLayer(visualLayer);
             }
             Boolean planInFrontLayer = ctx.inFrontLayerByOwnershipPlan(rg);
-            fig.fromGroup(planInFrontLayer != null
+            fig.fromGroup(_inlineBadgeGraphic ? false : (planInFrontLayer != null
                     ? planInFrontLayer
                     : keepShellInFrontLayer
                     || !(isBackgroundLike || isTextFrameBackdrop || isTextOwnedVisualShell
-                    || demotedBehindForeground));
+                    || demotedBehindForeground)));
             fig.sourceId("page_obj_" + rg.id());
 
             // BEHIND_TEXT 항목은 XML 순서상 앞에 올수록 더 아래 레이어 → addBlockAtFront
@@ -884,6 +902,18 @@ public final class BackgroundInjector {
             ImageIO.write(img, "png", baos);
             return baos.toByteArray();
         } catch (Exception e) { return null; }
+    }
+
+    /**
+     * 배지 셸 그래픽을 텍스트 "뒤"에 깔아야 하는가. inline_badge(편집 텍스트 보유) + 배지 크기의
+     * mixed_group/shell(텍스트 숨김, 편집 TF 별도 렌더)을 포함. 큰 사이드박스(높이 큼)는 제외.
+     * (기존 isTextHiddenBadgeShell은 !containsEditableText·w≤95 제약이라 inline_badge/넓은 배지를
+     *  놓치므로 별도 판정.)
+     */
+    private static boolean isBadgeShellGraphicBehind(RenderedGroup rg) {
+        // 안전 범위: 통합 inline_badge만. mixed_group_text_hidden 등 미마이그레이션 셸을 넓히면
+        // plan-reject/중복 등 회귀 위험 → Stage 3에서 JSX가 inline_badge로 분해해 처리한다.
+        return rg != null && "inline_badge".equals(rg.reason());
     }
 
     private static boolean isPageObject(RenderedGroup rg) {
@@ -3198,6 +3228,28 @@ public final class BackgroundInjector {
         if (rg == null) return false;
         return "inline_graphic_only".equals(rg.reason())
                 || "text_composite_editable_text_hidden".equals(rg.reason());
+    }
+
+    private static boolean isTextHiddenBadgeShell(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
+            return false;
+        }
+        String reason = rg.reason();
+        if (reason == null) return false;
+        boolean textHiddenShell = reason.contains("badge")
+                || reason.contains("visual_label_text_hidden_shell")
+                || reason.contains("editable_composite_text_hidden_shell")
+                || reason.contains("text_composite_editable_text_hidden")
+                || reason.contains("text_hidden_shell")
+                || reason.contains("mixed_group_text_hidden");
+        if (!textHiddenShell) return false;
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        return w >= 3.0 && h >= 2.0 && w <= 95.0 && h <= 35.0;
     }
 
     private static boolean isPlanForegroundVisualLayer(String visualLayer) {

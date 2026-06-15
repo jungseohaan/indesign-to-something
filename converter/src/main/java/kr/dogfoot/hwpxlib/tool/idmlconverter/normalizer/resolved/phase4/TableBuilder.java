@@ -28,6 +28,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Table
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.SimpleButtonLabelInlineFactory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.NumberedSideHeadTableNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
@@ -491,6 +492,9 @@ public final class TableBuilder {
         ASTTable result = expandedTable != null ? expandedTable : astTable;
         restoreLostCellTextFromSnapshot(result, sourceTextByCell);
         completeVisibleTableOuterBorder(result);
+        if (NumberedSideHeadTableNormalizer.normalizePlanned(ctx, result) && ctx != null && ctx.debugAst) {
+            result.debugOrNew().note("side-head flow table normalized from Stage 1 plan");
+        }
         return result;
     }
 
@@ -958,12 +962,32 @@ public final class TableBuilder {
             if (rg == null || rg.sourceObjectIds() == null) continue;
             if (!containsSourceId(rg.sourceObjectIds(), tfId)) continue;
             if (!isTableCompositeVisual(rg)) continue;
+            // 배지 셸(작은 알약 그래픽 + 편집 텍스트 별도 소유)은 테이블이 재구성하지 못하는
+            // 장식 chrome이다. 억제하면 알약이 사라져 셀 텍스트만 남는다(구조도/개관 배지). 억제 제외 →
+            // Phase 6/7이 셀 텍스트 뒤 backdrop으로 배치한다.
+            if (isBadgeShellOwnedByTable(rg)) continue;
             ctx.setRenderedDisposition(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED);
             ctx.phase6PlacedIds.add(rg.id());
             if (ctx.debugAst && table != null) {
                 table.debugOrNew().note("table composite visual suppressed: rendered " + rg.id());
             }
         }
+    }
+
+    /**
+     * 테이블 TF 소유의 배지 셸: 편집 텍스트(별도 TF)를 가진 작은 알약/라벨 그래픽.
+     * 테이블은 텍스트만 재구성하므로 이 chrome을 억제하면 알약이 사라진다.
+     * 큰 합성 PNG(셀 전체 베이킹)는 height로 배제한다.
+     */
+    private static boolean isBadgeShellOwnedByTable(RenderedGroup rg) {
+        if (rg == null) return false;
+        String reason = rg.reason();
+        if (reason == null || !reason.contains("mixed_group")) return false;
+        String[] ed = rg.editableTextFrameIds();
+        if (ed == null || ed.length == 0) return false;
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        return Math.abs(b[2] - b[0]) <= 60.0; // 배지 한 줄 높이
     }
 
     private static boolean isTableCompositeVisual(RenderedGroup rg) {

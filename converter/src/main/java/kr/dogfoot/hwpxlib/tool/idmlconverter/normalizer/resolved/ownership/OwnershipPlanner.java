@@ -97,6 +97,11 @@ public final class OwnershipPlanner {
         VisualAction visualAction = visualActionOf(rg, placement, textAction);
         VisualLayer visualLayer = visualLayerOf(rg, visualAction, textAction);
         int[] sourceIds = sourceIdsOrSelf(rg);
+        if (hasIndependentContentVisualBesideOwnedText(rg)
+                && (visualAction == VisualAction.PLACE_FLOATING_PNG
+                || visualAction == VisualAction.PLACE_INLINE_PNG)) {
+            sourceIds = independentContentVisualSourceIds(rg, sourceIds);
+        }
         int zOrder = zOrderOf(rg, visualAction, sourceIds);
         plans.add(new ObjectPlan(
                 rg.id(),
@@ -218,6 +223,11 @@ public final class OwnershipPlanner {
                 && ("hwpx_tf".equals(rg.textOwner())
                 || Boolean.TRUE.equals(rg.containsEditableText())
                 || hasEditableTextFrameIds(rg))) {
+            if (hasIndependentContentVisualBesideOwnedText(rg)) {
+                return placement == Placement.INLINE
+                        ? VisualAction.PLACE_INLINE_PNG
+                        : VisualAction.PLACE_FLOATING_PNG;
+            }
             if ("label_backdrop_group".equals(rg.reason())) {
                 return VisualAction.PLACE_TEXT_SHELL;
             }
@@ -254,6 +264,9 @@ public final class OwnershipPlanner {
             return VisualLayer.PAGE_BACKGROUND;
         }
         if (visualAction == VisualAction.PLACE_INLINE_PNG) {
+            return VisualLayer.CONTENT_VISUAL;
+        }
+        if (hasIndependentContentVisualBesideOwnedText(rg)) {
             return VisualLayer.CONTENT_VISUAL;
         }
         if (visualAction == VisualAction.PLACE_TEXT_SHELL) {
@@ -353,7 +366,89 @@ public final class OwnershipPlanner {
         // 여러 editable TF가 한 장식 카드 묶음에 들어간 경우에는 shell의
         // 외곽선/박스도 텍스트보다 뒤에 있어야 한다. CONTAINER_OUTLINE으로
         // 올리면 HWPX의 in-front 평면에서 owned text를 덮는다.
-        return h <= 80.0 && w <= 140.0;
+        // w 상한 180: 작품+구조도/개관처럼 알약 옆에 넓은 빈 영역이 붙어 bounds가 넓은
+        // 테이블 셀 배지(w≈173)도 backdrop(텍스트 뒤)으로 잡는다. 알약은 불투명이라
+        // foreground로 두면 셀 텍스트를 가린다.
+        return h <= 80.0 && w <= 180.0;
+    }
+
+    private boolean hasIndependentContentVisualBesideOwnedText(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        String reason = safe(rg.reason());
+        if (!reason.contains("mixed_group_text_hidden")
+                && !reason.contains("image_group_text_hidden")
+                && !reason.contains("complex_graphic_text_hidden")) {
+            return false;
+        }
+        if (!"hwpx_tf".equals(rg.textOwner()) && !hasEditableTextFrameIds(rg)) {
+            return false;
+        }
+        List<double[]> textBounds = new ArrayList<>();
+        List<double[]> visualBounds = new ArrayList<>();
+        int drawableVisuals = 0;
+        for (int id : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item == null) continue;
+            String type = safe(item.type());
+            double[] b = boundsOf(item);
+            if (b == null || b.length < 4 || area(b) <= 0.0) continue;
+            if ("TextFrame".equals(type)) {
+                textBounds.add(b);
+                continue;
+            }
+            if ("Group".equals(type)) continue;
+            if (!isSubstantialDrawableContentVisual(item, b)) continue;
+            visualBounds.add(b);
+            drawableVisuals++;
+        }
+        if (textBounds.isEmpty() || visualBounds.isEmpty() || drawableVisuals == 0) return false;
+
+        for (double[] vb : visualBounds) {
+            boolean overlapsOwnedText = false;
+            for (double[] tb : textBounds) {
+                if (overlapRatio(vb, tb) >= 0.35 || containsCenter(vb, tb) || containsCenter(tb, vb)) {
+                    overlapsOwnedText = true;
+                    break;
+                }
+            }
+            if (!overlapsOwnedText) return true;
+        }
+        return false;
+    }
+
+    private int[] independentContentVisualSourceIds(RenderedGroup rg, int[] fallback) {
+        if (rg == null || data == null) return fallback;
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        for (int id : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item == null) continue;
+            double[] b = boundsOf(item);
+            if (isSubstantialDrawableContentVisual(item, b)) {
+                ids.add(id);
+            }
+        }
+        if (ids.isEmpty()) return fallback;
+        int[] out = new int[ids.size()];
+        int i = 0;
+        for (Integer id : ids) out[i++] = id != null ? id : -1;
+        return out;
+    }
+
+    private static boolean isSubstantialDrawableContentVisual(ResolvedPageItem item, double[] b) {
+        if (item == null || b == null || b.length < 4) return false;
+        String type = safe(item.type());
+        if (!("Rectangle".equals(type) || "Polygon".equals(type) || "Oval".equals(type)
+                || "GraphicLine".equals(type) || "Image".equals(type))) {
+            return false;
+        }
+        double w = Math.abs(b[3] - b[1]);
+        double h = Math.abs(b[2] - b[0]);
+        if (w < 3.0 || h < 3.0 || area(b) < 18.0) return false;
+        if ("GraphicLine".equals(type) && Math.min(w, h) < 1.5) return false;
+        if ("Image".equals(type)) return true;
+        boolean hasFill = !isNoneColor(item.fillColorName()) && !isPaperColor(item.fillColorName());
+        boolean hasStroke = !isNoneColor(item.strokeColorName()) && item.strokeWeight() > 0.01;
+        return hasFill || hasStroke;
     }
 
     private boolean isCompanionShellOfCompleteSimpleLabel(RenderedGroup rg) {

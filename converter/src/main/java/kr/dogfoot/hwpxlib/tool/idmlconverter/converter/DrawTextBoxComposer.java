@@ -72,6 +72,9 @@ final class DrawTextBoxComposer {
         spec.fillColor = block.fillColor();
         spec.fillTint = block.fillTint();
         spec.imageFillData = block.imageFillData();
+        // 통합 플로팅 배지: imageFill을 전역 native-graphics OFF와 무관하게 칠한다(텍스트는 검색
+        // 가능 런 유지 → SPEC-025 위배 아님). 좁은 범위(forceImageFill 플래그)로 한정해 회귀 방지.
+        spec.forceImageFill = block.forceImageFill();
         spec.nativeGraphicsAllowed = block.nativeGraphicsAllowed();
         spec.marginLeft = block.insetLeft();
         spec.marginRight = block.insetRight();

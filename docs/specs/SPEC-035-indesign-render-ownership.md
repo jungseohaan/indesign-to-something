@@ -47,6 +47,38 @@ IDML -> HWPX 변환은 두 세계를 섞는다.
 
 legacy Phase는 이 Stage 구조로 이관한다. 이관 전까지 legacy Phase는 plan 실행 브리지 역할만 한다.
 
+### Phase 6/7 폐기 계획
+
+Phase 6 `BackgroundInjector`와 Phase 7 `RenderableFramePlacer`는 최종 구조에서 존재하지 않는다.
+두 클래스의 책임은 Stage 3 `VisualBuilder` 아래의 plan executor로 흡수한다.
+
+폐기 원칙:
+
+- `ResolvedToASTBuilder`는 Phase 6/7 클래스를 직접 호출하지 않는다.
+- 모든 visible visual은 `ObjectPlan`의 `visualAction`, `placement`, `visualLayer`, `zOrder`를 실행한 결과여야 한다.
+- crop/page-intersection/spread-overflow는 ownership을 재판정하지 않는 순수 배치 함수여야 한다.
+- `phase6PlacedIds`, executor-local duplicate key, child coverage set은 최종적으로 `ObjectPlan` 또는 Stage 4 invariant로 대체한다.
+- Phase 7의 “Phase 6에서 이미 처리됨” 같은 후행 보정은 제거한다. 같은 source의 중복은 Stage 1 plan에서 금지한다.
+
+이관 순서:
+
+1. Stage 3 `VisualBuilder`를 단일 진입점으로 만들고 Phase 6/7 직접 호출을 상위 파이프라인에서 제거한다.
+2. Phase 7의 spread/page intersection 배치를 `VisualBuilder` executor로 옮긴다.
+3. Phase 6의 PNG load/crop/layer/zOrder 계산을 `VisualPlacementExecutor`와 `VisualCropper`로 옮긴다.
+4. `computeChildOfGroupSuppression`, `computeInlineCoverageSuppression`을 Stage 1 ownership refinement로 옮긴다.
+5. `phase6PlacedIds`와 Phase 6/7 중복 suppression bridge를 삭제한다.
+6. `BackgroundInjector`와 `RenderableFramePlacer` 클래스를 삭제한다.
+
+각 단계 회귀 게이트:
+
+- `mvn -pl converter -am -DskipTests package`
+- badge regression: `scripts/badge_regression/check_badges.py`
+- visual smoke: 최근 이슈 페이지의 HWPX 내부 이미지/텍스트 조건 확인
+  - page 45: `스스로 질문하기` 라벨이 본문과 과머지되지 않음
+  - page 49: `생각 열기`, `활동 안내`, `소단원`이 누락되지 않음
+  - page 53/56: anchored table/heading flow가 원본 순서를 유지함
+  - page 62: top-left `작품 감상` 그래픽의 두 시각 조각이 함께 유지됨
+
 ---
 
 ## 핵심 3원칙
@@ -152,6 +184,48 @@ PDF 내부 텍스트를 제거한 배경 PNG를 만들거나 PDF 내부 글자�
 즉 `나를 깨우는, 문학`, `문학의 본질과 미적 기능`,
 `문학의 인식적·윤리적 기능`처럼 PDF에서 선택되는 문구는 텍스트 성격이지만,
 source가 placed PDF뿐인 경우에는 PDF visual이 그대로 소유한다.
+
+### 1.4 Numbered side-head flow table
+
+큰 번호가 왼쪽에 서고, 오른쪽 위에 소제목/라벨, 오른쪽 아래에 본문 문장이 놓이는
+활동 머리표는 독립 floating TF들의 우연한 겹침이 아니라 하나의 흐름 단위다.
+
+예:
+
+- 왼쪽: `1`, `2`, `01` 같은 큰 번호 표식
+- 오른쪽 위: `작품의 시적 발상` 같은 짧은 head/label
+- 오른쪽 아래: 해당 활동을 설명하는 본문 문장
+
+정책:
+
+- Stage 1은 source table/story 구조를 보고 `SideHeadFlowPlan`을 만든다.
+- Stage 2/Table Builder는 이 plan을 실행해 borderless 2-column flow table을 만든다.
+- 왼쪽 marker cell은 head row와 body row를 `rowSpan=2`로 span한다.
+- 오른쪽 첫 행은 head/label, 오른쪽 둘째 행은 body paragraph를 소유한다.
+- marker/head/body를 각각 독립 floating object로 남기지 않는다.
+
+허용되는 판단 신호:
+
+- source table이 1열 구조로 추출되었고 앞 두 행이 각각 단일 셀이다.
+- 첫 행 첫 단락이 큰 숫자 run으로 시작하고, 그 뒤에 head text 또는 inline head object가 있다.
+- 둘째 행에 본문성 텍스트가 있다.
+- 같은 story/table source에서 온 구조적 관계다.
+
+금지:
+
+- page 번호, 문구, object id, 절대 좌표 기반으로 side-head를 판정
+- Stage 4에서 plan 없이 1열 table을 2열 table로 뒤집기
+- marker와 label/body를 PNG/TF 양쪽으로 중복 visible 출력
+
+현재 legacy bridge:
+
+- `SideHeadFlowPlanner`가 Stage 1에서 plan을 만든다.
+- `TableBuilder`가 ASTTable 생성 직후 해당 sourceId의 plan을 실행한다.
+- `NumberedSideHeadTableNormalizer`는 임시 executor bridge이다.
+  plan이 없는 structural fallback을 수행하면 `SIDE_HEAD_FLOW_UNPLANNED_BRIDGE`
+  warning을 남겨 다음 migration 대상임을 드러낸다.
+- 최종적으로는 Table Builder가 처음부터 plan 기반 2열 rowSpan table을 생성하고,
+  Stage 4 bridge는 제거한다.
 
 ### 2. 시각 객체는 4층만 쓴다
 

@@ -3152,6 +3152,181 @@ public class InlineFrameHandler {
      *
      * PNG에는 editable TF 내용이 포함되지 않으므로 별도로 배치해야 한다.
      */
+    /**
+     * Stage 2 (배지 렌더 통합): extract_indd.jsx가 emit한 단일 배지 계약을 하나의 BadgeBox로 변환.
+     *  - reason="inline_badge"(분리형): 그래픽 PNG(텍스트 제거)를 박스 imageFill로, 편집 텍스트를
+     *    Y(읽기) 순서로 중앙 문단에 쌓는다. 텍스트가 박스 자신의 fill 위에 그려져 z 조율 불필요.
+     *  - reason="inline_badge_baked"(마커/융합): 텍스트 포함 PNG를 인라인 이미지로(편집 텍스트 없음).
+     * 해당 reason 그룹이 없으면 null → 호출측은 기존 try* 사다리로 폴백(자동 게이팅).
+     */
+    public static ASTInlineObject buildInlineBadge(ResolvedBuildContext ctx, int anchoredId) {
+        if (ctx == null || ctx.resolvedData == null) return null;
+        RenderedGroup rg = findInlineBadgeRender(ctx, anchoredId);
+        if (rg == null) return null;
+        byte[] png = loadBadgePngFlattenedOntoWhite(ctx, rg);
+        if (png == null || png.length == 0) return null;
+        boolean baked = "inline_badge_baked".equals(rg.reason());
+
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return null;
+        double[] bp = renderedBoundsPoints(ctx, b);
+        if (!validBounds(bp)) bp = b;
+        double boxW = Math.abs(bp[3] - bp[1]);
+        double boxH = Math.abs(bp[2] - bp[0]);
+        if (boxW <= 0 || boxH <= 0) return null;
+
+        int[] dims = pngPixelDims(png);
+
+        ASTInlineObject box = new ASTInlineObject();
+        box.sourceId("u" + Integer.toHexString(anchoredId));
+        box.width(CoordinateConverter.pointsToHwpunits(boxW));
+        box.height(CoordinateConverter.pointsToHwpunits(boxH));
+        box.verticalJustification("CenterAlign");
+        box.keepInline(true);
+
+        java.util.List<ResolvedTextFrame> tfs = baked
+                ? java.util.Collections.<ResolvedTextFrame>emptyList()
+                : badgeTextFramesSortedByReading(ctx, rg);
+
+        if (baked || tfs.isEmpty()) {
+            // 베이킹(또는 편집 텍스트 못 찾음) → 텍스트 포함 PNG를 인라인 이미지로.
+            box.kind(ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP);
+            box.imageData(png);
+            box.imageFormat("png");
+            if (dims != null) { box.pixelWidth(dims[0]); box.pixelHeight(dims[1]); }
+            return box;
+        }
+
+        // 분리형: 그래픽을 박스 imageFill로, 편집 텍스트를 그 위에.
+        box.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        box.imageFillData(png);
+        box.nativeGraphicsAllowed(true);
+        for (ResolvedTextFrame tf : tfs) {
+            String vt = tf.frameVisibleText();
+            if (vt == null) continue;
+            String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            if (cleaned.isEmpty()) continue;
+            ASTParagraph para = new ASTParagraph();
+            para.alignment("CENTER");
+            ASTTextRun run = new ASTTextRun();
+            run.text(cleaned);
+            applyFirstRunStyle(ctx, tf, run);
+            para.addItem(run);
+            box.addParagraph(para);
+        }
+        return box;
+    }
+
+    private static RenderedGroup findInlineBadgeRender(ResolvedBuildContext ctx, int anchoredId) {
+        if (ctx.resolvedData.allRenderedFloatingItems() == null) return null;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != anchoredId || rg.file() == null) continue;
+            String r = rg.reason();
+            if ("inline_badge".equals(r) || "inline_badge_baked".equals(r)) return rg;
+        }
+        return null;
+    }
+
+    /**
+     * Stage 2b: 플로팅(page_object) 통합 배지. reason="inline_badge"인 비-인라인 배지를
+     * 절대 좌표 ASTTextFrameBlock(그래픽=imageFill + 편집 텍스트를 그 위에)로 만든다.
+     * 좌표/크기(HWPUNIT)는 호출측(Phase 6)이 계산해 넘긴다. inline_badge가 아니거나 편집
+     * 텍스트가 없으면 null → 호출측이 기존 figure 경로로 폴백.
+     */
+    public static ASTTextFrameBlock buildFloatingBadge(
+            ResolvedBuildContext ctx, RenderedGroup rg, long xHwp, long yHwp, long wHwp, long hHwp) {
+        if (ctx == null || rg == null || !"inline_badge".equals(rg.reason())) return null;
+        if (wHwp <= 0 || hHwp <= 0) return null;
+        java.util.List<ResolvedTextFrame> tfs = badgeTextFramesSortedByReading(ctx, rg);
+        if (tfs.isEmpty()) return null;
+        byte[] png = loadBadgePngFlattenedOntoWhite(ctx, rg);
+        if (png == null || png.length == 0) return null;
+
+        ASTTextFrameBlock block = new ASTTextFrameBlock();
+        block.x(xHwp);
+        block.y(yHwp);
+        block.width(wHwp);
+        block.height(hHwp);
+        block.imageFillData(png);
+        block.nativeGraphicsAllowed(true);
+        block.forceImageFill(true);
+        block.inlineToFloating(true);
+        block.verticalJustification("CenterAlign");
+        boolean any = false;
+        for (ResolvedTextFrame tf : tfs) {
+            String vt = tf.frameVisibleText();
+            if (vt == null) continue;
+            String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            if (cleaned.isEmpty()) continue;
+            ASTParagraph para = new ASTParagraph();
+            para.alignment("CENTER");
+            ASTTextRun run = new ASTTextRun();
+            run.text(cleaned);
+            applyFirstRunStyle(ctx, tf, run);
+            para.addItem(run);
+            block.addParagraph(para);
+            any = true;
+        }
+        return any ? block : null;
+    }
+
+    /** rg.editableTextFrameIds()를 ResolvedTextFrame으로 매핑 후 Y(상단)→X(좌측) 읽기 순서로 정렬. */
+    private static java.util.List<ResolvedTextFrame> badgeTextFramesSortedByReading(
+            ResolvedBuildContext ctx, RenderedGroup rg) {
+        java.util.List<ResolvedTextFrame> out = new ArrayList<>();
+        String[] ids = rg.editableTextFrameIds();
+        if (ids == null) return out;
+        for (String id : ids) {
+            if (id == null) continue;
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(id);
+            if (tf != null && tf.frameVisibleText() != null) out.add(tf);
+        }
+        java.util.Collections.sort(out, new java.util.Comparator<ResolvedTextFrame>() {
+            public int compare(ResolvedTextFrame a, ResolvedTextFrame b2) {
+                double[] ga = a.geometricBounds(), gb = b2.geometricBounds();
+                double ay = ga != null ? ga[0] : 0, by = gb != null ? gb[0] : 0;
+                if (Math.abs(ay - by) > 1.0) return ay < by ? -1 : 1;
+                double ax = ga != null ? ga[1] : 0, bx = gb != null ? gb[1] : 0;
+                return ax < bx ? -1 : (ax > bx ? 1 : 0);
+            }
+        });
+        return out;
+    }
+
+    private static void applyFirstRunStyle(ResolvedBuildContext ctx, ResolvedTextFrame tf, ASTTextRun run) {
+        ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
+        if (story == null || story.paragraphs().isEmpty()) return;
+        ResolvedParagraph rp = story.paragraphs().get(0);
+        if (rp.runs() == null || rp.runs().isEmpty()) return;
+        ResolvedRun rr = rp.runs().get(0);
+        if (rr.fontFamily() != null) run.fontFamily(rr.fontFamily());
+        if (rr.fontStyle() != null) run.fontStyle(rr.fontStyle());
+        if (rr.fontSize() != null && rr.fontSize() > 0) {
+            run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+        }
+        if (rr.fillColor() != null) run.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+    }
+
+    // 배지 그래픽 PNG를 흰 배경에 합성해 로드. HWP imgBrush는 알파를 검정으로 칠하므로(투명→검정),
+    // 흰 페이지 위 배지는 흰 배경 합성이 올바르다(투명 영역=페이지색).
+    private static byte[] loadBadgePngFlattenedOntoWhite(ResolvedBuildContext ctx, RenderedGroup rg) {
+        byte[] png = loadRenderedPngBytes(ctx, rg);
+        if (png == null || png.length == 0) return null;
+        try {
+            BufferedImage img = ImageIO.read(new java.io.ByteArrayInputStream(png));
+            if (img != null) return flattenOntoWhite(img);
+        } catch (Exception ignored) {}
+        return png;
+    }
+
+    private static int[] pngPixelDims(byte[] png) {
+        try {
+            java.awt.image.BufferedImage im = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(png));
+            if (im != null) return new int[]{im.getWidth(), im.getHeight()};
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     public static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {
         if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(ctx.resolvedData, groupId)) {
             return java.util.Collections.emptyList();

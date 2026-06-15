@@ -33,6 +33,9 @@ public class ASTTextFrameBlock extends ASTBlock {
     // true이면 전역 native-textbox-graphics OFF여도 배경 fill/stroke를 강제로 칠한다.
     // (deco PNG가 풀어준 대형 배경/제목바를 네이티브 흡수한 사이드박스 블록 전용 — 좁은 범위)
     private boolean forceNativeFill;
+    // true이면 전역 native-textbox-graphics OFF여도 imageFillData를 박스 배경으로 강제로 칠한다.
+    // (통합 플로팅 배지 전용 — 텍스트는 검색 가능 런으로 유지되므로 SPEC-025 위배 아님)
+    private boolean forceImageFill;
     private String strokeColor;
     private double strokeWeight;
     private String strokeType = "Solid"; // Solid, Dashed, Dotted
@@ -144,6 +147,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean nativeGraphicsAllowed() { return nativeGraphicsAllowed; }
     public void nativeGraphicsAllowed(boolean v) { this.nativeGraphicsAllowed = v; }
+
+    public boolean forceImageFill() { return forceImageFill; }
+    public void forceImageFill(boolean v) { this.forceImageFill = v; }
 
     public boolean forceNativeFill() { return forceNativeFill; }
     public void forceNativeFill(boolean v) { this.forceNativeFill = v; }

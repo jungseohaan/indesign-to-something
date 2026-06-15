@@ -597,6 +597,9 @@ public final class FramePlacer {
                             expandedToTitleShell = true;
                             continue;
                         }
+                        // Stage 1이 같은 source group을 text shell로 소유한다고 결정했다면,
+                        // 그 안의 sibling fill 도형은 텍스트를 밀어내는 장애물이 아니라 라벨/컨테이너 장식이다.
+                        if (isSiblingPartOfOwnedTextShell(ctx, tf, sib)) continue;
                         // 형제의 Y-extent 가 TF 높이의 1.3배 이상이면 배경 도형(TF를 감싸는 container) →
                         // 텍스트가 배경 위에 올라타는 패턴이므로 shift 금지
                         if (sibYExt > h * XSHIFT_CONTAINER_HEIGHT_RATIO) continue;
@@ -914,6 +917,22 @@ public final class FramePlacer {
      * (extract_indd.jsx가 nativeFillChildIds로 명시 → Java가 네이티브 fill로 렌더)
      * 비어있지 않으면 PNG 셸이 있어도 applyGroupBackgroundShapeStyle 게이트를 열어 형제 도형 fill을 흡수.
      */
+    /** 이 TextFrame이 어떤 inline_badge의 editableTextFrameIds에 속하는지(=BadgeBox가 텍스트 소유). */
+    private static boolean isInlineBadgeOwnedTextFrame(ResolvedBuildContext ctx, String tfId) {
+        if (ctx == null || ctx.resolvedData == null || tfId == null) return false;
+        List<RenderedGroup> items = ctx.resolvedData.allRenderedFloatingItems();
+        if (items == null) return false;
+        for (RenderedGroup rg : items) {
+            if (rg == null || !"inline_badge".equals(rg.reason())) continue;
+            String[] ed = rg.editableTextFrameIds();
+            if (ed == null) continue;
+            for (String e : ed) {
+                if (tfId.equals(e)) return true;
+            }
+        }
+        return false;
+    }
+
     private static java.util.Set<String> releasedNativeFillChildIdsForTf(ResolvedBuildContext ctx, int tfDomId) {
         java.util.Set<String> ids = new java.util.HashSet<>();
         if (ctx == null || ctx.resolvedData == null || tfDomId < 0) return ids;
@@ -1513,6 +1532,58 @@ public final class FramePlacer {
             for (String editableId : editableIds) {
                 if (tfId.equals(editableId) && isExclusiveTextFrameShell(ctx, rg, tfId)) return true;
             }
+        }
+        return false;
+    }
+
+    private static boolean isSiblingPartOfOwnedTextShell(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            ResolvedPageItem sibling) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null || sibling == null) {
+            return false;
+        }
+        String siblingId = sibling.id();
+        if (siblingId == null || siblingId.isEmpty()) return false;
+        int siblingDomId;
+        try {
+            siblingDomId = Integer.parseInt(siblingId);
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.pageIndex() != tf.pageIndex()) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            if (!containsEditableTextFrameId(rg, tf.id())) continue;
+            if (!isOwnedTextShellPlan(ctx, rg)) continue;
+            if (containsInt(rg.sourceObjectIds(), siblingDomId)
+                    || containsInt(rg.childIds(), siblingDomId)
+                    || containsInt(rg.visualOnlyChildIds(), siblingDomId)
+                    || containsInt(rg.nativeFillChildIds(), siblingDomId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isOwnedTextShellPlan(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (rg == null) return false;
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        if (plan != null) {
+            return plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && plan.visualAction == VisualAction.PLACE_TEXT_SHELL;
+        }
+        return rg.hasEditableTextHiddenFromPng()
+                && isOwnedTextFrameShellReason(rg.reason());
+    }
+
+    private static boolean containsInt(int[] values, int expected) {
+        if (values == null) return false;
+        for (int value : values) {
+            if (value == expected) return true;
         }
         return false;
     }

@@ -48,12 +48,27 @@ public class ResolvedDataReader {
     private static ResolvedData fromJsonObject(JsonObject root) {
         ResolvedData data = new ResolvedData();
 
-        // colors → colorHexMap
+        // colors → colorHexMap.
+        // CMYK 스와치는 추출 시점의 naive 수식 hex 대신 ICC 프로파일 변환으로 재계산한다
+        // (InDesign 표시색에 근접 — 예: 질문하기 #40FF75(naive) → #12AE8C(ICC)). 전역 적용.
         if (root.has("colors")) {
             for (JsonElement e : root.getAsJsonArray("colors")) {
                 JsonObject c = e.getAsJsonObject();
                 String name = getString(c, "name");
                 String hex = getString(c, "hex");
+                String space = getString(c, "space");
+                if ("CMYK".equalsIgnoreCase(space)
+                        && c.has("colorValue") && c.get("colorValue").isJsonArray()) {
+                    com.google.gson.JsonArray cv = c.getAsJsonArray("colorValue");
+                    if (cv.size() >= 4) {
+                        try {
+                            String iccHex = kr.dogfoot.hwpxlib.tool.idmlconverter.util.CMYKColorConverter.cmykToHex(
+                                    cv.get(0).getAsDouble() / 100.0, cv.get(1).getAsDouble() / 100.0,
+                                    cv.get(2).getAsDouble() / 100.0, cv.get(3).getAsDouble() / 100.0);
+                            if (iccHex != null) hex = iccHex;
+                        } catch (Exception ignored) { }
+                    }
+                }
                 if (name != null && hex != null) {
                     data.addColor(name, hex);
                 }

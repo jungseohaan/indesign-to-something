@@ -11,11 +11,13 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase2.FramePla
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_5.BulletInserter;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.NumberedSideHeadTableNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase5.WrapPhase5;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7.RenderableFramePlacer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SideHeadFlowPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
@@ -219,6 +221,7 @@ public class ResolvedToASTBuilder {
     private void planOwnership() {
         OwnershipPlanner.runObservation(this.ctx);
         AnchoredTablePlanner.plan(this.ctx);
+        SideHeadFlowPlanner.plan(this.ctx);
         SimpleButtonLabelPlanner.plan(this.ctx);
     }
 
@@ -282,6 +285,11 @@ public class ResolvedToASTBuilder {
      * 새 visible 객체를 만들거나 ownership을 뒤집는 로직을 추가하지 않는다.</p>
      */
     private void postprocessLayout(List<ASTSection> sections) {
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.numberedSideHeadTablesBridge")) {
+            NumberedSideHeadTableNormalizer.run(this.ctx, sections);
+        }
+        tagPhase(sections, "Stage4.LayoutPostprocess.numberedSideHeadTablesBridge");
+
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.layoutPostprocess.bulletInserter")) {
             BulletInserter.run(this.ctx, sections);
         }
@@ -301,20 +309,12 @@ public class ResolvedToASTBuilder {
     /**
      * Stage 3: 시각 객체를 배치한다.
      *
-     * <p>현재는 BackgroundInjector와 RenderableFramePlacer가 각각 skip/중복
-     * 판단을 일부 갖고 있다. 목표 구조에서는 두 클래스를 VisualBuilder로
-     * 흡수하고, ObjectPlan의 visualAction/zOrder만 실행하게 만든다.</p>
+     * <p>VisualBuilder가 ObjectPlan의 visualAction/zOrder 실행 책임을 단일
+     * 진입점으로 갖는다. 내부 legacy executor는 단계적으로 흡수 후 제거한다.</p>
      */
     private void placeVisuals(List<ASTSection> sections) {
-        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage3.visualBuilder.backgroundInjector")) {
-            BackgroundInjector.inject(this.ctx, sections);
-        }
-        tagPhase(sections, "Stage3.VisualBuilder.legacyBackgroundInjector");
-
-        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage3.visualBuilder.renderableFramePlacer")) {
-            RenderableFramePlacer.place(this.ctx, sections);
-        }
-        tagPhase(sections, "Stage3.VisualBuilder.legacyRenderableFramePlacer");
+        VisualBuilder.place(this.ctx, sections);
+        tagPhase(sections, "Stage3.VisualBuilder");
     }
 
     private void writeRenderDecisionLog() {

@@ -15,7 +15,15 @@
 // SPEC-011: 추출 캐시 무효화용 스크립트 버전.
 // 출력 형식이나 추출 로직이 변경되면 이 값을 올려서 모든 캐시를 강제 무효화한다.
 // (mtime/size 기반 자동 무효화와 별개로 명시적 버전 관리 채널)
-var EXTRACT_SCRIPT_VERSION = "26";
+var EXTRACT_SCRIPT_VERSION = "27";
+
+// Stage 1 (배지 렌더 통합): 짧은 시각 라벨/인라인 배지를 단일 "inline_badge" 계약으로 emit.
+// false면 기존 다중-reason 경로 그대로(출력 바이트 동일). true면 두 export 패스(deco 디스패치 +
+// renderInlineObjects)가 배지를 inline_badge(분리형, 텍스트 숨김) / inline_badge_baked(마커)로 통일.
+var EMIT_UNIFIED_INLINE_BADGE = false;
+// 통합 배지로 emit된 그룹 id(전역) — deco/atomic 패스가 inline_badge로 내보낸 배지를
+// renderInlineObjects 패스가 inline_graphic_only로 이중 emit하지 않도록 dedup.
+var _inlineBadgeEmittedIds = {};
 
 // =============================================================================
 // SECTION 1: BOOTSTRAP
@@ -662,6 +670,25 @@ function _runRenderPhases(doc, ctx, allItems) {
     try { $.gc(); } catch (e) {}
 
     renderedFloatingItems = dedupeRenderedFloatingItems(renderedFloatingItems);
+
+    // 통합: 같은 id가 inline_badge로도 emit됐으면 inline_graphic_only 중복 entry 제거(배지당 1개).
+    // (deco/atomic 패스의 inline_badge + renderInlineObjects 패스의 inline_graphic_only 이중 emit 정리)
+    if (EMIT_UNIFIED_INLINE_BADGE) {
+        var _ubBadgeIds = {};
+        for (var _ub = 0; _ub < renderedFloatingItems.length; _ub++) {
+            var _ubr = renderedFloatingItems[_ub] && renderedFloatingItems[_ub].reason;
+            if (_ubr === "inline_badge" || _ubr === "inline_badge_baked") {
+                _ubBadgeIds[renderedFloatingItems[_ub].id] = true;
+            }
+        }
+        var _ubFiltered = [];
+        for (var _uf = 0; _uf < renderedFloatingItems.length; _uf++) {
+            var _ufr = renderedFloatingItems[_uf];
+            if (_ufr && _ufr.reason === "inline_graphic_only" && _ubBadgeIds[_ufr.id]) continue;
+            _ubFiltered.push(_ufr);
+        }
+        renderedFloatingItems = _ubFiltered;
+    }
 
     // 추출 통계 기록
     try {
@@ -2872,6 +2899,43 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         }
     }
 
+    // Stage 1: 통합 인라인 배지 emit. 짧은 시각 라벨 그룹을 단일 계약으로 내보낸다.
+    //  - 분리형(reason="inline_badge"): 텍스트 숨겨 그래픽 PNG 1개 export, 편집 텍스트는 HWPX 소유.
+    //  - 베이킹형(reason="inline_badge_baked"): 순수 글리프 마커(가/나/1)는 글자가 디자인 → 텍스트 포함
+    //    PNG, 편집 텍스트 없음.
+    // per-pill label_backdrop / 개별 vector / shell 중복 emit는 호출측에서 건너뛴다(한 배지=한 entry).
+    function _emitInlineBadge(grp, page) {
+        try { _inlineBadgeEmittedIds[grp.id] = true; } catch (eMark) {}
+        var editableIds = [];
+        try { editableIds = _collectTextFrameIds(grp, true, true); } catch (eIds) {}
+        if (_isVisualMarkerLabelGroup(grp) || editableIds.length === 0) {
+            _decoRender(grp, page, null, {
+                textOwner: "indesign_png",
+                containsText: true,
+                containsEditableText: editableIds.length > 0,
+                placementAllowed: true,
+                editableTextFrameIds: editableIds.length > 0 ? editableIds : undefined,
+                reason: "inline_badge_baked"
+            });
+            return;
+        }
+        var savedTFs = null;
+        try {
+            savedTFs = hideTextFrames(grp);
+            _decoRender(grp, page, null, {
+                textHiddenBeforeExport: true,
+                textOwner: "hwpx_tf",
+                containsEditableText: true,
+                placementAllowed: true,
+                editableTextFrameIds: editableIds,
+                reason: "inline_badge"
+            });
+        } catch (e) {
+        } finally {
+            try { if (savedTFs && savedTFs.length > 0) restoreTextFrames(savedTFs); } catch (eR) {}
+        }
+    }
+
     function _hasVisualShapeChild(grp) {
         try {
             var nested = grp.allPageItems;
@@ -3398,6 +3462,11 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 var childId = child.id;
                 if (renderedIds[childId] || decoChildIds[childId]) continue;
                 if (!_isShortVisualLabelGroup(child)) continue;
+                if (EMIT_UNIFIED_INLINE_BADGE) {
+                    _emitInlineBadge(child, page);  // Stage 1 통합: 자식 배지도 단일 계약
+                    rendered++;
+                    continue;
+                }
                 var editableIds = [];
                 try { editableIds = _collectTextFrameIds(child, true, true); } catch (eIds) {}
                 if (_isVisualMarkerLabelGroup(child)) {
@@ -3418,7 +3487,9 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 rendered++;
             }
         } catch (e) {}
-        try { rendered += _renderSiblingLabelBackdropGroups(grp, page); } catch (eSibling) {}
+        if (!EMIT_UNIFIED_INLINE_BADGE) {
+            try { rendered += _renderSiblingLabelBackdropGroups(grp, page); } catch (eSibling) {}
+        }
         return rendered;
     }
 
@@ -3721,12 +3792,21 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 try { editableTfIdsForGroup = _collectTextFrameIds(grp, true, true); } catch (e) {}
             }
 
+            // Stage 1 통합: 짧은 시각 라벨 그룹은 단일 inline_badge로 emit, 기존 sibling-backdrop/
+            // marker/shell 경로 전부 건너뜀(한 배지=한 entry).
+            var _unifiedBadge = EMIT_UNIFIED_INLINE_BADGE
+                    && (kind === "mixedGroup" || kind === "textComposite")
+                    && _isShortVisualLabelGroup(grp);
+
+            // 통합 모드에서는 per-pill label_backdrop 자체를 만들지 않는다(inline_badge가 배경 소유).
             var siblingLabelBackdropCount = 0;
-            if (kind === "mixedGroup" || kind === "textComposite") {
+            if (!EMIT_UNIFIED_INLINE_BADGE && (kind === "mixedGroup" || kind === "textComposite")) {
                 siblingLabelBackdropCount = _renderSiblingLabelBackdropGroups(grp, grpPage);
             }
 
-            if ((siblingLabelBackdropCount > 0
+            if (_unifiedBadge) {
+                _emitInlineBadge(grp, grpPage);
+            } else if ((siblingLabelBackdropCount > 0
                         && (_isLabelBackdropOnlyGroup(grp) || _isShortVisualLabelGroup(grp)))
                     || (_hasClaimedLabelBackdropItems(grp)
                         && (_hasOnlyClaimedLabelTextFrames(grp) || _editableVisibleTextFrameCount(grp) === 0))) {
@@ -5032,7 +5112,9 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                             containsEditableText: inlineCompleteMarker ? true : false,
                             placementAllowed: true,
                             editableTextFrameIds: inlineCompleteMarker ? inlineCompleteMarkerEditableIds : inlineHiddenTextFrameIds,
-                            reason: inlineCompleteMarker ? "visual_marker_label_indesign_png" : (_inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only")
+                            reason: EMIT_UNIFIED_INLINE_BADGE
+                                    ? (inlineCompleteMarker ? "inline_badge_baked" : (_inlineHasHiddenText ? "inline_badge" : "inline_graphic_only"))
+                                    : (inlineCompleteMarker ? "visual_marker_label_indesign_png" : (_inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only"))
                         }));
                     }
                 } catch (eRender) {}
