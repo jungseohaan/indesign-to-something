@@ -96,8 +96,8 @@ final class FrameTransformations {
         rect.createPos();
         rect.pos().treatAsCharAnd(false)
                 .affectLSpacingAnd(false)
-                .flowWithTextAnd(false)
-                .allowOverlapAnd(true)
+                .flowWithTextAnd(block.anchoredFlowWithText())
+                .allowOverlapAnd(!block.anchoredFlowWithText())
                 .holdAnchorAndSOAnd(false)
                 .vertRelToAnd(VertRelTo.PAPER)
                 .horzRelToAnd(HorzRelTo.PAPER)
@@ -189,8 +189,8 @@ final class FrameTransformations {
         rect.createPos();
         rect.pos().treatAsCharAnd(false)
                 .affectLSpacingAnd(false)
-                .flowWithTextAnd(false)
-                .allowOverlapAnd(true)
+                .flowWithTextAnd(block.anchoredFlowWithText())
+                .allowOverlapAnd(!block.anchoredFlowWithText())
                 .holdAnchorAndSOAnd(false)
                 .vertRelToAnd(VertRelTo.PAPER)
                 .horzRelToAnd(HorzRelTo.PAPER)

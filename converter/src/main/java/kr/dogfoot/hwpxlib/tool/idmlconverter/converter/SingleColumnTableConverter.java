@@ -110,8 +110,8 @@ final class SingleColumnTableConverter {
         table.createPos();
         table.pos().treatAsCharAnd(false)
                 .affectLSpacingAnd(false)
-                .flowWithTextAnd(false)
-                .allowOverlapAnd(true)
+                .flowWithTextAnd(block.anchoredFlowWithText())
+                .allowOverlapAnd(!block.anchoredFlowWithText())
                 .holdAnchorAndSOAnd(false)
                 .vertRelToAnd(VertRelTo.PAPER)
                 .horzRelToAnd(HorzRelTo.PAPER)

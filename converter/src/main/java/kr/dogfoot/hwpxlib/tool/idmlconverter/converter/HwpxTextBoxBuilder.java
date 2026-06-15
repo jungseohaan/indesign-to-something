@@ -485,8 +485,8 @@ public class HwpxTextBoxBuilder {
         rect.createPos();
         rect.pos().treatAsCharAnd(false)
                 .affectLSpacingAnd(false)
-                .flowWithTextAnd(false)
-                .allowOverlapAnd(true)
+                .flowWithTextAnd(block.anchoredFlowWithText())
+                .allowOverlapAnd(!block.anchoredFlowWithText())
                 .holdAnchorAndSOAnd(false)
                 .vertRelToAnd(VertRelTo.PAPER)
                 .horzRelToAnd(HorzRelTo.PAPER)
@@ -593,8 +593,8 @@ public class HwpxTextBoxBuilder {
         rect.createPos();
         rect.pos().treatAsCharAnd(false)
                 .affectLSpacingAnd(false)
-                .flowWithTextAnd(false)
-                .allowOverlapAnd(true)
+                .flowWithTextAnd(block.anchoredFlowWithText())
+                .allowOverlapAnd(!block.anchoredFlowWithText())
                 .holdAnchorAndSOAnd(false)
                 .vertRelToAnd(VertRelTo.PAPER)
                 .horzRelToAnd(HorzRelTo.PAPER)
@@ -673,8 +673,8 @@ public class HwpxTextBoxBuilder {
         rect.createPos();
         rect.pos().treatAsCharAnd(false)
                 .affectLSpacingAnd(false)
-                .flowWithTextAnd(false)
-                .allowOverlapAnd(true)
+                .flowWithTextAnd(block.anchoredFlowWithText())
+                .allowOverlapAnd(!block.anchoredFlowWithText())
                 .holdAnchorAndSOAnd(false)
                 .vertRelToAnd(VertRelTo.PAPER)
                 .horzRelToAnd(HorzRelTo.PAPER)

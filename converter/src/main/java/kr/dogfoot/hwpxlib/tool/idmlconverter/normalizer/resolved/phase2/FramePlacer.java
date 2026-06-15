@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.GroupedFlowStackPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
@@ -704,6 +705,9 @@ public final class FramePlacer {
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
             block.height(CoordinateConverter.pointsToHwpunits(h));
+            if (GroupedFlowStackPolicy.isFlowStackTitleTextFrame(ctx, tf)) {
+                block.anchoredFlowWithText(true);
+            }
             // 부모 Group이 Phase7 렌더 PNG로 배치되면 그 위에 올라가야 함.
             // Phase7은 zOrder=10000-pageItemIdx 로 역매핑하므로 동일한 방식으로 계산하여
             // 부모 PNG 바로 위에 배치한다.

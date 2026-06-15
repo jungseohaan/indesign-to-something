@@ -264,6 +264,9 @@ public class ASTSerializer {
         if (tf.noAutoLineWrap()) {
             first = writeBooleanField(sb, "noAutoLineWrap", true, first);
         }
+        if (tf.anchoredFlowWithText()) {
+            first = writeBooleanField(sb, "anchoredFlowWithText", true, first);
+        }
 
         // paragraphs
         if (tf.paragraphs() != null && !tf.paragraphs().isEmpty()) {
@@ -293,6 +296,9 @@ public class ASTSerializer {
         first = writeIntField(sb, "zOrder", table.zOrder(), first);
         if (table.flowWithText()) {
             first = writeBooleanField(sb, "flowWithText", true, first);
+        }
+        if (table.anchoredFlowWithText()) {
+            first = writeBooleanField(sb, "anchoredFlowWithText", true, first);
         }
         first = writeIntField(sb, "rowCount", table.rowCount(), first);
         first = writeIntField(sb, "colCount", table.colCount(), first);

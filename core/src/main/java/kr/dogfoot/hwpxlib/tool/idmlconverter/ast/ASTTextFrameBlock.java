@@ -62,6 +62,9 @@ public class ASTTextFrameBlock extends ASTBlock {
     // Phase 2가 non-editable inline TF를 플로팅 글상자로 전환한 경우 true.
     // HwpxTextBoxBuilder가 이 플래그를 보고 투명 DrawText 경로(hp:rect)로 라우팅.
     private boolean inlineToFloating;
+    // 페이지 좌표는 유지하지만 앵커 문단과 함께 이동해야 하는 플로팅 글상자.
+    // 인라인(treatAsChar=true)과 달리 원본의 page-level group stack 좌표를 보존한다.
+    private boolean anchoredFlowWithText;
 
     // composedLines 기반 분할: Story 내 문자 범위
     private int composedCharStart = -1;
@@ -177,6 +180,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean inlineToFloating() { return inlineToFloating; }
     public void inlineToFloating(boolean v) { this.inlineToFloating = v; }
+
+    public boolean anchoredFlowWithText() { return anchoredFlowWithText; }
+    public void anchoredFlowWithText(boolean v) { this.anchoredFlowWithText = v; }
 
     public boolean suppressParaLeftIndent() { return suppressParaLeftIndent; }
     public void suppressParaLeftIndent(boolean v) { this.suppressParaLeftIndent = v; }

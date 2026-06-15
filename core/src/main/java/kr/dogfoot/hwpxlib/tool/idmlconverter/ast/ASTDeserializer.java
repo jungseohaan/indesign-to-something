@@ -185,6 +185,7 @@ public class ASTDeserializer {
         if (o.has("strokeTint")) tf.strokeTint(getDouble(o, "strokeTint"));
         tf.fromGroup(getBool(o, "fromGroup"));
         tf.noAutoLineWrap(getBool(o, "noAutoLineWrap"));
+        tf.anchoredFlowWithText(getBool(o, "anchoredFlowWithText"));
 
         if (o.has("paragraphs")) {
             for (JsonElement e : o.getAsJsonArray("paragraphs")) {
@@ -206,6 +207,7 @@ public class ASTDeserializer {
         table.height(getLong(o, "height"));
         table.zOrder(getInt(o, "zOrder"));
         table.flowWithText(getBool(o, "flowWithText"));
+        table.anchoredFlowWithText(getBool(o, "anchoredFlowWithText"));
         table.rowCount(getInt(o, "rowCount"));
         table.colCount(getInt(o, "colCount"));
         table.appliedTableStyle(getString(o, "appliedTableStyle"));

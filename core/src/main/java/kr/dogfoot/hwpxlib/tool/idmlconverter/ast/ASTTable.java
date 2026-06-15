@@ -20,6 +20,7 @@ public class ASTTable extends ASTBlock {
     private long height;
     private int zOrder;
     private boolean flowWithText;
+    private boolean anchoredFlowWithText;
 
     // 테이블 스타일
     private String appliedTableStyle;
@@ -62,6 +63,9 @@ public class ASTTable extends ASTBlock {
 
     public boolean flowWithText() { return flowWithText; }
     public void flowWithText(boolean v) { this.flowWithText = v; }
+
+    public boolean anchoredFlowWithText() { return anchoredFlowWithText; }
+    public void anchoredFlowWithText(boolean v) { this.anchoredFlowWithText = v; }
 
     public String appliedTableStyle() { return appliedTableStyle; }
     public void appliedTableStyle(String v) { this.appliedTableStyle = v; }

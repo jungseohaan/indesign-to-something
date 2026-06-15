@@ -91,6 +91,18 @@ public class HwpxTableBuilder {
                     .horzAlignAnd(HorzAlign.LEFT)
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
+        } else if (astTable.anchoredFlowWithText()) {
+            table.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PAPER)
+                    .horzRelToAnd(HorzRelTo.PAPER)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(y)
+                    .horzOffset(x);
         } else {
             table.pos().treatAsCharAnd(false)
                     .affectLSpacingAnd(false)
@@ -295,6 +307,7 @@ public class HwpxTableBuilder {
         chunk.height(Math.max(1L, sourceRow.rowHeight()));
         chunk.zOrder(source.zOrder());
         chunk.flowWithText(source.flowWithText());
+        chunk.anchoredFlowWithText(source.anchoredFlowWithText());
         chunk.rowCount(1);
         chunk.colCount(source.colCount());
         chunk.appliedTableStyle(source.appliedTableStyle());

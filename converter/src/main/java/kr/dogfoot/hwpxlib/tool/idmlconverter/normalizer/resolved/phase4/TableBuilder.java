@@ -23,6 +23,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDispositio
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.GroupedFlowStackPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.SimpleButtonLabelInlineFactory;
@@ -270,6 +271,10 @@ public final class TableBuilder {
                 if (ctx.isAnchoredNestedTableSource(idmlTable.selfId())) {
                     astTable.flowWithText(true);
                 }
+                if (GroupedFlowStackPolicy.isFlowStackTableTextFrame(ctx, tf)
+                        || hasFlowStackTitleAboveTableBounds(ctx, tf, resolvedTableBounds, thisX, thisY, astTable)) {
+                    astTable.anchoredFlowWithText(true);
+                }
                 absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
 
                 report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
@@ -362,6 +367,10 @@ public final class TableBuilder {
                 if (ctx.isAnchoredNestedTableSource(idmlTable.selfId())) {
                     astTable.flowWithText(true);
                 }
+                if (GroupedFlowStackPolicy.isFlowStackTableTextFrame(ctx, tf)
+                        || hasFlowStackTitleAboveTableBounds(ctx, tf, resolvedTableBounds, thisX, thisY, astTable)) {
+                    astTable.anchoredFlowWithText(true);
+                }
                 absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
                 report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
                 completeVisibleTableOuterBorder(astTable);
@@ -381,6 +390,34 @@ public final class TableBuilder {
                 report.total++;
             }
         }
+    }
+
+    private static boolean hasFlowStackTitleAboveTableBounds(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            double[] resolvedTableBounds,
+            long tableX,
+            long tableY,
+            ASTTable table) {
+        if (ctx == null || tf == null || table == null) return false;
+        double top;
+        double left;
+        double bottom;
+        double right;
+        if (resolvedTableBounds != null && resolvedTableBounds.length >= 4 && ctx.resolvedData != null) {
+            double scale = ctx.resolvedData.scaleFactor();
+            top = resolvedTableBounds[0] * scale;
+            left = resolvedTableBounds[1] * scale;
+            bottom = resolvedTableBounds[2] * scale;
+            right = resolvedTableBounds[3] * scale;
+        } else {
+            top = CoordinateConverter.hwpunitsToPoints(tableY);
+            left = CoordinateConverter.hwpunitsToPoints(tableX);
+            bottom = top + CoordinateConverter.hwpunitsToPoints(table.height());
+            right = left + CoordinateConverter.hwpunitsToPoints(table.width());
+        }
+        return GroupedFlowStackPolicy.hasFlowStackTitleAboveBounds(
+                ctx, tf.pageIndex(), top, left, bottom, right);
     }
 
     private static long[] tableOwnerOrigin(ResolvedBuildContext ctx, ResolvedTextFrame tf, int pageIdx) {
@@ -805,6 +842,7 @@ public final class TableBuilder {
         out.y(src.y());
         out.zOrder(src.zOrder());
         out.flowWithText(src.flowWithText());
+        out.anchoredFlowWithText(src.anchoredFlowWithText());
         out.appliedTableStyle(src.appliedTableStyle());
         out.borderColor(src.borderColor());
         out.borderWidth(src.borderWidth());
@@ -1779,6 +1817,7 @@ public final class TableBuilder {
         newTable.y(original.y());
         newTable.zOrder(original.zOrder());
         newTable.flowWithText(original.flowWithText());
+        newTable.anchoredFlowWithText(original.anchoredFlowWithText());
         newTable.appliedTableStyle(original.appliedTableStyle());
         newTable.borderColor(original.borderColor());
         newTable.borderWidth(original.borderWidth());
