@@ -29,7 +29,7 @@ public class ResolvedData {
     private final Map<String, RenderedGroup> renderedImageFrameMap = new HashMap<>();  // DOM id → rendered image frame (PSD, AI 등)
     private final Map<String, RenderedGroup> childImageToGroupMap = new HashMap<>();  // 자식 이미지 DOM id → 부모 그룹 RenderedGroup
     private final Set<Integer> processedImageGroupIds = new HashSet<>();  // 이미 Figure로 변환된 그룹 렌더 ID
-    private Set<Integer> inlineObjectDomIds;                     // inline_object로 등록된 DOM id 집합 (Phase 7 조상 검사용)
+    private Set<Integer> inlineObjectDomIds;                     // inline_object로 등록된 DOM id 집합 (Stage 3 조상 검사용)
     private final List<FontMetricEntry> fontMetrics = new ArrayList<>();  // InDesign 폰트 메트릭
     private double scaleFactor = 2.8346;  // resolved 좌표 → pt 변환 스케일
     private final Map<String, FontMetricEntry> fontMetricMap = new HashMap<>();  // family → metric
@@ -1421,7 +1421,7 @@ public class ResolvedData {
     public void buildRenderedIdSet() {
         renderedExtIdmlIds = new HashSet<>();
 
-        // inline_object로 등록된 DOM id 집합 (FramePlacer 조상 검사 + Phase 7 skip용)
+        // inline_object로 등록된 DOM id 집합 (FramePlacer 조상 검사 + Stage 3 skip용)
         inlineObjectDomIds = new HashSet<>();
         for (RenderedGroup flt : renderedFloatingItems) {
             if ("inline_object".equals(flt.itemType()) || "inline_object".equals(flt.type())) {

@@ -966,8 +966,7 @@ public final class TableBuilder {
             // 장식 chrome이다. 억제하면 알약이 사라져 셀 텍스트만 남는다(구조도/개관 배지). 억제 제외 →
             // Phase 6/7이 셀 텍스트 뒤 backdrop으로 배치한다.
             if (isBadgeShellOwnedByTable(rg)) continue;
-            ctx.setRenderedDisposition(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED);
-            ctx.phase6PlacedIds.add(rg.id());
+            ctx.markRenderedVisualHandled(rg.id());
             if (ctx.debugAst && table != null) {
                 table.debugOrNew().note("table composite visual suppressed: rendered " + rg.id());
             }
@@ -1746,7 +1745,7 @@ public final class TableBuilder {
     /**
      * 테이블 셀에 포함된 인라인 그룹(tryInlineGroupAsBoxList가 [leftITF, rightITF]를 반환)이
      * 있으면 해당 컬럼을 2개로 분할하여 3컬럼 테이블로 재구성한다.
-     * 처리된 그룹 ID는 TEXT_BLOCK_PLACED로 등록하여 Phase 7 중복 배치를 방지한다.
+     * 처리된 그룹 ID는 TEXT_BLOCK_PLACED로 등록하여 Stage 3 visual 중복 배치를 방지한다.
      *
      * @return 재구성된 ASTTable, 또는 확장 불필요 시 null
      */
@@ -1815,8 +1814,8 @@ public final class TableBuilder {
 
         if (expansionMap.isEmpty()) return null;
 
-        // Phase 7 중복 배치 방지: 부모 그룹 ID + 같은 파일을 공유하는 TF ID + 자손 TF ID 모두 등록
-        suppressAllDescendantsFromPhase7(ctx, suppressGroupIds);
+        // Stage 3 visual 중복 배치 방지: 부모 그룹 ID + 같은 파일을 공유하는 TF ID + 자손 TF ID 모두 등록
+        markAllDescendantsVisualHandled(ctx, suppressGroupIds);
 
         // 확장 컬럼을 2개로 분할한 새 컬럼 너비 목록
         List<Long> origColWidths = original.columnWidths();
@@ -2580,8 +2579,7 @@ public final class TableBuilder {
     }
 
     private static void markPageItemHandled(ResolvedBuildContext ctx, int itemId) {
-        ctx.setRenderedDisposition(itemId, FrameDisposition.TEXT_BLOCK_PLACED);
-        ctx.phase6PlacedIds.add(itemId);
+        ctx.markRenderedVisualHandled(itemId);
     }
 
     private static void suppressRenderedGroupsCoveredByAbsorbedCellBackgrounds(
@@ -2603,8 +2601,7 @@ public final class TableBuilder {
             if (!containsAbsorbed) continue;
 
             if (shouldSuppressRenderedGroupAfterCellAbsorption(ctx, rg, absorbedItemIds, pageItemById)) {
-                ctx.setRenderedDisposition(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED);
-                ctx.phase6PlacedIds.add(rg.id());
+                ctx.markRenderedVisualHandled(rg.id());
             }
         }
     }
@@ -2690,11 +2687,10 @@ public final class TableBuilder {
     }
 
     private static void markPageObjectHandled(ResolvedBuildContext ctx, RenderedGroup rg) {
-        ctx.setRenderedDisposition(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED);
-        ctx.phase6PlacedIds.add(rg.id());
+        ctx.markRenderedVisualHandled(rg.id());
         Set<Integer> ids = new HashSet<>();
         ids.add(rg.id());
-        suppressAllDescendantsFromPhase7(ctx, ids);
+        markAllDescendantsVisualHandled(ctx, ids);
     }
 
     private static String blendColorWithWhite(String hex, double fraction) {
@@ -2717,7 +2713,7 @@ public final class TableBuilder {
     }
 
     /**
-     * 그룹 ID 집합과 그 모든 자손을 Phase 7에서 처리하지 않도록 등록.
+     * 그룹 ID 집합과 그 모든 자손을 Stage 3 visual executor에서 중복 처리하지 않도록 등록.
      *
      * 처리 순서:
      * 1) groupIds 자체를 TEXT_BLOCK_PLACED로 등록
@@ -2725,12 +2721,12 @@ public final class TableBuilder {
      *    같은 파일을 공유하는 TF(형제 TF) 도 suppressed
      * 3) pageItems childIds BFS로 그룹 자손 전체 수집 → suppressed
      */
-    private static void suppressAllDescendantsFromPhase7(
+    private static void markAllDescendantsVisualHandled(
             ResolvedBuildContext ctx, Set<Integer> groupIds) {
         if (ctx.renderedItemDispositions == null || ctx.resolvedData == null) return;
 
         // Step 1: 부모 그룹 직접 등록
-        for (int id : groupIds) ctx.setRenderedDisposition(id, FrameDisposition.TEXT_BLOCK_PLACED);
+        for (int id : groupIds) ctx.markRenderedVisualHandled(id);
 
         // Step 2: 공유 PNG 파일로 렌더된 floating 항목 억제
         Set<String> sharedFiles = new HashSet<>();
@@ -2742,7 +2738,7 @@ public final class TableBuilder {
         if (!sharedFiles.isEmpty()) {
             for (RenderedGroup rt : ctx.resolvedData.allRenderedFloatingItems()) {
                 if (rt.file() != null && sharedFiles.contains(rt.file())) {
-                    ctx.setRenderedDisposition(rt.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+                    ctx.markRenderedVisualHandled(rt.id());
                 }
             }
         }
@@ -2763,7 +2759,7 @@ public final class TableBuilder {
             if (children == null) continue;
             for (int child : children) {
                 if (visited.add(child)) {
-                    ctx.setRenderedDisposition(child, FrameDisposition.TEXT_BLOCK_PLACED);
+                    ctx.markRenderedVisualHandled(child);
                     queue.add(child);
                 }
             }

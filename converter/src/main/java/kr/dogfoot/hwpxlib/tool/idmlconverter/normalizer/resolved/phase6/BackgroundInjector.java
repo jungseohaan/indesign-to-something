@@ -8,13 +8,21 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.VisualSourcePolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.PreparedVisualImage;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualCropper;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualLayeringRules;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualOverlapZOrderPlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualOverflowPlacer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualPlacementExecutor;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualPlacementPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualPlacementPlanBuilder;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualPngHeader;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualSyntheticLinePlacer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualZOrderPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
@@ -22,7 +30,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -68,11 +75,11 @@ public final class BackgroundInjector {
         }
 
         // (SPEC-036 (가)) childOfGroup(부모 PNG에 구워진 자식) 억제는 Stage 2.5 refinement가
-        // 비보호 항목을 plan(DROP_VISUAL)으로 확정 + 전체를 phase6PlacedIds 선등록.
+        // 비보호 항목을 plan(DROP_VISUAL)으로 확정한다.
         // → 아래 VisualPlacementResolver.planRejection이 처리하므로 여기서 별도 체크 불필요.
 
         // (SPEC-036 (가)) coveredByInlineObjects(inline_object 소유 커버리지) 억제도 Stage 2.5
-        // refinement가 plan(DROP_VISUAL) 확정 + phase6PlacedIds 선등록 → 아래 별도 체크 불필요.
+        // refinement가 plan(DROP_VISUAL) 확정 → 아래 별도 체크 불필요.
         Set<Integer> completeInlineSimpleButtonLabels = ctx.inlineCompleteSimpleButtonLabelIds;
         Set<Integer> inlineEditableLabelShells = ctx.inlineEditableLabelShellIds;
 
@@ -84,31 +91,22 @@ public final class BackgroundInjector {
             if (!isPageObject(rg) && !conceptDiagramInlineShell) {
                 continue;
             }
-            // FramePlacer가 네이티브 fill로 흡수한 배경 도형 → floating PNG 배치 금지(본문 가림 방지).
-            if (ctx.nativeFillAbsorbedIds.contains(rg.id())) {
-                ctx.phase6PlacedIds.add(rg.id());
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_NATIVE_FILL_ABSORBED",
-                        "background shape is painted as native cell fill by FramePlacer");
-                continue;
-            }
             // (SPEC-036 (가)) 셀 인라인 임베드 배지의 floating PNG 억제는 Stage 2.5 refinement가
             // plan(DROP_VISUAL)으로 확정 → 위 VisualPlacementResolver.planRejection이 처리한다.
-            // SPEC-036: plan 권위 억제 판정 (Phase 6/7 공용 VisualPlacementResolver로 통합)
-            VisualPlacementResolver.PlanRejection planRej = VisualPlacementResolver.planRejection(ctx, rg);
-            if (planRej != null) {
-                if (planRej.markPhase6Placed) ctx.phase6PlacedIds.add(rg.id());
-                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", planRej.code, planRej.detail);
+            // SPEC-036: Phase 6 초기 억제 판정은 VisualPlacementResolver로 통합한다.
+            VisualPlacementResolver.PlanRejection initialRej = VisualPlacementResolver.phase6InitialRejection(ctx, rg);
+            if (initialRej != null) {
+                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", initialRej.code, initialRej.detail);
                 continue;
             }
             if (shouldDecomposeToEditableLabelShell(rg, editableLabelShellIds, idToRendered)) {
-                ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_EDITABLE_LABEL_PARENT",
                         "editable label shell is placed from a tighter child render");
                 continue;
             }
-            if (ctx.isRenderedDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) {
-                ctx.phase6PlacedIds.add(rg.id());
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_RENDERED_DISPOSED", "rendered item already handled");
+            VisualPlacementResolver.PlanRejection disposedRej = VisualPlacementResolver.phase6DisposedRejection(ctx, rg);
+            if (disposedRej != null) {
+                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", disposedRej.code, disposedRej.detail);
                 continue;
             }
             boolean conceptDiagramLabelShell = conceptDiagramLabelShellIds.contains(rg.id());
@@ -121,7 +119,6 @@ public final class BackgroundInjector {
             if (isPageObject(rg)
                     && completeInlineSimpleButtonLabels.contains(rg.id())
                     && isCompletePngSimpleButtonLabel(ctx, rg)) {
-                ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_COMPLETE_LABEL",
                         "complete simple button label is owned by inline object");
                 continue;
@@ -129,33 +126,18 @@ public final class BackgroundInjector {
             if (isPageObject(rg)
                     && inlineEditableLabelShells.contains(rg.id())
                     && isInlineEditableLabelShellRender(rg)) {
-                ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_EDITABLE_LABEL_SHELL",
                         "editable label shell is owned by inline text frame");
                 continue;
             }
             // (SPEC-036 (가)) SKIP_CHILD_OF_GROUP / SKIP_INLINE_COVERAGE / SKIP_INLINE_OBJECT은
             // Stage 2.5 refinement가 plan(DROP_VISUAL)으로 확정 → 위 planRejection이 처리.
-            // 텍스트-숨김 배지 셸(inline_badge / mixed_group_text_hidden / *_text_hidden_shell 등으로
-            // 그래픽엔 텍스트가 없고 편집 텍스트는 별도 TF로 렌더됨)은 그래픽을 "뒤에" 깔아야 하므로
-            // 소유권 스킵을 통과시킨다(스킵하면 알약/셸 그래픽이 빠져 배지가 맨 텍스트로 보임).
-            boolean _badgeShell = isBadgeShellGraphicBehind(rg);
-            if (!_badgeShell && ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg) && !protectedEditableLabelShell) {
-                ctx.phase6PlacedIds.add(rg.id());
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_VISUAL_LABEL_TEXT_EDITABLE", "text label kept editable");
-                continue;
-            }
-            if (!_badgeShell && rg.shouldSkipByOwnership()) {
-                ctx.phase6PlacedIds.add(rg.id());
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OWNERSHIP", "render ownership says text is not hidden");
-                continue;
-            }
-            // childIds 검사
-            boolean planKeepsFloatingVisual = ctx.hasOwnershipPlan(rg)
-                    && ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg);
-            if (!planKeepsFloatingVisual && shouldSkipByChildPolicy(ctx, rg) && !protectedEditableLabelShell) {
-                ctx.phase6PlacedIds.add(rg.id());
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_CHILD_POLICY", "child policy suppresses render");
+            VisualPlacementResolver.PlanRejection legacyOwnershipRej =
+                    VisualPlacementResolver.phase6LegacyOwnershipRejection(
+                            ctx, rg, protectedEditableLabelShell);
+            if (legacyOwnershipRej != null) {
+                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
+                        legacyOwnershipRej.code, legacyOwnershipRej.detail);
                 continue;
             }
             if (!processedDomPageKeys.add(rg.id() + ":" + rg.pageIndex())) {
@@ -188,7 +170,6 @@ public final class BackgroundInjector {
             bounds = normalizeInlineSpreadBoundsToPage(ctx, pageIdx, rg, bounds);
 
             if (tryAbsorbTextEmphasisBackdrop(ctx, sections, rg, bounds)) {
-                ctx.phase6PlacedIds.add(rg.id());
                 ctx.recordRenderedDecision(rg, "Phase6", "ABSORB_TEXT_EMPHASIS_BACKDROP",
                         "thin text backdrop converted to HWPX character shading");
                 continue;
@@ -234,7 +215,16 @@ public final class BackgroundInjector {
             double visRight = Math.min(rawRight, pageWidthMm);
             double visBottom = Math.min(rawBottom, pageHeightMm);
             if (visLeft >= visRight || visTop >= visBottom) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OUTSIDE_PAGE", "no visible page intersection");
+                int overflowPlaced = VisualOverflowPlacer.placeSpreadOverflowCopies(
+                        ctx, sections, rg, pageIdx,
+                        rawLeft, rawTop, rawRight, rawBottom, fullW, fullH,
+                        pageWidthMm, originalImageData, ctx.visualLayerByOwnershipPlan(rg));
+                if (overflowPlaced > 0) {
+                    ctx.recordRenderedDecision(rg, "Phase6", "PLACE_OUTSIDE_PAGE_OVERFLOW",
+                            "no main page intersection, but spread overflow was placed on adjacent page");
+                } else {
+                    ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OUTSIDE_PAGE", "no visible page intersection");
+                }
                 continue;
             }
             double minEdgeStripVisibleWidth = minimumVisibleWidthForMasterEdgeStrip(
@@ -257,14 +247,12 @@ public final class BackgroundInjector {
             boolean isBackgroundLike = isFullPageBg || (isTextFrameVisualShell && coversPageByArea);
             boolean isContainerVisualShell = !isBackgroundLike
                     && (isRenderedContainerShell(rg) || isTextFrameVisualShell);
-            boolean isInferredTextFrameVisualShell = inferredTextFrameVisualShellZOrder(ctx, rg) >= 0;
+            boolean isInferredTextFrameVisualShell =
+                    VisualZOrderPlanner.inferredTextFrameVisualShellZOrder(ctx, rg) >= 0;
             String visualLayer = ctx.visualLayerByOwnershipPlan(rg);
             boolean planKeepsForegroundZ = isPlanForegroundVisualLayer(visualLayer);
 
-            int pixelW = 0, pixelH = 0;
-            Double stripCropLeftOverride = null;
-            Double stripCropWidthOverride = null;
-            boolean pageAnchoredStripCrop = false;
+            PreparedVisualImage prepared = new PreparedVisualImage(imageData);
             boolean shouldCompositeTfInlineVisuals = shouldCompositeTfInlineVisuals(rg);
             boolean keepPlannedContainerBackdropFill =
                     ("CONTAINER_BACKDROP".equals(visualLayer) || "CONTAINER_FACE".equals(visualLayer))
@@ -284,73 +272,57 @@ public final class BackgroundInjector {
                     || needsAlphaCrop
                     || needsPageCrop;
             try {
-                BufferedImage img = needsFullImageDecode ? loadImageForPlacement(ctx, rg, imageData) : null;
+                BufferedImage img = needsFullImageDecode ? loadImageForPlacement(ctx, rg, prepared.imageData) : null;
                 if (img == null && !needsFullImageDecode) {
-                    int[] dims = readPngDimensions(imageData);
+                    int[] dims = VisualPngHeader.readDimensions(prepared.imageData);
                     if (dims != null) {
-                        pixelW = dims[0];
-                        pixelH = dims[1];
+                        prepared.pixelW = dims[0];
+                        prepared.pixelH = dims[1];
                         ConversionTiming.addCounter("phase6.pngBytes.headerDimensionReads", 1);
                     }
                 }
                 if (img != null && shouldCompositeTfInlineVisuals) {
-                    imageData = encodePng(img);
+                    prepared.imageData = VisualCropper.encodePng(img);
                 }
                 if (img != null
                         && !planKeepsForegroundZ
                         && !keepPlannedContainerBackdropFill
                         && isContainerVisualShell
                         && !isInferredTextFrameVisualShell) {
-                    BufferedImage transparentShell = knockOutPaperLikeFill(img);
+                    BufferedImage transparentShell = VisualCropper.knockOutPaperLikeFill(img);
                     if (transparentShell != img) {
-                        imageData = encodePng(transparentShell);
+                        prepared.imageData = VisualCropper.encodePng(transparentShell);
                         img.flush();
                         img = transparentShell;
                     }
                 }
                 // whiteStroke: PNG가 흑색 획으로 내보낸 것 → 흰색으로 반전
                 if (img != null && rg.isWhiteStroke()) {
-                    BufferedImage inv = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
-                    for (int iy = 0; iy < img.getHeight(); iy++) {
-                        for (int ix = 0; ix < img.getWidth(); ix++) {
-                            int argb = img.getRGB(ix, iy);
-                            int a = (argb >> 24) & 0xFF;
-                            if (a > 0) {
-                                int r = (argb >> 16) & 0xFF;
-                                int g = (argb >> 8) & 0xFF;
-                                int b = argb & 0xFF;
-                                argb = (a << 24) | ((255 - r) << 16) | ((255 - g) << 8) | (255 - b);
-                            }
-                            inv.setRGB(ix, iy, argb);
-                        }
-                    }
+                    BufferedImage inv = VisualCropper.invertVisiblePixels(img);
                     img.flush();
                     img = inv;
                     // imageData를 반전 이미지로 업데이트 (crop 없을 때도 흰색이 적용되도록)
                     try {
-                        java.io.ByteArrayOutputStream invBaos = new java.io.ByteArrayOutputStream();
-                        ImageIO.write(img, "png", invBaos);
-                        imageData = invBaos.toByteArray();
+                        prepared.imageData = VisualCropper.encodePng(img);
                     } catch (Exception ignored2) {}
                 }
                 if (img != null) {
                     if (needsAlphaCrop) {
-                        int[] alphaBounds = alphaBounds(img);
-                        if (alphaBounds != null && shouldApplyAlphaCrop(img, alphaBounds)) {
-                            int pxX = alphaBounds[0];
-                            int pxY = alphaBounds[1];
-                            int pxW = alphaBounds[2];
-                            int pxH = alphaBounds[3];
+                        VisualCropper.AlphaCropResult alphaCrop = VisualCropper.alphaCrop(img);
+                        if (alphaCrop != null) {
+                            int pxX = alphaCrop.pxX;
+                            int pxY = alphaCrop.pxY;
+                            int pxW = alphaCrop.pxW;
+                            int pxH = alphaCrop.pxH;
                             double cropLeft = rawLeft + (double) pxX / (double) img.getWidth() * fullW;
                             double cropTop = rawTop + (double) pxY / (double) img.getHeight() * fullH;
                             double cropRight = rawLeft + (double) (pxX + pxW) / (double) img.getWidth() * fullW;
                             double cropBottom = rawTop + (double) (pxY + pxH) / (double) img.getHeight() * fullH;
-                            BufferedImage cropped = img.getSubimage(pxX, pxY, pxW, pxH);
-                            imageData = encodePng(cropped);
-                            pixelW = cropped.getWidth();
-                            pixelH = cropped.getHeight();
+                            prepared.imageData = alphaCrop.imageData;
+                            prepared.pixelW = alphaCrop.image.getWidth();
+                            prepared.pixelH = alphaCrop.image.getHeight();
                             img.flush();
-                            img = cropped;
+                            img = alphaCrop.image;
 
                             rawLeft = cropLeft;
                             rawTop = cropTop;
@@ -383,65 +355,27 @@ public final class BackgroundInjector {
                                 || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5))
                             || (hasCropSourceBounds && cropRefW > 1.0 && cropRefH > 1.0);
                     if (needsCrop) {
-                        pageAnchoredStripCrop = !hasCropSourceBounds && shouldAnchorStripCropToPage(
-                                rg, rawLeft, rawRight, rawTop, rawBottom, pageWidthMm, pageHeightMm);
-                        int[] stripRun = pageAnchoredStripCrop
-                                ? edgeAlphaRun(img, pageIdx)
-                                : null;
-                        int pxX;
-                        int pxY;
-                        int pxW;
-                        int pxH;
-                        if (stripRun != null) {
-                            pxX = stripRun[0];
-                            pxY = 0;
-                            pxW = stripRun[1] - stripRun[0] + 1;
-                            pxH = img.getHeight();
-                            stripCropLeftOverride = (double) pxX / (double) img.getWidth() * pageWidthMm;
-                            stripCropWidthOverride = (double) pxW / (double) img.getWidth() * pageWidthMm;
-                        } else {
-                            pxX = pageAnchoredStripCrop
-                                    ? 0
-                                    : (int) Math.round((visLeft - cropRefLeft) / cropRefW * img.getWidth());
-                            pxY = (int) Math.round((visTop - cropRefTop) / cropRefH * img.getHeight());
-                            pxW = pageAnchoredStripCrop
-                                    ? (int) Math.round((visRight - visLeft) / fullW * img.getWidth())
-                                    : (int) Math.round((visRight - cropRefLeft) / cropRefW * img.getWidth()) - pxX;
-                            pxH = (int) Math.round((visBottom - cropRefTop) / cropRefH * img.getHeight()) - pxY;
-                            if (hasCropSourceBounds && isMasterEdgeStrip(rg, pageWidthMm)
-                                    && cropRefLeft < -0.5 && Math.abs(visLeft) < 0.5
-                                    && visRight > rawRight + 0.1) {
-                                int desiredPxW = (int) Math.round((visRight - visLeft) / cropRefW * img.getWidth());
-                                desiredPxW = Math.max(1, Math.min(img.getWidth(), desiredPxW));
-                                pxX = Math.max(0, img.getWidth() - desiredPxW);
-                                pxW = img.getWidth() - pxX;
-                            } else if (hasCropSourceBounds && isMasterEdgeStrip(rg, pageWidthMm)
-                                    && cropRefRight > pageWidthMm + 0.5 && Math.abs(visRight - pageWidthMm) < 0.5
-                                    && visLeft < rawLeft - 0.1) {
-                                int desiredPxW = (int) Math.round((visRight - visLeft) / cropRefW * img.getWidth());
-                                pxX = 0;
-                                pxW = Math.max(1, Math.min(img.getWidth(), desiredPxW));
+                        VisualCropper.PageCropPlan cropPlan = VisualCropper.pageCropPlan(
+                                rg, img, pageIdx, hasCropSourceBounds,
+                                rawLeft, rawRight, rawTop, rawBottom,
+                                cropRefLeft, cropRefTop, cropRefRight, cropRefW, cropRefH,
+                                visLeft, visTop, visRight, visBottom,
+                                fullW, pageWidthMm, pageHeightMm);
+                        prepared.pageAnchoredStripCrop = cropPlan.pageAnchoredStripCrop;
+                        prepared.stripCropLeftOverride = cropPlan.stripCropLeftOverride;
+                        prepared.stripCropWidthOverride = cropPlan.stripCropWidthOverride;
+                        VisualCropper.PageCropResult pageCrop = VisualCropper.pageCrop(
+                                img, cropPlan.pxX, cropPlan.pxY, cropPlan.pxW, cropPlan.pxH);
+                        if (pageCrop != null) {
+                            if (pageCrop.imageData != null) {
+                                prepared.imageData = pageCrop.imageData;
                             }
-                        }
-                        pxX = Math.max(0, Math.min(pxX, img.getWidth() - 1));
-                        pxY = Math.max(0, Math.min(pxY, img.getHeight() - 1));
-                        pxW = Math.max(1, Math.min(img.getWidth() - pxX, pxW));
-                        pxH = Math.max(1, Math.min(img.getHeight() - pxY, pxH));
-                        try {
-                            BufferedImage cropped = img.getSubimage(pxX, pxY, pxW, pxH);
-                            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-                            ImageIO.write(cropped, "png", baos);
-                            imageData = baos.toByteArray();
-                            pixelW = cropped.getWidth();
-                            pixelH = cropped.getHeight();
-                            cropped.flush();
-                        } catch (Exception ignored2) {
-                            pixelW = img.getWidth();
-                            pixelH = img.getHeight();
+                            prepared.pixelW = pageCrop.pixelW;
+                            prepared.pixelH = pageCrop.pixelH;
                         }
                     } else {
-                        pixelW = img.getWidth();
-                        pixelH = img.getHeight();
+                        prepared.pixelW = img.getWidth();
+                        prepared.pixelH = img.getHeight();
                     }
                     img.flush();
                 }
@@ -452,9 +386,9 @@ public final class BackgroundInjector {
             if (rg.isWhiteStroke() && !((fullW > 1.0 && fullH > 1.0)
                     && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
                         || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5))
-                    && pixelW > 0 && pixelH > 0) {
-                double pngWidthMm = pixelW * 25.4 / 220.0;
-                double pngHeightMm = pixelH * 25.4 / 220.0;
+                    && prepared.pixelW > 0 && prepared.pixelH > 0) {
+                double pngWidthMm = prepared.pixelW * 25.4 / 220.0;
+                double pngHeightMm = prepared.pixelH * 25.4 / 220.0;
                 double storedW = visRight - visLeft;
                 double storedH = visBottom - visTop;
                 if (pngWidthMm > storedW + 1.0) {
@@ -469,10 +403,10 @@ public final class BackgroundInjector {
                 }
             }
 
-            if (shouldPreserveVisualLabelAspect(rg, pixelW, pixelH)) {
+            if (shouldPreserveVisualLabelAspect(rg, prepared.pixelW, prepared.pixelH)) {
                 double storedW = visRight - visLeft;
                 double storedH = visBottom - visTop;
-                double imageRatio = (double) pixelW / (double) pixelH;
+                double imageRatio = (double) prepared.pixelW / (double) prepared.pixelH;
                 double storedRatio = storedW / storedH;
                 if (storedW > 0 && storedH > 0 && imageRatio > 0
                         && storedRatio > imageRatio * 1.10) {
@@ -486,254 +420,35 @@ public final class BackgroundInjector {
                 }
             }
 
-            long x = CoordinateConverter.pointsToHwpunits(visLeft * ctx.scaleFactor);
-            long y = CoordinateConverter.pointsToHwpunits(visTop * ctx.scaleFactor);
-            long w = CoordinateConverter.pointsToHwpunits((visRight - visLeft) * ctx.scaleFactor);
-            long h = CoordinateConverter.pointsToHwpunits((visBottom - visTop) * ctx.scaleFactor);
-            if (stripCropLeftOverride != null && stripCropWidthOverride != null) {
-                x = CoordinateConverter.pointsToHwpunits(stripCropLeftOverride * ctx.scaleFactor);
-                w = CoordinateConverter.pointsToHwpunits(stripCropWidthOverride * ctx.scaleFactor);
+            VisualPlacementPlan placementPlan = VisualPlacementPlanBuilder.build(
+                    ctx,
+                    sections.get(pageIdx),
+                    floatingItems,
+                    rg,
+                    prepared,
+                    visLeft,
+                    visTop,
+                    visRight,
+                    visBottom,
+                    visualLayer,
+                    isBackgroundLike,
+                    planKeepsForegroundZ,
+                    isContainerVisualShell,
+                    isInferredTextFrameVisualShell,
+                    isTextFrameVisualShell);
+            if (placementPlan == null || !placementPlan.hasPositiveSize()) continue;
+
+            VisualPlacementExecutor.PlacementResult placementResult = VisualPlacementExecutor.place(
+                    ctx, sections.get(pageIdx), rg, prepared, placementPlan);
+            if (placementResult.textShellPlaced) {
+                continue;
             }
 
-            if (w <= 0 || h <= 0) continue;
-
-            ASTFigure fig = new ASTFigure();
-            fig.x(x);
-            fig.y(y);
-            fig.width(w);
-            fig.height(h);
-            fig.imageData(imageData);
-            String fmt = rg.imageFormat();
-            fig.imageFormat((fmt != null && !fmt.isEmpty()) ? fmt : "png");
-            fig.pixelWidth(pixelW);
-            fig.pixelHeight(pixelH);
-            // 페이지 전체를 덮는 배경 항목 → zOrder=0 (최하단 레이어)
-            // 기준: rawLeft≤1mm, rawTop≤1mm, rawBottom≥(pageHeight-1mm) — 페이지 전체 커버
-            // 장식/부분 항목 → zOrder=5 (배경 위에 표시)
-            // 페이지 배경 판별: 블리드 여유(최대 10mm) 허용 + 면적이 페이지 30% 이상이면 배경으로 간주.
-            // graphic_3357처럼 페이지 높이의 일부만 덮는 스프레드 배경 이미지도 포함하기 위해 면적 조건 추가.
-            boolean isTextFrameBackdrop = inferredTextLineBackdropZOrder(ctx, rg) >= 0;
-            boolean isEditableLabelShell = isEditableLabelShellCandidate(rg);
-            boolean isTextOwnedVisualShell = isTextOwnedVisualShell(rg) && !isEditableLabelShell;
-            boolean isTextOwnedRenderedContent = isTextOwnedRenderedContent(rg);
-            int resolvedZ = isBackgroundLike
-                    ? 0
-                    : Math.max(5, effectiveZOrder(ctx, rg));
-            if (stripCropLeftOverride != null && stripCropWidthOverride != null) {
-                resolvedZ = Math.max(resolvedZ, 900);
-            }
-            if (isCompletePngSimpleButtonLabel(ctx, rg)) {
-                resolvedZ = Math.max(resolvedZ,
-                        foregroundMarkerZOrder(sections.get(pageIdx), x, y, w, h, resolvedZ));
-            }
-            boolean demotedBehindForeground = false;
-            if (!planKeepsForegroundZ) {
-                int containerAdjustedZ = containerShellZOrderBehindRenderedContent(ctx, floatingItems, rg, resolvedZ);
-                if (containerAdjustedZ < resolvedZ) {
-                    resolvedZ = containerAdjustedZ;
-                    demotedBehindForeground = true;
-                }
-            }
-            if (!planKeepsForegroundZ
-                    && !isBackgroundLike && !isTextFrameBackdrop
-                    && !isTextOwnedVisualShell && !isTextOwnedRenderedContent
-                    && !isEditableLabelShell
-                    && !isCompletePngSimpleButtonLabel(ctx, rg)) {
-                int adjustedZ = foregroundOverlapShellZOrder(sections.get(pageIdx), rg, x, y, w, h, resolvedZ);
-                demotedBehindForeground = demotedBehindForeground || adjustedZ < resolvedZ;
-                resolvedZ = adjustedZ;
-            }
-            boolean isPaperOnlyContainerShell = isPaperOnlyContainerShell(ctx, rg);
-            if (!planKeepsForegroundZ
-                    && isContainerVisualShell
-                    && !isInferredTextFrameVisualShell
-                    && (!rg.zOrderKnown() || isPaperOnlyContainerShell)) {
-                resolvedZ = Math.max(1, Math.min(resolvedZ, 4));
-            }
-            // 텍스트-숨김 배지 셸 그래픽(텍스트 제거됨)은 별도 배치되는 편집 텍스트프레임 "뒤"에 깔린다.
-            boolean _inlineBadgeGraphic = isBadgeShellGraphicBehind(rg);
-            if (_inlineBadgeGraphic) resolvedZ = 1;
-            fig.zOrder(resolvedZ);
-            boolean keepShellInFrontLayer = isContainerVisualShell
-                    || (isTextFrameVisualShell && !isBackgroundLike);
-            if (visualLayer != null) {
-                fig.visualLayer(visualLayer);
-            }
-            Boolean planInFrontLayer = ctx.inFrontLayerByOwnershipPlan(rg);
-            fig.fromGroup(_inlineBadgeGraphic ? false : (planInFrontLayer != null
-                    ? planInFrontLayer
-                    : keepShellInFrontLayer
-                    || !(isBackgroundLike || isTextFrameBackdrop || isTextOwnedVisualShell
-                    || demotedBehindForeground)));
-            fig.sourceId("page_obj_" + rg.id());
-
-            // BEHIND_TEXT 항목은 XML 순서상 앞에 올수록 더 아래 레이어 → addBlockAtFront
-            sections.get(pageIdx).addBlockAtFront(fig);
-            ctx.phase6PlacedIds.add(rg.id());
-            ctx.recordRenderedDecision(rg, "Phase6", "PLACE", "placed as ASTFigure");
-
-            // 스프레드를 가로질러 다음 페이지로 넘치는 경우: 우측 반을 다음 페이지에 별도 배치
-            // 얇은 master/haseera strip은 각 페이지별 렌더 항목이 따로 있으므로
-            // neighbor overflow를 만들면 반대쪽 페이지 placeholder(PB 등)가 중복 배치된다.
-            boolean overflowsRight = !pageAnchoredStripCrop
-                    && rawRight > pageWidthMm + 10.0 && pageIdx + 1 < sections.size();
-            if (overflowsRight) {
-                int nextPageIdx = pageIdx + 1;
-                double nextPageWidthMm = 1e9, nextPageHeightMm = 1e9;
-                if (ctx.resolvedData.pages() != null && nextPageIdx < ctx.resolvedData.pages().size()) {
-                    double[] npB = ctx.resolvedData.pages().get(nextPageIdx).bounds();
-                    if (npB != null && npB.length >= 4) {
-                        nextPageWidthMm = (npB[3] - npB[1]) / ctx.scaleFactor;
-                        nextPageHeightMm = (npB[2] - npB[0]) / ctx.scaleFactor;
-                    }
-                }
-                // 다음 페이지 상대 좌표 (수평 스프레드: X에서 현재 페이지 폭만큼 뺌)
-                double nextVisLeft = Math.max(0.0, rawLeft - pageWidthMm);
-                double nextVisTop = Math.max(0.0, rawTop);
-                double nextVisRight = Math.min(rawRight - pageWidthMm, nextPageWidthMm);
-                double nextVisBottom = Math.min(rawBottom, nextPageHeightMm);
-                if (nextVisLeft < nextVisRight && nextVisTop < nextVisBottom) {
-                    byte[] overflowData = originalImageData;
-                    if (overflowData != null) {
-                        int ovPixelW = 0, ovPixelH = 0;
-                        try {
-                            BufferedImage ovImg = decodePngBytes(overflowData);
-                            if (ovImg != null) {
-                                // 다음 페이지 가시 영역을 page-0 좌표계로 변환하여 크롭
-                                double cropLeft = nextVisLeft + pageWidthMm;
-                                double cropTop = nextVisTop;
-                                double cropRight = nextVisRight + pageWidthMm;
-                                double cropBottom = nextVisBottom;
-                                int pxX2 = (int) Math.round((cropLeft - rawLeft) / fullW * ovImg.getWidth());
-                                int pxY2 = (int) Math.round((cropTop - rawTop) / fullH * ovImg.getHeight());
-                                int pxW2 = (int) Math.round((cropRight - rawLeft) / fullW * ovImg.getWidth()) - pxX2;
-                                int pxH2 = (int) Math.round((cropBottom - rawTop) / fullH * ovImg.getHeight()) - pxY2;
-                                pxX2 = Math.max(0, Math.min(pxX2, ovImg.getWidth() - 1));
-                                pxY2 = Math.max(0, Math.min(pxY2, ovImg.getHeight() - 1));
-                                pxW2 = Math.max(1, Math.min(ovImg.getWidth() - pxX2, pxW2));
-                                pxH2 = Math.max(1, Math.min(ovImg.getHeight() - pxY2, pxH2));
-                                try {
-                                    BufferedImage ovCropped = ovImg.getSubimage(pxX2, pxY2, pxW2, pxH2);
-                                    java.io.ByteArrayOutputStream baos2 = new java.io.ByteArrayOutputStream();
-                                    ImageIO.write(ovCropped, "png", baos2);
-                                    overflowData = baos2.toByteArray();
-                                    ovPixelW = ovCropped.getWidth();
-                                    ovPixelH = ovCropped.getHeight();
-                                    ovCropped.flush();
-                                } catch (Exception ignored3) {
-                                    ovPixelW = ovImg.getWidth();
-                                    ovPixelH = ovImg.getHeight();
-                                }
-                                ovImg.flush();
-                            }
-                        } catch (Exception ignored2) {}
-
-                        long nx = CoordinateConverter.pointsToHwpunits(nextVisLeft * ctx.scaleFactor);
-                        long ny = CoordinateConverter.pointsToHwpunits(nextVisTop * ctx.scaleFactor);
-                        long nw = CoordinateConverter.pointsToHwpunits((nextVisRight - nextVisLeft) * ctx.scaleFactor);
-                        long nh = CoordinateConverter.pointsToHwpunits((nextVisBottom - nextVisTop) * ctx.scaleFactor);
-                        if (nw > 0 && nh > 0) {
-                            ASTFigure fig2 = new ASTFigure();
-                            fig2.x(nx);
-                            fig2.y(ny);
-                            fig2.width(nw);
-                            fig2.height(nh);
-                            fig2.imageData(overflowData);
-                            String fmt2 = rg.imageFormat();
-                            fig2.imageFormat((fmt2 != null && !fmt2.isEmpty()) ? fmt2 : "png");
-                            fig2.pixelWidth(ovPixelW);
-                            fig2.pixelHeight(ovPixelH);
-                            fig2.zOrder(0); // 오버플로우 배경은 항상 최하단 레이어
-                            fig2.fromGroup(false);
-                            fig2.sourceId("page_obj_" + rg.id() + "_ov");
-                            sections.get(nextPageIdx).addBlockAtFront(fig2);
-                        }
-                    }
-                }
-            }
-            // 스프레드를 가로질러 이전 페이지로 넘치는 경우: 왼쪽 반을 이전 페이지에 별도 배치.
-            // InDesign은 오른쪽 페이지에 소유된 큰 장식/이미지가 왼쪽 페이지 영역까지
-            // 보이도록 둘 수 있다. HWPX는 페이지 단위로 잘리므로 교차한 각 페이지에
-            // 같은 source visual의 page-local 인스턴스를 만들어야 한다.
-            boolean overflowsLeft = !pageAnchoredStripCrop
-                    && rawLeft < -10.0 && pageIdx - 1 >= 0;
-            if (overflowsLeft) {
-                int prevPageIdx = pageIdx - 1;
-                double prevPageWidthMm = 1e9, prevPageHeightMm = 1e9;
-                if (ctx.resolvedData.pages() != null && prevPageIdx < ctx.resolvedData.pages().size()) {
-                    double[] ppB = ctx.resolvedData.pages().get(prevPageIdx).bounds();
-                    if (ppB != null && ppB.length >= 4) {
-                        prevPageWidthMm = (ppB[3] - ppB[1]) / ctx.scaleFactor;
-                        prevPageHeightMm = (ppB[2] - ppB[0]) / ctx.scaleFactor;
-                    }
-                }
-                double prevVisLeft = Math.max(0.0, rawLeft + pageWidthMm);
-                double prevVisTop = Math.max(0.0, rawTop);
-                double prevVisRight = Math.min(rawRight + pageWidthMm, prevPageWidthMm);
-                double prevVisBottom = Math.min(rawBottom, prevPageHeightMm);
-                if (prevVisLeft < prevVisRight && prevVisTop < prevVisBottom) {
-                    byte[] overflowData = originalImageData;
-                    if (overflowData != null) {
-                        int ovPixelW = 0, ovPixelH = 0;
-                        try {
-                            BufferedImage ovImg = decodePngBytes(overflowData);
-                            if (ovImg != null) {
-                                // 이전 페이지 가시 영역을 현재 페이지-local raw 좌표계로 되돌려 크롭한다.
-                                double cropLeft = prevVisLeft - pageWidthMm;
-                                double cropTop = prevVisTop;
-                                double cropRight = prevVisRight - pageWidthMm;
-                                double cropBottom = prevVisBottom;
-                                int pxX2 = (int) Math.round((cropLeft - rawLeft) / fullW * ovImg.getWidth());
-                                int pxY2 = (int) Math.round((cropTop - rawTop) / fullH * ovImg.getHeight());
-                                int pxW2 = (int) Math.round((cropRight - rawLeft) / fullW * ovImg.getWidth()) - pxX2;
-                                int pxH2 = (int) Math.round((cropBottom - rawTop) / fullH * ovImg.getHeight()) - pxY2;
-                                pxX2 = Math.max(0, Math.min(pxX2, ovImg.getWidth() - 1));
-                                pxY2 = Math.max(0, Math.min(pxY2, ovImg.getHeight() - 1));
-                                pxW2 = Math.max(1, Math.min(ovImg.getWidth() - pxX2, pxW2));
-                                pxH2 = Math.max(1, Math.min(ovImg.getHeight() - pxY2, pxH2));
-                                try {
-                                    BufferedImage ovCropped = ovImg.getSubimage(pxX2, pxY2, pxW2, pxH2);
-                                    java.io.ByteArrayOutputStream baos2 = new java.io.ByteArrayOutputStream();
-                                    ImageIO.write(ovCropped, "png", baos2);
-                                    overflowData = baos2.toByteArray();
-                                    ovPixelW = ovCropped.getWidth();
-                                    ovPixelH = ovCropped.getHeight();
-                                    ovCropped.flush();
-                                } catch (Exception ignored3) {
-                                    ovPixelW = ovImg.getWidth();
-                                    ovPixelH = ovImg.getHeight();
-                                }
-                                ovImg.flush();
-                            }
-                        } catch (Exception ignored2) {}
-
-                        long px = CoordinateConverter.pointsToHwpunits(prevVisLeft * ctx.scaleFactor);
-                        long py = CoordinateConverter.pointsToHwpunits(prevVisTop * ctx.scaleFactor);
-                        long pw = CoordinateConverter.pointsToHwpunits((prevVisRight - prevVisLeft) * ctx.scaleFactor);
-                        long ph = CoordinateConverter.pointsToHwpunits((prevVisBottom - prevVisTop) * ctx.scaleFactor);
-                        if (pw > 0 && ph > 0) {
-                            ASTFigure figPrev = new ASTFigure();
-                            figPrev.x(px);
-                            figPrev.y(py);
-                            figPrev.width(pw);
-                            figPrev.height(ph);
-                            figPrev.imageData(overflowData);
-                            String fmt2 = rg.imageFormat();
-                            figPrev.imageFormat((fmt2 != null && !fmt2.isEmpty()) ? fmt2 : "png");
-                            figPrev.pixelWidth(ovPixelW);
-                            figPrev.pixelHeight(ovPixelH);
-                            figPrev.zOrder(0);
-                            figPrev.fromGroup(false);
-                            if (visualLayer != null) {
-                                figPrev.visualLayer(visualLayer);
-                            }
-                            figPrev.sourceId("page_obj_" + rg.id() + "_ov_prev");
-                            sections.get(prevPageIdx).addBlockAtFront(figPrev);
-                            ctx.recordRenderedDecision(rg, "Phase6", "PLACE_OVERFLOW_PREVIOUS_PAGE",
-                                    "spread-crossing visual placed on previous page");
-                        }
-                    }
-                }
+            if (!prepared.pageAnchoredStripCrop) {
+                VisualOverflowPlacer.placeSpreadOverflowCopies(
+                        ctx, sections, rg, pageIdx,
+                        rawLeft, rawTop, rawRight, rawBottom, fullW, fullH,
+                        pageWidthMm, originalImageData, visualLayer);
             }
         }
 
@@ -742,166 +457,7 @@ public final class BackgroundInjector {
         // captures only the invisible frame shape — the child line is lost. Detect this by checking
         // if the parent PNG file is < 1 KB but has non-trivial pixel dimensions, then generate a
         // solid-color 1-row PNG from the child's pageItems stroke data.
-        injectSyntheticGraphicLines(ctx, sections);
-    }
-
-    private static void injectSyntheticGraphicLines(ResolvedBuildContext ctx, List<ASTSection> sections) {
-        if (!VisualSourcePolicy.useJavaSyntheticGraphicPngs()) return;
-        if (ctx.resolvedData == null || ctx.resolvedData.pageItems() == null) return;
-        List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
-        if (floatingItems == null) return;
-
-        Set<Integer> syntheticDone = new HashSet<>();
-
-        for (RenderedGroup rg : floatingItems) {
-            if (!isPageObject(rg)) continue;
-            if (rg.childIds() == null || rg.childIds().length == 0) continue;
-            if (rg.file() == null) continue;
-
-            // Only process items whose PNG file is essentially empty (< 1 KB)
-            File pngFile = new File(ctx.basePath, rg.file());
-            if (!pngFile.exists() || pngFile.length() > 1000) continue;
-
-            // Confirm non-trivial pixel dimensions (large image but tiny file = transparent)
-            int[] dims = readPngDimensions(pngFile);
-            if (dims == null || dims[0] < 50 || dims[1] < 5) continue;
-
-            int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
-            if (pageIdx < 0 || pageIdx >= sections.size()) continue;
-            if (ctx.resolvedData.pages() == null || pageIdx >= ctx.resolvedData.pages().size()) continue;
-
-            double[] pgBounds = ctx.resolvedData.pages().get(pageIdx).bounds();
-            if (pgBounds == null || pgBounds.length < 4) continue;
-            double pagePtLeft = pgBounds[1];
-            double pagePtTop = pgBounds[0];
-            double pageWidthPt = pgBounds[3] - pgBounds[1];
-            double pageHeightPt = pgBounds[2] - pgBounds[0];
-
-            for (int cid : rg.childIds()) {
-                if (syntheticDone.contains(cid)) continue;
-                ResolvedPageItem pi = ctx.resolvedData.getPageItem(String.valueOf(cid));
-                if (pi == null || !"GraphicLine".equals(pi.type())) continue;
-                if (pi.strokeWeight() <= 0 || pi.strokeColorName() == null) continue;
-                if (pi.opacity() <= 0) continue;
-
-                double[] lineBounds = pi.geometricBounds();
-                if (lineBounds == null || lineBounds.length < 4) continue;
-
-                // Page-relative pt coordinates
-                double lineX1 = lineBounds[1] - pagePtLeft;
-                double lineX2 = lineBounds[3] - pagePtLeft;
-                double lineY1 = lineBounds[0] - pagePtTop;
-                double lineY2 = lineBounds[2] - pagePtTop;
-
-                // Clip to parent frame (paste-inside clipping)
-                if (pi.parentId() != null) {
-                    ResolvedPageItem parentPi = ctx.resolvedData.getPageItem(pi.parentId());
-                    if (parentPi != null && parentPi.geometricBounds() != null) {
-                        double[] fb = parentPi.geometricBounds();
-                        lineX1 = Math.max(lineX1, fb[1] - pagePtLeft);
-                        lineX2 = Math.min(lineX2, fb[3] - pagePtLeft);
-                        lineY1 = Math.max(lineY1, fb[0] - pagePtTop);
-                        lineY2 = Math.min(lineY2, fb[2] - pagePtTop);
-                    }
-                }
-
-                // Clip to page
-                lineX1 = Math.max(0.0, lineX1);
-                lineX2 = Math.min(lineX2, pageWidthPt);
-                if (lineX1 >= lineX2) continue;
-
-                // For a horizontal line, lineY1 ≈ lineY2; use strokeWeight for height.
-                // Minimum 1 pt so sub-point lines are still rendered.
-                double strokePt = Math.max(pi.strokeWeight(), 1.0);
-                double lineYCenter = (lineY1 + lineY2) / 2.0;
-                double visTop = Math.max(0.0, lineYCenter - strokePt / 2.0);
-                double visBottom = Math.min(lineYCenter + strokePt / 2.0, pageHeightPt);
-                if (visTop >= visBottom) continue;
-
-                byte[] imageData = generateSolidLinePng(pi, ctx);
-                if (imageData == null) continue;
-
-                long x = CoordinateConverter.pointsToHwpunits(lineX1);
-                long y = CoordinateConverter.pointsToHwpunits(visTop);
-                long w = CoordinateConverter.pointsToHwpunits(lineX2 - lineX1);
-                long h = CoordinateConverter.pointsToHwpunits(visBottom - visTop);
-                if (w <= 0 || h <= 0) continue;
-
-                ASTFigure fig = new ASTFigure();
-                fig.x(x);
-                fig.y(y);
-                fig.width(w);
-                fig.height(h);
-                fig.imageData(imageData);
-                fig.imageFormat("png");
-                fig.pixelWidth(100);
-                fig.pixelHeight(4);
-                fig.zOrder(1); // above default zOrder=0 page items
-                fig.fromGroup(true); // IN_FRONT_OF_TEXT
-                fig.sourceId("synth_line_" + cid);
-                sections.get(pageIdx).addBlockAtFront(fig);
-                syntheticDone.add(cid);
-                System.err.println("[BackgroundInjector] synthetic line id=" + cid
-                        + " x=" + String.format("%.1f", lineX1) + "pt y=" + String.format("%.1f", visTop)
-                        + "pt w=" + String.format("%.1f", lineX2 - lineX1) + "pt h=" + String.format("%.1f", visBottom - visTop)
-                        + "pt hwpW=" + w + " hwpH=" + h + " stroke=" + pi.strokeColorName());
-            }
-        }
-    }
-
-    /** Read PNG width/height from file header without decoding pixel data. */
-    private static int[] readPngDimensions(File pngFile) {
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(pngFile)) {
-            byte[] header = new byte[24];
-            if (fis.read(header) < 24) return null;
-            // PNG magic: 0x89 P N G \r \n 0x1a \n
-            if ((header[0] & 0xFF) != 0x89 || header[1] != 'P') return null;
-            int w = ((header[16] & 0xFF) << 24) | ((header[17] & 0xFF) << 16)
-                  | ((header[18] & 0xFF) << 8)  |  (header[19] & 0xFF);
-            int h = ((header[20] & 0xFF) << 24) | ((header[21] & 0xFF) << 16)
-                  | ((header[22] & 0xFF) << 8)  |  (header[23] & 0xFF);
-            return new int[]{w, h};
-        } catch (Exception e) { return null; }
-    }
-
-    /** Read PNG width/height from cached bytes without decoding pixel data. */
-    private static int[] readPngDimensions(byte[] pngData) {
-        if (pngData == null || pngData.length < 24) return null;
-        try {
-            if ((pngData[0] & 0xFF) != 0x89 || pngData[1] != 'P') return null;
-            int w = ((pngData[16] & 0xFF) << 24) | ((pngData[17] & 0xFF) << 16)
-                  | ((pngData[18] & 0xFF) << 8)  |  (pngData[19] & 0xFF);
-            int h = ((pngData[20] & 0xFF) << 24) | ((pngData[21] & 0xFF) << 16)
-                  | ((pngData[22] & 0xFF) << 8)  |  (pngData[23] & 0xFF);
-            return new int[]{w, h};
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /** Generate a 100×4 solid-color PNG from the pageItem's stroke color and opacity. */
-    private static byte[] generateSolidLinePng(ResolvedPageItem pi, ResolvedBuildContext ctx) {
-        String colorName = pi.strokeColorName();
-        int r = 128, g = 128, b = 128;
-        String hex = ctx.resolvedData.resolveColorHex(colorName);
-        if (hex != null && hex.startsWith("#") && hex.length() >= 7) {
-            try {
-                r = Integer.parseInt(hex.substring(1, 3), 16);
-                g = Integer.parseInt(hex.substring(3, 5), 16);
-                b = Integer.parseInt(hex.substring(5, 7), 16);
-            } catch (NumberFormatException ignored) {}
-        }
-        int alpha = (int) Math.round(255 * pi.opacity() / 100.0);
-        try {
-            BufferedImage img = new BufferedImage(100, 4, BufferedImage.TYPE_INT_ARGB);
-            int argb = (alpha << 24) | (r << 16) | (g << 8) | b;
-            for (int px = 0; px < 100; px++)
-                for (int py = 0; py < 4; py++)
-                    img.setRGB(px, py, argb);
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            ImageIO.write(img, "png", baos);
-            return baos.toByteArray();
-        } catch (Exception e) { return null; }
+        VisualSyntheticLinePlacer.injectSyntheticGraphicLines(ctx, sections);
     }
 
     /**
@@ -911,20 +467,11 @@ public final class BackgroundInjector {
      *  놓치므로 별도 판정.)
      */
     private static boolean isBadgeShellGraphicBehind(RenderedGroup rg) {
-        // 안전 범위: 통합 inline_badge만. mixed_group_text_hidden 등 미마이그레이션 셸을 넓히면
-        // plan-reject/중복 등 회귀 위험 → Stage 3에서 JSX가 inline_badge로 분해해 처리한다.
-        return rg != null && "inline_badge".equals(rg.reason());
+        return VisualLayeringRules.isBadgeShellGraphicBehind(rg);
     }
 
     private static boolean isPageObject(RenderedGroup rg) {
-        String t = rg.itemType();
-        if ("page_object".equals(t)) return true;
-        if (t != null) return false;
-        // 하위 호환: 구 캐시는 itemType 없음 → 파일명으로 추론
-        String f = rg.file();
-        return f != null && (f.contains("img_") || f.contains("deco_")
-                || f.contains("shape_") || f.contains("graphic_") || f.contains("master_")
-                || f.contains("haseera_"));
+        return VisualLayeringRules.isPageObject(rg);
     }
 
     private static boolean hasUsableCropSourceBounds(RenderedGroup rg, double[] bounds) {
@@ -941,15 +488,6 @@ public final class BackgroundInjector {
                 && crop[3] >= bounds[3] - 0.05;
         boolean materiallyLarger = cropW > boundsW + 0.5 || cropH > boundsH + 0.5;
         return containsBounds && materiallyLarger;
-    }
-
-    private static boolean shouldAnchorStripCropToPage(RenderedGroup rg,
-                                                       double rawLeft,
-                                                       double rawRight,
-                                                       double rawTop,
-                                                       double rawBottom,
-                                                       double pageWidth) {
-        return shouldAnchorStripCropToPage(rg, rawLeft, rawRight, rawTop, rawBottom, pageWidth, 1e9);
     }
 
     private static double minimumVisibleWidthForMasterEdgeStrip(RenderedGroup rg,
@@ -989,147 +527,29 @@ public final class BackgroundInjector {
         return Math.max(minVisible, 0.0);
     }
 
-    private static boolean isMasterEdgeStrip(RenderedGroup rg, double pageWidth) {
-        if (rg == null || pageWidth >= 1e8) return false;
-        String file = rg.file();
-        String reason = rg.reason();
-        return (file != null && (file.contains("master_") || file.contains("haseera_")))
-                || "master_graphic".equals(reason)
-                || "haseera_graphic".equals(reason);
-    }
-
-    private static boolean shouldAnchorStripCropToPage(RenderedGroup rg,
-                                                       double rawLeft,
-                                                       double rawRight,
-                                                       double rawTop,
-                                                       double rawBottom,
-                                                       double pageWidth,
-                                                       double pageHeight) {
-        if (pageWidth >= 1e8) return false;
-        if (rawLeft >= -0.5 || rawRight <= pageWidth + 0.5) return false;
-        double fullH = rawBottom - rawTop;
-        double maxStripHeight = pageHeight < 1e8 ? Math.min(40.0, pageHeight * 0.15) : 40.0;
-        if (fullH > maxStripHeight) return false;
-        String file = rg.file();
-        String reason = rg.reason();
-        return (file != null && (file.contains("master_") || file.contains("haseera_")))
-                || "master_graphic".equals(reason)
-                || "haseera_graphic".equals(reason);
-    }
-
-    private static int[] edgeAlphaRun(BufferedImage img, int pageIdx) {
-        int w = img.getWidth();
-        int h = img.getHeight();
-        if (w <= 0 || h <= 0) return null;
-
-        int[] colorRun = edgeColorRun(img, pageIdx);
-        if (colorRun != null) return colorRun;
-
-        boolean[] occupied = new boolean[w];
-        int occupiedCount = 0;
-        for (int x = 0; x < w; x++) {
-            for (int y = 0; y < h; y++) {
-                if (((img.getRGB(x, y) >>> 24) & 0xFF) > 8) {
-                    occupied[x] = true;
-                    occupiedCount++;
-                    break;
-                }
-            }
-        }
-        if (occupiedCount == 0 || occupiedCount > w * 0.35) return null;
-
-        int gapLimit = Math.max(8, w / 180);
-        List<int[]> runs = new ArrayList<>();
-        int runStart = -1;
-        int lastOccupied = -1;
-        for (int x = 0; x < w; x++) {
-            if (!occupied[x]) continue;
-            if (runStart < 0 || (lastOccupied >= 0 && x - lastOccupied > gapLimit)) {
-                if (runStart >= 0) runs.add(new int[]{runStart, lastOccupied});
-                runStart = x;
-            }
-            lastOccupied = x;
-        }
-        if (runStart >= 0) runs.add(new int[]{runStart, lastOccupied});
-        if (runs.isEmpty()) return null;
-
-        int[] selected = runs.get(0);
-        if ((pageIdx & 1) == 1) {
-            selected = runs.get(runs.size() - 1);
-        }
-        int pad = Math.max(2, w / 1000);
-        int left = Math.max(0, selected[0] - pad);
-        int right = Math.min(w - 1, selected[1] + pad);
-        if (right - left + 1 > w * 0.35) return null;
-        return new int[]{left, right};
-    }
-
-    private static int[] edgeColorRun(BufferedImage img, int pageIdx) {
-        int w = img.getWidth();
-        int h = img.getHeight();
-        boolean[] occupied = new boolean[w];
-        int occupiedCount = 0;
-        for (int x = 0; x < w; x++) {
-            for (int y = 0; y < h; y++) {
-                int argb = img.getRGB(x, y);
-                int a = (argb >>> 24) & 0xFF;
-                if (a <= 8) continue;
-                int r = (argb >>> 16) & 0xFF;
-                int g = (argb >>> 8) & 0xFF;
-                int b = argb & 0xFF;
-                int max = Math.max(r, Math.max(g, b));
-                int min = Math.min(r, Math.min(g, b));
-                if (max >= 80 && max - min >= 35) {
-                    occupied[x] = true;
-                    occupiedCount++;
-                    break;
-                }
-            }
-        }
-        if (occupiedCount == 0 || occupiedCount > w * 0.35) return null;
-        return selectEdgeRun(occupied, pageIdx, w);
-    }
-
-    private static int[] selectEdgeRun(boolean[] occupied, int pageIdx, int width) {
-        int gapLimit = Math.max(8, width / 180);
-        List<int[]> runs = new ArrayList<>();
-        int runStart = -1;
-        int lastOccupied = -1;
-        for (int x = 0; x < width; x++) {
-            if (!occupied[x]) continue;
-            if (runStart < 0 || (lastOccupied >= 0 && x - lastOccupied > gapLimit)) {
-                if (runStart >= 0) runs.add(new int[]{runStart, lastOccupied});
-                runStart = x;
-            }
-            lastOccupied = x;
-        }
-        if (runStart >= 0) runs.add(new int[]{runStart, lastOccupied});
-        if (runs.isEmpty()) return null;
-
-        int[] selected = runs.get(0);
-        if ((pageIdx & 1) == 1) {
-            selected = runs.get(runs.size() - 1);
-        }
-        int pad = Math.max(2, width / 1000);
-        int left = Math.max(0, selected[0] - pad);
-        int right = Math.min(width - 1, selected[1] + pad);
-        if (right - left + 1 > width * 0.35) return null;
-        return new int[]{left, right};
-    }
-
-
     /**
-     * SPEC-036 (가): Stage 2.5 refinement용. childOfGroup 전체(Phase 7 dedup용)와,
+     * SPEC-036 (가): Stage 2.5 refinement용. childOfGroup 전체와,
      * 그중 SKIP_CHILD_OF_GROUP 실제 억제 대상(비보호 = !protectedEditableLabelShell)을 분리 반환.
-     * 비보호 집합만 plan(DROP_VISUAL)으로 확정하면 Phase 6/7이 휴리스틱 없이 동일 결과를 낸다.
+     * 비보호 집합만 plan(DROP_VISUAL)으로 확정하면 Stage 3가 휴리스틱 없이 동일 결과를 낸다.
      */
     public static final class ChildOfGroupSuppression {
         public final Set<Integer> all;
         public final Set<Integer> nonProtected;
+        public final Set<Integer> protectedConceptDiagramLabelShell;
+        public final Set<Integer> protectedConceptDiagramInlineShell;
+        public final Set<Integer> protectedEditableLabelShell;
 
-        ChildOfGroupSuppression(Set<Integer> all, Set<Integer> nonProtected) {
+        ChildOfGroupSuppression(
+                Set<Integer> all,
+                Set<Integer> nonProtected,
+                Set<Integer> protectedConceptDiagramLabelShell,
+                Set<Integer> protectedConceptDiagramInlineShell,
+                Set<Integer> protectedEditableLabelShell) {
             this.all = all;
             this.nonProtected = nonProtected;
+            this.protectedConceptDiagramLabelShell = protectedConceptDiagramLabelShell;
+            this.protectedConceptDiagramInlineShell = protectedConceptDiagramInlineShell;
+            this.protectedEditableLabelShell = protectedEditableLabelShell;
         }
     }
 
@@ -1137,11 +557,11 @@ public final class BackgroundInjector {
             ResolvedBuildContext ctx, List<ASTSection> sections) {
         Set<Integer> empty = new HashSet<>();
         if (ctx == null || ctx.resolvedData == null) {
-            return new ChildOfGroupSuppression(empty, new HashSet<>());
+            return new ChildOfGroupSuppression(empty, new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>());
         }
         List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
         if (floatingItems == null || floatingItems.isEmpty()) {
-            return new ChildOfGroupSuppression(empty, new HashSet<>());
+            return new ChildOfGroupSuppression(empty, new HashSet<>(), new HashSet<>(), new HashSet<>(), new HashSet<>());
         }
         Set<Integer> editableLabelShellIds = collectEditableLabelShells(ctx, floatingItems);
         Set<Integer> conceptDiagramLabelShellIds = collectConceptDiagramLabelShells(ctx, floatingItems);
@@ -1156,22 +576,36 @@ public final class BackgroundInjector {
                 idToPage, idToRendered);
         // SKIP_CHILD_OF_GROUP 게이트와 동일: childOfGroup ∧ !protectedEditableLabelShell
         Set<Integer> nonProtected = new HashSet<>();
+        Set<Integer> protectedConceptDiagramLabelShell = new HashSet<>();
+        Set<Integer> protectedConceptDiagramInlineShell = new HashSet<>();
+        Set<Integer> protectedEditableLabelShell = new HashSet<>();
         for (RenderedGroup rg : floatingItems) {
             if (!childOfGroup.contains(rg.id())) continue;
             boolean conceptDiagramInlineShell = isConceptDiagramInlineVisualShell(ctx, rg);
             boolean conceptDiagramLabelShell = conceptDiagramLabelShellIds.contains(rg.id());
-            boolean protectedEditableLabelShell = conceptDiagramLabelShell
-                    || conceptDiagramInlineShell
-                    || shouldPreserveEditableLabelShell(rg, editableLabelShellIds);
-            if (!protectedEditableLabelShell) nonProtected.add(rg.id());
+            boolean editableLabelShell = shouldPreserveEditableLabelShell(rg, editableLabelShellIds);
+            if (conceptDiagramLabelShell) {
+                protectedConceptDiagramLabelShell.add(rg.id());
+            } else if (conceptDiagramInlineShell) {
+                protectedConceptDiagramInlineShell.add(rg.id());
+            } else if (editableLabelShell) {
+                protectedEditableLabelShell.add(rg.id());
+            } else {
+                nonProtected.add(rg.id());
+            }
         }
-        return new ChildOfGroupSuppression(childOfGroup, nonProtected);
+        return new ChildOfGroupSuppression(
+                childOfGroup,
+                nonProtected,
+                protectedConceptDiagramLabelShell,
+                protectedConceptDiagramInlineShell,
+                protectedEditableLabelShell);
     }
 
     /**
      * SPEC-036 (가): Stage 2.5 refinement용. inline_object 소유 커버리지 억제.
-     * coveredByInlineObjects 전체(Phase 7 dedup)와, SKIP_INLINE_COVERAGE/SKIP_INLINE_OBJECT 두 체크의
-     * 실제 억제 대상(게이트 적용 합집합)을 분리 반환 → 후자만 plan(DROP_VISUAL)으로 확정.
+     * SKIP_INLINE_COVERAGE/SKIP_INLINE_OBJECT 두 체크의 실제 억제 대상(게이트 적용 합집합)을
+     * 분리 반환 → 후자만 plan(DROP_VISUAL)으로 확정.
      */
     public static final class InlineCoverageSuppression {
         public final Set<Integer> all;
@@ -1262,9 +696,14 @@ public final class BackgroundInjector {
                 for (int cid : rg.sourceObjectIds()) {
                     if (cid == rg.id()) continue;
                     if (conceptDiagramLabelShellIds.contains(cid)) continue;
-                    if (shouldPreserveSourceChild(idToRendered.get(cid))) continue;
+                    RenderedGroup child = idToRendered.get(cid);
+                    if (child == null) continue;
+                    if (shouldPreserveSourceChild(child)) continue;
                     if (parentIsTextShellOnly && ctx.resolvedData.isRenderedImageFrameDomId(cid)) continue;
-                    childOfGroup.add(cid);
+                    Integer cp = idToPage.get(cid);
+                    if (cp != null && cp == parentPage) {
+                        childOfGroup.add(cid);
+                    }
                 }
             }
         }
@@ -1275,14 +714,13 @@ public final class BackgroundInjector {
             ResolvedBuildContext ctx, List<ASTSection> sections, RenderedGroup rg,
             Set<Integer> editableLabelShellIds, Map<Integer, RenderedGroup> idToRendered) {
         if (!isPageObject(rg)) return false;
-        if (ctx.hasOwnershipPlan(rg) && !ctx.hasVisibleVisualByOwnershipPlan(rg)) return false;
+        boolean hasOwnershipPlan = ctx.hasOwnershipPlan(rg);
+        if (hasOwnershipPlan && !ctx.hasVisibleVisualByOwnershipPlan(rg)) return false;
         if (ctx.resolvedData.isInlineObjectId(rg.id())) return false;
-        if (ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg)) return false;
+        if (!hasOwnershipPlan && ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg)) return false;
         if (shouldDecomposeToEditableLabelShell(rg, editableLabelShellIds, idToRendered)) return false;
-        if (rg.shouldSkipByOwnership()) return false;
-        boolean planKeepsVisibleVisual = ctx.hasOwnershipPlan(rg)
-                && ctx.hasVisibleVisualByOwnershipPlan(rg);
-        if (!planKeepsVisibleVisual && shouldSkipByChildPolicy(ctx, rg)) return false;
+        if (!hasOwnershipPlan && rg.shouldSkipByOwnership()) return false;
+        if (!hasOwnershipPlan && shouldSkipByChildPolicy(ctx, rg)) return false;
         if (rg.bounds() == null || rg.bounds().length < 4) return false;
         int pageIdx = ctx.toSectionIndex.applyAsInt(rg.pageIndex());
         if (pageIdx < 0 || pageIdx >= sections.size()) return false;
@@ -1348,24 +786,11 @@ public final class BackgroundInjector {
     }
 
     private static boolean isTextOwnedVisualShell(RenderedGroup rg) {
-        if (rg == null) return false;
-        if (isTextOwnedRenderedContent(rg)) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        return isTextFrameVisualShellReason(rg.reason());
+        return VisualLayeringRules.isTextOwnedVisualShell(rg);
     }
 
     private static boolean isTextOwnedRenderedContent(RenderedGroup rg) {
-        if (rg == null) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        String reason = rg.reason();
-        if (reason == null) return false;
-        return reason.contains("mixed_group_text_hidden")
-                || reason.contains("image_group_text_hidden")
-                || reason.contains("complex_graphic_text_hidden");
+        return VisualLayeringRules.isTextOwnedRenderedContent(rg);
     }
 
     private static Set<Integer> collectEditableLabelShells(
@@ -1499,19 +924,7 @@ public final class BackgroundInjector {
     }
 
     private static boolean isEditableLabelShellCandidate(RenderedGroup rg) {
-        if (rg == null || !isPageObject(rg)) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        if ("indesign_png".equals(rg.textOwner())) return false;
-        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (!isTextFrameVisualShellReason(rg.reason())) return false;
-        double[] b = rg.bounds();
-        if (b == null || b.length < 4) return false;
-        double w = b[3] - b[1];
-        double h = b[2] - b[0];
-        return w >= 8.0 && w <= 90.0
-                && h >= 2.5 && h <= 14.0
-                && w / h >= 2.0;
+        return VisualLayeringRules.isEditableLabelShellCandidate(rg);
     }
 
     private static boolean matchesShortEditableLabelText(ResolvedBuildContext ctx, RenderedGroup shell) {
@@ -1845,7 +1258,7 @@ public final class BackgroundInjector {
     private static BufferedImage loadImageForPlacement(ResolvedBuildContext ctx, RenderedGroup rg, byte[] pngData) {
         if (ctx == null || rg == null || rg.file() == null) return null;
         try {
-            BufferedImage base = decodePngBytes(pngData);
+            BufferedImage base = VisualCropper.decodePngBytes(pngData);
             if (base == null || !shouldCompositeTfInlineVisuals(rg)) return base;
             BufferedImage merged = compositeTfInlineVisuals(ctx, rg, base);
             return merged != null ? merged : base;
@@ -1853,58 +1266,6 @@ public final class BackgroundInjector {
             System.err.println("[BackgroundInjector] PNG 합성 실패: " + e.getMessage());
             return null;
         }
-    }
-
-    private static BufferedImage decodePngBytes(byte[] pngData) {
-        if (pngData == null || pngData.length == 0) return null;
-        try {
-            ConversionTiming.addCounter("phase6.pngBytes.imageDecodes", 1);
-            return ImageIO.read(new java.io.ByteArrayInputStream(pngData));
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static BufferedImage knockOutPaperLikeFill(BufferedImage img) {
-        if (img == null || img.getWidth() <= 0 || img.getHeight() <= 0) return img;
-        long total = (long) img.getWidth() * (long) img.getHeight();
-        if (total <= 0) return img;
-
-        long paperLike = 0;
-        for (int y = 0; y < img.getHeight(); y++) {
-            for (int x = 0; x < img.getWidth(); x++) {
-                int argb = img.getRGB(x, y);
-                int a = (argb >>> 24) & 0xFF;
-                if (a < 220) continue;
-                int r = (argb >>> 16) & 0xFF;
-                int g = (argb >>> 8) & 0xFF;
-                int b = argb & 0xFF;
-                if (isPaperLikeRgb(r, g, b)) paperLike++;
-            }
-        }
-
-        if ((double) paperLike / (double) total < 0.55) {
-            return img;
-        }
-
-        BufferedImage out = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < img.getHeight(); y++) {
-            for (int x = 0; x < img.getWidth(); x++) {
-                int argb = img.getRGB(x, y);
-                int a = (argb >>> 24) & 0xFF;
-                int r = (argb >>> 16) & 0xFF;
-                int g = (argb >>> 8) & 0xFF;
-                int b = argb & 0xFF;
-                out.setRGB(x, y, (a >= 180 && isPaperLikeRgb(r, g, b)) ? 0x00000000 : argb);
-            }
-        }
-        return out;
-    }
-
-    private static boolean isPaperLikeRgb(int r, int g, int b) {
-        int max = Math.max(r, Math.max(g, b));
-        int min = Math.min(r, Math.min(g, b));
-        return r >= 246 && g >= 246 && b >= 246 && (max - min) <= 8;
     }
 
     private static boolean hasTfInlineVisuals(RenderedGroup rg) {
@@ -1930,47 +1291,6 @@ public final class BackgroundInjector {
                 || reason.contains("image_group");
     }
 
-    private static int[] alphaBounds(BufferedImage img) {
-        if (img == null || img.getWidth() <= 0 || img.getHeight() <= 0) return null;
-        int minX = img.getWidth();
-        int minY = img.getHeight();
-        int maxX = -1;
-        int maxY = -1;
-        for (int y = 0; y < img.getHeight(); y++) {
-            for (int x = 0; x < img.getWidth(); x++) {
-                int alpha = (img.getRGB(x, y) >>> 24) & 0xFF;
-                if (alpha <= 10) continue;
-                if (x < minX) minX = x;
-                if (y < minY) minY = y;
-                if (x > maxX) maxX = x;
-                if (y > maxY) maxY = y;
-            }
-        }
-        if (maxX < minX || maxY < minY) return null;
-        int pad = 1;
-        minX = Math.max(0, minX - pad);
-        minY = Math.max(0, minY - pad);
-        maxX = Math.min(img.getWidth() - 1, maxX + pad);
-        maxY = Math.min(img.getHeight() - 1, maxY + pad);
-        return new int[] { minX, minY, maxX - minX + 1, maxY - minY + 1 };
-    }
-
-    private static boolean shouldApplyAlphaCrop(BufferedImage img, int[] bounds) {
-        if (img == null || bounds == null || bounds.length < 4) return false;
-        int cropW = bounds[2];
-        int cropH = bounds[3];
-        if (cropW <= 0 || cropH <= 0) return false;
-        int padLeft = bounds[0];
-        int padTop = bounds[1];
-        int padRight = img.getWidth() - (bounds[0] + cropW);
-        int padBottom = img.getHeight() - (bounds[1] + cropH);
-        int maxPad = Math.max(Math.max(padLeft, padRight), Math.max(padTop, padBottom));
-        if (maxPad < 2) return false;
-        double areaRatio = (double) cropW * (double) cropH
-                / ((double) img.getWidth() * (double) img.getHeight());
-        return areaRatio > 0.01 && areaRatio < 0.98;
-    }
-
     private static boolean shouldPreserveVisualLabelAspect(RenderedGroup rg, int pixelW, int pixelH) {
         return rg != null
                 && pixelW > 0
@@ -1980,27 +1300,11 @@ public final class BackgroundInjector {
     }
 
     private static boolean isCompletePngSimpleButtonLabel(ResolvedBuildContext ctx, RenderedGroup rg) {
-        return ctx != null
-                && ctx.resolvedData != null
-                && ctx.resolvedData.shouldUseCompletePngForSimpleButtonLabel(rg);
+        return VisualLayeringRules.isCompletePngSimpleButtonLabel(ctx, rg);
     }
 
     private static int effectiveZOrder(ResolvedBuildContext ctx, RenderedGroup rg) {
-        if (rg == null) return 5;
-        Integer plannedZ = ctx.zOrderByOwnershipPlan(rg);
-        if (plannedZ != null) return plannedZ;
-        int ownedShellZ = ownedTextFrameShellZOrder(ctx, rg);
-        if (ownedShellZ >= 0) return ownedShellZ;
-        int conceptLabelShellZ = conceptDiagramLabelShellZOrder(ctx, rg);
-        if (conceptLabelShellZ >= 0) return conceptLabelShellZ;
-        int inferredShellZ = inferredTextFrameVisualShellZOrder(ctx, rg);
-        if (inferredShellZ >= 0) return inferredShellZ;
-        int textLineBackdropZ = inferredTextLineBackdropZOrder(ctx, rg);
-        if (textLineBackdropZ >= 0) return textLineBackdropZ;
-        int titleLabelZ = titleLabelBackgroundZOrder(ctx, rg);
-        if (titleLabelZ >= 0) return titleLabelZ;
-        if (rg.zOrderKnown()) return rg.zOrder();
-        return Math.max(rg.zOrder(), 5);
+        return VisualZOrderPlanner.effectiveZOrder(ctx, rg);
     }
 
     private static int foregroundMarkerZOrder(
@@ -2010,28 +1314,7 @@ public final class BackgroundInjector {
             long w,
             long h,
             int currentZ) {
-        if (section == null || w <= 0 || h <= 0) return currentZ;
-        int maxOverlapZ = currentZ;
-        long markerArea = w * h;
-        if (markerArea <= 0) return currentZ;
-        for (ASTBlock block : section.blocks()) {
-            if (block == null) continue;
-            long[] b = astBlockBounds(block);
-            if (b == null) continue;
-            long bw = b[2] - b[0];
-            long bh = b[3] - b[1];
-            if (bw <= 0 || bh <= 0) continue;
-            long overlap = overlapAreaHwp(x, y, w, h, b[0], b[1], bw, bh);
-            if (overlap <= 0) continue;
-            long blockArea = bw * bh;
-            if (blockArea <= 0) continue;
-            if ((double) overlap / (double) markerArea < 0.02
-                    && (double) overlap / (double) blockArea < 0.02) {
-                continue;
-            }
-            maxOverlapZ = Math.max(maxOverlapZ, astBlockZOrder(block));
-        }
-        return Math.min(999, maxOverlapZ + 1);
+        return VisualOverlapZOrderPlanner.foregroundMarkerZOrder(section, x, y, w, h, currentZ);
     }
 
     private static int foregroundOverlapShellZOrder(
@@ -2042,35 +1325,7 @@ public final class BackgroundInjector {
             long w,
             long h,
             int currentZ) {
-        if (!isForegroundOverlapShellCandidate(rg) || section == null || w <= 0 || h <= 0) {
-            return currentZ;
-        }
-        int minOverlapZ = Integer.MAX_VALUE;
-        long shellArea = w * h;
-        if (shellArea <= 0) return currentZ;
-        for (ASTBlock block : section.blocks()) {
-            if (block == null) continue;
-            long[] b = astBlockBounds(block);
-            if (b == null) continue;
-            long bw = b[2] - b[0];
-            long bh = b[3] - b[1];
-            if (bw <= 0 || bh <= 0) continue;
-            long overlap = overlapAreaHwp(x, y, w, h, b[0], b[1], bw, bh);
-            if (overlap <= 0) continue;
-            long blockArea = bw * bh;
-            if (blockArea <= 0) continue;
-            if ((double) overlap / (double) blockArea < 0.05
-                    && (double) overlap / (double) shellArea < 0.01) {
-                continue;
-            }
-            int z = astBlockZOrder(block);
-            if (z <= 0) continue;
-            minOverlapZ = Math.min(minOverlapZ, z);
-        }
-        if (minOverlapZ == Integer.MAX_VALUE || minOverlapZ >= currentZ) {
-            return currentZ;
-        }
-        return Math.max(0, minOverlapZ - 1);
+        return VisualOverlapZOrderPlanner.foregroundOverlapShellZOrder(section, rg, x, y, w, h, currentZ);
     }
 
     private static int containerShellZOrderBehindRenderedContent(
@@ -2078,11 +1333,7 @@ public final class BackgroundInjector {
             List<RenderedGroup> items,
             RenderedGroup shell,
             int currentZ) {
-        int minContentZ = minOverlappingRenderedContentZ(ctx, items, shell);
-        if (minContentZ < 0 || currentZ < minContentZ) {
-            return currentZ;
-        }
-        return Math.max(0, minContentZ - 1);
+        return VisualOverlapZOrderPlanner.containerShellZOrderBehindRenderedContent(ctx, items, shell, currentZ);
     }
 
     private static int minOverlappingRenderedContentZ(
@@ -2134,28 +1385,7 @@ public final class BackgroundInjector {
     }
 
     private static boolean isPaperOnlyContainerShell(ResolvedBuildContext ctx, RenderedGroup rg) {
-        if (ctx == null || ctx.resolvedData == null || rg == null) return false;
-        if (!isRenderedContainerShell(rg)) return false;
-        if (!"vector_shape".equals(rg.reason())) return false;
-
-        int[] sourceIds = rg.sourceObjectIds();
-        boolean sawSource = false;
-        boolean sawPaperFill = false;
-        if (sourceIds != null) {
-            for (int sourceId : sourceIds) {
-                if (isPaperOnlyPageItem(ctx, String.valueOf(sourceId))) {
-                    sawSource = true;
-                    sawPaperFill = true;
-                    continue;
-                }
-                ResolvedPageItem pi = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
-                if (pi != null) return false;
-            }
-        }
-        if (!sawSource) {
-            return isPaperOnlyPageItem(ctx, String.valueOf(rg.id()));
-        }
-        return sawPaperFill;
+        return VisualOverlapZOrderPlanner.isPaperOnlyContainerShell(ctx, rg);
     }
 
     private static boolean isPaperOnlyPageItem(ResolvedBuildContext ctx, String domId) {
@@ -3063,12 +2293,7 @@ public final class BackgroundInjector {
     }
 
     private static boolean isTextFrameVisualShellReason(String reason) {
-        if (reason == null) return false;
-        return reason.contains("decoration")
-                || reason.contains("text_hidden")
-                || reason.contains("visual_shell")
-                || reason.contains("textframe_visual_shell")
-                || reason.contains("complex_graphic");
+        return VisualLayeringRules.isTextFrameVisualShellReason(reason);
     }
 
     private static boolean isSimilarTextFrameVisualShell(double[] shellBounds, double[] tfBounds) {
@@ -3258,9 +2483,4 @@ public final class BackgroundInjector {
                 || "FOREGROUND_MASK".equals(visualLayer);
     }
 
-    private static byte[] encodePng(BufferedImage image) throws Exception {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        ImageIO.write(image, "png", baos);
-        return baos.toByteArray();
-    }
 }

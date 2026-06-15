@@ -760,7 +760,7 @@ public class InlineFrameHandler {
             return null;
         }
         if (containsConceptDiagramTextFrame(ctx, anchorId)) return null;
-        // AboveLine 앵커는 floating badge → Phase 7 이 처리, 인라인 변환 불가
+        // AboveLine 앵커는 floating badge → Stage 3 visual executor가 처리, 인라인 변환 불가
         if (ctx.aboveLineAnchoredIds.contains(anchoredObjectId)) {
             return null;
         }
@@ -2527,7 +2527,7 @@ public class InlineFrameHandler {
 
             for (RenderedGroup part : parts) {
                 if (part.id() != anchoredObjectId) {
-                    ctx.setRenderedDisposition(part.id(), FrameDisposition.TEXT_BLOCK_PLACED);
+                    ctx.markRenderedVisualHandled(part.id());
                 }
             }
 
@@ -2663,7 +2663,7 @@ public class InlineFrameHandler {
         if (ctx.basePath == null) return null;
 
         // Phase 2 가 이 inline_object 의 자손 TF 를 floating 으로 전환했으면
-        // inline PNG 는 Phase 7 이 floating ASTFigure 로 재배치 → 여기서 억제.
+        // inline PNG 는 Stage 3 visual executor가 floating ASTFigure 로 재배치 → 여기서 억제.
         if (ctx.isInlineDisposed(anchoredObjectId, FrameDisposition.PNG_CONVERT_TO_FLOATING)) return null;
         // Phase 2 가 floating text box 로 승격한 inline TF → inline PNG 도 억제 (28pt PNG가 행간 팽창하는 것 방지).
         if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
@@ -2721,7 +2721,7 @@ public class InlineFrameHandler {
         }
 
         // renderedFloatingItems에서 해당 ID의 inline_object 또는 null-type inline TF 찾기.
-        // null-type: renderable inline TF (예: 번호 라벨 "1", "가") — Phase 7 floating 대신
+        // null-type: renderable inline TF (예: 번호 라벨 "1", "가") — floating 배치 대신
         // inline PNG로 임베드하여 텍스트 baseline과 수평 정렬 보장.
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg.id() != anchoredObjectId) continue;
@@ -2804,7 +2804,7 @@ public class InlineFrameHandler {
                         }
                         // 전체 폭 배경 데코레이션 감지: 가로/세로 비율 > 8 이면서 폭 > 100pt 이면
                         // 인라인 배치 시 한 줄을 전부 차지하여 이후 텍스트를 밀어냄 → 인라인 스킵.
-                        // Phase 7이 floating ASTFigure로 배치하도록 위임.
+                        // Stage 3 visual executor가 floating ASTFigure로 배치하도록 위임.
                         // (예: 주황색 라운드사각형 배경 AR=16 — 텍스트 배경이지 인라인 문자가 아님)
                         // AR=6~7 정도의 라벨 박스(예: "최근 사회·문화적 맥락" 36mm×6mm)는 인라인 유지.
                         // GraphicLine(인라인 선)은 제외.

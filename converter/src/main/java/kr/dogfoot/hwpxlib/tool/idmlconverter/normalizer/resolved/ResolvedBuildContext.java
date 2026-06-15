@@ -234,6 +234,23 @@ public final class ResolvedBuildContext {
         renderedItemDispositions.put(domId, d);
     }
 
+    /**
+     * Stage 3 visual executor 또는 그 이전 text/table builder가 rendered visual을
+     * 이미 처리/억제했음을 표시한다.
+     */
+    public void markRenderedVisualHandled(int domId) {
+        renderedItemDispositions.put(domId, FrameDisposition.TEXT_BLOCK_PLACED);
+    }
+
+    /** 여러 rendered visual을 Stage 3에서 이미 처리된 것으로 표시한다. */
+    public void markRenderedVisualsHandled(java.util.Collection<Integer> domIds) {
+        if (domIds == null) return;
+        for (Integer domId : domIds) {
+            if (domId == null) continue;
+            markRenderedVisualHandled(domId);
+        }
+    }
+
     /** inline_object domId의 disposition을 등록한다. */
     public void setInlineDisposition(int domId, FrameDisposition d) {
         inlineObjectDispositions.put(domId, d);
@@ -329,7 +346,7 @@ public final class ResolvedBuildContext {
     /**
      * inline_object ID → TF 의 pageIndex 매핑.
      * inline_object의 renderedGroup.pageIndex()가 TF의 실제 섹션과 다를 수 있으므로
-     * Phase 2 에서 TF 의 pageIndex 를 함께 저장해 Phase 7b 가 올바른 섹션에 배치.
+     * Phase 2 에서 TF 의 pageIndex 를 함께 저장해 Stage 3 visual executor가 올바른 섹션에 배치.
      */
     public java.util.Map<Integer, Integer> inlineObjectTfPageIndex = new java.util.HashMap<>();
 
@@ -341,15 +358,9 @@ public final class ResolvedBuildContext {
     public java.util.Set<Integer> aboveLineAnchoredIds = new java.util.HashSet<>();
 
     /**
-     * Phase 6(BackgroundInjector)이 배치한 page_object DOM ID 집합.
-     * Phase 7c가 동일 항목을 중복 배치하지 않도록 건너뛰는 데 사용.
-     */
-    public java.util.Set<Integer> phase6PlacedIds = new java.util.HashSet<>();
-
-    /**
      * FramePlacer(Phase 2)가 네이티브 fill로 흡수한 배경 도형 DOM ID 집합
      * (deco PNG가 nativeFillChildIds로 풀어준 대형 배경). 이 도형은 별도 complex_graphic
-     * PNG로도 추출되어 floating 배치될 수 있으므로, Phase 6/7c가 floating 배치를 건너뛴다.
+     * PNG로도 추출되어 floating 배치될 수 있으므로, Stage 3 visual executor가 floating 배치를 건너뛴다.
      */
     public java.util.Set<Integer> nativeFillAbsorbedIds = new java.util.HashSet<>();
 

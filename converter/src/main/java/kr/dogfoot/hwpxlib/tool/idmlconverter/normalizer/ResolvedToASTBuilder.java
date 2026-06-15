@@ -238,19 +238,15 @@ public class ResolvedToASTBuilder {
         if (this.ctx == null) return;
         // 1) 셀 인라인 임베드 배지: 원본 floating PNG는 인라인이 소유 → DROP_VISUAL
         this.ctx.dropVisualForDomIds(this.ctx.cellInlineEmbeddedDomIds, "cell_inline_embedded_visual_owned_by_inline");
-        // 2) childOfGroup: 부모 PNG에 구워진 자식. 비보호(SKIP_CHILD_OF_GROUP 대상)는 DROP_VISUAL,
-        //    전체는 phase6PlacedIds 선등록(보호 항목의 Phase 7 중복 방지 — 기존 addAll과 동일).
+        // 2) childOfGroup: 부모 PNG에 구워진 자식. 비보호(SKIP_CHILD_OF_GROUP 대상)는 DROP_VISUAL.
         BackgroundInjector.ChildOfGroupSuppression cog =
                 BackgroundInjector.computeChildOfGroupSuppression(this.ctx, sections);
         this.ctx.dropVisualForDomIds(cog.nonProtected, "child_baked_into_renderable_parent_group");
-        this.ctx.phase6PlacedIds.addAll(cog.all);
-        // 3) coveredByInlineObjects: inline_object가 소유한 시각. 게이트 통과분만 DROP_VISUAL,
-        //    전체는 phase6PlacedIds 선등록(기존 addAll과 동일). childOfGroup 마킹 이후에 계산해야
-        //    collectInlineObjectCoverage가 Phase 6과 동일 plan 상태를 본다.
+        // 3) coveredByInlineObjects: inline_object가 소유한 시각. 게이트 통과분만 DROP_VISUAL.
+        //    childOfGroup 마킹 이후에 계산해야 collectInlineObjectCoverage가 Phase 6과 동일 plan 상태를 본다.
         BackgroundInjector.InlineCoverageSuppression cov =
                 BackgroundInjector.computeInlineCoverageSuppression(this.ctx);
         this.ctx.dropVisualForDomIds(cov.dropVisual, "visual_owned_by_inline_object_coverage");
-        this.ctx.phase6PlacedIds.addAll(cov.all);
     }
 
     /**

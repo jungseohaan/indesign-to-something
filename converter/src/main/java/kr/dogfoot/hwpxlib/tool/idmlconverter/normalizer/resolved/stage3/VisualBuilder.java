@@ -4,7 +4,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase7.RenderableFramePlacer;
 
 import java.util.List;
 
@@ -26,11 +25,6 @@ public final class VisualBuilder {
         try (ConversionTiming.Scope ignored =
                      ConversionTiming.time("stage3.visualBuilder.legacyBackgroundInjector")) {
             BackgroundInjector.inject(ctx, sections);
-        }
-
-        try (ConversionTiming.Scope ignored =
-                     ConversionTiming.time("stage3.visualBuilder.legacyRenderableFramePlacer")) {
-            RenderableFramePlacer.place(ctx, sections);
         }
     }
 }

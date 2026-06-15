@@ -838,7 +838,7 @@ public final class FramePlacer {
             if (inlineToFloating) {
                 block.inlineToFloating(true);
                 // Case 1 (non-editable inline TF with text): 조상 inline_object PNG 를
-                // inline 배치에서 억제하고 Phase 7 이 floating 으로 재배치하도록 등록.
+                // inline 배치에서 억제하고 Stage 3 visual executor가 floating 으로 재배치하도록 등록.
                 // Case 2 (editable badge child)는 badge PNG 가 inline 앵커 그대로 유지되어야 하므로 제외.
                 // Case 3 (non-editable TF inside inline_object): inline_object PNG가 이미 inline으로 배치됨.
                 //   floating text 오버레이는 생성하되, inline_object는 floating 전환 금지.
@@ -912,11 +912,6 @@ public final class FramePlacer {
         return false;
     }
 
-    /**
-     * 이 TF를 owner로 하는 deco PNG가 "굽지 않고 풀어준" 대형 배경 도형 DOM ID 집합.
-     * (extract_indd.jsx가 nativeFillChildIds로 명시 → Java가 네이티브 fill로 렌더)
-     * 비어있지 않으면 PNG 셸이 있어도 applyGroupBackgroundShapeStyle 게이트를 열어 형제 도형 fill을 흡수.
-     */
     /** 이 TextFrame이 어떤 inline_badge의 editableTextFrameIds에 속하는지(=BadgeBox가 텍스트 소유). */
     private static boolean isInlineBadgeOwnedTextFrame(ResolvedBuildContext ctx, String tfId) {
         if (ctx == null || ctx.resolvedData == null || tfId == null) return false;
@@ -933,6 +928,11 @@ public final class FramePlacer {
         return false;
     }
 
+    /**
+     * 이 TF를 owner로 하는 deco PNG가 "굽지 않고 풀어준" 대형 배경 도형 DOM ID 집합.
+     * (extract_indd.jsx가 nativeFillChildIds로 명시 → Java가 네이티브 fill로 렌더)
+     * 비어있지 않으면 PNG 셸이 있어도 applyGroupBackgroundShapeStyle 게이트를 열어 형제 도형 fill을 흡수.
+     */
     private static java.util.Set<String> releasedNativeFillChildIdsForTf(ResolvedBuildContext ctx, int tfDomId) {
         java.util.Set<String> ids = new java.util.HashSet<>();
         if (ctx == null || ctx.resolvedData == null || tfDomId < 0) return ids;
@@ -1682,8 +1682,7 @@ public final class FramePlacer {
             block.imageFillData(png);
             block.nativeGraphicsAllowed(true);
             block.inlineToFloating(true);
-            ctx.setRenderedDisposition(best.id(), FrameDisposition.TEXT_BLOCK_PLACED);
-            ctx.phase6PlacedIds.add(best.id());
+            ctx.markRenderedVisualHandled(best.id());
         } catch (Exception ignored) {
         }
     }

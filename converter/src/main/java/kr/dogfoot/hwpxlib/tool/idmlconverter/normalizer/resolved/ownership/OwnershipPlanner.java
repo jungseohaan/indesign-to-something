@@ -617,6 +617,9 @@ public final class OwnershipPlanner {
                 && !reason.contains("complex_graphic_text_hidden")) {
             return false;
         }
+        if (hasImageSource(rg)) {
+            return false;
+        }
         int textFrames = 0;
         int drawableShapes = 0;
         int polygonShapes = 0;
@@ -649,6 +652,15 @@ public final class OwnershipPlanner {
         boolean calloutTail = polygonShapes > 0 && roundedOrStrokedShapes > 0;
         boolean outlineBox = roundedOrStrokedShapes > 0 && (h > 16.0 || w > 45.0);
         return calloutTail || outlineBox;
+    }
+
+    private boolean hasImageSource(RenderedGroup rg) {
+        if (rg == null || data == null || rg.sourceObjectIds() == null) return false;
+        for (int id : rg.sourceObjectIds()) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item != null && "Image".equals(safe(item.type()))) return true;
+        }
+        return false;
     }
 
     private Placement placementOf(RenderedGroup rg) {
