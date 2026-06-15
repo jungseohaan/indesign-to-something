@@ -3152,71 +3152,6 @@ public class InlineFrameHandler {
      *
      * PNG에는 editable TF 내용이 포함되지 않으므로 별도로 배치해야 한다.
      */
-    /**
-     * Stage 2 (배지 렌더 통합): extract_indd.jsx가 emit한 단일 배지 계약을 하나의 BadgeBox로 변환.
-     *  - reason="inline_badge"(분리형): 그래픽 PNG(텍스트 제거)를 박스 imageFill로, 편집 텍스트를
-     *    Y(읽기) 순서로 중앙 문단에 쌓는다. 텍스트가 박스 자신의 fill 위에 그려져 z 조율 불필요.
-     *  - reason="inline_badge_baked"(마커/융합): 텍스트 포함 PNG를 인라인 이미지로(편집 텍스트 없음).
-     * 해당 reason 그룹이 없으면 null → 호출측은 기존 try* 사다리로 폴백(자동 게이팅).
-     */
-    public static ASTInlineObject buildInlineBadge(ResolvedBuildContext ctx, int anchoredId) {
-        if (ctx == null || ctx.resolvedData == null) return null;
-        RenderedGroup rg = findInlineBadgeRender(ctx, anchoredId);
-        if (rg == null) return null;
-        byte[] png = loadBadgePngFlattenedOntoWhite(ctx, rg);
-        if (png == null || png.length == 0) return null;
-        boolean baked = "inline_badge_baked".equals(rg.reason());
-
-        double[] b = rg.bounds();
-        if (b == null || b.length < 4) return null;
-        double[] bp = renderedBoundsPoints(ctx, b);
-        if (!validBounds(bp)) bp = b;
-        double boxW = Math.abs(bp[3] - bp[1]);
-        double boxH = Math.abs(bp[2] - bp[0]);
-        if (boxW <= 0 || boxH <= 0) return null;
-
-        int[] dims = pngPixelDims(png);
-
-        ASTInlineObject box = new ASTInlineObject();
-        box.sourceId("u" + Integer.toHexString(anchoredId));
-        box.width(CoordinateConverter.pointsToHwpunits(boxW));
-        box.height(CoordinateConverter.pointsToHwpunits(boxH));
-        box.verticalJustification("CenterAlign");
-        box.keepInline(true);
-
-        java.util.List<ResolvedTextFrame> tfs = baked
-                ? java.util.Collections.<ResolvedTextFrame>emptyList()
-                : badgeTextFramesSortedByReading(ctx, rg);
-
-        if (baked || tfs.isEmpty()) {
-            // 베이킹(또는 편집 텍스트 못 찾음) → 텍스트 포함 PNG를 인라인 이미지로.
-            box.kind(ASTInlineObject.ObjectKind.INLINE_BADGE_GROUP);
-            box.imageData(png);
-            box.imageFormat("png");
-            if (dims != null) { box.pixelWidth(dims[0]); box.pixelHeight(dims[1]); }
-            return box;
-        }
-
-        // 분리형: 그래픽을 박스 imageFill로, 편집 텍스트를 그 위에.
-        box.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
-        box.imageFillData(png);
-        box.nativeGraphicsAllowed(true);
-        for (ResolvedTextFrame tf : tfs) {
-            String vt = tf.frameVisibleText();
-            if (vt == null) continue;
-            String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
-            if (cleaned.isEmpty()) continue;
-            ASTParagraph para = new ASTParagraph();
-            para.alignment("CENTER");
-            ASTTextRun run = new ASTTextRun();
-            run.text(cleaned);
-            applyFirstRunStyle(ctx, tf, run);
-            para.addItem(run);
-            box.addParagraph(para);
-        }
-        return box;
-    }
-
     private static RenderedGroup findInlineBadgeRender(ResolvedBuildContext ctx, int anchoredId) {
         if (ctx.resolvedData.allRenderedFloatingItems() == null) return null;
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
@@ -3317,14 +3252,6 @@ public class InlineFrameHandler {
             if (img != null) return flattenOntoWhite(img);
         } catch (Exception ignored) {}
         return png;
-    }
-
-    private static int[] pngPixelDims(byte[] png) {
-        try {
-            java.awt.image.BufferedImage im = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(png));
-            if (im != null) return new int[]{im.getWidth(), im.getHeight()};
-        } catch (Exception ignored) {}
-        return null;
     }
 
     public static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {

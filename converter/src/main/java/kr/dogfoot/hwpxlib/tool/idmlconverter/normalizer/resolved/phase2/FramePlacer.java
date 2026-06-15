@@ -912,22 +912,6 @@ public final class FramePlacer {
         return false;
     }
 
-    /** 이 TextFrame이 어떤 inline_badge의 editableTextFrameIds에 속하는지(=BadgeBox가 텍스트 소유). */
-    private static boolean isInlineBadgeOwnedTextFrame(ResolvedBuildContext ctx, String tfId) {
-        if (ctx == null || ctx.resolvedData == null || tfId == null) return false;
-        List<RenderedGroup> items = ctx.resolvedData.allRenderedFloatingItems();
-        if (items == null) return false;
-        for (RenderedGroup rg : items) {
-            if (rg == null || !"inline_badge".equals(rg.reason())) continue;
-            String[] ed = rg.editableTextFrameIds();
-            if (ed == null) continue;
-            for (String e : ed) {
-                if (tfId.equals(e)) return true;
-            }
-        }
-        return false;
-    }
-
     /**
      * 이 TF를 owner로 하는 deco PNG가 "굽지 않고 풀어준" 대형 배경 도형 DOM ID 집합.
      * (extract_indd.jsx가 nativeFillChildIds로 명시 → Java가 네이티브 fill로 렌더)
