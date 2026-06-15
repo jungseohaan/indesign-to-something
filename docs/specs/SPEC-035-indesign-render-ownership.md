@@ -57,17 +57,75 @@ Phase 6 `BackgroundInjector`와 Phase 7 `RenderableFramePlacer`는 최종 구조
 - `ResolvedToASTBuilder`는 Phase 6/7 클래스를 직접 호출하지 않는다.
 - 모든 visible visual은 `ObjectPlan`의 `visualAction`, `placement`, `visualLayer`, `zOrder`를 실행한 결과여야 한다.
 - crop/page-intersection/spread-overflow는 ownership을 재판정하지 않는 순수 배치 함수여야 한다.
-- `phase6PlacedIds`, executor-local duplicate key, child coverage set은 최종적으로 `ObjectPlan` 또는 Stage 4 invariant로 대체한다.
+- executor-local duplicate key, child coverage set은 최종적으로 `ObjectPlan` 또는 Stage 4 invariant로 대체한다.
 - Phase 7의 “Phase 6에서 이미 처리됨” 같은 후행 보정은 제거한다. 같은 source의 중복은 Stage 1 plan에서 금지한다.
 
 이관 순서:
 
 1. Stage 3 `VisualBuilder`를 단일 진입점으로 만들고 Phase 6/7 직접 호출을 상위 파이프라인에서 제거한다.
-2. Phase 7의 spread/page intersection 배치를 `VisualBuilder` executor로 옮긴다.
+2. Phase 7의 spread/page intersection 배치를 `VisualBuilder` executor로 옮긴다. (진행 중: spread-overflow는 Stage 3 helper로 분리 완료)
 3. Phase 6의 PNG load/crop/layer/zOrder 계산을 `VisualPlacementExecutor`와 `VisualCropper`로 옮긴다.
 4. `computeChildOfGroupSuppression`, `computeInlineCoverageSuppression`을 Stage 1 ownership refinement로 옮긴다.
-5. `phase6PlacedIds`와 Phase 6/7 중복 suppression bridge를 삭제한다.
-6. `BackgroundInjector`와 `RenderableFramePlacer` 클래스를 삭제한다.
+5. Phase 6/7 중복 suppression bridge를 삭제한다. (late floating suppress set은 삭제 완료)
+6. `BackgroundInjector` 클래스를 삭제한다. (`RenderableFramePlacer`는 삭제 완료)
+
+현재 이관 상태:
+
+- `ResolvedToASTBuilder`의 visual 배치는 Stage 3 `VisualBuilder` 단일 진입점으로 들어간다.
+- `VisualPlacementResolver`가 Phase 6/7의 plan 권위 suppress를 공통 판정한다.
+- Stage 3 `VisualBuilder`는 더 이상 `RenderableFramePlacer`(Phase 7)를 호출하지 않는다.
+  `RenderableFramePlacer` 클래스도 삭제했다.
+- Phase 7에 남아 있던 spread-overflow-only 배치는 Stage 3 `VisualOverflowPlacer`로 분리했다.
+  주 페이지와 교차하지 않는 객체라도 스프레드 기준 인접 페이지에 보이는 조각이 있으면
+  `SKIP_OUTSIDE_PAGE` 전에 `PLACE_OUTSIDE_PAGE_OVERFLOW`로 배치한다.
+  주 페이지와 교차하는 객체의 인접 페이지 조각도 `BackgroundInjector` 내부 재판정 없이
+  같은 helper를 통해 crop/place만 수행한다.
+- 빈 parent PNG export에서 사라지는 `GraphicLine` 보강은 Stage 3 `VisualSyntheticLinePlacer`로
+  분리했다. 이 helper는 ownership을 새로 판단하지 않고, 이미 허용된 visual pass에서 누락된
+  자식 선분 픽셀만 복원한다.
+- Phase 6 crop/image 준비 결과는 Stage 3 `PreparedVisualImage` 값 객체로 묶었다. 다음 단계에서는
+  이 객체를 `VisualCropper` 반환 모델로 사용하여 crop/image mutation을 executor 밖으로 이동한다.
+- PNG header-only dimension read는 Stage 3 `VisualPngHeader`로 분리했다. image decode 여부는
+  executor가 아니라 image preparation 단계의 책임으로 옮긴다.
+- Stage 3 `VisualCropper`를 도입하고 PNG decode/encode, paper-like fill knockout,
+  white-stroke pixel inversion을 이동했다. 아직 alpha/page crop 좌표 계산은 legacy executor에
+  남아 있으며, 다음 단계에서 cropper의 반환 모델로 옮긴다.
+- alpha crop의 픽셀 경계 탐색과 이미지 crop/encode는 `VisualCropper.alphaCrop`으로 이동했다.
+  executor는 crop result의 픽셀 사각형을 원본 좌표계 bounds 갱신에만 사용한다.
+- page/cropSource crop의 픽셀 clamp, subimage, encode는 `VisualCropper.pageCrop`으로 이동했다.
+  crop 사각형 산출도 `VisualCropper.pageCropPlan`과 `PageCropPlan`으로 이동했다.
+  executor는 plan의 픽셀 사각형과 strip override를 `PreparedVisualImage`에 적용만 한다.
+- master/page-edge strip의 alpha/color column run 탐색은 `VisualCropper.edgeAlphaRun`으로 이동했다.
+  executor는 strip crop 적용 여부와 source 정책 판단만 유지한다.
+- Stage 3 `VisualPlacementExecutor`를 도입했다. `ASTFigure` / `ASTTextFrameBlock` visible output
+  생성과 section 삽입은 이 executor가 수행하고, `BackgroundInjector`는 아직 geometry/zOrder/fromGroup
+  산출 후 executor를 호출하는 bridge 역할을 한다.
+- Stage 3 `VisualPlacementPlan`을 도입했다. executor는 긴 인자 목록 대신 placement plan을
+  받아 AST를 물질화한다. 아직 plan 산출은 `BackgroundInjector` bridge에 남아 있으며, 다음 단계에서
+  zOrder/fromGroup 산출을 이 plan builder로 옮긴다.
+- Phase 7의 배치 전 suppress 조건은 삭제했다. Stage 3 배치 후 중복 보정은 더 이상 실행하지 않는다.
+- Phase 6의 초기 suppress 조건 일부는 `VisualPlacementResolver.phase6InitialRejection` /
+  `phase6DisposedRejection`으로 이동했다.
+- Phase 6의 `shouldKeepVisualLabelTextEditable`, `shouldSkipByOwnership`,
+  child policy suppress는 `phase6LegacyOwnershipRejection`에 격리한다.
+  `ObjectPlan`이 있는 객체에는 legacy ownership fallback을 적용하지 않는다.
+- legacy `phase6PlacedIds` 이름과 late floating suppress API를 제거했다.
+  실제 처리 완료 상태는 `ResolvedBuildContext.markRenderedVisualHandled` /
+  `renderedItemDispositions`만 소유한다.
+- Stage 2.5 refinement에서 `DROP_VISUAL`로 확정된 id는 ObjectPlan에만 반영한다.
+- child-of-group refinement는 실제 `RenderedGroup`이 있는 자식만 DROP_VISUAL 후보로 본다.
+  source id만 있고 렌더 후보가 없는 항목은 Stage 3 visible 배치와 무관하므로 plan drop 대상에 넣지 않는다.
+- child-of-group 보호 shell(`editable label shell`, concept diagram shell 등)은 Stage 2.5에서
+  선제 suppress하지 않는다. 보존되어야 하는 visual은 Stage 3 실행기가 실제 배치한 뒤 중복을 막는다.
+- inline coverage 보호 shell도 Stage 2.5에서 선제 suppress하지 않는다. `DROP_VISUAL`로 확정된
+  실제 중복만 ObjectPlan에 반영하고, 보존 visual은 Stage 3 실행 결과가 권위를 가진다.
+- 이미지 source를 포함한 text shell은 callout/outline shell로 보지 않는다. 내부 콘텐츠 이미지의
+  polygon/stroke를 컨테이너 외곽선 근거로 세면 parent shell이 `CONTAINER_OUTLINE` 전면층으로 올라가
+  콘텐츠 이미지를 가린다. 이런 shell은 `CONTAINER_BACKDROP`으로 내려가야 한다.
+- late floating suppress reason 리포트와 `markRenderedVisualPlacedForLateFloating` bridge는 삭제했다.
+  `SKIP_NATIVE_FILL_ABSORBED` 같은 true suppress는 Stage 3 decision log로만 남는다.
+- 아직 남은 배지/자식/inline coverage 정책은 Stage 1 ownership refinement로 옮긴 뒤,
+  Phase 6 실행기에서는 plan 실행만 남겨야 한다.
 
 각 단계 회귀 게이트:
 
@@ -78,6 +136,7 @@ Phase 6 `BackgroundInjector`와 Phase 7 `RenderableFramePlacer`는 최종 구조
   - page 49: `생각 열기`, `활동 안내`, `소단원`이 누락되지 않음
   - page 53/56: anchored table/heading flow가 원본 순서를 유지함
   - page 62: top-left `작품 감상` 그래픽의 두 시각 조각이 함께 유지됨
+  - page 64: 중앙 콘텐츠 이미지가 text shell/backdrop보다 앞에 유지됨
 
 ---
 
@@ -412,6 +471,12 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 - 회전/기울임/복합 경계선처럼 HWPX drawText 도형 속성으로 표현하기 어려운 라벨 배경
 - 여러 visual source가 하나의 라벨 껍데기를 만들고, extractor가 텍스트 없는 shell PNG를
   안정적으로 export한 경우
+
+실행 규칙:
+
+- floating `PLACE_TEXT_SHELL`도 `ASTFigure`가 아니라 `ASTTextFrameBlock(imageFill + drawText)`로 실행한다.
+- shell source가 소유한 editable child TF는 별도 visible TF로 남기지 않는다.
+- shell PNG와 child TF가 동시에 보이면 source ownership 위반이다.
 
 ## Text Card Backdrop
 
