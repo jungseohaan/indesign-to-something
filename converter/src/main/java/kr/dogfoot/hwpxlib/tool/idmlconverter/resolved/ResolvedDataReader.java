@@ -538,6 +538,9 @@ public class ResolvedDataReader {
         if (o.has("tfInlineVisualIds") && !o.get("tfInlineVisualIds").isJsonNull()) {
             group.tfInlineVisualIds(parseIntArray(o.getAsJsonArray("tfInlineVisualIds")));
         }
+        if (o.has("nativeFillChildIds") && !o.get("nativeFillChildIds").isJsonNull()) {
+            group.nativeFillChildIds(parseIntArray(o.getAsJsonArray("nativeFillChildIds")));
+        }
         if (o.has("sourceObjectIds") && !o.get("sourceObjectIds").isJsonNull()) {
             group.sourceObjectIds(parseIntArray(o.getAsJsonArray("sourceObjectIds")));
         }

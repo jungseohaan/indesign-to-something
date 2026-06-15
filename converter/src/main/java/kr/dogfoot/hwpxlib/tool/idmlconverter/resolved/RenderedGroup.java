@@ -29,6 +29,8 @@ public class RenderedGroup {
     private String[] editableTextFrameIds;
     private int[] visualOnlyChildIds;
     private int[] tfInlineVisualIds;
+    // PNG가 굽지 않고 풀어준(네이티브 fill로 렌더해야 할) 대형 솔리드 배경 사각형 DOM ID.
+    private int[] nativeFillChildIds;
     private int[] sourceObjectIds;
     private String overlapPolicy;
     private String reason;
@@ -111,6 +113,9 @@ public class RenderedGroup {
 
     public int[] tfInlineVisualIds() { return tfInlineVisualIds; }
     public void tfInlineVisualIds(int[] v) { this.tfInlineVisualIds = v; }
+
+    public int[] nativeFillChildIds() { return nativeFillChildIds; }
+    public void nativeFillChildIds(int[] v) { this.nativeFillChildIds = v; }
 
     public int[] sourceObjectIds() { return sourceObjectIds; }
     public void sourceObjectIds(int[] v) { this.sourceObjectIds = v; }

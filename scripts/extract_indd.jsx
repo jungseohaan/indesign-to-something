@@ -1464,6 +1464,124 @@ function restoreRepeatedCellBackgroundCandidates(saved) {
     }
 }
 
+// ── 사이드박스 deco 그룹 분해: 대형 배경/제목바/불릿을 통-PNG에서 분리 ──
+
+function _isSolidFillShape(it) {
+    try {
+        if (Math.abs(it.rotationAngle || 0) > 0.1) return false;
+    } catch (eRot) {}
+    var fn = null;
+    try { fn = it.fillColor ? it.fillColor.name : null; } catch (eF) {}
+    if (!fn || fn === "None" || fn === "[None]" || fn === "Paper") return false;
+    try { if (it.fillColor.constructor.name === "Gradient") return false; } catch (eGr) {}
+    try { if (it.transparencySettings.blendingSettings.opacity < 95) return false; } catch (eOp) {}
+    try { if (it.transparencySettings.dropShadowSettings.mode === ShadowMode.DROP) return false; } catch (eSh) {}
+    try { if (it.transparencySettings.gradientFeatherSettings.applied) return false; } catch (eGf) {}
+    return true;
+}
+
+function _largestEditableTextFrameBounds(grp) {
+    var best = null, bestArea = 0;
+    try {
+        var nested = grp.allPageItems;
+        for (var i = 0; i < nested.length; i++) {
+            var it = nested[i];
+            try { if (it.constructor.name !== "TextFrame") continue; } catch (e0) { continue; }
+            try { if (isOnHiddenLayer(it)) continue; } catch (e1) {}
+            var b = null; try { b = it.geometricBounds; } catch (e2) {}
+            if (!b || b.length < 4) continue;
+            var a = (b[2] - b[0]) * (b[3] - b[1]);
+            if (a > bestArea) { bestArea = a; best = [b[0], b[1], b[2], b[3]]; }
+        }
+    } catch (e) {}
+    return best;
+}
+
+// 단일 대형 솔리드 배경 Rectangle(사이드박스 전체 배경). 0개/2개+면 null(기존 베이킹 유지).
+function _findLargeSolidFillBackgroundChild(grp) {
+    try {
+        var grpB = grp.geometricBounds;
+        if (!grpB || grpB.length < 4) return null;
+        var grpArea = (grpB[2] - grpB[0]) * (grpB[3] - grpB[1]);
+        if (grpArea <= 0) return null;
+        var tfB = _largestEditableTextFrameBounds(grp);
+        if (!tfB) return null;
+        var tfArea = (tfB[2] - tfB[0]) * (tfB[3] - tfB[1]);
+        if (tfArea <= 0) return null;
+
+        var candidate = null, count = 0;
+        var nested = grp.allPageItems;
+        for (var i = 0; i < nested.length; i++) {
+            var rc = nested[i];
+            try { if (rc.constructor.name !== "Rectangle") continue; } catch (e0) { continue; }
+            try { if (isOnHiddenLayer(rc)) continue; } catch (e1) {}
+            try { if (rc.nonprinting) continue; } catch (e2) {}
+            if (isInlineItem(rc)) continue;            // 인라인 앵커 도형 제외
+            if (!_isSolidFillShape(rc)) continue;
+            var rb = null; try { rb = rc.geometricBounds; } catch (e3) {}
+            if (!rb || rb.length < 4) continue;
+            var rArea = (rb[2] - rb[0]) * (rb[3] - rb[1]);
+            if (rArea < grpArea * 0.55) continue;       // 그룹의 절반 이상
+            var ov = boundsOverlapArea(rb, tfB);
+            if (ov / tfArea < 0.75) continue;           // 메인 TF를 덮음
+            candidate = rc; count++;
+        }
+        return count === 1 ? candidate : null;
+    } catch (e) { return null; }
+}
+
+// 그룹 안 인라인 앵커 시각 객체(불릿 등) — 본문이 인라인 렌더하므로 PNG에서 제거.
+function _findInlineAnchoredVisualItems(grp) {
+    var items = [];
+    try {
+        var nested = grp.allPageItems;
+        for (var i = 0; i < nested.length; i++) {
+            var it = nested[i];
+            try { if (it.constructor.name === "TextFrame") continue; } catch (e0) { continue; }
+            try { if (isOnHiddenLayer(it)) continue; } catch (e1) {}
+            if (isInlineItem(it)) items.push(it);
+        }
+    } catch (e) {}
+    return items;
+}
+
+function _itemsByIds(grp, ids) {
+    var out = [];
+    if (!ids || ids.length === 0) return out;
+    var want = {};
+    for (var k = 0; k < ids.length; k++) want[ids[k].toString()] = true;
+    try {
+        var nested = grp.allPageItems;
+        for (var i = 0; i < nested.length; i++) {
+            if (want[nested[i].id.toString()]) out.push(nested[i]);
+        }
+    } catch (e) {}
+    return out;
+}
+
+// 범용: 도형들을 PNG 굽기 전 숨김(fill=None+opacity0, 폴백 visible=false). restore 대칭.
+function _hideItemsForExport(items) {
+    var saved = [];
+    if (!items) return saved;
+    for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var state = { item: item, mode: "cellBg" };
+        var changed = false;
+        try { state.fillColor = item.fillColor; item.fillColor = app.activeDocument.swatches.itemByName("None"); changed = true; }
+        catch (e1) { try { state.fillColor = item.fillColor; item.fillColor = app.activeDocument.swatches.itemByName("[None]"); changed = true; } catch (e2) {} }
+        try { var blend = item.transparencySettings.blendingSettings; state.opacity = blend.opacity; blend.opacity = 0; changed = true; } catch (e3) {}
+        try { var fb = item.fillTransparencySettings.blendingSettings; state.fillOpacity = fb.opacity; fb.opacity = 0; changed = true; } catch (e4) {}
+        try { var sb = item.strokeTransparencySettings.blendingSettings; state.strokeOpacity = sb.opacity; sb.opacity = 0; changed = true; } catch (e5) {}
+        if (!changed) { try { state.wasVisible = item.visible; item.visible = false; state.mode = "visible"; changed = true; } catch (e6) {} }
+        if (changed) saved.push(state);
+    }
+    return saved;
+}
+
+function _restoreItemsForExport(saved) {
+    restoreRepeatedCellBackgroundCandidates(saved);
+}
+
 function _isTopLevelInlineVisualItem(item) {
     try {
         if (!item || item.constructor.name === "TextFrame") return false;
@@ -1789,6 +1907,13 @@ function applyRenderOwnership(entry, renderTarget, opts) {
     if (visualOnlyIds && visualOnlyIds.length > 0) entry.visualOnlyChildIds = visualOnlyIds;
     if (opts.tfInlineVisualIds && opts.tfInlineVisualIds.length > 0) {
         entry.tfInlineVisualIds = opts.tfInlineVisualIds;
+    }
+    // 통-PNG에서 풀어준(굽지 않은) 대형 솔리드 배경 / 제목바 도형 → Java가 네이티브 fill로 렌더.
+    if (opts.nativeFillChildIds && opts.nativeFillChildIds.length > 0) {
+        entry.nativeFillChildIds = opts.nativeFillChildIds;
+    }
+    if (opts.titleBackgroundChildIds && opts.titleBackgroundChildIds.length > 0) {
+        entry.titleBackgroundChildIds = opts.titleBackgroundChildIds;
     }
     if (textHidden) entry.textHiddenBeforeExport = true;
     return entry;
@@ -3574,6 +3699,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         var _savedTFsForCatch = null;
         var _savedCellBgsForCatch = null;
         var _savedLabelBackdropsForCatch = null;
+        var _savedDecompForCatch = null;
         try {
             // hexGrid: 자신의 자식이 이전 Pass에서 개별 렌더된 경우 results에서 제거
             if (kind === "hexGrid") {
@@ -3639,18 +3765,37 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 var savedTFs = hideTextFrames(grp);
                 var savedCellBgs = hideRepeatedCellBackgroundCandidates(grp);
                 var savedLabelBackdrops = _hideClaimedLabelBackdropItems(grp);
+                // 사이드박스 분해: 대형 솔리드 배경 + 인라인 불릿만 PNG에서 분리(네이티브 fill/인라인).
+                // 제목 둥근사각형은 그대로 PNG에 굽고(추출 이미지) 제목 텍스트가 그 위에 결합되게 둔다.
+                // (단일 대형 배경이 있을 때만 발동 → 배지/개념도/라벨 배경은 미발동)
+                var _bgRect = (kind === "mixedGroup") ? _findLargeSolidFillBackgroundChild(grp) : null;
+                var _inlineVisItems = _bgRect ? _findInlineAnchoredVisualItems(grp) : [];
+                var _releasedIds = [];
+                if (_bgRect) {
+                    _releasedIds.push(_bgRect.id);
+                    for (var _ii = 0; _ii < _inlineVisItems.length; _ii++) _releasedIds.push(_inlineVisItems[_ii].id);
+                }
+                var _decompItems = [];
+                if (_bgRect) _decompItems.push(_bgRect);
+                _decompItems = _decompItems.concat(_inlineVisItems);
+                var savedDecomp = _hideItemsForExport(_decompItems);
                 _savedTFsForCatch = savedTFs;
                 _savedCellBgsForCatch = savedCellBgs;
                 _savedLabelBackdropsForCatch = savedLabelBackdrops;
+                _savedDecompForCatch = savedDecomp;
                 _decoRender(grp, grpPage, null, {
                     textHiddenBeforeExport: true,
                     textOwner: "hwpx_tf",
                     editableTextFrameIds: editableTfIdsForGroup.length > 0 ? editableTfIdsForGroup : undefined,
+                    tfInlineVisualIds: _releasedIds.length > 0 ? _releasedIds : undefined,
+                    nativeFillChildIds: _bgRect ? [_bgRect.id] : undefined,
                     reason: kind === "textComposite" ? "text_composite_editable_text_hidden" : "mixed_group_text_hidden"
                 });
+                _restoreItemsForExport(savedDecomp);
                 _restoreClaimedLabelBackdropItems(savedLabelBackdrops);
                 restoreRepeatedCellBackgroundCandidates(savedCellBgs);
                 restoreTextFrames(savedTFs);
+                _savedDecompForCatch = null;
                 _savedLabelBackdropsForCatch = null;
                 _savedCellBgsForCatch = null;
                 _savedTFsForCatch = null;
@@ -3668,7 +3813,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 });
             }
         } catch (e) {
-            // outer catch: 예외가 발생해도 숨겼던 TF 복원
+            // outer catch: 예외가 발생해도 숨겼던 TF/도형 복원
+            try { if (_savedDecompForCatch && _savedDecompForCatch.length > 0) _restoreItemsForExport(_savedDecompForCatch); } catch (eD) {}
             try { if (_savedLabelBackdropsForCatch && _savedLabelBackdropsForCatch.length > 0) _restoreClaimedLabelBackdropItems(_savedLabelBackdropsForCatch); } catch (e0) {}
             try { if (_savedCellBgsForCatch && _savedCellBgsForCatch.length > 0) restoreRepeatedCellBackgroundCandidates(_savedCellBgsForCatch); } catch (e1) {}
             try { if (_savedTFsForCatch && _savedTFsForCatch.length > 0) restoreTextFrames(_savedTFsForCatch); } catch (e2) {}

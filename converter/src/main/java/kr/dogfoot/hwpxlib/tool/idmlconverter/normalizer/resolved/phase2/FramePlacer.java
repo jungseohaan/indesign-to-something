@@ -784,8 +784,23 @@ public final class FramePlacer {
             } catch (Exception eFill) {
                 System.err.println("[FramePlacer] fill/stroke 속성 적용 오류 tf=" + tf.id() + ": " + eFill);
             }
-            if (!hasRenderedVisualShell || hasAbsorbedTextStylePlan(ctx, tfDomId)) {
-                applyGroupBackgroundShapeStyle(ctx, tf, block);
+            java.util.Set<String> releasedFillIds = releasedNativeFillChildIdsForTf(ctx, tfDomId);
+            if (!hasRenderedVisualShell || hasAbsorbedTextStylePlan(ctx, tfDomId)
+                    || !releasedFillIds.isEmpty()) {
+                // PNG가 풀어준 도형이 있으면 그 id로만 형제 흡수를 제한(다른 장식 흡수 방지).
+                applyGroupBackgroundShapeStyle(ctx, tf, block,
+                        releasedFillIds.isEmpty() ? null : releasedFillIds);
+                // released 경로(사이드박스 대형 배경/제목바)만 전역 정책과 무관하게 강제 fill.
+                if (!releasedFillIds.isEmpty()
+                        && block.fillColor() != null && block.fillColor().startsWith("#")) {
+                    block.forceNativeFill(true);
+                    // 흡수된 배경 도형은 별도 complex_graphic PNG로도 추출돼 floating 배치될 수 있음
+                    // → Phase 6/7c가 그 floating PNG를 건너뛰도록 등록(이중 배치/본문 가림 방지).
+                    for (String fid : releasedFillIds) {
+                        try { ctx.nativeFillAbsorbedIds.add(Integer.parseInt(fid)); }
+                        catch (NumberFormatException ignore) { }
+                    }
+                }
             }
             if (!hwpxOwnedTextFrame) {
                 applyInlineOwnedVisualShellImageFill(ctx, tf, block, pageLeft, pageTop);
@@ -888,6 +903,31 @@ public final class FramePlacer {
             }
         }
         return false;
+    }
+
+    /**
+     * 이 TF를 owner로 하는 deco PNG가 "굽지 않고 풀어준" 대형 배경 도형 DOM ID 집합.
+     * (extract_indd.jsx가 nativeFillChildIds로 명시 → Java가 네이티브 fill로 렌더)
+     * 비어있지 않으면 PNG 셸이 있어도 applyGroupBackgroundShapeStyle 게이트를 열어 형제 도형 fill을 흡수.
+     */
+    private static java.util.Set<String> releasedNativeFillChildIdsForTf(ResolvedBuildContext ctx, int tfDomId) {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        if (ctx == null || ctx.resolvedData == null || tfDomId < 0) return ids;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return ids;
+        String tfId = String.valueOf(tfDomId);
+        for (RenderedGroup rg : groups) {
+            if (rg == null || !"indesign_png".equals(rg.visualOwner())) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null || rg.nativeFillChildIds() == null) continue;
+            boolean ownsTf = false;
+            for (String editableId : editableIds) {
+                if (tfId.equals(editableId)) { ownsTf = true; break; }
+            }
+            if (!ownsTf) continue;
+            for (int id : rg.nativeFillChildIds()) ids.add(String.valueOf(id));
+        }
+        return ids;
     }
 
     private static boolean hasAbsorbedTextStylePlan(ResolvedBuildContext ctx, int tfDomId) {
@@ -1130,12 +1170,23 @@ public final class FramePlacer {
      */
     private static void applyGroupBackgroundShapeStyle(
             ResolvedBuildContext ctx, ResolvedTextFrame tf, ASTTextFrameBlock block) {
+        applyGroupBackgroundShapeStyle(ctx, tf, block, null);
+    }
+
+    /**
+     * allowedSourceIds!=null이면 그 id의 형제 도형만 흡수 대상으로 한다(PNG가 명시적으로 풀어준
+     * 배경/제목바만). null이면 기존 동작(부모/최대 overlap 형제).
+     */
+    private static void applyGroupBackgroundShapeStyle(
+            ResolvedBuildContext ctx, ResolvedTextFrame tf, ASTTextFrameBlock block,
+            java.util.Set<String> allowedSourceIds) {
         ResolvedPageItem tfItem = ctx.resolvedData.getPageItem(tf.id());
         if (tfItem == null || tfItem.parentId() == null || tf.geometricBounds() == null) return;
 
         double[] tfb = tf.geometricBounds();
         ResolvedPageItem parent = ctx.resolvedData.getPageItem(tfItem.parentId());
-        if (isTextShellShape(parent) && overlapRatio(tfb, parent.geometricBounds()) >= 0.75) {
+        if (isTextShellShape(parent) && overlapRatio(tfb, parent.geometricBounds()) >= 0.75
+                && (allowedSourceIds == null || allowedSourceIds.contains(parent.id()))) {
             applyPageItemStyleToBlock(ctx, parent, block);
             return;
         }
@@ -1144,6 +1195,7 @@ public final class FramePlacer {
         double bestScore = 0.0;
         for (ResolvedPageItem pi : ctx.resolvedData.pageItems()) {
             if (pi == null || pi.id() == null || pi.id().equals(tf.id())) continue;
+            if (allowedSourceIds != null && !allowedSourceIds.contains(pi.id())) continue;
             if (!tfItem.parentId().equals(pi.parentId())) continue;
             if (!isTextShellShape(pi)) continue;
             double[] pb = pi.geometricBounds();
@@ -1455,7 +1507,7 @@ public final class FramePlacer {
             String[] editableIds = rg.editableTextFrameIds();
             if (editableIds == null) continue;
             for (String editableId : editableIds) {
-                if (tfId.equals(editableId)) return true;
+                if (tfId.equals(editableId) && isExclusiveTextFrameShell(ctx, rg, tfId)) return true;
             }
         }
         return false;
@@ -1501,6 +1553,7 @@ public final class FramePlacer {
             if (!"indesign_png".equals(rg.visualOwner())) continue;
             if (!containsEditableTextFrameId(rg, tf.id())) continue;
             if (!isOwnedTextFrameShellReason(rg.reason())) continue;
+            if (!isExclusiveTextFrameShell(ctx, rg, tf.id())) continue;
 
             ResolvedPageItem sourceItem = ctx.resolvedData.getPageItem(String.valueOf(rg.id()));
             if (sourceItem == null || !sourceItem.isInline()) continue;
@@ -1611,6 +1664,7 @@ public final class FramePlacer {
             if (!"hwpx_tf".equals(rg.textOwner())) continue;
             if (!containsEditableTextFrameId(rg, tf.id())) continue;
             if (!isOwnedTextFrameShellReason(rg.reason())) continue;
+            if (!isExclusiveTextFrameShell(ctx, rg, tf.id())) continue;
             double[] rb = rg.bounds();
             if (rb == null || rb.length < 4) continue;
             try {
@@ -1793,6 +1847,32 @@ public final class FramePlacer {
             if (tfId.equals(editableId)) return true;
         }
         return false;
+    }
+
+    private static boolean isExclusiveTextFrameShell(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            String tfId) {
+        if (ctx == null || ctx.resolvedData == null || rg == null || tfId == null) return false;
+        if (!containsEditableTextFrameId(rg, tfId)) return false;
+        int editableCount = 0;
+        String[] editableIds = rg.editableTextFrameIds();
+        if (editableIds != null) {
+            for (String editableId : editableIds) {
+                if (editableId != null && !editableId.isEmpty()) editableCount++;
+            }
+        }
+        if (editableCount != 1) return false;
+
+        int[] sourceIds = rg.sourceObjectIds();
+        if (sourceIds == null || sourceIds.length == 0) return true;
+        for (int sourceId : sourceIds) {
+            if (sourceId < 0) continue;
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            if (item == null || !"TextFrame".equals(item.type())) continue;
+            if (!tfId.equals(item.id())) return false;
+        }
+        return true;
     }
 
     private static boolean containsString(String[] values, String expected) {

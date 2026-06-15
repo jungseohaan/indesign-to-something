@@ -346,6 +346,13 @@ public final class ResolvedBuildContext {
     public java.util.Set<Integer> phase6PlacedIds = new java.util.HashSet<>();
 
     /**
+     * FramePlacer(Phase 2)가 네이티브 fill로 흡수한 배경 도형 DOM ID 집합
+     * (deco PNG가 nativeFillChildIds로 풀어준 대형 배경). 이 도형은 별도 complex_graphic
+     * PNG로도 추출되어 floating 배치될 수 있으므로, Phase 6/7c가 floating 배치를 건너뛴다.
+     */
+    public java.util.Set<Integer> nativeFillAbsorbedIds = new java.util.HashSet<>();
+
+    /**
      * Concept diagram pseudo-table 영역에 속한 TextFrame DOM id.
      * 이 영역은 실제 IDML Table이 아니라 visual shell + editable TF + 독립 설명 TF
      * 조합이므로, table/grid/width-expansion/label-centering 보정보다 원본 좌표 보존을 우선한다.

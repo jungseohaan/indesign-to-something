@@ -1335,6 +1335,11 @@ public final class StoryConverter {
         List<Integer> ids = new ArrayList<>();
         if (ctx == null || owner == null || owner.tfInlineVisualIds() == null) return ids;
         for (int inlineId : owner.tfInlineVisualIds()) {
+            // nativeFillChildIds(대형 배경)는 FramePlacer가 네이티브 셀 fill로 흡수 →
+            // 인라인 이미지로 렌더하면 본문 위에 통이미지가 떠 가린다. 인라인에서 제외.
+            if (ownerContainsId(owner.nativeFillChildIds(), inlineId)) {
+                continue;
+            }
             RenderedGroup inlineRg = findRenderedGroup(ctx, inlineId);
             String parentStoryId = inlineRg != null ? inlineRg.parentStoryId() : null;
             if (parentStoryId != null && storyId != null && !storyId.equals(parentStoryId)) {

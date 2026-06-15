@@ -30,6 +30,9 @@ public class ASTTextFrameBlock extends ASTBlock {
     private String fillColor;
     private byte[] imageFillData;
     private boolean nativeGraphicsAllowed;
+    // true이면 전역 native-textbox-graphics OFF여도 배경 fill/stroke를 강제로 칠한다.
+    // (deco PNG가 풀어준 대형 배경/제목바를 네이티브 흡수한 사이드박스 블록 전용 — 좁은 범위)
+    private boolean forceNativeFill;
     private String strokeColor;
     private double strokeWeight;
     private String strokeType = "Solid"; // Solid, Dashed, Dotted
@@ -138,6 +141,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean nativeGraphicsAllowed() { return nativeGraphicsAllowed; }
     public void nativeGraphicsAllowed(boolean v) { this.nativeGraphicsAllowed = v; }
+
+    public boolean forceNativeFill() { return forceNativeFill; }
+    public void forceNativeFill(boolean v) { this.forceNativeFill = v; }
 
     public String strokeColor() { return strokeColor; }
     public void strokeColor(String v) { this.strokeColor = v; }

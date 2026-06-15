@@ -83,6 +83,13 @@ public final class BackgroundInjector {
             if (!isPageObject(rg) && !conceptDiagramInlineShell) {
                 continue;
             }
+            // FramePlacer가 네이티브 fill로 흡수한 배경 도형 → floating PNG 배치 금지(본문 가림 방지).
+            if (ctx.nativeFillAbsorbedIds.contains(rg.id())) {
+                ctx.phase6PlacedIds.add(rg.id());
+                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_NATIVE_FILL_ABSORBED",
+                        "background shape is painted as native cell fill by FramePlacer");
+                continue;
+            }
             // (SPEC-036 (가)) 셀 인라인 임베드 배지의 floating PNG 억제는 Stage 2.5 refinement가
             // plan(DROP_VISUAL)으로 확정 → 위 VisualPlacementResolver.planRejection이 처리한다.
             // SPEC-036: plan 권위 억제 판정 (Phase 6/7 공용 VisualPlacementResolver로 통합)

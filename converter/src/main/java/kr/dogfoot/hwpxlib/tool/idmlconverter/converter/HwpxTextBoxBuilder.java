@@ -325,11 +325,14 @@ public class HwpxTextBoxBuilder {
         }
 
         if (colCount <= 1) {
-            // 래퍼 fill 또는 프레임 자체 fill이 있으면 배경 사각형 추가
-            boolean hasOwnVisibleFill = nativeTextBoxGraphicsEnabled()
+            // 래퍼 fill 또는 프레임 자체 fill이 있으면 배경 사각형 추가.
+            // 전역 native-textbox-graphics OFF여도 block이 명시적으로 네이티브 그래픽 허용(사이드박스
+            // 대형 배경 흡수 등)이면 fill을 칠한다.
+            boolean nativeOk = nativeTextBoxGraphicsEnabled() || block.forceNativeFill();
+            boolean hasOwnVisibleFill = nativeOk
                     && block.fillColor() != null
                     && block.fillColor().startsWith("#") && !block.fillColor().equals("#FFFFFF");
-            boolean hasWrapper = nativeTextBoxGraphicsEnabled()
+            boolean hasWrapper = nativeOk
                     && (block.hasWrapperFill() || hasOwnVisibleFill);
             if (!hasWrapper && shouldUseFloatingDrawTextBox(block)) {
                 frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
@@ -357,11 +360,16 @@ public class HwpxTextBoxBuilder {
                     _singleInnerTable.zOrder(block.zOrder());
                     ctx.tableBuilderRef.convertTable(framePara, _singleInnerTable);
                 } else {
-                    if (hasWrapper) {
+                    // forceNativeFill(사이드박스 대형 배경 흡수)은 별도 배경 rect 대신 셀 배경 fill로 칠한다.
+                    // 별도 rect는 본문 표(앞면)와 z-레이어가 엇갈려 본문을 가리는 문제가 있어, 셀 배경이
+                    // 본문 뒤에 안정적으로 깔린다. (createTextFrameBorderFill이 block.fillColor()를 셀 배경에 적용)
+                    boolean useCellNativeFill = block.forceNativeFill() && hasWrapper;
+                    boolean wrapper = hasWrapper && !useCellNativeFill;
+                    if (wrapper) {
                         addWrapperRoundedRect(framePara, block, w, h);
                     }
                     singleColumnTableConverter.convertSingleColumnTable(framePara, block, block.effectiveX(), block.y(), w, h,
-                            block.paragraphs(), hasWrapper);
+                            block.paragraphs(), wrapper);
                 }
             }
         } else {
@@ -498,7 +506,7 @@ public class HwpxTextBoxBuilder {
      */
     private void addWrapperRoundedRect(Para framePara, ASTTextFrameBlock block,
                                         long w, long h) {
-        if (!nativeTextBoxGraphicsEnabled()) return;
+        if (!nativeTextBoxGraphicsEnabled() && !block.forceNativeFill()) return;
 
         // 배경 fill: 래퍼 fill → 프레임 자체 fill → 없음
         String bgColor = null;
@@ -555,14 +563,15 @@ public class HwpxTextBoxBuilder {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
-        // 스트로크 (프레임 자체 stroke, tint 반영)
-        setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, "Solid", block.strokeTint());
+        // 스트로크 (프레임 자체 stroke, tint 반영) — released 사이드박스 배경은 전역 정책 무시
+        boolean _force = block.forceNativeFill();
+        setupTextBoxLineShape(rect, strokeColor, strokeWeightPt, "Solid", block.strokeTint(), _force);
 
         // 배경 fill (래퍼 fill 또는 프레임 fill)
         if (hasBg) {
-            setupTextBoxFillBrush(rect, bgColor, bgTint);
+            setupTextBoxFillBrush(rect, bgColor, bgTint, _force);
         } else {
-            setupTextBoxFillBrush(rect, "#FFFFFF", 100);
+            setupTextBoxFillBrush(rect, "#FFFFFF", 100, _force);
         }
 
         // 라운드 코너
@@ -826,7 +835,8 @@ public class HwpxTextBoxBuilder {
 
         // 배경 채우기 (fillTint는 색상 농도로 RGB에 적용, 불투명 처리)
         String fill = block.fillColor();
-        if (nativeTextBoxGraphicsEnabled() && fill != null && fill.startsWith("#")) {
+        if ((nativeTextBoxGraphicsEnabled() || block.forceNativeFill())
+                && fill != null && fill.startsWith("#")) {
             String tinted = blendColorWithWhite(fill, block.fillTint() / 100.0);
             bf.createFillBrush();
             VisualShellApplicator.applyWinBrushFill(bf.fillBrush(), tinted, "#FF000000");
