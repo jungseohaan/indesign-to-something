@@ -76,7 +76,7 @@ ExtendScript 추출
  ├─ rendered_frames/*.png (인라인 객체, 배지, 장식 텍스트)
  └─ Links/ (원본 이미지)
 
-ResolvedToASTBuilder (Phase 0~7)
+ResolvedToASTBuilder (Phase 0~6 + Stage 3)
  ├─ Phase 0: InfraSetup (IDML 폰트/스타일/색상 정의 복사 + 정렬 보강)
  ├─ Phase 1: PageLayoutBuilder (페이지/섹션 빌드)
  ├─ Phase 2: FramePlacer (TextFrame 분류/배치, facing pages 보정)
@@ -86,8 +86,10 @@ ResolvedToASTBuilder (Phase 0~7)
  ├─ Phase 4: TableBuilder (테이블 + SPEC-017 품질 게이트)
  ├─ Phase 4.5: BulletInserter (불릿 자동 삽입)
  ├─ Phase 5: WrapPhase5 (textwrap 글상자 분할)
- ├─ Phase 6: BackgroundInjector (페이지 배경 PNG 주입)
- └─ Phase 7: RenderableFramePlacer (renderable 프레임/배지 플로팅 배치)
+ ├─ Stage 2.5: 시각 ownership refine (ObjectPlan 권위 확정)
+ └─ Stage 3: VisualBuilder (모든 시각 배치 — 배경/플로팅/배지/renderable)
+             내부: BackgroundInjector.inject + stage3/Visual* 헬퍼
+             (구 Phase 6 BackgroundInjector + Phase 7 RenderableFramePlacer 통합, SPEC-035)
 
 ASTToHwpxConverter → .hwpx
 ```
@@ -97,7 +99,7 @@ ASTToHwpxConverter → .hwpx
 ```
 IDML → IDMLNormalizer (Stage1~3) → ResolvedMerger → ASTToHwpxConverter → .hwpx
 ```
-> 레거시는 `normalizer/legacy/` 패키지로 격리되어 있다. 신규 변경은 새 파이프라인(Phase 0~7)에 적용한다.
+> 레거시는 `normalizer/legacy/` 패키지로 격리되어 있다. 신규 변경은 새 파이프라인(Phase 0~6 + Stage 3)에 적용한다.
 
 ### 편집 TextFrame 분류 (배경 PNG에서 제외)
 
@@ -140,7 +142,8 @@ src/main/java/kr/dogfoot/hwpxlib/tool/idmlconverter/
 ├── ast/                           # 중간 표현 (ASTDocument, ASTParagraph, ...)
 ├── normalizer/
 │   ├── ResolvedToASTBuilder.java  # 새 파이프라인 오케스트레이터 (247 LOC)
-│   ├── resolved/phase0~7/         # Phase 0~7 + phase4_5 + shared
+│   ├── resolved/phase0~6/         # Phase 0~6 + phase4_5 + shared
+│   ├── resolved/stage3/           # Stage 3 시각 배치 (VisualBuilder + Visual*)
 │   └── legacy/                    # 레거시: IDMLNormalizer + Stage1~3
 ├── converter/                     # W4로 9개 sub-module 분리
 │   ├── ASTToHwpxConverter.java    # AST → HWPX 메인

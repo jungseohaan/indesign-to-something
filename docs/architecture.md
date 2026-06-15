@@ -48,7 +48,7 @@ Adobe InDesign 문서(`.indd` / `.idml`)를 한글(`.hwpx`)로 변환한다.
 │  ┌──────┴───────────────────────────────────────────┐ │
 │  │  IDMLToHwpxConverter (파사드)                    │ │
 │  │   ├─ ResolvedToASTBuilder  ← 새 파이프라인       │ │
-│  │   │     (Phase 0~7)                              │ │
+│  │   │     (Phase 0~6 + Stage 3)                    │ │
 │  │   ├─ IDMLNormalizer        ← 레거시 파이프라인   │ │
 │  │   │     (Stage 1~3)                              │ │
 │  │   └─ ASTToHwpxConverter   AST → HWPX            │ │
@@ -197,7 +197,7 @@ if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) 
 
 분기 조건: ExtendScript가 `renderedFloatingItems`를 생성했는가. 데스크탑 앱이 만든 추출은 항상 새 파이프라인을 탄다.
 
-### 5.1 새 파이프라인 — `ResolvedToASTBuilder` (Phase 0~7)
+### 5.1 새 파이프라인 — `ResolvedToASTBuilder` (Phase 0~6 + Stage 3)
 
 `src/main/java/.../normalizer/ResolvedToASTBuilder.java` — 슬림한 오케스트레이터(430줄). 각 phase는 별도 클래스에 위임.
 
@@ -257,14 +257,17 @@ if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) 
                                 │
                                 ▼
        ┌───────────────────────────────────────────────┐
-       │  Phase 6  BackgroundInjector                  │
-       │           페이지 배경 PNG 주입                │
+       │  Stage 2.5  시각 ownership refine             │
+       │            (ObjectPlan 권위 확정)             │
        └───────────────────────────────────────────────┘
                                 │
                                 ▼
        ┌───────────────────────────────────────────────┐
-       │  Phase 7  RenderableFramePlacer               │
-       │           renderable TF(배지)를 플로팅 이미지로│
+       │  Stage 3  VisualBuilder                       │
+       │           모든 시각 배치 (배경/플로팅/배지)   │
+       │           내부: BackgroundInjector.inject     │
+       │           + stage3/Visual* 헬퍼               │
+       │           (구 Phase 6 + Phase 7 통합, SPEC-035)│
        └───────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -288,8 +291,9 @@ if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) 
 | 4 | `normalizer/resolved/phase4/TableBuilder.java` | 525 | 테이블 |
 | 4.5 | `normalizer/resolved/phase4_5/BulletInserter.java` | 99 | 불릿 |
 | 5 | `normalizer/resolved/phase5/WrapPhase5.java` | 391 | textwrap 분할 |
-| 6 | `normalizer/resolved/phase6/BackgroundInjector.java` | 117 | 배경 주입 |
-| 7 | `normalizer/resolved/phase7/RenderableFramePlacer.java` | 106 | 배지 배치 |
+| Stage 3 | `normalizer/resolved/stage3/VisualBuilder.java` | 30 | 시각 배치 진입점 (BackgroundInjector.inject 브리지) |
+| Stage 3 | `normalizer/resolved/phase6/BackgroundInjector.java` | 2486 | 시각 배치 본체 (구 Phase 6+7 통합) |
+| Stage 3 | `normalizer/resolved/stage3/Visual*.java` (12개) | — | 배치 plan/실행/z-순서/크롭/오버플로우 헬퍼 |
 | — | `normalizer/resolved/shared/ParagraphTextHelpers.java` | — | phase 공유 헬퍼 |
 | — | `normalizer/resolved/ResolvedBuildContext.java` | — | phase 간 공유 컨텍스트 |
 
@@ -356,7 +360,7 @@ IDML
 | 2.9 | `replaceFloatingRenderedTextFrames` | 플로팅 렌더 텍스트 프레임 → 이미지 |
 | 2.10 | `injectOrphanRenderedGraphics` | orphan 렌더 그래픽 주입 |
 
-새 파이프라인은 이 모든 단계를 Phase 0~7 안에 통합했다.
+새 파이프라인은 이 모든 단계를 Phase 0~6 + Stage 3 안에 통합했다.
 
 ---
 

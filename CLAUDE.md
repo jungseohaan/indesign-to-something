@@ -65,8 +65,8 @@ cd desktop && npm run tauri dev
    │  ResolvedMerger    │    │  Phase 4 TableBuilder       │
    │  FrameDistributor  │    │  Phase 4.5 BulletInserter   │
    │  OverlayEnricher   │    │  Phase 5 WrapPhase5         │
-   │  FloatingImage…    │    │  Phase 6 BackgroundInjector │
-   │  …등                │    │  Phase 7 RenderableFrame…   │
+   │  FloatingImage…    │    │  Stage 2.5 VisualRefine     │
+   │  …등                │    │  Stage 3 VisualBuilder      │
    └────────┬───────────┘    └────────┬─────────────────────┘
             └──────┬─────────────────┘
                    ▼
@@ -88,7 +88,7 @@ cd desktop && npm run tauri dev
 | 모듈 | 위치 | 역할 |
 |------|------|------|
 | IDML 파서 | `idml/` | IDML ZIP 로딩, XML 파싱 |
-| 신 파이프라인 | `normalizer/ResolvedToASTBuilder.java` + `normalizer/resolved/phase0~7/` | resolved.json 우선 빌드 (Phase 0~7) |
+| 신 파이프라인 | `normalizer/ResolvedToASTBuilder.java` + `normalizer/resolved/phase0~6/` + `stage3/` | resolved.json 우선 빌드 (Phase 0~6 텍스트/레이아웃 + Stage 3 시각 배치) |
 | 레거시 파이프라인 | `normalizer/legacy/IDMLNormalizer.java` + `Stage1/2/3_*.java` | IDML 우선 3단계 빌드 + 후처리 7단계 |
 | AST | `ast/` | 중간 표현 (ASTDocument, ASTSection, ASTBlock...) |
 | Resolved | `resolved/` | resolved.json 데이터 모델 + 레거시 후처리 |
@@ -159,9 +159,15 @@ src/main/java/kr/dogfoot/hwpxlib/tool/idmlconverter/
 │       ├── phase4/TableBuilder.java        # 테이블 변환
 │       ├── phase4_5/BulletInserter.java    # 불릿 자동 삽입
 │       ├── phase5/WrapPhase5.java          # textwrap 글상자 분할
-│       ├── phase6/BackgroundInjector.java  # 페이지 배경 PNG 주입
-│       ├── phase7/RenderableFramePlacer.java # 배지 플로팅 배치
+│       ├── phase6/BackgroundInjector.java  # 시각 배치 본체(배경+플로팅+배지). VisualBuilder가 호출
+│       ├── stage3/                       # Stage 3 시각 배치 (구 phase6+phase7 통합, codex 리팩터)
+│       │   ├── VisualBuilder.java        # ★ 시각 배치 진입점 (현재 BackgroundInjector.inject 브리지)
+│       │   ├── VisualPlacementPlan(Builder/Executor).java # 배치 plan/실행
+│       │   ├── VisualZOrderPlanner.java / VisualOverlapZOrderPlanner.java # z-순서
+│       │   ├── VisualCropper.java / VisualOverflowPlacer.java # 크롭/오버플로우
+│       │   └── VisualLayeringRules.java / VisualSyntheticLinePlacer.java / VisualPngHeader.java 등
 │       └── shared/ParagraphTextHelpers.java # phase 공유 헬퍼
+│       # ※ phase7/RenderableFramePlacer 는 제거됨 → 로직이 BackgroundInjector.inject + stage3/Visual* 로 흡수 (SPEC-035)
 ├── converter/                     # HWPX 출력 (W4로 9개 모듈 분리)
 │   ├── ASTToHwpxConverter.java    # HWPX 변환 메인
 │   ├── HwpxConverterContext.java  # 변환 공유 상태
@@ -277,7 +283,7 @@ packages/semantic-schemas/schemas/ # SPEC-018 SSOT (Maven 리소스로 포함)
 - **문단 인덱스 불일치**: IDML(AST)과 InDesign DOM(resolved)의 문단 수가 다름 → 텍스트 기반 매핑 사용
 - **HWPX 연결 글상자**: 한글은 연결 글상자 체인에서 후속 프레임의 명시적 콘텐츠를 무시 → distributed 프레임은 `linkListIDRef=0`으로 해제
 
-### 신 파이프라인 (Phase 0~7) 구현 트랩
+### 신 파이프라인 (Phase 0~6 + Stage 3) 구현 트랩
 - **lazy IDMLDocument 초기화 순서**: `ctx.idmlDocumentSupplier.get()` 호출 전 반드시 `ctx.ensureIdmlInfra.run()` 먼저 (idempotent). 누락 시 `IDMLDocument=null` → ParagraphStyle/CharacterStyle 정의 조회 실패 (SPEC-024 회귀 사례)
 - **hex/decimal ID 변환**: IDML `u` + hex (`u1735`), InDesign DOM decimal (`5941`), 변환은 `parseInt("1735", 16) = 5941`
 - **Phase 3 텍스트 매칭**: `lastMatchResult[0]` 인덱스 캐시로 O(n) 가속. 인라인 수식으로 텍스트 길이 차이 시 next() 재탐색 → O(n²) 위험
