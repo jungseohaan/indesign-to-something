@@ -63,6 +63,10 @@ public final class VisualPlacementResolver {
     /** Phase 6 문맥상 decomposition 판정 뒤에 적용해야 하는 disposed suppress 판정. */
     public static PlanRejection phase6DisposedRejection(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (ctx.isRenderedDisposed(rg.id(), FrameDisposition.TEXT_BLOCK_PLACED)) {
+            if (rg.hasEditableTextHiddenFromPng()
+                    && ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) {
+                return null;
+            }
             return new PlanRejection("SKIP_RENDERED_DISPOSED", "rendered item already handled");
         }
         return null;

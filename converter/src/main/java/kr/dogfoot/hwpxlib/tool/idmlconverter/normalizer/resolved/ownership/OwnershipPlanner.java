@@ -55,6 +55,7 @@ public final class OwnershipPlanner {
         resolveInlineCompositeHwpxTextParents();
         resolveInlineFloatingSameDom();
         resolveFloatingChildrenOwnedByInlineParent();
+        resolveFloatingPageObjectsOwnedByInlineHwpxText();
         resolveDuplicateRenderedChannels();
         resolveFloatingInlineObjectPageObjectDuplicates();
         resolveVisualBackdropClusterSources();
@@ -114,6 +115,10 @@ public final class OwnershipPlanner {
             if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                     || plan.visualAction == VisualAction.ABSORB_TEXT_STYLE
                     || plan.visualAction == VisualAction.PLACE_TABLE_STYLE) {
+                continue;
+            }
+            RenderedGroup rendered = renderedGroupForPlan(plan);
+            if (rendered != null && isEditableVisualShellWithSeparateHwpxText(rendered)) {
                 continue;
             }
             if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) continue;
@@ -245,6 +250,15 @@ public final class OwnershipPlanner {
     }
 
     private VisualAction visualActionOf(RenderedGroup rg, Placement placement, TextAction textAction) {
+        if ("image_group_text_hidden".equals(rg.reason())
+                && (textAction == TextAction.OWNED_BY_HWPX_TEXT || hasEditableTextOwnerSignal(rg))) {
+            return placement == Placement.INLINE
+                    ? VisualAction.PLACE_INLINE_PNG
+                    : VisualAction.PLACE_FLOATING_PNG;
+        }
+        if (isInlineCompleteGraphicWithHwpxTextSource(rg, placement)) {
+            return VisualAction.DROP_VISUAL;
+        }
         if (isCompanionShellOfCompleteSimpleLabel(rg)) {
             return VisualAction.DROP_VISUAL;
         }
@@ -252,6 +266,9 @@ public final class OwnershipPlanner {
             return VisualAction.DROP_VISUAL;
         }
         if (Boolean.FALSE.equals(rg.placementAllowed())) {
+            return VisualAction.DROP_VISUAL;
+        }
+        if (isLabelBackdropGroupWithUnclaimedHwpxText(rg)) {
             return VisualAction.DROP_VISUAL;
         }
         if (isTextCardBackdropVector(rg)) {
@@ -275,7 +292,7 @@ public final class OwnershipPlanner {
                         : VisualAction.PLACE_FLOATING_PNG;
             }
             if ("label_backdrop_group".equals(rg.reason())) {
-                return VisualAction.PLACE_TEXT_SHELL;
+                return VisualAction.PLACE_FLOATING_PNG;
             }
             if (isCalloutOrOutlineTextShell(rg)) {
                 return VisualAction.PLACE_TEXT_SHELL;
@@ -341,7 +358,7 @@ public final class OwnershipPlanner {
                 return VisualLayer.CONTENT_VISUAL;
             }
             if ("label_backdrop_group".equals(rg.reason())) {
-                return VisualLayer.LABEL_BACKDROP;
+                return VisualLayer.LABEL_OVERLAY_BACKDROP;
             }
             return looksLikeShortLabel(rg) ? VisualLayer.LABEL_BACKDROP : VisualLayer.CONTAINER_BACKDROP;
         }
@@ -356,6 +373,9 @@ public final class OwnershipPlanner {
         }
         if (isTextCardBackdropVector(rg)) {
             return VisualLayer.TEXT_CARD_BACKDROP;
+        }
+        if (isOverlayMarkerDecoration(rg)) {
+            return VisualLayer.LABEL_OVERLAY_BACKDROP;
         }
         if (isFlatImageExportBackdrop(rg)) {
             return VisualLayer.CONTAINER_BACKDROP;
@@ -390,6 +410,9 @@ public final class OwnershipPlanner {
         if (isMaskLikeVisual(rg)) {
             return VisualLayer.FOREGROUND_MASK;
         }
+        if ("label_backdrop_group".equals(rg.reason())) {
+            return VisualLayer.LABEL_OVERLAY_BACKDROP;
+        }
         if (isLabelBackdropLike(rg, textAction)) {
             return VisualLayer.LABEL_BACKDROP;
         }
@@ -397,6 +420,44 @@ public final class OwnershipPlanner {
             return VisualLayer.CONTAINER_BACKDROP;
         }
         return VisualLayer.CONTENT_VISUAL;
+    }
+
+    private boolean isOverlayMarkerDecoration(RenderedGroup rg) {
+        if (rg == null || data == null || isLargeVisual(rg)) return false;
+        if (isLineLikeVisual(rg) || isMaskLikeVisual(rg)) return false;
+        String reason = safe(rg.reason());
+        if (!"decoration_group".equals(reason)
+                && !"pure_decoration_group".equals(reason)
+                && !"vector_shape".equals(reason)) {
+            return false;
+        }
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        double h = Math.abs(b[2] - b[0]);
+        double w = Math.abs(b[3] - b[1]);
+        double min = Math.min(w, h);
+        double max = Math.max(w, h);
+        if (min < 3.0 || max > 18.0 || min / Math.max(1.0, max) < 0.55) return false;
+
+        boolean hasColoredOval = false;
+        boolean hasPaperMarker = false;
+        for (int id : sourceIdsOrSelf(rg)) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(id));
+            if (item == null) continue;
+            String type = safe(item.type());
+            String fill = safe(item.fillColorName());
+            if ("Oval".equals(type)
+                    && !fill.isEmpty()
+                    && !isNoneColor(fill)
+                    && !isPaperColor(fill)) {
+                hasColoredOval = true;
+            }
+            if (("Polygon".equals(type) || "GraphicLine".equals(type) || "Oval".equals(type))
+                    && isPaperColor(fill)) {
+                hasPaperMarker = true;
+            }
+        }
+        return hasColoredOval && hasPaperMarker;
     }
 
     private boolean isEditableLabelCardShell(RenderedGroup rg) {
@@ -552,6 +613,13 @@ public final class OwnershipPlanner {
                 || "image_group_text_hidden".equals(reason)
                 || "inline_text_hidden".equals(reason)
                 || "container_face_shadow_pair".equals(reason);
+    }
+
+    private boolean isInlineCompleteGraphicWithHwpxTextSource(RenderedGroup rg, Placement placement) {
+        if (rg == null || placement != Placement.INLINE) return false;
+        if (!"inline_graphic_only".equals(rg.reason())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return true;
+        return hasEditableTextOwnerSignal(rg);
     }
 
     private boolean hasEditableTextOwnerSignal(RenderedGroup rg) {
@@ -917,6 +985,53 @@ public final class OwnershipPlanner {
         }
     }
 
+    private void resolveFloatingPageObjectsOwnedByInlineHwpxText() {
+        List<ObjectPlan> inlineHwpxOwnedPlans = new ArrayList<>();
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.DROP_VISUAL) continue;
+            if (!safe(plan.kind).contains("inline_object")) continue;
+            if (!"owned_by_hwpx_text_frame".equals(plan.reason)
+                    && !"inline_parent_contains_hwpx_text_sources".equals(plan.reason)) {
+                continue;
+            }
+            inlineHwpxOwnedPlans.add(plan);
+        }
+        if (inlineHwpxOwnedPlans.isEmpty()) return;
+
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isVisibleRenderedVisual(plan)) continue;
+            if (plan.placement != Placement.FLOATING) continue;
+            if (!isTextHiddenContainerRender(plan)) continue;
+            RenderedGroup rendered = renderedGroupForPlan(plan);
+            if (rendered != null && hasIndependentContentVisualBesideOwnedText(rendered)) continue;
+            if (!isOwnedByInlineHwpxTextSource(plan, inlineHwpxOwnedPlans)) continue;
+            plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
+                    "floating_page_object_owned_by_inline_hwpx_text"));
+        }
+    }
+
+    private static boolean isOwnedByInlineHwpxTextSource(ObjectPlan floating, List<ObjectPlan> inlineOwners) {
+        if (floating == null || inlineOwners == null || inlineOwners.isEmpty()) return false;
+        for (ObjectPlan inline : inlineOwners) {
+            if (inline == null) continue;
+            if (floating.pageIndex != inline.pageIndex) continue;
+            if (floating.domId == inline.domId) return true;
+            if (sourceSetContainsAll(inline.sourceObjectIds, floating.sourceObjectIds)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isTextHiddenContainerRender(ObjectPlan plan) {
+        String reason = safe(plan != null ? plan.reason : null);
+        return reason.contains("mixed_group_text_hidden")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("inline_text_hidden")
+                || reason.contains("container_face_shadow_pair");
+    }
+
     private void resolveInlineCompositeHwpxTextParents() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
@@ -1031,6 +1146,15 @@ public final class OwnershipPlanner {
                 if (child.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
                 if (child.pageIndex != parent.pageIndex) continue;
                 if (!isStrictChildPlan(parent, child)) continue;
+                if (isBackgroundParentWithContentChild(parent, child)) {
+                    ObjectPlan retainedParent = parent.withSourceObjectIds(
+                            withoutChildVisualSources(parent, child));
+                    if (retainedParent.sourceObjectIds.length != parent.sourceObjectIds.length) {
+                        plans.set(i, retainedParent);
+                        parent = retainedParent;
+                    }
+                    continue;
+                }
                 if (parentSelfContributesVisibleVisual(parent)
                         || parentHasVisiblePixelsOutsideChildren(parent, Arrays.asList(child))
                         || shouldPreferCompositeParent(parent, child)) {
@@ -1229,6 +1353,15 @@ public final class OwnershipPlanner {
                 if (shadow.pageIndex != face.pageIndex) continue;
                 if (!isColoredContainerShadow(shadow)) continue;
                 if (!sameContainerFootprint(face, shadow)) continue;
+                if (isHwpxTextOwnedContainerShell(face) || isHwpxTextOwnedContainerShell(shadow)) {
+                    plans.set(i, face.withVisualAction(
+                            VisualAction.DROP_VISUAL,
+                            "text_owned_container_shell_duplicate"));
+                    plans.set(j, shadow.withVisualAction(
+                            VisualAction.DROP_VISUAL,
+                            "text_owned_container_shell_duplicate_child"));
+                    break;
+                }
 
                 CombinedVisual combined = createContainerFaceShadowImage(face, shadow);
                 if (combined != null) {
@@ -1267,6 +1400,13 @@ public final class OwnershipPlanner {
                 break;
             }
         }
+    }
+
+    private static boolean isHwpxTextOwnedContainerShell(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.visualLayer == VisualLayer.CONTAINER_BACKDROP;
     }
 
     private CombinedVisual createContainerFaceShadowImage(ObjectPlan face, ObjectPlan shadow) {
@@ -1705,6 +1845,54 @@ public final class OwnershipPlanner {
             for (int sourceId : rg.sourceObjectIds()) {
                 ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
                 if (tf != null && data.isHwpxOwnedTextFrame(tf.id())) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isLabelBackdropGroupWithUnclaimedHwpxText(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!"label_backdrop_group".equals(rg.reason())) return false;
+        HashSet<Integer> claimedTextFrames = new HashSet<>();
+        if (rg.editableTextFrameIds() != null) {
+            for (String id : rg.editableTextFrameIds()) {
+                int parsed = parseFlexibleId(id);
+                if (parsed >= 0) claimedTextFrames.add(parsed);
+            }
+        }
+        HashSet<Integer> visited = new HashSet<>();
+        for (int sourceId : sourceIdsOrSelf(rg)) {
+            if (sourceId < 0) continue;
+            if (containsUnclaimedHwpxTextFrame(sourceId, claimedTextFrames, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsUnclaimedHwpxTextFrame(
+            int sourceId,
+            HashSet<Integer> claimedTextFrames,
+            HashSet<Integer> visited) {
+        if (!visited.add(sourceId)) return false;
+        ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+        if (tf != null && data.isHwpxOwnedTextFrame(tf.id()) && !claimedTextFrames.contains(sourceId)) {
+            return true;
+        }
+        ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+        if (item != null && item.childIds() != null) {
+            for (int childId : item.childIds()) {
+                if (containsUnclaimedHwpxTextFrame(childId, claimedTextFrames, visited)) {
+                    return true;
+                }
+            }
+        }
+        for (ResolvedPageItem candidate : data.pageItems()) {
+            if (candidate == null || candidate.parentId() == null) continue;
+            if (!candidate.parentId().equals(String.valueOf(sourceId))) continue;
+            int childId = parseInt(candidate.id(), -1);
+            if (childId >= 0 && containsUnclaimedHwpxTextFrame(childId, claimedTextFrames, visited)) {
+                return true;
             }
         }
         return false;
@@ -2486,6 +2674,34 @@ public final class OwnershipPlanner {
         double parentScore = visualInkScore(parent);
         double childScore = visualInkScore(child);
         return parentScore > childScore + 0.006;
+    }
+
+    private static boolean isBackgroundParentWithContentChild(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        return parent.visualPolicyLayer() == PolicyLayer.BACKGROUND
+                && child.visualPolicyLayer() == PolicyLayer.CONTENT;
+    }
+
+    private static int[] withoutChildVisualSources(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || parent.sourceObjectIds == null) return new int[0];
+        LinkedHashSet<Integer> childSources = new LinkedHashSet<>();
+        if (child != null) {
+            childSources.add(child.domId);
+            if (child.sourceObjectIds != null) {
+                for (int sourceId : child.sourceObjectIds) {
+                    childSources.add(sourceId);
+                }
+            }
+        }
+        if (childSources.isEmpty()) return parent.sourceObjectIds;
+        List<Integer> retained = new ArrayList<>();
+        for (int sourceId : parent.sourceObjectIds) {
+            if (sourceId != parent.domId && childSources.contains(sourceId)) {
+                continue;
+            }
+            retained.add(sourceId);
+        }
+        return retained.isEmpty() ? parent.sourceObjectIds : toIntArray(retained);
     }
 
     private boolean parentHasPaperBackdrop(ObjectPlan parent) {

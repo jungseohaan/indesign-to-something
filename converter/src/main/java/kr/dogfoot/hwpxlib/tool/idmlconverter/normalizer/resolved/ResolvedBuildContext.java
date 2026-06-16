@@ -520,6 +520,12 @@ public final class ResolvedBuildContext {
         boolean changed = false;
         for (int i = 0; i < ownershipPlans.size(); i++) {
             ObjectPlan p = ownershipPlans.get(i);
+            if ("child_baked_into_renderable_parent_group".equals(reason)
+                    && p.domId >= 0
+                    && domIds.contains(p.domId)
+                    && hasVisibleOwnedTextImageGroupPlanForDomId(p.domId)) {
+                continue;
+            }
             if (domIds.contains(p.domId) && p.visualAction != VisualAction.DROP_VISUAL) {
                 ownershipPlans.set(i, p.withVisualAction(VisualAction.DROP_VISUAL, reason));
                 changed = true;
@@ -611,6 +617,19 @@ public final class ResolvedBuildContext {
         return null;
     }
 
+    public boolean hasVisibleOwnedTextImageGroupPlanForDomId(int domId) {
+        if (domId < 0 || ownershipPlans == null) return false;
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.domId != domId) continue;
+            if (!plan.hasVisibleVisual()) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (!"image_group_text_hidden".equals(plan.reason)) continue;
+            if (plan.visualPolicyLayer() == PolicyLayer.CONTENT) return true;
+        }
+        return false;
+    }
+
     public boolean isCompleteInlinePngByOwnershipPlan(RenderedGroup rg) {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         return plan != null
@@ -634,6 +653,7 @@ public final class ResolvedBuildContext {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         if (plan == null || !plan.hasVisibleVisual() || plan.visualLayer == null) return null;
         return plan.visualLayer == VisualLayer.CONTAINER_FACE
+                || plan.visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
                 || plan.visualLayer == VisualLayer.CONTENT_VISUAL
                 || plan.visualLayer == VisualLayer.CONTAINER_OUTLINE
                 || plan.visualLayer == VisualLayer.FOREGROUND_MASK;

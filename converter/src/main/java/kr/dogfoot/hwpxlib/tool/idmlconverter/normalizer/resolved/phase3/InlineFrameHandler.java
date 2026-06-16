@@ -199,6 +199,9 @@ public class InlineFrameHandler {
      */
     public static java.util.List<ASTInlineObject> tryInlineGroupAsBoxList(ResolvedBuildContext ctx, int anchoredObjectId) {
         String anchorId = String.valueOf(anchoredObjectId);
+        if (containsObjectReplacementTextFrameDescendant(ctx, anchorId)) {
+            return null;
+        }
         if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(ctx.resolvedData, anchoredObjectId)) {
             return null;
         }
@@ -215,6 +218,7 @@ public class InlineFrameHandler {
             if (!tf.isInline()) continue;
             String vt = tf.frameVisibleText();
             if (vt == null) continue;
+            if (hasObjectReplacementText(vt)) continue;
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) continue;
             if (!ctx.resolvedData.isSimpleButtonLabelTextFrame(tf.id())) {
@@ -362,6 +366,7 @@ public class InlineFrameHandler {
             for (ResolvedTextFrame nestedTf : childTfCandidates) {
                 String vt = nestedTf.frameVisibleText();
                 if (vt == null) continue;
+                if (hasObjectReplacementText(vt)) continue;
                 String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
                 if (cleaned.isEmpty()) continue;
 
@@ -436,6 +441,7 @@ public class InlineFrameHandler {
             // visible text 확인
             String vt = tf.frameVisibleText();
             if (vt == null) continue;
+            if (hasObjectReplacementText(vt)) continue;
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) continue;
 
@@ -666,6 +672,23 @@ public class InlineFrameHandler {
         return java.util.Collections.singletonList(outer);
     }
 
+    private static boolean hasObjectReplacementText(String text) {
+        return text != null && (text.indexOf('\uFFFC') >= 0 || text.indexOf('￼') >= 0);
+    }
+
+    private static boolean containsObjectReplacementTextFrameDescendant(
+            ResolvedBuildContext ctx,
+            String anchorId) {
+        if (ctx == null || ctx.resolvedData == null || anchorId == null) return false;
+        java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(anchorId, 8);
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || tf.id() == null) continue;
+            if (!anchorId.equals(tf.id()) && !descendantIds.contains(tf.id())) continue;
+            if (hasObjectReplacementText(tf.frameVisibleText())) return true;
+        }
+        return false;
+    }
+
     /**
      * 인라인 shape(Rectangle/Oval/Polygon)가 editable child TF를 품고 있고,
      * Stage 1 ownership이 PLACE_TEXT_SHELL로 결정한 경우에는 shape PNG를 shell로,
@@ -689,6 +712,7 @@ public class InlineFrameHandler {
             if (!ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
             if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return null;
             String vt = tf.frameVisibleText();
+            if (hasObjectReplacementText(vt)) return null;
             String cleaned = vt == null
                     ? ""
                     : vt.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
@@ -731,6 +755,7 @@ public class InlineFrameHandler {
         ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(shell.editableTextFrameIds()[0]);
         if (childTf == null || ctx.resolvedData.isTextOwnedByIndesignPng(childTf.id())) return null;
         String vt = childTf.frameVisibleText();
+        if (hasObjectReplacementText(vt)) return null;
         String cleaned = vt == null ? "" : vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
         if (cleaned.isEmpty()) return null;
         return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, shell, true);
@@ -1535,11 +1560,17 @@ public class InlineFrameHandler {
             return null;
         }
         ResolvedStory story = ctx.resolvedData.getStory(textFrame.storyId());
-        if (story != null && !story.paragraphs().isEmpty()) {
-            ResolvedParagraph rp = story.paragraphs().get(0);
-            if (rp.runs() != null && !rp.runs().isEmpty()) {
+        if (story != null && story.paragraphs() != null) {
+            for (ResolvedParagraph rp : story.paragraphs()) {
+                if (rp == null || rp.runs() == null || rp.runs().isEmpty()) continue;
                 for (ResolvedRun run : rp.runs()) {
-                    if (run != null && !run.isInlineAnchor() && run.text() != null && !run.text().isEmpty()) {
+                    if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+                    String visible = run.text()
+                            .replace("\uFFFC", "")
+                            .replace("\r", "")
+                            .replace("\n", "")
+                            .trim();
+                    if (!visible.isEmpty()) {
                         return run;
                     }
                 }
@@ -3231,15 +3262,9 @@ public class InlineFrameHandler {
     private static void applyFirstRunStyle(ResolvedBuildContext ctx, ResolvedTextFrame tf, ASTTextRun run) {
         ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
         if (story == null || story.paragraphs().isEmpty()) return;
-        ResolvedParagraph rp = story.paragraphs().get(0);
-        if (rp.runs() == null || rp.runs().isEmpty()) return;
-        ResolvedRun rr = rp.runs().get(0);
-        if (rr.fontFamily() != null) run.fontFamily(rr.fontFamily());
-        if (rr.fontStyle() != null) run.fontStyle(rr.fontStyle());
-        if (rr.fontSize() != null && rr.fontSize() > 0) {
-            run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
-        }
-        if (rr.fillColor() != null) run.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+        ResolvedRun rr = firstVisibleResolvedRun(story);
+        if (rr == null) return;
+        applyResolvedRunStyle(ctx, rr, run);
     }
 
     // 배지 그래픽 PNG를 흰 배경에 합성해 로드. HWP imgBrush는 알파를 검정으로 칠하므로(투명→검정),
@@ -3255,20 +3280,36 @@ public class InlineFrameHandler {
     }
 
     public static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {
-        if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(ctx.resolvedData, groupId)) {
+        if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(ctx.resolvedData, groupId)
+                && !hasPlannedFloatingShellForSemanticInlineGroup(ctx, groupId)) {
             return java.util.Collections.emptyList();
         }
         java.util.List<ASTInlineObject> result = new ArrayList<>();
         String groupIdStr = String.valueOf(groupId);
         java.util.List<ResolvedTextFrame> editableChildren = new ArrayList<>();
+        java.util.Set<String> descendantIds = ctx.resolvedData.buildDescendantSet(groupIdStr, 8);
+        boolean semanticGroupWithPlannedShell = InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(
+                ctx.resolvedData, groupId)
+                && hasPlannedFloatingShellForSemanticInlineGroup(ctx, groupId);
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
-            if (pi == null || !groupIdStr.equals(pi.parentId())) continue;
+            if (pi == null) continue;
+            boolean directChild = groupIdStr.equals(pi.parentId());
+            if (semanticGroupWithPlannedShell) {
+                if (directChild || !descendantIds.contains(tf.id())) continue;
+                if (!hasTextHiddenInlineShellForTextFrame(ctx, tf.id())) continue;
+            } else if (!directChild) {
+                continue;
+            }
             if (!tf.isInline()) continue;
             if (!ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
             if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) continue;
+            int tfDomId;
+            try { tfDomId = Integer.parseInt(tf.id()); } catch (NumberFormatException e) { continue; }
+            if (ctx.isTextDisposed(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED)) continue;
             String vt = tf.frameVisibleText();
             if (vt == null) continue;
+            if (hasObjectReplacementText(vt)) continue;
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) continue;
             double[] gb = textFrameBoundsPoints(ctx, tf);
@@ -3276,13 +3317,13 @@ public class InlineFrameHandler {
             editableChildren.add(tf);
         }
 
-        RenderedGroup inlineBackdrop = editableChildren.size() == 1
-                ? findInlineEditableGroupBackdrop(ctx, groupId)
-                : null;
-        byte[] inlineBackdropData = loadRenderedPngBytes(ctx, inlineBackdrop);
-        double[] inlineBackdropBounds = inlineBackdrop != null ? inlineBackdrop.bounds() : null;
-
         for (ResolvedTextFrame tf : editableChildren) {
+            RenderedGroup textFrameShell = findTextHiddenInlineShellForTextFrame(ctx, tf.id());
+            RenderedGroup inlineBackdrop = textFrameShell != null
+                    ? textFrameShell
+                    : (editableChildren.size() == 1 ? findInlineEditableGroupBackdrop(ctx, groupId) : null);
+            byte[] inlineBackdropData = loadRenderedPngBytes(ctx, inlineBackdrop);
+            double[] inlineBackdropBounds = inlineBackdrop != null ? inlineBackdrop.bounds() : null;
             String vt = tf.frameVisibleText();
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             double[] gb = textFrameBoundsPoints(ctx, tf);
@@ -3334,17 +3375,9 @@ public class InlineFrameHandler {
             ASTTextRun textRunInner = new ASTTextRun();
             textRunInner.text(cleaned);
             ResolvedStory story = tf.storyId() != null ? ctx.resolvedData.getStory(tf.storyId()) : null;
-            if (story != null && !story.paragraphs().isEmpty()) {
-                ResolvedParagraph rp = story.paragraphs().get(0);
-                if (rp.runs() != null && !rp.runs().isEmpty()) {
-                    ResolvedRun rr = rp.runs().get(0);
-                    if (rr.fontFamily() != null) textRunInner.fontFamily(rr.fontFamily());
-                    if (rr.fontStyle() != null) textRunInner.fontStyle(rr.fontStyle());
-                    if (rr.fontSize() != null && rr.fontSize() > 0) {
-                        textRunInner.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
-                    }
-                    if (rr.fillColor() != null) textRunInner.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
-                }
+            ResolvedRun rr = firstVisibleResolvedRun(story);
+            if (rr != null) {
+                applyResolvedRunStyle(ctx, rr, textRunInner);
             }
             paraInner.addItem(textRunInner);
             box.addParagraph(paraInner);
@@ -3352,6 +3385,89 @@ public class InlineFrameHandler {
             result.add(box);
         }
         return result;
+    }
+
+    private static ResolvedRun firstVisibleResolvedRun(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null) return null;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            ResolvedRun run = firstVisibleResolvedRun(paragraph);
+            if (run != null) return run;
+        }
+        return null;
+    }
+
+    private static ResolvedRun firstVisibleResolvedRun(ResolvedParagraph paragraph) {
+        if (paragraph == null || paragraph.runs() == null) return null;
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null || run.text() == null) continue;
+            String visible = run.text()
+                    .replace("\uFFFC", "")
+                    .replace("\r", "")
+                    .replace("\n", "")
+                    .trim();
+            if (!visible.isEmpty()) return run;
+        }
+        return null;
+    }
+
+    private static void applyResolvedRunStyle(ResolvedBuildContext ctx, ResolvedRun rr, ASTTextRun run) {
+        if (rr == null || run == null) return;
+        if (rr.fontFamily() != null) run.fontFamily(rr.fontFamily());
+        if (rr.fontStyle() != null) run.fontStyle(rr.fontStyle());
+        if (rr.fontSize() != null && rr.fontSize() > 0) {
+            run.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(rr.fontSize()));
+        }
+        if (rr.fillColor() != null) run.textColor(RunBuilder.resolveColorToHex(ctx, rr.fillColor()));
+        if (rr.horizontalScale() != null && rr.horizontalScale() != 0 && rr.horizontalScale() != 100) {
+            run.horizontalScale((short) rr.horizontalScale().doubleValue());
+        }
+        if (rr.tracking() != null && rr.tracking() != 0) {
+            run.letterSpacing((short) Math.round(rr.tracking() / 10.0));
+        }
+        if (Boolean.TRUE.equals(rr.underline())) run.underline(true);
+        if (Boolean.TRUE.equals(rr.strikeThru())) run.strikeThrough(true);
+    }
+
+
+    private static boolean hasTextHiddenInlineShellForTextFrame(ResolvedBuildContext ctx, String textFrameId) {
+        return findTextHiddenInlineShellForTextFrame(ctx, textFrameId) != null;
+    }
+
+    private static RenderedGroup findTextHiddenInlineShellForTextFrame(ResolvedBuildContext ctx, String textFrameId) {
+        if (ctx == null || ctx.resolvedData == null || textFrameId == null) return null;
+        java.util.List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return null;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.file() == null) continue;
+            if (!"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) continue;
+            if (!rg.hasEditableTextHiddenFromPng()) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null) continue;
+            for (String editableId : editableIds) {
+                if (textFrameId.equals(editableId)) return rg;
+            }
+        }
+        return null;
+    }
+
+    public static boolean hasPlannedFloatingShellForSemanticInlineGroup(
+            ResolvedBuildContext ctx,
+            int groupDomId) {
+        if (ctx == null || ctx.resolvedData == null) return false;
+        java.util.List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.id() != groupDomId) continue;
+            if (!"page_object".equals(rg.type()) && !"page_object".equals(rg.itemType())) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if (!rg.hasEditableTextHiddenFromPng()) continue;
+            if (ctx.hasOwnershipPlan(rg)) {
+                return ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg);
+            }
+            String reason = rg.reason();
+            return reason != null && reason.contains("text_hidden");
+        }
+        return false;
     }
 
     private static RenderedGroup findInlineEditableGroupBackdrop(ResolvedBuildContext ctx, int groupId) {

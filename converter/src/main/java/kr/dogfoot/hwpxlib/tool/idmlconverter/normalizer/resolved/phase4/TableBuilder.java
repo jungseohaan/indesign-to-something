@@ -33,6 +33,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Simpl
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
@@ -491,11 +493,155 @@ public final class TableBuilder {
         ASTTable expandedTable = tryExpandInlineGroupColumns(ctx, astTable, idmlTable);
         ASTTable result = expandedTable != null ? expandedTable : astTable;
         restoreLostCellTextFromSnapshot(result, sourceTextByCell);
+        removeParagraphsDuplicatingPlacedOrcTextFrames(ctx, result);
+        enrichMissingCellTextRunStylesFromResolved(ctx, result);
         completeVisibleTableOuterBorder(result);
         if (NumberedSideHeadTableNormalizer.normalizePlanned(ctx, result) && ctx != null && ctx.debugAst) {
             result.debugOrNew().note("side-head flow table normalized from Stage 1 plan");
         }
         return result;
+    }
+
+    private static void removeParagraphsDuplicatingPlacedOrcTextFrames(
+            ResolvedBuildContext ctx,
+            ASTTable table) {
+        if (ctx == null || ctx.resolvedData == null || table == null || table.rows() == null) return;
+        List<String> placedOrcTexts = placedOrcTextFrameTexts(ctx);
+        if (placedOrcTexts.isEmpty()) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                Iterator<ASTParagraph> it = cell.paragraphs().iterator();
+                while (it.hasNext()) {
+                    ASTParagraph paragraph = it.next();
+                    String paragraphText = normalizedParagraphText(paragraph);
+                    if (paragraphText.isEmpty()) continue;
+                    for (String placedText : placedOrcTexts) {
+                        if (startsWithPlacedOrcText(paragraphText, placedText)) {
+                            it.remove();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static List<String> placedOrcTextFrameTexts(ResolvedBuildContext ctx) {
+        List<String> texts = new ArrayList<>();
+        if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.textFrames() == null) return texts;
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || tf.id() == null) continue;
+            int domId;
+            try {
+                domId = Integer.parseInt(tf.id());
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+            if (!ctx.isTextDisposed(domId, FrameDisposition.TEXT_BLOCK_PLACED)) continue;
+            String visible = tf.frameVisibleText();
+            if (!hasObjectReplacementText(visible)) continue;
+            String normalized = normalizeTextWithoutControls(visible);
+            if (normalized.length() >= 20) texts.add(normalized);
+        }
+        return texts;
+    }
+
+    private static boolean startsWithPlacedOrcText(String paragraphText, String placedText) {
+        if (paragraphText == null || placedText == null || placedText.isEmpty()) return false;
+        if (!paragraphText.startsWith(placedText)) return false;
+        int suffixLength = paragraphText.length() - placedText.length();
+        return suffixLength <= 20;
+    }
+
+    private static boolean hasObjectReplacementText(String text) {
+        return text != null && (text.indexOf('\uFFFC') >= 0 || text.indexOf('￼') >= 0);
+    }
+
+    private static String normalizeTextWithoutControls(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder normalized = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008') continue;
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
+            normalized.append(ch);
+        }
+        return normalized.toString();
+    }
+
+    private static void enrichMissingCellTextRunStylesFromResolved(ResolvedBuildContext ctx, ASTTable table) {
+        if (ctx == null || ctx.resolvedData == null || table == null || table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null || cell.paragraphs() == null) continue;
+                for (ASTParagraph paragraph : cell.paragraphs()) {
+                    if (paragraph == null || paragraph.items() == null) continue;
+                    for (ASTInlineItem item : paragraph.items()) {
+                        if (!(item instanceof ASTTextRun)) continue;
+                        ASTTextRun run = (ASTTextRun) item;
+                        if (!needsResolvedStyleFallback(run)) continue;
+                        ResolvedRun resolved = findUniqueResolvedRunForText(ctx, run.text());
+                        if (resolved != null) {
+                            applyResolvedTextRunStyle(run, resolved);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean needsResolvedStyleFallback(ASTTextRun run) {
+        if (run == null || run.text() == null) return false;
+        if (run.fontSizeHwpunits() != null || run.fontFamily() != null || run.characterStyleRef() != null) {
+            return false;
+        }
+        return normalizeComparableText(run.text()).length() >= 10;
+    }
+
+    private static ResolvedRun findUniqueResolvedRunForText(ResolvedBuildContext ctx, String text) {
+        String key = normalizeComparableText(text);
+        if (key.length() < 10) return null;
+        ResolvedRun match = null;
+        Double fontSize = null;
+        if (ctx.resolvedData.stories() == null) return null;
+        for (ResolvedStory story : ctx.resolvedData.stories()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (ResolvedParagraph paragraph : story.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                for (ResolvedRun candidate : paragraph.runs()) {
+                    if (candidate == null || candidate.isInlineAnchor() || candidate.text() == null) continue;
+                    String candidateText = normalizeComparableText(candidate.text());
+                    if (!key.equals(candidateText)) continue;
+                    if (candidate.fontSize() == null || candidate.fontSize() <= 0) continue;
+                    if (fontSize != null && Math.abs(fontSize - candidate.fontSize()) > 0.01) {
+                        return null;
+                    }
+                    fontSize = candidate.fontSize();
+                    match = candidate;
+                }
+            }
+        }
+        return match;
+    }
+
+    private static void applyResolvedTextRunStyle(ASTTextRun target, ResolvedRun source) {
+        if (target == null || source == null) return;
+        if (source.fontFamily() != null) target.fontFamily(source.fontFamily());
+        if (source.fontStyle() != null) target.fontStyle(source.fontStyle());
+        if (source.fontSize() != null && source.fontSize() > 0) {
+            target.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(source.fontSize()));
+        }
+        if (source.horizontalScale() != null && source.horizontalScale() != 0 && source.horizontalScale() != 100) {
+            target.horizontalScale((short) source.horizontalScale().doubleValue());
+        }
+        if (source.tracking() != null && source.tracking() != 0) {
+            target.letterSpacing((short) Math.round(source.tracking() / 10.0));
+        }
+        if (Boolean.TRUE.equals(source.underline())) target.underline(true);
+        if (Boolean.TRUE.equals(source.strikeThru())) target.strikeThrough(true);
     }
 
     private static Map<String, List<ASTParagraph>> snapshotVisibleTextParagraphsByCell(ASTTable table) {
@@ -1222,6 +1368,7 @@ public final class TableBuilder {
                 ASTTableCell astCell = findAstCell(astRow, idmlCell.columnIndex());
                 if (astCell == null) continue;
                 for (String storyRef : idmlCell.textFrameStoryRefs()) {
+                    if (isStoryOwnedByPlacedTextFrame(ctx, storyRef)) continue;
                     kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory nestedStory =
                             ctx.loadIDMLStory.apply(storyRef);
                     if (nestedStory == null) continue;
@@ -1255,6 +1402,7 @@ public final class TableBuilder {
             ASTTableCell astCell,
             String storyRef) {
         if (ctx == null || ctx.resolvedData == null || astCell == null || storyRef == null) return false;
+        if (isStoryOwnedByPlacedTextFrame(ctx, storyRef)) return false;
         ResolvedStory story = ctx.resolvedData.getStory(toDecimalStoryId(storyRef));
         if (story == null) {
             story = ctx.resolvedData.getStory(storyRef);
@@ -1267,6 +1415,24 @@ public final class TableBuilder {
         astCell.paragraphs().clear();
         astCell.paragraphs().addAll(paragraphs);
         return true;
+    }
+
+    private static boolean isStoryOwnedByPlacedTextFrame(ResolvedBuildContext ctx, String storyRef) {
+        if (ctx == null || ctx.resolvedData == null || storyRef == null) return false;
+        String storyId = toDecimalStoryId(storyRef);
+        if (storyId == null) return false;
+        List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
+        if (frames == null || frames.isEmpty()) return false;
+        for (ResolvedTextFrame tf : frames) {
+            if (tf == null || tf.id() == null) continue;
+            try {
+                int domId = Integer.parseInt(tf.id());
+                if (ctx.isTextDisposed(domId, FrameDisposition.TEXT_BLOCK_PLACED)) return true;
+            } catch (NumberFormatException ignored) {
+                // Non-DOM ids cannot be checked against text-frame ownership disposition.
+            }
+        }
+        return false;
     }
 
     private static boolean hasAuthoritativeResolvedStructure(ResolvedStory story) {

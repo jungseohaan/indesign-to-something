@@ -69,6 +69,7 @@ public final class ObjectPlan {
         if (visualLayer == VisualLayer.TEXT_CARD_BACKDROP
                 || visualLayer == VisualLayer.CONTAINER_FACE
                 || visualLayer == VisualLayer.LABEL_BACKDROP
+                || visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
                 || visualLayer == VisualLayer.CONTAINER_OUTLINE
                 || visualLayer == VisualLayer.FOREGROUND_MASK) {
             return PolicyLayer.DECORATION;

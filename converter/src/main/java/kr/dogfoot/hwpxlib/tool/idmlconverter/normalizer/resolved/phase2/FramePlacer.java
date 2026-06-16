@@ -10,6 +10,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Group
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
@@ -147,20 +148,38 @@ public final class FramePlacer {
             // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
             InlineToFloatingReason inlineToFloatingReason = InlineToFloatingReason.NONE;
             if (tf.isInline()) {
+                if (ownershipPlanKeepsInlineText(ctx, tfDomId)
+                        && !shouldPromoteInlineHwpxTextFrameToFloating(ctx, tf, tfDomId)
+                        && !hasObjectReplacementText(tf.frameVisibleText())) {
+                    continue;
+                }
                 Integer semanticGroupId = tfDomId >= 0
                         ? InlineSemanticLabelPolicy.semanticMultiTextInlineGroupAncestor(
                                 ctx.resolvedData, tf.id())
                         : null;
                 if (semanticGroupId != null) {
-                    ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                    inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                    if (ctx.deferredAnchoredFloatingIds != null) {
-                        ctx.deferredAnchoredFloatingIds.add(semanticGroupId);
+                    if (InlineFrameHandler.hasPlannedFloatingShellForSemanticInlineGroup(ctx, semanticGroupId)) {
+                        if (isDirectChildOf(ctx, tf.id(), semanticGroupId)) {
+                            continue;
+                        }
+                        if (!hasRenderedVisualShell(ctx, tfDomId)) {
+                            continue;
+                        }
+                        ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+                        inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
+                    } else {
+                        ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+                        inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
+                        if (ctx.deferredAnchoredFloatingIds != null) {
+                            ctx.deferredAnchoredFloatingIds.add(semanticGroupId);
+                        }
                     }
                 }
                 if (inlineToFloatingReason == InlineToFloatingReason.NONE
-                        && ownershipPlanKeepsInlineText(ctx, tfDomId)) {
-                    continue;
+                        && hwpxOwnedTextFrame
+                        && shouldPromoteInlineHwpxTextFrameToFloating(ctx, tf, tfDomId)) {
+                    ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
+                    inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
                 }
                 if (inlineToFloatingReason == InlineToFloatingReason.NONE && conceptDiagramTf) {
                     if (tfDomId >= 0) {
@@ -912,6 +931,124 @@ public final class FramePlacer {
         return false;
     }
 
+    private static boolean hasTextHiddenInlineShellForTextFrame(ResolvedBuildContext ctx, String textFrameId) {
+        if (ctx == null || ctx.resolvedData == null || textFrameId == null) return false;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
+            if (!"inline_object".equals(rg.type()) && !"inline_object".equals(rg.itemType())) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if (!rg.hasEditableTextHiddenFromPng()) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null) continue;
+            for (String editableId : editableIds) {
+                if (textFrameId.equals(editableId)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean shouldPromoteInlineHwpxTextFrameToFloating(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            int tfDomId) {
+        if (ctx == null || tf == null || tfDomId < 0) return false;
+        if (!ownershipPlanKeepsInlineText(ctx, tfDomId)) return false;
+        if (hasFloatingLabelBackdropForTextFrame(ctx, tf.id())) return true;
+        if (hasFloatingContentVisualForTextFrame(ctx, tf.id())) return true;
+        return isCompactStackedInlineLabelTextFrame(tf)
+                && hasTextHiddenInlineShellForTextFrame(ctx, tf.id());
+    }
+
+    private static boolean hasFloatingLabelBackdropForTextFrame(ResolvedBuildContext ctx, String textFrameId) {
+        if (ctx == null || ctx.resolvedData == null || textFrameId == null) return false;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
+            if (!"label_backdrop_group".equals(rg.reason())) continue;
+            if (!isRenderedPageObject(rg)) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if (ctx.hasOwnershipPlan(rg) && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null) continue;
+            for (String editableId : editableIds) {
+                if (textFrameId.equals(editableId)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasFloatingContentVisualForTextFrame(ResolvedBuildContext ctx, String textFrameId) {
+        if (ctx == null || ctx.resolvedData == null || textFrameId == null) return false;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
+            if (!isRenderedPageObject(rg)) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            String reason = rg.reason();
+            if (!"image_group_text_hidden".equals(reason)) continue;
+            if (ctx.hasOwnershipPlan(rg) && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) continue;
+            String layer = ctx.visualLayerByOwnershipPlan(rg);
+            if (layer != null && !"CONTENT_VISUAL".equals(layer)) continue;
+            String[] editableIds = rg.editableTextFrameIds();
+            if (editableIds == null) continue;
+            for (String editableId : editableIds) {
+                if (textFrameId.equals(editableId)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isCompactStackedInlineLabelTextFrame(ResolvedTextFrame tf) {
+        String text = tf != null ? tf.frameVisibleText() : null;
+        if (text == null) return false;
+        boolean stacked = text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0;
+        String cleaned = text.replace("\uFFFC", "")
+                .replace("￼", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+        if (!stacked || cleaned.length() < 2 || cleaned.length() > 8) return false;
+        double[] b = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
+        if (b == null || b.length < 4) return true;
+        double h = Math.abs(b[2] - b[0]);
+        double w = Math.abs(b[3] - b[1]);
+        return w > 0 && h > 0 && w <= 28.0 && h <= 28.0;
+    }
+
+    private static boolean hasObjectReplacementText(String text) {
+        return text != null && (text.indexOf('\uFFFC') >= 0 || text.indexOf('￼') >= 0);
+    }
+
+    private static boolean hasPlannedFloatingShellForSemanticInlineGroup(
+            ResolvedBuildContext ctx,
+            int groupDomId) {
+        if (ctx == null || ctx.resolvedData == null) return false;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.id() != groupDomId) continue;
+            if (!isRenderedPageObject(rg)) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            if (!rg.hasEditableTextHiddenFromPng()) continue;
+            if (ctx.hasOwnershipPlan(rg)) {
+                return ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg);
+            }
+            String reason = rg.reason();
+            return reason != null && reason.contains("text_hidden");
+        }
+        return false;
+    }
+
+    private static boolean isDirectChildOf(ResolvedBuildContext ctx, String childId, int parentDomId) {
+        if (ctx == null || ctx.resolvedData == null || childId == null) return false;
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(childId);
+        return item != null && String.valueOf(parentDomId).equals(item.parentId());
+    }
+
     /**
      * 이 TF를 owner로 하는 deco PNG가 "굽지 않고 풀어준" 대형 배경 도형 DOM ID 집합.
      * (extract_indd.jsx가 nativeFillChildIds로 명시 → Java가 네이티브 fill로 렌더)
@@ -1556,10 +1693,15 @@ public final class FramePlacer {
     private static boolean isOwnedTextShellPlan(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (rg == null) return false;
         ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
-        if (plan != null) {
-            return plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
-                    && plan.visualAction == VisualAction.PLACE_TEXT_SHELL;
+        if (plan != null
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL) {
+            return true;
         }
+        // plan이 PLACE_TEXT_SHELL이 아니어도(codex가 편집 셸을 PLACE_FLOATING_PNG로 두는
+        // editableShellSep 모델), 텍스트가 PNG에서 숨겨진 편집 셸이면 그 그룹의 자식 도형은
+        // 라벨 시각의 일부다. 이 신호로 X-shift 가드가 라벨 배경을 장애물로 오인하지 않게 한다.
+        // (예: '교수·학습' 탭 60039 complex_graphic_text_hidden + 파란 Oval 자식 60086)
         return rg.hasEditableTextHiddenFromPng()
                 && isOwnedTextFrameShellReason(rg.reason());
     }

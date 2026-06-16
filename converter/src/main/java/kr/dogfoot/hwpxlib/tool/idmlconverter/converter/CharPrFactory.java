@@ -249,7 +249,7 @@ final class CharPrFactory {
                         textRun.text() != null ? textRun.text() : "");
         kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry.applyCharRule(ruleCtx);
         if (ruleCtx.targetKoFont != null) fontFamilyToUse = ruleCtx.targetKoFont;
-        if (ruleCtx.targetFontSizePt != null)
+        if (ruleCtx.targetFontSizePt != null && textRun.fontSizeHwpunits() == null)
             height = (int) (ruleCtx.targetFontSizePt * kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ConverterConstants.HWPUNIT_PER_POINT);
         if (ruleCtx.targetLetterSpacing != null) letterSpacingToUse = ruleCtx.targetLetterSpacing;
 

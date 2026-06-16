@@ -15,7 +15,7 @@
 // SPEC-011: 추출 캐시 무효화용 스크립트 버전.
 // 출력 형식이나 추출 로직이 변경되면 이 값을 올려서 모든 캐시를 강제 무효화한다.
 // (mtime/size 기반 자동 무효화와 별개로 명시적 버전 관리 채널)
-var EXTRACT_SCRIPT_VERSION = "27";
+var EXTRACT_SCRIPT_VERSION = "31";
 
 // Stage 1 (배지 렌더 통합): 짧은 시각 라벨/인라인 배지를 단일 "inline_badge" 계약으로 emit.
 // false면 기존 다중-reason 경로 그대로(출력 바이트 동일). true면 두 export 패스(deco 디스패치 +
@@ -2604,7 +2604,11 @@ function exportVisualBackdropClusters(doc, outputDir, startPage, endPage, allIte
             try { if (!outFile.exists || outFile.length < 512) return false; } catch (eSize) {}
 
             var bounds = null;
-            try { bounds = arrCopy(tempGroup.visibleBounds); } catch (eBounds) {}
+            if (visualItems.length === 1) {
+                try { bounds = arrCopy(visualItems[0].visibleBounds); } catch (eSingleBounds) {}
+                if (!bounds) try { bounds = arrCopy(visualItems[0].geometricBounds); } catch (eSingleBounds2) {}
+            }
+            if (!bounds) try { bounds = arrCopy(tempGroup.visibleBounds); } catch (eBounds) {}
             if (!bounds) try { bounds = arrCopy(tempGroup.geometricBounds); } catch (eBounds2) {}
             if (bounds) _toPageRelativeBounds(bounds, cluster.page);
 
@@ -2782,10 +2786,15 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         if (bounds) _toPageRelativeBounds(bounds, page);
 
         var childIds = [];
+        var skippedClaimedLabelChild = false;
         try {
             var nested = item.allPageItems;
             for (var i = 0; i < nested.length; i++) {
                 var cid = nested[i].id;
+                if (labelBackdropClaimedIds[cid] || labelBackdropClaimedTextFrameIds[cid]) {
+                    skippedClaimedLabelChild = true;
+                    continue;
+                }
                 decoChildIds[cid] = true;
                 childIds.push(cid);
                 if (childIdMap) childIdMap[cid] = true;
@@ -2796,7 +2805,16 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         try { _z = getItemZOrder(item); } catch (e) {}
         var entry = { id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: page.documentOffset, zOrder: _z };
         if (childIds.length > 0) entry.childIds = childIds;
-        results.push(applyRenderOwnership(entry, item, ownershipOpts || { reason: "decoration_group" }));
+        var resolvedOwnershipOpts = ownershipOpts || { reason: "decoration_group" };
+        if (skippedClaimedLabelChild && !resolvedOwnershipOpts.sourceObjectIds) {
+            var sourceIds = [domId];
+            for (var si = 0; si < childIds.length; si++) sourceIds.push(childIds[si]);
+            var copiedOpts = {};
+            for (var ok in resolvedOwnershipOpts) copiedOpts[ok] = resolvedOwnershipOpts[ok];
+            copiedOpts.sourceObjectIds = sourceIds;
+            resolvedOwnershipOpts = copiedOpts;
+        }
+        results.push(applyRenderOwnership(entry, item, resolvedOwnershipOpts));
         renderedIds[domId] = true;
         return childIds;
     }
@@ -3122,6 +3140,20 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return true;
     }
 
+    function _isCompactStackedEditableLabelTextFrame(tf) {
+        if (!_isEditableSiblingLabelTextFrame(tf)) return false;
+        var raw = "";
+        try { raw = String(tf.contents || ""); } catch (eContents) {}
+        if (raw.indexOf("\r") < 0 && raw.indexOf("\n") < 0) return false;
+        var text = _plainTextOfTextFrame(tf);
+        if (!text || text.length < 2 || text.length > 8) return false;
+        var b = _boundsOfItem(tf);
+        if (!b) return false;
+        var w = Math.abs(b[3] - b[1]);
+        var h = Math.abs(b[2] - b[0]);
+        return w <= 18.0 && h <= 24.0 && h >= w * 0.75;
+    }
+
     function _isLabelBackdropCandidateItem(item) {
         try { if (!item || isOnHiddenLayer(item)) return false; } catch (e0) { return false; }
         try { if (renderedIds[item.id] || decoChildIds[item.id]) return false; } catch (eSeen) {}
@@ -3246,7 +3278,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
     }
 
     function _exportLabelBackdropGroup(tf, visualItems, page) {
-        if (!tf || !visualItems || visualItems.length < 2 || !page) return false;
+        if (!tf || !visualItems || visualItems.length < 1 || !page) return false;
+        if (visualItems.length < 2 && !_isCompactStackedEditableLabelTextFrame(tf)) return false;
         var tfId = tf.id;
         var fileName = "label_backdrop_group_" + tfId + ".png";
         var outFile = File(renderDir + "/" + fileName);
@@ -3256,15 +3289,17 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         try {
             for (var i = 0; i < ordered.length; i++) {
                 var dup = ordered[i].duplicate();
-                try {
-                    if (dup.constructor.name === "TextFrame") dup.contents = "";
-                } catch (eClear) {}
+                _clearTextFramesInRenderDuplicate(dup);
                 dups.push(dup);
             }
-            try {
-                tempGroup = page.groups.add(dups);
-            } catch (eGroupPage) {
-                try { tempGroup = doc.groups.add(dups); } catch (eGroupDoc) {}
+            if (dups.length === 1) {
+                tempGroup = dups[0];
+            } else {
+                try {
+                    tempGroup = page.groups.add(dups);
+                } catch (eGroupPage) {
+                    try { tempGroup = doc.groups.add(dups); } catch (eGroupDoc) {}
+                }
             }
             if (!tempGroup) return false;
             try { tempGroup.exportFile(ExportFormat.PNG_FORMAT, outFile); } catch (eExport) {}
@@ -3279,11 +3314,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             var z = 0;
             try { z = getItemZOrder(visualItems[0]); } catch (eZ0) {}
             for (var si = 0; si < visualItems.length; si++) {
+                _appendSourceAndDescendantIds(visualItems[si], sourceIds, seen);
                 var sid = visualItems[si].id;
-                if (!seen[sid]) {
-                    sourceIds.push(sid);
-                    seen[sid] = true;
-                }
                 decoChildIds[sid] = true;
                 renderedIds[sid] = true;
                 labelBackdropClaimedIds[sid] = true;
@@ -3292,6 +3324,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                     if (iz > z) z = iz;
                 } catch (eZ) {}
             }
+            sourceIds = _withoutSourceId(sourceIds, tfId);
             labelBackdropClaimedTextFrameIds[tfId] = true;
             var entryId = -900000000 + Number(tfId);
             results.push(applyRenderOwnership({
@@ -3328,17 +3361,72 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         }
     }
 
+    function _withoutSourceId(sourceIds, excludedId) {
+        var out = [];
+        var excluded = String(excludedId);
+        for (var i = 0; sourceIds && i < sourceIds.length; i++) {
+            if (String(sourceIds[i]) === excluded) continue;
+            out.push(sourceIds[i]);
+        }
+        return out;
+    }
+
+    function _clearTextFramesInRenderDuplicate(item) {
+        if (!item) return;
+        try {
+            if (item.constructor && item.constructor.name === "TextFrame") {
+                item.contents = "";
+            }
+        } catch (eClearSelf) {}
+        try {
+            var descendants = item.allPageItems;
+            if (!descendants) return;
+            for (var i = 0; i < descendants.length; i++) {
+                try {
+                    if (descendants[i].constructor && descendants[i].constructor.name === "TextFrame") {
+                        descendants[i].contents = "";
+                    }
+                } catch (eClearChild) {}
+            }
+        } catch (eDesc) {}
+    }
+
+    function _appendSourceAndDescendantIds(item, out, seen) {
+        if (!item || !out || !seen) return;
+        try {
+            var id = item.id;
+            if (!seen[id]) {
+                out.push(id);
+                seen[id] = true;
+            }
+        } catch (eSelf) {}
+        try {
+            var descendants = item.allPageItems;
+            if (!descendants) return;
+            for (var i = 0; i < descendants.length; i++) {
+                try {
+                    var childId = descendants[i].id;
+                    if (!seen[childId]) {
+                        out.push(childId);
+                        seen[childId] = true;
+                    }
+                } catch (eChild) {}
+            }
+        } catch (eDesc) {}
+    }
+
     function _renderSiblingLabelBackdropGroups(grp, page) {
         var rendered = 0;
         try {
             var nested = grp.allPageItems;
             var candidates = [];
+            var compactCandidates = [];
             var residualCandidates = [];
             for (var i = 0; i < nested.length; i++) {
                 if (_isLabelBackdropCandidateItem(nested[i])) candidates.push(nested[i]);
+                if (_isLabelBackdropCandidateItemIgnoringClaims(nested[i])) compactCandidates.push(nested[i]);
                 if (_isLabelBackdropResidualCandidateItem(nested[i])) residualCandidates.push(nested[i]);
             }
-            if (candidates.length < 2) return 0;
             var claimed = {};
             for (var ti = 0; ti < nested.length; ti++) {
                 var tf = nested[ti];
@@ -3346,6 +3434,27 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 var tfBounds = _boundsOfItem(tf);
                 if (!tfBounds) continue;
                 var owned = [];
+                if (_isCompactStackedEditableLabelTextFrame(tf)) {
+                    var parentBackdrop = _parentBackdropOfCompactLabel(tf);
+                    if (parentBackdrop && !claimed[parentBackdrop.id]) {
+                        var pb = _boundsOfItem(parentBackdrop);
+                        if (_candidateLooksLikeLabelShell(tfBounds, pb)) owned.push(parentBackdrop);
+                    }
+                    for (var cci = 0; cci < compactCandidates.length; cci++) {
+                        var compactCand = compactCandidates[cci];
+                        if (!compactCand || claimed[compactCand.id]) continue;
+                        var ccb = _boundsOfItem(compactCand);
+                        if (!_candidateLooksLikeLabelShell(tfBounds, ccb)) continue;
+                        var alreadyOwned = false;
+                        for (var oi0 = 0; oi0 < owned.length; oi0++) {
+                            if (owned[oi0] && owned[oi0].id === compactCand.id) {
+                                alreadyOwned = true;
+                                break;
+                            }
+                        }
+                        if (!alreadyOwned) owned.push(compactCand);
+                    }
+                }
                 for (var ci = 0; ci < candidates.length; ci++) {
                     var cand = candidates[ci];
                     if (!cand || claimed[cand.id]) continue;
@@ -3353,7 +3462,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                     if (!_candidateLooksLikeLabelShell(tfBounds, cb)) continue;
                     owned.push(cand);
                 }
-                if (owned.length < 2) continue;
+                if (owned.length < 2 && !_isCompactStackedEditableLabelTextFrame(tf)) continue;
                 if (_exportLabelBackdropGroup(tf, owned, page)) {
                     for (var oi = 0; oi < owned.length; oi++) claimed[owned[oi].id] = true;
                     _claimLabelBackdropResidualItems(tfBounds, residualCandidates, owned, claimed);
@@ -3362,6 +3471,101 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             }
         } catch (e) {}
         return rendered;
+    }
+
+    function _renderCompactStackedLabelBackdrops(grp, page) {
+        var rendered = 0;
+        try {
+            if (!grp || !page) return 0;
+            var nested = grp.allPageItems;
+            var visualCandidates = [];
+            for (var i = 0; i < nested.length; i++) {
+                if (_isLabelBackdropCandidateItemIgnoringClaims(nested[i])) visualCandidates.push(nested[i]);
+            }
+            for (var ti = 0; ti < nested.length; ti++) {
+                var tf = nested[ti];
+                if (!_looksLikeCompactStackedLabelTextFrame(tf)) continue;
+                try { if (labelBackdropClaimedTextFrameIds[tf.id]) continue; } catch (eClaimedTf) {}
+                var tfBounds = _boundsOfItem(tf);
+                if (!tfBounds) continue;
+                var owned = [];
+                var parentBackdrop = _parentBackdropOfCompactLabel(tf);
+                if (parentBackdrop) {
+                    var pb = _boundsOfItem(parentBackdrop);
+                    if (_candidateLooksLikeLabelShell(tfBounds, pb)) owned.push(parentBackdrop);
+                }
+                for (var ci = 0; ci < visualCandidates.length; ci++) {
+                    var cand = visualCandidates[ci];
+                    if (!cand || (owned.length > 0 && cand.id === owned[0].id)) continue;
+                    var cb = _boundsOfItem(cand);
+                    if (_candidateLooksLikeLabelShell(tfBounds, cb)) {
+                        owned.push(cand);
+                        break;
+                    }
+                }
+                if (owned.length < 1) continue;
+                if (_exportLabelBackdropGroup(tf, owned, page)) {
+                    for (var oi = 0; oi < owned.length; oi++) {
+                        try { labelBackdropClaimedIds[owned[oi].id] = true; } catch (eOwned) {}
+                    }
+                    rendered++;
+                }
+            }
+        } catch (e) {}
+        return rendered;
+    }
+
+    function _looksLikeCompactStackedLabelTextFrame(tf) {
+        try { if (!tf || tf.constructor.name !== "TextFrame") return false; } catch (e0) { return false; }
+        try { if (visibleTextLengthOfTextFrame(tf) <= 0) return false; } catch (eVisible) { return false; }
+        var raw = "";
+        try { raw = String(tf.contents || ""); } catch (eContents) {}
+        if (raw.indexOf("\r") < 0 && raw.indexOf("\n") < 0) return false;
+        var text = _plainTextOfTextFrame(tf);
+        if (!text || text.length < 2 || text.length > 8) return false;
+        if (_isSimpleMarkerLabelText(text)) return false;
+        var b = _boundsOfItem(tf);
+        if (!b) return false;
+        var w = Math.abs(b[3] - b[1]);
+        var h = Math.abs(b[2] - b[0]);
+        return w <= 18.0 && h <= 24.0 && h >= w * 0.75;
+    }
+
+    function _isLabelBackdropCandidateItemIgnoringClaims(item) {
+        try { if (!item || isOnHiddenLayer(item)) return false; } catch (e0) { return false; }
+        try {
+            if (item.images && item.images.length > 0) return false;
+            if (item.pdfs && item.pdfs.length > 0) return false;
+            if (item.epss && item.epss.length > 0) return false;
+        } catch (ePlaced) {}
+        var cn = "";
+        try { cn = item.constructor.name; } catch (eCn) {}
+        if (cn === "TextFrame") {
+            if (visibleTextLengthOfTextFrame(item) > 0) return false;
+            return hasVisibleFill(item) || hasVisibleStroke(item);
+        }
+        if (cn === "Rectangle" || cn === "Oval" || cn === "Polygon" || cn === "GraphicLine") {
+            return hasVisibleFill(item) || hasVisibleStroke(item);
+        }
+        return false;
+    }
+
+    function _parentBackdropOfCompactLabel(tf) {
+        if (!tf) return null;
+        var parent = null;
+        try { parent = tf.parent; } catch (eParent) {}
+        if (!parent || parent === tf) return null;
+        try { if (isOnHiddenLayer(parent)) return null; } catch (eHidden) { return null; }
+        try {
+            if (parent.images && parent.images.length > 0) return null;
+            if (parent.pdfs && parent.pdfs.length > 0) return null;
+            if (parent.epss && parent.epss.length > 0) return null;
+        } catch (ePlaced) {}
+        var cn = "";
+        try { cn = parent.constructor.name; } catch (eCn) {}
+        if (cn !== "Rectangle" && cn !== "Oval" && cn !== "Polygon" && cn !== "TextFrame") return null;
+        if (!hasVisibleFill(parent) && !hasVisibleStroke(parent)) return null;
+        return parent;
     }
 
     function _isLabelBackdropOnlyGroup(grp) {
@@ -3802,6 +4006,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             var siblingLabelBackdropCount = 0;
             if (!EMIT_UNIFIED_INLINE_BADGE && (kind === "mixedGroup" || kind === "textComposite")) {
                 siblingLabelBackdropCount = _renderSiblingLabelBackdropGroups(grp, grpPage);
+                siblingLabelBackdropCount += _renderCompactStackedLabelBackdrops(grp, grpPage);
             }
 
             if (_unifiedBadge) {

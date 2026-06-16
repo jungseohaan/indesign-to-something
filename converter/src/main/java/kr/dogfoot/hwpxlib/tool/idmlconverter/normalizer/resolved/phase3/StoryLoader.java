@@ -14,6 +14,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTMathGrouper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTRunConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
@@ -429,9 +430,11 @@ public class StoryLoader {
                                     }
                                     if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(
                                             ctx.resolvedData, domId)) {
-                                        ctx.deferredAnchoredFloatingIds.add(domId);
-                                        anchorIdx++;
-                                        continue;
+                                        if (!InlineFrameHandler.hasPlannedFloatingShellForSemanticInlineGroup(ctx, domId)) {
+                                            ctx.deferredAnchoredFloatingIds.add(domId);
+                                            anchorIdx++;
+                                            continue;
+                                        }
                                     }
                                     // 커스텀 위치 앵커가 부모 범위 밖이면 인라인 흐름에는 넣지 않는다.
                                     // 단, inline_object PNG가 있으면 시각 장식이므로 절대 좌표 floating으로 보존한다.
@@ -614,6 +617,7 @@ public class StoryLoader {
                                                           String cellStoryId) {
         List<ASTParagraph> result = new ArrayList<>();
         if (ctx == null || idmlCell == null || idmlCell.paragraphs() == null) return result;
+        if (hasTextFrameStoryOwnedByPlacedTextFrame(ctx, idmlCell)) return result;
         int paraIndex = 0;
         for (IDMLParagraph ip : idmlCell.paragraphs()) {
             if (ip == null) { paraIndex++; continue; }
@@ -1027,5 +1031,51 @@ public class StoryLoader {
             }
         }
         return false;
+    }
+
+    private static boolean hasTextFrameStoryOwnedByPlacedTextFrame(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (ctx == null || ctx.resolvedData == null || idmlCell == null
+                || idmlCell.textFrameStoryRefs() == null || idmlCell.textFrameStoryRefs().isEmpty()) {
+            return false;
+        }
+        for (String storyRef : idmlCell.textFrameStoryRefs()) {
+            if (isStoryOwnedByPlacedTextFrame(ctx, storyRef)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isStoryOwnedByPlacedTextFrame(ResolvedBuildContext ctx, String storyRef) {
+        if (storyRef == null) return false;
+        String storyId = toDecimalStoryId(storyRef);
+        if (storyId == null) return false;
+        List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
+        if (frames == null || frames.isEmpty()) return false;
+        for (ResolvedTextFrame tf : frames) {
+            if (tf == null || tf.id() == null) continue;
+            try {
+                int domId = Integer.parseInt(tf.id());
+                if (ctx.isTextDisposed(domId, FrameDisposition.TEXT_BLOCK_PLACED)) return true;
+            } catch (NumberFormatException ignored) {
+                // Non-DOM ids cannot be matched against text-frame ownership disposition.
+            }
+        }
+        return false;
+    }
+
+    private static String toDecimalStoryId(String storyRef) {
+        if (storyRef == null || storyRef.isEmpty()) return null;
+        String s = storyRef;
+        if (s.startsWith("child_")) s = s.substring("child_".length());
+        if (s.startsWith("Story_")) s = s.substring("Story_".length());
+        if (s.startsWith("u") && s.length() > 1) {
+            try {
+                return String.valueOf(Integer.parseInt(s.substring(1), 16));
+            } catch (NumberFormatException ignored) {
+                return storyRef;
+            }
+        }
+        return storyRef;
     }
 }

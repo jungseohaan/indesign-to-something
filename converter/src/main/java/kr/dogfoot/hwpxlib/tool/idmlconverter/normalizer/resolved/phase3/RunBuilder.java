@@ -3,6 +3,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHFontGlyphMap;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionTiming;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStyleDef;
 import kr.dogfoot.hwpxlib.tool.equationconverter.idml.EHTextClassifier;
@@ -10,7 +11,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.MatchConfidence;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.RunPropertyResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextControlNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -78,6 +81,7 @@ class RunBuilder {
             text = EHFontGlyphMap.applyEHGrepAsciiGlyphMap(text);
         }
         tr.text(text);
+        rr = resolvedRunForText(ctx, text, rr);
 
         // fontFamily / fontSize / textColor: 헬퍼로 단일 우선순위 적용
         // SPEC-016: 매칭 신뢰도(confidence)에 따라 resolved 오버라이드 여부 결정
@@ -102,6 +106,21 @@ class RunBuilder {
         }
         Integer resolvedFontSize = RunPropertyResolver.resolveFontSizeHwpunitsWithConfidence(
                 rr, cr, sc.fontSize, confidence);
+        if (shouldTrustResolvedFontSizeForText(text, rr)) {
+            resolvedFontSize = (int) CoordinateConverter.pointsToHwpunits(rr.fontSize());
+        } else {
+            ResolvedRun exactResolvedRun = findResolvedRunWithSameText(ctx, text);
+            if (exactResolvedRun != null && exactResolvedRun.fontSize() != null
+                    && exactResolvedRun.fontSize() > 0) {
+                resolvedFontSize = (int) CoordinateConverter.pointsToHwpunits(exactResolvedRun.fontSize());
+            } else if (resolvedFontSize != null && resolvedFontSize >= 1100) {
+                ResolvedRun containingResolvedRun = findSmallerResolvedRunContainingText(ctx, text, resolvedFontSize);
+                if (containingResolvedRun != null && containingResolvedRun.fontSize() != null
+                        && containingResolvedRun.fontSize() > 0) {
+                    resolvedFontSize = (int) CoordinateConverter.pointsToHwpunits(containingResolvedRun.fontSize());
+                }
+            }
+        }
         if (resolvedFontSize != null) {
             tr.fontSizeHwpunits(resolvedFontSize);
         }
@@ -243,6 +262,94 @@ class RunBuilder {
         }
         // 수식 폰트 감지는 convertMathRunsInParagraph에서 후처리
         return tr;
+    }
+
+    private static boolean shouldTrustResolvedFontSizeForText(String text, ResolvedRun rr) {
+        if (rr == null || rr.fontSize() == null || rr.fontSize() <= 0) return false;
+        String resolvedText = normalizeComparableText(rr.text());
+        String actualText = normalizeComparableText(text);
+        if (resolvedText.isEmpty() || actualText.isEmpty()) return false;
+        if (actualText.length() < 2) return false;
+        return resolvedText.equals(actualText)
+                || resolvedText.contains(actualText)
+                || actualText.contains(resolvedText);
+    }
+
+    private static ResolvedRun resolvedRunForText(ResolvedBuildContext ctx, String text, ResolvedRun rr) {
+        if (shouldTrustResolvedFontSizeForText(text, rr)) return rr;
+        ResolvedRun exact = findResolvedRunWithSameText(ctx, text);
+        return exact != null ? exact : rr;
+    }
+
+    private static String normalizeComparableText(String text) {
+        if (text == null) return "";
+        return text
+                .replace("\uFFFC", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\u0008", "")
+                .trim();
+    }
+
+    private static ResolvedRun findResolvedRunWithSameText(ResolvedBuildContext ctx, String text) {
+        if (ctx == null || ctx.resolvedData == null) return null;
+        String key = normalizeComparableText(normalizeSpaces(text));
+        if (key.length() < 10) return null;
+        ResolvedRun match = null;
+        Double fontSize = null;
+        for (ResolvedStory story : ctx.resolvedData.stories()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (ResolvedParagraph paragraph : story.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run == null || run.isInlineAnchor()) continue;
+                    String candidate = normalizeComparableText(normalizeSpaces(run.text()));
+                    if (!key.equals(candidate)) continue;
+                    if (run.fontSize() == null || run.fontSize() <= 0) continue;
+                    if (fontSize != null && Math.abs(fontSize - run.fontSize()) > 0.01) {
+                        return null;
+                    }
+                    fontSize = run.fontSize();
+                    match = run;
+                }
+            }
+        }
+        return match;
+    }
+
+    private static ResolvedRun findSmallerResolvedRunContainingText(
+            ResolvedBuildContext ctx,
+            String text,
+            int currentFontSizeHwpunits) {
+        if (ctx == null || ctx.resolvedData == null) return null;
+        String key = normalizeComparableText(normalizeSpaces(text));
+        if (key.length() < 2) return null;
+        if (key.replaceAll("[\\p{Punct}\\s]+", "").length() < 2) return null;
+        double currentPt = currentFontSizeHwpunits / 100.0;
+        ResolvedRun best = null;
+        Double bestSize = null;
+        for (ResolvedStory story : ctx.resolvedData.stories()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (ResolvedParagraph paragraph : story.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run == null || run.isInlineAnchor()) continue;
+                    if (run.fontSize() == null || run.fontSize() <= 0) continue;
+                    if (run.fontSize() >= currentPt - 1.0) continue;
+                    String candidate = normalizeComparableText(normalizeSpaces(run.text()));
+                    if (candidate.length() <= key.length()) continue;
+                    if (!candidate.contains(key)) continue;
+                    if (bestSize != null && Math.abs(bestSize - run.fontSize()) > 0.3) {
+                        return null;
+                    }
+                    bestSize = run.fontSize();
+                    best = run;
+                }
+            }
+        }
+        return best;
     }
 
     static boolean hasUnderlineIntent(IDMLCharacterRun cr, ResolvedRun rr) {
@@ -806,11 +913,13 @@ class RunBuilder {
 
     static ResolvedRun findResolvedRun(ResolvedBuildContext ctx, List<ResolvedRun> runs, int startIdx, String text) {
         if (runs == null || runs.isEmpty() || text == null || text.isEmpty()) return null;
-        String key = text.length() > 5 ? text.substring(0, 5) : text;
+        String normalizedText = normalizeComparableText(normalizeSpaces(text));
+        if (normalizedText.isEmpty()) return null;
+        String key = normalizedText.length() > 5 ? normalizedText.substring(0, 5) : normalizedText;
         // startIdx부터 순차 검색
         for (int i = startIdx; i < runs.size(); i++) {
-            String rt = runs.get(i).text();
-            if (rt != null && rt.contains(key)) {
+            String rt = normalizeComparableText(normalizeSpaces(runs.get(i).text()));
+            if (!rt.isEmpty() && rt.contains(key)) {
                 ctx.lastMatchResult[0] = i;
                 return runs.get(i);
             }
@@ -818,8 +927,8 @@ class RunBuilder {
         // 앞쪽 소수 런만 역방향 재탐색 (O(n²) 방지: 전체 restart 대신 최대 8칸 window)
         int backWindow = Math.max(0, startIdx - 8);
         for (int i = backWindow; i < startIdx; i++) {
-            String rt = runs.get(i).text();
-            if (rt != null && rt.contains(key)) {
+            String rt = normalizeComparableText(normalizeSpaces(runs.get(i).text()));
+            if (!rt.isEmpty() && rt.contains(key)) {
                 ctx.lastMatchResult[0] = i;
                 return runs.get(i);
             }
