@@ -1,6 +1,7 @@
 # SPEC-036: Render Ownership Consolidation (SPEC-035 실행 일원화)
 
-> 상태: In Progress (2026-06-14 시작)
+> 상태: **Done (2026-06-17)** — Tier 0~3 완료. BackgroundInjector 3,182 → 994 LOC, audit 중복위험 0건, 골든디프 0.
+> (2026-06-14 시작)
 > 전제: [SPEC-035](SPEC-035-indesign-render-ownership.md)가 정의한 ObjectPlan을 **실행 단계의 단일 권위**로 승격한다.
 > 원칙: 휴리스틱에 예외를 더하지 않는다. 결정은 Planner로 모으고, 실행기는 plan을 따른다.
 
@@ -125,9 +126,29 @@ Tier 0 불일치 클래스를 빈도순으로 하나씩:
 > 비보호 항목만 DROP_VISUAL 마킹해야 한다(보호 항목 마킹 시 회귀).
 
 ### Tier 3 — 잔여 정리
-- 이전 완료로 dead가 된 헬퍼 삭제(데드코드 분석).
-- BackgroundInjector를 *실행*만 남겨 결정 로직 0.
-- 문서 동기화([docs/architecture.md](../architecture.md), [CLAUDE.md](../../CLAUDE.md), 본 INDEX).
+
+#### ✅ 완료 (2026-06-17) — BackgroundInjector 3,182 → 994 LOC
+
+핵심 발견: Tier 2 이전(visualAction 분류를 `VisualZOrderPlanner`/`OwnershipPlanner`로 복제)이
+끝났는데 **BackgroundInjector의 원본 복사본이 dead로 남아 있었다**(zOrder 클러스터 결정은 zOrder 메서드들의 호출 부재로 0).
+genuine-root reachability 분석(roots = `inject` + 외부 호출 util 8개)으로 두 dead 클러스터 식별·삭제:
+
+- **zOrder/layer 실제 로직 469 LOC 삭제** — `effectiveZOrder`/`inferredTextFrameVisualShellZOrder`/
+  `semanticTextOverlapShellZOrder`/`titleLabelBackgroundZOrder`/`inferredTextLineBackdropZOrder`/
+  `textFrameBackdropScore` 등. 이미 `VisualZOrderPlanner`/`VisualOverlapZOrderPlanner`로 복제됨.
+- **suppression 클러스터 310 LOC 삭제** — `computeChildOfGroupSuppression`/`computeInlineCoverageSuppression`/
+  `computeChildOfGroup`/`canSuppressChildren`/`shouldSkipByChildPolicy`/`collectInlineObjectCoverage` +
+  `ChildOfGroupSuppression`/`InlineCoverageSuppression` 클래스. 이미 `OwnershipPlanner`로 복제됨
+  (BI 버전은 `public`이라 단순 reachability가 root로 오인 → 실제 호출 0 확인 후 삭제).
+
+실행(execution) 로직 2개 클러스터는 Stage 3 helper로 **순수 이동**:
+- **텍스트강조 흡수 510 LOC** → `stage3/VisualTextEmphasisAbsorber` (ABSORB_TEXT_STYLE 실행).
+- **TF inline visual 합성 143 LOC** → `stage3/VisualTfInlineCompositor` (부모 PNG에 inline 자식 합성).
+
+매 단계 골든디프(`section0.xml` md5 `462b4860…`) **0 유지**. 미사용 import 11개 제거.
+결과: BackgroundInjector는 `inject` 오케스트레이터 + crop/page-intersection/edge-strip 실행 + Stage 3 위임만 남음.
+
+- 문서 동기화: [docs/architecture.md](../architecture.md), [CLAUDE.md](../../CLAUDE.md), 본 INDEX.
 
 ---
 
@@ -135,8 +156,10 @@ Tier 0 불일치 클래스를 빈도순으로 하나씩:
 
 - `scripts/render_decision_audit.py` — (신규) 불일치 리포트 생성기 [Tier 0]
 - `converter/.../phase6/VisualPlacementResolver.java` — (신규) 공용 결정 함수 [Tier 1]
-- `converter/.../phase6/BackgroundInjector.java` — suppress 게이트를 resolver 호출로 대체 [Tier 1~3]
-- `converter/.../phase7/RenderableFramePlacer.java` — 동일 resolver 라우팅 [Tier 1]
+- `converter/.../phase6/BackgroundInjector.java` — dead zOrder/suppression 클러스터 삭제, 실행 2클러스터 위임 [Tier 1~3]
+- `converter/.../stage3/VisualTextEmphasisAbsorber.java` — (신규) ABSORB_TEXT_STYLE 실행 분리 [Tier 3]
+- `converter/.../stage3/VisualTfInlineCompositor.java` — (신규) TF inline 합성 실행 분리 [Tier 3]
+- `converter/.../phase7/RenderableFramePlacer.java` — 동일 resolver 라우팅 [Tier 1] (클래스 삭제 완료)
 - `converter/.../normalizer/resolved/ResolvedBuildContext.java` — 死 Set 제거, Set 통합 [Tier 1]
 - `converter/.../ownership/OwnershipPlanner.java` — visualAction 분류 보강 [Tier 2]
 
@@ -144,11 +167,11 @@ Tier 0 불일치 클래스를 빈도순으로 하나씩:
 
 ## 검증
 
-- [ ] Tier 0: 불일치 리포트가 page 53 일러스트류 충돌을 데이터로 식별
-- [ ] Tier 1: 골든디프 0 (순수 이동 증명), Phase 7 GAP 해소
-- [ ] Tier 2: 클래스별 *의도된 변화만* 골든디프에 반영
-- [ ] 텍스트 손실 0, `StoryConverterTest`/`OwnershipPlannerTest` 기존 실패 외 신규 0
-- [ ] BackgroundInjector LOC 3,182 → 목표 ≤ 1,200
+- [x] Tier 0: 불일치 리포트가 page 53 일러스트류 충돌을 데이터로 식별
+- [x] Tier 1: 골든디프 0 (순수 이동 증명), Phase 7 GAP 해소
+- [x] Tier 2: 클래스별 *의도된 변화만* 골든디프에 반영. **최종 audit 중복위험 0건**(plan=DROP_VISUAL→배치됨 0), 잔여 15건은 전부 실행단계 skip(SKIP_OUTSIDE_PAGE 등)
+- [x] 텍스트 손실 0, 골든디프 `462b4860…` 0 유지. 신규 테스트 실패 0(기존 `StoryConverterTest`/`TestFontMapper` 실패는 무관 영역)
+- [x] BackgroundInjector LOC 3,182 → **994** (목표 ≤ 1,200 달성, dead 779 삭제 + 실행 653 Stage 3 이동)
 
 ---
 

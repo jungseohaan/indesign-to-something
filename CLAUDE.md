@@ -159,12 +159,14 @@ src/main/java/kr/dogfoot/hwpxlib/tool/idmlconverter/
 │       ├── phase4/TableBuilder.java        # 테이블 변환
 │       ├── phase4_5/BulletInserter.java    # 불릿 자동 삽입
 │       ├── phase5/WrapPhase5.java          # textwrap 글상자 분할
-│       ├── phase6/BackgroundInjector.java  # 시각 배치 본체(배경+플로팅+배지). VisualBuilder가 호출
+│       ├── phase6/BackgroundInjector.java  # 시각 배치 실행 본체(994 LOC, 구 3182). inject 오케스트레이터+crop/page-intersection. VisualBuilder가 호출
 │       ├── stage3/                       # Stage 3 시각 배치 (구 phase6+phase7 통합, codex 리팩터)
 │       │   ├── VisualBuilder.java        # ★ 시각 배치 진입점 (현재 BackgroundInjector.inject 브리지)
 │       │   ├── VisualPlacementPlan(Builder/Executor).java # 배치 plan/실행
-│       │   ├── VisualZOrderPlanner.java / VisualOverlapZOrderPlanner.java # z-순서
+│       │   ├── VisualZOrderPlanner.java / VisualOverlapZOrderPlanner.java # z-순서 (zOrder 결정 권위, BI dead 복사본 삭제됨)
 │       │   ├── VisualCropper.java / VisualOverflowPlacer.java # 크롭/오버플로우
+│       │   ├── VisualTextEmphasisAbsorber.java # ABSORB_TEXT_STYLE 실행 (SPEC-036, 구 BI tryAbsorbTextEmphasisBackdrop)
+│       │   ├── VisualTfInlineCompositor.java   # TF inline 자식 PNG 합성 (SPEC-036, 구 BI compositeTfInlineVisuals)
 │       │   └── VisualLayeringRules.java / VisualSyntheticLinePlacer.java / VisualPngHeader.java 등
 │       └── shared/ParagraphTextHelpers.java # phase 공유 헬퍼
 │       # ※ phase7/RenderableFramePlacer 는 제거됨 → 로직이 BackgroundInjector.inject + stage3/Visual* 로 흡수 (SPEC-035)

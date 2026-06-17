@@ -292,8 +292,10 @@ if (resolvedData != null && !resolvedData.allRenderedFloatingItems().isEmpty()) 
 | 4.5 | `normalizer/resolved/phase4_5/BulletInserter.java` | 99 | 불릿 |
 | 5 | `normalizer/resolved/phase5/WrapPhase5.java` | 391 | textwrap 분할 |
 | Stage 3 | `normalizer/resolved/stage3/VisualBuilder.java` | 30 | 시각 배치 진입점 (BackgroundInjector.inject 브리지) |
-| Stage 3 | `normalizer/resolved/phase6/BackgroundInjector.java` | 2486 | 시각 배치 본체 (구 Phase 6+7 통합) |
-| Stage 3 | `normalizer/resolved/stage3/Visual*.java` (12개) | — | 배치 plan/실행/z-순서/크롭/오버플로우 헬퍼 |
+| Stage 3 | `normalizer/resolved/phase6/BackgroundInjector.java` | 994 | 시각 배치 실행 본체 (SPEC-036: dead 779 삭제 + 실행 653 Stage 3 이동, 구 3182) |
+| Stage 3 | `normalizer/resolved/stage3/VisualTextEmphasisAbsorber.java` | 544 | ABSORB_TEXT_STYLE 실행 (SPEC-036 분리) |
+| Stage 3 | `normalizer/resolved/stage3/VisualTfInlineCompositor.java` | 171 | TF inline 자식 PNG 합성 (SPEC-036 분리) |
+| Stage 3 | `normalizer/resolved/stage3/Visual*.java` (14개) | — | 배치 plan/실행/z-순서/크롭/오버플로우 헬퍼 |
 | — | `normalizer/resolved/shared/ParagraphTextHelpers.java` | — | phase 공유 헬퍼 |
 | — | `normalizer/resolved/ResolvedBuildContext.java` | — | phase 간 공유 컨텍스트 |
 

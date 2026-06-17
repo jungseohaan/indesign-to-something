@@ -23,7 +23,7 @@
 | **[SPEC-markdown](SPEC-markdown-export.md)** | AST → Markdown 내보내기 | **신규(2026-06-04)**. 계층 구조 파악 목적. 글/이미지 블럭 Y순 배치 + 단락 스타일 이름 주석 보존 |
 | **[SPEC-034](SPEC-034-llm-semantic-extraction.md)** | LLM 기반 시멘틱 구조 추출 | **신규(2026-06-04)**. GROQ/Anthropic API로 SemanticNode 분류 보강 + 계층형 JSON 출력. M1~M3 단계 |
 | **[SPEC-035](SPEC-035-indesign-render-ownership.md)** | InDesign 렌더 Ownership 기반 중복 방지 | **신규(2026-06-05)**. 텍스트 포함 PNG 기본 배치 금지, source id 기반 ownership gating, composedLines 줄 보존 |
-| **[SPEC-036](SPEC-036-render-ownership-consolidation.md)** | Render Ownership 실행 일원화 | **신규(2026-06-14)**. SPEC-035 ObjectPlan을 실행 단계 단일 권위로 승격. BackgroundInjector 3182 LOC/58 헬퍼/22 suppress 신호 → plan.visualAction 1개로 수렴. Tier 0(캐릭터화)→1(VisualPlacementResolver)→2(Planner 권위화)→3(정리) |
+| ~~[SPEC-036](SPEC-036-render-ownership-consolidation.md)~~ | Render Ownership 실행 일원화 | **Done(2026-06-17)** → Done 섹션 이동. BackgroundInjector 3,182 → **994 LOC**, audit 중복위험 0건, 골든디프 0 |
 
 ## Pending (제안/검토 대기)
 
@@ -59,6 +59,7 @@
 | [SPEC-023](SPEC-023-renderable-text-bg-merge.md) | 외곽선 텍스트 배지 배경 병합 | TextFrame 외곽선 + 라운드 |
 | [SPEC-024](SPEC-024-rulebelow-idml-doc-null.md) | RuleBelow 감지 실패 | lazy IDMLDocument 초기화 순서 |
 | [SPEC-031](SPEC-031-dsl-rule-engine.md) | Java-Kotlin 하이브리드 DSL 규칙 엔진 | 2026-05-27. ConversionRules.kt 단일 파일로 서식 규칙 정의 |
+| [SPEC-036](SPEC-036-render-ownership-consolidation.md) | Render Ownership 실행 일원화 | 2026-06-17. BackgroundInjector 3,182 → 994 LOC, dead 779 삭제 + 실행 653 Stage 3 이동, 골든디프 0 |
 | [SPEC-badge-extraction](SPEC-badge-extraction.md) | 배지 추출/변환 (초기 안) | SPEC-021/022로 진화 |
 | [SPEC-idml-free-pipeline](SPEC-idml-free-pipeline.md) | 하이브리드 파이프라인 (초기 안) | 신 파이프라인 진입점 |
 | [SPEC-pdf-export](SPEC-pdf-export.md) | PDF 프리뷰 생성 | 링크 재연결 + 고해상도 |
