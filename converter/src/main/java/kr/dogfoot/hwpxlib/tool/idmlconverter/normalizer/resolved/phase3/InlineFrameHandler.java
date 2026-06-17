@@ -752,6 +752,14 @@ public class InlineFrameHandler {
             break;
         }
         if (shell == null) return null;
+        // 라벨 셸(visual_label_text_hidden_shell)이 Stage 3에서 플로팅 PLACE_TEXT_SHELL로
+        // 배치될 예정이면 인라인 베이킹하지 않는다. 인라인(여기)+플로팅(Stage 3) 이중 배치를 막고
+        // 플로팅 셸이 단독 소유한다. (SPEC-035 §1.2 인라인 의미 라벨 그룹은 플로팅이 소유)
+        // 범위를 라벨 셸로 한정 — 이미지 섞인 mixed_group 등은 기존 인라인 동작 유지.
+        if ("visual_label_text_hidden_shell".equals(shell.reason())
+                && ctx.visualActionByOwnershipPlan(shell) == VisualAction.PLACE_TEXT_SHELL) {
+            return null;
+        }
         java.util.List<ResolvedTextFrame> children = badgeTextFramesSortedByReading(ctx, shell);
         if (children.isEmpty()) return null;
         for (ResolvedTextFrame childTf : children) {
