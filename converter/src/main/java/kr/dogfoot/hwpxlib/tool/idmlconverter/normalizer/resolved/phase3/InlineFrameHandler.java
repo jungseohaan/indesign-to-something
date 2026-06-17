@@ -3478,6 +3478,7 @@ public class InlineFrameHandler {
             block.sourceId("page_obj_" + rg.id() + "_" + tf.id());
             block.inlineToFloating(true);
             block.verticalJustification("CenterAlign");
+            boolean pillIsDark = false;
             if (opaque[i] >= 0.06) {
                 try {
                     BufferedImage crop = orig.getSubimage(
@@ -3485,6 +3486,8 @@ public class InlineFrameHandler {
                     block.imageFillData(flattenOntoWhite(crop));
                     block.nativeGraphicsAllowed(true);
                     block.forceImageFill(true);
+                    java.awt.Color pill = averageOpaqueColor(crop);
+                    pillIsDark = pill != null && relativeLuminance(pill) < 0.72;
                 } catch (Exception ignored) {
                     // crop 실패 시 배경 없는 텍스트 블록으로 둔다.
                 }
@@ -3494,6 +3497,12 @@ public class InlineFrameHandler {
             ASTTextRun run = new ASTTextRun();
             run.text(cleaned);
             applyFirstRunStyle(ctx, tf, run);
+            // 컬러 알약(셸) 위에 얹힌 라벨 텍스트는 알약과 대비되는 밝은 색이어야 한다.
+            // resolved 캐시가 '예시답안(지도서만)' 같은 어두운 지도서 색을 잘못 줄 수 있어,
+            // 알약이 어두우면 원본 렌더처럼 흰색으로 보정한다. (원본 baked PNG 기준)
+            if (pillIsDark) {
+                run.textColor("#FFFFFF");
+            }
             para.addItem(run);
             block.addParagraph(para);
             markTextBlockPlaced(ctx, tf);
@@ -3553,6 +3562,30 @@ public class InlineFrameHandler {
     private static int clampI(int v, int lo, int hi) {
         if (hi < lo) hi = lo;
         return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    /** 불투명 픽셀의 평균 색(셸 알약의 채움색 근사). 텍스트 픽셀은 소수라 평균에 거의 영향 없음. */
+    private static java.awt.Color averageOpaqueColor(BufferedImage img) {
+        if (img == null) return null;
+        long r = 0, g = 0, b = 0, n = 0;
+        int sx = Math.max(1, img.getWidth() / 48);
+        int sy = Math.max(1, img.getHeight() / 48);
+        for (int y = 0; y < img.getHeight(); y += sy) {
+            for (int x = 0; x < img.getWidth(); x += sx) {
+                int p = img.getRGB(x, y);
+                if (((p >>> 24) & 0xFF) < 200) continue;
+                r += (p >> 16) & 0xFF;
+                g += (p >> 8) & 0xFF;
+                b += p & 0xFF;
+                n++;
+            }
+        }
+        if (n == 0) return null;
+        return new java.awt.Color((int) (r / n), (int) (g / n), (int) (b / n));
+    }
+
+    private static double relativeLuminance(java.awt.Color c) {
+        return (0.2126 * c.getRed() + 0.7152 * c.getGreen() + 0.0722 * c.getBlue()) / 255.0;
     }
 
     /** rg.editableTextFrameIds()를 ResolvedTextFrame으로 매핑 후 Y(상단)→X(좌측) 읽기 순서로 정렬. */
