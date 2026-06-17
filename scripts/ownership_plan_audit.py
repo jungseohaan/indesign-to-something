@@ -37,8 +37,13 @@ VISIBLE_VISUAL_ACTIONS = {
 PLACED_DECISIONS = {
     "PLACE",
     "PLACE_OVERFLOW_PREVIOUS_PAGE",
+    "PLACE_INLINE_TEXT_SHELL",
     "PLACE_TEXT_SHELL_FIGURE",
     "PLACE_TEXT_SHELL_BLOCK",
+}
+
+ROUTED_DECISIONS = {
+    "ROUTE_INLINE_VISUAL",
 }
 
 
@@ -74,14 +79,28 @@ def plan_key(plan: Dict[str, Any]) -> str:
     )
 
 
+def visual_sources(plan: Dict[str, Any]) -> List[int]:
+    sources = plan.get("visualSourceObjectIds") or plan.get("sourceObjectIds") or []
+    return [int(source) for source in sources]
+
+
+def text_sources(plan: Dict[str, Any]) -> List[int]:
+    owned = plan.get("ownedTextFrameIds") or []
+    if owned:
+        return [int(source) for source in owned]
+    if str(plan.get("kind") or "").startswith("text_frame") and plan.get("domId") is not None:
+        return [int(plan["domId"])]
+    return [int(source) for source in plan.get("sourceObjectIds") or []]
+
+
 def audit_plan_duplicates(plans: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     by_source: Dict[Tuple[int, Any], List[Dict[str, Any]]] = defaultdict(list)
     for plan in plans:
         if plan.get("visualAction") not in VISIBLE_VISUAL_ACTIONS:
             continue
         page = plan.get("pageIndex")
-        for source in plan.get("sourceObjectIds") or []:
-            by_source[(int(source), page)].append(plan)
+        for source in visual_sources(plan):
+            by_source[(source, page)].append(plan)
 
     duplicates: List[Dict[str, Any]] = []
     for (source, page), group in by_source.items():
@@ -104,8 +123,8 @@ def audit_text_owner_conflicts(plans: Iterable[Dict[str, Any]]) -> List[Dict[str
         text_action = plan.get("textAction")
         if text_action not in {"OWNED_BY_HWPX_TEXT", "OWNED_BY_PNG"}:
             continue
-        for source in plan.get("sourceObjectIds") or []:
-            by_source[(int(source), page)][text_action] += 1
+        for source in text_sources(plan):
+            by_source[(source, page)][text_action] += 1
 
     conflicts: List[Dict[str, Any]] = []
     for (source, page), actions in by_source.items():
@@ -141,6 +160,7 @@ def audit_execution(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     dropped_despite_plan = []
     outside_page_despite_plan = []
     expected_non_floating_bypass = []
+    planned_non_floating_routes = []
     placed_despite_drop = []
     no_object_plan = []
     cross = Counter()
@@ -148,6 +168,7 @@ def audit_execution(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     for (dom_id, item_type, page), entry in grouped.items():
         decisions = [r.get("decision") for r in entry["rows"]]
         placed = any(d in PLACED_DECISIONS for d in decisions)
+        routed = any(d in ROUTED_DECISIONS for d in decisions)
         plan = entry["planVisualAction"]
         cross[(plan, "PLACED" if placed else "SKIPPED", item_type)] += 1
         sample = {
@@ -165,7 +186,9 @@ def audit_execution(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         elif plan == "PLACE_FLOATING_PNG" and not placed:
             dropped_despite_plan.append(sample)
         elif plan in {"PLACE_INLINE_PNG", "PLACE_TEXT_SHELL"} and not placed:
-            if "SKIP_OBJECT_PLAN_NOT_FLOATING_VISUAL" in decisions:
+            if routed:
+                planned_non_floating_routes.append(sample)
+            elif "SKIP_OBJECT_PLAN_NOT_FLOATING_VISUAL" in decisions:
                 expected_non_floating_bypass.append(sample)
             else:
                 dropped_despite_plan.append(sample)
@@ -179,6 +202,7 @@ def audit_execution(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "dropped_despite_plan": dropped_despite_plan,
         "outside_page_despite_plan": outside_page_despite_plan,
         "expected_non_floating_bypass": expected_non_floating_bypass,
+        "planned_non_floating_routes": planned_non_floating_routes,
         "placed_despite_drop": placed_despite_drop,
         "no_object_plan": no_object_plan,
     }
@@ -247,12 +271,13 @@ def build_report(extract_dir: Path) -> Dict[str, Any]:
             "plans": len(plans),
             "warnings": len(warnings),
             "renderDecisionRows": len(decisions),
-            "rawDuplicateVisibleSourceRefs": len(duplicates),
+            "duplicateVisibleVisualSourceRefs": len(duplicates),
             "textOwnerConflicts": len(text_conflicts),
         "droppedDespitePlan": len(execution["dropped_despite_plan"]),
         "outsidePageDespitePlan": len(execution["outside_page_despite_plan"]),
-        "expectedNonFloatingBypass": len(execution["expected_non_floating_bypass"]),
-        "placedDespiteDrop": len(execution["placed_despite_drop"]),
+            "expectedNonFloatingBypass": len(execution["expected_non_floating_bypass"]),
+            "plannedNonFloatingRoutes": len(execution["planned_non_floating_routes"]),
+            "placedDespiteDrop": len(execution["placed_despite_drop"]),
             "noObjectPlan": len(execution["no_object_plan"]),
         },
         "planVisualActionCounts": dict(plan_action_counts),
@@ -266,6 +291,7 @@ def build_report(extract_dir: Path) -> Dict[str, Any]:
         "droppedDespitePlan": execution["dropped_despite_plan"][:100],
         "outsidePageDespitePlan": execution["outside_page_despite_plan"][:100],
         "expectedNonFloatingBypass": execution["expected_non_floating_bypass"][:100],
+        "plannedNonFloatingRoutes": execution["planned_non_floating_routes"][:100],
         "placedDespiteDrop": execution["placed_despite_drop"][:100],
         "noObjectPlan": execution["no_object_plan"][:100],
         "executionCross": {
@@ -295,11 +321,12 @@ def main() -> None:
     print_counter("ownership warnings", Counter(report["warningCounts"]))
     print_counter("top pages to inspect", Counter({int(k): v for k, v in report["pageScores"].items()}), 15)
 
-    print_samples("raw duplicate visible source-ref samples", report["duplicateVisibleSources"])
+    print_samples("duplicate visible visual-source samples", report["duplicateVisibleSources"])
     print_samples("text owner conflict samples", report["textOwnerConflicts"])
     print_samples("dropped despite plan samples", report["droppedDespitePlan"])
     print_samples("outside page despite plan samples", report["outsidePageDespitePlan"])
     print_samples("expected non-floating bypass samples", report["expectedNonFloatingBypass"])
+    print_samples("planned non-floating route samples", report["plannedNonFloatingRoutes"])
     print_samples("placed despite drop samples", report["placedDespiteDrop"])
     print_samples("no object plan samples", report["noObjectPlan"])
 

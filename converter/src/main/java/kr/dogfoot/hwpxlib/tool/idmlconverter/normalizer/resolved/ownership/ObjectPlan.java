@@ -13,6 +13,10 @@ public final class ObjectPlan {
     public final Placement placement;
     public final Integer renderId;
     public final int[] sourceObjectIds;
+    public final int[] visualSourceObjectIds;
+    public final int[] ownedTextFrameIds;
+    public final int[] descendantVisualObjectIds;
+    public final String sourceBundleKey;
     public final int zOrder;
     public final String reason;
     public final String file;
@@ -56,6 +60,32 @@ public final class ObjectPlan {
             String sourceLayerId,
             String sourceLayerName,
             int sourceLayerIndex) {
+        this(domId, kind, pageIndex, textAction, visualAction, visualLayer, placement,
+                renderId, sourceObjectIds, null, null, null, null, zOrder, reason, file, bounds,
+                sourceLayerId, sourceLayerName, sourceLayerIndex);
+    }
+
+    public ObjectPlan(
+            int domId,
+            String kind,
+            int pageIndex,
+            TextAction textAction,
+            VisualAction visualAction,
+            VisualLayer visualLayer,
+            Placement placement,
+            Integer renderId,
+            int[] sourceObjectIds,
+            int[] visualSourceObjectIds,
+            int[] ownedTextFrameIds,
+            int[] descendantVisualObjectIds,
+            String sourceBundleKey,
+            int zOrder,
+            String reason,
+            String file,
+            double[] bounds,
+            String sourceLayerId,
+            String sourceLayerName,
+            int sourceLayerIndex) {
         this.domId = domId;
         this.kind = kind;
         this.pageIndex = pageIndex;
@@ -65,6 +95,16 @@ public final class ObjectPlan {
         this.placement = placement;
         this.renderId = renderId;
         this.sourceObjectIds = sourceObjectIds != null ? Arrays.copyOf(sourceObjectIds, sourceObjectIds.length) : new int[0];
+        this.visualSourceObjectIds = visualSourceObjectIds != null
+                ? Arrays.copyOf(visualSourceObjectIds, visualSourceObjectIds.length)
+                : Arrays.copyOf(this.sourceObjectIds, this.sourceObjectIds.length);
+        this.ownedTextFrameIds = ownedTextFrameIds != null
+                ? Arrays.copyOf(ownedTextFrameIds, ownedTextFrameIds.length)
+                : new int[0];
+        this.descendantVisualObjectIds = descendantVisualObjectIds != null
+                ? Arrays.copyOf(descendantVisualObjectIds, descendantVisualObjectIds.length)
+                : new int[0];
+        this.sourceBundleKey = sourceBundleKey;
         this.zOrder = zOrder;
         this.reason = reason;
         this.file = file;
@@ -115,6 +155,10 @@ public final class ObjectPlan {
                 placement,
                 renderId,
                 sourceObjectIds,
+                visualSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
                 zOrder,
                 newReason != null ? newReason : reason,
                 file,
@@ -135,6 +179,10 @@ public final class ObjectPlan {
                 placement,
                 renderId,
                 sourceObjectIds,
+                visualSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
                 zOrder,
                 reason,
                 file,
@@ -155,6 +203,10 @@ public final class ObjectPlan {
                 placement,
                 renderId,
                 sourceObjectIds,
+                visualSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
                 zOrder,
                 reason,
                 file,
@@ -175,6 +227,10 @@ public final class ObjectPlan {
                 placement,
                 renderId,
                 sourceObjectIds,
+                visualSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
                 newZOrder,
                 reason,
                 file,
@@ -195,6 +251,106 @@ public final class ObjectPlan {
                 placement,
                 renderId,
                 newSourceObjectIds,
+                visualSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withVisualSourceObjectIds(int[] newVisualSourceObjectIds) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                newVisualSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withOwnedTextFrameIds(int[] newOwnedTextFrameIds) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                newOwnedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withDescendantVisualObjectIds(int[] newDescendantVisualObjectIds) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                ownedTextFrameIds,
+                newDescendantVisualObjectIds,
+                sourceBundleKey,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withSourceBundleKey(String newSourceBundleKey) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                newSourceBundleKey,
                 zOrder,
                 reason,
                 file,
@@ -221,6 +377,10 @@ public final class ObjectPlan {
                 placement,
                 renderId,
                 newSourceObjectIds,
+                newSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
                 newZOrder,
                 newReason != null ? newReason : reason,
                 newFile != null ? newFile : file,
@@ -243,6 +403,10 @@ public final class ObjectPlan {
                 .append("\"placement\":\"").append(placement).append("\",")
                 .append("\"renderId\":").append(renderId != null ? renderId : -1).append(',')
                 .append("\"sourceObjectIds\":").append(intArrayJson(sourceObjectIds)).append(',')
+                .append("\"visualSourceObjectIds\":").append(intArrayJson(visualSourceObjectIds)).append(',')
+                .append("\"ownedTextFrameIds\":").append(intArrayJson(ownedTextFrameIds)).append(',')
+                .append("\"descendantVisualObjectIds\":").append(intArrayJson(descendantVisualObjectIds)).append(',')
+                .append("\"sourceBundleKey\":\"").append(escape(sourceBundleKey)).append("\",")
                 .append("\"zOrder\":").append(zOrder).append(',')
                 .append("\"sourceLayerId\":\"").append(escape(sourceLayerId)).append("\",")
                 .append("\"sourceLayerName\":\"").append(escape(sourceLayerName)).append("\",")

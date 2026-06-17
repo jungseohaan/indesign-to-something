@@ -1360,6 +1360,11 @@ public class InlineFrameHandler {
             boolean forcePngFill) {
         if (childTfs == null || childTfs.size() != 1) return null;
         if (shell == null || ctx.basePath == null || shell.file() == null) return null;
+        if (!ctx.hasOwnershipPlan(shell)
+                || ctx.visualActionByOwnershipPlan(shell) != VisualAction.PLACE_TEXT_SHELL
+                || ctx.placementByOwnershipPlan(shell) != Placement.INLINE) {
+            return null;
+        }
         File pngFile = new File(ctx.basePath, shell.file());
         if (!pngFile.exists() || !pngFile.isFile()) return null;
         try {
@@ -1405,6 +1410,10 @@ public class InlineFrameHandler {
                     // Non-numeric DOM ids cannot be recorded in the legacy disposition map.
                 }
             }
+            ctx.markRenderedVisualHandled(shell.id());
+            ctx.recordRenderedDecision(shell, "Phase3.InlineFrameHandler",
+                    "PLACE_INLINE_TEXT_SHELL",
+                    "placed planned inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
             return obj;
         } catch (Exception e) {
             return null;
@@ -1496,6 +1505,32 @@ public class InlineFrameHandler {
             if (id.equals(v)) return true;
         }
         return false;
+    }
+
+    private static ResolvedTextFrame firstEditableTextFrameForRenderedGroup(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg) {
+        if (ctx == null || ctx.resolvedData == null || rg == null) return null;
+        String[] ids = rg.editableTextFrameIds();
+        if (ids == null || ids.length == 0) return null;
+        ResolvedTextFrame found = null;
+        for (String id : ids) {
+            if (id == null) continue;
+            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(id);
+            if (tf == null && id.startsWith("u")) {
+                try {
+                    tf = ctx.resolvedData.getTextFrame(String.valueOf(Integer.parseInt(id.substring(1), 16)));
+                } catch (Exception ignored) {
+                    // Keep scanning other ids.
+                }
+            }
+            if (tf == null) continue;
+            if (!ctx.resolvedData.isEditableTextFrame(tf.id())) continue;
+            if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) continue;
+            if (found != null) return null;
+            found = tf;
+        }
+        return found;
     }
 
     private static boolean shouldOverlayRenderedBadgeText(ResolvedBuildContext ctx, RenderedGroup matched) {
@@ -2563,6 +2598,13 @@ public class InlineFrameHandler {
                 if (!ctx.hasOwnershipPlan(rg)
                         || (!placeInlinePng && !placeInlineTextShell)) {
                     return null;
+                }
+                if (placeInlineTextShell) {
+                    ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
+                    ResolvedTextFrame childTf = firstEditableTextFrameForRenderedGroup(ctx, rg);
+                    ASTInlineObject shellObject =
+                            buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, rg, false);
+                    if (shellObject != null) return shellObject;
                 }
                 boolean isNullTypeInline = rg.itemType() == null;
                 // inline_object PNG를 그대로 사용 (tryInlineGroupAsSingleBadge가 먼저 INLINE_TEXT_FRAME을 시도했으므로

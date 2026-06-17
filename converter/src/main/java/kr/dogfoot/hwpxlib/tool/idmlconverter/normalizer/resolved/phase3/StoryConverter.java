@@ -27,6 +27,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.RunPropertyResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextRunSegmenter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 
 import javax.imageio.ImageIO;
@@ -1465,11 +1467,11 @@ public final class StoryConverter {
             RenderedGroup inlineRg = findRenderedGroup(ctx, inlineId);
             if (inlineRg == null
                     || !ctx.hasOwnershipPlan(inlineRg)
-                    || !ctx.shouldPlaceInlinePngByOwnershipPlan(inlineRg)) {
+                    || !isPlannedInlineVisual(inlineRg, ctx)) {
                 if (inlineRg != null) {
                     ctx.recordRenderedDecision(inlineRg, "Phase3.restoreTfInlineVisuals",
                             "SKIP_OBJECT_PLAN_NOT_INLINE_VISUAL",
-                            "OwnershipPlanner did not assign this TF inline visual to PLACE_INLINE_PNG");
+                            "OwnershipPlanner did not assign this TF inline visual to an inline visual action");
                 }
                 continue;
             }
@@ -1480,6 +1482,14 @@ public final class StoryConverter {
             ids.add(inlineId);
         }
         return ids;
+    }
+
+    private static boolean isPlannedInlineVisual(RenderedGroup rg, ResolvedBuildContext ctx) {
+        if (rg == null || ctx == null) return false;
+        if (ctx.placementByOwnershipPlan(rg) != Placement.INLINE) return false;
+        VisualAction action = ctx.visualActionByOwnershipPlan(rg);
+        return action == VisualAction.PLACE_INLINE_PNG
+                || action == VisualAction.PLACE_TEXT_SHELL;
     }
 
     private static RenderedGroup findTfInlineVisualOwner(ResolvedBuildContext ctx, String domId) {
@@ -1497,6 +1507,10 @@ public final class StoryConverter {
     private static ASTInlineObject loadTfInlineVisual(ResolvedBuildContext ctx, int inlineId) {
         RenderedGroup rg = findRenderedGroup(ctx, inlineId);
         if (rg == null || rg.file() == null || ctx.basePath == null) return null;
+        if (ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL
+                && ctx.placementByOwnershipPlan(rg) == Placement.INLINE) {
+            return InlineFrameHandler.loadInlineObject(ctx, inlineId);
+        }
         File pngFile = new File(ctx.basePath, rg.file());
         if (!pngFile.exists()) return null;
         try {
@@ -2484,7 +2498,7 @@ public final class StoryConverter {
             if (matchedRg != null && ctx.hasOwnershipPlan(matchedRg)
                     && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(matchedRg)) {
                 ctx.recordRenderedDecision(matchedRg, "Phase3.DeferredAnchoredFloating",
-                        "SKIP_OBJECT_PLAN_NOT_FLOATING_VISUAL",
+                        "ROUTE_INLINE_VISUAL",
                         "OwnershipPlanner already assigned this inline visual to a non-floating route");
                 continue;
             }

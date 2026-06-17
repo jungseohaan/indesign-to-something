@@ -1,0 +1,49 @@
+{
+  "fixtures": [
+    {
+      "name": "page45",
+      "badges": [
+        {
+          "text": "스스로",
+          "kind": "capsule_white_text",
+          "text_present": true,
+          "on_background": true,
+          "occurrences": 2,
+          "in_boxed": 2,
+          "pass": true
+        },
+        {
+          "text": "질문하기",
+          "kind": "capsule_text",
+          "text_present": true,
+          "on_background": true,
+          "occurrences": 2,
+          "in_boxed": 2,
+          "pass": true
+        },
+        {
+          "text": "대단원",
+          "kind": "label_baked_or_text",
+          "text_present": true,
+          "on_background": true,
+          "occurrences": 4,
+          "in_boxed": 4,
+          "pass": true
+        },
+        {
+          "text": "구성 방향",
+          "kind": "label_baked_or_text",
+          "text_present": true,
+          "on_background": true,
+          "occurrences": 2,
+          "in_boxed": 2,
+          "pass": true
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "passed": 4,
+    "total": 4
+  }
+}

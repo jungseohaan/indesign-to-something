@@ -194,7 +194,7 @@ public final class BackgroundInjector {
                     && !isInferredTextFrameVisualShell;
             boolean isPlannedTextShell =
                     ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
-            boolean needsAlphaCrop = !isPlannedTextShell && shouldCropOwnedTextFrameShellToAlpha(rg);
+            boolean needsAlphaCrop = shouldCropOwnedTextFrameShellToAlpha(rg);
             boolean needsIntersectionCrop = fullW > 1.0 && fullH > 1.0
                     && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
                         || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5);

@@ -713,7 +713,9 @@ public final class FramePlacer {
     }
 
     private static boolean hasPlannedTextShellForTextFrame(ResolvedBuildContext ctx, int tfDomId) {
-        if (ctx == null || ctx.resolvedData == null || tfDomId < 0) return false;
+        if (ctx == null || tfDomId < 0) return false;
+        if (ctx.isTextFrameOwnedByTextShellPlan(tfDomId)) return true;
+        if (ctx.resolvedData == null) return false;
         List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
         if (groups == null) return false;
         String tfId = String.valueOf(tfDomId);

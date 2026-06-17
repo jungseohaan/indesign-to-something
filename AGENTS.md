@@ -18,12 +18,14 @@
 
 ## 기준 문서
 
-- `docs/specs/SPEC-035-indesign-render-ownership.md`
-- `docs/specs/SPEC-036-source-ownership-v2.md` (Active 단순 정책)
+- `docs/specs/SPEC-036-source-ownership-v2.md` (Active / Canonical)
+- `docs/specs/SPEC-035-indesign-render-ownership.md` (legacy 이관 기록과 배경 설명)
 - 보조 SPEC:
   - `docs/specs/SPEC-025-text-image-rendering-removal.md`
   - `docs/specs/SPEC-028-inline-anchored-group-duplicate.md`
   - `docs/specs/SPEC-033-badge-inline-simplification.md`
+
+`SPEC-035`와 `SPEC-036`이 충돌하면 항상 `SPEC-036`을 따른다.
 
 ## Stage 구조
 
@@ -71,9 +73,12 @@ PNG가 텍스트까지 소유할 수 있는 것은 단순 위치 표식뿐이다
 
 ### 3. 한 source object는 한 번만 visible output이 된다
 
-부모 PNG와 자식 PNG, PNG와 TF, inline과 floating이 같은 source를 동시에 보여 주면 잘못된 것이다.
+부모 PNG와 자식 PNG, complete PNG와 HWPX TF, inline과 floating이 같은 source를 동시에 보여 주면 잘못된 것이다.
 
 같은 source object의 visible output은 정확히 하나다.
+
+단, textless shell visual과 그 위의 editable child TF text는 서로 다른 ownership channel이다.
+복합 그래픽 그룹은 하나의 shell로 보존할 수 있고, 하나 이상의 child TF는 별도 HWPX 텍스트로 배치할 수 있다.
 
 ## ObjectPlan 필수 필드
 

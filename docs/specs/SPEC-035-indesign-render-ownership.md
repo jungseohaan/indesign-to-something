@@ -478,9 +478,12 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 
 실행 규칙:
 
-- floating `PLACE_TEXT_SHELL`도 `ASTFigure`가 아니라 `ASTTextFrameBlock(imageFill + drawText)`로 실행한다.
-- shell source가 소유한 editable child TF는 별도 visible TF로 남기지 않는다.
-- shell PNG와 child TF가 동시에 보이면 source ownership 위반이다.
+- 현재 기준은 `SPEC-036`이다.
+- `PLACE_TEXT_SHELL`은 textless shell visual을 배치하고, editable child TF는 별도 HWPX 텍스트가 소유한다.
+- shell visual과 child TF text는 서로 다른 ownership channel이면 동시에 보일 수 있다.
+- 중복 위반은 shell PNG 안에 child TF 텍스트 픽셀이 남거나, parent shell과 descendant visual fragment가 동시에 보이거나,
+  같은 TF를 HWPX 텍스트와 drawText/imageFill 내부 텍스트로 동시에 재생성하는 경우다.
+- floating 실행 방식은 후속 단계가 재판정하지 않고 `ObjectPlan`의 `visualAction`, `placement`, `visualLayer`, `zOrder`를 따른다.
 
 ## Text Card Backdrop
 

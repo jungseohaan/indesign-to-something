@@ -40,8 +40,8 @@ public final class VisualPlacementResolver {
                     "OwnershipPlanner visualAction=DROP_VISUAL");
         }
         if (ctx.hasOwnershipPlan(rg) && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) {
-            return new PlanRejection("SKIP_OBJECT_PLAN_NOT_FLOATING_VISUAL",
-                    "OwnershipPlanner placement/action is not handled by floating visual executor");
+            return new PlanRejection("ROUTE_INLINE_VISUAL",
+                    "OwnershipPlanner assigned this visual to the inline visual executor");
         }
         return null;
     }

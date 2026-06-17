@@ -1,0 +1,18 @@
+{
+  "java": "/opt/homebrew/opt/openjdk/bin/java",
+  "jar": "converter/target/idml-to-something-1.0.9-cli.jar",
+  "fixtures": [
+    {
+      "name": "page45",
+      "idml": ".badge-corpus/page45/output.idml",
+      "resolved": ".badge-corpus/page45/resolved.json",
+      "links": "/Users/seohan/Library/Caches/idml-to-hwpx/extracts/18d9889aaf39ff0e5e715d11b20c4dd19a0192af73d4fe8b56f5c0dc48d34841/Links",
+      "badges": [
+        {"text": "스스로",   "kind": "capsule_white_text"},
+        {"text": "질문하기", "kind": "capsule_text"},
+        {"text": "대단원",   "kind": "label_baked_or_text"},
+        {"text": "구성 방향", "kind": "label_baked_or_text"}
+      ]
+    }
+  ]
+}

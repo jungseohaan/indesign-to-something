@@ -26,6 +26,8 @@ public final class OwnershipPlanValidator {
         v.validateInlineFloatingSourceSplit();
         v.validateHwpxTextNotPlacedAsCompletePng();
         v.validateTextShellBehindOwnedText();
+        v.validateParentTextShellDescendantsDropped();
+        v.validateParentTextShellOwnedTextFrames();
     }
 
     private final ResolvedBuildContext ctx;
@@ -38,7 +40,7 @@ public final class OwnershipPlanValidator {
         Map<String, List<ObjectPlan>> bySource = new LinkedHashMap<>();
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (!hasVisibleVisualSlot(plan)) continue;
-            for (int sourceId : plan.sourceObjectIds) {
+            for (int sourceId : visualSourceIds(plan)) {
                 String key = plan.pageIndex + ":" + sourceId;
                 bySource.computeIfAbsent(key, k -> new ArrayList<>()).add(plan);
             }
@@ -75,7 +77,7 @@ public final class OwnershipPlanValidator {
         Map<String, List<ObjectPlan>> bySource = new LinkedHashMap<>();
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (!hasVisibleVisualSlot(plan)) continue;
-            for (int sourceId : plan.sourceObjectIds) {
+            for (int sourceId : visualSourceIds(plan)) {
                 String key = plan.pageIndex + ":" + sourceId;
                 bySource.computeIfAbsent(key, k -> new ArrayList<>()).add(plan);
             }
@@ -128,11 +130,44 @@ public final class OwnershipPlanValidator {
         }
     }
 
+    private void validateParentTextShellDescendantsDropped() {
+        for (ObjectPlan parent : ctx.ownershipPlans) {
+            if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (parent.descendantVisualObjectIds == null || parent.descendantVisualObjectIds.length == 0) continue;
+            for (ObjectPlan candidate : ctx.ownershipPlans) {
+                if (candidate == parent || !hasVisibleVisualSlot(candidate)) continue;
+                if (candidate.pageIndex != parent.pageIndex) continue;
+                if (!referencesAnyDescendant(candidate, parent.descendantVisualObjectIds)) continue;
+                warn("STAGE4_PARENT_TEXT_SHELL_DESCENDANT_VISIBLE",
+                        "parent=" + planRef(parent)
+                                + " descendantVisible=" + planRef(candidate));
+            }
+        }
+    }
+
+    private void validateParentTextShellOwnedTextFrames() {
+        for (ObjectPlan parent : ctx.ownershipPlans) {
+            if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (parent.ownedTextFrameIds == null || parent.ownedTextFrameIds.length == 0) continue;
+            for (int textFrameId : parent.ownedTextFrameIds) {
+                ObjectPlan textPlan = findTextFramePlan(textFrameId, parent.pageIndex);
+                if (textPlan == null || textPlan.textAction != TextAction.OWNED_BY_HWPX_TEXT) {
+                    warn("STAGE4_PARENT_TEXT_SHELL_OWNED_TEXT_MISSING",
+                            "parent=" + planRef(parent)
+                                    + " textFrameId=" + textFrameId);
+                }
+            }
+        }
+    }
+
     private boolean hasVisibleVisualSlot(ObjectPlan plan) {
         return plan != null && plan.hasVisibleVisual();
     }
 
     private int[] textFrameSourceIds(ObjectPlan plan) {
+        if (plan != null && plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) {
+            return plan.ownedTextFrameIds;
+        }
         if (plan == null || plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0
                 || ctx.resolvedData == null) {
             return new int[0];
@@ -146,6 +181,41 @@ public final class OwnershipPlanValidator {
         int[] out = new int[ids.size()];
         for (int i = 0; i < ids.size(); i++) out[i] = ids.get(i);
         return out;
+    }
+
+    private static int[] visualSourceIds(ObjectPlan plan) {
+        if (plan == null) return new int[0];
+        if (plan.visualSourceObjectIds != null && plan.visualSourceObjectIds.length > 0) {
+            return plan.visualSourceObjectIds;
+        }
+        return plan.sourceObjectIds != null ? plan.sourceObjectIds : new int[0];
+    }
+
+    private ObjectPlan findTextFramePlan(int textFrameId, int pageIndex) {
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.pageIndex != pageIndex) continue;
+            if (plan.domId != textFrameId) continue;
+            if (plan.kind != null && plan.kind.startsWith("text_frame")) return plan;
+        }
+        return null;
+    }
+
+    private static boolean referencesAnyDescendant(ObjectPlan plan, int[] descendants) {
+        if (plan == null || descendants == null || descendants.length == 0) return false;
+        if (contains(descendants, plan.domId)) return true;
+        if (plan.renderId != null && contains(descendants, plan.renderId)) return true;
+        for (int sourceId : visualSourceIds(plan)) {
+            if (contains(descendants, sourceId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean contains(int[] values, int candidate) {
+        if (values == null) return false;
+        for (int value : values) {
+            if (value == candidate) return true;
+        }
+        return false;
     }
 
     private void warn(String code, String detail) {

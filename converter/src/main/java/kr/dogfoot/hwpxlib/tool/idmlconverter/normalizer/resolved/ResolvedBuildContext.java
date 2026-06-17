@@ -508,7 +508,10 @@ public final class ResolvedBuildContext {
         }
         for (int i = 0; i < ownershipPlans.size(); i++) {
             ObjectPlan existing = ownershipPlans.get(i);
-            if (!sameRenderedIdentity(existing, replacement)) continue;
+            if (!sameRenderedIdentity(existing, replacement)
+                    && !sameRenderedAssetForReplacement(existing, replacement)) {
+                continue;
+            }
             ownershipPlans.set(i, replacement);
             ownershipPlanIndexDirty = true;
             ownershipPlanRenderedCache.clear();
@@ -518,10 +521,10 @@ public final class ResolvedBuildContext {
     }
 
     public void trimSourceObjectIdsClaimedBy(ObjectPlan owner) {
-        if (owner == null || owner.sourceObjectIds == null || owner.sourceObjectIds.length == 0) return;
+        if (owner == null || owner.visualSourceObjectIds == null || owner.visualSourceObjectIds.length == 0) return;
         boolean changedAny = false;
         java.util.LinkedHashSet<Integer> ownedSources = new java.util.LinkedHashSet<>();
-        for (int sourceId : owner.sourceObjectIds) {
+        for (int sourceId : owner.visualSourceObjectIds) {
             ownedSources.add(sourceId);
         }
         for (int i = 0; i < ownershipPlans.size(); i++) {
@@ -530,22 +533,33 @@ public final class ResolvedBuildContext {
             if (sameRenderedIdentity(plan, owner)) continue;
             if (!plan.hasVisibleVisual()) continue;
             if (plan.pageIndex != owner.pageIndex) continue;
-            if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) continue;
+            if (plan.visualSourceObjectIds == null || plan.visualSourceObjectIds.length == 0) continue;
             java.util.List<Integer> retained = new java.util.ArrayList<>();
             boolean changed = false;
-            for (int sourceId : plan.sourceObjectIds) {
+            for (int sourceId : plan.visualSourceObjectIds) {
                 if (sourceId != plan.domId && ownedSources.contains(sourceId)) {
                     changed = true;
                     continue;
                 }
                 retained.add(sourceId);
             }
-            if (!changed || retained.isEmpty()) continue;
+            if (!changed) continue;
+            if (retained.isEmpty()) {
+                ObjectPlan replacement = plan.withVisualAction(VisualAction.DROP_VISUAL,
+                        "visual_source_slot_claimed_by_owner");
+                if (!"text_frame".equals(replacement.kind)
+                        && replacement.textAction != TextAction.DROP_TEXT) {
+                    replacement = replacement.withTextAction(TextAction.DROP_TEXT);
+                }
+                ownershipPlans.set(i, replacement);
+                changedAny = true;
+                continue;
+            }
             int[] nextSources = new int[retained.size()];
             for (int j = 0; j < retained.size(); j++) {
                 nextSources[j] = retained.get(j);
             }
-            ownershipPlans.set(i, plan.withSourceObjectIds(nextSources));
+            ownershipPlans.set(i, plan.withVisualSourceObjectIds(nextSources));
             changedAny = true;
         }
         if (changedAny) {
@@ -560,6 +574,16 @@ public final class ResolvedBuildContext {
         if (!existing.renderId.equals(replacement.renderId)) return false;
         if (existing.pageIndex != replacement.pageIndex) return false;
         if (existing.placement != replacement.placement) return false;
+        if (existing.file == null || replacement.file == null) return true;
+        return existing.file.equals(replacement.file);
+    }
+
+    private static boolean sameRenderedAssetForReplacement(ObjectPlan existing, ObjectPlan replacement) {
+        if (existing == null || replacement == null) return false;
+        if (replacement.kind == null || !replacement.kind.startsWith("simple_button_label:")) return false;
+        if (existing.renderId == null || replacement.renderId == null) return false;
+        if (!existing.renderId.equals(replacement.renderId)) return false;
+        if (existing.pageIndex != replacement.pageIndex) return false;
         if (existing.file == null || replacement.file == null) return true;
         return existing.file.equals(replacement.file);
     }
@@ -718,6 +742,11 @@ public final class ResolvedBuildContext {
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             if (plan.domId == domId) return true;
+            if (plan.ownedTextFrameIds != null) {
+                for (int textFrameId : plan.ownedTextFrameIds) {
+                    if (textFrameId == domId) return true;
+                }
+            }
             if (plan.sourceObjectIds == null) continue;
             for (int sourceObjectId : plan.sourceObjectIds) {
                 if (sourceObjectId == domId) return true;

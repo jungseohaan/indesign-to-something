@@ -2756,6 +2756,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
     var renderedIds = {};
     var labelBackdropClaimedIds = {};
     var labelBackdropClaimedTextFrameIds = {};
+    var leafTextShellGroupIds = {};
 
     // ── 공통 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -2782,7 +2783,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         if (!opts || opts.textHiddenBeforeExport !== true) return false;
         var reason = String(opts.reason || "");
         return reason === "visual_label_text_hidden_shell"
-                || reason === "editable_composite_text_hidden_shell";
+                || reason === "editable_composite_text_hidden_shell"
+                || reason === "leaf_group_text_hidden_shell";
     }
 
     function _expandedBounds(bounds, pad) {
@@ -3062,6 +3064,130 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                         || cn === "GraphicLine" || cn === "Group") return true;
             }
         } catch (e) {}
+        return false;
+    }
+
+    function _directPageItemsOfGroup(grp) {
+        var items = [];
+        if (!grp) return items;
+        try {
+            var direct = grp.pageItems;
+            for (var i = 0; direct && i < direct.length; i++) {
+                try {
+                    var p = direct[i].parent;
+                    if (p && p.id === grp.id) items.push(direct[i]);
+                } catch (eParentDirect) {}
+            }
+            if (items.length > 0) return items;
+        } catch (eDirect) {}
+        try {
+            var nested = grp.allPageItems;
+            for (var j = 0; nested && j < nested.length; j++) {
+                try {
+                    var p = nested[j].parent;
+                    if (p && p.id === grp.id) items.push(nested[j]);
+                } catch (eParent) {}
+            }
+        } catch (eNested) {}
+        return items;
+    }
+
+    function _isDirectVisualShapeItem(item) {
+        if (!item) return false;
+        var cn = "";
+        try { cn = item.constructor.name; } catch (eCn) {}
+        if (cn !== "Rectangle" && cn !== "Oval" && cn !== "Polygon" && cn !== "GraphicLine") return false;
+        try {
+            if (item.images && item.images.length > 0) return false;
+            if (item.pdfs && item.pdfs.length > 0) return false;
+            if (item.epss && item.epss.length > 0) return false;
+        } catch (ePlaced) {}
+        return hasVisibleFill(item) || hasVisibleStroke(item);
+    }
+
+    function _hasDirectVisualShapeChild(grp) {
+        var direct = _directPageItemsOfGroup(grp);
+        for (var i = 0; i < direct.length; i++) {
+            if (_isDirectVisualShapeItem(direct[i])) return true;
+        }
+        return false;
+    }
+
+    function _isDirectEditableTextFrame(item) {
+        if (!item) return false;
+        try { if (item.constructor.name !== "TextFrame") return false; } catch (e0) { return false; }
+        try { if (classifyTextFrameCached(item) !== "editable") return false; } catch (eClass) { return false; }
+        try { if (!_textFrameHasContent(item)) return false; } catch (eContent) { return false; }
+        return true;
+    }
+
+    function _isLeafEditableTextShellGroup(grp) {
+        try { if (!grp || grp.constructor.name !== "Group") return false; } catch (e0) { return false; }
+        if (isOnHiddenLayer(grp)) return false;
+        if (_decoHasPlaced(grp)) return false;
+
+        var editableTextCount = 0;
+        var hasDirectShape = false;
+        try {
+            var nested = grp.allPageItems;
+            if (!nested || nested.length < 2) return false;
+            for (var i = 0; i < nested.length; i++) {
+                var item = nested[i];
+                if (!item) continue;
+                var cn = "";
+                try { cn = item.constructor.name; } catch (eCn) {}
+                if (cn === "Group") return false;
+                if (_isDirectEditableTextFrame(item)) {
+                    editableTextCount++;
+                    continue;
+                }
+                if (_isDirectVisualShapeItem(item)) {
+                    hasDirectShape = true;
+                }
+            }
+        } catch (eNested) {
+            return false;
+        }
+        return editableTextCount >= 1 && hasDirectShape;
+    }
+
+    function _renderLeafEditableTextShellGroups(grp, page) {
+        var rendered = 0;
+        try {
+            var nested = grp.allPageItems;
+            for (var i = 0; nested && i < nested.length; i++) {
+                var child = nested[i];
+                if (!child) continue;
+                try { if (child.constructor.name !== "Group") continue; } catch (eCn) { continue; }
+                try { if (child.id === grp.id || renderedIds[child.id] || decoChildIds[child.id]) continue; } catch (eSeen) {}
+                if (!_isLeafEditableTextShellGroup(child)) continue;
+                _renderLeafEditableTextShellGroup(child, page);
+                rendered++;
+            }
+        } catch (e) {}
+        return rendered;
+    }
+
+    function _renderLeafEditableTextShellGroup(grp, page) {
+        try { leafTextShellGroupIds[grp.id] = true; } catch (eMark) {}
+        _renderEditableVisualLabelShell(grp, page, "leaf_group_text_hidden_shell");
+    }
+
+    function _hasRenderedLeafTextShellChild(grp) {
+        try {
+            var nested = grp.allPageItems;
+            for (var i = 0; nested && i < nested.length; i++) {
+                try {
+                    if (nested[i].constructor.name === "Group" && leafTextShellGroupIds[nested[i].id]) return true;
+                } catch (eChild) {}
+            }
+        } catch (eNested) {}
+        var direct = _directPageItemsOfGroup(grp);
+        for (var j = 0; j < direct.length; j++) {
+            try {
+                if (direct[j].constructor.name === "Group" && leafTextShellGroupIds[direct[j].id]) return true;
+            } catch (e) {}
+        }
         return false;
     }
 
@@ -4037,6 +4163,20 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         try { _decoRender(item, p1Page, null); } catch (e) {}
     }
 
+    // ── Pass 1.5: leaf editable text shell group ─────────────────────────────
+    // 같은 원본 Group 안에 직접 도형과 editable TF가 함께 있으면, sibling
+    // label backdrop으로 쪼개기 전에 group 전체를 하나의 textless shell로 소유한다.
+    for (var lgi = 0; lgi < allItems.length; lgi++) {
+        var leafGrp = allItems[lgi];
+        try { if (!leafGrp || leafGrp.constructor.name !== "Group") continue; } catch (eLeafCn) { continue; }
+        if (renderedIds[leafGrp.id] || decoChildIds[leafGrp.id]) continue;
+        if (!_isLeafEditableTextShellGroup(leafGrp)) continue;
+        var leafPage = _resolveGroupPage(leafGrp);
+        if (!leafPage) continue;
+        if (leafPage.documentOffset + 1 < startPage || leafPage.documentOffset + 1 > endPage) continue;
+        try { _renderLeafEditableTextShellGroup(leafGrp, leafPage); } catch (eLeafRender) {}
+    }
+
     // ── Pass 2~4 통합: Group ─────────────────────────────────────────────────
     for (var gi = 0; gi < allItems.length; gi++) {
         var grp = allItems[gi];
@@ -4095,6 +4235,16 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 try { editableTfIdsForGroup = _collectTextFrameIds(grp, true, true); } catch (e) {}
             }
 
+            var _leafTextShellGroup = (kind === "mixedGroup" || kind === "textComposite")
+                    && _isLeafEditableTextShellGroup(grp);
+            var _hasLeafTextShellChild = (kind === "mixedGroup" || kind === "textComposite")
+                    && _hasRenderedLeafTextShellChild(grp);
+            var _nestedLeafTextShellCount = 0;
+            if (!_leafTextShellGroup && !_hasLeafTextShellChild
+                    && (kind === "mixedGroup" || kind === "textComposite")) {
+                _nestedLeafTextShellCount = _renderLeafEditableTextShellGroups(grp, grpPage);
+            }
+
             // Stage 1 통합: 짧은 시각 라벨 그룹은 단일 inline_badge로 emit, 기존 sibling-backdrop/
             // marker/shell 경로 전부 건너뜀(한 배지=한 entry).
             var _unifiedBadge = EMIT_UNIFIED_INLINE_BADGE
@@ -4103,12 +4253,18 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
 
             // 통합 모드에서는 per-pill label_backdrop 자체를 만들지 않는다(inline_badge가 배경 소유).
             var siblingLabelBackdropCount = 0;
-            if (!EMIT_UNIFIED_INLINE_BADGE && (kind === "mixedGroup" || kind === "textComposite")) {
+            if (!_leafTextShellGroup && !_hasLeafTextShellChild && _nestedLeafTextShellCount === 0
+                    && !EMIT_UNIFIED_INLINE_BADGE
+                    && (kind === "mixedGroup" || kind === "textComposite")) {
                 siblingLabelBackdropCount = _renderSiblingLabelBackdropGroups(grp, grpPage);
                 siblingLabelBackdropCount += _renderCompactStackedLabelBackdrops(grp, grpPage);
             }
 
-            if (_unifiedBadge) {
+            if (_leafTextShellGroup) {
+                if (!renderedIds[grp.id]) _renderLeafEditableTextShellGroup(grp, grpPage);
+            } else if ((_hasLeafTextShellChild || _nestedLeafTextShellCount > 0) && !_hasDirectVisualShapeChild(grp)) {
+                _exportPaperStrokeShapes(grp, grpPage);
+            } else if (_unifiedBadge) {
                 _emitInlineBadge(grp, grpPage);
             } else if ((siblingLabelBackdropCount > 0
                         && (_isLabelBackdropOnlyGroup(grp) || _isShortVisualLabelGroup(grp)))

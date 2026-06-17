@@ -83,6 +83,7 @@ public final class OwnershipPlanner {
         resolveClippedDecorationParents();
         resolveContainerMasksOverIntrudingLabelBackdrops();
         resolveLayeredContainerFaces();
+        resolveParentTextShellDescendantVisuals();
         resolveCompositeBakedChildVisuals();
         resolveNestedTextShellSources();
         resolveClusterOwnedTextFrameShells();
@@ -783,7 +784,10 @@ public final class OwnershipPlanner {
                 || visualAction == VisualAction.PLACE_INLINE_PNG)) {
             sourceIds = independentContentVisualSourceIds(rg, sourceIds);
         }
-        int zOrder = zOrderOf(rg, visualAction, sourceIds);
+        int[] ownedTextFrameIds = editableTextFrameIdsOf(rg);
+        int[] visualSourceIds = visualSourceIdsForRendered(sourceIds, ownedTextFrameIds, visualAction);
+        String sourceBundleKey = sourceBundleKeyOf(rg, sourceIds, ownedTextFrameIds);
+        int zOrder = zOrderOf(rg, visualAction, visualSourceIds);
         plans.add(new ObjectPlan(
                 rg.id(),
                 channel + ":" + safe(rg.type()) + ":" + safe(rg.itemType()),
@@ -794,6 +798,10 @@ public final class OwnershipPlanner {
                 placement,
                 rg.id(),
                 sourceIds,
+                visualSourceIds,
+                ownedTextFrameIds,
+                new int[0],
+                sourceBundleKey,
                 zOrder,
                 safe(rg.reason()),
                 rg.file(),
@@ -836,6 +844,10 @@ public final class OwnershipPlanner {
                     placement,
                     null,
                     sourceIds,
+                    sourceIds,
+                    new int[] { domId },
+                    new int[0],
+                    "p" + tf.pageIndex() + ":tf:" + domId,
                     tf.zOrder(),
                     tableOnlyTextFrame ? "table_only_text_frame" : textFrameReason(tf, textAction),
                     null,
@@ -844,6 +856,55 @@ public final class OwnershipPlanner {
                     tf.layerName(),
                     tf.layerIndex()));
         }
+    }
+
+    private int[] editableTextFrameIdsOf(RenderedGroup rg) {
+        if (rg == null || rg.editableTextFrameIds() == null || rg.editableTextFrameIds().length == 0) {
+            return new int[0];
+        }
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        for (String id : rg.editableTextFrameIds()) {
+            int parsed = parseFlexibleId(id);
+            if (parsed >= 0 && data != null && data.isTextOwnedByIndesignPng(String.valueOf(parsed))) {
+                continue;
+            }
+            if (parsed >= 0) ids.add(parsed);
+        }
+        return toIntArray(ids);
+    }
+
+    private static String sourceBundleKeyOf(RenderedGroup rg, int[] sourceIds, int[] ownedTextFrameIds) {
+        if (rg == null) return null;
+        StringBuilder sb = new StringBuilder(64);
+        sb.append('p').append(rg.pageIndex()).append(":r").append(rg.id());
+        if (sourceIds != null && sourceIds.length > 0) {
+            sb.append(":s");
+            for (int id : sourceIds) sb.append('_').append(id);
+        }
+        if (ownedTextFrameIds != null && ownedTextFrameIds.length > 0) {
+            sb.append(":t");
+            for (int id : ownedTextFrameIds) sb.append('_').append(id);
+        }
+        return sb.toString();
+    }
+
+    private static int[] visualSourceIdsForRendered(
+            int[] sourceIds,
+            int[] ownedTextFrameIds,
+            VisualAction visualAction) {
+        if (sourceIds == null || sourceIds.length == 0) return new int[0];
+        if (ownedTextFrameIds == null || ownedTextFrameIds.length == 0) return sourceIds;
+        if (visualAction == VisualAction.DROP_VISUAL || visualAction == VisualAction.ABSORB_TEXT_STYLE
+                || visualAction == VisualAction.PLACE_TABLE_STYLE) {
+            return sourceIds;
+        }
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        for (int sourceId : sourceIds) {
+            if (!contains(ownedTextFrameIds, sourceId)) {
+                ids.add(sourceId);
+            }
+        }
+        return ids.isEmpty() ? sourceIds : toIntArray(ids);
     }
 
     private String sourceLayerId(RenderedGroup rg, int[] sourceIds) {
@@ -936,6 +997,9 @@ public final class OwnershipPlanner {
             if (!renderedGroupClaimsTextFrame(rg, textFrameId)) continue;
             ObjectPlan shellPlan = findRenderedPlan(rg.id(), rg.file());
             if (shellPlan == null || shellPlan.placement != Placement.FLOATING) {
+                continue;
+            }
+            if (!isDirectInlineTextShellReason(shellPlan.reason)) {
                 continue;
             }
             if (shellPlan != null
@@ -1907,7 +1971,7 @@ public final class OwnershipPlanner {
         for (ObjectPlan plan : plans) {
             if (!plan.hasVisibleVisual()) continue;
             if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
-            for (int sourceId : plan.sourceObjectIds) {
+            for (int sourceId : visualSourceIds(plan)) {
                 visibleNonShellSources.put(pageSourceKey(plan.pageIndex, sourceId), Boolean.TRUE);
             }
         }
@@ -1916,7 +1980,7 @@ public final class OwnershipPlanner {
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             List<Integer> retained = new ArrayList<>();
             boolean changed = false;
-            for (int sourceId : plan.sourceObjectIds) {
+            for (int sourceId : visualSourceIds(plan)) {
                 boolean sourceOwnedByNonShell = Boolean.TRUE.equals(
                         visibleNonShellSources.get(pageSourceKey(plan.pageIndex, sourceId)));
                 if (sourceOwnedByNonShell && sourceId != plan.domId) {
@@ -1926,7 +1990,7 @@ public final class OwnershipPlanner {
                 retained.add(sourceId);
             }
             if (!changed) continue;
-            plans.set(i, plan.withSourceObjectIds(toIntArray(retained)));
+            plans.set(i, plan.withVisualSourceObjectIds(toIntArray(retained)));
         }
     }
 
@@ -1974,9 +2038,9 @@ public final class OwnershipPlanner {
                 if (!isVisibleRenderedVisual(child)) continue;
                 if (child.pageIndex != parent.pageIndex) continue;
                 if (!shouldSplitChildSourceSlotFromComposite(parent, child)) continue;
-                ObjectPlan retainedParent = parent.withSourceObjectIds(
+                ObjectPlan retainedParent = parent.withVisualSourceObjectIds(
                         withoutChildVisualSources(parent, child));
-                if (retainedParent.sourceObjectIds.length != parent.sourceObjectIds.length) {
+                if (visualSourceIds(retainedParent).length != visualSourceIds(parent).length) {
                     plans.set(i, retainedParent);
                     parent = retainedParent;
                 }
@@ -2091,9 +2155,9 @@ public final class OwnershipPlanner {
                 if (child.pageIndex != parent.pageIndex) continue;
                 if (!isStrictChildPlan(parent, child)) continue;
                 if (isBackgroundParentWithContentChild(parent, child)) {
-                    ObjectPlan retainedParent = parent.withSourceObjectIds(
+                    ObjectPlan retainedParent = parent.withVisualSourceObjectIds(
                             withoutChildVisualSources(parent, child));
-                    if (retainedParent.sourceObjectIds.length != parent.sourceObjectIds.length) {
+                    if (visualSourceIds(retainedParent).length != visualSourceIds(parent).length) {
                         plans.set(i, retainedParent);
                         parent = retainedParent;
                     }
@@ -2534,6 +2598,89 @@ public final class OwnershipPlanner {
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL;
     }
 
+    private void resolveParentTextShellDescendantVisuals() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan parent = plans.get(i);
+            if (!isParentTextShellOwner(parent)) continue;
+            LinkedHashSet<Integer> descendants = new LinkedHashSet<>();
+            for (int j = 0; j < plans.size(); j++) {
+                if (i == j) continue;
+                ObjectPlan child = plans.get(j);
+                if (!isVisibleRenderedVisual(child)) continue;
+                if (child.pageIndex != parent.pageIndex) continue;
+                if (!isDescendantVisualOfParentTextShell(parent, child)) continue;
+                collectDescendantVisualIds(parent, child, descendants);
+                ObjectPlan dropped = child.withVisualAction(VisualAction.DROP_VISUAL,
+                        "owned_by_parent_text_shell");
+                if (!"text_frame".equals(dropped.kind)) {
+                    dropped = dropped.withTextAction(TextAction.DROP_TEXT);
+                }
+                plans.set(j, dropped);
+            }
+            if (!descendants.isEmpty()) {
+                plans.set(i, parent.withDescendantVisualObjectIds(toIntArray(descendants)));
+            }
+        }
+    }
+
+    private static boolean isParentTextShellOwner(ObjectPlan plan) {
+        return plan != null
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.hasVisibleVisual()
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0;
+    }
+
+    private boolean isDescendantVisualOfParentTextShell(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        if ("text_frame".equals(child.kind)) return false;
+        if (parent.domId == child.domId) return false;
+        if (isSameRenderPlan(parent, child)) return false;
+        if (child.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && !ownedTextFramesCoveredBy(parent, child)) {
+            return false;
+        }
+        if (isStrictChildPlan(parent, child)) return true;
+        if (!sharesAnySource(parent, child) && !containsAny(parent.sourceObjectIds, visualSourceIds(child))) {
+            return false;
+        }
+        if (parent.bounds == null || child.bounds == null) return false;
+        return boundsContains(parent.bounds, child.bounds, 4.0)
+                || boundsMostlyOverlap(parent.bounds, child.bounds, 0.70);
+    }
+
+    private static boolean ownedTextFramesCoveredBy(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        if (child.ownedTextFrameIds == null || child.ownedTextFrameIds.length == 0) return true;
+        for (int id : child.ownedTextFrameIds) {
+            if (!contains(parent.ownedTextFrameIds, id)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isSameRenderPlan(ObjectPlan a, ObjectPlan b) {
+        if (a == null || b == null) return false;
+        if (a.renderId == null || b.renderId == null) return false;
+        if (!a.renderId.equals(b.renderId)) return false;
+        if (a.file == null || b.file == null) return true;
+        return a.file.equals(b.file);
+    }
+
+    private void collectDescendantVisualIds(
+            ObjectPlan parent,
+            ObjectPlan child,
+            LinkedHashSet<Integer> descendants) {
+        if (child == null || descendants == null) return;
+        if (child.domId >= 0) descendants.add(child.domId);
+        if (child.renderId != null && child.renderId >= 0) descendants.add(child.renderId);
+        int[] parentVisualSources = visualSourceIds(parent);
+        for (int sourceId : visualSourceIds(child)) {
+            if (contains(child.ownedTextFrameIds, sourceId)) continue;
+            if (!contains(parentVisualSources, sourceId)) continue;
+            if (sourceId >= 0) descendants.add(sourceId);
+        }
+    }
+
     private static boolean containsAllSources(ObjectPlan owner, ObjectPlan child) {
         if (owner == null || child == null || child.sourceObjectIds == null) return false;
         for (int sourceId : child.sourceObjectIds) {
@@ -2553,14 +2700,14 @@ public final class OwnershipPlanner {
                 if (child.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
                 if (child.pageIndex != parent.pageIndex) continue;
                 if (!isStrictChildPlan(parent, child)) continue;
-                for (int sourceId : child.sourceObjectIds) {
+                for (int sourceId : visualSourceIds(child)) {
                     childSources.add(sourceId);
                 }
             }
             if (childSources.isEmpty()) continue;
             List<Integer> retained = new ArrayList<>();
             boolean changed = false;
-            for (int sourceId : parent.sourceObjectIds) {
+            for (int sourceId : visualSourceIds(parent)) {
                 if (sourceId != parent.domId && childSources.contains(sourceId)) {
                     changed = true;
                     continue;
@@ -2568,7 +2715,7 @@ public final class OwnershipPlanner {
                 retained.add(sourceId);
             }
             if (!changed) continue;
-            plans.set(i, parent.withSourceObjectIds(toIntArray(retained)));
+            plans.set(i, parent.withVisualSourceObjectIds(toIntArray(retained)));
         }
     }
 
@@ -2729,7 +2876,7 @@ public final class OwnershipPlanner {
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             List<Integer> retained = new ArrayList<>();
             boolean changed = false;
-            for (int sourceId : plan.sourceObjectIds) {
+            for (int sourceId : visualSourceIds(plan)) {
                 if (sourceId != plan.domId
                         && data.getTextFrame(String.valueOf(sourceId)) != null
                         && textOwnedSlots.contains(pageSourceKey(plan.pageIndex, sourceId))) {
@@ -2739,7 +2886,7 @@ public final class OwnershipPlanner {
                 retained.add(sourceId);
             }
             if (!changed || retained.isEmpty()) continue;
-            ObjectPlan next = plan.withSourceObjectIds(toIntArray(retained));
+            ObjectPlan next = plan.withVisualSourceObjectIds(toIntArray(retained));
             if (textFrameIdsForPlan(next).length == 0) {
                 next = next.withTextAction(TextAction.DROP_TEXT);
             }
@@ -2763,7 +2910,7 @@ public final class OwnershipPlanner {
             if (plan.textAction == TextAction.OWNED_BY_PNG) continue;
             List<Integer> retained = new ArrayList<>();
             boolean changed = false;
-            for (int sourceId : plan.sourceObjectIds) {
+            for (int sourceId : visualSourceIds(plan)) {
                 if (sourceId != plan.domId && hwpxTextSources.contains(sourceId)) {
                     changed = true;
                     continue;
@@ -2771,7 +2918,7 @@ public final class OwnershipPlanner {
                 retained.add(sourceId);
             }
             if (!changed) continue;
-            plans.set(i, plan.withSourceObjectIds(toIntArray(retained)));
+            plans.set(i, plan.withVisualSourceObjectIds(toIntArray(retained)));
         }
     }
 
@@ -2779,7 +2926,7 @@ public final class OwnershipPlanner {
         Map<String, List<ObjectPlan>> byPageSource = new LinkedHashMap<>();
         for (ObjectPlan plan : plans) {
             if (!plan.hasVisibleVisual()) continue;
-            for (int sourceId : plan.sourceObjectIds) {
+            for (int sourceId : visualSourceIds(plan)) {
                 String key = plan.pageIndex + ":" + sourceId;
                 byPageSource.computeIfAbsent(key, k -> new ArrayList<>()).add(plan);
             }
@@ -4296,6 +4443,23 @@ public final class OwnershipPlanner {
         int[] out = new int[values.size()];
         for (int i = 0; i < values.size(); i++) out[i] = values.get(i);
         return out;
+    }
+
+    private static int[] toIntArray(LinkedHashSet<Integer> values) {
+        int[] out = new int[values.size()];
+        int i = 0;
+        for (Integer value : values) {
+            out[i++] = value != null ? value : -1;
+        }
+        return out;
+    }
+
+    private static int[] visualSourceIds(ObjectPlan plan) {
+        if (plan == null) return new int[0];
+        if (plan.visualSourceObjectIds != null && plan.visualSourceObjectIds.length > 0) {
+            return plan.visualSourceObjectIds;
+        }
+        return plan.sourceObjectIds != null ? plan.sourceObjectIds : new int[0];
     }
 
     private static int parseInt(String value, int fallback) {
