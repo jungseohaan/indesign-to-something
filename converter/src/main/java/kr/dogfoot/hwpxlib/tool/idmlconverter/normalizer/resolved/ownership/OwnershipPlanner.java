@@ -8,6 +8,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualLa
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.awt.image.BufferedImage;
@@ -1020,9 +1023,7 @@ public final class OwnershipPlanner {
         if ("image_group_text_hidden".equals(rg.reason())
                 && !isImageBackedContentShell(rg)
                 && (textAction == TextAction.OWNED_BY_HWPX_TEXT || hasEditableTextOwnerSignal(rg))) {
-            return placement == Placement.INLINE
-                    ? VisualAction.PLACE_INLINE_PNG
-                    : VisualAction.PLACE_FLOATING_PNG;
+            return VisualAction.PLACE_TEXT_SHELL;
         }
         if (isInlineCompleteGraphicWithHwpxTextSource(rg, placement, textAction)) {
             return VisualAction.DROP_VISUAL;
@@ -1054,12 +1055,7 @@ public final class OwnershipPlanner {
                 || Boolean.TRUE.equals(rg.containsEditableText())
                 || hasEditableTextFrameIds(rg))) {
             if (isEditableVisualShellWithSeparateHwpxText(rg)) {
-                if (!hasIndependentContentVisualBesideOwnedText(rg) && !isImageBackedContentShell(rg)) {
-                    return VisualAction.PLACE_TEXT_SHELL;
-                }
-                return placement == Placement.INLINE
-                        ? VisualAction.PLACE_INLINE_PNG
-                        : VisualAction.PLACE_FLOATING_PNG;
+                return VisualAction.PLACE_TEXT_SHELL;
             }
             if (hasIndependentContentVisualBesideOwnedText(rg)) {
                 return placement == Placement.INLINE
@@ -1067,7 +1063,7 @@ public final class OwnershipPlanner {
                         : VisualAction.PLACE_FLOATING_PNG;
             }
             if ("label_backdrop_group".equals(rg.reason())) {
-                return VisualAction.PLACE_FLOATING_PNG;
+                return VisualAction.PLACE_TEXT_SHELL;
             }
             if (isCalloutOrOutlineTextShell(rg)) {
                 return VisualAction.PLACE_TEXT_SHELL;
@@ -1104,7 +1100,8 @@ public final class OwnershipPlanner {
         if (visualAction == VisualAction.PLACE_INLINE_PNG) {
             return VisualLayer.CONTENT_VISUAL;
         }
-        if (hasIndependentContentVisualBesideOwnedText(rg)) {
+        if (visualAction != VisualAction.PLACE_TEXT_SHELL
+                && hasIndependentContentVisualBesideOwnedText(rg)) {
             return VisualLayer.CONTENT_VISUAL;
         }
         if (visualAction == VisualAction.PLACE_TEXT_SHELL) {
@@ -1119,12 +1116,13 @@ public final class OwnershipPlanner {
             }
             if ("visual_label_text_hidden_shell".equals(rg.reason())
                     || "editable_composite_text_hidden_shell".equals(rg.reason())) {
-                // This is not a passive backdrop behind a text frame. The
-                // extractor exported the complete label chrome with text hidden,
-                // and the editable TextFrame is placed above it. These labels
-                // often sit on a container edge, so placing them in the lower
-                // LABEL_BACKDROP band lets the container outline/image clip them.
-                return VisualLayer.CONTENT_VISUAL;
+                return VisualLayer.LABEL_BACKDROP;
+            }
+            if (isEditableVisualShellWithSeparateHwpxText(rg)) {
+                if (isImageBackedContentShell(rg) && !isBackdropDominantImageShell(rg)) {
+                    return VisualLayer.CONTENT_VISUAL;
+                }
+                return isLabelReason(rg) ? VisualLayer.LABEL_BACKDROP : VisualLayer.CONTAINER_BACKDROP;
             }
             if (isImageBackedContentShell(rg)) {
                 if (isBackdropDominantImageShell(rg)) {
@@ -1133,7 +1131,7 @@ public final class OwnershipPlanner {
                 return VisualLayer.CONTENT_VISUAL;
             }
             if ("label_backdrop_group".equals(rg.reason())) {
-                return VisualLayer.LABEL_OVERLAY_BACKDROP;
+                return VisualLayer.LABEL_BACKDROP;
             }
             return isLabelReason(rg) ? VisualLayer.LABEL_BACKDROP : VisualLayer.CONTAINER_BACKDROP;
         }
@@ -1186,7 +1184,7 @@ public final class OwnershipPlanner {
             return VisualLayer.FOREGROUND_MASK;
         }
         if ("label_backdrop_group".equals(rg.reason())) {
-            return VisualLayer.LABEL_OVERLAY_BACKDROP;
+            return VisualLayer.LABEL_BACKDROP;
         }
         if (isLabelBackdropLike(rg, textAction)) {
             return VisualLayer.LABEL_BACKDROP;
@@ -1661,6 +1659,9 @@ public final class OwnershipPlanner {
             if (InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(data, rg)) {
                 return Placement.FLOATING;
             }
+            if (!hasResolvedInlineAnchor(rg.id())) {
+                return Placement.FLOATING;
+            }
             return Placement.INLINE;
         }
         if (isMultiTextVisualLabelShell(rg)) {
@@ -1690,7 +1691,25 @@ public final class OwnershipPlanner {
             if (other == null || other == rg) continue;
             if (other.id() != rg.id()) continue;
             if ("inline_object".equals(other.type()) || "inline_object".equals(other.itemType())) {
-                return true;
+                return hasResolvedInlineAnchor(rg.id());
+            }
+        }
+        return false;
+    }
+
+    private boolean hasResolvedInlineAnchor(int domId) {
+        if (data == null || domId < 0 || data.stories() == null) return false;
+        for (ResolvedStory story : data.stories()) {
+            if (story == null || story.paragraphs() == null) continue;
+            for (ResolvedParagraph paragraph : story.paragraphs()) {
+                if (paragraph == null || paragraph.runs() == null) continue;
+                for (ResolvedRun run : paragraph.runs()) {
+                    if (run == null || !run.isInlineAnchor()) continue;
+                    Integer anchoredId = run.anchoredObjectId();
+                    if (anchoredId != null && anchoredId == domId) {
+                        return true;
+                    }
+                }
             }
         }
         return false;
@@ -2279,11 +2298,14 @@ public final class OwnershipPlanner {
                 if (shadow.pageIndex != face.pageIndex) continue;
                 if (!isColoredContainerShadow(shadow)) continue;
                 if (!sameContainerFootprint(face, shadow)) continue;
-                if (isHwpxTextOwnedContainerShell(face) || isHwpxTextOwnedContainerShell(shadow)) {
-                    plans.set(i, face.withVisualAction(
-                            VisualAction.DROP_VISUAL,
-                            "text_owned_container_shell_duplicate"));
-                    plans.set(j, shadow.withVisualAction(
+                ObjectPlan textShellOwner = chooseTextShellContainerOwner(face, shadow);
+                if (textShellOwner != null) {
+                    boolean faceOwns = textShellOwner == face;
+                    int ownerIndex = faceOwns ? i : j;
+                    int duplicateIndex = faceOwns ? j : i;
+                    ObjectPlan duplicate = faceOwns ? shadow : face;
+                    plans.set(ownerIndex, textShellOwner.withZOrder(Math.min(face.zOrder, shadow.zOrder)));
+                    plans.set(duplicateIndex, duplicate.withVisualAction(
                             VisualAction.DROP_VISUAL,
                             "text_owned_container_shell_duplicate_child"));
                     break;
@@ -2481,6 +2503,44 @@ public final class OwnershipPlanner {
         double w = Math.max(1.0, Math.min(Math.abs(a.bounds[3] - a.bounds[1]), Math.abs(b.bounds[3] - b.bounds[1])));
         return Math.abs(aCy - bCy) <= h * 0.08 + 3.0
                 && Math.abs(aCx - bCx) <= w * 0.08 + 3.0;
+    }
+
+    private ObjectPlan chooseTextShellContainerOwner(ObjectPlan a, ObjectPlan b) {
+        if (a == null || b == null) return null;
+        boolean aShell = isHwpxTextOwnedShell(a);
+        boolean bShell = isHwpxTextOwnedShell(b);
+        if (!aShell && !bShell) return null;
+        if (aShell && !bShell) return a;
+        if (!aShell) return b;
+        boolean aContainsB = containsAllSources(a, b) || contains(a.sourceObjectIds, b.domId);
+        boolean bContainsA = containsAllSources(b, a) || contains(b.sourceObjectIds, a.domId);
+        if (aContainsB && !bContainsA) return a;
+        if (bContainsA && !aContainsB) return b;
+        double aArea = area(a.bounds);
+        double bArea = area(b.bounds);
+        if (aArea > bArea * 1.05) return a;
+        if (bArea > aArea * 1.05) return b;
+        if (a.visualLayer == VisualLayer.LABEL_BACKDROP && b.visualLayer != VisualLayer.LABEL_BACKDROP) {
+            return a;
+        }
+        if (b.visualLayer == VisualLayer.LABEL_BACKDROP && a.visualLayer != VisualLayer.LABEL_BACKDROP) {
+            return b;
+        }
+        return a.zOrder <= b.zOrder ? a : b;
+    }
+
+    private static boolean isHwpxTextOwnedShell(ObjectPlan plan) {
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL;
+    }
+
+    private static boolean containsAllSources(ObjectPlan owner, ObjectPlan child) {
+        if (owner == null || child == null || child.sourceObjectIds == null) return false;
+        for (int sourceId : child.sourceObjectIds) {
+            if (!contains(owner.sourceObjectIds, sourceId)) return false;
+        }
+        return true;
     }
 
     private void resolveNestedTextShellSources() {

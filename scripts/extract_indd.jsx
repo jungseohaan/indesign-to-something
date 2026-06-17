@@ -2778,6 +2778,33 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return false;
     }
 
+    function _shouldGuardTextHiddenShellExport(opts) {
+        if (!opts || opts.textHiddenBeforeExport !== true) return false;
+        var reason = String(opts.reason || "");
+        return reason === "visual_label_text_hidden_shell"
+                || reason === "editable_composite_text_hidden_shell";
+    }
+
+    function _expandedBounds(bounds, pad) {
+        if (!bounds || bounds.length < 4) return null;
+        return [bounds[0] - pad, bounds[1] - pad, bounds[2] + pad, bounds[3] + pad];
+    }
+
+    function _makeTransparentExportGuard(page, bounds) {
+        if (!page || !bounds || bounds.length < 4) return null;
+        var guard = null;
+        try {
+            guard = page.rectangles.add({ geometricBounds: bounds });
+            try { guard.strokeWeight = 0; } catch (eStrokeWeight) {}
+            try { guard.strokeColor = doc.swatches.itemByName("None"); } catch (eStroke) {}
+            try { guard.fillColor = doc.swatches.itemByName("Paper"); } catch (eFill) {}
+            try { guard.transparencySettings.blendingSettings.opacity = 0; } catch (eOpacity) {}
+        } catch (eGuard) {
+            guard = null;
+        }
+        return guard;
+    }
+
     // PNG 렌더 + results 등록 (자식 claim 포함)
     function _decoRender(item, page, childIdMap, ownershipOpts) {
         var domId = item.id;
@@ -2812,19 +2839,50 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         } catch (eAutoHide) {}
         // exportFile을 독립 try로 감싸 InDesign 2026 예외가 push를 건너뛰지 않도록 보호
         var _exportOk = false;
+        var _guardedExportBounds = null;
+        var _exportTarget = item;
+        var _exportDup = null;
+        var _exportGuard = null;
+        var _exportGroup = null;
+        if (_shouldGuardTextHiddenShellExport(resolvedOwnershipOpts)) {
+            try { _guardedExportBounds = arrCopy(item.geometricBounds); } catch (eGb) {}
+            if (!_guardedExportBounds) {
+                try { _guardedExportBounds = arrCopy(item.visibleBounds); } catch (eVb) {}
+            }
+            _guardedExportBounds = _expandedBounds(_guardedExportBounds, 1.0);
+        }
         try {
-            item.exportFile(ExportFormat.PNG_FORMAT, _outFile);
+            if (_guardedExportBounds) {
+                _exportDup = item.duplicate();
+                _exportGuard = _makeTransparentExportGuard(page, _guardedExportBounds);
+                if (_exportDup && _exportGuard) {
+                    try {
+                        _exportGroup = page.groups.add([_exportGuard, _exportDup]);
+                    } catch (eGroupPage) {
+                        try { _exportGroup = doc.groups.add([_exportGuard, _exportDup]); } catch (eGroupDoc) {}
+                    }
+                }
+                if (_exportGroup) _exportTarget = _exportGroup;
+            }
+            _exportTarget.exportFile(ExportFormat.PNG_FORMAT, _outFile);
             _exportOk = true;
         } catch (eExp) {
             try { _exportOk = _outFile.exists; } catch (e2) {}
         } finally {
+            try { if (_exportGroup) _exportGroup.remove(); } catch (eRemoveGroup) {}
+            try { if (!_exportGroup && _exportDup) _exportDup.remove(); } catch (eRemoveDup) {}
+            try { if (!_exportGroup && _exportGuard) _exportGuard.remove(); } catch (eRemoveGuard) {}
             try { if (_autoHiddenTFs && _autoHiddenTFs.length > 0) restoreTextFrames(_autoHiddenTFs); } catch (eRestoreAutoHide) {}
         }
         if (!_exportOk) return [];
 
         var bounds = null;
-        try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
-        if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
+        if (_guardedExportBounds) {
+            bounds = arrCopy(_guardedExportBounds);
+        } else {
+            try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
+            if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
+        }
         if (bounds) _toPageRelativeBounds(bounds, page);
 
         var childIds = [];

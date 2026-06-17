@@ -67,6 +67,9 @@ public final class StoryConverter {
     private static final int    FALLBACK_IDML_PARA_MAX      = 2;
     /** resolved 단락 수가 이 값 이상이면 단락 구조 불일치로 판단 → resolved fallback */
     private static final int    FALLBACK_RESOLVED_PARA_MIN  = 5;
+    /** composed line ink가 선언 font보다 작은 장식/삽화 내부 TF는 ink bounds를 기준으로 run font를 제한한다. */
+    private static final double COMPOSED_INK_FONT_CAP_RATIO = 1.15;
+    private static final double COMPOSED_INK_MIN_PT = 4.0;
 
     // scanTextPathStorySubstitutions 전용 — 메서드 호출마다 재컴파일 방지
     private static final Pattern TEXT_FRAME_PATTERN =
@@ -279,6 +282,7 @@ public final class StoryConverter {
             ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, storyId);
             insertAnchoredTables(ctx, blocks);
             annotateParagraphPageBounds(ctx, blocks);
+            applyComposedInkFontCaps(ctx, blocks);
             distributeNanos += System.nanoTime() - stepStart;
             stepStart = System.nanoTime();
             restoreTfInlineVisuals(ctx, blocks);
@@ -301,6 +305,7 @@ public final class StoryConverter {
         }
         storyLoopNanos = System.nanoTime() - t0;
         insertAnchoredTables(ctx, textFrameBlocks(sections));
+        applyComposedInkFontCaps(ctx, textFrameBlocks(sections));
         System.err.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
 
         // Phase 3 후처리: AnchoredPosition="Anchored" + TextWrapMode="None" Group 들을
@@ -320,6 +325,139 @@ public final class StoryConverter {
         ConversionTiming.metric("stage2.textBuilder.storyConverter.restoreInlineVisualsMs", millis(restoreInlineNanos));
         ConversionTiming.metric("stage2.textBuilder.storyConverter.postprocessMs", millis(postprocessNanos));
         ConversionTiming.metric("stage2.textBuilder.storyConverter.deferredFloatingMs", millis(deferredFloatingNanos));
+    }
+
+    private static void applyComposedInkFontCaps(ResolvedBuildContext ctx, List<ASTTextFrameBlock> blocks) {
+        if (ctx == null || ctx.resolvedData == null || blocks == null) return;
+        for (ASTTextFrameBlock block : blocks) {
+            if (block == null || block.paragraphs() == null || block.paragraphs().isEmpty()) continue;
+            ResolvedTextFrame tf = textFrameForBlock(ctx, block);
+            double maxFontSizePt = maxFontSizePt(ctx, tf);
+            double capPt = composedInkFontCapPt(tf, maxFontSizePt, ctx.scaleFactor);
+            if (capPt <= 0) continue;
+            int capHwpunits = (int) Math.round(CoordinateConverter.pointsToHwpunits(capPt));
+            clampParagraphFonts(block.paragraphs(), capHwpunits);
+        }
+    }
+
+    private static ResolvedTextFrame textFrameForBlock(ResolvedBuildContext ctx, ASTTextFrameBlock block) {
+        if (ctx == null || ctx.resolvedData == null || block == null) return null;
+        String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
+        ResolvedTextFrame direct = domId != null ? ctx.resolvedData.getTextFrame(domId) : null;
+        if (direct != null) return direct;
+
+        String storyId = block.storyId();
+        if (storyId == null || ctx.resolvedData.textFrames() == null) return null;
+        ResolvedTextFrame firstStoryFrame = null;
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || !storyId.equals(tf.storyId())) continue;
+            if (firstStoryFrame == null) firstStoryFrame = tf;
+            double maxFontSizePt = maxFontSizePt(ctx, tf);
+            if (composedInkFontCapPt(tf, maxFontSizePt, ctx.scaleFactor) > 0) return tf;
+        }
+        return firstStoryFrame;
+    }
+
+    private static double maxFontSizePt(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.storyId() == null) return 0.0;
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null) return 0.0;
+        double max = 0.0;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || run.fontSize() == null || run.fontSize() <= 0) continue;
+                max = Math.max(max, run.fontSize());
+            }
+        }
+        return max;
+    }
+
+    private static double composedInkFontCapPt(ResolvedTextFrame tf, double maxFontSizePt, double scaleFactor) {
+        if (tf == null || maxFontSizePt <= 0) return 0.0;
+        if (tf.composedLines() == null || tf.composedLines().isEmpty()) return 0.0;
+        double[] frameBounds = tf.pageRelativeBounds();
+        if (frameBounds == null || frameBounds.length < 4) frameBounds = tf.geometricBounds();
+        if (frameBounds == null || frameBounds.length < 4) return 0.0;
+
+        double unitScale = scaleFactor > 1.0 ? scaleFactor : 1.0;
+        double frameW = Math.abs(frameBounds[3] - frameBounds[1]) / unitScale;
+        double frameH = Math.abs(frameBounds[2] - frameBounds[0]) / unitScale;
+        double frameMaxAxis = Math.max(frameW, frameH);
+        if (frameMaxAxis <= 0 || maxFontSizePt <= frameMaxAxis * 1.20) return 0.0;
+
+        double inkMaxAxis = 0.0;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
+            if (!hasVisibleTextExcludingObjectControls(line.text())) continue;
+            double[] b = line.bounds();
+            double lineW = Math.abs(b[3] - b[1]) / unitScale;
+            double lineH = Math.abs(b[2] - b[0]) / unitScale;
+            if (lineW <= 0 || lineH <= 0) continue;
+            inkMaxAxis = Math.max(inkMaxAxis, Math.max(lineW, lineH));
+        }
+        if (inkMaxAxis <= 0 || inkMaxAxis >= maxFontSizePt * 0.90) return 0.0;
+        return Math.max(COMPOSED_INK_MIN_PT, inkMaxAxis * COMPOSED_INK_FONT_CAP_RATIO);
+    }
+
+    private static boolean hasVisibleTextExcludingObjectControls(String text) {
+        if (text == null) return false;
+        String cleaned = text
+                .replace("\uFFFC", "")
+                .replace("\u0003", "")
+                .replace("\u0007", "")
+                .replace("\b", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+        return !cleaned.isEmpty();
+    }
+
+    private static void clampParagraphFonts(List<ASTParagraph> paragraphs, int capHwpunits) {
+        if (paragraphs == null || capHwpunits <= 0) return;
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null) continue;
+            clampInlineItems(paragraph.items(), capHwpunits);
+            if (paragraph.inlineTable() != null) {
+                clampTableFonts(paragraph.inlineTable(), capHwpunits);
+            }
+        }
+    }
+
+    private static void clampInlineItems(List<ASTInlineItem> items, int capHwpunits) {
+        if (items == null) return;
+        for (ASTInlineItem item : items) {
+            if (item instanceof ASTTextRun) {
+                ASTTextRun run = (ASTTextRun) item;
+                if (run.fontSizeHwpunits() != null && run.fontSizeHwpunits() > capHwpunits) {
+                    run.fontSizeHwpunits(capHwpunits);
+                }
+            } else if (item instanceof ASTInlineObject) {
+                ASTInlineObject obj = (ASTInlineObject) item;
+                clampParagraphFonts(obj.paragraphs(), capHwpunits);
+                if (obj.inlineTables() != null) {
+                    for (ASTTable table : obj.inlineTables()) {
+                        clampTableFonts(table, capHwpunits);
+                    }
+                }
+                if (obj.overlayFrames() != null) {
+                    for (ASTInlineObject overlay : obj.overlayFrames()) {
+                        clampParagraphFonts(overlay.paragraphs(), capHwpunits);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void clampTableFonts(ASTTable table, int capHwpunits) {
+        if (table == null || table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                clampParagraphFonts(cell.paragraphs(), capHwpunits);
+            }
+        }
     }
 
     private static List<ASTTextFrameBlock> textFrameBlocks(List<ASTSection> sections) {

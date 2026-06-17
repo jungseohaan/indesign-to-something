@@ -1060,6 +1060,7 @@ public class StoryLoader {
             try {
                 int domId = Integer.parseInt(tf.id());
                 if (ctx.isTextDisposed(domId, FrameDisposition.TEXT_BLOCK_PLACED)) return true;
+                if (ctx.isTextFrameOwnedByTextShellPlan(domId)) return true;
             } catch (NumberFormatException ignored) {
                 // Non-DOM ids cannot be matched against text-frame ownership disposition.
             }

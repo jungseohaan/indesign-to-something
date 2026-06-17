@@ -2554,8 +2554,14 @@ public class InlineFrameHandler {
                 proceed = ancTf != null && ancTf.isInline();
             }
             if (proceed) {
+                VisualAction plannedVisualAction = ctx.visualActionByOwnershipPlan(rg);
+                Placement plannedPlacement = ctx.placementByOwnershipPlan(rg);
+                boolean placeInlinePng = plannedVisualAction == VisualAction.PLACE_INLINE_PNG
+                        && plannedPlacement == Placement.INLINE;
+                boolean placeInlineTextShell = plannedVisualAction == VisualAction.PLACE_TEXT_SHELL
+                        && plannedPlacement == Placement.INLINE;
                 if (!ctx.hasOwnershipPlan(rg)
-                        || !ctx.shouldPlaceInlinePngByOwnershipPlan(rg)) {
+                        || (!placeInlinePng && !placeInlineTextShell)) {
                     return null;
                 }
                 boolean isNullTypeInline = rg.itemType() == null;

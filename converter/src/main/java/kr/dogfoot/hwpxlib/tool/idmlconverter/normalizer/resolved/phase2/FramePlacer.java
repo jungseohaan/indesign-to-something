@@ -90,6 +90,9 @@ public final class FramePlacer {
     private static final double PARTIAL_LEFT_WRAP_FRAME_RATIO = 0.18;
     /** HWPX drawText가 원본 fontSize보다 작은 박스로 텍스트를 SQUEEZE하지 않도록 축을 보존한다. */
     private static final double FONT_AXIS_MIN_RATIO = 1.15;
+    /** composed line ink가 선언 font보다 작은 장식/삽화 내부 TF는 ink bounds를 기준으로 축을 보존한다. */
+    private static final double COMPOSED_INK_FONT_CAP_RATIO = 1.15;
+    private static final double COMPOSED_INK_MIN_PT = 4.0;
     // -----------------------------------------------------------------------
 
     public static void placeTextFrames(ResolvedBuildContext ctx, List<ASTSection> sections) {
@@ -521,8 +524,10 @@ public final class FramePlacer {
             boolean verticalComposedText = isVerticalComposedTextFrame(tf);
             boolean fontAxisExpanded = false;
             double maxFontSizePt = maxFontSizePt(ctx, tf);
-            if (maxFontSizePt > 0) {
-                double minTextAxis = maxFontSizePt * FONT_AXIS_MIN_RATIO;
+            double composedInkFontCapPt = composedInkFontCapPt(tf, maxFontSizePt, ctx.scaleFactor);
+            double axisFontSizePt = composedInkFontCapPt > 0 ? composedInkFontCapPt : maxFontSizePt;
+            if (axisFontSizePt > 0) {
+                double minTextAxis = axisFontSizePt * FONT_AXIS_MIN_RATIO;
                 if (verticalComposedText && w < minTextAxis) {
                     double delta = minTextAxis - w;
                     x -= delta / 2.0;
@@ -659,7 +664,8 @@ public final class FramePlacer {
                 int inlineEditableLen = editableInlineTextLengthForStory(ctx, tf.storyId());
                 block.frameVisibleTextLength(Math.max(visibleLen, inlineEditableLen));
             }
-            boolean preserveFontSize = verticalComposedText || fontAxisExpanded;
+            boolean preserveFontSize = composedInkFontCapPt <= 0
+                    && (verticalComposedText || fontAxisExpanded);
             boolean sourceSingleLineOverlay = plannedVisualTextOverlay
                     && shouldUseVisualShellNoAutoLineWrap(true, tf, block);
             block.noAutoLineWrap(sourceSingleLineOverlay
@@ -1257,6 +1263,10 @@ public final class FramePlacer {
             double shellHeight = shellBottom - shellTop;
             if (shellWidth <= 0 || shellHeight <= 0) continue;
 
+            if (isShellClaimedByAnotherTextFrame(ctx, tf, sibling, parentId, pageLeft, pageTop, useScaled, scale)) {
+                continue;
+            }
+
             double yOverlap = Math.min(tfBottom, shellBottom) - Math.max(tfTop, shellTop);
             if (yOverlap <= 0 || yOverlap / Math.min(tfHeight, shellHeight) < 0.35) continue;
 
@@ -1270,6 +1280,95 @@ public final class FramePlacer {
             }
         }
         return bestRight;
+    }
+
+    private static boolean isShellClaimedByAnotherTextFrame(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame owner,
+            ResolvedPageItem shell,
+            String parentId,
+            double pageLeft,
+            double pageTop,
+            boolean useScaled,
+            double scale) {
+        if (ctx == null || ctx.resolvedData == null || owner == null || shell == null) return false;
+        double[] shellGb = shell.geometricBounds();
+        if (shellGb == null || shellGb.length < 4) return false;
+
+        double shellLeft = localX(shellGb[1], pageLeft);
+        double shellRight = localX(shellGb[3], pageLeft);
+        double shellTop = shellGb[0] - pageTop;
+        double shellBottom = shellGb[2] - pageTop;
+        if (useScaled) {
+            shellLeft *= scale;
+            shellRight *= scale;
+            shellTop *= scale;
+            shellBottom *= scale;
+        }
+        double shellWidth = shellRight - shellLeft;
+        double shellHeight = shellBottom - shellTop;
+        if (shellWidth <= 0 || shellHeight <= 0) return false;
+
+        double ownerScore = textFrameShellClaimScore(owner, shellLeft, shellRight, shellTop, shellBottom,
+                pageLeft, pageTop, useScaled, scale);
+        for (ResolvedTextFrame other : ctx.resolvedData.textFrames()) {
+            if (other == null || other.id() == null || other.id().equals(owner.id())) continue;
+            if (other.pageIndex() != owner.pageIndex()) continue;
+            ResolvedPageItem otherItem = ctx.resolvedData.getPageItem(other.id());
+            if (otherItem == null || parentId == null || !parentId.equals(otherItem.parentId())) continue;
+            if (!isHwpxTextCandidate(ctx, other)) continue;
+            double otherScore = textFrameShellClaimScore(other, shellLeft, shellRight, shellTop, shellBottom,
+                    pageLeft, pageTop, useScaled, scale);
+            if (otherScore <= 0.0) continue;
+            if (otherScore > ownerScore + 0.20) return true;
+            if (otherScore >= 0.85 && ownerScore < 0.35) return true;
+        }
+        return false;
+    }
+
+    private static boolean isHwpxTextCandidate(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || tf == null || tf.id() == null) return false;
+        int domId = parseDomIdOrNeg(tf.id());
+        ObjectPlan plan = ctx.findTextFrameOwnershipPlan(domId);
+        if (plan != null) return plan.textAction == TextAction.OWNED_BY_HWPX_TEXT;
+        return ctx.resolvedData != null && ctx.resolvedData.isEditableTextFrame(tf.id());
+    }
+
+    private static double textFrameShellClaimScore(
+            ResolvedTextFrame tf,
+            double shellLeft,
+            double shellRight,
+            double shellTop,
+            double shellBottom,
+            double pageLeft,
+            double pageTop,
+            boolean useScaled,
+            double scale) {
+        if (tf == null) return 0.0;
+        double[] gb = tf.geometricBounds();
+        if (gb == null || gb.length < 4) return 0.0;
+        double left = localX(gb[1], pageLeft);
+        double right = localX(gb[3], pageLeft);
+        double top = gb[0] - pageTop;
+        double bottom = gb[2] - pageTop;
+        if (useScaled) {
+            left *= scale;
+            right *= scale;
+            top *= scale;
+            bottom *= scale;
+        }
+        double width = right - left;
+        double height = bottom - top;
+        if (width <= 0 || height <= 0) return 0.0;
+        double xOverlap = Math.min(right, shellRight) - Math.max(left, shellLeft);
+        double yOverlap = Math.min(bottom, shellBottom) - Math.max(top, shellTop);
+        if (xOverlap <= 0 || yOverlap <= 0) return 0.0;
+        double overlapRatio = (xOverlap * yOverlap) / (width * height);
+        double centerX = (left + right) * 0.5;
+        double centerY = (top + bottom) * 0.5;
+        boolean centerInside = centerX >= shellLeft && centerX <= shellRight
+                && centerY >= shellTop && centerY <= shellBottom;
+        return overlapRatio + (centerInside ? 0.5 : 0.0);
     }
 
     private static double localX(double spreadX, double pageLeft) {
@@ -2400,6 +2499,33 @@ public final class FramePlacer {
             }
         }
         return max;
+    }
+
+    private static double composedInkFontCapPt(ResolvedTextFrame tf, double maxFontSizePt, double scaleFactor) {
+        if (tf == null || maxFontSizePt <= 0) return 0.0;
+        if (tf.composedLines() == null || tf.composedLines().isEmpty()) return 0.0;
+        double[] frameBounds = tf.pageRelativeBounds();
+        if (frameBounds == null || frameBounds.length < 4) frameBounds = tf.geometricBounds();
+        if (frameBounds == null || frameBounds.length < 4) return 0.0;
+
+        double unitScale = scaleFactor > 1.0 ? scaleFactor : 1.0;
+        double frameW = Math.abs(frameBounds[3] - frameBounds[1]) / unitScale;
+        double frameH = Math.abs(frameBounds[2] - frameBounds[0]) / unitScale;
+        double frameMaxAxis = Math.max(frameW, frameH);
+        if (frameMaxAxis <= 0 || maxFontSizePt <= frameMaxAxis * 1.20) return 0.0;
+
+        double inkMaxAxis = 0.0;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
+            if (!hasVisibleTextExcludingObjectControls(line.text())) continue;
+            double[] b = line.bounds();
+            double lineW = Math.abs(b[3] - b[1]) / unitScale;
+            double lineH = Math.abs(b[2] - b[0]) / unitScale;
+            if (lineW <= 0 || lineH <= 0) continue;
+            inkMaxAxis = Math.max(inkMaxAxis, Math.max(lineW, lineH));
+        }
+        if (inkMaxAxis <= 0 || inkMaxAxis >= maxFontSizePt * 0.90) return 0.0;
+        return Math.max(COMPOSED_INK_MIN_PT, inkMaxAxis * COMPOSED_INK_FONT_CAP_RATIO);
     }
 
     private static boolean shouldUseVisualShellNoAutoLineWrap(

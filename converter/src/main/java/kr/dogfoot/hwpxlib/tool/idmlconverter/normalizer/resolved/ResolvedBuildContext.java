@@ -711,6 +711,21 @@ public final class ResolvedBuildContext {
                 && plan.placement == Placement.INLINE;
     }
 
+    public boolean isTextFrameOwnedByTextShellPlan(int domId) {
+        if (domId < 0 || ownershipPlans == null) return false;
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.domId == domId) return true;
+            if (plan.sourceObjectIds == null) continue;
+            for (int sourceObjectId : plan.sourceObjectIds) {
+                if (sourceObjectId == domId) return true;
+            }
+        }
+        return false;
+    }
+
     public boolean hasVisibleOwnedTextImageGroupPlanForDomId(int domId) {
         if (domId < 0 || ownershipPlans == null) return false;
         for (ObjectPlan plan : ownershipPlans) {

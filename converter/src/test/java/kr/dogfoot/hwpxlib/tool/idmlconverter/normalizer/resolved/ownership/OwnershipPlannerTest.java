@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import org.junit.Assert;
@@ -31,6 +32,7 @@ public class OwnershipPlannerTest {
                 new String[] { "101" },
                 new int[] { 100, 101 });
         data.addRenderedFloatingItem(inline);
+        addInlineAnchor(data, 100);
 
         ResolvedBuildContext ctx = plan(data);
         ObjectPlan plan = findRenderedPlan(ctx, 100, "inline_graphic_only");
@@ -138,6 +140,8 @@ public class OwnershipPlannerTest {
         Assert.assertNotNull(plan);
         Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, plan.textAction);
         Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, plan.visualAction);
+        Assert.assertEquals(VisualLayer.LABEL_BACKDROP, plan.visualLayer);
+        Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(shell));
         Assert.assertEquals(19, plan.zOrder);
         Assert.assertFalse(ctx.shouldDropVisualByOwnershipPlan(shell));
         Assert.assertEquals(Integer.valueOf(19), ctx.zOrderByOwnershipPlan(shell));
@@ -292,6 +296,7 @@ public class OwnershipPlannerTest {
         floating.file("rendered_frames/deco_401.png");
         data.addRenderedFloatingItem(inline);
         data.addRenderedFloatingItem(floating);
+        addInlineAnchor(data, 401);
 
         ResolvedBuildContext ctx = plan(data);
         ObjectPlan inlinePlan = findRenderedPlan(ctx, 401, "inline_graphic_only");
@@ -330,6 +335,7 @@ public class OwnershipPlannerTest {
                 new int[] { 421, 422, 423 });
         data.addRenderedFloatingItem(inline);
         data.addRenderedFloatingItem(floatingShell);
+        addInlineAnchor(data, 421);
 
         ResolvedBuildContext ctx = plan(data);
         ObjectPlan inlinePlan = findRenderedPlan(ctx, 421, "inline_graphic_only");
@@ -372,6 +378,7 @@ public class OwnershipPlannerTest {
         inlineShell.containsEditableText(Boolean.FALSE);
         data.addRenderedFloatingItem(inlineComplete);
         data.addRenderedFloatingItem(inlineShell);
+        addInlineAnchor(data, 451);
 
         ResolvedBuildContext ctx = plan(data);
         ObjectPlan textPlan = findPlanByKind(ctx, 453, "text_frame");
@@ -383,6 +390,49 @@ public class OwnershipPlannerTest {
         Assert.assertNotNull(textPlan);
         Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, textPlan.textAction);
         Assert.assertEquals(Placement.INLINE, textPlan.placement);
+    }
+
+    @Test
+    public void unanchoredInlineRenderedShellIsPlannedFloating() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame tf = textFrame(473, "구절\n풀이");
+        tf.isInline(true);
+        data.addTextFrame(tf);
+        RenderedGroup inlineComplete = rendered(
+                471,
+                "inline_object",
+                "inline_object",
+                "inline_graphic_only",
+                "indesign_png",
+                "none",
+                null,
+                new int[] { 471, 472, 473 });
+        inlineComplete.containsText(Boolean.FALSE);
+        inlineComplete.containsEditableText(Boolean.FALSE);
+        RenderedGroup floatingShell = rendered(
+                471,
+                "page_object",
+                "page_object",
+                "visual_label_text_hidden_shell",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "473" },
+                new int[] { 471, 472, 473 });
+        floatingShell.containsText(Boolean.FALSE);
+        floatingShell.containsEditableText(Boolean.FALSE);
+        data.addRenderedFloatingItem(inlineComplete);
+        data.addRenderedFloatingItem(floatingShell);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan textPlan = findPlanByKind(ctx, 473, "text_frame");
+        ObjectPlan shellPlan = findRenderedPlan(ctx, 471, "visual_label_text_hidden_shell");
+
+        Assert.assertNotNull(shellPlan);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
+        Assert.assertEquals(Placement.FLOATING, shellPlan.placement);
+        Assert.assertNotNull(textPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, textPlan.textAction);
+        Assert.assertEquals(Placement.FLOATING, textPlan.placement);
     }
 
     @Test
@@ -410,9 +460,66 @@ public class OwnershipPlannerTest {
 
         Assert.assertNotNull(backdropPlan);
         Assert.assertEquals(Placement.FLOATING, backdropPlan.placement);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, backdropPlan.visualAction);
+        Assert.assertEquals(VisualLayer.LABEL_BACKDROP, backdropPlan.visualLayer);
+        Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(backdrop));
         Assert.assertNotNull(textPlan);
         Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, textPlan.textAction);
         Assert.assertEquals(Placement.FLOATING, textPlan.placement);
+    }
+
+    @Test
+    public void mixedTextHiddenGroupWithIndependentDecorationStaysBehindOwnedText() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame tf = textFrame(473, "1연");
+        tf.zOrder(80);
+        tf.geometricBounds(new double[] { 43.0, 32.9, 51.0, 68.0 });
+        tf.pageRelativeBounds(new double[] { 43.0, 32.9, 51.0, 68.0 });
+        data.addTextFrame(tf);
+        data.addPageItem(pageItem(
+                473,
+                "TextFrame",
+                new double[] { 43.0, 32.9, 51.0, 68.0 },
+                null,
+                null,
+                0.0));
+        data.addPageItem(pageItem(
+                474,
+                "Rectangle",
+                new double[] { 43.0, 32.9, 51.0, 68.0 },
+                "C=75 M=45 Y=0 K=0",
+                null,
+                0.0));
+        data.addPageItem(pageItem(
+                475,
+                "Rectangle",
+                new double[] { 43.0, 92.0, 61.0, 203.0 },
+                "C=0 M=0 Y=0 K=10",
+                null,
+                0.0));
+        RenderedGroup shell = rendered(
+                472,
+                "page_object",
+                "page_object",
+                "mixed_group_text_hidden",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "473" },
+                new int[] { 472, 473, 474, 475 });
+        shell.containsText(Boolean.FALSE);
+        shell.containsEditableText(Boolean.FALSE);
+        shell.bounds(new double[] { 43.0, 32.9, 61.0, 203.0 });
+        data.addRenderedFloatingItem(shell);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan shellPlan = findRenderedPlan(ctx, 472, "mixed_group_text_hidden");
+
+        Assert.assertNotNull(shellPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, shellPlan.textAction);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
+        Assert.assertEquals(VisualLayer.CONTAINER_BACKDROP, shellPlan.visualLayer);
+        Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(shell));
+        Assert.assertEquals(79, shellPlan.zOrder);
     }
 
     @Test
@@ -514,6 +621,7 @@ public class OwnershipPlannerTest {
                 new int[] { 651 });
         data.addRenderedFloatingItem(inline);
         data.addRenderedFloatingItem(shell);
+        addInlineAnchor(data, 650);
 
         ResolvedBuildContext ctx = plan(data);
         ObjectPlan inlinePlan = findRenderedPlan(ctx, 650, "inline_graphic_only");
@@ -991,6 +1099,18 @@ public class OwnershipPlannerTest {
         paragraph.styleName(firstParagraphStyleName);
         story.addParagraph(paragraph);
         return story;
+    }
+
+    private static void addInlineAnchor(ResolvedData data, int anchoredObjectId) {
+        ResolvedStory story = new ResolvedStory();
+        story.id("story-" + anchoredObjectId);
+        ResolvedParagraph paragraph = new ResolvedParagraph();
+        ResolvedRun run = new ResolvedRun();
+        run.type("inline_anchor");
+        run.anchoredObjectId(anchoredObjectId);
+        paragraph.runs().add(run);
+        story.addParagraph(paragraph);
+        data.addStory(story);
     }
 
     private static RenderedGroup rendered(

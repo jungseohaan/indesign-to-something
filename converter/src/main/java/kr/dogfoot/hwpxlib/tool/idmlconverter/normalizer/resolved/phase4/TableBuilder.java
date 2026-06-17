@@ -278,26 +278,20 @@ public final class TableBuilder {
                         || hasFlowStackTitleAboveTableBounds(ctx, tf, resolvedTableBounds, thisX, thisY, astTable)) {
                     astTable.anchoredFlowWithText(true);
                 }
-                boolean chromeOwnedByTextShell = tableChromeOwnedByTextShell(ctx, tf);
-                if (chromeOwnedByTextShell) {
-                    stripTableChrome(astTable);
-                } else {
-                    absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
-                    report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
-                    completeVisibleTableOuterBorder(astTable);
-                }
+                List<ObjectPlan> chromeShellPlans = tableChromeShellPlans(ctx, tf);
+                absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
+                report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
+                completeVisibleTableOuterBorder(astTable);
+                stripTableChromeCoveredByShell(ctx, astTable, chromeShellPlans);
 
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
-                    if (chromeOwnedByTextShell) {
-                        stripTableChrome(placement.table);
-                    } else {
-                        report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
-                                ctx, placement.table, placement.pageIdx);
-                        completeVisibleTableOuterBorder(placement.table);
-                    }
+                    report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
+                            ctx, placement.table, placement.pageIdx);
+                    completeVisibleTableOuterBorder(placement.table);
+                    stripTableChromeCoveredByShell(ctx, placement.table, chromeShellPlans);
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
@@ -382,26 +376,20 @@ public final class TableBuilder {
                         || hasFlowStackTitleAboveTableBounds(ctx, tf, resolvedTableBounds, thisX, thisY, astTable)) {
                     astTable.anchoredFlowWithText(true);
                 }
-                boolean chromeOwnedByTextShell = tableChromeOwnedByTextShell(ctx, tf);
-                if (chromeOwnedByTextShell) {
-                    stripTableChrome(astTable);
-                } else {
-                    absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
-                    report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
-                    completeVisibleTableOuterBorder(astTable);
-                }
+                List<ObjectPlan> chromeShellPlans = tableChromeShellPlans(ctx, tf);
+                absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
+                report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
+                completeVisibleTableOuterBorder(astTable);
+                stripTableChromeCoveredByShell(ctx, astTable, chromeShellPlans);
 
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
-                    if (chromeOwnedByTextShell) {
-                        stripTableChrome(placement.table);
-                    } else {
-                        report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
-                                ctx, placement.table, placement.pageIdx);
-                        completeVisibleTableOuterBorder(placement.table);
-                    }
+                    report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
+                            ctx, placement.table, placement.pageIdx);
+                    completeVisibleTableOuterBorder(placement.table);
+                    stripTableChromeCoveredByShell(ctx, placement.table, chromeShellPlans);
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
@@ -440,38 +428,182 @@ public final class TableBuilder {
                 ctx, tf.pageIndex(), top, left, bottom, right);
     }
 
-    private static boolean tableChromeOwnedByTextShell(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
-        if (ctx == null || ctx.ownershipPlans == null || tf == null) return false;
+    private static List<ObjectPlan> tableChromeShellPlans(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        List<ObjectPlan> out = new ArrayList<>();
+        if (ctx == null || ctx.ownershipPlans == null || tf == null) return out;
         int tfId = parseId(tf.id());
-        if (tfId < 0) return false;
+        if (tfId < 0) return out;
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
-            if (plan.domId == tfId) return true;
-            if (containsSourceId(plan.sourceObjectIds, tfId)) return true;
+            boolean sourceRelated = plan.domId == tfId
+                    || containsSourceId(plan.sourceObjectIds, tfId)
+                    || sharesSourceGroup(ctx, tfId, plan);
+            if (!sourceRelated) continue;
+            if (shellBoundsOwnTableChrome(ctx, tf, plan)) {
+                out.add(plan);
+            }
+        }
+        return out;
+    }
+
+    private static boolean shellBoundsOwnTableChrome(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            ObjectPlan shellPlan) {
+        if (ctx == null || tf == null || shellPlan == null) return false;
+        if (shellPlan.pageIndex != tf.pageIndex()) return false;
+        double[] tableBounds = tf.pageRelativeBounds();
+        if (tableBounds == null || tableBounds.length < 4) {
+            tableBounds = tf.geometricBounds();
+        }
+        double[] shellBounds = shellPlan.bounds;
+        if (tableBounds == null || tableBounds.length < 4
+                || shellBounds == null || shellBounds.length < 4) {
+            return false;
+        }
+
+        double tableTop = Math.min(tableBounds[0], tableBounds[2]);
+        double tableLeft = Math.min(tableBounds[1], tableBounds[3]);
+        double tableBottom = Math.max(tableBounds[0], tableBounds[2]);
+        double tableRight = Math.max(tableBounds[1], tableBounds[3]);
+        double shellTop = Math.min(shellBounds[0], shellBounds[2]);
+        double shellLeft = Math.min(shellBounds[1], shellBounds[3]);
+        double shellBottom = Math.max(shellBounds[0], shellBounds[2]);
+        double shellRight = Math.max(shellBounds[1], shellBounds[3]);
+
+        double tableWidth = tableRight - tableLeft;
+        double tableHeight = tableBottom - tableTop;
+        double shellWidth = shellRight - shellLeft;
+        double shellHeight = shellBottom - shellTop;
+        if (tableWidth <= 0 || tableHeight <= 0 || shellWidth <= 0 || shellHeight <= 0) {
+            return false;
+        }
+
+        double ix = Math.max(0, Math.min(tableRight, shellRight) - Math.max(tableLeft, shellLeft));
+        double iy = Math.max(0, Math.min(tableBottom, shellBottom) - Math.max(tableTop, shellTop));
+        double intersection = ix * iy;
+        if (intersection <= 0) return false;
+
+        double shellCoverage = intersection / (shellWidth * shellHeight);
+        double tableCoverage = intersection / (tableWidth * tableHeight);
+        double horizontalCoverage = ix / Math.min(tableWidth, shellWidth);
+        double edgeTolerancePt = 4.0;
+        boolean topAligned = Math.abs(shellTop - tableTop) <= edgeTolerancePt;
+
+        if (shellCoverage >= 0.82 && tableCoverage >= 0.20 && horizontalCoverage >= 0.70) {
+            return true;
+        }
+        return topAligned
+                && shellCoverage >= 0.82
+                && horizontalCoverage >= 0.70
+                && shellHeight <= tableHeight * 0.65 + edgeTolerancePt;
+    }
+
+    private static boolean sharesSourceGroup(
+            ResolvedBuildContext ctx,
+            int textFrameId,
+            ObjectPlan shellPlan) {
+        if (ctx == null || ctx.resolvedData == null || shellPlan == null
+                || shellPlan.sourceObjectIds == null) {
+            return false;
+        }
+        Set<Integer> textFrameGroups = sourceGroupIds(ctx, textFrameId);
+        if (textFrameGroups.isEmpty()) return false;
+        for (int sourceId : shellPlan.sourceObjectIds) {
+            Set<Integer> shellGroups = sourceGroupIds(ctx, sourceId);
+            for (Integer groupId : shellGroups) {
+                if (groupId != null && textFrameGroups.contains(groupId)) {
+                    return true;
+                }
+            }
         }
         return false;
     }
 
-    private static void stripTableChrome(ASTTable table) {
-        if (table == null) return;
-        table.appliedTableStyle(null);
-        table.borderColor(null);
-        table.borderWidth(0);
-        if (table.rows() == null) return;
-        for (ASTTableRow row : table.rows()) {
-            if (row == null || row.cells() == null) continue;
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null) continue;
-                cell.fillColor(null);
-                cell.topBorder(null);
-                cell.bottomBorder(null);
-                cell.leftBorder(null);
-                cell.rightBorder(null);
-                cell.topLeftDiagonalLine(false);
-                cell.topRightDiagonalLine(false);
-                cell.diagonalBorder(null);
+    private static Set<Integer> sourceGroupIds(ResolvedBuildContext ctx, int sourceId) {
+        Set<Integer> out = new HashSet<>();
+        if (ctx == null || ctx.resolvedData == null || sourceId < 0) return out;
+        ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+        if (item != null && item.parentId() != null) {
+            int parentId = parseId(item.parentId());
+            if (parentId >= 0) out.add(parentId);
+        }
+        for (ResolvedPageItem candidate : ctx.resolvedData.pageItems()) {
+            if (candidate == null || candidate.childIds() == null) continue;
+            for (int childId : candidate.childIds()) {
+                if (childId != sourceId) continue;
+                int groupId = parseId(candidate.id());
+                if (groupId >= 0) out.add(groupId);
             }
         }
+        return out;
+    }
+
+    private static void stripTableChromeCoveredByShell(
+            ResolvedBuildContext ctx,
+            ASTTable table,
+            List<ObjectPlan> shellPlans) {
+        if (table == null || shellPlans == null || shellPlans.isEmpty()) return;
+        if (table.rows() == null || table.columnWidths() == null) return;
+        long[] colLeft = buildColumnOffsets(table.columnWidths());
+        long[] rowTop = buildRowOffsets(table.rows());
+        double tableLeftPt = CoordinateConverter.hwpunitsToPoints(table.x());
+        double tableTopPt = CoordinateConverter.hwpunitsToPoints(table.y());
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        for (ObjectPlan shellPlan : shellPlans) {
+            if (shellPlan == null || shellPlan.bounds == null || shellPlan.bounds.length < 4) continue;
+            double shellTop = Math.min(shellPlan.bounds[0], shellPlan.bounds[2]) * scale;
+            double shellLeft = Math.min(shellPlan.bounds[1], shellPlan.bounds[3]) * scale;
+            double shellBottom = Math.max(shellPlan.bounds[0], shellPlan.bounds[2]) * scale;
+            double shellRight = Math.max(shellPlan.bounds[1], shellPlan.bounds[3]) * scale;
+            for (ASTTableRow row : table.rows()) {
+                if (row == null || row.cells() == null) continue;
+                for (ASTTableCell cell : row.cells()) {
+                    if (cell == null) continue;
+                    int c0 = Math.max(0, cell.columnIndex());
+                    int c1 = Math.min(colLeft.length - 1, c0 + Math.max(1, cell.columnSpan()));
+                    int r0 = Math.max(0, cell.rowIndex());
+                    int r1 = Math.min(rowTop.length - 1, r0 + Math.max(1, cell.rowSpan()));
+                    if (c0 < 0 || c1 <= c0 || r0 < 0 || r1 <= r0) continue;
+
+                    double cellLeft = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c0]);
+                    double cellRight = tableLeftPt + CoordinateConverter.hwpunitsToPoints(colLeft[c1]);
+                    double cellTop = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r0]);
+                    double cellBottom = tableTopPt + CoordinateConverter.hwpunitsToPoints(rowTop[r1]);
+                    if (!shellCoversCellChrome(shellLeft, shellTop, shellRight, shellBottom,
+                            cellLeft, cellTop, cellRight, cellBottom)) {
+                        continue;
+                    }
+                    cell.fillColor(null);
+                    cell.topBorder(null);
+                    cell.bottomBorder(null);
+                    cell.leftBorder(null);
+                    cell.rightBorder(null);
+                    cell.topLeftDiagonalLine(false);
+                    cell.topRightDiagonalLine(false);
+                    cell.diagonalBorder(null);
+                }
+            }
+        }
+    }
+
+    private static boolean shellCoversCellChrome(
+            double shellLeft,
+            double shellTop,
+            double shellRight,
+            double shellBottom,
+            double cellLeft,
+            double cellTop,
+            double cellRight,
+            double cellBottom) {
+        double ix = Math.max(0, Math.min(shellRight, cellRight) - Math.max(shellLeft, cellLeft));
+        double iy = Math.max(0, Math.min(shellBottom, cellBottom) - Math.max(shellTop, cellTop));
+        double intersection = ix * iy;
+        double cellArea = Math.max(0, cellRight - cellLeft) * Math.max(0, cellBottom - cellTop);
+        if (intersection <= 0 || cellArea <= 0) return false;
+        double cellCoverage = intersection / cellArea;
+        double horizontalCoverage = ix / Math.max(1.0, cellRight - cellLeft);
+        return cellCoverage >= 0.45 && horizontalCoverage >= 0.70;
     }
 
     private static long[] tableOwnerOrigin(ResolvedBuildContext ctx, ResolvedTextFrame tf, int pageIdx) {
@@ -1479,6 +1611,7 @@ public final class TableBuilder {
             try {
                 int domId = Integer.parseInt(tf.id());
                 if (ctx.isTextDisposed(domId, FrameDisposition.TEXT_BLOCK_PLACED)) return true;
+                if (ctx.isTextFrameOwnedByTextShellPlan(domId)) return true;
             } catch (NumberFormatException ignored) {
                 // Non-DOM ids cannot be checked against text-frame ownership disposition.
             }

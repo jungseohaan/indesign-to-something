@@ -191,10 +191,11 @@ public final class BackgroundInjector {
             boolean isPlannedTextShell =
                     ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
             boolean needsAlphaCrop = !isPlannedTextShell && shouldCropOwnedTextFrameShellToAlpha(rg);
-            boolean needsPageCrop = (fullW > 1.0 && fullH > 1.0
+            boolean needsIntersectionCrop = fullW > 1.0 && fullH > 1.0
                     && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
-                        || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5))
-                    || (hasCropSourceBounds && cropRefW > 1.0 && cropRefH > 1.0);
+                        || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5);
+            boolean needsPageCrop = needsIntersectionCrop
+                    || (!isPlannedTextShell && hasCropSourceBounds && cropRefW > 1.0 && cropRefH > 1.0);
             boolean needsFullImageDecode = shouldCompositeTfInlineVisuals
                     || mayNeedContainerShellKnockout
                     || rg.isWhiteStroke()
@@ -279,10 +280,11 @@ public final class BackgroundInjector {
                             }
                         }
                     }
-                    boolean needsCrop = (fullW > 1.0 && fullH > 1.0
+                    boolean currentNeedsIntersectionCrop = fullW > 1.0 && fullH > 1.0
                             && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
-                                || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5))
-                            || (hasCropSourceBounds && cropRefW > 1.0 && cropRefH > 1.0);
+                                || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5);
+                    boolean needsCrop = currentNeedsIntersectionCrop
+                            || (!isPlannedTextShell && hasCropSourceBounds && cropRefW > 1.0 && cropRefH > 1.0);
                     if (needsCrop) {
                         VisualCropper.PageCropPlan cropPlan = VisualCropper.pageCropPlan(
                                 rg, img, pageIdx, hasCropSourceBounds,
