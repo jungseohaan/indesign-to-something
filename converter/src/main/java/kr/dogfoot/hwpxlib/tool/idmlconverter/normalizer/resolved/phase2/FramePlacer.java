@@ -450,6 +450,12 @@ public final class FramePlacer {
                     h = pageRelativeBounds.h;
                 }
             }
+            double ownedShellRight = plannedVisualTextOverlay
+                    ? ownedTextShellRightExtent(ctx, tf, pageLeft, pageTop, x, y, w, h)
+                    : Double.NaN;
+            if (!Double.isNaN(ownedShellRight) && ownedShellRight > x + w) {
+                w = ownedShellRight - x;
+            }
             if (w <= 0) continue;
 
             // composedLines 기반 글상자 분할
@@ -654,9 +660,12 @@ public final class FramePlacer {
                 block.frameVisibleTextLength(Math.max(visibleLen, inlineEditableLen));
             }
             boolean preserveFontSize = verticalComposedText || fontAxisExpanded;
-            block.noAutoLineWrap(!preserveFontSize
+            boolean sourceSingleLineOverlay = plannedVisualTextOverlay
+                    && shouldUseVisualShellNoAutoLineWrap(true, tf, block);
+            block.noAutoLineWrap(sourceSingleLineOverlay
+                    || (!preserveFontSize
                     && (shouldUseNoAutoLineWrap(tf, block)
-                    || shouldUseVisualShellNoAutoLineWrap(hasRenderedVisualShell, tf, block)));
+                    || shouldUseVisualShellNoAutoLineWrap(hasRenderedVisualShell, tf, block))));
             // storyTotalTextLength는 convertStories()에서 설정
 
             // 타이틀 오버레이로 첫 N 단락 숨김 + 본문 중간의 제외 인덱스 적용
@@ -1197,6 +1206,75 @@ public final class FramePlacer {
             }
         }
         return false;
+    }
+
+    private static double ownedTextShellRightExtent(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            double pageLeft,
+            double pageTop,
+            double tfLeft,
+            double tfTop,
+            double tfWidth,
+            double tfHeight) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) {
+            return Double.NaN;
+        }
+        if (tfWidth <= 0 || tfHeight <= 0) return Double.NaN;
+        ResolvedPageItem tfItem = ctx.resolvedData.getPageItem(tf.id());
+        String parentId = tfItem != null ? tfItem.parentId() : null;
+        if (parentId == null || parentId.isEmpty()) return Double.NaN;
+        double[] tfGb = tf.geometricBounds();
+        if (tfGb == null || tfGb.length < 4) return Double.NaN;
+
+        double scale = ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        double rawTfLeft = localX(tfGb[1], pageLeft);
+        double scaledTfLeft = rawTfLeft * scale;
+        boolean useScaled = Math.abs(scaledTfLeft - tfLeft) < Math.abs(rawTfLeft - tfLeft);
+
+        double tfRight = tfLeft + tfWidth;
+        double tfBottom = tfTop + tfHeight;
+        double bestRight = Double.NaN;
+        for (ResolvedPageItem sibling : ctx.resolvedData.pageItems()) {
+            if (sibling == null || sibling.id() == null || sibling.id().equals(tf.id())) continue;
+            if (!parentId.equals(sibling.parentId())) continue;
+            if (!isTitleShellShape(sibling)) continue;
+            if (!isSiblingPartOfOwnedTextShell(ctx, tf, sibling)) continue;
+            double[] gb = sibling.geometricBounds();
+            if (gb == null || gb.length < 4) continue;
+
+            double shellLeft = localX(gb[1], pageLeft);
+            double shellRight = localX(gb[3], pageLeft);
+            double shellTop = gb[0] - pageTop;
+            double shellBottom = gb[2] - pageTop;
+            if (useScaled) {
+                shellLeft *= scale;
+                shellRight *= scale;
+                shellTop *= scale;
+                shellBottom *= scale;
+            }
+            double shellWidth = shellRight - shellLeft;
+            double shellHeight = shellBottom - shellTop;
+            if (shellWidth <= 0 || shellHeight <= 0) continue;
+
+            double yOverlap = Math.min(tfBottom, shellBottom) - Math.max(tfTop, shellTop);
+            if (yOverlap <= 0 || yOverlap / Math.min(tfHeight, shellHeight) < 0.35) continue;
+
+            double xOverlap = Math.min(tfRight, shellRight) - Math.max(tfLeft, shellLeft);
+            double nearGap = Math.max(2.0, tfWidth * 0.25);
+            if (xOverlap <= 0 && Math.abs(shellLeft - tfRight) > nearGap && Math.abs(tfLeft - shellRight) > nearGap) {
+                continue;
+            }
+            if (shellRight > tfRight && (Double.isNaN(bestRight) || shellRight > bestRight)) {
+                bestRight = shellRight;
+            }
+        }
+        return bestRight;
+    }
+
+    private static double localX(double spreadX, double pageLeft) {
+        double x = spreadX - pageLeft;
+        return x >= 0 ? x : spreadX;
     }
 
     private static boolean isOwnedTextShellPlan(ResolvedBuildContext ctx, RenderedGroup rg) {
