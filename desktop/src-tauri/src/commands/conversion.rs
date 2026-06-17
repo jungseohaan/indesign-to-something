@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
-use std::path::Path;
+use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -317,19 +317,42 @@ pub async fn convert_hwpx_to_idml(
     final_result.ok_or_else(|| "No result received".to_string())
 }
 
-/// LLM 교수자료 생성: IDML → teaching_material.json
+#[derive(Debug, Clone, Serialize)]
+pub struct DefaultTeachingPrompt {
+    pub path: String,
+    pub content: String,
+}
+
+#[tauri::command]
+pub async fn get_default_teaching_prompt(
+    app: AppHandle,
+    jar_path: Option<String>,
+) -> Result<DefaultTeachingPrompt, String> {
+    let path = resolve_default_prompt_path(&app, jar_path.as_deref())?;
+    let content = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| format!("기본 프롬프트 읽기 실패: {}", e))?;
+    Ok(DefaultTeachingPrompt { path, content })
+}
+
+/// LLM Semantic Block 생성: IDML → semantic block JSON
 #[tauri::command]
 pub async fn generate_teaching(
     app: AppHandle,
     input_path: String,
     output_path: String,
-    prompt_path: String,
+    prompt_path: Option<String>,
     extra_prompt_path: Option<String>,
     jar_path: String,
     resolved_json_path: Option<String>,
     links_directory: Option<String>,
     html_template_path: Option<String>,
 ) -> Result<ConvertResult, String> {
+    let prompt_path = match prompt_path {
+        Some(path) if !path.trim().is_empty() => path,
+        _ => resolve_default_prompt_path(&app, Some(&jar_path))?,
+    };
+
     let mut args = vec![
         "-jar".to_string(),
         jar_path,
@@ -452,4 +475,48 @@ pub async fn generate_teaching(
     }
 
     final_result.ok_or_else(|| "No result received".to_string())
+}
+
+fn resolve_default_prompt_path(app: &AppHandle, jar_path: Option<&str>) -> Result<String, String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("prompts").join("base_prompt.txt"));
+        candidates.push(cwd.join("..").join("prompts").join("base_prompt.txt"));
+    }
+
+    candidates.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../prompts/base_prompt.txt"),
+    );
+
+    if let Some(jar) = jar_path {
+        if let Some(target_dir) = Path::new(jar).parent() {
+            if let Some(converter_dir) = target_dir.parent() {
+                if let Some(project_dir) = converter_dir.parent() {
+                    candidates.push(project_dir.join("prompts").join("base_prompt.txt"));
+                }
+            }
+        }
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("prompts").join("base_prompt.txt"));
+        candidates.push(
+            resource_dir
+                .join("_up_")
+                .join("_up_")
+                .join("prompts")
+                .join("base_prompt.txt"),
+        );
+    }
+
+    for candidate in candidates {
+        if candidate.exists() {
+            let resolved = candidate.canonicalize().unwrap_or(candidate);
+            return Ok(resolved.to_string_lossy().to_string());
+        }
+    }
+
+    Err("기본 프롬프트 파일을 찾을 수 없습니다: prompts/base_prompt.txt".to_string())
 }

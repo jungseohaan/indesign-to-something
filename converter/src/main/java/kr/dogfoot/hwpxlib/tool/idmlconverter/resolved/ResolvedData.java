@@ -595,6 +595,10 @@ public class ResolvedData {
     // --- RenderedFloatingItem (통합 플로팅 그래픽) ---
 
     public void addRenderedFloatingItem(RenderedGroup item) {
+        if (isMalformedLabelBackdropGroup(item)) {
+            return;
+        }
+        normalizeLabelBackdropGroupBounds(item);
         if (isExactRenderedItemDuplicate(item)) {
             return;
         }
@@ -619,6 +623,124 @@ public class ResolvedData {
     }
 
     public List<RenderedGroup> allRenderedFloatingItems() { return renderedFloatingItems; }
+
+    private boolean isMalformedLabelBackdropGroup(RenderedGroup item) {
+        if (!isLabelBackdropGroup(item)) return false;
+        int[] sourceIds = item.sourceObjectIds();
+        if (sourceIds == null || sourceIds.length == 0) return false;
+        LabelBackdropSourceScope scope = labelBackdropSourceScope(item);
+        if (!scope.hasEditableScope()) return false;
+        for (int sourceId : sourceIds) {
+            if (scope.claimedTextFrameIds.contains(sourceId)) continue;
+            ResolvedPageItem source = pageItemMap.get(String.valueOf(sourceId));
+            if (source == null) continue;
+            if (!isClosedLabelShellSource(source)) {
+                return true;
+            }
+            if (!scope.allows(sourceId, source)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void normalizeLabelBackdropGroupBounds(RenderedGroup item) {
+        if (!isLabelBackdropGroup(item)) return;
+        double[] sourceBounds = canonicalLabelBackdropBounds(item);
+        if (!validBounds(sourceBounds)) return;
+        item.bounds(sourceBounds);
+        item.cropSourceBounds(null);
+    }
+
+    private double[] canonicalLabelBackdropBounds(RenderedGroup item) {
+        int[] sourceIds = item.sourceObjectIds();
+        if (sourceIds == null || sourceIds.length == 0) return null;
+        LabelBackdropSourceScope scope = labelBackdropSourceScope(item);
+        if (!scope.hasEditableScope()) return null;
+        double[] union = null;
+        for (int sourceId : sourceIds) {
+            if (scope.claimedTextFrameIds.contains(sourceId)) continue;
+            ResolvedPageItem source = pageItemMap.get(String.valueOf(sourceId));
+            if (source == null || !isClosedLabelShellSource(source) || !scope.allows(sourceId, source)) {
+                continue;
+            }
+            double[] bounds = source.visibleBounds();
+            if (!validBounds(bounds)) bounds = source.geometricBounds();
+            if (!validBounds(bounds)) continue;
+            union = union == null ? Arrays.copyOf(bounds, 4) : unionBounds(union, bounds);
+        }
+        return union;
+    }
+
+    private LabelBackdropSourceScope labelBackdropSourceScope(RenderedGroup item) {
+        LabelBackdropSourceScope scope = new LabelBackdropSourceScope();
+        String[] editableIds = item != null ? item.editableTextFrameIds() : null;
+        if (editableIds == null) return scope;
+        for (String tfId : editableIds) {
+            Integer parsed = parseDecimalId(tfId);
+            if (parsed != null) scope.claimedTextFrameIds.add(parsed);
+            ResolvedPageItem tfItem = pageItemMap.get(tfId);
+            if (tfItem == null) continue;
+            String parentId = tfItem.parentId();
+            if (parentId == null || parentId.isEmpty()) continue;
+            scope.allowedParentIds.add(parentId);
+            String cur = parentId;
+            Set<String> visited = new HashSet<>();
+            while (cur != null && !cur.isEmpty() && visited.add(cur)) {
+                scope.allowedAncestorIds.add(cur);
+                ResolvedPageItem parent = pageItemMap.get(cur);
+                cur = parent != null ? parent.parentId() : null;
+            }
+        }
+        return scope;
+    }
+
+    private static boolean isLabelBackdropGroup(RenderedGroup item) {
+        return item != null && "label_backdrop_group".equals(item.reason());
+    }
+
+    private static boolean isClosedLabelShellSource(ResolvedPageItem item) {
+        if (item == null || item.type() == null) return false;
+        return "Rectangle".equals(item.type())
+                || "Oval".equals(item.type())
+                || "Polygon".equals(item.type());
+    }
+
+    private static double[] unionBounds(double[] a, double[] b) {
+        return new double[] {
+                Math.min(a[0], b[0]),
+                Math.min(a[1], b[1]),
+                Math.max(a[2], b[2]),
+                Math.max(a[3], b[3])
+        };
+    }
+
+    private static Integer parseDecimalId(String id) {
+        if (id == null || id.isEmpty()) return null;
+        try {
+            return Integer.parseInt(id);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static final class LabelBackdropSourceScope {
+        private final Set<Integer> claimedTextFrameIds = new HashSet<>();
+        private final Set<String> allowedAncestorIds = new HashSet<>();
+        private final Set<String> allowedParentIds = new HashSet<>();
+
+        private boolean hasEditableScope() {
+            return !allowedAncestorIds.isEmpty() || !allowedParentIds.isEmpty();
+        }
+
+        private boolean allows(int sourceId, ResolvedPageItem source) {
+            String sid = String.valueOf(sourceId);
+            if (allowedAncestorIds.contains(sid)) return true;
+            String parentId = source != null ? source.parentId() : null;
+            return parentId != null
+                    && (allowedParentIds.contains(parentId) || allowedAncestorIds.contains(parentId));
+        }
+    }
 
     private boolean isExactRenderedItemDuplicate(RenderedGroup item) {
         if (item == null) return true;
@@ -989,12 +1111,6 @@ public class ResolvedData {
             if (isSemanticTextFrame(tf, style)) {
                 return true;
             }
-            if (isShortSemanticLabel(tf) && hasHwpxTextOwnerRenderForFrame(id)) {
-                return true;
-            }
-            if (isShortSemanticLabel(tf) && hasSeparateVisualShellForLabel(item, tf)) {
-                return true;
-            }
         }
         return false;
     }
@@ -1021,8 +1137,7 @@ public class ResolvedData {
         if (text.isEmpty()) return false;
         if (simpleButtonLabelText(tf) != null) return false;
         if (hasSemanticStyleName(styleName)) return true;
-        if (text.length() > 1) return true;
-        return false;
+        return true;
     }
 
     private static boolean hasSemanticStyleName(String styleName) {
@@ -1078,36 +1193,38 @@ public class ResolvedData {
             if (!"hwpx_tf".equals(item.textOwner())) continue;
             if (!containsString(item.editableTextFrameIds(), textFrameId)) continue;
             String reason = item.reason();
-            if (reason == null || !reason.contains("text_hidden")) continue;
+            if (!isTextOwnedShellReason(reason)) continue;
             if (!overlapsTextFrame(item.bounds(), tf, 0.75)) continue;
             return true;
         }
         return false;
     }
 
+    private static boolean isTextOwnedShellReason(String reason) {
+        if (reason == null) return false;
+        return reason.contains("text_hidden")
+                || reason.contains("visual_shell")
+                || reason.contains("editable_textframe_visual_shell")
+                || reason.contains("image_group")
+                || reason.contains("decoration_group")
+                || reason.contains("mixed_group_text_hidden")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("label_backdrop_group");
+    }
+
     private static boolean isEditableLabelShellCandidate(RenderedGroup item) {
         if (!isVisualOnlyPageObject(item)) return false;
+        if (!"indesign_png".equals(item.visualOwner())) return false;
+        if (Boolean.TRUE.equals(item.containsText()) || Boolean.TRUE.equals(item.containsEditableText())) return false;
+        if ("indesign_png".equals(item.textOwner())) return false;
         String reason = item.reason();
         if (reason == null || !(reason.contains("decoration")
                 || reason.contains("visual_shell")
+                || reason.contains("text_hidden")
                 || reason.contains("complex_graphic"))) {
             return false;
         }
-        double[] b = item.bounds();
-        if (b == null || b.length < 4) return false;
-        double w = b[3] - b[1];
-        double h = b[2] - b[0];
-        return w >= 8.0 && w <= 90.0
-                && h >= 2.5 && h <= 14.0
-                && w / h >= 2.0;
-    }
-
-    private static boolean isShortSemanticLabel(ResolvedTextFrame tf) {
-        String text = normalizedText(tf != null ? tf.frameVisibleText() : null);
-        return !text.isEmpty()
-                && text.length() <= 60
-                && text.indexOf('\n') < 0
-                && text.indexOf('\r') < 0;
+        return true;
     }
 
     private static String normalizedText(String text) {

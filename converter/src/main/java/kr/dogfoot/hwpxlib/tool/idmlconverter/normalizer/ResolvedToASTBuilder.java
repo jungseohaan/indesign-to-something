@@ -13,9 +13,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBui
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_5.BulletInserter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4_7.NumberedSideHeadTableNormalizer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase5.WrapPhase5;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.OwnershipPlanValidator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SideHeadFlowPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlanner;
@@ -157,12 +157,16 @@ public class ResolvedToASTBuilder {
             postprocessLayout(sections);
         }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage2_5.visualOwnershipRefine")) {
-            refineVisualOwnership(sections);
+            OwnershipPlanner.runVisualRefinement(this.ctx);
         }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage3.visualBuilder")) {
             placeVisuals(sections);
         }
 
+        try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.validate.ownershipPlan")) {
+            removeStage1OwnershipInvariantWarnings();
+            OwnershipPlanValidator.validate(this.ctx);
+        }
         try (ConversionTiming.Scope ignored = ConversionTiming.time("stage4.validate.writeDecisionLogs")) {
             writeOwnershipPlanLog();
             writeRenderDecisionLog();
@@ -173,6 +177,20 @@ public class ResolvedToASTBuilder {
         } finally {
             totalScope.close();
         }
+    }
+
+    private void removeStage1OwnershipInvariantWarnings() {
+        if (ctx == null || ctx.ownershipWarningLines == null || ctx.ownershipWarningLines.isEmpty()) {
+            return;
+        }
+        ctx.ownershipWarningLines.removeIf(line ->
+                line != null
+                        && (line.contains("\"code\":\"DUPLICATE_VISIBLE_SOURCE\"")
+                        || line.contains("\"code\":\"CONFLICTING_TEXT_OWNER\"")
+                        || line.contains("\"code\":\"VISIBLE_VISUAL_CONTAINS_HWPX_TEXT_SOURCE\"")
+                        || line.contains("\"code\":\"INLINE_FLOATING_SAME_DOM\"")
+                        || line.contains("\"code\":\"DUPLICATE_VISIBLE_FILE_BOUNDS\"")
+                        || line.contains("\"code\":\"TEXT_SHELL_ZORDER_GE_TEXT\"")));
     }
 
     /**
@@ -234,21 +252,6 @@ public class ResolvedToASTBuilder {
      * <p>현재 이전 완료: cellInlineEmbeddedDomIds(셀에 인라인 임베드된 배지의 원본 floating PNG).
      * 후속: childOfGroup(부모에 구워진 자식) 등 — 각 클래스 골든디프 게이트로 단계 이전.</p>
      */
-    private void refineVisualOwnership(List<ASTSection> sections) {
-        if (this.ctx == null) return;
-        // 1) 셀 인라인 임베드 배지: 원본 floating PNG는 인라인이 소유 → DROP_VISUAL
-        this.ctx.dropVisualForDomIds(this.ctx.cellInlineEmbeddedDomIds, "cell_inline_embedded_visual_owned_by_inline");
-        // 2) childOfGroup: 부모 PNG에 구워진 자식. 비보호(SKIP_CHILD_OF_GROUP 대상)는 DROP_VISUAL.
-        BackgroundInjector.ChildOfGroupSuppression cog =
-                BackgroundInjector.computeChildOfGroupSuppression(this.ctx, sections);
-        this.ctx.dropVisualForDomIds(cog.nonProtected, "child_baked_into_renderable_parent_group");
-        // 3) coveredByInlineObjects: inline_object가 소유한 시각. 게이트 통과분만 DROP_VISUAL.
-        //    childOfGroup 마킹 이후에 계산해야 collectInlineObjectCoverage가 Phase 6과 동일 plan 상태를 본다.
-        BackgroundInjector.InlineCoverageSuppression cov =
-                BackgroundInjector.computeInlineCoverageSuppression(this.ctx);
-        this.ctx.dropVisualForDomIds(cov.dropVisual, "visual_owned_by_inline_object_coverage");
-    }
-
     /**
      * Stage 1/2: 현재는 legacy Phase들이 ownership 일부와 text/table 생성을
      * 함께 수행한다.
@@ -332,6 +335,7 @@ public class ResolvedToASTBuilder {
         if (basePath == null || ctx == null) {
             return;
         }
+        ctx.rebuildOwnershipPlanLinesFromPlans();
         writeJsonLines("ownership-plan.jsonl", ctx.ownershipPlanLines, "ownership plan");
         writeJsonLines("ownership-warnings.jsonl", ctx.ownershipWarningLines, "ownership warnings");
     }

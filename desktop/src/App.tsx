@@ -102,7 +102,7 @@ function App() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "converter", label: "HWPX 내보내기" },
-    { key: "teaching", label: "교수자료 생성" },
+    { key: "teaching", label: "Semantic Block" },
   ];
 
   return (

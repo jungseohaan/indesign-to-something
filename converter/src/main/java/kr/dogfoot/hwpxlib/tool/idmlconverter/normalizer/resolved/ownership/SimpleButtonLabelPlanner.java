@@ -77,8 +77,8 @@ public final class SimpleButtonLabelPlanner {
                     completeRender != null && completeRender.bounds() != null
                             ? completeRender.bounds()
                             : (anchor.pageRelativeBounds() != null ? anchor.pageRelativeBounds() : anchor.geometricBounds()));
-            ctx.addOwnershipPlan(objectPlan);
-            ctx.ownershipPlanLines.add(objectPlan.toJson());
+            ctx.replaceRenderedOwnershipPlan(objectPlan);
+            ctx.trimSourceObjectIdsClaimedBy(objectPlan);
         }
     }
 

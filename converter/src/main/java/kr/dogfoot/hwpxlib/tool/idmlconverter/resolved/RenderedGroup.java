@@ -35,6 +35,9 @@ public class RenderedGroup {
     private String overlapPolicy;
     private String reason;
     private String parentStoryId;
+    private String layerId;       // primary InDesign layer id copied from source/render target
+    private String layerName;     // primary InDesign layer name
+    private int layerIndex = -1;  // primary InDesign document layer index
 
     public int id() { return id; }
     public void id(int v) { this.id = v; }
@@ -128,6 +131,15 @@ public class RenderedGroup {
 
     public String parentStoryId() { return parentStoryId; }
     public void parentStoryId(String v) { this.parentStoryId = v; }
+
+    public String layerId() { return layerId; }
+    public void layerId(String v) { this.layerId = v; }
+
+    public String layerName() { return layerName; }
+    public void layerName(String v) { this.layerName = v; }
+
+    public int layerIndex() { return layerIndex; }
+    public void layerIndex(int v) { this.layerIndex = v; }
 
     private boolean whiteStroke; // true: 획이 흰색(Paper)이었던 PNG → 검은 픽셀을 흰색으로 반전 필요
 

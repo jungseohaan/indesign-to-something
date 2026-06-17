@@ -24,8 +24,6 @@ import java.util.Set;
 public final class SideHeadFlowPlanner {
     private SideHeadFlowPlanner() {}
 
-    private static final double MIN_MARKER_FONT_PT = 18.0;
-
     public static void plan(ResolvedBuildContext ctx) {
         if (ctx == null || ctx.resolvedData == null || ctx.loadIDMLStory == null) return;
         Set<String> plannedStories = new HashSet<>();
@@ -50,7 +48,7 @@ public final class SideHeadFlowPlanner {
                         1,
                         1,
                         1,
-                        "source_table_large_numeric_marker_with_head_and_body");
+                        "source_table_numbered_marker_with_head_and_body");
                 ctx.addSideHeadFlowPlan(plan);
                 ctx.ownershipPlanLines.add(plan.toJson());
             }
@@ -76,8 +74,8 @@ public final class SideHeadFlowPlanner {
     private static boolean hasSubstantiveParagraph(IDMLTableCell cell) {
         if (cell == null || cell.paragraphs() == null) return false;
         for (IDMLParagraph paragraph : cell.paragraphs()) {
-            String text = visibleText(paragraph);
-            if (text.trim().length() >= 8) return true;
+            if (!visibleText(paragraph).trim().isEmpty()) return true;
+            if (hasInlineContent(paragraph)) return true;
         }
         return false;
     }
@@ -86,6 +84,10 @@ public final class SideHeadFlowPlanner {
         if (cell == null || cell.paragraphs() == null || cell.paragraphs().size() != 1) return false;
         IDMLParagraph paragraph = cell.paragraphs().get(0);
         if (paragraph == null || paragraph.characterRuns() == null) return false;
+
+        if (hasAutomaticNumberMarker(paragraph)) {
+            return hasInlineContent(paragraph) || !visibleText(paragraph).trim().isEmpty();
+        }
 
         boolean sawMarker = false;
         boolean sawHeadContentAfterMarker = false;
@@ -97,8 +99,6 @@ public final class SideHeadFlowPlanner {
                 if (trimmed.isEmpty()) continue;
                 String markerText = markerText(trimmed);
                 if (!markerText.matches("[0-9]{1,2}")) return false;
-                Double fontSize = run.fontSize();
-                if (fontSize != null && fontSize < MIN_MARKER_FONT_PT) return false;
                 sawMarker = true;
                 if (runHasInlineHeadContent(run)) sawHeadContentAfterMarker = true;
                 continue;
@@ -108,6 +108,20 @@ public final class SideHeadFlowPlanner {
             }
         }
         return sawMarker && sawHeadContentAfterMarker;
+    }
+
+    private static boolean hasAutomaticNumberMarker(IDMLParagraph paragraph) {
+        if (paragraph == null) return false;
+        String expr = paragraph.numberingExpression();
+        return expr != null && expr.contains("^#");
+    }
+
+    private static boolean hasInlineContent(IDMLParagraph paragraph) {
+        if (paragraph == null || paragraph.characterRuns() == null) return false;
+        for (IDMLCharacterRun run : paragraph.characterRuns()) {
+            if (runHasInlineHeadContent(run)) return true;
+        }
+        return false;
     }
 
     private static boolean runHasInlineHeadContent(IDMLCharacterRun run) {

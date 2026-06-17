@@ -19,6 +19,7 @@
 ## 기준 문서
 
 - `docs/specs/SPEC-035-indesign-render-ownership.md`
+- `docs/specs/SPEC-036-source-ownership-v2.md` (Active 단순 정책)
 - 보조 SPEC:
   - `docs/specs/SPEC-025-text-image-rendering-removal.md`
   - `docs/specs/SPEC-028-inline-anchored-group-duplicate.md`

@@ -17,6 +17,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTabStop;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
@@ -61,14 +62,8 @@ public final class FramePlacer {
     private static final double SCRIBBLE_AREA_RATIO = 50.0;
     /** placeByYGapSplit: 중앙값 행간의 이 배수 초과 간격이면 분할 지점으로 판단 */
     private static final double YGAP_SPLIT_FACTOR = 3.0;
-    /** 공간 포함 감지 허용 오차 (pt) */
-    private static final double CONTAINMENT_TOL_PT = 1.0;
     /** occlusion 감지 bounds 여유 (pt) */
     private static final double OCCLUSION_BOUNDS_TOL_PT = 1.0;
-    /** 연결 글상자 체인 병합: Y 간격이 행 높이의 이 배수 이내면 동일 체인으로 간주 */
-    private static final double CHAIN_GAP_RATIO     = 0.5;
-    /** 연결 글상자 체인 병합: X 겹침 비율이 이 값 이상이어야 같은 컬럼으로 간주 */
-    private static final double CHAIN_X_OVERLAP_MIN = 0.5;
     /** title overlay 감지: Y 겹침이 두 TF 높이 최솟값의 이 비율 이상이어야 오버레이로 간주 */
     private static final double OVERLAY_Y_OVERLAP_MIN  = 0.5;
     /** title overlay 감지: 다른 TF 너비의 이 비율 이상이 단락 영역 안에 들어와야 오버레이로 간주 */
@@ -79,12 +74,6 @@ public final class FramePlacer {
     private static final double XSHIFT_STRIP_HEIGHT_RATIO     = 0.20;
     /** X-shift 적용 후 남은 너비가 이 pt 미만이면 shift 취소 */
     private static final double XSHIFT_MIN_REMAIN_PT          = 20.0;
-    /** TF visual shell 추정: shell이 TF 면적 중 이 비율 이상을 덮어야 함 */
-    private static final double VISUAL_SHELL_TF_OVERLAP_MIN = 0.75;
-    /** TF visual shell 추정: shell 면적이 TF 면적의 이 배수보다 크면 페이지 배경/큰 장식으로 간주 */
-    private static final double VISUAL_SHELL_MAX_AREA_RATIO = 1.8;
-    /** TF visual shell 추정: shell 면적이 TF 면적의 이 배수보다 작으면 부분 장식으로 간주 */
-    private static final double VISUAL_SHELL_MIN_AREA_RATIO = 0.45;
     /** shell 위 제목 TF: sibling fill 도형이 TF보다 이 배수 이상 높으면 TF 세로 bounds를 shell에 맞춘다. */
     private static final double TITLE_SHELL_HEIGHT_RATIO = 1.35;
     /** shell 위 제목 TF: sibling fill 도형이 TF보다 너무 크면 전체 배경 컨테이너이므로 세로 확장하지 않는다. */
@@ -99,14 +88,14 @@ public final class FramePlacer {
     private static final double PARTIAL_LEFT_WRAP_MIN_PT = 10.0;
     /** 일부 문단만 text-wrap 으로 왼쪽이 밀릴 때 frame 폭 대비 최소 wrap 비율. */
     private static final double PARTIAL_LEFT_WRAP_FRAME_RATIO = 0.18;
+    /** HWPX drawText가 원본 fontSize보다 작은 박스로 텍스트를 SQUEEZE하지 않도록 축을 보존한다. */
+    private static final double FONT_AXIS_MIN_RATIO = 1.15;
     // -----------------------------------------------------------------------
 
     public static void placeTextFrames(ResolvedBuildContext ctx, List<ASTSection> sections) {
         List<ResolvedTextFrame> frames = ctx.resolvedData.textFrames();
 
         FrameIndex idx = buildIndex(ctx.resolvedData.allRenderedFloatingItems(), frames, ctx);
-        Set<String> duplicateVisualShellTextFrameIds =
-                collectDuplicateVisualShellTextFrameIds(ctx, frames);
         ctx.conceptDiagramTextFrameIds.addAll(collectConceptDiagramTextFrameIds(ctx, frames));
 
         // FP-B: title overlay 및 inline Y-조정 내부 루프에서 같은 페이지 TF만 검색하도록
@@ -118,188 +107,47 @@ public final class FramePlacer {
             if (_f.isInline()) inlineFramesByPage.computeIfAbsent(_f.pageIndex(), k -> new ArrayList<>()).add(_f);
         }
 
-        // 공간 포함 감지: inner TF가 outer TF bounds 안에 완전히 들어가고 다른 story를 가진 경우.
-        // InDesign "밑줄 빈칸 + 예시 답안 오버레이" 패턴: inner TF는 outer TF의 마지막 단락에 주입.
-        // key=inner TF id (decimal), value=outer TF id (decimal)
-        ContainmentMaps cm = buildContainmentMap(ctx, frames, idx.badgeChildDomIds);
-
         for (ResolvedTextFrame tf : frames) {
-            if (duplicateVisualShellTextFrameIds.contains(tf.id())) {
-                int duplicateDomId = parseDomIdOrNeg(tf.id());
-                if (duplicateDomId >= 0) {
-                    ctx.setTextDisposition(duplicateDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                }
-                continue;
-            }
-            // 공간 포함 inner TF: outer TF 단락에 주입될 예정 → 독립 배치 스킵
-            if (cm.innerToOuter.containsKey(tf.id())) {
-                continue;
-            }
-
             int tfDomId = parseDomIdOrNeg(tf.id());
+            ObjectPlan textPlan = ctx.findTextFrameOwnershipPlan(tfDomId);
+            boolean planKnown = textPlan != null;
+            if (planKnown && textPlan.textAction != TextAction.OWNED_BY_HWPX_TEXT) {
+                continue;
+            }
+            if (planKnown && textPlan.placement == Placement.INLINE) {
+                continue;
+            }
             boolean conceptDiagramTf = ctx.conceptDiagramTextFrameIds.contains(tf.id());
             boolean hwpxOwnedTextFrame = ctx.resolvedData.isHwpxOwnedTextFrame(tf.id());
+            boolean plannedFloatingHwpxText =
+                    planKnown
+                            ? textPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                                && textPlan.placement == Placement.FLOATING
+                            : ctx.ownershipPlanPlacesFloatingHwpxText(tfDomId);
             boolean editableForHwpx = ctx.resolvedData.isEditableTextFrame(tf.id()) || hwpxOwnedTextFrame;
             if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) {
                 continue;
             }
+            if (tf.isInline()
+                    && !plannedFloatingHwpxText
+                    && (InlineFrameHandler.isEditableTextFrameOfPlannedInlinePngWithSeparateHwpxText(
+                    ctx, tf.id())
+                    || InlineFrameHandler.isEditableTextFrameOfPlannedInlineTextShell(
+                    ctx, tf.id()))) {
+                continue;
+            }
 
-            // 인라인 프레임은 Phase 3에서 처리
-            // 단, non-editable + non-rendered + story 미공유 인라인이면 플로팅 전환
-            InlineToFloatingReason inlineToFloatingReason = InlineToFloatingReason.NONE;
             if (tf.isInline()) {
-                if (ownershipPlanKeepsInlineText(ctx, tfDomId)
-                        && !shouldPromoteInlineHwpxTextFrameToFloating(ctx, tf, tfDomId)
-                        && !hasObjectReplacementText(tf.frameVisibleText())) {
+                if (!plannedFloatingHwpxText) {
                     continue;
                 }
-                Integer semanticGroupId = tfDomId >= 0
-                        ? InlineSemanticLabelPolicy.semanticMultiTextInlineGroupAncestor(
-                                ctx.resolvedData, tf.id())
-                        : null;
-                if (semanticGroupId != null) {
-                    if (InlineFrameHandler.hasPlannedFloatingShellForSemanticInlineGroup(ctx, semanticGroupId)) {
-                        if (isDirectChildOf(ctx, tf.id(), semanticGroupId)) {
-                            continue;
-                        }
-                        if (!hasRenderedVisualShell(ctx, tfDomId)) {
-                            continue;
-                        }
-                        ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                        inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                    } else {
-                        ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                        inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                        if (ctx.deferredAnchoredFloatingIds != null) {
-                            ctx.deferredAnchoredFloatingIds.add(semanticGroupId);
-                        }
-                    }
-                }
-                if (inlineToFloatingReason == InlineToFloatingReason.NONE
-                        && hwpxOwnedTextFrame
-                        && shouldPromoteInlineHwpxTextFrameToFloating(ctx, tf, tfDomId)) {
-                    ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                    inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                }
-                if (inlineToFloatingReason == InlineToFloatingReason.NONE && conceptDiagramTf) {
-                    if (tfDomId >= 0) {
-                        ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                    }
-                    inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                } else if (inlineToFloatingReason == InlineToFloatingReason.NONE && !editableForHwpx) {
-                    String vis = tf.frameVisibleText();
-                    boolean hasText = vis != null && vis.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim().length() > 1;
-                    boolean rendered = tfDomId >= 0 && ctx.resolvedData.isRenderedByOtherChannel(tfDomId);
-                    // badge_group_child: 부모 inline_object의 childIds에 포함된 경우에만 PNG에 텍스트가 있음.
-                    // childIds가 비어있으면 inline PNG는 배경만 캡처 → 텍스트 TF는 별도 플로팅 배치 필요.
-                    if (rendered && tfDomId >= 0 && idx.badgeChildDomIds.contains(tfDomId)) {
-                        Integer parentBadgeId = idx.badgeChildToParentId.get(tfDomId);
-                        boolean inInlinePng = false;
-                        if (parentBadgeId != null) {
-                            int[] pChildIds = idx.inlineObjectChildIdsMap.get(parentBadgeId);
-                            if (pChildIds != null) {
-                                for (int pcid : pChildIds) {
-                                    if (pcid == tfDomId) { inInlinePng = true; break; }
-                                }
-                            }
-                        }
-                        if (!inInlinePng) rendered = false;
-                    }
-                    // inline_object의 childIds 에 포함된 TextFrame 은 부모 PNG 에 시각적으로
-                    // 이미 텍스트가 포함됨 → 플로팅 텍스트 배치 건너뜀 (예: "After You Read" 버튼).
-                    if (!rendered && tfDomId >= 0) {
-                        rendered = idx.childrenOfInlineObjects.contains(tfDomId);
-                    }
-                    // 부모/조상 Group이 inline_object 이거나 inline PNG로 캡처된 경우
-                    // → Phase 3가 INLINE_TEXT_FRAME으로 처리 → floating 불필요.
-                    // 5 hop 조상 체인을 검사하여 중첩 Group(예: Group18498 → Group18558 → TF18579) 도 처리.
-                    ResolvedPageItem _inlPi = ctx.resolvedData.getPageItem(tf.id());
-                    if (!rendered && tfDomId >= 0) {
-                        String _curParentId = (_inlPi != null) ? _inlPi.parentId() : null;
-                        for (int _h = 0; _h < 5 && _curParentId != null && !rendered; _h++) {
-                            int _pid = parseDomIdOrNeg(_curParentId);
-                            if (_pid >= 0) {
-                                if (ctx.resolvedData.isInlineObjectId(_pid)) rendered = true;
-                                if (!rendered && idx.inlineFileGroupIds.contains(_pid)) rendered = true;
-                            }
-                            if (!rendered) {
-                                ResolvedPageItem _nextPi = ctx.resolvedData.getPageItem(_curParentId);
-                                if (_nextPi == null) break;
-                                _curParentId = _nextPi.parentId();
-                            }
-                        }
-                    }
-                    boolean sharedWithEditable = tf.storyId() != null && idx.editableStoryIds.contains(tf.storyId());
-                    // parentId가 있으면 다른 객체 안에 중첩 → 배경에서 부모와 함께 숨겨짐
-                    boolean hasParent = _inlPi != null && _inlPi.parentId() != null;
-                    if (hasText && !rendered && !sharedWithEditable && hasParent) {
-                        inlineToFloatingReason = InlineToFloatingReason.NON_EDITABLE_WITH_TEXT;
-                    } else {
-                        continue;
-                    }
-                } else if (inlineToFloatingReason == InlineToFloatingReason.NONE) {
-                    // SPEC-025: inline + editable. Phase 3 처리 분기:
-                    // - 자기 텍스트 ≥ 2 자: Phase 3 가 인라인 텍스트 런으로 임베드 → 플로팅 스킵
-                    // - 멀티 child 배지 (Phase 3 가 자손 텍스트 결합 ≥ 2자): Phase 3 가 결합 인라인 임베드 → 플로팅 스킵
-                    // - 단일 1자 라벨 (예: "1", "예"): Phase 3 가 PNG 임베드 (텍스트 누락) → 플로팅으로 검색 가능 텍스트 보강
-                    // hwpxOwnedTextFrame(렌더 그룹의 text-hidden editable 자식)은 인라인 그룹의
-                    // 자손이라도 floating HWPX 텍스트로 확정 배치한다. PNG는 텍스트를 숨겼고
-                    // Phase 3 inline run 임베드도 복합 그룹에서는 자식 TF를 누락/오배치시키므로,
-                    // descendant 스킵을 hwpxOwned가 아닐 때로 한정해 배치 경로를 단일화한다.
-                    // (예: page 52 '구절풀이' 주석 박스의 시 본문 TF)
-                    if (tfDomId >= 0 && !hwpxOwnedTextFrame && isDescendantOfInlineObject(ctx, idx, tf.id())) {
-                        continue;
-                    }
-                    if (hwpxOwnedTextFrame) {
-                        // rendered page_object가 textOwner=hwpx_tf로 선언된 경우 PNG에서는
-                        // 텍스트를 숨긴 상태다. Phase 3 inline story 흐름에 기대면 parentless
-                        // inline child TF가 누락될 수 있으므로 Phase 2에서 글상자로 확정 배치한다.
-                        if (tfDomId >= 0) {
-                            ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                        }
-                        inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                    } else {
-                        // inline+editable TF가 어떤 렌더 채널에도 없으면 Phase 3 인라인 런으로 처리.
-                        // (어휘 숫자 superscript "1"/"2"/"3" 등 — PNG 없이 IDML 스토리 텍스트만 존재)
-                        // 렌더된 경우에만 floating 배치 + TEXT_BLOCK_PLACED 설정.
-                        boolean _isRenderedInline = tfDomId >= 0
-                                && (ctx.resolvedData.isRenderedByOtherChannel(tfDomId)
-                                    || idx.allRenderedItemIds.contains(tfDomId));
-                        if (!_isRenderedInline) {
-                            // 렌더 없음 → 보통은 Phase 3 가 IDML 스토리에서 인라인 텍스트 런으로 처리한다.
-                            // 단, resolved DOM 에서는 isInline=true 이지만 parentId가 없는 독립 TF가 있다.
-                            // 이 경우 IDML inline run으로 다시 주입되지 않아 텍스트가 누락되므로
-                            // 일반 floating text block으로 배치한다.
-                            ResolvedPageItem _tfi3 = ctx.resolvedData.getPageItem(tf.id());
-                            boolean _parentlessInline = _tfi3 == null || _tfi3.parentId() == null;
-                            String _visInline = tf.frameVisibleText();
-                            boolean _hasOwnInlineText = _visInline != null
-                                    && _visInline
-                                        .replace("\uFFFC", "")
-                                        .replace("\b", "")
-                                        .replace("\r", "")
-                                        .replace("\n", "")
-                                        .trim().length() > 1;
-                            if (_parentlessInline && _hasOwnInlineText) {
-                                if (isConsumedParentlessInlineContinuation(
-                                        ctx, tf, framesByPage.getOrDefault(tf.pageIndex(), Collections.emptyList()))) {
-                                    continue;
-                                }
-                                inlineToFloatingReason = InlineToFloatingReason.EDITABLE_UNANCHORED_TEXT;
-                            } else {
-                                continue;
-                            }
-                        } else {
-                            // 렌더 있음 → floating 배치 + Phase 3 중복 방지
-                            // (tfDomId >= 0은 _isRenderedInline 조건이 보장)
-                            ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
-                            inlineToFloatingReason = InlineToFloatingReason.EDITABLE_RENDERED;
-                        }
-                    }
-                }
+                ctx.setTextDisposition(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED);
             }
-            boolean inlineToFloating = inlineToFloatingReason != InlineToFloatingReason.NONE;
-            boolean hasRenderedVisualShell = hasRenderedVisualShell(ctx, tfDomId);
+            boolean inlineToFloating = tf.isInline() && plannedFloatingHwpxText;
+            boolean hasPlannedTextShell = hasPlannedTextShellForTextFrame(ctx, tfDomId);
+            boolean plannedVisualTextOverlay = plannedFloatingHwpxText
+                    && hasPlannedVisualTextOverlayForTextFrame(ctx, tfDomId);
+            boolean hasRenderedVisualShell = hasPlannedTextShell;
 
             // 숨김/비인쇄 TF → 변환 불필요
             if (tf.onHiddenLayer() || tf.nonprinting()) { continue; }
@@ -330,39 +178,6 @@ public final class FramePlacer {
                 continue;
             }
 
-            // 연결 글상자 체인: 후속 프레임은 건너뜀 (첫 프레임에서 병합 처리)
-            // 단, 체인의 프레임들이 Y 방향으로 떨어져 있거나 다른 컬럼이면 병합하지 않음 (각각 배치)
-            if (tf.previousFrameId() != null) {
-                ResolvedTextFrame prevTf = ctx.resolvedData.getTextFrame(tf.previousFrameId());
-                if (prevTf != null && prevTf.geometricBounds() != null && tf.geometricBounds() != null) {
-                    int prevDomId = parseDomIdOrNeg(prevTf.id());
-                    boolean prevHasRenderedVisualShell = hasRenderedVisualShell(ctx, prevDomId);
-                    if (hasRenderedVisualShell || prevHasRenderedVisualShell) {
-                        // A rendered visual shell is an independent visual unit
-                        // (for example, a checkbox/underline frame). Do not merge
-                        // or suppress it only because the story is threaded.
-                    } else {
-                    double[] pgb = prevTf.geometricBounds();
-                    double[] cgb = tf.geometricBounds();
-                    boolean diffPage = prevTf.pageIndex() != tf.pageIndex();
-                    double prevBottom = pgb[2];
-                    double curTop = cgb[0];
-                    double gap = curTop - prevBottom;
-                    double lineH = cgb[2] - cgb[0];
-                    // X 범위 겹침 비율: 컬럼이 다르면 병합 안 함
-                    double xOverlapRatio = xOverlapRatio(pgb, cgb);
-                    // gap<0 (역방향) 또는 gap>lineH*CHAIN_GAP_RATIO 또는 다른 컬럼이면 독립 배치
-                    if (diffPage || gap < 0 || gap > lineH * CHAIN_GAP_RATIO || xOverlapRatio < CHAIN_X_OVERLAP_MIN) {
-                        // 병합하지 않고 독립 배치 → continue하지 않음
-                    } else {
-                        continue; // 인접 → 병합 (첫 프레임에서 처리)
-                    }
-                    }
-                } else {
-                    continue;
-                }
-            }
-
             // 페이지 인덱스 결정 (document offset → section index 매핑)
             int pageIdx = ctx.toSectionIndex.applyAsInt(tf.pageIndex());
             if (pageIdx < 0 || pageIdx >= sections.size()) {
@@ -381,34 +196,8 @@ public final class FramePlacer {
             double pageLeft = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[1] : 0;
             double pageTop = (rPage != null && rPage.bounds() != null) ? rPage.bounds()[0] : 0;
 
-            // 연결 글상자 체인이면 인접한 프레임만 bounds 합산 (복사본 사용)
-            // hasNextPageChain: 체인 중 다른 페이지 프레임이 있으면 YGap 분할 금지
-            boolean hasNextPageChain = false;
-            boolean mergedChainBounds = false;
-            if (tf.nextFrameId() != null) {
-                gb = new double[]{gb[0], gb[1], gb[2], gb[3]};
-                String nextId = tf.nextFrameId();
-                while (nextId != null) {
-                    ResolvedTextFrame next = ctx.resolvedData.getTextFrame(nextId);
-                    if (next == null || next.geometricBounds() == null) break;
-                    int nextDomId = parseDomIdOrNeg(next.id());
-                    if (hasRenderedVisualShell || hasRenderedVisualShell(ctx, nextDomId)) break;
-                    double[] ngb = next.geometricBounds();
-                    // 다른 페이지이거나 Y 간격이 한 줄 높이의 50% 이상이면 합산 중단
-                    if (next.pageIndex() != tf.pageIndex()) { hasNextPageChain = true; break; }
-                    double gap = ngb[0] - gb[2];
-                    double lineH = ngb[2] - ngb[0];
-                    // X 범위 겹침 확인: 다른 컬럼이면 병합 중단
-                    // gap<0 (역방향) 또는 gap>lineH*CHAIN_GAP_RATIO 또는 다른 컬럼이면 병합 중단
-                    if (gap < 0 || gap > lineH * CHAIN_GAP_RATIO || xOverlapRatio(gb, ngb) < CHAIN_X_OVERLAP_MIN) break;
-                    if (ngb[0] < gb[0]) gb[0] = ngb[0];
-                    if (ngb[1] < gb[1]) gb[1] = ngb[1];
-                    if (ngb[2] > gb[2]) gb[2] = ngb[2];
-                    if (ngb[3] > gb[3]) gb[3] = ngb[3];
-                    mergedChainBounds = true;
-                    nextId = next.nextFrameId();
-                }
-            }
+            // SPEC-035: linked/threaded TextFrames do not merge geometry.
+            boolean hasNextPageChain = hasNextPageChainOnDifferentPage(ctx, tf);
 
             LocalFrameBounds localBounds = computeLocalFrameBounds(
                     gb, pageLeft, pageTop);
@@ -429,7 +218,7 @@ public final class FramePlacer {
 
             ASTSection section = sections.get(pageIdx);
             boolean hasVisibleText = hasVisibleTextExcludingObjectControls(tf.frameVisibleText());
-            if (!hasVisibleText && !mergedChainBounds) {
+            if (!hasVisibleText) {
                 LocalFrameBounds pageRelativeBounds = computePageRelativeFrameBounds(tf);
                 if (pageRelativeBounds != null) {
                     x = pageRelativeBounds.x;
@@ -723,18 +512,39 @@ public final class FramePlacer {
                 System.err.println("[FramePlacer] partial-left-wrap 감지 → suppressParaLeftIndent: tf="
                         + tf.id() + " storyId=" + tf.storyId());
             }
+            boolean verticalComposedText = isVerticalComposedTextFrame(tf);
+            boolean fontAxisExpanded = false;
+            double maxFontSizePt = maxFontSizePt(ctx, tf);
+            if (maxFontSizePt > 0) {
+                double minTextAxis = maxFontSizePt * FONT_AXIS_MIN_RATIO;
+                if (verticalComposedText && w < minTextAxis) {
+                    double delta = minTextAxis - w;
+                    x -= delta / 2.0;
+                    w = minTextAxis;
+                    fontAxisExpanded = true;
+                } else if (!verticalComposedText && h < minTextAxis) {
+                    double delta = minTextAxis - h;
+                    y -= delta / 2.0;
+                    h = minTextAxis;
+                    fontAxisExpanded = true;
+                }
+            }
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
             block.height(CoordinateConverter.pointsToHwpunits(h));
+            if (verticalComposedText) {
+                block.verticalText(true);
+            }
             if (GroupedFlowStackPolicy.isFlowStackTitleTextFrame(ctx, tf)) {
                 block.anchoredFlowWithText(true);
             }
             // 부모 Group이 Phase7 렌더 PNG로 배치되면 그 위에 올라가야 함.
             // Phase7은 zOrder=10000-pageItemIdx 로 역매핑하므로 동일한 방식으로 계산하여
             // 부모 PNG 바로 위에 배치한다.
-            if (hwpxOwnedTextFrame) {
-                // SPEC-035 A: 렌더 그룹의 text-hidden editable 텍스트는 TEXT 최상위 레이어다.
+            if (hwpxOwnedTextFrame || plannedVisualTextOverlay) {
+                // SPEC-035 A: 렌더 그룹의 text-hidden editable 텍스트와 shell/backdrop 위 텍스트는
+                // TEXT 최상위 레이어다.
                 // tf.zOrder()는 그룹 내부 z라 이웃 주석/해설 셸(DECORATION)보다 낮을 수 있어
                 // 시 본문 등 읽어야 할 텍스트가 가려진다(예: page 52 '구절풀이' 박스의 시 본문).
                 // 충분히 높은 밴드로 올려 occlusion을 방지하되, editable 끼리의 상대 순서는 보존한다.
@@ -781,38 +591,41 @@ public final class FramePlacer {
             // 시각 속성: TF 의 fillColor / cornerRadius 를 글상자에 적용.
             // (배경 PNG 에 같은 색이 있으면 같은 색으로 덧칠되므로 시각 차이 없음.
             //  배경 PNG 에 없는 경우 — 예: page 23 cutter/stopper 같은 단어 박스 — 글상자 fill 로 표시.)
-            try {
-                String fillName = tf.fillColor();
-                if (fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
-                    String fillHex = ctx.resolvedData.resolveTintedColorHex(fillName, tf.fillTint());
-                    if (fillHex != null) {
-                        block.fillColor(fillHex);
-                        block.fillTint(100);
+            if (!hasPlannedTextShell) {
+                try {
+                    String fillName = tf.fillColor();
+                    if (fillName != null && !"None".equals(fillName) && !"[None]".equals(fillName)) {
+                        String fillHex = ctx.resolvedData.resolveTintedColorHex(fillName, tf.fillTint());
+                        if (fillHex != null) {
+                            block.fillColor(fillHex);
+                            block.fillTint(100);
+                            block.nativeGraphicsAllowed(true);
+                        }
+                    }
+                    if (tf.cornerRadius() > 0) {
+                        block.cornerRadius(tf.cornerRadius() * ctx.scaleFactor);
                         block.nativeGraphicsAllowed(true);
                     }
-                }
-                if (tf.cornerRadius() > 0) {
-                    block.cornerRadius(tf.cornerRadius() * ctx.scaleFactor);
-                    block.nativeGraphicsAllowed(true);
-                }
-                // TF 자체 strokeColor/strokeWeight 복사 (배지 자식 override 이전 기본값).
-                // fillColor와 동일한 방식: page_bg에 border가 없는 editable 텍스트박스는
-                // TF stroke로 HWPX 테두리를 그려야 시각적으로 border가 보임.
-                if (tf.strokeColor() != null && !"None".equals(tf.strokeColor()) && !"[None]".equals(tf.strokeColor())
-                        && tf.strokeWeight() > 0) {
-                    String strokeHex = ctx.resolvedData.resolveColorHex(tf.strokeColor());
-                    if (strokeHex != null) {
-                        block.strokeColor(strokeHex);
-                        block.strokeWeight(tf.strokeWeight());
-                        block.nativeGraphicsAllowed(true);
+                    // TF 자체 strokeColor/strokeWeight 복사 (배지 자식 override 이전 기본값).
+                    // fillColor와 동일한 방식: page_bg에 border가 없는 editable 텍스트박스는
+                    // TF stroke로 HWPX 테두리를 그려야 시각적으로 border가 보임.
+                    if (tf.strokeColor() != null && !"None".equals(tf.strokeColor()) && !"[None]".equals(tf.strokeColor())
+                            && tf.strokeWeight() > 0) {
+                        String strokeHex = ctx.resolvedData.resolveColorHex(tf.strokeColor());
+                        if (strokeHex != null) {
+                            block.strokeColor(strokeHex);
+                            block.strokeWeight(tf.strokeWeight());
+                            block.nativeGraphicsAllowed(true);
+                        }
                     }
+                } catch (Exception eFill) {
+                    System.err.println("[FramePlacer] fill/stroke 속성 적용 오류 tf=" + tf.id() + ": " + eFill);
                 }
-            } catch (Exception eFill) {
-                System.err.println("[FramePlacer] fill/stroke 속성 적용 오류 tf=" + tf.id() + ": " + eFill);
             }
             java.util.Set<String> releasedFillIds = releasedNativeFillChildIdsForTf(ctx, tfDomId);
-            if (!hasRenderedVisualShell || hasAbsorbedTextStylePlan(ctx, tfDomId)
-                    || !releasedFillIds.isEmpty()) {
+            if (!hasPlannedTextShell
+                    && (!hasRenderedVisualShell || hasAbsorbedTextStylePlan(ctx, tfDomId)
+                    || !releasedFillIds.isEmpty())) {
                 // PNG가 풀어준 도형이 있으면 그 id로만 형제 흡수를 제한(다른 장식 흡수 방지).
                 applyGroupBackgroundShapeStyle(ctx, tf, block,
                         releasedFillIds.isEmpty() ? null : releasedFillIds);
@@ -828,7 +641,7 @@ public final class FramePlacer {
                     }
                 }
             }
-            if (!hwpxOwnedTextFrame) {
+            if (!hasPlannedTextShell && !hwpxOwnedTextFrame) {
                 applyInlineOwnedVisualShellImageFill(ctx, tf, block, pageLeft, pageTop);
             }
 
@@ -840,8 +653,10 @@ public final class FramePlacer {
                 int inlineEditableLen = editableInlineTextLengthForStory(ctx, tf.storyId());
                 block.frameVisibleTextLength(Math.max(visibleLen, inlineEditableLen));
             }
-            block.noAutoLineWrap(shouldUseNoAutoLineWrap(tf, block)
-                    || shouldUseVisualShellNoAutoLineWrap(hasRenderedVisualShell, tf, block));
+            boolean preserveFontSize = verticalComposedText || fontAxisExpanded;
+            block.noAutoLineWrap(!preserveFontSize
+                    && (shouldUseNoAutoLineWrap(tf, block)
+                    || shouldUseVisualShellNoAutoLineWrap(hasRenderedVisualShell, tf, block)));
             // storyTotalTextLength는 convertStories()에서 설정
 
             // 타이틀 오버레이로 첫 N 단락 숨김 + 본문 중간의 제외 인덱스 적용
@@ -856,167 +671,61 @@ public final class FramePlacer {
 
             if (inlineToFloating) {
                 block.inlineToFloating(true);
-                // Case 1 (non-editable inline TF with text): 조상 inline_object PNG 를
-                // inline 배치에서 억제하고 Stage 3 visual executor가 floating 으로 재배치하도록 등록.
-                // Case 2 (editable badge child)는 badge PNG 가 inline 앵커 그대로 유지되어야 하므로 제외.
-                // Case 3 (non-editable TF inside inline_object): inline_object PNG가 이미 inline으로 배치됨.
-                //   floating text 오버레이는 생성하되, inline_object는 floating 전환 금지.
-                //   (전환하면 body text가 밀리지 않고 겹침)
-                if (inlineToFloatingReason == InlineToFloatingReason.NON_EDITABLE_WITH_TEXT) {
-                    ResolvedPageItem _ancCurPi = ctx.resolvedData.getPageItem(tf.id());
-                    outer_anc:
-                    for (int _ancHops = 0; _ancCurPi != null && _ancHops < 10; _ancHops++) {
-                        String _ancPid = _ancCurPi.parentId();
-                        if (_ancPid == null) break;
-                        int _ancPidInt = parseDomIdOrNeg(_ancPid);
-                        if (_ancPidInt >= 0) {
-                            RenderedGroup _ancRg = idx.inlineObjectById.get(_ancPidInt);
-                            if (_ancRg != null) {
-                                // inline_object PNG가 있으면 inline 배치 유지 → floating 전환 등록 안 함.
-                                // TF는 floating text box로 배치되어 PNG 위에 텍스트 오버레이 역할을 한다.
-                                if (_ancRg.file() != null) break outer_anc;
-                                ctx.setInlineDisposition(_ancRg.id(), FrameDisposition.PNG_CONVERT_TO_FLOATING);
-                                ctx.inlineObjectTfPageIndex.put(_ancRg.id(), tf.pageIndex());
-                                break outer_anc;
-                            }
-                        }
-                        _ancCurPi = ctx.resolvedData.getPageItem(_ancPid);
-                    }
-                }
             }
-            if (hasRenderedVisualShell && block.fillColor() == null && block.strokeColor() == null) {
-                // The parent InDesign PNG owns the visual shell. Route this as a
-                // transparent text overlay so the 1x1 table fallback does not cover it.
-                block.inlineToFloating(true);
+            if (plannedVisualTextOverlay) {
+                block.plannedVisualTextOverlay(true);
             }
-            // 공간 포함 outer TF: 자신 안에 포함된 inner TF id 기록 → StoryConverter가 inner story 주입
-            String _innerFrameId = cm.outerToInner.get(tf.id());
-            if (_innerFrameId != null) block.innerFrameId(_innerFrameId);
-
             section.addBlock(block);
         }
     }
 
-    private static boolean hasRenderedVisualShell(ResolvedBuildContext ctx, int tfDomId) {
+    private static boolean hasPlannedVisualTextOverlayForTextFrame(ResolvedBuildContext ctx, int tfDomId) {
         if (ctx == null || ctx.resolvedData == null || tfDomId < 0) return false;
         List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
         if (groups == null) return false;
         String tfId = String.valueOf(tfDomId);
-        ResolvedTextFrame tf = null;
-        if (ctx.resolvedData.textFrames() != null) {
-            for (ResolvedTextFrame candidate : ctx.resolvedData.textFrames()) {
-                if (candidate != null && tfId.equals(candidate.id())) {
-                    tf = candidate;
-                    break;
-                }
-            }
-        }
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
-            if (!isRenderedPageObject(rg)) continue;
-            if (Boolean.FALSE.equals(rg.placementAllowed())) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            String[] editableIds = rg.editableTextFrameIds();
-            if (rg.hasEditableTextHiddenFromPng() && editableIds != null) {
-                for (String editableId : editableIds) {
-                    if (tfId.equals(editableId)) {
-                        return true;
-                    }
-                }
-            }
-            if (tf != null && isInferredTextFrameVisualShell(ctx, tf, rg)) {
+            if (!containsEditableTextFrameId(rg, tfId)) continue;
+            if (!"hwpx_tf".equals(rg.textOwner()) && !rg.hasEditableTextHiddenFromPng()) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan == null) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (plan.placement != Placement.FLOATING) continue;
+            if (plan.hasVisibleVisual()) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasPlannedTextShellForTextFrame(ResolvedBuildContext ctx, int tfDomId) {
+        if (ctx == null || ctx.resolvedData == null || tfDomId < 0) return false;
+        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        String tfId = String.valueOf(tfDomId);
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
+            if (!containsEditableTextFrameId(rg, tfId)) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan == null) continue;
+            if (plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && plan.visualAction == VisualAction.PLACE_TEXT_SHELL) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean hasTextHiddenInlineShellForTextFrame(ResolvedBuildContext ctx, String textFrameId) {
-        if (ctx == null || ctx.resolvedData == null || textFrameId == null) return false;
-        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
-        if (groups == null) return false;
-        for (RenderedGroup rg : groups) {
-            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
-            if (!"inline_object".equals(rg.type()) && !"inline_object".equals(rg.itemType())) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            if (!rg.hasEditableTextHiddenFromPng()) continue;
-            String[] editableIds = rg.editableTextFrameIds();
-            if (editableIds == null) continue;
-            for (String editableId : editableIds) {
-                if (textFrameId.equals(editableId)) return true;
-            }
+    private static boolean hasNextPageChainOnDifferentPage(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.nextFrameId() == null) return false;
+        String nextId = tf.nextFrameId();
+        Set<String> seen = new HashSet<>();
+        while (nextId != null && seen.add(nextId)) {
+            ResolvedTextFrame next = ctx.resolvedData.getTextFrame(nextId);
+            if (next == null) return false;
+            if (next.pageIndex() != tf.pageIndex()) return true;
+            nextId = next.nextFrameId();
         }
         return false;
-    }
-
-    private static boolean shouldPromoteInlineHwpxTextFrameToFloating(
-            ResolvedBuildContext ctx,
-            ResolvedTextFrame tf,
-            int tfDomId) {
-        if (ctx == null || tf == null || tfDomId < 0) return false;
-        if (!ownershipPlanKeepsInlineText(ctx, tfDomId)) return false;
-        if (hasFloatingLabelBackdropForTextFrame(ctx, tf.id())) return true;
-        if (hasFloatingContentVisualForTextFrame(ctx, tf.id())) return true;
-        return isCompactStackedInlineLabelTextFrame(tf)
-                && hasTextHiddenInlineShellForTextFrame(ctx, tf.id());
-    }
-
-    private static boolean hasFloatingLabelBackdropForTextFrame(ResolvedBuildContext ctx, String textFrameId) {
-        if (ctx == null || ctx.resolvedData == null || textFrameId == null) return false;
-        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
-        if (groups == null) return false;
-        for (RenderedGroup rg : groups) {
-            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
-            if (!"label_backdrop_group".equals(rg.reason())) continue;
-            if (!isRenderedPageObject(rg)) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            if (ctx.hasOwnershipPlan(rg) && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) continue;
-            String[] editableIds = rg.editableTextFrameIds();
-            if (editableIds == null) continue;
-            for (String editableId : editableIds) {
-                if (textFrameId.equals(editableId)) return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean hasFloatingContentVisualForTextFrame(ResolvedBuildContext ctx, String textFrameId) {
-        if (ctx == null || ctx.resolvedData == null || textFrameId == null) return false;
-        List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
-        if (groups == null) return false;
-        for (RenderedGroup rg : groups) {
-            if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
-            if (!isRenderedPageObject(rg)) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            String reason = rg.reason();
-            if (!"image_group_text_hidden".equals(reason)) continue;
-            if (ctx.hasOwnershipPlan(rg) && !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) continue;
-            String layer = ctx.visualLayerByOwnershipPlan(rg);
-            if (layer != null && !"CONTENT_VISUAL".equals(layer)) continue;
-            String[] editableIds = rg.editableTextFrameIds();
-            if (editableIds == null) continue;
-            for (String editableId : editableIds) {
-                if (textFrameId.equals(editableId)) return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isCompactStackedInlineLabelTextFrame(ResolvedTextFrame tf) {
-        String text = tf != null ? tf.frameVisibleText() : null;
-        if (text == null) return false;
-        boolean stacked = text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0;
-        String cleaned = text.replace("\uFFFC", "")
-                .replace("￼", "")
-                .replace("\r", "")
-                .replace("\n", "")
-                .trim();
-        if (!stacked || cleaned.length() < 2 || cleaned.length() > 8) return false;
-        double[] b = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
-        if (b == null || b.length < 4) return true;
-        double h = Math.abs(b[2] - b[0]);
-        double w = Math.abs(b[3] - b[1]);
-        return w > 0 && h > 0 && w <= 28.0 && h <= 28.0;
     }
 
     private static boolean hasObjectReplacementText(String text) {
@@ -1092,46 +801,6 @@ public final class FramePlacer {
                 && tfDomId >= 0
                 && ctx.anchoredTablePlansForOwnerTextFrame(tfDomId) != null
                 && !ctx.anchoredTablePlansForOwnerTextFrame(tfDomId).isEmpty();
-    }
-
-    private static boolean isInferredTextFrameVisualShell(
-            ResolvedBuildContext ctx, ResolvedTextFrame tf, RenderedGroup rg) {
-        if (tf == null || rg == null) return false;
-        if (tf.pageIndex() != rg.pageIndex()) return false;
-        if (ctx.resolvedData.isInlineObjectId(rg.id())) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        if (!isDecorationVisualShellReason(rg.reason())) return false;
-        double[] rbRaw = rg.bounds();
-        double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
-        if (rbRaw == null || rbRaw.length < 4 || tb == null || tb.length < 4) return false;
-        double[] scaledRb = new double[] {
-                rbRaw[0] * ctx.scaleFactor,
-                rbRaw[1] * ctx.scaleFactor,
-                rbRaw[2] * ctx.scaleFactor,
-                rbRaw[3] * ctx.scaleFactor
-        };
-        return isSimilarShellBounds(scaledRb, tb) || isSimilarShellBounds(rbRaw, tb);
-    }
-
-    private static boolean isSimilarShellBounds(double[] shellBounds, double[] tfBounds) {
-        if (shellBounds == null || shellBounds.length < 4 || tfBounds == null || tfBounds.length < 4) {
-            return false;
-        }
-        double tfArea = area(tfBounds);
-        double shellArea = area(shellBounds);
-        if (tfArea <= 0 || shellArea <= 0) return false;
-        double areaRatio = shellArea / tfArea;
-        if (areaRatio < VISUAL_SHELL_MIN_AREA_RATIO || areaRatio > VISUAL_SHELL_MAX_AREA_RATIO) {
-            return false;
-        }
-        return overlapArea(shellBounds, tfBounds) / tfArea >= VISUAL_SHELL_TF_OVERLAP_MIN;
-    }
-
-    private static boolean isDecorationVisualShellReason(String reason) {
-        if (reason == null) return false;
-        return reason.contains("decoration")
-                || reason.contains("visual_shell")
-                || reason.contains("textframe_visual_shell");
     }
 
     private static double area(double[] b) {
@@ -1292,16 +961,6 @@ public final class FramePlacer {
         return !text.isEmpty() && text.length() <= 60;
     }
 
-    /** 두 bounds 배열([top,left,bottom,right])의 X 겹침 비율을 반환. 겹침 없으면 0. */
-    private static double xOverlapRatio(double[] a, double[] b) {
-        double xOvStart = Math.max(a[1], b[1]);
-        double xOvEnd   = Math.min(a[3], b[3]);
-        double aW = a[3] - a[1];
-        double bW = b[3] - b[1];
-        return (xOvEnd > xOvStart && aW > 0 && bW > 0)
-                ? (xOvEnd - xOvStart) / Math.min(aW, bW) : 0.0;
-    }
-
     private static int parseDomIdOrNeg(String id) {
         if (id == null) return -1;
         try { return Integer.parseInt(id); } catch (NumberFormatException e) { return -1; }
@@ -1416,26 +1075,6 @@ public final class FramePlacer {
                 && !lineText.replace("\r", "").replace("\n", "").replace("\uFFFC", "").trim().isEmpty();
     }
 
-    private static boolean ownershipPlanKeepsInlineText(ResolvedBuildContext ctx, int tfDomId) {
-        if (ctx == null || tfDomId < 0) return false;
-        ObjectPlan plan = ctx.findOwnershipPlanForDomId(tfDomId);
-        return plan != null
-                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
-                && plan.visualAction == VisualAction.DROP_VISUAL
-                && plan.placement == Placement.INLINE;
-    }
-
-    private enum InlineToFloatingReason {
-        /** 플로팅 전환 없음 (기본값). */
-        NONE,
-        /** non-editable inline TF + 텍스트 있음 + 렌더 없음 + story 미공유 → floating 텍스트 박스. */
-        NON_EDITABLE_WITH_TEXT,
-        /** editable inline TF + 렌더 채널 있음(배지 등) → floating 텍스트 박스 + TEXT_BLOCK_PLACED. */
-        EDITABLE_RENDERED,
-        /** editable inline TF + parentId 없음 + 렌더 없음 → Phase 3가 못 살리므로 floating 텍스트 박스. */
-        EDITABLE_UNANCHORED_TEXT
-    }
-
     /** {@link #placeTextFrames} 에서 사전 구축하는 룩업 인덱스 집합. */
     private static final class FrameIndex {
         final Set<Integer> badgeChildDomIds;
@@ -1508,136 +1147,6 @@ public final class FramePlacer {
         return new FrameIndex(badgeChildDomIds, badgeChildToParentId, inlineObjectChildIdsMap,
                 childrenOfInlineObjects, inlineFileGroupIds, allRenderedItemIds,
                 renderedItemWithFileIds, editableStoryIds, inlineObjectById);
-    }
-
-    /** {@link #buildContainmentMap}의 반환값: inner→outer 맵과 그 역방향 맵. */
-    private static final class ContainmentMaps {
-        final Map<String, String> innerToOuter;
-        final Map<String, String> outerToInner;
-        ContainmentMaps(Map<String, String> innerToOuter, Map<String, String> outerToInner) {
-            this.innerToOuter = innerToOuter;
-            this.outerToInner = outerToInner;
-        }
-    }
-
-    private static ContainmentMaps buildContainmentMap(
-            ResolvedBuildContext ctx,
-            List<ResolvedTextFrame> frames,
-            Set<Integer> badgeChildDomIds) {
-        Map<String, String> innerToOuterMap = new HashMap<>();
-        final double TOL = CONTAINMENT_TOL_PT;
-        // Pass 1: 각 inner TF에 대해 포함하는 outer TF 후보를 모두 수집
-        Map<String, List<ResolvedTextFrame>> innerCandidates = new HashMap<>();
-        for (ResolvedTextFrame outer : frames) {
-            if (outer.storyId() == null) continue;
-            double[] aGb = outer.geometricBounds();
-            if (aGb == null || aGb.length < 4) continue;
-            for (ResolvedTextFrame inner : frames) {
-                if (inner == outer) continue;
-                if (inner.storyId() == null || inner.storyId().equals(outer.storyId())) continue;
-                // Threaded frames are a continuous text flow, not an overlay answer
-                // inserted into a containing blank. Keeping them independent avoids
-                // duplicating the same story both inside the outer TF and as its own TF.
-                if (inner.previousFrameId() != null || inner.nextFrameId() != null) continue;
-                if (inner.pageIndex() != outer.pageIndex()) continue;
-                if (inner.onHiddenLayer() || outer.onHiddenLayer() || inner.nonprinting() || outer.nonprinting()) continue;
-                if (inner.isInline()) continue;
-                String _outerVis = outer.frameVisibleText();
-                if (_outerVis == null || _outerVis.trim().isEmpty()) continue;
-                double[] bGb = inner.geometricBounds();
-                if (bGb == null || bGb.length < 4) continue;
-                if (bGb[0] >= aGb[0] - TOL && bGb[1] >= aGb[1] - TOL
-                        && bGb[2] <= aGb[2] + TOL && bGb[3] <= aGb[3] + TOL) {
-                    if (!isSimpleContainedTextMergeCandidate(ctx, inner)) continue;
-                    int innerDomId = parseDomIdOrNeg(inner.id());
-                    boolean isBadgeChild = innerDomId >= 0 && badgeChildDomIds.contains(innerDomId);
-                    if (!isBadgeChild && !hasHwpxOwnedVisualShell(ctx, inner.id())) {
-                        innerCandidates.computeIfAbsent(inner.id(), k -> new ArrayList<>()).add(outer);
-                    }
-                }
-            }
-        }
-        // Pass 2: 각 inner에 대해 가장 작은(가장 내부) outer 선택
-        for (Map.Entry<String, List<ResolvedTextFrame>> e : innerCandidates.entrySet()) {
-            ResolvedTextFrame bestOuter = null;
-            double minArea = Double.MAX_VALUE;
-            for (ResolvedTextFrame outer : e.getValue()) {
-                double[] ob = outer.geometricBounds();
-                double area = (ob[2] - ob[0]) * (ob[3] - ob[1]);
-                if (area < minArea) { minArea = area; bestOuter = outer; }
-            }
-            if (bestOuter != null) innerToOuterMap.put(e.getKey(), bestOuter.id());
-        }
-        // Pass 3: outer 하나에 inner가 여러 개이면 오버레이 패턴이 아님 → 모두 제거
-        Map<String, Integer> outerInnerCount = new HashMap<>();
-        for (String outerId : innerToOuterMap.values()) {
-            outerInnerCount.merge(outerId, 1, Integer::sum);
-        }
-        innerToOuterMap.entrySet().removeIf(e -> outerInnerCount.getOrDefault(e.getValue(), 0) > 1);
-        // Pass 4: outer로 사용되는 프레임은 inner로 스킵하지 않음 (계층 유지)
-        Set<String> usedAsOuter = new HashSet<>(innerToOuterMap.values());
-        innerToOuterMap.keySet().removeIf(usedAsOuter::contains);
-        if (!innerToOuterMap.isEmpty()) {
-            for (Map.Entry<String, String> e : innerToOuterMap.entrySet()) {
-                System.err.println("[FramePlacer] 공간 포함 오버레이: inner=" + e.getKey()
-                        + " ⊂ outer=" + e.getValue());
-            }
-        }
-        Map<String, String> outerToInnerMap = new HashMap<>();
-        for (Map.Entry<String, String> e : innerToOuterMap.entrySet()) {
-            outerToInnerMap.put(e.getValue(), e.getKey());
-        }
-        return new ContainmentMaps(innerToOuterMap, outerToInnerMap);
-    }
-
-    private static boolean isSimpleContainedTextMergeCandidate(
-            ResolvedBuildContext ctx, ResolvedTextFrame inner) {
-        if (inner == null || inner.id() == null) return false;
-        if (ctx != null && ctx.resolvedData != null
-                && ctx.resolvedData.isSimpleButtonLabelTextFrame(inner.id())) {
-            return true;
-        }
-        String raw = inner.frameVisibleText();
-        if (raw == null) return false;
-        if (raw.indexOf('\n') >= 0 || raw.indexOf('\r') >= 0) return false;
-        String text = normalizeContainedMergeText(raw);
-        if (text.isEmpty()) return false;
-        if (containsDecorativeOrSentenceMarker(text)) return false;
-        if (text.matches("\\d{1,3}")) return true;
-        int cpCount = text.codePointCount(0, text.length());
-        return cpCount <= 4 && !containsWhitespace(raw);
-    }
-
-    private static String normalizeContainedMergeText(String text) {
-        return text
-                .replace("\uFFFC", "")
-                .replace("\u0016", "")
-                .replace("\u0018", "")
-                .replace("\u0007", "")
-                .replace("\b", "")
-                .replaceAll("\\s+", "")
-                .trim();
-    }
-
-    private static boolean containsWhitespace(String text) {
-        for (int i = 0; i < text.length(); i++) {
-            if (Character.isWhitespace(text.charAt(i))) return true;
-        }
-        return false;
-    }
-
-    private static boolean containsDecorativeOrSentenceMarker(String text) {
-        for (int i = 0; i < text.length();) {
-            int cp = text.codePointAt(i);
-            if (cp == '▶' || cp == '▷' || cp == '•' || cp == '●'
-                    || cp == '◆' || cp == '◇' || cp == '■' || cp == '□'
-                    || cp == ',' || cp == '.' || cp == '?' || cp == '!'
-                    || cp == ':' || cp == ';' || cp == '·') {
-                return true;
-            }
-            i += Character.charCount(cp);
-        }
-        return false;
     }
 
     private static boolean hasHwpxOwnedVisualShell(ResolvedBuildContext ctx, String tfId) {
@@ -1749,7 +1258,6 @@ public final class FramePlacer {
             if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
             if (rg.pageIndex() != tf.pageIndex()) continue;
             if (!isRenderedPageObject(rg)) continue;
-            if (Boolean.FALSE.equals(rg.placementAllowed())) continue;
             if (!"hwpx_tf".equals(rg.textOwner())) continue;
             if (!"indesign_png".equals(rg.visualOwner())) continue;
             if (!containsEditableTextFrameId(rg, tf.id())) continue;
@@ -2088,7 +1596,11 @@ public final class FramePlacer {
         return reason.contains("text_hidden")
                 || reason.contains("visual_shell")
                 || reason.contains("editable_textframe_visual_shell")
-                || reason.contains("image_group");
+                || reason.contains("image_group")
+                || reason.contains("decoration_group")
+                || reason.contains("mixed_group_text_hidden")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("label_backdrop_group");
     }
 
     public static Set<String> collectConceptDiagramTextFrameIds(
@@ -2769,41 +2281,47 @@ public final class FramePlacer {
         return false;
     }
 
-    private static boolean isConsumedParentlessInlineContinuation(
-            ResolvedBuildContext ctx,
-            ResolvedTextFrame inlineTf,
-            List<ResolvedTextFrame> samePageFrames) {
-        if (ctx == null || inlineTf == null || samePageFrames == null) return false;
-        if (!inlineTf.isInline()) return false;
-        ResolvedPageItem inlineItem = ctx.resolvedData.getPageItem(inlineTf.id());
-        if (inlineItem != null && inlineItem.parentId() != null) return false;
+    private static boolean isVerticalComposedTextFrame(ResolvedTextFrame tf) {
+        if (tf == null || tf.composedLines() == null || tf.composedLines().isEmpty()) return false;
+        double[] frameBounds = tf.pageRelativeBounds();
+        if (frameBounds == null || frameBounds.length < 4) frameBounds = tf.geometricBounds();
+        if (frameBounds == null || frameBounds.length < 4) return false;
 
-        String inlineText = inlineTf.frameVisibleText();
-        if (inlineText == null || !inlineText.startsWith("\uFFFC")) return false;
-        double[] ib = inlineTf.geometricBounds();
-        if (ib == null || ib.length < 4) return false;
+        double frameW = Math.abs(frameBounds[3] - frameBounds[1]);
+        double frameH = Math.abs(frameBounds[2] - frameBounds[0]);
+        if (frameW <= 0 || frameH <= 0 || frameH <= frameW * 1.2) return false;
 
-        for (ResolvedTextFrame owner : samePageFrames) {
-            if (owner == null || owner == inlineTf || owner.isInline()) continue;
-            if (owner.storyId() != null && owner.storyId().equals(inlineTf.storyId())) continue;
-            if (!ctx.resolvedData.isEditableTextFrame(owner.id())) continue;
-
-            String ownerText = owner.frameVisibleText();
-            if (ownerText == null || !ownerText.trim().endsWith("\uFFFC")) continue;
-            double[] ob = owner.geometricBounds();
-            if (ob == null || ob.length < 4) continue;
-
-            boolean insideOwner = ib[0] >= ob[0] - 0.5
-                    && ib[1] >= ob[1] - 0.5
-                    && ib[2] <= ob[2] + 0.5
-                    && ib[3] <= ob[3] + 0.5;
-            if (insideOwner) {
-                System.err.println("[FramePlacer] parentless inline continuation consumed: tf="
-                        + inlineTf.id() + " ownerTf=" + owner.id());
-                return true;
+        int checked = 0;
+        int verticalLike = 0;
+        for (ResolvedTextFrame.ComposedLine line : tf.composedLines()) {
+            if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
+            if (!hasVisibleTextExcludingObjectControls(line.text())) continue;
+            double[] b = line.bounds();
+            double lineW = Math.abs(b[3] - b[1]);
+            double lineH = Math.abs(b[2] - b[0]);
+            if (lineW <= 0 || lineH <= 0) continue;
+            checked++;
+            if (lineH > lineW * 1.8) {
+                verticalLike++;
             }
         }
-        return false;
+        return checked > 0 && verticalLike == checked;
+    }
+
+    private static double maxFontSizePt(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.storyId() == null) return 0.0;
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null) return 0.0;
+
+        double max = 0.0;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run == null || run.fontSize() == null || run.fontSize() <= 0) continue;
+                max = Math.max(max, run.fontSize());
+            }
+        }
+        return max;
     }
 
     private static boolean shouldUseVisualShellNoAutoLineWrap(
@@ -2819,90 +2337,6 @@ public final class FramePlacer {
             return false;
         }
         return tf.paragraphStart() == tf.paragraphEnd();
-    }
-
-    private static Set<String> collectDuplicateVisualShellTextFrameIds(
-            ResolvedBuildContext ctx, List<ResolvedTextFrame> frames) {
-        Set<String> suppress = new HashSet<>();
-        if (ctx == null || ctx.resolvedData == null || frames == null) return suppress;
-
-        Map<String, ResolvedTextFrame> byId = new HashMap<>();
-        for (ResolvedTextFrame tf : frames) {
-            if (tf != null && tf.id() != null) byId.put(tf.id(), tf);
-        }
-
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (!isSegmentedVisualShellGroup(rg)) continue;
-            String[] editableIds = rg.editableTextFrameIds();
-            if (editableIds == null || editableIds.length < 2) continue;
-
-            List<ResolvedTextFrame> childTfs = new ArrayList<>();
-            for (String id : editableIds) {
-                ResolvedTextFrame tf = byId.get(id);
-                if (tf != null && !cleanVisibleText(tf).isEmpty()) childTfs.add(tf);
-            }
-            if (childTfs.size() < 2) continue;
-
-            for (int i = 0; i < childTfs.size(); i++) {
-                ResolvedTextFrame a = childTfs.get(i);
-                String aText = cleanVisibleText(a);
-                double[] aBounds = boundsOf(a);
-                if (aText.isEmpty() || aText.length() > 8 || aBounds == null) continue;
-
-                if (isSyntheticGroupWideLabel(rg, a, childTfs)) {
-                    suppress.add(a.id());
-                    continue;
-                }
-
-                for (int j = 0; j < childTfs.size(); j++) {
-                    if (i == j) continue;
-                    ResolvedTextFrame b = childTfs.get(j);
-                    if (!aText.equals(cleanVisibleText(b))) continue;
-                    double[] bBounds = boundsOf(b);
-                    if (bBounds == null) continue;
-                    if (containsBounds(aBounds, bBounds, 0.35)
-                            && area(aBounds) > area(bBounds) * 1.15) {
-                        suppress.add(a.id());
-                        break;
-                    }
-                }
-            }
-        }
-        return suppress;
-    }
-
-    private static boolean isSegmentedVisualShellGroup(RenderedGroup rg) {
-        if (rg == null || !"page_object".equals(rg.type())) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        if (!rg.hasEditableTextHiddenFromPng()) return false;
-        String reason = rg.reason();
-        if (reason == null) return false;
-        return reason.contains("mixed_group_text_hidden")
-                || reason.contains("visual_label_text_hidden_shell")
-                || reason.contains("editable_composite_text_hidden_shell");
-    }
-
-    private static boolean isSyntheticGroupWideLabel(
-            RenderedGroup rg, ResolvedTextFrame tf, List<ResolvedTextFrame> siblings) {
-        if (rg == null || tf == null || siblings == null || siblings.size() < 3) return false;
-        String text = cleanVisibleText(tf);
-        if (text.isEmpty() || text.length() > 8) return false;
-        double[] rb = rg.bounds();
-        double[] tb = boundsOf(tf);
-        if (rb == null || tb == null) return false;
-        double rArea = area(rb);
-        double tArea = area(tb);
-        if (rArea <= 0.0 || tArea <= 0.0) return false;
-        double overlap = overlapArea(rb, tb);
-        boolean nearlyGroupSized = overlap / tArea >= 0.92 && tArea / rArea >= 0.72;
-        if (!nearlyGroupSized) return false;
-
-        int otherTextFrames = 0;
-        for (ResolvedTextFrame sibling : siblings) {
-            if (sibling == tf) continue;
-            if (!cleanVisibleText(sibling).isEmpty()) otherTextFrames++;
-        }
-        return otherTextFrames >= 2;
     }
 
     private static String cleanVisibleText(ResolvedTextFrame tf) {
@@ -3049,28 +2483,6 @@ public final class FramePlacer {
                 .replace("\b", "")
                 .replaceAll("\\s+", "")
                 .trim();
-    }
-
-    private static boolean isDescendantOfInlineObject(
-            ResolvedBuildContext ctx, FrameIndex idx, String domId) {
-        if (ctx == null || ctx.resolvedData == null || domId == null) return false;
-        String curId = domId;
-        for (int depth = 0; depth < 8 && curId != null; depth++) {
-            ResolvedPageItem pi = ctx.resolvedData.getPageItem(curId);
-            if (pi == null || pi.parentId() == null) return false;
-            int parentDomId = parseDomIdOrNeg(pi.parentId());
-            if (parentDomId >= 0) {
-                if (ctx.resolvedData.isInlineObjectId(parentDomId)) return true;
-                if (idx != null && idx.inlineObjectById.containsKey(parentDomId)) return true;
-                if (idx != null && idx.inlineFileGroupIds.contains(parentDomId)) return true;
-                ResolvedPageItem parentPi = ctx.resolvedData.getPageItem(pi.parentId());
-                if (parentPi != null && parentPi.isInline() && "Group".equals(parentPi.type())) {
-                    return true;
-                }
-            }
-            curId = pi.parentId();
-        }
-        return false;
     }
 
     private static boolean isShortSingleLineTextFrame(ResolvedTextFrame tf) {

@@ -2,10 +2,8 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 /**
@@ -30,23 +28,13 @@ public final class VisualPlacementExecutor {
         }
 
         if (ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL) {
-            java.util.List<ASTTextFrameBlock> shells = InlineFrameHandler.buildFloatingTextShellBlocks(
-                    ctx, rg, plan.x, plan.y, plan.width, plan.height, plan.zOrder);
-            if (!shells.isEmpty()) {
-                for (ASTTextFrameBlock shell : shells) {
-                    section.addBlockAtFront(shell);
-                }
-                ctx.markRenderedVisualHandled(rg.id());
-                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
-                        "PLACE_TEXT_SHELL_BLOCK",
-                        "placed extracted InDesign shell as imageFill text frame with editable HWPX text"
-                                + (shells.size() > 1 ? " (" + shells.size() + " split label blocks)" : ""));
-                return PlacementResult.textShellPlaced();
-            }
+            ASTFigure fig = buildFigure(rg, image, plan);
+            section.addBlockAtFront(fig);
+            ctx.markRenderedVisualHandled(rg.id());
             ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
-                    "SKIP_TEXT_SHELL_BLOCK_BUILD_FAILED",
-                    "PLACE_TEXT_SHELL plan had no usable editable text shell");
-            return PlacementResult.notPlaced();
+                    "PLACE_TEXT_SHELL_FIGURE",
+                    "placed extracted InDesign textless shell as ASTFigure; editable text is owned by Stage2 HWPX TF");
+            return PlacementResult.textShellPlaced();
         }
 
         ASTFigure fig = buildFigure(rg, image, plan);

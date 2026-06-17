@@ -26,6 +26,9 @@ public final class SimpleButtonLabelInlineFactory {
 
     public static ASTInlineObject create(ResolvedBuildContext ctx, int anchorDomId) {
         if (ctx == null || ctx.resolvedData == null) return null;
+        if (InlineFrameHandler.shouldUsePlannedInlinePngWithSeparateHwpxText(ctx, anchorDomId)) {
+            return null;
+        }
         SimpleButtonLabelPlan plan = ctx.simpleButtonLabelPlan(anchorDomId);
         if (plan == null) return null;
         if (plan.mode == SimpleButtonLabelPlan.Mode.COMPLETE_PNG) {

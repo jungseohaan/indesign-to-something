@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save, message } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
@@ -40,6 +40,30 @@ interface TeachingMaterial {
   units: TeachingUnit[];
 }
 
+interface SemanticBlock {
+  block_id?: string;
+  block_type?: string;
+  title?: string | null;
+  raw_text?: string;
+  page_start?: number;
+  page_end?: number;
+  image_refs?: string[];
+}
+
+interface TeachingBlock {
+  teaching_block_id?: string;
+  title?: string | null;
+  block_type?: string;
+  semantic_blocks?: string[];
+  page_start?: number;
+  page_end?: number;
+}
+
+interface DefaultTeachingPrompt {
+  path: string;
+  content: string;
+}
+
 const LAYOUT_LABELS: Record<string, string> = {
   title: "제목",
   bullets: "목록",
@@ -71,7 +95,7 @@ function extractApiKeyErrorDetail(msg: string): string {
     return "API 키가 유효하지 않습니다. .env 파일의 API 키를 확인하세요.\n\n" + msg;
   }
   if (/api\s*키\s*없음/i.test(msg) || /GROQ_API_KEY|ANTHROPIC_API_KEY|OPENAI_API_KEY/.test(msg)) {
-    return "API 키를 찾을 수 없습니다.\n\n프로젝트 루트에 .env 파일을 만들고 API 키를 설정하세요.\n예: GROQ_API_KEY=sk-...\n\n" + msg;
+    return "API 키를 찾을 수 없습니다.\n\n프로젝트 루트에 .env 파일을 만들고 API 키를 설정하세요.\n예: OPENAI_API_KEY=sk-...\n\n" + msg;
   }
   return "API 키 오류가 발생했습니다.\n\n" + msg;
 }
@@ -94,9 +118,10 @@ export function TeachingPage() {
   const [extractFromCache, setExtractFromCache] = useState(false);
 
   // Prompt config
-  const [promptPath, setPromptPath] = useState("");
-  const [promptContent, setPromptContent] = useState("");
-  const [promptDirty, setPromptDirty] = useState(false);
+  const [defaultPromptPath, setDefaultPromptPath] = useState("");
+  const [defaultPromptContent, setDefaultPromptContent] = useState("");
+  const [defaultPromptError, setDefaultPromptError] = useState<string | null>(null);
+  const [defaultPromptLoading, setDefaultPromptLoading] = useState(false);
 
   const [extraPromptPath, setExtraPromptPath] = useState("");
   const [extraPromptContent, setExtraPromptContent] = useState("");
@@ -109,14 +134,11 @@ export function TeachingPage() {
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [material, setMaterial] = useState<TeachingMaterial | null>(null);
+  const [semanticBlocks, setSemanticBlocks] = useState<SemanticBlock[] | null>(null);
+  const [teachingBlocks, setTeachingBlocks] = useState<TeachingBlock[] | null>(null);
   const [htmlPath, setHtmlPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedUnits, setExpandedUnits] = useState<Set<number>>(new Set([0]));
-
-  const promptPathRef = useRef(promptPath);
-  const extraPromptPathRef = useRef(extraPromptPath);
-  promptPathRef.current = promptPath;
-  extraPromptPathRef.current = extraPromptPath;
 
   // On mount: pre-populate from converter tab's already-extracted state (silent)
   useEffect(() => {
@@ -132,13 +154,22 @@ export function TeachingPage() {
     }
   }, []);
 
-  // Load file content when promptPath changes
+  // Load the fixed base prompt from prompts/base_prompt.txt.
   useEffect(() => {
-    if (!promptPath) { setPromptContent(""); setPromptDirty(false); return; }
-    invoke<string>("read_text_file", { path: promptPath })
-      .then((content) => { setPromptContent(content); setPromptDirty(false); })
-      .catch(() => {});
-  }, [promptPath]);
+    setDefaultPromptLoading(true);
+    setDefaultPromptError(null);
+    invoke<DefaultTeachingPrompt>("get_default_teaching_prompt", { jarPath: jarPath || null })
+      .then((prompt) => {
+        setDefaultPromptPath(prompt.path);
+        setDefaultPromptContent(prompt.content);
+      })
+      .catch((e) => {
+        setDefaultPromptPath("");
+        setDefaultPromptContent("");
+        setDefaultPromptError(String(e));
+      })
+      .finally(() => setDefaultPromptLoading(false));
+  }, [jarPath]);
 
   // Load file content when extraPromptPath changes
   useEffect(() => {
@@ -147,12 +178,6 @@ export function TeachingPage() {
       .then((content) => { setExtraPromptContent(content); setExtraPromptDirty(false); })
       .catch(() => {});
   }, [extraPromptPath]);
-
-  async function savePrompt() {
-    if (!promptPath || !promptDirty) return;
-    await invoke("write_text_file", { path: promptPath, content: promptContent });
-    setPromptDirty(false);
-  }
 
   async function saveExtraPrompt() {
     if (!extraPromptPath || !extraPromptDirty) return;
@@ -198,6 +223,8 @@ export function TeachingPage() {
     if (s.sourceType === "indd" && s.inddPath === path && s.idmlPath) {
       setExtractError(null);
       setMaterial(null);
+      setSemanticBlocks(null);
+      setTeachingBlocks(null);
       setError(null);
       const parentDir = path.replace(/[/\\][^/\\]+$/, "");
       const base = path.replace(/^.*[/\\]/, "").replace(/\.[^.]+$/, "");
@@ -214,6 +241,8 @@ export function TeachingPage() {
     setExtractionMessage("준비 중...");
     setExtractError(null);
     setMaterial(null);
+    setSemanticBlocks(null);
+    setTeachingBlocks(null);
     setError(null);
 
     const unlistenProgress = await listen<InddExtractionProgress>(
@@ -247,14 +276,6 @@ export function TeachingPage() {
     }
   }
 
-  async function browsePrompt() {
-    const selected = await open({
-      filters: [{ name: "텍스트", extensions: ["txt"] }],
-      multiple: false,
-    });
-    if (selected && typeof selected === "string") setPromptPath(selected);
-  }
-
   async function browseExtraPrompt() {
     const selected = await open({
       filters: [{ name: "텍스트", extensions: ["txt"] }],
@@ -272,10 +293,9 @@ export function TeachingPage() {
   }
 
   async function generate() {
-    if (!idmlPath || !jarPath || !promptPath) return;
+    if (!idmlPath || !jarPath || defaultPromptLoading || defaultPromptError) return;
 
     // 수정된 내용 먼저 파일에 저장
-    if (promptDirty) await savePrompt();
     if (extraPromptDirty) await saveExtraPrompt();
 
     // 저장 경로 확정 — 생성 직전에 물어봄
@@ -290,6 +310,8 @@ export function TeachingPage() {
     setProgress(null);
     setLogs([]);
     setMaterial(null);
+    setSemanticBlocks(null);
+    setTeachingBlocks(null);
     setHtmlPath(null);
     setError(null);
 
@@ -304,7 +326,7 @@ export function TeachingPage() {
       const result = await invoke<{ html_path?: string | null }>("generate_teaching", {
         inputPath: idmlPath,
         outputPath: chosenOutput,
-        promptPath,
+        promptPath: null,
         extraPromptPath: extraPromptPath || null,
         jarPath,
         resolvedJsonPath: resolvedJsonPath || null,
@@ -327,7 +349,20 @@ export function TeachingPage() {
     // 파일 읽기 — generate_teaching 성공 후 별도 처리
     try {
       const raw = await invoke<string>("read_text_file", { path: chosenOutput });
-      setMaterial(JSON.parse(raw));
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        setSemanticBlocks(parsed);
+        setTeachingBlocks(null);
+        setMaterial(null);
+      } else if (parsed?.semantic_blocks && Array.isArray(parsed.semantic_blocks)) {
+        setSemanticBlocks(parsed.semantic_blocks);
+        setTeachingBlocks(Array.isArray(parsed.teaching_blocks) ? parsed.teaching_blocks : []);
+        setMaterial(null);
+      } else {
+        setMaterial(parsed);
+        setSemanticBlocks(null);
+        setTeachingBlocks(null);
+      }
     } catch (e: any) {
       setError(`결과 파일 읽기 실패: ${chosenOutput}\n\n${String(e)}`);
     } finally {
@@ -348,7 +383,7 @@ export function TeachingPage() {
 
   const inddLoaded = !!idmlPath;
   const indesignAvailable = !!indesignPath;
-  const canGenerate = inddLoaded && !!jarPath && !!promptPath && !isGenerating && !isExtracting;
+  const canGenerate = inddLoaded && !!jarPath && !defaultPromptLoading && !defaultPromptError && !isGenerating && !isExtracting;
   const inddFilename = inddPath ? inddPath.replace(/^.*[/\\]/, "") : null;
 
   return (
@@ -432,37 +467,25 @@ export function TeachingPage() {
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-gray-600 text-xs font-medium w-20 shrink-0">기본 프롬프트</span>
-                <input
-                  type="text"
-                  value={promptPath}
-                  onChange={(e) => setPromptPath(e.target.value)}
-                  placeholder="prompts/base_prompt.txt"
-                  className="flex-1 text-xs border rounded px-2 py-1.5 font-mono bg-white"
-                />
-                <button
-                  onClick={browsePrompt}
-                  className="px-2 py-1.5 text-xs border rounded hover:bg-gray-100 bg-white shrink-0"
-                >
-                  찾아보기
-                </button>
-                {promptDirty && (
-                  <button
-                    onClick={savePrompt}
-                    className="px-2 py-1.5 text-xs rounded bg-amber-500 text-white hover:bg-amber-600 shrink-0"
-                  >
-                    저장
-                  </button>
+                <div className="flex-1 text-xs border rounded px-2 py-1.5 font-mono bg-gray-100 text-gray-600 truncate">
+                  {defaultPromptLoading ? "prompts/base_prompt.txt 로드 중..." : defaultPromptPath || "prompts/base_prompt.txt"}
+                </div>
+                {defaultPromptError && (
+                  <span className="text-xs text-red-500 shrink-0">로드 실패</span>
                 )}
               </div>
-              {promptPath && (
+              {defaultPromptError ? (
+                <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                  {defaultPromptError}
+                </div>
+              ) : defaultPromptContent && (
                 <textarea
-                  value={promptContent}
-                  onChange={(e) => { setPromptContent(e.target.value); setPromptDirty(true); }}
-                  onBlur={savePrompt}
+                  value={defaultPromptContent}
+                  readOnly
                   spellCheck={false}
-                  className="w-full text-xs font-mono border rounded px-3 py-2 bg-white resize-y leading-relaxed"
+                  className="w-full text-xs font-mono border rounded px-3 py-2 bg-gray-50 resize-y leading-relaxed text-gray-600"
                   style={{ minHeight: "140px", maxHeight: "320px" }}
-                  placeholder="프롬프트 내용이 여기에 표시됩니다..."
+                  placeholder="기본 프롬프트 내용이 여기에 표시됩니다..."
                 />
               )}
             </div>
@@ -527,7 +550,7 @@ export function TeachingPage() {
                 disabled={!canGenerate}
                 className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
               >
-                {isGenerating ? "생성 중..." : "교수자료 생성"}
+                {isGenerating ? "생성 중..." : "Semantic Block 생성"}
               </button>
             </div>
           </div>
@@ -568,7 +591,100 @@ export function TeachingPage() {
 
       {/* 결과 */}
       <div className="flex-1 overflow-y-auto px-5 py-4">
-        {material ? (
+        {semanticBlocks ? (
+          <div>
+            <div className="mb-4 flex items-center gap-3 text-xs text-gray-500">
+              <span>{semanticBlocks.length}개 Semantic Block</span>
+              {teachingBlocks && (
+                <>
+                  <span>·</span>
+                  <span>{teachingBlocks.length}개 Teaching Block</span>
+                </>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  onClick={() => invoke("open_file", { path: outputPath }).catch(() => {})}
+                  className="px-2 py-0.5 border rounded text-xs hover:bg-gray-100"
+                >
+                  JSON 파일 열기
+                </button>
+              </div>
+            </div>
+
+            {teachingBlocks && teachingBlocks.length > 0 && (
+              <div className="mb-5">
+                <div className="mb-2 text-xs font-medium text-gray-500">Teaching Blocks</div>
+                <div className="space-y-2">
+                  {teachingBlocks.map((block, idx) => (
+                    <div key={block.teaching_block_id ?? idx} className="border rounded-lg px-4 py-3 bg-blue-50/40">
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs font-mono text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded shrink-0">
+                          {block.teaching_block_id ?? `TB-${String(idx + 1).padStart(3, "0")}`}
+                        </span>
+                        {block.block_type && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-white text-blue-700 border border-blue-100 shrink-0">
+                            {block.block_type}
+                          </span>
+                        )}
+                        {(block.page_start || block.page_end) && (
+                          <span className="text-xs text-gray-400 shrink-0">
+                            p.{block.page_start ?? block.page_end}
+                            {block.page_end && block.page_end !== block.page_start ? `-${block.page_end}` : ""}
+                          </span>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-gray-800 truncate">{block.title}</div>
+                          {block.semantic_blocks && block.semantic_blocks.length > 0 && (
+                            <div className="mt-1 text-xs text-gray-500 font-mono truncate">
+                              {block.semantic_blocks.join(", ")}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mb-2 text-xs font-medium text-gray-500">Raw Semantic Blocks</div>
+            <div className="space-y-2">
+              {semanticBlocks.map((block, idx) => (
+                <div key={block.block_id ?? idx} className="border rounded-lg px-4 py-3">
+                  <div className="flex items-start gap-2">
+                    <span className="text-xs font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded shrink-0">
+                      {block.block_id ?? `SB-${String(idx + 1).padStart(3, "0")}`}
+                    </span>
+                    {block.block_type && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 shrink-0">
+                        {block.block_type}
+                      </span>
+                    )}
+                    {(block.page_start || block.page_end) && (
+                      <span className="text-xs text-gray-400 shrink-0">
+                        p.{block.page_start ?? block.page_end}
+                        {block.page_end && block.page_end !== block.page_start ? `-${block.page_end}` : ""}
+                      </span>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      {block.title && (
+                        <div className="text-sm font-medium text-gray-800 truncate">{block.title}</div>
+                      )}
+                      <div className="mt-1 text-xs text-gray-600 whitespace-pre-wrap line-clamp-4">
+                        {block.raw_text}
+                      </div>
+                      {block.image_refs && block.image_refs.length > 0 && (
+                        <div className="mt-2 text-xs text-gray-400 font-mono truncate">
+                          images: {block.image_refs.join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : material ? (
           <div>
             <div className="mb-4 flex items-center gap-3 text-xs text-gray-500">
               <span>모델: <span className="font-mono">{material.model}</span></span>
@@ -660,7 +776,7 @@ export function TeachingPage() {
           <div className="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
             <span className="text-4xl">📚</span>
             <p>INDD 파일을 열고 프롬프트를 선택하세요</p>
-            <p className="text-xs">단원별 슬라이드 구성을 LLM이 생성합니다</p>
+            <p className="text-xs">InDesign AST를 Semantic Block JSON 배열로 추출합니다</p>
           </div>
         ) : null}
       </div>

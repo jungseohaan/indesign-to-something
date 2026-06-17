@@ -264,6 +264,9 @@ public class ASTSerializer {
         if (tf.noAutoLineWrap()) {
             first = writeBooleanField(sb, "noAutoLineWrap", true, first);
         }
+        if (tf.plannedVisualTextOverlay()) {
+            first = writeBooleanField(sb, "plannedVisualTextOverlay", true, first);
+        }
         if (tf.anchoredFlowWithText()) {
             first = writeBooleanField(sb, "anchoredFlowWithText", true, first);
         }

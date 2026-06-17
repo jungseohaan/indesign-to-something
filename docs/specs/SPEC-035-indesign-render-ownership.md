@@ -1,7 +1,11 @@
 # SPEC-035: IDML Render Ownership
 
-> 상태: In Progress
+> 상태: Migration Record
 > 원칙: 예외 금지. 페이지별 패치 금지. source ownership으로만 해결한다.
+
+정책의 최종 기준은 `SPEC-036-source-ownership-v2.md`이다.
+이 문서는 기존 Phase 6/7/legacy path를 Stage 구조로 이관하기 위한 기록으로만 유지한다.
+두 문서가 충돌하면 `SPEC-036`을 따른다.
 
 ---
 

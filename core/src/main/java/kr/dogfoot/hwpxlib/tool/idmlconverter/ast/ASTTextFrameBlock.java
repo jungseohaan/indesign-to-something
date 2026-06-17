@@ -65,6 +65,9 @@ public class ASTTextFrameBlock extends ASTBlock {
     // Phase 2가 non-editable inline TF를 플로팅 글상자로 전환한 경우 true.
     // HwpxTextBoxBuilder가 이 플래그를 보고 투명 DrawText 경로(hp:rect)로 라우팅.
     private boolean inlineToFloating;
+    // Stage 1 plan상 별도 visual shell/backdrop 위에 얹히는 HWPX 텍스트.
+    // HWPX table은 floating PNG와 평면이 엇갈릴 수 있어 overlay-safe DrawText 경로로 라우팅한다.
+    private boolean plannedVisualTextOverlay;
     // 페이지 좌표는 유지하지만 앵커 문단과 함께 이동해야 하는 플로팅 글상자.
     // 인라인(treatAsChar=true)과 달리 원본의 page-level group stack 좌표를 보존한다.
     private boolean anchoredFlowWithText;
@@ -186,6 +189,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean inlineToFloating() { return inlineToFloating; }
     public void inlineToFloating(boolean v) { this.inlineToFloating = v; }
+
+    public boolean plannedVisualTextOverlay() { return plannedVisualTextOverlay; }
+    public void plannedVisualTextOverlay(boolean v) { this.plannedVisualTextOverlay = v; }
 
     public boolean anchoredFlowWithText() { return anchoredFlowWithText; }
     public void anchoredFlowWithText(boolean v) { this.anchoredFlowWithText = v; }

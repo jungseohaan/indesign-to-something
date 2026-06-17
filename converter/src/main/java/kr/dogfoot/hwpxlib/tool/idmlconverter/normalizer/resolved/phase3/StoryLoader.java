@@ -416,9 +416,21 @@ public class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
+                                    ASTInlineObject groupShell =
+                                            InlineFrameHandler.tryInlineGroupShellWithEditableChild(ctx, domId);
+                                    if (groupShell != null) {
+                                        para.addItem(groupShell);
+                                        anchorIdx++;
+                                        continue;
+                                    }
                                     // AnchoredPosition="Anchored" + TextWrapMode="None" Group:
                                     // 사전 스캔에서 등록됨 → 인라인 삽입 건너뛰고 Phase 3 후처리가 floating ASTFigure 로 배치.
                                     if (ctx.deferredAnchoredFloatingIds.contains(domId)) {
+                                        anchorIdx++;
+                                        continue;
+                                    }
+                                    if (InlineFrameHandler.hasTextBlockPlacedDescendant(ctx, domId)
+                                            || InlineFrameHandler.hasPlannedFloatingHwpxTextDescendant(ctx, domId)) {
                                         anchorIdx++;
                                         continue;
                                     }
@@ -459,15 +471,6 @@ public class StoryLoader {
                                                 InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, domId);
                                         if (shapeShell != null) {
                                             para.addItem(shapeShell);
-                                            anchorIdx++;
-                                            continue;
-                                        }
-                                        // 곡선/말풍선 Group 셸(렌더 PNG 배경) + 편집 텍스트 → 인라인 박스로
-                                        // (번호 "1"/"2"와 같은 줄에 자연 흐름 + 텍스트 검색 가능)
-                                        ASTInlineObject groupShell =
-                                                InlineFrameHandler.tryInlineGroupShellWithEditableChild(ctx, domId);
-                                        if (groupShell != null) {
-                                            para.addItem(groupShell);
                                             anchorIdx++;
                                             continue;
                                         }

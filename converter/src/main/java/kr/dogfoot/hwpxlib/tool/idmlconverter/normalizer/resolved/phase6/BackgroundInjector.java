@@ -17,6 +17,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualSy
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualTextEmphasisAbsorber;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualTfInlineCompositor;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualZOrderPlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
@@ -52,93 +53,27 @@ public final class BackgroundInjector {
         List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
         if (floatingItems == null || floatingItems.isEmpty()) return;
 
-        Set<Integer> editableLabelShellIds = collectEditableLabelShells(ctx, floatingItems);
-        Set<Integer> conceptDiagramLabelShellIds = collectConceptDiagramLabelShells(ctx, floatingItems);
-
-        // Pass 1: id → pageIndex 맵 구성 (자식의 페이지 판별용)
-        Map<Integer, Integer> idToPage = new HashMap<>();
-        Map<Integer, RenderedGroup> idToRendered = new HashMap<>();
-        for (RenderedGroup rg : floatingItems) {
-            idToPage.put(rg.id(), rg.pageIndex());
-            idToRendered.putIfAbsent(rg.id(), rg);
-        }
-
         // (SPEC-036 (가)) childOfGroup(부모 PNG에 구워진 자식) 억제는 Stage 2.5 refinement가
         // 비보호 항목을 plan(DROP_VISUAL)으로 확정한다.
         // → 아래 VisualPlacementResolver.planRejection이 처리하므로 여기서 별도 체크 불필요.
 
         // (SPEC-036 (가)) coveredByInlineObjects(inline_object 소유 커버리지) 억제도 Stage 2.5
         // refinement가 plan(DROP_VISUAL) 확정 → 아래 별도 체크 불필요.
-        Set<Integer> completeInlineSimpleButtonLabels = ctx.inlineCompleteSimpleButtonLabelIds;
-        Set<Integer> inlineEditableLabelShells = ctx.inlineEditableLabelShellIds;
-
-        Set<String> processedKeys = new HashSet<>();
-        Set<String> processedDomPageKeys = new HashSet<>();
-
         for (RenderedGroup rg : floatingItems) {
             boolean conceptDiagramInlineShell = isConceptDiagramInlineVisualShell(ctx, rg);
             if (!isPageObject(rg) && !conceptDiagramInlineShell) {
                 continue;
             }
-            // (SPEC-036 (가)) 셀 인라인 임베드 배지의 floating PNG 억제는 Stage 2.5 refinement가
-            // plan(DROP_VISUAL)으로 확정 → 위 VisualPlacementResolver.planRejection이 처리한다.
-            // SPEC-036: Phase 6 초기 억제 판정은 VisualPlacementResolver로 통합한다.
-            VisualPlacementResolver.PlanRejection initialRej = VisualPlacementResolver.phase6InitialRejection(ctx, rg);
-            if (initialRej != null) {
-                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", initialRej.code, initialRej.detail);
-                continue;
-            }
-            if (shouldDecomposeToEditableLabelShell(rg, editableLabelShellIds, idToRendered)) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_EDITABLE_LABEL_PARENT",
-                        "editable label shell is placed from a tighter child render");
-                continue;
-            }
-            VisualPlacementResolver.PlanRejection disposedRej = VisualPlacementResolver.phase6DisposedRejection(ctx, rg);
-            if (disposedRej != null) {
-                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6", disposedRej.code, disposedRej.detail);
-                continue;
-            }
-            boolean conceptDiagramLabelShell = conceptDiagramLabelShellIds.contains(rg.id());
-            boolean protectedEditableLabelShell = conceptDiagramLabelShell
-                    || conceptDiagramInlineShell
-                    || shouldPreserveEditableLabelShell(rg, editableLabelShellIds);
-            // 단순 배지 완성형 PNG가 inline_object/page_object 쌍으로 동시에 추출되면
-            // page_object가 원본 절대 좌표를 보존한다. inline_object는 HWP 문장 흐름에
-            // 들어가면서 플로팅 위치/선택 영역이 밀리는 경우가 있어 Phase 3에서 버린다.
-            if (isPageObject(rg)
-                    && completeInlineSimpleButtonLabels.contains(rg.id())
-                    && isCompletePngSimpleButtonLabel(ctx, rg)) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_COMPLETE_LABEL",
-                        "complete simple button label is owned by inline object");
-                continue;
-            }
-            if (isPageObject(rg)
-                    && inlineEditableLabelShells.contains(rg.id())
-                    && isInlineEditableLabelShellRender(rg)) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_INLINE_EDITABLE_LABEL_SHELL",
-                        "editable label shell is owned by inline text frame");
-                continue;
-            }
-            // (SPEC-036 (가)) SKIP_CHILD_OF_GROUP / SKIP_INLINE_COVERAGE / SKIP_INLINE_OBJECT은
-            // Stage 2.5 refinement가 plan(DROP_VISUAL)으로 확정 → 위 planRejection이 처리.
-            VisualPlacementResolver.PlanRejection legacyOwnershipRej =
-                    VisualPlacementResolver.phase6LegacyOwnershipRejection(
-                            ctx, rg, protectedEditableLabelShell);
-            if (legacyOwnershipRej != null) {
+            if (!ctx.hasOwnershipPlan(rg)) {
                 ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
-                        legacyOwnershipRej.code, legacyOwnershipRej.detail);
+                        "SKIP_NO_OBJECT_PLAN", "visible candidate has no OwnershipPlanner ObjectPlan");
                 continue;
             }
-            if (!processedDomPageKeys.add(rg.id() + ":" + rg.pageIndex())) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_DUPLICATE_DOM_PAGE",
-                        "same DOM id already rendered on this page");
-                continue;
-            }
-            // 같은 페이지에서 같은 파일이 중복 추출된 경우만 스킵한다.
-            // master_graphic은 같은 PNG asset을 여러 페이지 인스턴스가 공유하므로 pageIndex를 보존해야 한다.
-            if (!processedKeys.add((rg.file() != null ? rg.file() : String.valueOf(rg.id()))
-                    + ":" + rg.pageIndex())) {
-                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_DUPLICATE_FILE_PAGE", "same page/file already processed");
+            VisualPlacementResolver.PlanRejection planRej =
+                    VisualPlacementResolver.planRejection(ctx, rg);
+            if (planRej != null) {
+                ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
+                        planRej.code, planRej.detail);
                 continue;
             }
 
@@ -156,7 +91,7 @@ public final class BackgroundInjector {
             bounds = VisualTfInlineCompositor.shouldCompositeTfInlineVisuals(rg)
                     ? VisualTfInlineCompositor.boundsWithTfInlineVisuals(ctx, rg, bounds)
                     : bounds;
-            bounds = normalizeInlineSpreadBoundsToPage(ctx, pageIdx, rg, bounds);
+            bounds = normalizeSpreadBoundsToPage(ctx, pageIdx, rg, bounds);
 
             if (VisualTextEmphasisAbsorber.tryAbsorbTextEmphasisBackdrop(ctx, sections, rg, bounds)) {
                 ctx.recordRenderedDecision(rg, "Phase6", "ABSORB_TEXT_EMPHASIS_BACKDROP",
@@ -253,7 +188,9 @@ public final class BackgroundInjector {
                     && !keepPlannedContainerBackdropFill
                     && isContainerVisualShell
                     && !isInferredTextFrameVisualShell;
-            boolean needsAlphaCrop = shouldCropOwnedTextFrameShellToAlpha(rg);
+            boolean isPlannedTextShell =
+                    ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
+            boolean needsAlphaCrop = !isPlannedTextShell && shouldCropOwnedTextFrameShellToAlpha(rg);
             boolean needsPageCrop = (fullW > 1.0 && fullH > 1.0
                     && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
                         || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5))
@@ -786,15 +723,12 @@ public final class BackgroundInjector {
         return false;
     }
 
-    private static double[] normalizeInlineSpreadBoundsToPage(
+    private static double[] normalizeSpreadBoundsToPage(
             ResolvedBuildContext ctx, int pageIdx, RenderedGroup rg, double[] bounds) {
         if (ctx == null || ctx.resolvedData == null || rg == null
                 || bounds == null || bounds.length < 4) {
             return bounds;
         }
-        boolean inlineObject = "inline_object".equals(rg.itemType())
-                || "inline_object".equals(rg.type());
-        if (!inlineObject) return bounds;
         if (ctx.resolvedData.pages() == null || pageIdx < 0 || pageIdx >= ctx.resolvedData.pages().size()) {
             return bounds;
         }
@@ -809,9 +743,9 @@ public final class BackgroundInjector {
         double pageHeight = pageBottom - pageTop;
         if (pageWidth <= 0.0 || pageHeight <= 0.0) return bounds;
 
-        // Right-page inline anchors are sometimes exported in spread coordinates
-        // while the HWPX page expects page-relative coordinates. Fold those into
-        // the local page before visibility/crop/z-order decisions.
+        // Some extracted visuals are exported in spread coordinates while the
+        // HWPX page expects page-relative coordinates. Fold those into the local
+        // page before visibility/crop/z-order decisions.
         boolean xInSpreadPage = bounds[1] >= pageLeft - 0.5
                 && bounds[3] <= pageRight + 0.5
                 && pageLeft > 1.0;
@@ -826,16 +760,31 @@ public final class BackgroundInjector {
                 && pageTop <= 1.0
                 && bounds[0] >= pageHeight - 0.5
                 && bounds[2] <= pageHeight * 2.0 + 0.5;
-        double localPageWidth = ctx.scaleFactor != 0.0 ? pageWidth / ctx.scaleFactor : pageWidth;
-        double localPageHeight = ctx.scaleFactor != 0.0 ? pageHeight / ctx.scaleFactor : pageHeight;
+        double scale = ctx.scaleFactor != 0.0 ? ctx.scaleFactor : 1.0;
+        double localPageLeft = pageLeft / scale;
+        double localPageTop = pageTop / scale;
+        double localPageRight = pageRight / scale;
+        double localPageBottom = pageBottom / scale;
+        double localPageWidth = pageWidth / scale;
+        double localPageHeight = pageHeight / scale;
+        boolean xInLocalSpreadPage = !xInSpreadPage
+                && bounds[1] >= localPageLeft - 0.5
+                && bounds[3] <= localPageRight + 0.5
+                && localPageLeft > 1.0;
+        boolean yInLocalSpreadPage = !yInSpreadPage
+                && bounds[0] >= localPageTop - 0.5
+                && bounds[2] <= localPageBottom + 0.5
+                && localPageTop > 1.0;
         boolean xInRightLocalSpreadPage = !xInSpreadPage
                 && !xInRightSpreadPage
+                && !xInLocalSpreadPage
                 && pageLeft <= 1.0
                 && localPageWidth > 0.0
                 && bounds[1] >= localPageWidth - 0.5
                 && bounds[3] <= localPageWidth * 2.0 + 0.5;
         boolean yInBottomLocalSpreadPage = !yInSpreadPage
                 && !yInBottomSpreadPage
+                && !yInLocalSpreadPage
                 && pageTop <= 1.0
                 && localPageHeight > 0.0
                 && bounds[0] >= localPageHeight - 0.5
@@ -843,12 +792,18 @@ public final class BackgroundInjector {
         if (xInRightSpreadPage) {
             pageLeft = pageWidth;
             xInSpreadPage = true;
+        } else if (xInLocalSpreadPage) {
+            pageLeft = localPageLeft;
+            xInSpreadPage = true;
         } else if (xInRightLocalSpreadPage) {
             pageLeft = localPageWidth;
             xInSpreadPage = true;
         }
         if (yInBottomSpreadPage) {
             pageTop = pageHeight;
+            yInSpreadPage = true;
+        } else if (yInLocalSpreadPage) {
+            pageTop = localPageTop;
             yInSpreadPage = true;
         } else if (yInBottomLocalSpreadPage) {
             pageTop = localPageHeight;

@@ -15,7 +15,15 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.SimpleButtonLabelPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
@@ -36,6 +44,102 @@ import java.util.HashMap;
 public class StoryConverterTest {
     @Rule
     public TemporaryFolder temp = new TemporaryFolder();
+
+    @Test
+    public void inlinePngPlanWithSeparateHwpxTextDoesNotBecomeInlineTextFrame() {
+        ResolvedData data = new ResolvedData();
+
+        ResolvedPageItem group = new ResolvedPageItem();
+        group.id("96421");
+        group.type("Group");
+        data.addPageItem(group);
+
+        ResolvedPageItem textItem = new ResolvedPageItem();
+        textItem.id("96423");
+        textItem.type("TextFrame");
+        textItem.parentId("96421");
+        data.addPageItem(textItem);
+
+        ResolvedPageItem shellItem = new ResolvedPageItem();
+        shellItem.id("96422");
+        shellItem.type("Polygon");
+        shellItem.parentId("96421");
+        shellItem.geometricBounds(new double[] { 112.0, 283.3, 115.3, 296.6 });
+        data.addPageItem(shellItem);
+
+        ResolvedBuildContext ctx = new ResolvedBuildContext();
+        ctx.resolvedData = data;
+        ctx.ownershipPlans.add(new ObjectPlan(
+                96421,
+                "rendered_floating_item:inline_object:inline_object",
+                1,
+                TextAction.DROP_TEXT,
+                VisualAction.PLACE_INLINE_PNG,
+                VisualLayer.CONTENT_VISUAL,
+                Placement.INLINE,
+                96421,
+                new int[] { 96421, 96422 },
+                0,
+                "inline_graphic_only",
+                "rendered_frames/inline_96421.png",
+                null));
+        ctx.ownershipPlans.add(new ObjectPlan(
+                96423,
+                "text_frame",
+                1,
+                TextAction.OWNED_BY_HWPX_TEXT,
+                VisualAction.DROP_VISUAL,
+                VisualLayer.CONTENT_VISUAL,
+                Placement.FLOATING,
+                null,
+                new int[] { 96423 },
+                18,
+                "editable_text_frame",
+                "",
+                null));
+
+        Assert.assertTrue(InlineFrameHandler.shouldUsePlannedInlinePngWithSeparateHwpxText(ctx, 96421));
+        Assert.assertTrue(InlineFrameHandler.buildChildEditableBoxes(ctx, 96421).isEmpty());
+
+        ResolvedBuildContext renderedCtx = new ResolvedBuildContext();
+        renderedCtx.resolvedData = data;
+        renderedCtx.ownershipPlans.addAll(ctx.ownershipPlans);
+        renderedCtx.resolvedData.addRenderedFloatingItem(renderedGroup(
+                96421,
+                "inline_object",
+                null,
+                "inline_graphic_only",
+                "indesign_png",
+                "none",
+                null,
+                false));
+        renderedCtx.resolvedData.addRenderedFloatingItem(renderedGroup(
+                96421,
+                "page_object",
+                null,
+                "visual_label_text_hidden_shell",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "96423" },
+                true));
+        renderedCtx.addSimpleButtonLabelPlan(new SimpleButtonLabelPlan(
+                96421,
+                96423,
+                96422,
+                1,
+                "예시 답안",
+                null,
+                null,
+                9.0,
+                "#0037b8",
+                null,
+                null,
+                SimpleButtonLabelPlan.Mode.TEXT_SHELL,
+                new int[] { 96421, 96422, 96423 },
+                "simple_button_label_text_shell"));
+        Assert.assertTrue(InlineFrameHandler.shouldUsePlannedInlinePngWithSeparateHwpxText(renderedCtx, 96421));
+        Assert.assertNull(SimpleButtonLabelInlineFactory.create(renderedCtx, 96421));
+    }
 
     @Test
     public void storyWithStandaloneTextAndTableKeepsTextParagraphs() throws Exception {
@@ -87,6 +191,8 @@ public class StoryConverterTest {
 
         ResolvedBuildContext ctx = new ResolvedBuildContext();
         ctx.resolvedData = data;
+        ctx.spec016Counts = new int[3];
+        addInlineTableSourcePlan(ctx, 26964);
         ctx.loadIDMLStory = storyId -> inlineTableStory();
 
         ASTInlineObject obj = InlineFrameHandler.tryInlineTextFrameWithTables(ctx, 26964);
@@ -132,6 +238,8 @@ public class StoryConverterTest {
 
         ResolvedBuildContext ctx = new ResolvedBuildContext();
         ctx.resolvedData = data;
+        ctx.spec016Counts = new int[3];
+        addInlineTableSourcePlan(ctx, 26964);
         ctx.loadIDMLStory = storyId -> inlineTableStory();
 
         ASTInlineObject obj = InlineFrameHandler.tryInlineTextFrameWithTables(ctx, 26963);
@@ -222,6 +330,29 @@ public class StoryConverterTest {
         return tf;
     }
 
+    private static RenderedGroup renderedGroup(
+            int id,
+            String type,
+            String itemType,
+            String reason,
+            String visualOwner,
+            String textOwner,
+            String[] editableTextFrameIds,
+            boolean textHiddenBeforeExport) {
+        RenderedGroup rg = new RenderedGroup();
+        rg.id(id);
+        rg.type(type);
+        rg.itemType(itemType);
+        rg.reason(reason);
+        rg.visualOwner(visualOwner);
+        rg.textOwner(textOwner);
+        rg.editableTextFrameIds(editableTextFrameIds);
+        rg.textHiddenBeforeExport(textHiddenBeforeExport);
+        rg.containsText(Boolean.FALSE);
+        rg.file("rendered_frames/test_" + id + ".png");
+        return rg;
+    }
+
     private static IDMLStory loadStory(File storyFile) {
         try {
             DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
@@ -260,6 +391,33 @@ public class StoryConverterTest {
         table.rowCount(3);
         story.addTable(table);
         return story;
+    }
+
+    private static void addInlineTableSourcePlan(ResolvedBuildContext ctx, int textFrameDomId) {
+        ctx.addOwnershipPlan(new ObjectPlan(
+                textFrameDomId,
+                "text_frame",
+                0,
+                TextAction.OWNED_BY_HWPX_TEXT,
+                VisualAction.PLACE_TABLE_STYLE,
+                VisualLayer.CONTENT_VISUAL,
+                Placement.INLINE,
+                null,
+                new int[] { textFrameDomId },
+                0,
+                "test_inline_table_text_frame",
+                null,
+                null));
+        ctx.addAnchoredTablePlan(new AnchoredTablePlan(
+                textFrameDomId,
+                "26967",
+                0,
+                "u6957i696d",
+                textFrameDomId,
+                "26967",
+                "u6957i696d",
+                0,
+                "test_inline_table_source"));
     }
 
     private static IDMLParagraph paragraph(String text) {

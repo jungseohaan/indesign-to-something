@@ -185,6 +185,7 @@ public class ASTDeserializer {
         if (o.has("strokeTint")) tf.strokeTint(getDouble(o, "strokeTint"));
         tf.fromGroup(getBool(o, "fromGroup"));
         tf.noAutoLineWrap(getBool(o, "noAutoLineWrap"));
+        tf.plannedVisualTextOverlay(getBool(o, "plannedVisualTextOverlay"));
         tf.anchoredFlowWithText(getBool(o, "anchoredFlowWithText"));
 
         if (o.has("paragraphs")) {

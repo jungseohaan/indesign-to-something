@@ -278,18 +278,26 @@ public final class TableBuilder {
                         || hasFlowStackTitleAboveTableBounds(ctx, tf, resolvedTableBounds, thisX, thisY, astTable)) {
                     astTable.anchoredFlowWithText(true);
                 }
-                absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
-
-                report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
-                completeVisibleTableOuterBorder(astTable);
+                boolean chromeOwnedByTextShell = tableChromeOwnedByTextShell(ctx, tf);
+                if (chromeOwnedByTextShell) {
+                    stripTableChrome(astTable);
+                } else {
+                    absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
+                    report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
+                    completeVisibleTableOuterBorder(astTable);
+                }
 
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
-                    report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
-                            ctx, placement.table, placement.pageIdx);
-                    completeVisibleTableOuterBorder(placement.table);
+                    if (chromeOwnedByTextShell) {
+                        stripTableChrome(placement.table);
+                    } else {
+                        report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
+                                ctx, placement.table, placement.pageIdx);
+                        completeVisibleTableOuterBorder(placement.table);
+                    }
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
@@ -374,17 +382,26 @@ public final class TableBuilder {
                         || hasFlowStackTitleAboveTableBounds(ctx, tf, resolvedTableBounds, thisX, thisY, astTable)) {
                     astTable.anchoredFlowWithText(true);
                 }
-                absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
-                report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
-                completeVisibleTableOuterBorder(astTable);
+                boolean chromeOwnedByTextShell = tableChromeOwnedByTextShell(ctx, tf);
+                if (chromeOwnedByTextShell) {
+                    stripTableChrome(astTable);
+                } else {
+                    absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
+                    report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
+                    completeVisibleTableOuterBorder(astTable);
+                }
 
                 List<TablePlacement> tablePlacements = splitSpreadWideTable(
                         ctx, astTable, tablePageIdx, resolvedTableBounds, sections.size());
                 for (TablePlacement placement : tablePlacements) {
                     if (placement.pageIdx < 0 || placement.pageIdx >= sections.size()) continue;
-                    report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
-                            ctx, placement.table, placement.pageIdx);
-                    completeVisibleTableOuterBorder(placement.table);
+                    if (chromeOwnedByTextShell) {
+                        stripTableChrome(placement.table);
+                    } else {
+                        report.cellBackgroundsAbsorbed += absorbCellBackgroundPageObjects(
+                                ctx, placement.table, placement.pageIdx);
+                        completeVisibleTableOuterBorder(placement.table);
+                    }
                     sections.get(placement.pageIdx).addBlock(placement.table);
                 }
                 suppressRenderedVisualsOwnedByTable(ctx, tf, astTable);
@@ -421,6 +438,40 @@ public final class TableBuilder {
         }
         return GroupedFlowStackPolicy.hasFlowStackTitleAboveBounds(
                 ctx, tf.pageIndex(), top, left, bottom, right);
+    }
+
+    private static boolean tableChromeOwnedByTextShell(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.ownershipPlans == null || tf == null) return false;
+        int tfId = parseId(tf.id());
+        if (tfId < 0) return false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.domId == tfId) return true;
+            if (containsSourceId(plan.sourceObjectIds, tfId)) return true;
+        }
+        return false;
+    }
+
+    private static void stripTableChrome(ASTTable table) {
+        if (table == null) return;
+        table.appliedTableStyle(null);
+        table.borderColor(null);
+        table.borderWidth(0);
+        if (table.rows() == null) return;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                cell.fillColor(null);
+                cell.topBorder(null);
+                cell.bottomBorder(null);
+                cell.leftBorder(null);
+                cell.rightBorder(null);
+                cell.topLeftDiagonalLine(false);
+                cell.topRightDiagonalLine(false);
+                cell.diagonalBorder(null);
+            }
+        }
     }
 
     private static long[] tableOwnerOrigin(ResolvedBuildContext ctx, ResolvedTextFrame tf, int pageIdx) {
@@ -1640,7 +1691,6 @@ public final class TableBuilder {
                     for (ASTInlineObject box : boxes) {
                         astPara.addItem(box);
                     }
-                    ctx.setInlineDisposition(groupId, FrameDisposition.TEXT_BLOCK_PLACED);
                 }
             }
         }

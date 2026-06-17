@@ -17,6 +17,9 @@ public final class ObjectPlan {
     public final String reason;
     public final String file;
     public final double[] bounds;
+    public final String sourceLayerId;
+    public final String sourceLayerName;
+    public final int sourceLayerIndex;
 
     public ObjectPlan(
             int domId,
@@ -32,6 +35,27 @@ public final class ObjectPlan {
             String reason,
             String file,
             double[] bounds) {
+        this(domId, kind, pageIndex, textAction, visualAction, visualLayer, placement,
+                renderId, sourceObjectIds, zOrder, reason, file, bounds, null, null, -1);
+    }
+
+    public ObjectPlan(
+            int domId,
+            String kind,
+            int pageIndex,
+            TextAction textAction,
+            VisualAction visualAction,
+            VisualLayer visualLayer,
+            Placement placement,
+            Integer renderId,
+            int[] sourceObjectIds,
+            int zOrder,
+            String reason,
+            String file,
+            double[] bounds,
+            String sourceLayerId,
+            String sourceLayerName,
+            int sourceLayerIndex) {
         this.domId = domId;
         this.kind = kind;
         this.pageIndex = pageIndex;
@@ -45,6 +69,9 @@ public final class ObjectPlan {
         this.reason = reason;
         this.file = file;
         this.bounds = bounds != null ? Arrays.copyOf(bounds, bounds.length) : null;
+        this.sourceLayerId = sourceLayerId;
+        this.sourceLayerName = sourceLayerName;
+        this.sourceLayerIndex = sourceLayerIndex;
     }
 
     public boolean hasVisibleVisual() {
@@ -91,7 +118,10 @@ public final class ObjectPlan {
                 zOrder,
                 newReason != null ? newReason : reason,
                 file,
-                bounds);
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
     }
 
     public ObjectPlan withTextAction(TextAction newTextAction) {
@@ -108,7 +138,10 @@ public final class ObjectPlan {
                 zOrder,
                 reason,
                 file,
-                bounds);
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
     }
 
     public ObjectPlan withVisualLayer(VisualLayer newVisualLayer) {
@@ -125,7 +158,10 @@ public final class ObjectPlan {
                 zOrder,
                 reason,
                 file,
-                bounds);
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
     }
 
     public ObjectPlan withZOrder(int newZOrder) {
@@ -142,7 +178,10 @@ public final class ObjectPlan {
                 newZOrder,
                 reason,
                 file,
-                bounds);
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
     }
 
     public ObjectPlan withSourceObjectIds(int[] newSourceObjectIds) {
@@ -159,7 +198,10 @@ public final class ObjectPlan {
                 zOrder,
                 reason,
                 file,
-                bounds);
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
     }
 
     public ObjectPlan withRenderedVisual(
@@ -182,7 +224,10 @@ public final class ObjectPlan {
                 newZOrder,
                 newReason != null ? newReason : reason,
                 newFile != null ? newFile : file,
-                newBounds != null ? newBounds : bounds);
+                newBounds != null ? newBounds : bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
     }
 
     public String toJson() {
@@ -199,6 +244,9 @@ public final class ObjectPlan {
                 .append("\"renderId\":").append(renderId != null ? renderId : -1).append(',')
                 .append("\"sourceObjectIds\":").append(intArrayJson(sourceObjectIds)).append(',')
                 .append("\"zOrder\":").append(zOrder).append(',')
+                .append("\"sourceLayerId\":\"").append(escape(sourceLayerId)).append("\",")
+                .append("\"sourceLayerName\":\"").append(escape(sourceLayerName)).append("\",")
+                .append("\"sourceLayerIndex\":").append(sourceLayerIndex).append(',')
                 .append("\"reason\":\"").append(escape(reason)).append("\",")
                 .append("\"file\":\"").append(escape(file)).append("\"");
         if (bounds != null && bounds.length >= 4) {

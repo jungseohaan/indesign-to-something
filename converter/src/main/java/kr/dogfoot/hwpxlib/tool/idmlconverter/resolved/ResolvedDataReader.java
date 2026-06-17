@@ -288,6 +288,9 @@ public class ResolvedDataReader {
         tf.nonprinting(getBool(o, "nonprinting", false));
         tf.masterSourceId(getString(o, "masterSourceId"));
         tf.isMasterInstance(getBool(o, "isMasterInstance", false));
+        tf.layerId(getString(o, "layerId"));
+        tf.layerName(getString(o, "layerName"));
+        tf.layerIndex(getInt(o, "layerIndex", -1));
 
         return tf;
     }
@@ -426,6 +429,9 @@ public class ResolvedDataReader {
         item.name(getString(o, "name"));
         item.parentId(getString(o, "parentId"));
         item.pageIndex(getInt(o, "pageIndex", -1));
+        item.layerId(getString(o, "layerId"));
+        item.layerName(getString(o, "layerName"));
+        item.layerIndex(getInt(o, "layerIndex", -1));
 
         // 기하
         if (o.has("geometricBounds")) {
@@ -544,6 +550,9 @@ public class ResolvedDataReader {
         group.overlapPolicy(getString(o, "overlapPolicy"));
         group.reason(getString(o, "reason"));
         group.parentStoryId(getString(o, "parentStoryId"));
+        group.layerId(getString(o, "layerId"));
+        group.layerName(getString(o, "layerName"));
+        group.layerIndex(getInt(o, "layerIndex", -1));
         if (o.has("editableTextFrameIds") && !o.get("editableTextFrameIds").isJsonNull()) {
             group.editableTextFrameIds(parseStringArray(o.getAsJsonArray("editableTextFrameIds")));
         }

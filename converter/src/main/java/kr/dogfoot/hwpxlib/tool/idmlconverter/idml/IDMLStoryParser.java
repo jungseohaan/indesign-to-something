@@ -501,6 +501,8 @@ public class IDMLStoryParser {
         para.spaceBefore(parseDoubleAttr(paraRange, "SpaceBefore"));
         para.spaceAfter(parseDoubleAttr(paraRange, "SpaceAfter"));
         para.tracking(parseDoubleAttr(paraRange, "Tracking"));
+        para.numberingExpression(getAttrOrNull(paraRange, "NumberingExpression"));
+        para.bulletsTextAfter(getAttrOrNull(paraRange, "BulletsTextAfter"));
 
         // 단락 아래선 (RuleBelow) — 분수 TextFrame 감지용
         para.ruleBelowOn("true".equalsIgnoreCase(paraRange.getAttribute("RuleBelow")));

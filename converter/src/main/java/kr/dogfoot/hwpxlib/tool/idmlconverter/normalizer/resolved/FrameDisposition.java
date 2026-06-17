@@ -36,13 +36,4 @@ public enum FrameDisposition {
      */
     TEXT_BLOCK_PLACED,
 
-    /**
-     * Phase 2 또는 Phase 3가 inline_object PNG를 floating으로 전환하도록 결정한 경우.
-     *
-     * <ul>
-     *   <li>Phase 3 ({@code loadInlineObject}): inline PNG 배치 억제 (return null)</li>
-     *   <li>Stage 3 visual executor: floating ASTFigure로 재배치</li>
-     * </ul>
-     */
-    PNG_CONVERT_TO_FLOATING,
 }

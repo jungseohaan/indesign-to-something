@@ -144,6 +144,35 @@ public class OwnershipPlannerTest {
     }
 
     @Test
+    public void placementDisallowedEditableCompositeKeepsHwpxTextAndVisualShell() {
+        ResolvedData data = new ResolvedData();
+        data.addTextFrame(textFrame(501, "재구성"));
+        RenderedGroup shell = rendered(
+                502,
+                "page_object",
+                "page_object",
+                "decoration_group",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "501" },
+                new int[] { 502, 501 });
+        shell.placementAllowed(Boolean.FALSE);
+        data.addRenderedFloatingItem(shell);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan textPlan = findPlanByKind(ctx, 501, "text_frame");
+        ObjectPlan plan = findRenderedPlan(ctx, 502, "decoration_group");
+
+        Assert.assertNotNull(textPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, textPlan.textAction);
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, plan.textAction);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, plan.visualAction);
+        Assert.assertFalse(ctx.shouldDropVisualByOwnershipPlan(shell));
+        Assert.assertFalse(data.isTextOwnedByIndesignPng("501"));
+    }
+
+    @Test
     public void semanticTitleLabelIsHwpxTextAndDropsCompletePng() {
         ResolvedData data = new ResolvedData();
         ResolvedTextFrame title = textFrame(251, "나를 깨우는, 문학");
@@ -273,6 +302,117 @@ public class OwnershipPlannerTest {
         Assert.assertNotNull(floatingPlan);
         Assert.assertEquals(VisualAction.DROP_VISUAL, floatingPlan.visualAction);
         Assert.assertTrue(ctx.shouldDropVisualByOwnershipPlan(floating));
+    }
+
+    @Test
+    public void floatingTextShellIsDroppedWhenSameDomInlinePngIsVisible() {
+        ResolvedData data = new ResolvedData();
+        data.addTextFrame(textFrame(423, "예시 답안"));
+        RenderedGroup inline = rendered(
+                421,
+                "inline_object",
+                "inline_object",
+                "inline_graphic_only",
+                "indesign_png",
+                "none",
+                null,
+                new int[] { 421, 422 });
+        inline.containsText(Boolean.FALSE);
+        inline.containsEditableText(Boolean.FALSE);
+        RenderedGroup floatingShell = rendered(
+                421,
+                "page_object",
+                "page_object",
+                "visual_label_text_hidden_shell",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "423" },
+                new int[] { 421, 422, 423 });
+        data.addRenderedFloatingItem(inline);
+        data.addRenderedFloatingItem(floatingShell);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan inlinePlan = findRenderedPlan(ctx, 421, "inline_graphic_only");
+        ObjectPlan shellPlan = findRenderedPlan(ctx, 421, "visual_label_text_hidden_shell");
+
+        Assert.assertNotNull(inlinePlan);
+        Assert.assertEquals(VisualAction.PLACE_INLINE_PNG, inlinePlan.visualAction);
+        Assert.assertNotNull(shellPlan);
+        Assert.assertEquals(VisualAction.DROP_VISUAL, shellPlan.visualAction);
+        Assert.assertTrue(ctx.shouldDropVisualByOwnershipPlan(floatingShell));
+    }
+
+    @Test
+    public void textFrameOwnedByInlinePageObjectShellIsPlannedInline() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame tf = textFrame(453, "예시 답안");
+        tf.isInline(true);
+        data.addTextFrame(tf);
+        RenderedGroup inlineComplete = rendered(
+                451,
+                "inline_object",
+                "inline_object",
+                "inline_graphic_only",
+                "indesign_png",
+                "none",
+                null,
+                new int[] { 451, 452, 453 });
+        inlineComplete.containsText(Boolean.FALSE);
+        inlineComplete.containsEditableText(Boolean.FALSE);
+        RenderedGroup inlineShell = rendered(
+                451,
+                "page_object",
+                "page_object",
+                "visual_label_text_hidden_shell",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "453" },
+                new int[] { 451, 452, 453 });
+        inlineShell.containsText(Boolean.FALSE);
+        inlineShell.containsEditableText(Boolean.FALSE);
+        data.addRenderedFloatingItem(inlineComplete);
+        data.addRenderedFloatingItem(inlineShell);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan textPlan = findPlanByKind(ctx, 453, "text_frame");
+        ObjectPlan shellPlan = findRenderedPlan(ctx, 451, "visual_label_text_hidden_shell");
+
+        Assert.assertNotNull(shellPlan);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
+        Assert.assertEquals(Placement.INLINE, shellPlan.placement);
+        Assert.assertNotNull(textPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, textPlan.textAction);
+        Assert.assertEquals(Placement.INLINE, textPlan.placement);
+    }
+
+    @Test
+    public void inlineTextFrameWithFloatingBackdropShellIsPlannedFloating() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame tf = textFrame(463, "구절\n풀이");
+        tf.isInline(true);
+        data.addTextFrame(tf);
+        RenderedGroup backdrop = rendered(
+                462,
+                "page_object",
+                "page_object",
+                "label_backdrop_group",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "463" },
+                new int[] { 461 });
+        backdrop.containsText(Boolean.FALSE);
+        backdrop.containsEditableText(Boolean.FALSE);
+        data.addRenderedFloatingItem(backdrop);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan textPlan = findPlanByKind(ctx, 463, "text_frame");
+        ObjectPlan backdropPlan = findRenderedPlan(ctx, 462, "label_backdrop_group");
+
+        Assert.assertNotNull(backdropPlan);
+        Assert.assertEquals(Placement.FLOATING, backdropPlan.placement);
+        Assert.assertNotNull(textPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, textPlan.textAction);
+        Assert.assertEquals(Placement.FLOATING, textPlan.placement);
     }
 
     @Test
@@ -472,7 +612,52 @@ public class OwnershipPlannerTest {
     }
 
     @Test
-    public void shortRoundedVectorIsLabelBackdropBehindTextPlane() {
+    public void nestedCompositeKeepsBothVisualsButSplitsSourceSlots() {
+        ResolvedData data = new ResolvedData();
+        RenderedGroup parent = rendered(
+                751,
+                "page_object",
+                "page_object",
+                "complex_graphic_text_hidden",
+                "indesign_png",
+                "",
+                null,
+                new int[] { 751, 752, 753, 754 });
+        RenderedGroup child = rendered(
+                752,
+                "page_object",
+                "page_object",
+                "mixed_group_text_hidden",
+                "indesign_png",
+                "",
+                null,
+                new int[] { 752, 753 });
+        parent.containsEditableText(Boolean.FALSE);
+        parent.containsText(Boolean.FALSE);
+        parent.bounds(new double[] { 0.0, 0.0, 100.0, 100.0 });
+        child.containsEditableText(Boolean.FALSE);
+        child.containsText(Boolean.FALSE);
+        child.bounds(new double[] { 10.0, 10.0, 30.0, 30.0 });
+        data.addRenderedFloatingItem(parent);
+        data.addRenderedFloatingItem(child);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan parentPlan = findRenderedPlan(ctx, 751, "complex_graphic_text_hidden");
+        ObjectPlan childPlan = findRenderedPlan(ctx, 752, "mixed_group_text_hidden");
+
+        Assert.assertNotNull(parentPlan);
+        Assert.assertEquals(VisualAction.PLACE_FLOATING_PNG, parentPlan.visualAction);
+        Assert.assertFalse(containsSource(parentPlan, 752));
+        Assert.assertFalse(containsSource(parentPlan, 753));
+        Assert.assertTrue(containsSource(parentPlan, 754));
+        Assert.assertNotNull(childPlan);
+        Assert.assertEquals(VisualAction.PLACE_FLOATING_PNG, childPlan.visualAction);
+        Assert.assertTrue(containsSource(childPlan, 752));
+        Assert.assertTrue(containsSource(childPlan, 753));
+    }
+
+    @Test
+    public void vectorWithoutLabelSourceSignalStaysContentVisual() {
         ResolvedData data = new ResolvedData();
         RenderedGroup label = rendered(
                 801,
@@ -493,8 +678,8 @@ public class OwnershipPlannerTest {
 
         Assert.assertNotNull(plan);
         Assert.assertEquals(VisualAction.PLACE_FLOATING_PNG, plan.visualAction);
-        Assert.assertEquals(VisualLayer.LABEL_BACKDROP, plan.visualLayer);
-        Assert.assertEquals(Boolean.FALSE, ctx.inFrontLayerByOwnershipPlan(label));
+        Assert.assertEquals(VisualLayer.CONTENT_VISUAL, plan.visualLayer);
+        Assert.assertEquals(Boolean.TRUE, ctx.inFrontLayerByOwnershipPlan(label));
     }
 
     @Test
@@ -752,6 +937,14 @@ public class OwnershipPlannerTest {
             }
         }
         return null;
+    }
+
+    private static boolean containsSource(ObjectPlan plan, int sourceId) {
+        if (plan == null || plan.sourceObjectIds == null) return false;
+        for (int id : plan.sourceObjectIds) {
+            if (id == sourceId) return true;
+        }
+        return false;
     }
 
     private static ResolvedTextFrame textFrame(int id, String text) {

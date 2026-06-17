@@ -20,6 +20,8 @@ public class IDMLParagraph {
     private Double leading;            // 줄간격 (points, Auto일 경우 null)
     private String leadingType;        // "Auto" = 자동 줄간격 (스타일 고정값 오버라이드)
     private Double tracking;           // 자간 (1/1000 em)
+    private String numberingExpression; // IDML automatic numbering expression, e.g. ^#.^t
+    private String bulletsTextAfter;    // IDML bullets/numbering suffix expression
 
     // 탭 정지점 (인라인 오버라이드)
     private java.util.List<IDMLStyleDef.TabStop> tabStops;
@@ -78,6 +80,12 @@ public class IDMLParagraph {
 
     public Double tracking() { return tracking; }
     public void tracking(Double v) { this.tracking = v; }
+
+    public String numberingExpression() { return numberingExpression; }
+    public void numberingExpression(String v) { this.numberingExpression = v; }
+
+    public String bulletsTextAfter() { return bulletsTextAfter; }
+    public void bulletsTextAfter(String v) { this.bulletsTextAfter = v; }
 
     public boolean columnBreakAfter() { return columnBreakAfter; }
     public void columnBreakAfter(boolean v) { this.columnBreakAfter = v; }

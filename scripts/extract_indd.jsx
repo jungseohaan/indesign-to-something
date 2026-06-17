@@ -1886,6 +1886,18 @@ function _filterIds(ids, removeIds) {
     return out;
 }
 
+function _copyLayerInfo(entry, item) {
+    if (!entry || !item) return entry;
+    try {
+        if (item.itemLayer) {
+            try { entry.layerId = item.itemLayer.id ? item.itemLayer.id.toString() : null; } catch (e0) {}
+            try { entry.layerName = item.itemLayer.name || null; } catch (e1) {}
+            try { entry.layerIndex = item.itemLayer.index; } catch (e2) {}
+        }
+    } catch (e) {}
+    return entry;
+}
+
 function applyRenderOwnership(entry, renderTarget, opts) {
     if (!entry) return entry;
     opts = opts || {};
@@ -1924,6 +1936,7 @@ function applyRenderOwnership(entry, renderTarget, opts) {
     entry.placementRole = opts.placementRole || entry.placementRole || inferPlacementRole(entry, textOwner, textHidden);
     entry.zSource = opts.zSource || entry.zSource
             || ((sourceIds && sourceIds.length > 0) ? "sourceObjectIds" : "absoluteZOrderIndex");
+    _copyLayerInfo(entry, opts.layerSource || renderTarget);
     if (sourceIds && sourceIds.length > 0) entry.sourceObjectIds = sourceIds;
     if (editableTfIds && editableTfIds.length > 0) entry.editableTextFrameIds = editableTfIds;
     var visualOnlyIds = opts.visualOnlyChildIds;
@@ -2770,6 +2783,33 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         var domId = item.id;
         var fileName = "deco_" + domId + ".png";
         var _outFile = File(renderDir + "/" + fileName);
+        var resolvedOwnershipOpts = ownershipOpts || { reason: "decoration_group" };
+        var _autoHiddenTFs = null;
+        try {
+            // A decoration render target may contain editable TextFrames whose
+            // visible content is a table/anchored story rather than plain
+            // TextFrame.contents.  Ownership must follow the source object, not
+            // a text-content heuristic: any editable TF inside the rendered
+            // target belongs to HWPX text and must be hidden before PNG export.
+            var _editableForDeco = _collectTextFrameIds(item, true, false);
+            var _textOwnerForDeco = resolvedOwnershipOpts.textOwner;
+            if (!_textOwnerForDeco && _editableForDeco.length > 0) _textOwnerForDeco = "hwpx_tf";
+            if (_editableForDeco.length > 0
+                    && _textOwnerForDeco !== "indesign_png"
+                    && resolvedOwnershipOpts.textHiddenBeforeExport !== true) {
+                _autoHiddenTFs = hideTextFrames(item);
+                var _copiedOwnershipOpts = {};
+                for (var _copyKey in resolvedOwnershipOpts) {
+                    if (resolvedOwnershipOpts.hasOwnProperty(_copyKey)) {
+                        _copiedOwnershipOpts[_copyKey] = resolvedOwnershipOpts[_copyKey];
+                    }
+                }
+                _copiedOwnershipOpts.textHiddenBeforeExport = true;
+                _copiedOwnershipOpts.textOwner = _textOwnerForDeco;
+                _copiedOwnershipOpts.editableTextFrameIds = _copiedOwnershipOpts.editableTextFrameIds || _editableForDeco;
+                resolvedOwnershipOpts = _copiedOwnershipOpts;
+            }
+        } catch (eAutoHide) {}
         // exportFile을 독립 try로 감싸 InDesign 2026 예외가 push를 건너뛰지 않도록 보호
         var _exportOk = false;
         try {
@@ -2777,6 +2817,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             _exportOk = true;
         } catch (eExp) {
             try { _exportOk = _outFile.exists; } catch (e2) {}
+        } finally {
+            try { if (_autoHiddenTFs && _autoHiddenTFs.length > 0) restoreTextFrames(_autoHiddenTFs); } catch (eRestoreAutoHide) {}
         }
         if (!_exportOk) return [];
 
@@ -2805,7 +2847,6 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         try { _z = getItemZOrder(item); } catch (e) {}
         var entry = { id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: page.documentOffset, zOrder: _z };
         if (childIds.length > 0) entry.childIds = childIds;
-        var resolvedOwnershipOpts = ownershipOpts || { reason: "decoration_group" };
         if (skippedClaimedLabelChild && !resolvedOwnershipOpts.sourceObjectIds) {
             var sourceIds = [domId];
             for (var si = 0; si < childIds.length; si++) sourceIds.push(childIds[si]);
@@ -3168,7 +3209,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             if (visibleTextLengthOfTextFrame(item) > 0) return false;
             return hasVisibleFill(item) || hasVisibleStroke(item);
         }
-        if (cn === "Rectangle" || cn === "Oval" || cn === "Polygon" || cn === "GraphicLine") {
+        if (cn === "Rectangle" || cn === "Oval" || cn === "Polygon") {
             return hasVisibleFill(item) || hasVisibleStroke(item);
         }
         return false;
@@ -3200,7 +3241,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                     if (hasVisibleFill(child) || hasVisibleStroke(child)) hasVisual = true;
                     continue;
                 }
-                if (ccn === "Rectangle" || ccn === "Oval" || ccn === "Polygon" || ccn === "GraphicLine") {
+                if (ccn === "Rectangle" || ccn === "Oval" || ccn === "Polygon") {
                     if (hasVisibleFill(child) || hasVisibleStroke(child)) hasVisual = true;
                     continue;
                 }
@@ -3544,7 +3585,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             if (visibleTextLengthOfTextFrame(item) > 0) return false;
             return hasVisibleFill(item) || hasVisibleStroke(item);
         }
-        if (cn === "Rectangle" || cn === "Oval" || cn === "Polygon" || cn === "GraphicLine") {
+        if (cn === "Rectangle" || cn === "Oval" || cn === "Polygon") {
             return hasVisibleFill(item) || hasVisibleStroke(item);
         }
         return false;
@@ -6463,6 +6504,7 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
             try { fData.strokeWeight = tf.strokeWeight; } catch (e) {}
             try { fData.opacity = tf.transparencySettings.blendingSettings.opacity; } catch (e) {}
             try { fData.cornerRadius = tf.topLeftCornerRadius; } catch (e) {}
+            _copyLayerInfo(fData, tf);
 
             // SPEC-025: 진단/분류 정보 (텍스트 이미지 렌더링 제거 작업용)
             // SPEC-030: classification 제거 (Java 신 파이프라인 미사용)
@@ -7142,6 +7184,7 @@ function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAll
 
         // 이름
         try { data.name = pi.name; } catch (e) {}
+        _copyLayerInfo(data, pi);
 
         // 부모 관계 (Spread/Page 직속은 null)
         try {

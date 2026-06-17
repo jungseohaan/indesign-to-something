@@ -257,32 +257,10 @@ public class ASTToHwpxConverter {
      * 같은 storyId를 공유하는 TextFrameBlock이 2개 이상이면 linkId를 할당한다.
      */
     private void buildStoryLinkMap() {
-        // storyId → 블록 수 카운트
-        Map<String, Integer> storyBlockCount = new LinkedHashMap<>();
-        for (ASTSection section : doc.sections()) {
-            for (ASTBlock block : section.blocks()) {
-                if (block.blockType() == ASTBlock.BlockType.TEXT_FRAME_BLOCK) {
-                    ASTTextFrameBlock tfb = (ASTTextFrameBlock) block;
-                    // distributed 블록은 독립 프레임이므로 링크 체인에서 제외
-                    if (!tfb.distributed() && tfb.storyId() != null) {
-                        storyBlockCount.merge(tfb.storyId(), 1, Integer::sum);
-                    }
-                }
-            }
-        }
-
-        // 2개 이상인 storyId에 대해 linkId 사전 할당
-        int linkIdCounter = 1;
-        for (Map.Entry<String, Integer> entry : storyBlockCount.entrySet()) {
-            if (entry.getValue() > 1) {
-                List<String> linkIds = new ArrayList<>();
-                for (int i = 0; i < entry.getValue(); i++) {
-                    linkIds.add(String.valueOf(linkIdCounter++));
-                }
-                ctx.storyLinkIds.put(entry.getKey(), linkIds);
-                ctx.storyLinkIndex.put(entry.getKey(), 0);
-            }
-        }
+        // SPEC-035: source TextFrames must remain independently owned visible
+        // outputs.  Do not create HWPX linked text boxes by storyId.
+        ctx.storyLinkIds.clear();
+        ctx.storyLinkIndex.clear();
     }
 
     // ── 섹션 변환 ──

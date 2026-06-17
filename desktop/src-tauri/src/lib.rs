@@ -203,6 +203,7 @@ pub fn run() {
             commands::analyze_idml,
             commands::convert_idml,
             commands::convert_hwpx_to_idml,
+            commands::get_default_teaching_prompt,
             commands::generate_teaching,
             commands::get_jar_path,
             commands::generate_preview,

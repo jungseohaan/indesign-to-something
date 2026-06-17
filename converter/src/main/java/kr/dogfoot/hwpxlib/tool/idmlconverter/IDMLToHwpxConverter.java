@@ -530,8 +530,9 @@ public class IDMLToHwpxConverter {
                 earlyWarnings.add("[Resolved] overlay 보강 실패: " + e.getMessage());
             }
         }
-        // Phase 2.7: 플로팅 이미지 → 인라인 머지
-        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.legacy.FloatingImageMerger.merge(astDoc);
+        // SPEC-035: source ownership/placement is decided by ObjectPlan only.
+        // Legacy floating-image merge mutates text-frame geometry after planning,
+        // so it is intentionally disabled.
         // Phase 2.10: orphan 렌더 그래픽 주입
         if (resolvedData != null) {
             injectOrphanRenderedGraphics(astDoc, resolvedData, options);

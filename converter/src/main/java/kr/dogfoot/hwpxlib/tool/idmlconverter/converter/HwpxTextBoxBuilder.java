@@ -289,6 +289,12 @@ public class HwpxTextBoxBuilder {
         }
 
 
+        // Stage 1이 별도 visual shell/backdrop 위에 HWPX 텍스트를 얹도록 계획한 경우에는
+        // floating PNG가 hp:tbl을 덮는 렌더러 차이를 피하기 위해 투명 DrawText 경로를 사용한다.
+        if (block.plannedVisualTextOverlay() && !block.isBackgroundOnly()) {
+            frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
+            return;
+        }
         // inlineToFloating: 배지 단일-child — fill 없으면 hp:tbl 흰 배경 방지를 위해 투명 DrawText 경로 사용
         if (block.imageFillData() != null && block.imageFillData().length > 0) {
             frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
@@ -807,8 +813,9 @@ public class HwpxTextBoxBuilder {
         bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
 
         // 테두리 — 텍스트 프레임의 strokeColor/strokeWeight 반영
+        boolean nativeOk = nativeTextBoxGraphicsEnabled() || block.forceNativeFill();
         String stroke = block.strokeColor();
-        boolean hasStroke = nativeTextBoxGraphicsEnabled()
+        boolean hasStroke = nativeOk
                 && stroke != null && stroke.startsWith("#") && block.strokeWeight() > 0;
 
         LineType2 lineType = LineType2.NONE;
@@ -835,8 +842,7 @@ public class HwpxTextBoxBuilder {
 
         // 배경 채우기 (fillTint는 색상 농도로 RGB에 적용, 불투명 처리)
         String fill = block.fillColor();
-        if ((nativeTextBoxGraphicsEnabled() || block.forceNativeFill())
-                && fill != null && fill.startsWith("#")) {
+        if (nativeOk && fill != null && fill.startsWith("#")) {
             String tinted = blendColorWithWhite(fill, block.fillTint() / 100.0);
             bf.createFillBrush();
             VisualShellApplicator.applyWinBrushFill(bf.fillBrush(), tinted, "#FF000000");

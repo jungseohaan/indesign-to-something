@@ -14,6 +14,9 @@ public class ResolvedPageItem {
     private String name;
     private String parentId;        // 부모 DOM id (Spread/Page 직속이면 null)
     private int pageIndex = -1;     // 문서 내 페이지 인덱스 (0-based)
+    private String layerId;         // InDesign ItemLayer id
+    private String layerName;       // InDesign ItemLayer name
+    private int layerIndex = -1;    // document.layers index, when available
 
     // 기하 (pasteboard 좌표, pt) — [top, left, bottom, right]
     private double[] geometricBounds;
@@ -80,6 +83,15 @@ public class ResolvedPageItem {
 
     public int pageIndex() { return pageIndex; }
     public void pageIndex(int v) { this.pageIndex = v; }
+
+    public String layerId() { return layerId; }
+    public void layerId(String v) { this.layerId = v; }
+
+    public String layerName() { return layerName; }
+    public void layerName(String v) { this.layerName = v; }
+
+    public int layerIndex() { return layerIndex; }
+    public void layerIndex(int v) { this.layerIndex = v; }
 
     public double[] geometricBounds() { return geometricBounds; }
     public void geometricBounds(double[] v) { this.geometricBounds = v; }

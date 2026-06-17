@@ -302,44 +302,7 @@ public class ConverterCLI {
         // --teach → 교수자료 JSON 생성
         boolean isTeachMode = teachPromptPath != null || teachDir != null;
         if (isTeachMode && outputPath.toLowerCase().endsWith(".json")) {
-            ASTDocument teachAst = IDMLToHwpxConverter.buildAst(inputPath, options, reporter);
-            kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader envR =
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.load();
-            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig llmCfg =
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig.builder()
-                            .groqApiKey(envR.getOrEnv(
-                                    kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.GROQ_API_KEY))
-                            .anthropicApiKey(envR.getOrEnv(
-                                    kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.ANTHROPIC_API_KEY))
-                            .build();
-            String resolvedPrompt = teachDir != null
-                    ? kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
-                            .loadFromDir(teachDir, textbookId)
-                    : kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
-                            .load(teachPromptPath, teachExtraPath);
-            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterial material =
-                    kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialGenerator
-                            .generate(teachAst, resolvedPrompt, llmCfg);
-            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialWriter
-                    .write(material, outputPath);
-
-            // JSON 옆에 HTML 프레젠테이션도 함께 생성
-            String htmlPath = outputPath.substring(0, outputPath.length() - 5) + ".html";
-            java.io.File htmlTemplateFile = htmlTemplatePath != null ? new java.io.File(htmlTemplatePath) : null;
-            try {
-                kr.dogfoot.hwpxlib.tool.idmlconverter.llm.HtmlSlideGenerator
-                        .write(material, htmlTemplateFile, new java.io.File(htmlPath));
-                System.err.println("[HTML] 프레젠테이션 생성 완료: " + htmlPath);
-            } catch (Exception htmlEx) {
-                System.err.println("[HTML] 프레젠테이션 생성 실패: " + htmlEx.getMessage());
-                htmlPath = null;
-            }
-
-            int teachPages = (teachAst != null && teachAst.sections() != null) ? teachAst.sections().size() : 0;
-            ConvertResult teachResult = new ConvertResult();
-            teachResult.pagesConverted(teachPages);
-            if (htmlPath != null) teachResult.htmlPath(htmlPath);
-            reporter.reportComplete(teachResult);
+            failLlmSemanticBlockGenerationDisabled();
             return;
         }
 
@@ -1529,89 +1492,23 @@ public class ConverterCLI {
             System.err.println("Usage: --teach-ast <ast-dir> <output.json> --teach <base_prompt.txt> [options]");
             System.exit(1);
         }
-        String astDir    = args[1];
-        String outputPath = args[2];
+        failLlmSemanticBlockGenerationDisabled();
+    }
 
-        String teachPromptPath = null;
-        String teachExtraPath  = null;
-        String teachDir        = null;
-        String textbookId      = null;
-
-        for (int i = 3; i < args.length; i++) {
-            switch (args[i]) {
-                case "--teach":       if (i + 1 < args.length) teachPromptPath = args[++i]; break;
-                case "--teach-extra": if (i + 1 < args.length) teachExtraPath  = args[++i]; break;
-                case "--teach-dir":   if (i + 1 < args.length) teachDir        = args[++i]; break;
-                case "--textbook-id": if (i + 1 < args.length) textbookId      = args[++i]; break;
-                default: System.err.println("Unknown option: " + args[i]);
-            }
-        }
-
-        if (teachPromptPath == null && teachDir == null) {
-            System.err.println("Error: --teach <base_prompt.txt> 또는 --teach-dir <dir> 가 필요합니다.");
-            System.exit(1);
-        }
-
-        System.out.println("[teach-ast] AST 로드 중: " + astDir);
-        ASTDocument doc = kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBundleReader.read(
-                new java.io.File(astDir));
-
-        kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader envR =
-                kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.load();
-        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig llmCfg =
-                kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig.builder()
-                        .groqApiKey(envR.getOrEnv(
-                                kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.GROQ_API_KEY))
-                        .anthropicApiKey(envR.getOrEnv(
-                                kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.ANTHROPIC_API_KEY))
-                        .build();
-
-        String resolvedPrompt = teachDir != null
-                ? kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
-                        .loadFromDir(teachDir, textbookId)
-                : kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
-                        .load(teachPromptPath, teachExtraPath);
-
-        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterial material =
-                kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialGenerator
-                        .generate(doc, resolvedPrompt, llmCfg);
-        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialWriter
-                .write(material, outputPath);
-        System.out.println("Teaching material 생성 완료: " + outputPath);
+    private static void failLlmSemanticBlockGenerationDisabled() {
+        System.err.println("Error: LLM 호출 기반 semantic/teaching block 생성은 비활성화되었습니다.");
+        System.err.println("       HWPX 변환 시 생성되는 .semantic-blocks.json은 로컬 SemanticBlockDetector만 사용합니다.");
+        System.exit(2);
     }
 
     private static void runTestLlm(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader env) {
-        String groqKey  = env.getOrEnv(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.GROQ_API_KEY);
-        String claudeKey = env.getOrEnv(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.ANTHROPIC_API_KEY);
+        failLlmSemanticBlockGenerationDisabled();
+    }
 
-        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig cfg =
-                kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig.builder()
-                        .groqApiKey(groqKey)
-                        .anthropicApiKey(claudeKey)
-                        .readTimeoutMs(15_000)
-                        .build();
-
-        if (!cfg.hasAnyKey()) {
-            System.err.println("[test-llm] API 키 없음. .env에 GROQ_API_KEY 또는 ANTHROPIC_API_KEY를 설정하세요.");
-            System.exit(1);
-        }
-
-        System.out.println("[test-llm] provider=" + cfg.activeProvider());
-        String masked = groqKey != null && groqKey.length() > 12
-                ? groqKey.substring(0, 8) + "****" + groqKey.substring(groqKey.length() - 4)
-                : "(비어있음)";
-        if (cfg.hasGroq()) System.out.println("[test-llm] GROQ key: " + masked);
-
-        try {
-            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.GroqClient client =
-                    new kr.dogfoot.hwpxlib.tool.idmlconverter.llm.GroqClient(cfg);
-            String result = client.ping();
-            System.out.println("[test-llm] 응답: " + result);
-            System.out.println("[test-llm] 연결 성공");
-        } catch (kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMException e) {
-            System.err.println("[test-llm] 실패: " + e.getMessage());
-            System.exit(1);
-        }
+    private static String maskKey(String key) {
+        if (key == null || key.isEmpty()) return "(비어있음)";
+        if (key.length() <= 12) return "****";
+        return key.substring(0, 8) + "****" + key.substring(key.length() - 4);
     }
 
     private static void printUsage() {

@@ -238,6 +238,13 @@ public class ASTRunConverter {
                         return;
                     }
                 }
+                kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject groupShell =
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                .tryInlineGroupShellWithEditableChild(tmpCtx, boxDomId);
+                if (groupShell != null) {
+                    para.addItem(groupShell);
+                    return;
+                }
                 java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject> boxList =
                         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
                                 .tryInlineGroupAsBoxList(tmpCtx, boxDomId);

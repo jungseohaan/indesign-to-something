@@ -8,7 +8,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLStoryParser;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.MatchConfidence;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
@@ -115,7 +114,6 @@ public final class StoryConverter {
         long distributeNanos = 0L;
         long restoreInlineNanos = 0L;
         long postprocessNanos = 0L;
-        long injectInnerNanos;
         long deferredFloatingNanos;
 
         // PRE: IDML 의 AnchoredPosition="Anchored" + TextWrapMode="None" InlineGraphic 들을
@@ -305,11 +303,6 @@ public final class StoryConverter {
         insertAnchoredTables(ctx, textFrameBlocks(sections));
         System.err.println("[ResolvedToASTBuilder] Phase 3: " + totalParas + " paragraphs converted (IDML=" + idmlCount + " resolved=" + resolvedCount + ")");
 
-        // Phase 3 후처리: inner TF 오버레이 패턴 — inner story 런을 outer block 마지막 단락에 주입.
-        t0 = System.nanoTime();
-        injectInnerStoryContents(ctx, sections);
-        injectInnerNanos = System.nanoTime() - t0;
-
         // Phase 3 후처리: AnchoredPosition="Anchored" + TextWrapMode="None" Group 들을
         // BEHIND_TEXT 위치-절대 ASTFigure 로 배치 (텍스트 겹침, 밀지 않음).
         t0 = System.nanoTime();
@@ -326,7 +319,6 @@ public final class StoryConverter {
         ConversionTiming.metric("stage2.textBuilder.storyConverter.distributeMs", millis(distributeNanos));
         ConversionTiming.metric("stage2.textBuilder.storyConverter.restoreInlineVisualsMs", millis(restoreInlineNanos));
         ConversionTiming.metric("stage2.textBuilder.storyConverter.postprocessMs", millis(postprocessNanos));
-        ConversionTiming.metric("stage2.textBuilder.storyConverter.injectInnerMs", millis(injectInnerNanos));
         ConversionTiming.metric("stage2.textBuilder.storyConverter.deferredFloatingMs", millis(deferredFloatingNanos));
     }
 
@@ -1304,14 +1296,6 @@ public final class StoryConverter {
                 if (visibleText.charAt(i) != '\uFFFC') continue;
                 int inlineId = inlineVisualIds.get(idIdx++);
                 if (containsInlineSource(block, inlineId)) continue;
-                if (shouldDropUnabsorbedTextStyleInlineVisual(ctx, owner, block, inlineId)) {
-                    continue;
-                }
-                if (shouldFloatTfOwnedInlineVisual(ctx, owner, block, inlineId)) {
-                    ctx.setInlineDisposition(inlineId, FrameDisposition.PNG_CONVERT_TO_FLOATING);
-                    ctx.deferredAnchoredFloatingIds.add(inlineId);
-                    continue;
-                }
                 ASTInlineObject inline = loadTfInlineVisual(ctx, inlineId);
                 if (inline == null) continue;
 
@@ -1341,6 +1325,16 @@ public final class StoryConverter {
                 continue;
             }
             RenderedGroup inlineRg = findRenderedGroup(ctx, inlineId);
+            if (inlineRg == null
+                    || !ctx.hasOwnershipPlan(inlineRg)
+                    || !ctx.shouldPlaceInlinePngByOwnershipPlan(inlineRg)) {
+                if (inlineRg != null) {
+                    ctx.recordRenderedDecision(inlineRg, "Phase3.restoreTfInlineVisuals",
+                            "SKIP_OBJECT_PLAN_NOT_INLINE_VISUAL",
+                            "OwnershipPlanner did not assign this TF inline visual to PLACE_INLINE_PNG");
+                }
+                continue;
+            }
             String parentStoryId = inlineRg != null ? inlineRg.parentStoryId() : null;
             if (parentStoryId != null && storyId != null && !storyId.equals(parentStoryId)) {
                 continue;
@@ -1352,67 +1346,6 @@ public final class StoryConverter {
 
     private static RenderedGroup findTfInlineVisualOwner(ResolvedBuildContext ctx, String domId) {
         return ctx != null ? ctx.tfInlineVisualOwnerForTextFrame(domId) : null;
-    }
-
-    private static boolean shouldDropUnabsorbedTextStyleInlineVisual(
-            ResolvedBuildContext ctx, RenderedGroup owner, ASTTextFrameBlock block, int inlineId) {
-        if (ctx == null || ctx.resolvedData == null || owner == null || block == null) return false;
-        if (!"hwpx_tf".equals(owner.textOwner())) return false;
-        String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
-        if (domId == null || !ctx.resolvedData.isHwpxOwnedTextFrame(domId)) return false;
-
-        RenderedGroup inlineRg = findRenderedGroup(ctx, inlineId);
-        if (inlineRg == null || !"inline_object".equals(inlineRg.itemType())) return false;
-        if (Boolean.TRUE.equals(inlineRg.containsText()) || Boolean.TRUE.equals(inlineRg.containsEditableText())) {
-            return false;
-        }
-        double[] b = inlineRg.bounds();
-        if (b == null || b.length < 4) return false;
-        double w = Math.abs(b[3] - b[1]);
-        double h = Math.abs(b[2] - b[0]);
-        if (w <= 0.0 || h <= 0.0) return false;
-
-        // InDesign often represents highlight/underline-like text styling as
-        // anchored vector strips inside a TextFrame. When HWPX owns the text,
-        // these strips must either become character attributes or be dropped;
-        // keeping them as inline images breaks editing and line flow.
-        boolean thinTextStyleStrip = h <= 3.0 && w >= 6.0 && w / Math.max(0.1, h) >= 4.0;
-        if (!thinTextStyleStrip) return false;
-        return ownerContainsId(owner.tfInlineVisualIds(), inlineId)
-                || ownerContainsId(owner.visualOnlyChildIds(), inlineId)
-                || ownerContainsId(owner.sourceObjectIds(), inlineId);
-    }
-
-    private static boolean shouldFloatTfOwnedInlineVisual(
-            ResolvedBuildContext ctx, RenderedGroup owner, ASTTextFrameBlock block, int inlineId) {
-        if (ctx == null || ctx.resolvedData == null || owner == null || block == null) return false;
-        RenderedGroup inlineRg = findRenderedGroup(ctx, inlineId);
-        if (inlineRg == null || !"inline_object".equals(inlineRg.itemType())) return false;
-        if (!"hwpx_tf".equals(owner.textOwner())) return false;
-
-        String domId = ParagraphTextHelpers.domIdFromSourceId(block.sourceId());
-        ResolvedTextFrame tf = domId != null ? ctx.resolvedData.getTextFrame(domId) : null;
-        double[] tfBounds = tf != null ? tf.pageRelativeBounds() : null;
-        double[] inlineBounds = inlineRg.bounds();
-        if (tfBounds == null || tfBounds.length < 4 || inlineBounds == null || inlineBounds.length < 4) {
-            return false;
-        }
-
-        double tfW = Math.abs(tfBounds[3] - tfBounds[1]);
-        double tfH = Math.abs(tfBounds[2] - tfBounds[0]);
-        double inlineW = Math.abs(inlineBounds[3] - inlineBounds[1]);
-        double inlineH = Math.abs(inlineBounds[2] - inlineBounds[0]);
-        if (tfW <= 0.0 || tfH <= 0.0 || inlineW <= 0.0 || inlineH <= 0.0) return false;
-
-        boolean wideStrip = inlineW >= tfW * 0.60 && inlineH <= tfH * 0.90;
-        if (!wideStrip) return false;
-
-        // TF-owned wide strips are usually decorative speech-bubble/blank outlines.
-        // Keeping them as inline characters makes HWP lay out image + text in one line,
-        // which stretches or breaks the editable text. Preserve them as floating visuals instead.
-        return ownerContainsId(owner.tfInlineVisualIds(), inlineId)
-                || ownerContainsId(owner.childImageIds(), inlineId)
-                || ownerContainsId(owner.sourceObjectIds(), inlineId);
     }
 
     private static boolean ownerContainsId(int[] ids, int value) {
@@ -2461,84 +2394,6 @@ public final class StoryConverter {
         }
     }
 
-
-    /**
-     * inner TF 오버레이 패턴 후처리: innerFrameId가 설정된 모든 블록에 대해
-     * inner story의 첫 단락 런을 outer 블록 마지막 단락에 주입한다.
-     */
-    private static void injectInnerStoryContents(ResolvedBuildContext ctx, List<ASTSection> sections) {
-        for (ASTSection sec : sections) {
-            for (ASTBlock blk : sec.blocks()) {
-                if (!(blk instanceof ASTTextFrameBlock)) continue;
-                ASTTextFrameBlock block = (ASTTextFrameBlock) blk;
-                if (block.innerFrameId() == null) continue;
-                injectInnerFrameContent(ctx, block);
-            }
-        }
-    }
-
-    private static void injectInnerFrameContent(ResolvedBuildContext ctx, ASTTextFrameBlock block) {
-        ResolvedTextFrame innerTf = ctx.resolvedData.getTextFrame(block.innerFrameId());
-        if (innerTf == null || innerTf.storyId() == null) return;
-
-        ResolvedStory innerStory = ctx.resolvedData.getStory(innerTf.storyId());
-        if (innerStory == null || innerStory.paragraphs().isEmpty()) return;
-
-        List<ASTParagraph> outerParas = block.paragraphs();
-        if (outerParas.isEmpty()) return;
-        // 마지막 비어있지 않은 단락 찾기 (trailing 빈 단락은 건너뜀)
-        int lastNonEmptyIdx = outerParas.size() - 1;
-        while (lastNonEmptyIdx > 0) {
-            ASTParagraph p = outerParas.get(lastNonEmptyIdx);
-            boolean hasContent = false;
-            for (ASTInlineItem item : p.items()) {
-                if (!(item instanceof ASTTextRun)) { hasContent = true; break; }
-                String t = ((ASTTextRun) item).text();
-                if (t != null && !t.trim().isEmpty()) { hasContent = true; break; }
-            }
-            if (hasContent) break;
-            lastNonEmptyIdx--;
-        }
-        ASTParagraph lastPara = outerParas.get(lastNonEmptyIdx);
-
-        // 마지막 단락의 밑줄 공백 런 제거 (inner text가 대체하는 빈칸)
-        List<ASTInlineItem> items = lastPara.items();
-        String inheritedUnderlineColor = null;
-        while (!items.isEmpty()) {
-            ASTInlineItem last = items.get(items.size() - 1);
-            if (last instanceof ASTTextRun) {
-                ASTTextRun tr = (ASTTextRun) last;
-                String t = tr.text();
-                boolean blankRun = t == null || t.replace(" ", "").replace(" ", "").replace("\t", "").isEmpty();
-                if (blankRun && tr.underline()) {
-                    if (inheritedUnderlineColor == null && tr.underlineColor() != null) {
-                        inheritedUnderlineColor = tr.underlineColor();
-                    }
-                    items.remove(items.size() - 1);
-                    continue;
-                }
-            }
-            break;
-        }
-
-        // inner story를 완전히 변환 (배지 inline anchor 포함)해서 첫 단락 items 추가
-        List<ASTParagraph> innerParas = convertStoryParagraphs(ctx, innerStory, false);
-        if (innerParas.isEmpty()) return;
-        ASTParagraph innerFirstPara = innerParas.get(0);
-        for (ASTInlineItem item : innerFirstPara.items()) {
-            if (item instanceof ASTTextRun) {
-                ASTTextRun tr = (ASTTextRun) item;
-                tr.underline(true);
-                if (inheritedUnderlineColor != null && tr.underlineColor() == null) {
-                    tr.underlineColor(inheritedUnderlineColor);
-                }
-            }
-            lastPara.addItem(item);
-        }
-        System.err.println("[StoryConverter] inner 오버레이 주입: innerTF=" + block.innerFrameId()
-                + " story=" + innerTf.storyId() + " items=" + innerFirstPara.items().size());
-    }
-
     public static List<ASTParagraph> convertStoryParagraphs(ResolvedBuildContext ctx, ResolvedStory story, boolean suppressLeftIndent) {
         List<ASTParagraph> paragraphs = new ArrayList<>();
 
@@ -2668,9 +2523,18 @@ public final class StoryConverter {
                             if (!hasVisibleText(para)) {
                                 firstTextRunAfterLeadingAnchor = true;
                             }
+                            ASTInlineObject earlyGroupShell =
+                                    InlineFrameHandler.tryInlineGroupShellWithEditableChild(ctx, anchoredId);
+                            if (earlyGroupShell != null) {
+                                para.addItem(earlyGroupShell);
+                                continue;
+                            }
                             // AnchoredPosition="Anchored" + TextWrapMode="None" Group:
                             // 인라인 배치 건너뛰고 후처리가 BEHIND_TEXT floating 으로 배치.
                             if (ctx.deferredAnchoredFloatingIds.contains(anchoredId)) {
+                                continue;
+                            }
+                            if (InlineFrameHandler.hasTextBlockPlacedDescendant(ctx, anchoredId)) {
                                 continue;
                             }
                             if (InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(

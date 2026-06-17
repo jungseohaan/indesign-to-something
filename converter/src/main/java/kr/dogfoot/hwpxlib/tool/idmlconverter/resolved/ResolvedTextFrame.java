@@ -43,6 +43,9 @@ public class ResolvedTextFrame {
     private boolean nonprinting;      // InDesign 인쇄 안 함/숨김 성격의 TF → 변환 불필요
     private String masterSourceId;    // 마스터 원본 TextFrame DOM ID
     private boolean isMasterInstance; // 마스터 페이지 아이템 인스턴스 (regular page에 배치된 마스터 아이템)
+    private String layerId;           // InDesign ItemLayer id
+    private String layerName;         // InDesign ItemLayer name
+    private int layerIndex = -1;      // document.layers index, when available
 
     public String id() { return id; }
     public void id(String v) { this.id = v; }
@@ -136,6 +139,15 @@ public class ResolvedTextFrame {
 
     public boolean isMasterInstance() { return isMasterInstance; }
     public void isMasterInstance(boolean v) { this.isMasterInstance = v; }
+
+    public String layerId() { return layerId; }
+    public void layerId(String v) { this.layerId = v; }
+
+    public String layerName() { return layerName; }
+    public void layerName(String v) { this.layerName = v; }
+
+    public int layerIndex() { return layerIndex; }
+    public void layerIndex(int v) { this.layerIndex = v; }
 
     // Phase 4: 조판 결과 (composed lines)
     private java.util.List<ComposedLine> composedLines;

@@ -19,8 +19,9 @@ import java.io.File;
  *        [--test-llm]
  *
  * Env (.env file in working directory or JAR directory):
- *   GROQ_API_KEY=gsk_...
+ *   OPENAI_API_KEY=sk-...
  *   ANTHROPIC_API_KEY=sk-ant-...
+ *   GROQ_API_KEY=gsk_...
  */
 public class LLMPipelineCLI {
 
@@ -68,11 +69,11 @@ public class LLMPipelineCLI {
             System.exit(1);
         }
 
-        String systemPrompt;
+        TeachingPromptLoader.AgentPrompts systemPrompts;
         if (teachDir != null && textbookId != null) {
-            systemPrompt = TeachingPromptLoader.loadFromDir(teachDir, textbookId);
+            systemPrompts = TeachingPromptLoader.loadAgentsFromDir(teachDir, textbookId);
         } else if (teachPrompt != null) {
-            systemPrompt = TeachingPromptLoader.load(teachPrompt, teachExtra);
+            systemPrompts = TeachingPromptLoader.loadAgents(teachPrompt, teachExtra);
         } else {
             System.err.println("ERROR: --teach <prompt> 또는 --teach-dir <dir> --textbook-id <id> 필요.");
             printUsage();
@@ -80,45 +81,50 @@ public class LLMPipelineCLI {
             return;
         }
 
-        String groqKey    = nullToEmpty(env.getOrEnv(EnvFileReader.GROQ_API_KEY));
+        String openaiKey  = nullToEmpty(env.getOrEnv(EnvFileReader.OPENAI_API_KEY));
         String claudeKey  = nullToEmpty(env.getOrEnv(EnvFileReader.ANTHROPIC_API_KEY));
+        String groqKey    = nullToEmpty(env.getOrEnv(EnvFileReader.GROQ_API_KEY));
 
         LLMConfig llmCfg = LLMConfig.builder()
-                .groqApiKey(groqKey)
+                .openaiApiKey(openaiKey)
                 .anthropicApiKey(claudeKey)
+                .groqApiKey(groqKey)
                 .build();
 
         if (!llmCfg.hasAnyKey()) {
-            System.err.println("ERROR: .env에 GROQ_API_KEY 또는 ANTHROPIC_API_KEY 없음.");
+            System.err.println("ERROR: .env에 OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY 중 하나가 필요합니다.");
             System.exit(1);
         }
 
-        TeachingMaterial material = TeachingMaterialGenerator.generate(doc, systemPrompt, llmCfg);
-        TeachingMaterialWriter.write(material, new File(outputPath));
-        System.out.println("Teaching material 생성 완료: " + outputPath);
+        com.google.gson.JsonObject result = TeachingMaterialGenerator.generate(doc, systemPrompts, llmCfg);
+        TeachingMaterialWriter.write(result, new File(outputPath));
+        System.out.println("Teaching semantic blocks 생성 완료: " + outputPath);
     }
 
     private static void runTestLlm(EnvFileReader env) {
-        String groqKey   = nullToEmpty(env.getOrEnv(EnvFileReader.GROQ_API_KEY));
+        String openaiKey = nullToEmpty(env.getOrEnv(EnvFileReader.OPENAI_API_KEY));
         String claudeKey = nullToEmpty(env.getOrEnv(EnvFileReader.ANTHROPIC_API_KEY));
+        String groqKey   = nullToEmpty(env.getOrEnv(EnvFileReader.GROQ_API_KEY));
 
-        if (!groqKey.isEmpty())   System.out.println("GROQ_API_KEY:      " + maskKey(groqKey));
+        if (!openaiKey.isEmpty()) System.out.println("OPENAI_API_KEY:    " + maskKey(openaiKey));
         if (!claudeKey.isEmpty()) System.out.println("ANTHROPIC_API_KEY: " + maskKey(claudeKey));
+        if (!groqKey.isEmpty())   System.out.println("GROQ_API_KEY:      " + maskKey(groqKey));
 
-        if (groqKey.isEmpty() && claudeKey.isEmpty()) {
-            System.out.println("API 키 없음. .env에 GROQ_API_KEY 또는 ANTHROPIC_API_KEY 설정 필요.");
+        if (openaiKey.isEmpty() && claudeKey.isEmpty() && groqKey.isEmpty()) {
+            System.out.println("API 키 없음. .env에 OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY 중 하나를 설정하세요.");
             System.exit(1);
         }
 
         LLMConfig cfg = LLMConfig.builder()
-                .groqApiKey(groqKey)
+                .openaiApiKey(openaiKey)
                 .anthropicApiKey(claudeKey)
+                .groqApiKey(groqKey)
                 .build();
 
         System.out.println("Provider: " + cfg.activeProvider());
         System.out.print("API 연결 테스트...");
         try {
-            String result = new GroqClient(cfg).ping();
+            String result = new AIClient(cfg).ping();
             System.out.println(" OK — " + result.substring(0, Math.min(result.length(), 60)));
         } catch (LLMException e) {
             System.out.println(" FAIL");

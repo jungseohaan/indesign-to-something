@@ -183,7 +183,7 @@ class TeachingPromptLoader {
 
 | 파일 | 역할 |
 |------|------|
-| `llm/GroqClient.java` | GROQ/Anthropic HTTP 클라이언트 (HttpURLConnection, 외부 의존성 없음) |
+| `llm/AIClient.java` | OpenAI/Anthropic/GROQ HTTP 클라이언트 (HttpURLConnection, 외부 의존성 없음) |
 | `llm/LLMConfig.java` | apiKey, model, timeout DTO |
 | `llm/LLMException.java` | Checked exception |
 | `llm/DocumentChunker.java` | AST → 단원/섹션 단위 텍스트 청크 |
@@ -203,7 +203,7 @@ class TeachingPromptLoader {
 
 ---
 
-## GroqClient 설계
+## AIClient 설계
 
 ```java
 // GROQ
@@ -259,7 +259,7 @@ public TeachingMaterial generate(
 // 2. DocumentChunker.chunk(doc) → List<DocumentChunk>
 // 3. 각 청크별:
 //    a. userPrompt 조립 (청크 텍스트 + "JSON으로만 응답" 지시)
-//    b. GroqClient.complete(systemPrompt, userPrompt)
+//    b. AIClient.complete(systemPrompt, userPrompt)
 //    c. 응답 파싱 → List<SlideContent>
 //    d. 파싱 실패 시 재시도 1회 → 그래도 실패 시 fallback 슬라이드
 // 4. TeachingMaterial 조립 + TeachingMaterialWriter.write()
@@ -317,7 +317,7 @@ Apache POI `poi-ooxml`로 `.pptx` 직접 생성.
 ## 구현 단계
 
 ### M1: LLM 연결 + JSON 생성
-- `GroqClient`, `LLMConfig`, `LLMException` 구현
+- `AIClient`, `LLMConfig`, `LLMException` 구현
 - `DocumentChunker`, `TeachingPromptLoader` 구현
 - `TeachingMaterialGenerator` + `TeachingMaterialWriter`
 - CLI `--teach` + `--test-llm` 플래그
@@ -350,7 +350,7 @@ Apache POI `poi-ooxml`로 `.pptx` 직접 생성.
 
 ## 주의사항
 
-- **API 키 마스킹**: `GroqClient` 에러 메시지에 키 원문 포함 금지. 앞 8자 + `****`
+- **API 키 마스킹**: `AIClient` 에러 메시지에 키 원문 포함 금지. 앞 8자 + `****`
 - **외부 의존성**: M1은 `HttpURLConnection`만 (pom.xml 변경 없음). M2에서 `poi-ooxml` 추가
 - **응답 파싱 강건성**: LLM이 JSON 외 텍스트를 섞어 반환할 수 있음 → `{}` 중괄호 범위 추출 후 파싱
 - **rate limiting**: GROQ 무료 티어 분당 6,000 tokens. 200페이지 교과서 ≈ 40청크. 청크 간 1초 딜레이 기본값

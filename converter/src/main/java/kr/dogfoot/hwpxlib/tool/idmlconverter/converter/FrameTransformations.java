@@ -156,13 +156,14 @@ final class FrameTransformations {
         rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
         rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
 
+        boolean textOnlyOverlay = block.plannedVisualTextOverlay();
         // FillBrush (배경색) — 래퍼에 둥근 모서리가 있으면 셀 배경 투명 (래퍼 사각형이 배경 역할)
-        String fillColor = block.fillColor();
+        String fillColor = textOnlyOverlay ? null : block.fillColor();
         double fillTint = block.fillTint();
-        if (block.hasWrapperFill() && block.cornerRadius() > 0) {
+        if (!textOnlyOverlay && block.hasWrapperFill() && block.cornerRadius() > 0) {
             // 둥근 모서리 래퍼: 셀 fill 생략 → 래퍼 Rectangle의 둥근 배경이 보임
             fillColor = null;
-        } else if ((fillColor == null || !fillColor.startsWith("#")) && block.hasWrapperFill()) {
+        } else if (!textOnlyOverlay && (fillColor == null || !fillColor.startsWith("#")) && block.hasWrapperFill()) {
             fillColor = "#FFFFFF";
             fillTint = 100;
         }
@@ -173,6 +174,13 @@ final class FrameTransformations {
         DrawTextBoxComposer.Spec spec = DrawTextBoxComposer.fromTextFrameBlock(block, w, h);
         spec.fillColor = fillColor;
         spec.fillTint = fillTint;
+        if (textOnlyOverlay) {
+            spec.strokeColor = null;
+            spec.strokeWeight = 0;
+            spec.imageFillData = null;
+            spec.nativeGraphicsAllowed = false;
+            spec.forceImageFill = false;
+        }
         long savedContainerWidth = ctx.currentContainerWidth;
         ctx.currentContainerWidth = roundedContentWidth;
         textBoxBuilder.drawTextBoxComposer().apply(rect, spec);
@@ -183,7 +191,7 @@ final class FrameTransformations {
                 rect,
                 w,
                 h,
-                block.cornerRadius(),
+                textOnlyOverlay ? 0 : block.cornerRadius(),
                 h);
 
         rect.createPos();

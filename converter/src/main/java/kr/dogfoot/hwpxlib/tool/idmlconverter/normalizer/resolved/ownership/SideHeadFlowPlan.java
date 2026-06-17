@@ -36,7 +36,16 @@ public final class SideHeadFlowPlan {
     public String toJson() {
         StringBuilder sb = new StringBuilder(240);
         sb.append('{');
+        append(sb, "domId", -1);
         append(sb, "kind", "side_head_flow");
+        append(sb, "textAction", TextAction.OWNED_BY_HWPX_TEXT.name());
+        append(sb, "visualAction", VisualAction.PLACE_TABLE_STYLE.name());
+        append(sb, "visualLayer", VisualLayer.CONTENT_VISUAL.name());
+        append(sb, "policyLayer", PolicyLayer.TEXT.name());
+        append(sb, "placement", Placement.INLINE.name());
+        append(sb, "renderId", -1);
+        sb.append("\"sourceObjectIds\":[],");
+        append(sb, "zOrder", 0);
         append(sb, "tableSourceId", tableSourceId);
         append(sb, "pageIndex", pageIndex);
         append(sb, "markerRow", markerRow);

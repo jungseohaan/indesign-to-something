@@ -48,13 +48,7 @@ public final class VisualLayeringRules {
         if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
         if (!isTextFrameVisualShellReason(rg.reason())) return false;
-        double[] b = rg.bounds();
-        if (b == null || b.length < 4) return false;
-        double w = b[3] - b[1];
-        double h = b[2] - b[0];
-        return w >= 8.0 && w <= 90.0
-                && h >= 2.5 && h <= 14.0
-                && w / h >= 2.0;
+        return true;
     }
 
     public static boolean isTextFrameVisualShellReason(String reason) {

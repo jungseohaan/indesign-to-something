@@ -6,19 +6,20 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 /**
- * GROQ / Anthropic LLM HTTP 클라이언트.
+ * OpenAI / Anthropic / GROQ LLM HTTP 클라이언트.
  *
- * 우선순위: GROQ → Anthropic. 외부 의존성 없음 (HttpURLConnection).
+ * 우선순위: OpenAI → Anthropic → GROQ. 외부 의존성 없음 (HttpURLConnection).
  * API 키는 로그에 절대 출력하지 않는다.
  */
-public class GroqClient {
+public class AIClient {
 
+    private static final String OPENAI_URL = "https://api.openai.com/v1/chat/completions";
     private static final String GROQ_URL  = "https://api.groq.com/openai/v1/chat/completions";
     private static final String CLAUDE_URL = "https://api.anthropic.com/v1/messages";
 
     private final LLMConfig config;
 
-    public GroqClient(LLMConfig config) {
+    public AIClient(LLMConfig config) {
         this.config = config;
     }
 
@@ -30,12 +31,43 @@ public class GroqClient {
      * @return LLM이 반환한 JSON 문자열 (content 필드)
      */
     public String complete(String systemPrompt, String userContent) throws LLMException {
+        LLMException lastError = null;
+        if (config.hasOpenAI()) {
+            try {
+                return callOpenAI(systemPrompt, userContent);
+            } catch (LLMException e) {
+                if (!hasProviderAfter("OpenAI") || !isFallbackable(e)) throw e;
+                lastError = e;
+                logProviderFallback("OpenAI", e);
+            }
+        }
+        if (config.hasAnthropic()) {
+            try {
+                return callAnthropic(systemPrompt, userContent);
+            } catch (LLMException e) {
+                if (!hasProviderAfter("Anthropic") || !isFallbackable(e)) throw e;
+                lastError = e;
+                logProviderFallback("Anthropic", e);
+            }
+        }
         if (config.hasGroq()) {
-            return callGroq(systemPrompt, userContent);
-        } else if (config.hasAnthropic()) {
-            return callAnthropic(systemPrompt, userContent);
-        } else {
-            throw new LLMException("API 키 없음. .env에 GROQ_API_KEY 또는 ANTHROPIC_API_KEY를 설정하세요.");
+            try {
+                return callGroq(systemPrompt, userContent);
+            } catch (LLMException e) {
+                if (isGroqDailyTokenLimit(e)) {
+                    throw new LLMException("Groq 일일 토큰 한도(TPD)를 초과했습니다. "
+                            + "오늘은 GROQ_API_KEY로 더 생성할 수 없으므로 OPENAI_API_KEY 또는 "
+                            + "ANTHROPIC_API_KEY를 .env에 설정하거나 Groq 한도 초기화 후 다시 실행하세요. "
+                            + "원본 오류: " + e.getMessage(), e);
+                }
+                throw e;
+            }
+        }
+        if (lastError != null) {
+            throw lastError;
+        }
+        {
+            throw new LLMException("API 키 없음. .env에 OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY 중 하나를 설정하세요.");
         }
     }
 
@@ -45,8 +77,16 @@ public class GroqClient {
     }
 
     // -------------------------------------------------------
-    // GROQ (OpenAI 호환 엔드포인트)
+    // OpenAI / GROQ (OpenAI 호환 엔드포인트)
     // -------------------------------------------------------
+
+    private String callOpenAI(String systemPrompt, String userContent) throws LLMException {
+        String body = buildOpenAIBody(LLMConfig.MODEL_OPENAI, systemPrompt, userContent);
+        String raw = post(OPENAI_URL, body,
+                "Authorization", "Bearer " + config.openaiApiKey(),
+                "Content-Type", "application/json");
+        return extractOpenAIContent(raw);
+    }
 
     private String callGroq(String systemPrompt, String userContent) throws LLMException {
         String body = buildOpenAIBody(LLMConfig.MODEL_GROQ_LLAMA, systemPrompt, userContent);
@@ -58,6 +98,9 @@ public class GroqClient {
                         "Content-Type", "application/json");
                 return extractOpenAIContent(raw);
             } catch (LLMException e) {
+                if (isGroqDailyTokenLimit(e)) {
+                    throw e;
+                }
                 if (e.getMessage().contains("HTTP 429") && attempt < 2) {
                     int waitSec = 5 * (1 << attempt); // 5s, 10s
                     System.err.println("[LLM] rate-limit 429, " + waitSec + "초 대기 후 재시도...");
@@ -70,11 +113,43 @@ public class GroqClient {
         throw new LLMException("GROQ rate-limit 재시도 3회 초과");
     }
 
+    private boolean hasProviderAfter(String provider) {
+        if ("OpenAI".equals(provider)) {
+            return config.hasAnthropic() || config.hasGroq();
+        }
+        if ("Anthropic".equals(provider)) {
+            return config.hasGroq();
+        }
+        return false;
+    }
+
+    private static boolean isFallbackable(LLMException e) {
+        String message = e.getMessage();
+        if (message == null) return false;
+        return message.contains("HTTP 429")
+                || message.contains("HTTP 500")
+                || message.contains("HTTP 502")
+                || message.contains("HTTP 503")
+                || message.contains("HTTP 504");
+    }
+
+    private static boolean isGroqDailyTokenLimit(LLMException e) {
+        String message = e.getMessage();
+        if (message == null) return false;
+        return message.contains("tokens per day")
+                || message.contains("(TPD)")
+                || message.contains("TPD):");
+    }
+
+    private static void logProviderFallback(String provider, LLMException e) {
+        System.err.println("[LLM] " + provider + " 호출 실패, 다음 provider로 전환: "
+                + safePreview(e.getMessage()));
+    }
+
     private String buildOpenAIBody(String model, String system, String user) {
         return "{"
                 + "\"model\":" + jsonStr(model) + ","
                 + "\"temperature\":0.3,"
-                + "\"response_format\":{\"type\":\"json_object\"},"
                 + "\"messages\":["
                 +   "{\"role\":\"system\",\"content\":" + jsonStr(system) + "},"
                 +   "{\"role\":\"user\",\"content\":" + jsonStr(user) + "}"
@@ -84,9 +159,9 @@ public class GroqClient {
     private String extractOpenAIContent(String raw) throws LLMException {
         // "content":"..." 필드 추출 (Gson 없이 간단 파싱)
         int idx = raw.indexOf("\"content\":");
-        if (idx < 0) throw new LLMException("GROQ 응답에 content 필드 없음: " + safePreview(raw));
+        if (idx < 0) throw new LLMException("OpenAI 호환 응답에 content 필드 없음: " + safePreview(raw));
         int start = raw.indexOf('"', idx + 10);
-        if (start < 0) throw new LLMException("GROQ content 파싱 실패");
+        if (start < 0) throw new LLMException("OpenAI 호환 content 파싱 실패");
         // JSON 문자열 파싱 (이스케이프 처리)
         StringBuilder sb = new StringBuilder();
         int i = start + 1;
