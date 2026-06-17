@@ -881,11 +881,11 @@ public final class OwnershipPlanner {
         if (tf == null || !tf.isInline()) return Placement.FLOATING;
         if (textAction != TextAction.OWNED_BY_HWPX_TEXT) return Placement.INLINE;
         if (visualAction != VisualAction.DROP_VISUAL) return Placement.INLINE;
-        if (hasInlineTextHiddenShellForTextFrame(tf.id())) {
-            return Placement.INLINE;
-        }
         if (hasFloatingTextHiddenShellForTextFrame(tf.id(), domId)) {
             return Placement.FLOATING;
+        }
+        if (hasInlineTextHiddenShellForTextFrame(tf.id())) {
+            return Placement.INLINE;
         }
         return Placement.INLINE;
     }
@@ -933,7 +933,6 @@ public final class OwnershipPlanner {
         for (RenderedGroup rg : data.allRenderedFloatingItems()) {
             if (rg == null) continue;
             if (!"indesign_png".equals(rg.visualOwner())) continue;
-            if (!isRenderedPageObject(rg)) continue;
             if (!renderedGroupClaimsTextFrame(rg, textFrameId)) continue;
             ObjectPlan shellPlan = findRenderedPlan(rg.id(), rg.file());
             if (shellPlan == null || shellPlan.placement != Placement.FLOATING) {

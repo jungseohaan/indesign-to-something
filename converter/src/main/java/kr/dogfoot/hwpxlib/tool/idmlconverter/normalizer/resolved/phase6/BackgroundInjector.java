@@ -17,6 +17,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualSy
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualTextEmphasisAbsorber;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualTfInlineCompositor;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualZOrderPlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
@@ -61,7 +62,10 @@ public final class BackgroundInjector {
         // refinement가 plan(DROP_VISUAL) 확정 → 아래 별도 체크 불필요.
         for (RenderedGroup rg : floatingItems) {
             boolean conceptDiagramInlineShell = isConceptDiagramInlineVisualShell(ctx, rg);
-            if (!isPageObject(rg) && !conceptDiagramInlineShell) {
+            boolean plannedFloatingTextShell =
+                    ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL
+                            && ctx.placementByOwnershipPlan(rg) == Placement.FLOATING;
+            if (!isPageObject(rg) && !conceptDiagramInlineShell && !plannedFloatingTextShell) {
                 continue;
             }
             if (!ctx.hasOwnershipPlan(rg)) {
