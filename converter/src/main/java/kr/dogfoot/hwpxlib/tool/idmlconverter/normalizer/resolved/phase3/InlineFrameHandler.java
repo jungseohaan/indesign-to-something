@@ -747,18 +747,21 @@ public class InlineFrameHandler {
             String reason = rg.reason();
             if (reason == null || !reason.contains("text_hidden")) continue;
             String[] eids = rg.editableTextFrameIds();
-            if (eids == null || eids.length != 1) continue;
+            if (eids == null || eids.length == 0) continue;
             shell = rg;
             break;
         }
         if (shell == null) return null;
-        ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(shell.editableTextFrameIds()[0]);
-        if (childTf == null || ctx.resolvedData.isTextOwnedByIndesignPng(childTf.id())) return null;
-        String vt = childTf.frameVisibleText();
-        if (hasObjectReplacementText(vt)) return null;
-        String cleaned = vt == null ? "" : vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
-        if (cleaned.isEmpty()) return null;
-        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, shell, true);
+        java.util.List<ResolvedTextFrame> children = badgeTextFramesSortedByReading(ctx, shell);
+        if (children.isEmpty()) return null;
+        for (ResolvedTextFrame childTf : children) {
+            if (childTf == null || ctx.resolvedData.isTextOwnedByIndesignPng(childTf.id())) return null;
+            String vt = childTf.frameVisibleText();
+            if (hasObjectReplacementText(vt)) return null;
+            String cleaned = vt == null ? "" : vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+            if (cleaned.isEmpty()) return null;
+        }
+        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, children, shell, true);
     }
 
     private static boolean isInlineShellShape(ResolvedPageItem item) {
@@ -1009,6 +1012,30 @@ public class InlineFrameHandler {
         return false;
     }
 
+    public static boolean hasTextBlockPlacedDescendant(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || anchoredObjectId < 0) return false;
+        if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) {
+            return true;
+        }
+        String anchorId = String.valueOf(anchoredObjectId);
+        Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 8);
+        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (tf == null || tf.id() == null) continue;
+            ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
+            if (pi == null) continue;
+            String parentId = pi.parentId();
+            if (!anchorId.equals(parentId) && !descendants.contains(parentId)) continue;
+            int tfDomId;
+            try { tfDomId = Integer.parseInt(tf.id()); } catch (NumberFormatException e) { continue; }
+            if (ctx.isTextDisposed(tfDomId, FrameDisposition.TEXT_BLOCK_PLACED)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean containsInt(int[] values, int target) {
         if (values == null) return false;
         for (int value : values) {
@@ -1205,7 +1232,7 @@ public class InlineFrameHandler {
                     atomicMatched = rg;
                     break;
                 }
-                if ("inline_object".equals(rg.itemType())) {
+                if (isInlineRenderedGroupType(rg)) {
                     pngFile = candidate;
                     matched = rg;
                     break;
@@ -1314,6 +1341,19 @@ public class InlineFrameHandler {
             ResolvedTextFrame childTf,
             RenderedGroup shell,
             boolean forcePngFill) {
+        if (childTf == null) return null;
+        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem,
+                java.util.Collections.singletonList(childTf), shell, forcePngFill);
+    }
+
+    private static ASTInlineObject buildInlineShellObject(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId,
+            ResolvedPageItem anchorItem,
+            java.util.List<ResolvedTextFrame> childTfs,
+            RenderedGroup shell,
+            boolean forcePngFill) {
+        if (childTfs == null || childTfs.isEmpty()) return null;
         if (shell == null || ctx.basePath == null || shell.file() == null) return null;
         File pngFile = new File(ctx.basePath, shell.file());
         if (!pngFile.exists() || !pngFile.isFile()) return null;
@@ -1350,9 +1390,16 @@ public class InlineFrameHandler {
             obj.nativeGraphicsAllowed(true);
             obj.forceImageFill(forcePngFill);
             applyInlineShellShapeStyle(ctx, anchorItem, obj);
-            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTfs.get(0)));
             obj.verticalJustification("CenterAlign");
-            buildBadgeParagraph(ctx, childTf, obj);
+            for (ResolvedTextFrame childTf : childTfs) {
+                buildBadgeParagraph(ctx, childTf, obj);
+                try {
+                    ctx.setTextDisposition(Integer.parseInt(childTf.id()), FrameDisposition.TEXT_BLOCK_PLACED);
+                } catch (Exception ignored) {
+                    // Non-numeric DOM ids cannot be recorded in the legacy disposition map.
+                }
+            }
             return obj;
         } catch (Exception e) {
             return null;
@@ -1712,6 +1759,12 @@ public class InlineFrameHandler {
                 Integer childId = rr.anchoredObjectId();
                 if (childId == null) continue;
                 hasNestedAnchor = true;
+
+                ASTInlineObject groupShell = tryInlineGroupShellWithEditableChild(ctx, childId);
+                if (groupShell != null) {
+                    items.add(groupShell);
+                    continue;
+                }
 
                 List<ASTInlineObject> boxList = tryInlineGroupAsBoxList(ctx, childId);
                 if (boxList != null && !boxList.isEmpty()) {
@@ -2715,6 +2768,8 @@ public class InlineFrameHandler {
         // inline_object PNG를 로드하지 않는다 (이미지 + 글상자 중복 방지).
         // Rectangle은 childIds가 비어있고 자식이 parentId로만 참조하므로 textFrames를 훑는다.
         String anchorIdStr = String.valueOf(anchoredObjectId);
+        boolean plannedInlinePngWithSeparateText =
+                shouldUsePlannedInlinePngWithSeparateHwpxText(ctx, anchoredObjectId);
         for (ResolvedTextFrame childTf : ctx.resolvedData.textFrames()) {
             // childTf의 조상 중에 anchorId가 있는지 확인
             boolean isDescendant = false;
@@ -2740,9 +2795,11 @@ public class InlineFrameHandler {
             // inline+editable 배지 자식: Phase 3가 INLINE_TEXT_FRAME으로 전담 처리 →
             // 이 TF의 텍스트는 INLINE_TEXT_FRAME 내부에 포함됨 → loadInlineObject PNG 폐기.
             if (childTf.isInline() && ctx.resolvedData.isEditableTextFrame(childTf.id())) {
+                if (plannedInlinePngWithSeparateText) continue;
                 return null;
             }
             if (ctx.resolvedData.isEditableTextFrame(childTf.id())) {
+                if (plannedInlinePngWithSeparateText) continue;
                 return null;
             }
             // inline + non-editable: Phase 3 가 이 child TF 를 별도로 처리할 수 있으므로 PNG 폐기.
@@ -2900,6 +2957,82 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    public static boolean shouldUsePlannedInlinePngWithSeparateHwpxText(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (hasInlineGraphicRenderWithSeparateHwpxTextShell(ctx, anchoredObjectId)) return true;
+        if (ctx == null || ctx.ownershipPlans == null || ctx.resolvedData == null) return false;
+        String anchorId = String.valueOf(anchoredObjectId);
+        Set<String> descendants = ctx.resolvedData.buildDescendantSet(anchorId, 8);
+        boolean hasInlinePngPlan = false;
+        boolean hasDescendantHwpxTextPlan = false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            boolean sameAnchor = plan.domId == anchoredObjectId
+                    || containsInt(plan.sourceObjectIds, anchoredObjectId);
+            if (sameAnchor
+                    && plan.placement == Placement.INLINE
+                    && plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                    && plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) {
+                hasInlinePngPlan = true;
+            }
+            boolean descendant = descendants.contains(String.valueOf(plan.domId))
+                    || containsAnyStringId(descendants, plan.sourceObjectIds);
+            if (descendant && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) {
+                hasDescendantHwpxTextPlan = true;
+            }
+            if (hasInlinePngPlan && hasDescendantHwpxTextPlan) return true;
+        }
+        return false;
+    }
+
+    public static boolean isEditableTextFrameOfPlannedInlinePngWithSeparateHwpxText(
+            ResolvedBuildContext ctx,
+            String textFrameId) {
+        if (ctx == null || ctx.resolvedData == null || textFrameId == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
+            if (!containsStringId(rg.editableTextFrameIds(), textFrameId)) continue;
+            if (shouldUsePlannedInlinePngWithSeparateHwpxText(ctx, rg.id())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasInlineGraphicRenderWithSeparateHwpxTextShell(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        boolean hasInlineGraphicOnly = false;
+        boolean hasSeparateHwpxTextShell = false;
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || rg.id() != anchoredObjectId) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            String renderedType = rg.itemType() != null ? rg.itemType() : rg.type();
+            if ("inline_object".equals(renderedType)
+                    && "inline_graphic_only".equals(rg.reason())
+                    && rg.file() != null && !rg.file().isEmpty()) {
+                hasInlineGraphicOnly = true;
+            }
+            if ("page_object".equals(renderedType)
+                    && "hwpx_tf".equals(rg.textOwner())
+                    && rg.hasEditableTextHiddenFromPng()
+                    && rg.editableTextFrameIds() != null
+                    && rg.editableTextFrameIds().length > 0) {
+                hasSeparateHwpxTextShell = true;
+            }
+            if (hasInlineGraphicOnly && hasSeparateHwpxTextShell) return true;
+        }
+        return false;
     }
 
     private static boolean hasRasterImageSource(ResolvedBuildContext ctx, RenderedGroup rg) {
@@ -3202,17 +3335,71 @@ public class InlineFrameHandler {
     public static ASTTextFrameBlock buildFloatingBadge(
             ResolvedBuildContext ctx, RenderedGroup rg, long xHwp, long yHwp, long wHwp, long hHwp) {
         if (ctx == null || rg == null || !"inline_badge".equals(rg.reason())) return null;
-        if (wHwp <= 0 || hHwp <= 0) return null;
-        java.util.List<ResolvedTextFrame> tfs = badgeTextFramesSortedByReading(ctx, rg);
-        if (tfs.isEmpty()) return null;
-        byte[] png = loadBadgePngFlattenedOntoWhite(ctx, rg);
-        if (png == null || png.length == 0) return null;
+        return buildFloatingTextShell(ctx, rg, xHwp, yHwp, wHwp, hHwp, 0);
+    }
 
+    public static ASTTextFrameBlock buildFloatingTextShell(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            long xHwp,
+            long yHwp,
+            long wHwp,
+            long hHwp,
+            int zOrder) {
+        java.util.List<ASTTextFrameBlock> blocks =
+                buildFloatingTextShellBlocks(ctx, rg, xHwp, yHwp, wHwp, hHwp, zOrder);
+        return blocks.isEmpty() ? null : blocks.get(0);
+    }
+
+    /**
+     * PLACE_TEXT_SHELL / inline_badge 셸을 ASTTextFrameBlock(들)로 만든다.
+     *
+     * <p>보통 한 블록이지만, 한 셸이 여러 editable 라벨을 소유하면서 일부 라벨이 셸
+     * 그래픽(배지/알약)과 겹치지 않으면(예: 주황 알약 위 '소단원' + 그 아래 배경 없는
+     * '이론 학습') 라벨을 각자 좌표의 독립 블록으로 분리한다. 셸 그래픽과 겹치는 라벨만
+     * 해당 영역으로 crop한 imageFill을 갖고, 나머지는 배경 없는 일반 텍스트 블록이 된다.
+     * 단일 라벨이거나 모든 라벨이 셸 그래픽과 겹치면 기존처럼 한 블록으로 합친다.
+     * (SPEC-035 §1.2 인라인 의미 라벨 그룹 분리)</p>
+     */
+    public static java.util.List<ASTTextFrameBlock> buildFloatingTextShellBlocks(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            long xHwp,
+            long yHwp,
+            long wHwp,
+            long hHwp,
+            int zOrder) {
+        java.util.List<ASTTextFrameBlock> out = new ArrayList<>();
+        if (ctx == null || rg == null) return out;
+        boolean inlineBadge = "inline_badge".equals(rg.reason());
+        boolean plannedTextShell = ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL
+                && rg.hasEditableTextHiddenFromPng();
+        if (!inlineBadge && !plannedTextShell) return out;
+        if (wHwp <= 0 || hHwp <= 0) return out;
+        java.util.List<ResolvedTextFrame> tfs = badgeTextFramesSortedByReading(ctx, rg);
+        if (tfs.isEmpty()) return out;
+        byte[] png = loadBadgePngFlattenedOntoWhite(ctx, rg);
+        if (png == null || png.length == 0) return out;
+
+        // 여러 라벨 중 셸 그래픽과 겹치지 않는 라벨이 있으면 라벨별 독립 블록으로 분리한다.
+        // 라벨 셸(visual_label_text_hidden_shell)에만 적용한다. 이미지가 섞인
+        // mixed_group_text_hidden 등은 응집된 다이어그램일 수 있어 합침을 유지한다.
+        if (tfs.size() > 1 && "visual_label_text_hidden_shell".equals(rg.reason())) {
+            java.util.List<ASTTextFrameBlock> split =
+                    trySplitLabelBlocks(ctx, rg, tfs, xHwp, yHwp, wHwp, hHwp, zOrder);
+            if (split != null && !split.isEmpty()) {
+                return split;
+            }
+        }
+
+        // 기본: 모든 라벨을 한 셸 블록에 합친다(기존 동작).
         ASTTextFrameBlock block = new ASTTextFrameBlock();
         block.x(xHwp);
         block.y(yHwp);
         block.width(wHwp);
         block.height(hHwp);
+        block.zOrder(zOrder);
+        block.sourceId("page_obj_" + rg.id());
         block.imageFillData(png);
         block.nativeGraphicsAllowed(true);
         block.forceImageFill(true);
@@ -3220,10 +3407,8 @@ public class InlineFrameHandler {
         block.verticalJustification("CenterAlign");
         boolean any = false;
         for (ResolvedTextFrame tf : tfs) {
-            String vt = tf.frameVisibleText();
-            if (vt == null) continue;
-            String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
-            if (cleaned.isEmpty()) continue;
+            String cleaned = cleanedLabelText(tf);
+            if (cleaned == null) continue;
             ASTParagraph para = new ASTParagraph();
             para.alignment("CENTER");
             ASTTextRun run = new ASTTextRun();
@@ -3231,9 +3416,143 @@ public class InlineFrameHandler {
             applyFirstRunStyle(ctx, tf, run);
             para.addItem(run);
             block.addParagraph(para);
+            markTextBlockPlaced(ctx, tf);
             any = true;
         }
-        return any ? block : null;
+        if (any) out.add(block);
+        return out;
+    }
+
+    /**
+     * 여러 라벨을 좌표별 독립 블록으로 분리한다. 모든 라벨이 page-relative bounds를 가지고,
+     * 그중 하나 이상이 셸 그래픽과 겹치지 않을 때만 분리하고, 아니면 null(합침 폴백).
+     */
+    private static java.util.List<ASTTextFrameBlock> trySplitLabelBlocks(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            java.util.List<ResolvedTextFrame> tfs,
+            long xHwp, long yHwp, long wHwp, long hHwp, int zOrder) {
+        double[] sb = rg.bounds();
+        if (sb == null || sb.length < 4) return null;
+        double sT = sb[0], sL = sb[1], sW = sb[3] - sb[1], sH = sb[2] - sb[0];
+        if (sW <= 0 || sH <= 0) return null;
+        BufferedImage orig = decodeRenderedOriginal(ctx, rg);
+        if (orig == null) return null;
+        int imgW = orig.getWidth(), imgH = orig.getHeight();
+        if (imgW <= 2 || imgH <= 2) return null;
+
+        int n = tfs.size();
+        double[][] px = new double[n][];
+        double[] opaque = new double[n];
+        int nonOverlap = 0;
+        for (int i = 0; i < n; i++) {
+            double[] cb = childPageRelativeBounds(tfs.get(i));
+            if (cb == null) return null; // 좌표계 일관성 미보장 → 합침 폴백
+            int pxX = clampI((int) Math.round((cb[1] - sL) / sW * imgW), 0, imgW - 1);
+            int pxY = clampI((int) Math.round((cb[0] - sT) / sH * imgH), 0, imgH - 1);
+            int pxW = clampI((int) Math.round((cb[3] - cb[1]) / sW * imgW), 1, imgW - pxX);
+            int pxH = clampI((int) Math.round((cb[2] - cb[0]) / sH * imgH), 1, imgH - pxY);
+            px[i] = new double[] { cb[0], cb[1], cb[2], cb[3], pxX, pxY, pxW, pxH };
+            opaque[i] = opaqueFraction(orig, pxX, pxY, pxW, pxH);
+            if (opaque[i] < 0.06) nonOverlap++;
+        }
+        if (nonOverlap == 0) return null; // 모두 셸 위 → 기존처럼 합침
+
+        java.util.List<ASTTextFrameBlock> out = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            ResolvedTextFrame tf = tfs.get(i);
+            String cleaned = cleanedLabelText(tf);
+            if (cleaned == null) continue;
+            double[] d = px[i];
+            long cx = xHwp + Math.round((d[1] - sL) / sW * wHwp);
+            long cy = yHwp + Math.round((d[0] - sT) / sH * hHwp);
+            long cw = Math.round((d[3] - d[1]) / sW * wHwp);
+            long ch = Math.round((d[2] - d[0]) / sH * hHwp);
+            if (cw <= 0 || ch <= 0) continue;
+            ASTTextFrameBlock block = new ASTTextFrameBlock();
+            block.x(cx);
+            block.y(cy);
+            block.width(cw);
+            block.height(ch);
+            block.zOrder(zOrder);
+            block.sourceId("page_obj_" + rg.id() + "_" + tf.id());
+            block.inlineToFloating(true);
+            block.verticalJustification("CenterAlign");
+            if (opaque[i] >= 0.06) {
+                try {
+                    BufferedImage crop = orig.getSubimage(
+                            (int) d[4], (int) d[5], (int) d[6], (int) d[7]);
+                    block.imageFillData(flattenOntoWhite(crop));
+                    block.nativeGraphicsAllowed(true);
+                    block.forceImageFill(true);
+                } catch (Exception ignored) {
+                    // crop 실패 시 배경 없는 텍스트 블록으로 둔다.
+                }
+            }
+            ASTParagraph para = new ASTParagraph();
+            para.alignment("CENTER");
+            ASTTextRun run = new ASTTextRun();
+            run.text(cleaned);
+            applyFirstRunStyle(ctx, tf, run);
+            para.addItem(run);
+            block.addParagraph(para);
+            markTextBlockPlaced(ctx, tf);
+            out.add(block);
+        }
+        return out;
+    }
+
+    private static String cleanedLabelText(ResolvedTextFrame tf) {
+        String vt = tf != null ? tf.frameVisibleText() : null;
+        if (vt == null) return null;
+        String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
+        return cleaned.isEmpty() ? null : cleaned;
+    }
+
+    private static void markTextBlockPlaced(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        try {
+            ctx.setTextDisposition(Integer.parseInt(tf.id()), FrameDisposition.TEXT_BLOCK_PLACED);
+        } catch (Exception ignored) {
+            // Non-numeric DOM ids cannot be recorded in the legacy disposition map.
+        }
+    }
+
+    private static double[] childPageRelativeBounds(ResolvedTextFrame tf) {
+        if (tf == null) return null;
+        double[] b = tf.pageRelativeBounds();
+        return (b != null && b.length >= 4) ? b : null;
+    }
+
+    private static BufferedImage decodeRenderedOriginal(ResolvedBuildContext ctx, RenderedGroup rg) {
+        try {
+            byte[] raw = loadRenderedPngBytes(ctx, rg);
+            if (raw == null || raw.length == 0) return null;
+            return ImageIO.read(new java.io.ByteArrayInputStream(raw));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static double opaqueFraction(BufferedImage img, int x, int y, int w, int h) {
+        if (img == null) return 0;
+        int x1 = Math.min(img.getWidth(), x + w);
+        int y1 = Math.min(img.getHeight(), y + h);
+        int stepX = Math.max(1, (x1 - x) / 64);
+        int stepY = Math.max(1, (y1 - y) / 64);
+        long opaque = 0, total = 0;
+        for (int yy = y; yy < y1; yy += stepY) {
+            for (int xx = x; xx < x1; xx += stepX) {
+                int a = (img.getRGB(xx, yy) >>> 24) & 0xFF;
+                if (a > 16) opaque++;
+                total++;
+            }
+        }
+        return total == 0 ? 0 : (double) opaque / total;
+    }
+
+    private static int clampI(int v, int lo, int hi) {
+        if (hi < lo) hi = lo;
+        return v < lo ? lo : (v > hi ? hi : v);
     }
 
     /** rg.editableTextFrameIds()를 ResolvedTextFrame으로 매핑 후 Y(상단)→X(좌측) 읽기 순서로 정렬. */
@@ -3280,6 +3599,9 @@ public class InlineFrameHandler {
     }
 
     public static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {
+        if (shouldUsePlannedInlinePngWithSeparateHwpxText(ctx, groupId)) {
+            return java.util.Collections.emptyList();
+        }
         if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(ctx.resolvedData, groupId)
                 && !hasPlannedFloatingShellForSemanticInlineGroup(ctx, groupId)) {
             return java.util.Collections.emptyList();

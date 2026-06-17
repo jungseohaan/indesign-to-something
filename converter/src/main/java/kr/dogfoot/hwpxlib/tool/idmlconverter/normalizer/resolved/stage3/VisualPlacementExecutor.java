@@ -4,13 +4,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
-
-import java.util.HashSet;
-import java.util.Set;
 
 /**
  * Stage 3 visible-output executor.
@@ -33,27 +29,27 @@ public final class VisualPlacementExecutor {
             return PlacementResult.notPlaced();
         }
 
-        ASTFigure fig = buildFigure(rg, image, plan);
         if (ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL) {
-            ASTTextFrameBlock textShell = InlineFrameHandler.buildFloatingBadge(
-                    ctx, rg, plan.x, plan.y, plan.width, plan.height);
-            if (textShell != null) {
-                textShell.zOrder(plan.zOrder);
-                textShell.sourceId("page_obj_text_shell_" + rg.id());
-                textShell.imageFillData(image.imageData);
-                textShell.nativeGraphicsAllowed(true);
-                textShell.forceImageFill(true);
-                textShell.fromGroup(fig.fromGroup());
-                removeEditableTextFrameBlocks(section, rg);
-                section.addBlock(textShell);
+            java.util.List<ASTTextFrameBlock> shells = InlineFrameHandler.buildFloatingTextShellBlocks(
+                    ctx, rg, plan.x, plan.y, plan.width, plan.height, plan.zOrder);
+            if (!shells.isEmpty()) {
+                for (ASTTextFrameBlock shell : shells) {
+                    section.addBlockAtFront(shell);
+                }
                 ctx.markRenderedVisualHandled(rg.id());
                 ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
-                        "PLACE_TEXT_SHELL",
-                        "placed as ASTTextFrameBlock imageFill+drawText from ObjectPlan");
+                        "PLACE_TEXT_SHELL_BLOCK",
+                        "placed extracted InDesign shell as imageFill text frame with editable HWPX text"
+                                + (shells.size() > 1 ? " (" + shells.size() + " split label blocks)" : ""));
                 return PlacementResult.textShellPlaced();
             }
+            ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
+                    "SKIP_TEXT_SHELL_BLOCK_BUILD_FAILED",
+                    "PLACE_TEXT_SHELL plan had no usable editable text shell");
+            return PlacementResult.notPlaced();
         }
 
+        ASTFigure fig = buildFigure(rg, image, plan);
         section.addBlockAtFront(fig);
         ctx.recordRenderedDecision(rg, "Phase6", "PLACE", "placed as ASTFigure");
         return PlacementResult.figurePlaced();
@@ -80,22 +76,6 @@ public final class VisualPlacementExecutor {
         fig.fromGroup(plan.fromGroup);
         fig.sourceId("page_obj_" + rg.id());
         return fig;
-    }
-
-    private static void removeEditableTextFrameBlocks(ASTSection section, RenderedGroup rg) {
-        if (section == null || section.blocks() == null || rg == null) return;
-        String[] editableIds = rg.editableTextFrameIds();
-        if (editableIds == null || editableIds.length == 0) return;
-        Set<String> sourceIds = new HashSet<>();
-        for (String editableId : editableIds) {
-            if (editableId == null || editableId.isEmpty()) continue;
-            sourceIds.add(ParagraphTextHelpers.domIdToSourceId(editableId));
-        }
-        if (sourceIds.isEmpty()) return;
-        section.blocks().removeIf(block ->
-                block instanceof ASTTextFrameBlock
-                        && block.sourceId() != null
-                        && sourceIds.contains(block.sourceId()));
     }
 
     public static final class PlacementResult {
