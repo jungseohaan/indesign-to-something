@@ -61,8 +61,7 @@ public class InlineFrameHandler {
 
     private InlineFrameHandler() {}
 
-    /** 원본에서 한 줄인 라벨/제목형 짧은 문장은 HWP 폰트폭 차이로 두 줄이 되지 않도록 SQUEEZE를 적용한다. */
-    private static final int SHORT_SINGLE_LINE_NO_WRAP_CHARS = 32;
+    /** 원본 단일행 라벨/제목형 fixed text는 HWP 폰트폭 차이로 두 줄이 되지 않도록 SQUEEZE를 적용한다. */
     private static final double INLINE_VECTOR_UNIT_MAX_SIZE_PT = 24.0;
     private static final double INLINE_VECTOR_UNIT_OVERLAP_RATIO = 0.25;
 
@@ -301,7 +300,7 @@ public class InlineFrameHandler {
             obj.width(CoordinateConverter.pointsToHwpunits(w));
             obj.height(CoordinateConverter.pointsToHwpunits(h));
             obj.sourceId(ParagraphTextHelpers.domIdToSourceId(childTf.id()));
-            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf, matchedRect != null));
             obj.nativeGraphicsAllowed(true);
 
             if (matchedRect != null) {
@@ -376,7 +375,7 @@ public class InlineFrameHandler {
                 obj.width(CoordinateConverter.pointsToHwpunits(rw));
                 obj.height(CoordinateConverter.pointsToHwpunits(rh));
                 obj.sourceId(ParagraphTextHelpers.domIdToSourceId(nestedTf.id()));
-                obj.noAutoLineWrap(shouldUseNoAutoLineWrap(nestedTf));
+                obj.noAutoLineWrap(shouldUseNoAutoLineWrap(nestedTf, true));
                 obj.nativeGraphicsAllowed(true);
 
                 String strokeName = rectPi.strokeColorName();
@@ -485,7 +484,7 @@ public class InlineFrameHandler {
             obj.width(CoordinateConverter.pointsToHwpunits(rw));
             obj.height(CoordinateConverter.pointsToHwpunits(rh));
             obj.sourceId(tfSourceId);
-            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(tf));
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(tf, true));
             obj.nativeGraphicsAllowed(true);
 
             String strokeName = bestSibling.strokeColorName();
@@ -964,7 +963,7 @@ public class InlineFrameHandler {
         obj.width(CoordinateConverter.pointsToHwpunits(w));
         obj.height(CoordinateConverter.pointsToHwpunits(hForInline));
         obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
-        obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
+        obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf, true));
         obj.nativeGraphicsAllowed(true);
         applyInlineShellShapeStyle(ctx, bgShape, obj);
 
@@ -1091,7 +1090,7 @@ public class InlineFrameHandler {
             obj.height(CoordinateConverter.pointsToHwpunits(h));
             obj.nativeGraphicsAllowed(true);
             obj.keepInline(true);
-            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf, true));
             obj.verticalJustification("CenterAlign");
             boolean nativeStyle = applyInlineEditableLabelShellStyle(ctx, obj, bgShape, hasOval, w, h);
             applyInlineEditableLabelTextMargins(obj, anchorItem, childTf);
@@ -1311,7 +1310,7 @@ public class InlineFrameHandler {
             obj.width(CoordinateConverter.pointsToHwpunits(bw));
             obj.height(CoordinateConverter.pointsToHwpunits(bh));
             obj.keepInline(true);
-            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf));
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf, true));
             obj.verticalJustification("CenterAlign");
             if (shouldOverlayRenderedBadgeText(ctx, matched)) {
                 buildBadgeParagraph(ctx, childTf, obj);
@@ -1400,7 +1399,7 @@ public class InlineFrameHandler {
             obj.nativeGraphicsAllowed(true);
             obj.forceImageFill(forcePngFill);
             applyInlineShellShapeStyle(ctx, anchorItem, obj);
-            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTfs.get(0)));
+            obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTfs.get(0), true));
             obj.verticalJustification("CenterAlign");
             for (ResolvedTextFrame childTf : childTfs) {
                 buildBadgeParagraph(ctx, childTf, obj);
@@ -1766,7 +1765,7 @@ public class InlineFrameHandler {
         obj.width(CoordinateConverter.pointsToHwpunits(w));
         obj.height(CoordinateConverter.pointsToHwpunits(h));
         obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
-        obj.noAutoLineWrap(shouldUseNoAutoLineWrap(tf));
+        obj.noAutoLineWrap(shouldUseNoAutoLineWrap(tf, true));
 
         String fillHex = ctx.resolvedData.resolveColorHex(fillName);
         if (fillHex != null) {
@@ -3344,7 +3343,7 @@ public class InlineFrameHandler {
             box.width(CoordinateConverter.pointsToHwpunits(boxW));
             box.height(CoordinateConverter.pointsToHwpunits(boxH));
             box.sourceId("child_u" + Integer.toHexString(tfDomId));
-            box.noAutoLineWrap(shouldUseNoAutoLineWrap(tf));
+            box.noAutoLineWrap(shouldUseNoAutoLineWrap(tf, inlineBackdropData != null));
             if (inlineBackdropData != null) {
                 box.imageFillData(inlineBackdropData);
                 box.nativeGraphicsAllowed(true);
@@ -3716,8 +3715,12 @@ public class InlineFrameHandler {
     }
 
     private static boolean shouldUseNoAutoLineWrap(ResolvedTextFrame tf) {
+        return shouldUseNoAutoLineWrap(tf, false);
+    }
+
+    private static boolean shouldUseNoAutoLineWrap(ResolvedTextFrame tf, boolean hasVisualShell) {
         if (tf == null) return false;
-        if (isShortSingleLineTextFrame(tf)) return true;
+        if (isFixedSingleLineTitleOrLabel(tf, hasVisualShell)) return true;
         if (tf.composedLines() == null || tf.composedLines().size() < 2) return false;
         String visibleText = tf.frameVisibleText();
         if (!hasVisibleTextExcludingObjectControls(visibleText)) return false;
@@ -3733,6 +3736,29 @@ public class InlineFrameHandler {
         return paragraphIndices.size() == tf.composedLines().size();
     }
 
+    private static boolean isFixedSingleLineTitleOrLabel(ResolvedTextFrame tf, boolean hasVisualShell) {
+        if (!isSourceSingleLineTextFrame(tf)) return false;
+        if (hasVisualShell) return true;
+        if (startsWithObjectReplacement(tf.frameVisibleText())) return true;
+        return hasOwnVisualStyle(tf);
+    }
+
+    private static boolean startsWithObjectReplacement(String visibleText) {
+        if (visibleText == null) return false;
+        for (int i = 0; i < visibleText.length(); i++) {
+            char ch = visibleText.charAt(i);
+            if (ch == '\uFFFC') return true;
+            if (!Character.isWhitespace(ch) && ch != '\u200A') return false;
+        }
+        return false;
+    }
+
+    private static boolean hasOwnVisualStyle(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        if (!isNoneColor(tf.fillColor())) return true;
+        return !isNoneColor(tf.strokeColor()) && tf.strokeWeight() > 0;
+    }
+
     private static boolean hasVisibleTextExcludingObjectControls(String visibleText) {
         if (visibleText == null) return false;
         String normalized = visibleText
@@ -3744,17 +3770,7 @@ public class InlineFrameHandler {
         return !normalized.isEmpty();
     }
 
-    private static String normalizeVisibleText(String visibleText) {
-        if (visibleText == null) return "";
-        return visibleText
-                .replace("\uFFFC", "")
-                .replace("\u0007", "")
-                .replace("\b", "")
-                .replaceAll("\\s+", "")
-                .trim();
-    }
-
-    private static boolean isShortSingleLineTextFrame(ResolvedTextFrame tf) {
+    private static boolean isSourceSingleLineTextFrame(ResolvedTextFrame tf) {
         if (tf == null) return false;
         List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
         boolean singleComposedLine = lines != null && lines.size() == 1;
@@ -3765,9 +3781,7 @@ public class InlineFrameHandler {
         if (visibleText.indexOf('\n') >= 0 || visibleText.indexOf('\r') >= 0) return false;
         if (tf.paragraphStart() != tf.paragraphEnd()) return false;
         if (tf.frameParaTexts() != null && tf.frameParaTexts().size() != 1) return false;
-
-        String normalized = normalizeVisibleText(visibleText);
-        return !normalized.isEmpty() && normalized.length() <= SHORT_SINGLE_LINE_NO_WRAP_CHARS;
+        return hasVisibleTextExcludingObjectControls(visibleText);
     }
 
 }

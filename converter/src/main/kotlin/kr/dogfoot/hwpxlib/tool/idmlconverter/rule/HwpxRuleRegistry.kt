@@ -25,17 +25,6 @@ class CharacterRuleBuilder(val styleRef: String) {
     var letterSpacing: Short? = null
 }
 
-class FontRuleBuilder(val indesignFontName: String) {
-    var koFont: String? = null
-    var enFont: String? = null
-    /** 자간 보정 (%, FontMapper.MappingResult.spacingAdjustPercent) */
-    var spacing: Int = 0
-    /** 크기 보정 (%, FontMapper.MappingResult.scaleAdjust) */
-    var scaleAdjust: Int = 0
-    /** 장평 보정 (FontMapper.MappingResult.ratio) */
-    var ratio: Double = 1.0
-}
-
 /**
  * 폰트명 키워드 기반 폴백 규칙 (FontMapper.keywordMapping() 대체).
  * keyword (필수) + keyword2 (선택, AND 조건) 모두 소문자로 지정.
@@ -72,7 +61,6 @@ class HwpxRuleRegistry private constructor() {
 
     private val paraRules = mutableMapOf<String, ParagraphRuleBuilder>()
     private val charRules = mutableMapOf<String, CharacterRuleBuilder>()
-    private val fontRules = mutableMapOf<String, FontRuleBuilder>()
     private val keywordFontRules = mutableListOf<KeywordFontRuleBuilder>()
     private var fontDefaults = FontDefaultsBuilder()
 
@@ -100,16 +88,6 @@ class HwpxRuleRegistry private constructor() {
         fun hasCharRule(characterStyleRef: String?): Boolean {
             if (characterStyleRef == null) return false
             return instance.charRules.containsKey(normalizeCharRef(characterStyleRef))
-        }
-
-        /**
-         * InDesign 폰트명에 대한 DSL fontRule 반환 (FontMapper Tier 0).
-         * null이면 DSL 규칙 없음 → JSON/키워드 폴백 사용.
-         */
-        @JvmStatic
-        fun applyFontRule(idmlFontName: String?): FontRuleBuilder? {
-            if (idmlFontName == null) return null
-            return instance.fontRules[idmlFontName]
         }
 
         /** DSL fontDefaults 반환 (FontMapper의 configSerif/Sans 초기화용) */
@@ -147,10 +125,6 @@ class HwpxRuleRegistry private constructor() {
     fun characterRule(styleRef: String, init: CharacterRuleBuilder.() -> Unit) {
         val key = Companion.normalizeCharRef(styleRef)
         charRules[key] = CharacterRuleBuilder(styleRef).apply(init)
-    }
-
-    fun fontRule(indesignFontName: String, init: FontRuleBuilder.() -> Unit) {
-        fontRules[indesignFontName] = FontRuleBuilder(indesignFontName).apply(init)
     }
 
     fun keywordFontRule(keyword: String, init: KeywordFontRuleBuilder.() -> Unit) {

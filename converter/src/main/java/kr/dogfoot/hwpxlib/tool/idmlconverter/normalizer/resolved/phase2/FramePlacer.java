@@ -54,8 +54,8 @@ public final class FramePlacer {
     private static final int HWPX_OWNED_TEXT_Z_BASE = 20000;
     /** TOP_ALIGN → CENTER_ALIGN 보정: 텍스트가 프레임 높이의 이 비율 이상 아래에 있을 때 */
     private static final double TOP_ALIGN_OFFSET_RATIO = 0.15;
-    /** 원본에서 한 줄인 라벨/제목형 짧은 문장은 HWP 폰트폭 차이로 두 줄이 되지 않도록 SQUEEZE를 적용한다. */
-    private static final int SHORT_SINGLE_LINE_NO_WRAP_CHARS = 32;
+    /** 원본 단일행 라벨/제목형 fixed text는 HWP 폰트폭 차이로 두 줄이 되지 않도록 SQUEEZE를 적용한다. */
+    private static final int TITLE_SHELL_TEXT_MAX_CHARS = 44;
     /** isOccludedByOpaqueShape: shape 크기가 텍스트 영역의 이 배수 미만이면 배경 도형으로 간주 */
     private static final double OCCLUDER_SIZE_RATIO = 1.2;
     /** isOccludedByOpaqueShape: Polygon/Oval AABB 면적이 텍스트 면적의 이 배수 초과이면 스크리블 */
@@ -668,9 +668,12 @@ public final class FramePlacer {
                     && (verticalComposedText || fontAxisExpanded);
             boolean sourceSingleLineOverlay = plannedVisualTextOverlay
                     && shouldUseVisualShellNoAutoLineWrap(true, tf, block);
+            boolean fixedSingleLineTitleOrLabel = isFixedSingleLineTitleOrLabel(
+                    ctx, tf, hasRenderedVisualShell, plannedVisualTextOverlay);
             block.noAutoLineWrap(sourceSingleLineOverlay
+                    || fixedSingleLineTitleOrLabel
                     || (!preserveFontSize
-                    && (shouldUseNoAutoLineWrap(tf, block)
+                    && (shouldUseNoAutoLineWrap(ctx, tf, block, fixedSingleLineTitleOrLabel)
                     || shouldUseVisualShellNoAutoLineWrap(hasRenderedVisualShell, tf, block))));
             // storyTotalTextLength는 convertStories()에서 설정
 
@@ -1390,7 +1393,7 @@ public final class FramePlacer {
         String text = tf.frameVisibleText();
         if (text == null) return false;
         String clean = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
-        if (clean.length() < 6 || clean.length() > SHORT_SINGLE_LINE_NO_WRAP_CHARS + 12) return false;
+        if (clean.length() < 6 || clean.length() > TITLE_SHELL_TEXT_MAX_CHARS) return false;
         if (tf.composedLines() != null && tf.composedLines().size() > 1) return false;
 
         double shellHeight = shellBottom - shellTop;
@@ -1599,7 +1602,7 @@ public final class FramePlacer {
         String text = tf.frameVisibleText();
         if (text == null) return false;
         String clean = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
-        if (clean.length() < 6 || clean.length() > SHORT_SINGLE_LINE_NO_WRAP_CHARS + 12) return false;
+        if (clean.length() < 6 || clean.length() > TITLE_SHELL_TEXT_MAX_CHARS) return false;
         return tf.composedLines() == null || tf.composedLines().size() <= 1;
     }
 
@@ -2230,12 +2233,77 @@ public final class FramePlacer {
         return true;
     }
 
-    private static boolean shouldUseNoAutoLineWrap(ResolvedTextFrame tf, ASTTextFrameBlock block) {
+    private static boolean shouldUseNoAutoLineWrap(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            ASTTextFrameBlock block,
+            boolean fixedSingleLineTitleOrLabel) {
         if (tf == null) return false;
         boolean suppressLeftIndent = block != null && block.suppressParaLeftIndent();
         if (suppressLeftIndent) return false;
-        if (isShortSingleLineTextFrame(tf)) return true;
+        if (fixedSingleLineTitleOrLabel) return true;
         return shouldUseNoAutoLineWrap(tf.composedLines(), false, tf.frameVisibleText());
+    }
+
+    private static boolean isFixedSingleLineTitleOrLabel(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            boolean hasRenderedVisualShell,
+            boolean plannedVisualTextOverlay) {
+        if (!isSourceSingleLineTextFrame(tf)) return false;
+        if (hasRenderedVisualShell || plannedVisualTextOverlay) return true;
+        if (hasTextShellPlan(ctx, tf)) return true;
+        return startsWithInlineAnchor(ctx, tf);
+    }
+
+    private static boolean hasTextShellPlan(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || tf == null) return false;
+        int tfDomId = parseDomIdOrNeg(tf.id());
+        if (tfDomId < 0) return false;
+        ObjectPlan plan = ctx.findTextFrameOwnershipPlan(tfDomId);
+        if (plan != null
+                && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL) {
+            return true;
+        }
+        List<RenderedGroup> groups = ctx.resolvedData != null ? ctx.resolvedData.allRenderedFloatingItems() : null;
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || !containsEditableTextFrameId(rg, tf.id())) continue;
+            ObjectPlan rgPlan = ctx.findOwnershipPlanForRendered(rg);
+            if (rgPlan != null
+                    && rgPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && rgPlan.visualAction == VisualAction.PLACE_TEXT_SHELL) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean startsWithInlineAnchor(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
+        if (ctx == null || ctx.resolvedData == null || tf == null || tf.storyId() == null) return false;
+        ResolvedStory story = ctx.resolvedData.getStory(tf.storyId());
+        if (story == null || story.paragraphs() == null || story.paragraphs().isEmpty()) return false;
+        int start = Math.max(0, tf.paragraphStart());
+        if (start >= story.paragraphs().size()) start = 0;
+        ResolvedParagraph paragraph = story.paragraphs().get(start);
+        if (paragraph == null || paragraph.runs() == null) return false;
+        for (ResolvedRun run : paragraph.runs()) {
+            if (run == null) continue;
+            if (run.isInlineAnchor()) return true;
+            String text = run.text();
+            if (text == null) continue;
+            String cleaned = text
+                    .replace("\uFFFC", "")
+                    .replace("\u0003", "")
+                    .replace("\u0007", "")
+                    .replace("\b", "")
+                    .replace("\r", "")
+                    .replace("\n", "")
+                    .trim();
+            if (!cleaned.isEmpty()) return false;
+        }
+        return false;
     }
 
     private static boolean shouldSuppressParaLeftIndentForPartialLeftWrap(
@@ -2556,17 +2624,7 @@ public final class FramePlacer {
         return !normalized.isEmpty();
     }
 
-    private static String normalizeVisibleText(String visibleText) {
-        if (visibleText == null) return "";
-        return visibleText
-                .replace("\uFFFC", "")
-                .replace("\u0007", "")
-                .replace("\b", "")
-                .replaceAll("\\s+", "")
-                .trim();
-    }
-
-    private static boolean isShortSingleLineTextFrame(ResolvedTextFrame tf) {
+    private static boolean isSourceSingleLineTextFrame(ResolvedTextFrame tf) {
         if (tf == null) return false;
         List<ResolvedTextFrame.ComposedLine> lines = tf.composedLines();
         boolean singleComposedLine = lines != null && lines.size() == 1;
@@ -2577,8 +2635,6 @@ public final class FramePlacer {
         if (visibleText.indexOf('\n') >= 0 || visibleText.indexOf('\r') >= 0) return false;
         if (tf.paragraphStart() != tf.paragraphEnd()) return false;
         if (tf.frameParaTexts() != null && tf.frameParaTexts().size() != 1) return false;
-
-        String normalized = normalizeVisibleText(visibleText);
-        return !normalized.isEmpty() && normalized.length() <= SHORT_SINGLE_LINE_NO_WRAP_CHARS;
+        return hasVisibleTextExcludingObjectControls(visibleText);
     }
 }

@@ -28,7 +28,7 @@ public class FontMapper {
     private String configSerifEn = DEFAULT_LATIN_SERIF;
     private String configSansEn = DEFAULT_LATIN_SANS;
 
-    // --- [1] 외부 JSON 매핑 ---
+    // --- [1] 외부 JSON 매핑 (exact font mappings의 단일 소스) ---
     private Map<String, MappingEntry> externalMappings = new HashMap<String, MappingEntry>();
 
     // --- [2] 한/글 폰트 메트릭 (font-mapping.json의 hwpxFontMetrics) ---
@@ -115,7 +115,8 @@ public class FontMapper {
 
     /**
      * DSL fontDefaults로 기본 폰트를 초기화한다 (ConversionRules.kt 값 적용).
-     * fontMapping 섹션은 font-mapping.json으로 이전됨 — config에서 더 이상 로드하지 않음.
+     * Exact font mappings are loaded only from font-mapping.json.
+     * DSL/config values here are limited to defaults and keyword fallback behavior.
      */
     public void loadFromConfig(kr.dogfoot.hwpxlib.tool.idmlconverter.ConversionConfig config) {
         kr.dogfoot.hwpxlib.tool.idmlconverter.rule.FontDefaultsBuilder dslDefaults =
@@ -183,27 +184,16 @@ public class FontMapper {
 
         MappingResult result;
 
-        // [0] DSL fontRule (ConversionRules.kt — 최우선)
-        kr.dogfoot.hwpxlib.tool.idmlconverter.rule.FontRuleBuilder dsl =
-                kr.dogfoot.hwpxlib.tool.idmlconverter.rule.HwpxRuleRegistry.applyFontRule(idmlFontFamily);
-        if (dsl != null) {
-            String ko = dsl.getKoFont() != null ? dsl.getKoFont() : DEFAULT_HWPX_FONT;
-            String en = dsl.getEnFont() != null ? dsl.getEnFont() : ko;
-            result = new MappingResult(ko, en, dsl.getSpacing(), dsl.getScaleAdjust(), dsl.getRatio());
-            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ko + "\" (DSL)" + (dsl.getRatio() != 1.0 ? " 장평=" + dsl.getRatio() : ""));
+        // [1] 외부 JSON 명시적 매핑: exact font mappings의 단일 소스
+        MappingEntry ext = externalMappings.get(idmlFontFamily);
+        if (ext != null) {
+            result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, ext.ratio);
+            System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
         }
-        // [1] 외부 JSON 명시적 매핑
+        // [2] 카테고리/키워드 폴백 (이름 기반)
+        // 메트릭 매칭은 비활성 — hwpxFontMetrics 카테고리 정확도 개선 후 재활성화
         else {
-            MappingEntry ext = externalMappings.get(idmlFontFamily);
-            if (ext != null) {
-                result = new MappingResult(ext.ko, ext.en, ext.spacing, ext.scaleAdjust, ext.ratio);
-                System.out.println("[FontMap] \"" + idmlFontFamily + "\" → \"" + ext.ko + "\" (JSON명시)" + (ext.ratio != 1.0 ? " 장평=" + ext.ratio : ""));
-            }
-            // [2] 카테고리/키워드 폴백 (이름 기반)
-            // 메트릭 매칭은 비활성 — hwpxFontMetrics 카테고리 정확도 개선 후 재활성화
-            else {
-                result = categoryFallback(idmlFontFamily, fontStyle);
-            }
+            result = categoryFallback(idmlFontFamily, fontStyle);
         }
 
         cache.put(cacheKey, result);

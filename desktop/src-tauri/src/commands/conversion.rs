@@ -61,7 +61,20 @@ pub async fn convert_idml(
         if !map.is_empty() {
             let temp_dir = std::env::temp_dir();
             let path = temp_dir.join("idml_font_map.json");
-            let json = serde_json::to_string(map)
+            let mappings = map
+                .iter()
+                .map(|(source, target)| {
+                    (
+                        source.clone(),
+                        serde_json::json!({
+                            "ko": target,
+                            "en": target,
+                            "spacing": 0
+                        }),
+                    )
+                })
+                .collect::<serde_json::Map<String, serde_json::Value>>();
+            let json = serde_json::to_string(&serde_json::json!({ "mappings": mappings }))
                 .map_err(|e| format!("Failed to serialize font map: {}", e))?;
             std::fs::write(&path, &json)
                 .map_err(|e| format!("Failed to write font map file: {}", e))?;
