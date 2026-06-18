@@ -32,6 +32,10 @@ public class RenderedGroup {
     // PNG가 굽지 않고 풀어준(네이티브 fill로 렌더해야 할) 대형 솔리드 배경 사각형 DOM ID.
     private int[] nativeFillChildIds;
     private int[] sourceObjectIds;
+    private String atomicObjectKind; // "COMPLETE_PNG" | "TEXTLESS_SHELL_WITH_TF" | "GRAPHIC_ONLY"
+    private int[] atomicSourceObjectIds;
+    private int[] atomicOwnedTextFrameIds;
+    private int[] atomicVisualSourceObjectIds;
     private String overlapPolicy;
     private String reason;
     private String parentStoryId;
@@ -122,6 +126,18 @@ public class RenderedGroup {
 
     public int[] sourceObjectIds() { return sourceObjectIds; }
     public void sourceObjectIds(int[] v) { this.sourceObjectIds = v; }
+
+    public String atomicObjectKind() { return atomicObjectKind; }
+    public void atomicObjectKind(String v) { this.atomicObjectKind = v; }
+
+    public int[] atomicSourceObjectIds() { return atomicSourceObjectIds; }
+    public void atomicSourceObjectIds(int[] v) { this.atomicSourceObjectIds = v; }
+
+    public int[] atomicOwnedTextFrameIds() { return atomicOwnedTextFrameIds; }
+    public void atomicOwnedTextFrameIds(int[] v) { this.atomicOwnedTextFrameIds = v; }
+
+    public int[] atomicVisualSourceObjectIds() { return atomicVisualSourceObjectIds; }
+    public void atomicVisualSourceObjectIds(int[] v) { this.atomicVisualSourceObjectIds = v; }
 
     public String overlapPolicy() { return overlapPolicy; }
     public void overlapPolicy(String v) { this.overlapPolicy = v; }

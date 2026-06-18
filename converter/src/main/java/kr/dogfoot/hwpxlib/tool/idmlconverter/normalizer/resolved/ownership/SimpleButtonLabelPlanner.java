@@ -34,9 +34,13 @@ public final class SimpleButtonLabelPlanner {
             if (labelText == null) continue;
 
             RenderedGroup completeRender = findCompletePngRender(data, anchor, labelTf);
+            RenderedGroup textlessShellRender = completeRender == null
+                    ? findTextlessShellRender(data, anchor, labelTf)
+                    : null;
             SimpleButtonLabelPlan.Mode mode = completeRender != null
                     ? SimpleButtonLabelPlan.Mode.COMPLETE_PNG
                     : SimpleButtonLabelPlan.Mode.TEXT_SHELL;
+            RenderedGroup visualRender = completeRender != null ? completeRender : textlessShellRender;
             LabelStyle labelStyle = labelStyle(ctx, labelTf, labelText);
             int[] sources = sourceIds(anchor, labelTf, shell);
             SimpleButtonLabelPlan plan = new SimpleButtonLabelPlan(
@@ -57,6 +61,10 @@ public final class SimpleButtonLabelPlanner {
                             ? "simple_button_label_complete_png"
                             : "simple_button_label_text_shell");
             ctx.addSimpleButtonLabelPlan(plan);
+            int labelTfId = parseInt(labelTf.id());
+            int[] ownedTextFrameIds = mode == SimpleButtonLabelPlan.Mode.COMPLETE_PNG
+                    ? new int[0]
+                    : new int[] { labelTfId };
             ObjectPlan objectPlan = new ObjectPlan(
                     plan.anchorDomId,
                     "simple_button_label:" + safe(anchor.type()),
@@ -69,14 +77,21 @@ public final class SimpleButtonLabelPlanner {
                             : VisualAction.PLACE_TEXT_SHELL,
                     VisualLayer.LABEL_BACKDROP,
                     Placement.INLINE,
-                    completeRender != null ? completeRender.id() : null,
+                    visualRender != null ? visualRender.id() : null,
                     sources,
-                    completeRender != null ? completeRender.zOrder() : anchor.zOrder(),
+                    sources,
+                    ownedTextFrameIds,
+                    new int[0],
+                    "simple_button_label:" + plan.anchorDomId,
+                    visualRender != null ? visualRender.zOrder() : anchor.zOrder(),
                     plan.reason,
-                    completeRender != null ? completeRender.file() : null,
-                    completeRender != null && completeRender.bounds() != null
-                            ? completeRender.bounds()
-                            : (anchor.pageRelativeBounds() != null ? anchor.pageRelativeBounds() : anchor.geometricBounds()));
+                    visualRender != null ? visualRender.file() : null,
+                    visualRender != null && visualRender.bounds() != null
+                            ? visualRender.bounds()
+                            : (anchor.pageRelativeBounds() != null ? anchor.pageRelativeBounds() : anchor.geometricBounds()),
+                    null,
+                    null,
+                    -1);
             ctx.replaceRenderedOwnershipPlan(objectPlan);
             ctx.trimSourceObjectIdsClaimedBy(objectPlan);
         }
@@ -195,6 +210,20 @@ public final class SimpleButtonLabelPlanner {
         int bestPriority = Integer.MAX_VALUE;
         for (RenderedGroup rg : data.allRenderedFloatingItems()) {
             if (!data.shouldUseCompletePngForSimpleButtonLabel(rg)) continue;
+            int priority = completeRenderPriority(rg, anchor, labelTf);
+            if (priority < bestPriority) {
+                best = rg;
+                bestPriority = priority;
+            }
+        }
+        return best;
+    }
+
+    private static RenderedGroup findTextlessShellRender(ResolvedData data, ResolvedPageItem anchor, ResolvedTextFrame labelTf) {
+        RenderedGroup best = null;
+        int bestPriority = Integer.MAX_VALUE;
+        for (RenderedGroup rg : data.allRenderedFloatingItems()) {
+            if (!data.shouldUseTextlessShellForAtomicMarkerLabel(rg)) continue;
             int priority = completeRenderPriority(rg, anchor, labelTf);
             if (priority < bestPriority) {
                 best = rg;

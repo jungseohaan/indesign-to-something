@@ -20,6 +20,21 @@
 - 본문, 제목, 라벨, 설명, 문항, 출처는 HWPX 텍스트다.
 - PNG가 텍스트를 소유할 수 있는 경우는 atomic marker뿐이다.
 - atomic marker는 명시적 표식 패턴만 허용한다: `가`, `ㄱ`, `1`, `01`, 체크/선택지 표식.
+- atomic object는 complete PNG 여부가 아니라 원본 source bundle로 먼저 식별한다.
+  marker bundle은 `marker shell root + label TextFrame + 그 자손`으로 닫혀 있어야 하고,
+  graphic-only bundle은 하나의 원본 Group과 그 자손으로 닫혀 있어야 한다.
+- extractor는 닫힌 atomic bundle을 찾으면 `atomicObjectKind`,
+  `atomicSourceObjectIds`, `atomicOwnedTextFrameIds`, `atomicVisualSourceObjectIds`를
+  resolved metadata에 기록한다. Java는 이 메타데이터를 우선 검증하고, 새 atomic
+  bundle을 후속 단계에서 만들지 않는다.
+- 닫힌 atomic bundle과 정확히 맞는 render만 atomic object의 visual owner가 될 수 있다.
+  table carrier, parent TextFrame, parent table, unrelated group source가 섞인 render는 atomic object owner가 아니다.
+- atomic object의 표현 방식은 둘 중 하나다.
+  - `COMPLETE_PNG`: `textAction=OWNED_BY_PNG`, `visualAction=PLACE_INLINE_PNG|PLACE_FLOATING_PNG`
+  - `TEXTLESS_SHELL_WITH_TF`: `textAction=OWNED_BY_HWPX_TEXT`, `visualAction=PLACE_TEXT_SHELL`
+  - `GRAPHIC_ONLY`: `textAction=DROP_TEXT`, `visualAction=PLACE_INLINE_PNG|PLACE_FLOATING_PNG`
+- `TEXTLESS_SHELL_WITH_TF`의 shell은 extractor가 만든 textless PNG/vector만 사용하고,
+  label TF는 HWPX text로 배치한다.
 - 텍스트를 임의로 합치지 않는다. 연결 TextFrame은 원본 thread만 따른다.
 
 ## 3. 비주얼
@@ -27,7 +42,7 @@
 - `PLACE_TEXT_SHELL`: textless PNG/vector shell을 원본 placement에 맞게 배치한다.
   floating shell은 별도 visual로, inline shell은 하나의 inline carrier 안에서 실행한다.
 - `PLACE_FLOATING_PNG`: 사진, 삽화, 차트, 완성형 콘텐츠 PNG.
-- `PLACE_INLINE_PNG`: 원본이 inline이고 텍스트를 PNG가 소유하는 atomic/graphic only 객체.
+- `PLACE_INLINE_PNG`: 원본이 inline인 complete marker 또는 graphic-only atomic 객체.
 - `ABSORB_TEXT_STYLE`: fill/stroke/underline처럼 HWPX 텍스트 속성 또는 1x1 table로 표현 가능한 장식.
 - `DROP_VISUAL`: 같은 source의 더 정확한 owner가 있을 때만 사용한다.
 

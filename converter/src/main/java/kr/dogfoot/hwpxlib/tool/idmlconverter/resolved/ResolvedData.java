@@ -16,6 +16,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
  * InDesign ExtendScript에서 수집한 모든 resolved 데이터.
  */
 public class ResolvedData {
+    private static final String ATOMIC_COMPLETE_PNG = "COMPLETE_PNG";
+    private static final String ATOMIC_TEXTLESS_SHELL_WITH_TF = "TEXTLESS_SHELL_WITH_TF";
+
     private final Map<String, ResolvedStory> storyMap = new HashMap<>();
     private final Map<String, String> colorHexMap = new HashMap<>();  // colorName → "#RRGGBB"
     private final List<ResolvedTextFrame> textFrames = new ArrayList<>();
@@ -38,6 +41,7 @@ public class ResolvedData {
     private final Map<String, RenderedGroup> renderedFloatingItemMap = new LinkedHashMap<>();
     private final Set<String> indesignPngTextOwnerFrameIds = new HashSet<>();
     private final Set<String> atomicIndesignPngTextOwnerFrameIds = new HashSet<>();
+    private Map<String, AtomicMarkerBundle> atomicMarkerBundleByLabelFrameId;
     private Set<String> editableTextFrameIds;  // 배경에서 숨겨진 TextFrame DOM ID
     private String basePath;  // resolved.json 부모 디렉토리 경로
     private final Map<String, String> paragraphStyleJustMap = new HashMap<>();  // styleName → justification (top-level paragraphStyles)
@@ -222,6 +226,7 @@ public class ResolvedData {
 
     public void addTextFrame(ResolvedTextFrame frame) {
         textFrames.add(frame);
+        atomicMarkerBundleByLabelFrameId = null;
     }
 
     /**
@@ -486,6 +491,7 @@ public class ResolvedData {
         if (item.id() != null) {
             pageItemMap.put(item.id(), item);
         }
+        atomicMarkerBundleByLabelFrameId = null;
     }
 
     public List<ResolvedPageItem> pageItems() { return pageItems; }
@@ -1008,19 +1014,24 @@ public class ResolvedData {
     }
 
     /**
-     * 기본 원칙은 editable TF 유지다. 다만 가/나/다/라, ㄱ/ㄴ/ㄷ, 1/2/3, 01/02처럼
-     * 내용 의미보다 위치 식별자 성격이 강한 짧은 버튼 라벨은 InDesign에서
-     * 완성형 PNG로 추출해도 편집 손실보다 중복/정렬 리스크가 작다.
-     * 이 기준은 플로팅/인라인에 동일하게 적용한다.
+     * Atomic object의 COMPLETE_PNG 표현만 판단한다.
+     *
+     * Atomic 여부는 원본 source bundle(marker shell root + label TF + descendants)로 먼저
+     * 결정하고, 이 메서드는 그 bundle을 PNG 한 장이 텍스트까지 소유해도 되는지만 본다.
      */
     public boolean shouldUseCompletePngForSimpleButtonLabel(RenderedGroup item) {
         if (item == null) return false;
+        if (hasAtomicObjectKind(item)
+                && !ATOMIC_COMPLETE_PNG.equals(item.atomicObjectKind())) {
+            return false;
+        }
         if (!"indesign_png".equals(item.visualOwner())) return false;
-        if ("visual_marker_label_indesign_png".equals(item.reason())) {
+        if (ATOMIC_COMPLETE_PNG.equals(item.atomicObjectKind())) {
             if (!"indesign_png".equals(item.textOwner())) return false;
             if (!Boolean.TRUE.equals(item.containsEditableText())) return false;
-        } else if ("visual_label_text_hidden_shell".equals(item.reason())) {
-            if (!"hwpx_tf".equals(item.textOwner())) return false;
+        } else if ("visual_marker_label_indesign_png".equals(item.reason())) {
+            if (!"indesign_png".equals(item.textOwner())) return false;
+            if (!Boolean.TRUE.equals(item.containsEditableText())) return false;
         } else if (!isInlineCompleteSimpleButtonLabelCandidate(item)) {
             return false;
         }
@@ -1030,7 +1041,188 @@ public class ResolvedData {
             ResolvedTextFrame tf = getTextFrame(id);
             if (!isSimpleButtonLabelText(tf)) return false;
         }
+        return isCanonicalAtomicMarkerRender(item, ids);
+    }
+
+    /**
+     * Atomic object의 TEXTLESS_SHELL_WITH_TF 표현을 판단한다.
+     *
+     * shell은 extractor가 만든 textless render여야 하고, label TF는 HWPX text가 소유한다.
+     */
+    public boolean shouldUseTextlessShellForAtomicMarkerLabel(RenderedGroup item) {
+        if (item == null) return false;
+        if (hasAtomicObjectKind(item)
+                && !ATOMIC_TEXTLESS_SHELL_WITH_TF.equals(item.atomicObjectKind())) {
+            return false;
+        }
+        if (!"indesign_png".equals(item.visualOwner())) return false;
+        if (!"hwpx_tf".equals(item.textOwner())) return false;
+        if (!hasAtomicObjectKind(item) && !isAtomicTextlessShellReason(item.reason())) return false;
+        if (!item.hasEditableTextHiddenFromPng()) return false;
+        if (Boolean.TRUE.equals(item.containsEditableText())) return false;
+        String[] ids = simpleButtonLabelTextFrameIds(item);
+        if (ids == null || ids.length == 0 || ids.length > 2) return false;
+        for (String id : ids) {
+            ResolvedTextFrame tf = getTextFrame(id);
+            if (!isSimpleButtonLabelText(tf)) return false;
+        }
+        return isCanonicalAtomicMarkerRender(item, ids);
+    }
+
+    public boolean isNonCanonicalAtomicObjectRender(RenderedGroup item) {
+        if (item == null) return false;
+        if (!"indesign_png".equals(item.visualOwner())) return false;
+        if (!isAtomicObjectRenderCandidate(item)) return false;
+        String[] ids = simpleButtonLabelTextFrameIds(item);
+        if (ids == null || ids.length == 0) return false;
+        for (String id : ids) {
+            ResolvedTextFrame tf = getTextFrame(id);
+            if (!isSimpleButtonLabelText(tf)) return false;
+        }
+        return !isCanonicalAtomicMarkerRender(item, ids);
+    }
+
+    private boolean isAtomicObjectRenderCandidate(RenderedGroup item) {
+        if (item == null) return false;
+        if (hasAtomicObjectKind(item)) return true;
+        if ("visual_marker_label_indesign_png".equals(item.reason())) {
+            return "indesign_png".equals(item.textOwner());
+        }
+        if (isInlineCompleteSimpleButtonLabelCandidate(item)) {
+            return "indesign_png".equals(item.textOwner());
+        }
+        if (isAtomicTextlessShellReason(item.reason())) {
+            return "hwpx_tf".equals(item.textOwner());
+        }
+        return false;
+    }
+
+    private static boolean isAtomicTextlessShellReason(String reason) {
+        return "visual_label_text_hidden_shell".equals(reason)
+                || "leaf_group_text_hidden_shell".equals(reason)
+                || "editable_composite_text_hidden_shell".equals(reason);
+    }
+
+    private boolean isCanonicalAtomicMarkerRender(RenderedGroup item, String[] labelTextFrameIds) {
+        if (item == null || labelTextFrameIds == null || labelTextFrameIds.length == 0) return false;
+        int[] sourceIds = item.sourceObjectIds();
+        if (sourceIds == null || sourceIds.length == 0) return false;
+
+        if (hasAtomicObjectKind(item)) {
+            int[] atomicSourceIds = item.atomicSourceObjectIds();
+            if (atomicSourceIds == null || atomicSourceIds.length == 0) return false;
+            Set<String> allowed = intArrayToStringSet(atomicSourceIds);
+            if (!containsAllSourceIds(allowed, sourceIds)) return false;
+
+            int[] ownedTextFrameIds = item.atomicOwnedTextFrameIds();
+            Set<String> owned = ownedTextFrameIds != null && ownedTextFrameIds.length > 0
+                    ? intArrayToStringSet(ownedTextFrameIds)
+                    : allowed;
+            for (String labelId : labelTextFrameIds) {
+                if (labelId == null || labelId.isEmpty() || !owned.contains(labelId)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        Set<String> allowed = new HashSet<>();
+        for (String labelId : labelTextFrameIds) {
+            if (labelId == null || labelId.isEmpty()) continue;
+            AtomicMarkerBundle bundle = atomicMarkerBundleForLabel(labelId);
+            if (bundle == null) return false;
+            allowed.addAll(bundle.sourceIds);
+        }
+        if (allowed.isEmpty()) return false;
+
+        for (int sourceId : sourceIds) {
+            String id = String.valueOf(sourceId);
+            if (!allowed.contains(id)) return false;
+        }
         return true;
+    }
+
+    private static boolean hasAtomicObjectKind(RenderedGroup item) {
+        String kind = item != null ? item.atomicObjectKind() : null;
+        return kind != null && !kind.isEmpty();
+    }
+
+    private static Set<String> intArrayToStringSet(int[] ids) {
+        Set<String> result = new HashSet<>();
+        if (ids == null) return result;
+        for (int id : ids) result.add(String.valueOf(id));
+        return result;
+    }
+
+    private static boolean containsAllSourceIds(Set<String> allowed, int[] sourceIds) {
+        if (allowed == null || sourceIds == null) return false;
+        for (int sourceId : sourceIds) {
+            if (!allowed.contains(String.valueOf(sourceId))) return false;
+        }
+        return true;
+    }
+
+    private AtomicMarkerBundle atomicMarkerBundleForLabel(String labelTextFrameId) {
+        if (labelTextFrameId == null) return null;
+        return atomicMarkerBundles().get(labelTextFrameId);
+    }
+
+    private Map<String, AtomicMarkerBundle> atomicMarkerBundles() {
+        if (atomicMarkerBundleByLabelFrameId == null) {
+            atomicMarkerBundleByLabelFrameId = buildAtomicMarkerBundles();
+        }
+        return atomicMarkerBundleByLabelFrameId;
+    }
+
+    private Map<String, AtomicMarkerBundle> buildAtomicMarkerBundles() {
+        Map<String, AtomicMarkerBundle> result = new HashMap<>();
+        for (ResolvedTextFrame tf : textFrames) {
+            if (!isSimpleButtonLabelText(tf)) continue;
+            String labelId = tf.id();
+            if (labelId == null || labelId.isEmpty()) continue;
+            ResolvedPageItem labelItem = pageItemMap.get(labelId);
+            String rootId = atomicMarkerRootForLabelItem(labelItem);
+            if (rootId == null) continue;
+            Set<String> sourceIds = new HashSet<>();
+            sourceIds.add(labelId);
+            sourceIds.add(rootId);
+            sourceIds.addAll(buildDescendantSet(rootId, 8));
+            result.put(labelId, new AtomicMarkerBundle(sourceIds));
+        }
+        return result;
+    }
+
+    private String atomicMarkerRootForLabelItem(ResolvedPageItem labelItem) {
+        String parentId = labelItem != null ? labelItem.parentId() : null;
+        for (int depth = 0; depth < 8 && parentId != null; depth++) {
+            ResolvedPageItem parent = pageItemMap.get(parentId);
+            if (parent == null) break;
+            if (isAtomicMarkerShellRoot(parent)) return parentId;
+            parentId = parent.parentId();
+        }
+        return null;
+    }
+
+    private boolean isAtomicMarkerShellRoot(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = item.type();
+        if (!("Oval".equals(type) || "Rectangle".equals(type) || "Polygon".equals(type) || "Group".equals(type))) {
+            return false;
+        }
+        if ("Group".equals(type)) return true;
+        String fill = item.fillColorName();
+        String stroke = item.strokeColorName();
+        return (fill != null && !"None".equals(fill) && !"[None]".equals(fill))
+                || (stroke != null && !"None".equals(stroke) && !"[None]".equals(stroke)
+                && item.strokeWeight() > 0);
+    }
+
+    private static final class AtomicMarkerBundle {
+        private final Set<String> sourceIds;
+
+        private AtomicMarkerBundle(Set<String> sourceIds) {
+            this.sourceIds = sourceIds;
+        }
     }
 
     private static boolean isInlineCompleteSimpleButtonLabelCandidate(RenderedGroup item) {

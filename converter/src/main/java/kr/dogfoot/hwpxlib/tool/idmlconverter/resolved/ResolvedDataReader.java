@@ -568,6 +568,16 @@ public class ResolvedDataReader {
         if (o.has("sourceObjectIds") && !o.get("sourceObjectIds").isJsonNull()) {
             group.sourceObjectIds(parseIntArray(o.getAsJsonArray("sourceObjectIds")));
         }
+        group.atomicObjectKind(getString(o, "atomicObjectKind"));
+        if (o.has("atomicSourceObjectIds") && !o.get("atomicSourceObjectIds").isJsonNull()) {
+            group.atomicSourceObjectIds(parseIntArray(o.getAsJsonArray("atomicSourceObjectIds")));
+        }
+        if (o.has("atomicOwnedTextFrameIds") && !o.get("atomicOwnedTextFrameIds").isJsonNull()) {
+            group.atomicOwnedTextFrameIds(parseIntArray(o.getAsJsonArray("atomicOwnedTextFrameIds")));
+        }
+        if (o.has("atomicVisualSourceObjectIds") && !o.get("atomicVisualSourceObjectIds").isJsonNull()) {
+            group.atomicVisualSourceObjectIds(parseIntArray(o.getAsJsonArray("atomicVisualSourceObjectIds")));
+        }
         return group;
     }
 

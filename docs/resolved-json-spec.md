@@ -297,6 +297,10 @@
 | `visualOnlyChildIds` | number[] | 텍스트 없이 시각 그래픽으로만 필요한 자식 id |
 | `tfInlineVisualIds` | number[] | editable TextFrame Story에 앵커되어 TF가 소유하는 시각 객체 id. 부모 PNG export에서는 숨기고 `visualOnlyChildIds`에서도 제외한다. |
 | `sourceObjectIds` | number[] | 이 렌더 항목에 포함된 원본 DOM id 전체 |
+| `atomicObjectKind` | `COMPLETE_PNG` / `TEXTLESS_SHELL_WITH_TF` / `GRAPHIC_ONLY` | 이 렌더 항목이 닫힌 atomic source bundle의 대표 출력임을 선언한다. |
+| `atomicSourceObjectIds` | number[] | atomic bundle 전체 원본 DOM id. 이 집합 밖의 source가 렌더에 섞이면 canonical atomic으로 보지 않는다. |
+| `atomicOwnedTextFrameIds` | number[] | atomic bundle 안에서 텍스트 소유권 판정 대상인 editable TextFrame id. `GRAPHIC_ONLY`에서는 빈 배열이다. |
+| `atomicVisualSourceObjectIds` | number[] | atomic bundle 안에서 shell/visual을 이루는 원본 DOM id. 보통 `atomicSourceObjectIds - atomicOwnedTextFrameIds`. |
 | `placementAllowed` | boolean | Java가 이 PNG를 직접 배치해도 되는지 |
 | `overlapPolicy` | `behind_text` / `in_front_of_text` / `inline` / `clipped_to_frame` | HWPX 배치 정책 |
 | `reason` | string | 추출기가 ownership을 판정한 사유 |
@@ -308,7 +312,8 @@
 3. `editableTextFrameIds`는 HWPX TextFrame으로 배치한다.
 4. `tfInlineVisualIds`는 Story 변환의 inline object로 배치한다. 부모 PNG의 중복 소유로 판단하지 않는다.
 5. `visualOnlyChildIds`의 별도 렌더 항목이 있으면 그것만 배치한다.
-6. ownership 필드가 없으면 기존 휴리스틱을 fallback으로 사용한다.
+6. `atomicObjectKind`가 있으면 Java는 atomic 판정을 다시 만들지 않고, `sourceObjectIds ⊆ atomicSourceObjectIds`와 `atomicOwnedTextFrameIds`만 검증한다.
+7. ownership 필드가 없으면 기존 휴리스틱을 fallback으로 사용한다.
 
 예시:
 

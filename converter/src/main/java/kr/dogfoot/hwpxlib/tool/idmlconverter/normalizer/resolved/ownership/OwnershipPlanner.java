@@ -339,6 +339,7 @@ public final class OwnershipPlanner {
         String reason = rg.reason() == null ? "" : rg.reason();
         if (!reason.contains("text_composite_editable_text_hidden")
                 && !reason.contains("editable_composite_text_hidden_shell")
+                && !reason.contains("visual_label_text_hidden_shell")
                 && !reason.contains("concept_label_shell")) {
             return false;
         }
@@ -1176,6 +1177,12 @@ public final class OwnershipPlanner {
         if (data.shouldUseCompletePngForSimpleButtonLabel(rg)) {
             return TextAction.OWNED_BY_PNG;
         }
+        if (data.shouldUseTextlessShellForAtomicMarkerLabel(rg)) {
+            return TextAction.OWNED_BY_HWPX_TEXT;
+        }
+        if (data.isNonCanonicalAtomicObjectRender(rg)) {
+            return TextAction.DROP_TEXT;
+        }
         if (data.shouldKeepVisualLabelTextEditable(rg)) {
             return TextAction.OWNED_BY_HWPX_TEXT;
         }
@@ -1194,6 +1201,12 @@ public final class OwnershipPlanner {
     }
 
     private VisualAction visualActionOf(RenderedGroup rg, Placement placement, TextAction textAction) {
+        if (data.isNonCanonicalAtomicObjectRender(rg)) {
+            return VisualAction.DROP_VISUAL;
+        }
+        if (data.shouldUseTextlessShellForAtomicMarkerLabel(rg)) {
+            return VisualAction.PLACE_TEXT_SHELL;
+        }
         if (isInlineCompleteGraphicWithSeparateTextHiddenShell(rg)) {
             return VisualAction.DROP_VISUAL;
         }
@@ -1511,6 +1524,7 @@ public final class OwnershipPlanner {
     private boolean isCompanionShellOfCompleteSimpleLabel(RenderedGroup rg) {
         if (rg == null) return false;
         if (!"visual_label_text_hidden_shell".equals(rg.reason())) return false;
+        if (data.shouldUseTextlessShellForAtomicMarkerLabel(rg)) return false;
         return data.shouldUseCompletePngForSimpleButtonLabel(rg);
     }
 
@@ -1862,7 +1876,20 @@ public final class OwnershipPlanner {
     }
 
     private boolean isTextHiddenShellForInlineAnchor(RenderedGroup rg) {
-        return false;
+        if (rg == null) return false;
+        if (!isDirectInlineTextShellReason(rg.reason())) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (!"hwpx_tf".equals(rg.textOwner())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
+        if (!rg.hasEditableTextHiddenFromPng()) return false;
+        if (!hasInlineSourceObject(rg) && !hasResolvedInlineAnchor(rg.id())) return false;
+        String[] ids = rg.editableTextFrameIds();
+        if (ids == null || ids.length == 0) return false;
+        for (String id : ids) {
+            ResolvedTextFrame tf = data != null ? data.getTextFrame(id) : null;
+            if (tf == null || !tf.isInline()) return false;
+        }
+        return true;
     }
 
     private boolean hasInlineSourceObject(RenderedGroup rg) {
@@ -2844,6 +2871,7 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isLeafTextHiddenShellPlan(plan)) continue;
+            if (isNonCanonicalAtomicObjectPlan(plan)) continue;
             if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
             if (hasAlternativeVisibleTextShellOwner(plan)) continue;
             plans.set(i, plan
@@ -2879,6 +2907,7 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isInlineTextShellPlan(plan)) continue;
+            if (isNonCanonicalAtomicObjectPlan(plan)) continue;
             if ("owned_by_page_object_channel".equals(plan.reason)) continue;
             if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
             if (hasAlternativeVisibleInlineTextShellOwner(plan)) continue;
@@ -2903,6 +2932,12 @@ public final class OwnershipPlanner {
         return false;
     }
 
+    private boolean isNonCanonicalAtomicObjectPlan(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        RenderedGroup rg = renderedGroupForPlan(plan);
+        return rg != null && data.isNonCanonicalAtomicObjectRender(rg);
+    }
+
     private boolean isInlineTextShellPlan(ObjectPlan plan) {
         if (plan == null || plan.placement != Placement.INLINE) return false;
         if (!safe(plan.kind).contains("inline_object")) return false;
@@ -2919,10 +2954,12 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan leafShell = plans.get(i);
             if (!isLeafTextHiddenShellPlan(leafShell)) continue;
+            if (isNonCanonicalAtomicObjectPlan(leafShell)) continue;
             if (leafShell.ownedTextFrameIds == null || leafShell.ownedTextFrameIds.length == 0) continue;
             if (leafShell.ownedTextFrameIds.length != 1) continue;
             ObjectPlan inlineCompanion = findInlineCompanionForLeafShell(leafShell);
             if (inlineCompanion == null) continue;
+            if (isNonCanonicalAtomicObjectPlan(inlineCompanion)) continue;
             int companionIndex = plans.indexOf(inlineCompanion);
             if (companionIndex < 0) continue;
 
@@ -2964,7 +3001,10 @@ public final class OwnershipPlanner {
             if (candidate.placement != Placement.INLINE) continue;
             if (!safe(candidate.kind).contains("inline_object")) continue;
             if (!hasInlineSourcePlan(candidate)) continue;
-            if (!intersects(candidate.sourceObjectIds, leafShell.sourceObjectIds)) continue;
+            if (candidate.domId != leafShell.domId
+                    && !intersects(candidate.sourceObjectIds, leafShell.sourceObjectIds)) {
+                continue;
+            }
             if (candidate.file == null || candidate.file.isEmpty()) continue;
             return candidate;
         }
@@ -3606,11 +3646,26 @@ public final class OwnershipPlanner {
     }
 
     private static int[] sourceIdsOrSelf(RenderedGroup rg) {
+        if (isGraphicOnlyAtomicObject(rg)
+                && rg.atomicSourceObjectIds() != null
+                && rg.atomicSourceObjectIds().length > 0) {
+            int[] copy = Arrays.copyOf(rg.atomicSourceObjectIds(), rg.atomicSourceObjectIds().length);
+            Arrays.sort(copy);
+            return copy;
+        }
         int[] ids = rg.sourceObjectIds();
         if (ids == null || ids.length == 0) return new int[] { rg.id() };
         int[] copy = Arrays.copyOf(ids, ids.length);
         Arrays.sort(copy);
         return copy;
+    }
+
+    private static boolean isGraphicOnlyAtomicObject(RenderedGroup rg) {
+        return rg != null
+                && "GRAPHIC_ONLY".equals(rg.atomicObjectKind())
+                && !"indesign_png".equals(rg.textOwner())
+                && !Boolean.TRUE.equals(rg.containsText())
+                && !Boolean.TRUE.equals(rg.containsEditableText());
     }
 
     private int zOrderOf(RenderedGroup rg, VisualAction visualAction, int[] sourceIds) {

@@ -1847,6 +1847,180 @@ function _collectTextFrameIdsFromNestedItems(item, nested, editableOnly, require
     return ids;
 }
 
+function _itemConstructorName(item) {
+    try { return item && item.constructor ? item.constructor.name : ""; } catch (e) {}
+    return "";
+}
+
+function _findNestedPageItemById(root, id) {
+    if (!root || id === undefined || id === null) return null;
+    var key = id.toString();
+    try {
+        if (root.id !== undefined && root.id !== null && root.id.toString() === key) return root;
+    } catch (e0) {}
+    try {
+        var nested = root.allPageItems;
+        for (var i = 0; i < nested.length; i++) {
+            try {
+                if (nested[i].id !== undefined && nested[i].id !== null && nested[i].id.toString() === key) {
+                    return nested[i];
+                }
+            } catch (e1) {}
+        }
+    } catch (e2) {}
+    return null;
+}
+
+function _idArrayContains(ids, id) {
+    if (!ids || id === undefined || id === null) return false;
+    var key = id.toString();
+    for (var i = 0; i < ids.length; i++) {
+        if (ids[i] !== undefined && ids[i] !== null && ids[i].toString() === key) return true;
+    }
+    return false;
+}
+
+function _idArraySubset(a, b) {
+    if (!a) return true;
+    for (var i = 0; i < a.length; i++) {
+        if (!_idArrayContains(b, a[i])) return false;
+    }
+    return true;
+}
+
+function _removeIds(ids, removeIds) {
+    var out = [];
+    if (!ids) return out;
+    for (var i = 0; i < ids.length; i++) {
+        if (!_idArrayContains(removeIds, ids[i])) out.push(ids[i]);
+    }
+    return out;
+}
+
+function _hasVisibleAtomicPaint(item) {
+    if (!item) return false;
+    var cName = _itemConstructorName(item);
+    if (cName === "Group") return true;
+    if (!(cName === "Oval" || cName === "Rectangle" || cName === "Polygon")) return false;
+    try {
+        var fillName = item.fillColor ? item.fillColor.name : null;
+        if (fillName && fillName !== "None" && fillName !== "[None]") return true;
+    } catch (e0) {}
+    try {
+        var strokeName = item.strokeColor ? item.strokeColor.name : null;
+        var weight = item.strokeWeight || 0;
+        if (strokeName && strokeName !== "None" && strokeName !== "[None]" && weight > 0) return true;
+    } catch (e1) {}
+    return false;
+}
+
+function _findAtomicRootForTextFrame(renderTarget, textFrameId) {
+    var tf = _findNestedPageItemById(renderTarget, textFrameId);
+    if (!tf) return null;
+    var parent = null;
+    try { parent = tf.parent; } catch (e0) { parent = null; }
+    for (var depth = 0; depth < 8 && parent; depth++) {
+        if (_hasVisibleAtomicPaint(parent)) {
+            var sourceIds = _collectSourceObjectIds(parent);
+            if (_idArrayContains(sourceIds, textFrameId)) return parent;
+        }
+        try {
+            var pName = _itemConstructorName(parent);
+            if (pName === "Page" || pName === "Spread" || pName === "Document" || pName === "Story") break;
+        } catch (e1) {}
+        try { parent = parent.parent; } catch (e2) { parent = null; }
+    }
+    if (_hasVisibleAtomicPaint(renderTarget)) {
+        var renderSourceIds = _collectSourceObjectIds(renderTarget);
+        if (_idArrayContains(renderSourceIds, textFrameId)) return renderTarget;
+    }
+    return null;
+}
+
+function _closedAtomicBundleForEditableTextFrames(renderTarget, editableTfIds, renderSourceIds) {
+    if (!renderTarget || !editableTfIds || editableTfIds.length === 0) return null;
+    var root = null;
+    for (var i = 0; i < editableTfIds.length; i++) {
+        var candidate = _findAtomicRootForTextFrame(renderTarget, editableTfIds[i]);
+        if (!candidate) return null;
+        if (root === null) {
+            root = candidate;
+        } else {
+            try {
+                if (root.id.toString() !== candidate.id.toString()) {
+                    if (_hasVisibleAtomicPaint(renderTarget)) {
+                        root = renderTarget;
+                    } else {
+                        return null;
+                    }
+                }
+            } catch (e) { return null; }
+        }
+    }
+    var atomicSourceIds = _collectSourceObjectIds(root);
+    for (var t = 0; t < editableTfIds.length; t++) {
+        if (!_idArrayContains(atomicSourceIds, editableTfIds[t])) return null;
+    }
+    if (!_idArraySubset(renderSourceIds, atomicSourceIds)) return null;
+    return {
+        sourceIds: atomicSourceIds,
+        visualSourceIds: _removeIds(atomicSourceIds, editableTfIds)
+    };
+}
+
+function _isAtomicCompletePngReason(reason) {
+    return reason === "visual_marker_label_indesign_png"
+            || reason === "inline_graphic_only"
+            || reason === "inline_badge_baked";
+}
+
+function _isAtomicTextlessShellReasonForMetadata(reason) {
+    return reason === "visual_label_text_hidden_shell"
+            || reason === "leaf_group_text_hidden_shell"
+            || reason === "editable_composite_text_hidden_shell"
+            || reason === "inline_text_hidden"
+            || reason === "inline_badge";
+}
+
+function _isAtomicGraphicOnlyReasonForMetadata(reason) {
+    return reason === "inline_graphic_only"
+            || reason === "pure_decoration_group"
+            || reason === "decoration_group";
+}
+
+function _annotateAtomicObjectOwnership(entry, renderTarget, opts, sourceIds, editableTfIds, textOwner) {
+    if (!entry || !renderTarget) return entry;
+    var reason = opts && opts.reason ? opts.reason : (entry.reason || "");
+    var kind = null;
+    var hasEditableText = editableTfIds && editableTfIds.length > 0;
+    if (textOwner === "none"
+            && !hasEditableText
+            && _isAtomicGraphicOnlyReasonForMetadata(reason)
+            && _itemConstructorName(renderTarget) === "Group"
+            && sourceIds
+            && sourceIds.length > 1) {
+        entry.atomicObjectKind = "GRAPHIC_ONLY";
+        entry.atomicSourceObjectIds = sourceIds;
+        entry.atomicOwnedTextFrameIds = [];
+        entry.atomicVisualSourceObjectIds = sourceIds;
+        return entry;
+    }
+    if (!hasEditableText) return entry;
+    if (textOwner === "indesign_png" && _isAtomicCompletePngReason(reason)) {
+        kind = "COMPLETE_PNG";
+    } else if (textOwner === "hwpx_tf" && _isAtomicTextlessShellReasonForMetadata(reason)) {
+        kind = "TEXTLESS_SHELL_WITH_TF";
+    }
+    if (!kind) return entry;
+    var bundle = _closedAtomicBundleForEditableTextFrames(renderTarget, editableTfIds, sourceIds);
+    if (!bundle) return entry;
+    entry.atomicObjectKind = kind;
+    entry.atomicSourceObjectIds = bundle.sourceIds;
+    entry.atomicOwnedTextFrameIds = editableTfIds;
+    entry.atomicVisualSourceObjectIds = bundle.visualSourceIds;
+    return entry;
+}
+
 function _collectVisualOnlyChildIds(item) {
     var ids = [], seen = {};
     try {
@@ -1939,6 +2113,7 @@ function applyRenderOwnership(entry, renderTarget, opts) {
     _copyLayerInfo(entry, opts.layerSource || renderTarget);
     if (sourceIds && sourceIds.length > 0) entry.sourceObjectIds = sourceIds;
     if (editableTfIds && editableTfIds.length > 0) entry.editableTextFrameIds = editableTfIds;
+    _annotateAtomicObjectOwnership(entry, renderTarget, opts, sourceIds, editableTfIds, textOwner);
     var visualOnlyIds = opts.visualOnlyChildIds;
     if (visualOnlyIds === undefined || visualOnlyIds === null) {
         visualOnlyIds = renderTarget ? _collectVisualOnlyChildIds(renderTarget) : [];

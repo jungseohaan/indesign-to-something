@@ -21,7 +21,28 @@ public class OwnershipPlannerTest {
     @Test
     public void completeSimpleInlineLabelOwnsTextAndVisibleInlinePng() {
         ResolvedData data = new ResolvedData();
-        data.addTextFrame(textFrame(101, "가"));
+        ResolvedTextFrame label = textFrame(101, "가");
+        label.isInline(true);
+        data.addTextFrame(label);
+        ResolvedPageItem anchor = pageItem(
+                100,
+                "Oval",
+                new double[] { 10.0, 10.0, 19.0, 19.0 },
+                "C=60 M=38 Y=3 K=0",
+                null,
+                0.0);
+        anchor.isInline(true);
+        data.addPageItem(anchor);
+        ResolvedPageItem labelItem = pageItem(
+                101,
+                "TextFrame",
+                new double[] { 10.0, 10.0, 19.0, 19.0 },
+                null,
+                null,
+                0.0);
+        labelItem.parentId("100");
+        labelItem.isInline(true);
+        data.addPageItem(labelItem);
         RenderedGroup inline = rendered(
                 100,
                 "inline_object",
@@ -41,6 +62,269 @@ public class OwnershipPlannerTest {
         Assert.assertEquals(TextAction.OWNED_BY_PNG, plan.textAction);
         Assert.assertEquals(VisualAction.PLACE_INLINE_PNG, plan.visualAction);
         Assert.assertEquals(Placement.INLINE, plan.placement);
+    }
+
+    @Test
+    public void tableCarrierContainingAtomicLabelDoesNotBecomeCompleteMarkerPng() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame label = textFrame(101, "가");
+        label.isInline(true);
+        data.addTextFrame(label);
+
+        ResolvedPageItem marker = pageItem(
+                100,
+                "Oval",
+                new double[] { 10.0, 10.0, 19.0, 19.0 },
+                "C=60 M=38 Y=3 K=0",
+                null,
+                0.0);
+        marker.isInline(true);
+        data.addPageItem(marker);
+        ResolvedPageItem labelItem = pageItem(
+                101,
+                "TextFrame",
+                new double[] { 10.0, 10.0, 19.0, 19.0 },
+                null,
+                null,
+                0.0);
+        labelItem.parentId("100");
+        labelItem.isInline(true);
+        data.addPageItem(labelItem);
+
+        ResolvedPageItem tableCarrier = pageItem(
+                200,
+                "Rectangle",
+                new double[] { 0.0, 0.0, 125.0, 396.0 },
+                null,
+                "Black",
+                0.25);
+        tableCarrier.isInline(true);
+        data.addPageItem(tableCarrier);
+
+        RenderedGroup carrierRender = rendered(
+                200,
+                "inline_object",
+                "inline_object",
+                "visual_marker_label_indesign_png",
+                "indesign_png",
+                "indesign_png",
+                new String[] { "101" },
+                new int[] { 200, 101, 27000 });
+        carrierRender.bounds(new double[] { 0.0, 0.0, 125.0, 396.0 });
+        data.addRenderedFloatingItem(carrierRender);
+        addInlineAnchor(data, 200);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 200, "visual_marker_label_indesign_png");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(TextAction.DROP_TEXT, plan.textAction);
+        Assert.assertEquals(VisualAction.DROP_VISUAL, plan.visualAction);
+        Assert.assertFalse(data.shouldUseCompletePngForSimpleButtonLabel(carrierRender));
+    }
+
+    @Test
+    public void extractorAtomicMetadataCanDefineCompleteMarkerWithoutPageItemParentChain() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame label = textFrame(101, "가");
+        label.isInline(true);
+        data.addTextFrame(label);
+
+        RenderedGroup inline = rendered(
+                100,
+                "inline_object",
+                "inline_object",
+                "inline_badge_baked",
+                "indesign_png",
+                "indesign_png",
+                new String[] { "101" },
+                new int[] { 100, 101 });
+        inline.atomicObjectKind("COMPLETE_PNG");
+        inline.atomicSourceObjectIds(new int[] { 100, 101 });
+        inline.atomicOwnedTextFrameIds(new int[] { 101 });
+        inline.atomicVisualSourceObjectIds(new int[] { 100 });
+        data.addRenderedFloatingItem(inline);
+        addInlineAnchor(data, 100);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 100, "inline_badge_baked");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(TextAction.OWNED_BY_PNG, plan.textAction);
+        Assert.assertEquals(VisualAction.PLACE_INLINE_PNG, plan.visualAction);
+        Assert.assertTrue(data.shouldUseCompletePngForSimpleButtonLabel(inline));
+    }
+
+    @Test
+    public void extractorAtomicMetadataRejectsCarrierOutsideClosedBundle() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame label = textFrame(101, "가");
+        label.isInline(true);
+        data.addTextFrame(label);
+
+        RenderedGroup carrierRender = rendered(
+                200,
+                "inline_object",
+                "inline_object",
+                "visual_marker_label_indesign_png",
+                "indesign_png",
+                "indesign_png",
+                new String[] { "101" },
+                new int[] { 200, 101 });
+        carrierRender.atomicObjectKind("COMPLETE_PNG");
+        carrierRender.atomicSourceObjectIds(new int[] { 100, 101 });
+        carrierRender.atomicOwnedTextFrameIds(new int[] { 101 });
+        carrierRender.atomicVisualSourceObjectIds(new int[] { 100 });
+        data.addRenderedFloatingItem(carrierRender);
+        addInlineAnchor(data, 200);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 200, "visual_marker_label_indesign_png");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(TextAction.DROP_TEXT, plan.textAction);
+        Assert.assertEquals(VisualAction.DROP_VISUAL, plan.visualAction);
+        Assert.assertFalse(data.shouldUseCompletePngForSimpleButtonLabel(carrierRender));
+    }
+
+    @Test
+    public void canonicalAtomicLabelCanUseTextlessShellWithHwpxText() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame label = textFrame(101, "가");
+        label.isInline(true);
+        data.addTextFrame(label);
+        ResolvedPageItem marker = pageItem(
+                100,
+                "Oval",
+                new double[] { 10.0, 10.0, 19.0, 19.0 },
+                "C=60 M=38 Y=3 K=0",
+                null,
+                0.0);
+        marker.isInline(true);
+        data.addPageItem(marker);
+        ResolvedPageItem labelItem = pageItem(
+                101,
+                "TextFrame",
+                new double[] { 10.0, 10.0, 19.0, 19.0 },
+                null,
+                null,
+                0.0);
+        labelItem.parentId("100");
+        labelItem.isInline(true);
+        data.addPageItem(labelItem);
+        RenderedGroup shell = rendered(
+                100,
+                "inline_object",
+                "inline_object",
+                "visual_label_text_hidden_shell",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "101" },
+                new int[] { 100, 101 });
+        shell.containsText(Boolean.FALSE);
+        shell.containsEditableText(Boolean.FALSE);
+        shell.textHiddenBeforeExport(true);
+        data.addRenderedFloatingItem(shell);
+        addInlineAnchor(data, 100);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 100, "visual_label_text_hidden_shell");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, plan.textAction);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, plan.visualAction);
+        Assert.assertTrue(data.shouldUseTextlessShellForAtomicMarkerLabel(shell));
+        Assert.assertFalse(data.shouldUseCompletePngForSimpleButtonLabel(shell));
+    }
+
+    @Test
+    public void extractorAtomicMetadataCanDefineTextlessShellWithoutPageItemParentChain() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame label = textFrame(101, "가");
+        label.isInline(true);
+        data.addTextFrame(label);
+
+        RenderedGroup shell = rendered(
+                100,
+                "inline_object",
+                "inline_object",
+                "inline_badge",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "101" },
+                new int[] { 100, 101 });
+        shell.containsText(Boolean.FALSE);
+        shell.containsEditableText(Boolean.FALSE);
+        shell.textHiddenBeforeExport(true);
+        shell.atomicObjectKind("TEXTLESS_SHELL_WITH_TF");
+        shell.atomicSourceObjectIds(new int[] { 100, 101 });
+        shell.atomicOwnedTextFrameIds(new int[] { 101 });
+        shell.atomicVisualSourceObjectIds(new int[] { 100 });
+        data.addRenderedFloatingItem(shell);
+        addInlineAnchor(data, 100);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 100, "inline_badge");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, plan.textAction);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, plan.visualAction);
+        Assert.assertTrue(data.shouldUseTextlessShellForAtomicMarkerLabel(shell));
+        Assert.assertFalse(data.shouldUseCompletePngForSimpleButtonLabel(shell));
+    }
+
+    @Test
+    public void simpleButtonLabelPlanUsesCanonicalTextlessShellRender() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame label = textFrame(101, "가");
+        label.isInline(true);
+        data.addTextFrame(label);
+        ResolvedPageItem marker = pageItem(
+                100,
+                "Oval",
+                new double[] { 10.0, 10.0, 19.0, 19.0 },
+                "C=60 M=38 Y=3 K=0",
+                null,
+                0.0);
+        marker.isInline(true);
+        data.addPageItem(marker);
+        ResolvedPageItem labelItem = pageItem(
+                101,
+                "TextFrame",
+                new double[] { 10.0, 10.0, 19.0, 19.0 },
+                null,
+                null,
+                0.0);
+        labelItem.parentId("100");
+        labelItem.isInline(true);
+        data.addPageItem(labelItem);
+        RenderedGroup shell = rendered(
+                100,
+                "inline_object",
+                "inline_object",
+                "visual_label_text_hidden_shell",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "101" },
+                new int[] { 100, 101 });
+        shell.containsText(Boolean.FALSE);
+        shell.containsEditableText(Boolean.FALSE);
+        shell.textHiddenBeforeExport(true);
+        shell.file("rendered_frames/atomic_shell.png");
+        shell.bounds(new double[] { 11.0, 12.0, 18.0, 20.0 });
+        data.addRenderedFloatingItem(shell);
+        addInlineAnchor(data, 100);
+
+        ResolvedBuildContext ctx = plan(data);
+        SimpleButtonLabelPlanner.plan(ctx);
+        ObjectPlan objectPlan = findPlanByKind(ctx, 100, "simple_button_label:");
+
+        Assert.assertNotNull(objectPlan);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, objectPlan.textAction);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, objectPlan.visualAction);
+        Assert.assertEquals(Integer.valueOf(100), objectPlan.renderId);
+        Assert.assertEquals("rendered_frames/atomic_shell.png", objectPlan.file);
+        Assert.assertArrayEquals(new int[] { 101 }, objectPlan.ownedTextFrameIds);
     }
 
     @Test
@@ -307,6 +591,89 @@ public class OwnershipPlannerTest {
         Assert.assertNotNull(floatingPlan);
         Assert.assertEquals(VisualAction.DROP_VISUAL, floatingPlan.visualAction);
         Assert.assertTrue(ctx.shouldDropVisualByOwnershipPlan(floating));
+    }
+
+    @Test
+    public void graphicOnlyAtomicObjectUsesClosedVisualBundleSources() {
+        ResolvedData data = new ResolvedData();
+        RenderedGroup graphic = rendered(
+                501,
+                "inline_object",
+                "inline_object",
+                "inline_graphic_only",
+                "indesign_png",
+                "none",
+                null,
+                new int[] { 500, 501, 502 });
+        graphic.containsText(Boolean.FALSE);
+        graphic.containsEditableText(Boolean.FALSE);
+        graphic.atomicObjectKind("GRAPHIC_ONLY");
+        graphic.atomicSourceObjectIds(new int[] { 501, 502 });
+        graphic.atomicOwnedTextFrameIds(new int[0]);
+        graphic.atomicVisualSourceObjectIds(new int[] { 501, 502 });
+        data.addRenderedFloatingItem(graphic);
+        addInlineAnchor(data, 501);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan plan = findRenderedPlan(ctx, 501, "inline_graphic_only");
+
+        Assert.assertNotNull(plan);
+        Assert.assertEquals(TextAction.DROP_TEXT, plan.textAction);
+        Assert.assertEquals(VisualAction.PLACE_INLINE_PNG, plan.visualAction);
+        Assert.assertArrayEquals(new int[] { 501, 502 }, plan.sourceObjectIds);
+        Assert.assertArrayEquals(new int[] { 501, 502 }, plan.visualSourceObjectIds);
+        Assert.assertArrayEquals(new int[0], plan.ownedTextFrameIds);
+    }
+
+    @Test
+    public void inlineTextlessLabelShellStaysInlineWhenGraphicOnlyCompanionOwnsClosedVisualBundle() {
+        ResolvedData data = new ResolvedData();
+        ResolvedTextFrame label = textFrame(96423, "예시 답안");
+        label.isInline(true);
+        data.addTextFrame(label);
+
+        RenderedGroup inlineGraphic = rendered(
+                96421,
+                "inline_object",
+                "inline_object",
+                "inline_graphic_only",
+                "indesign_png",
+                "none",
+                null,
+                new int[] { 96421, 96422 });
+        inlineGraphic.containsText(Boolean.FALSE);
+        inlineGraphic.containsEditableText(Boolean.FALSE);
+        inlineGraphic.atomicObjectKind("GRAPHIC_ONLY");
+        inlineGraphic.atomicSourceObjectIds(new int[] { 96421, 96422 });
+        inlineGraphic.atomicOwnedTextFrameIds(new int[0]);
+        inlineGraphic.atomicVisualSourceObjectIds(new int[] { 96421, 96422 });
+
+        RenderedGroup shell = rendered(
+                96421,
+                "page_object",
+                "page_object",
+                "visual_label_text_hidden_shell",
+                "indesign_png",
+                "hwpx_tf",
+                new String[] { "96423" },
+                new int[] { 96421, 96422, 96423 });
+        shell.containsText(Boolean.FALSE);
+        shell.containsEditableText(Boolean.FALSE);
+        shell.textHiddenBeforeExport(true);
+        data.addRenderedFloatingItem(inlineGraphic);
+        data.addRenderedFloatingItem(shell);
+        addInlineAnchor(data, 96421);
+
+        ResolvedBuildContext ctx = plan(data);
+        ObjectPlan shellPlan = findRenderedPlan(ctx, 96421, "visual_label_text_hidden_shell");
+        ObjectPlan textPlan = findPlanByKind(ctx, 96423, "text_frame");
+
+        Assert.assertNotNull(shellPlan);
+        Assert.assertEquals(Placement.INLINE, shellPlan.placement);
+        Assert.assertEquals(VisualAction.PLACE_TEXT_SHELL, shellPlan.visualAction);
+        Assert.assertNotNull(textPlan);
+        Assert.assertEquals(Placement.INLINE, textPlan.placement);
+        Assert.assertEquals(TextAction.OWNED_BY_HWPX_TEXT, textPlan.textAction);
     }
 
     @Test
