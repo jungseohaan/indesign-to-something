@@ -62,12 +62,13 @@ public class HwpxTableBuilder {
 
         // 테이블 속성
         int physicalRowCount = physicalRows(astTable).size();
+        String tableBorderFillId = createTableOuterBorderFill(astTable);
         table.pageBreakAnd(TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
                 .rowCntAnd((short) physicalRowCount)
                 .colCntAnd((short) astTable.colCount())
                 .cellSpacingAnd(0)
-                .borderFillIDRefAnd("1")
+                .borderFillIDRefAnd(tableBorderFillId)
                 .noAdjustAnd(false);
 
         // ShapeSize — floating table은 IDML 행 높이 합산값을 명시해야 셀선이 안정적으로 렌더된다.
@@ -224,12 +225,13 @@ public class HwpxTableBuilder {
                 .dropcapstyleAnd(DropCapStyle.None);
 
         int physicalRowCount = physicalRows(astTable).size();
+        String tableBorderFillId = createTableOuterBorderFill(astTable);
         table.pageBreakAnd(TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
                 .rowCntAnd((short) physicalRowCount)
                 .colCntAnd((short) astTable.colCount())
                 .cellSpacingAnd(0)
-                .borderFillIDRefAnd("1")
+                .borderFillIDRefAnd(tableBorderFillId)
                 .noAdjustAnd(false);
 
         table.createSZ();
@@ -587,11 +589,88 @@ public class HwpxTableBuilder {
         return bfId;
     }
 
+    private String createTableOuterBorderFill(ASTTable table) {
+        ASTTableCell.CellBorder left = null;
+        ASTTableCell.CellBorder right = null;
+        ASTTableCell.CellBorder top = null;
+        ASTTableCell.CellBorder bottom = null;
+
+        for (ASTTableRow row : physicalRows(table)) {
+            if (row == null || row.cells() == null) continue;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                if (cell.columnIndex() == 0) {
+                    left = strongerBorder(left, cell.leftBorder());
+                }
+                if (cell.columnIndex() + Math.max(1, cell.columnSpan()) >= table.colCount()) {
+                    right = strongerBorder(right, cell.rightBorder());
+                }
+                if (cell.rowIndex() == 0) {
+                    top = strongerBorder(top, cell.topBorder());
+                }
+                if (cell.rowIndex() + Math.max(1, cell.rowSpan()) >= table.rowCount()) {
+                    bottom = strongerBorder(bottom, cell.bottomBorder());
+                }
+            }
+        }
+
+        if (!isVisibleBorder(left) && !isVisibleBorder(right)
+                && !isVisibleBorder(top) && !isVisibleBorder(bottom)) {
+            return "1";
+        }
+
+        String bfId = String.valueOf(ctx.borderFillIdCounter.getAndIncrement());
+        BorderFill bf = ctx.hwpxFile.headerXMLFile().refList().borderFills().addNew();
+        bf.idAnd(bfId)
+                .threeDAnd(false)
+                .shadowAnd(false)
+                .centerLineAnd(CenterLineSort.NONE)
+                .breakCellSeparateLine(false);
+
+        bf.createSlash();
+        bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+        bf.createBackSlash();
+        bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+        bf.createLeftBorder();
+        applyCellBorder(bf.leftBorder(), left);
+        bf.createRightBorder();
+        applyCellBorder(bf.rightBorder(), right);
+        bf.createTopBorder();
+        applyCellBorder(bf.topBorder(), top);
+        bf.createBottomBorder();
+        applyCellBorder(bf.bottomBorder(), bottom);
+        bf.createDiagonal();
+        bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+        return bfId;
+    }
+
+    private static ASTTableCell.CellBorder strongerBorder(
+            ASTTableCell.CellBorder current,
+            ASTTableCell.CellBorder candidate) {
+        if (!isVisibleBorder(candidate)) return current;
+        if (!isVisibleBorder(current)) return candidate;
+        return candidate.weight() > current.weight() ? candidate : current;
+    }
+
+    private static boolean isVisibleBorder(ASTTableCell.CellBorder border) {
+        return border != null && border.weight() > 0;
+    }
+
     void applyCellBorder(Border hwpxBorder, ASTTableCell.CellBorder cellBorder) {
-        VisualShellApplicator.applyBorderEdge(hwpxBorder,
-                cellBorder != null ? cellBorder.strokeType() : null,
-                cellBorder != null ? cellBorder.weight() : 0L,
-                cellBorder != null ? cellBorder.color() : null);
+        double weight = cellBorder != null ? cellBorder.weight() : 0L;
+        if (weight <= 0) {
+            hwpxBorder.typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+            return;
+        }
+
+        LineType2 lineType = HwpxParagraphBuilder.strokeTypeToLineType(cellBorder.strokeType());
+        LineWidth lineWidth = HwpxParagraphBuilder.hwpunitToLineWidth(weight);
+        if (lineWidth == LineWidth.MM_0_1) {
+            lineWidth = LineWidth.MM_0_12;
+        }
+        String color = cellBorder.color();
+        String c = (color == null || color.isEmpty() || !color.startsWith("#")) ? "#000000" : color;
+        hwpxBorder.typeAnd(lineType).widthAnd(lineWidth).color(c);
     }
 
     /** 셀이 텍스트와 인라인 객체 모두 비어있는지 (TableBuilder의 인라인 추출 후 상태 검사용). */

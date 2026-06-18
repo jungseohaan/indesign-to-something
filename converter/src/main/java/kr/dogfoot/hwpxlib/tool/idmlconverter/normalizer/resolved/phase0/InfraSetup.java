@@ -95,6 +95,7 @@ public final class InfraSetup {
                         if (resolvedStyle.leftIndent() != null) sd.leftMargin(CoordinateConverter.pointsToHwpunits(resolvedStyle.leftIndent()));
                         if (resolvedStyle.firstLineIndent() != null) sd.firstLineIndent(CoordinateConverter.pointsToHwpunits(resolvedStyle.firstLineIndent()));
                         if (resolvedStyle.rightIndent() != null) sd.rightMargin(CoordinateConverter.pointsToHwpunits(resolvedStyle.rightIndent()));
+                        copyLeading(resolvedStyle, sd);
                     } else {
                         // 폰트 정보 추출
                         org.w3c.dom.NodeList appliedFonts = ps.getElementsByTagName("AppliedFont");
@@ -109,6 +110,7 @@ public final class InfraSetup {
                         }
                         sd.textColor(ps.getAttribute("FillColor"));
                         sd.fontStyle(ps.getAttribute("FontStyle"));
+                        copyDirectLeading(ps, sd);
                     }
                     // 정렬 (Justification)
                     String justification = ps.getAttribute("Justification");
@@ -171,6 +173,64 @@ public final class InfraSetup {
                     + " styles=" + doc.paragraphStyles().size());
         } catch (Exception e) {
             System.err.println("[ResolvedToASTBuilder] IDML 정의 복사 실패: " + e.getMessage());
+        }
+    }
+
+    private static void copyLeading(IDMLStyleDef source, ASTStyleDef target) {
+        if (source == null || target == null) return;
+        if (source.leading() != null && source.leading() > 0) {
+            target.lineSpacing((int) CoordinateConverter.pointsToHwpunits(source.leading()));
+            target.lineSpacingType("fixed");
+        } else if ("Auto".equalsIgnoreCase(source.leadingType())) {
+            target.lineSpacingType("percent");
+            double autoLeading = source.autoLeading() != null ? source.autoLeading() : 120.0;
+            target.lineSpacing((int) Math.round(autoLeading));
+        }
+        if (source.autoLeading() != null) {
+            target.autoLeading(source.autoLeading());
+        }
+    }
+
+    private static void copyDirectLeading(org.w3c.dom.Element paragraphStyle, ASTStyleDef target) {
+        if (paragraphStyle == null || target == null) return;
+        String leading = firstPropertyText(paragraphStyle, "Leading");
+        if (leading != null && !leading.isEmpty()) {
+            if ("Auto".equalsIgnoreCase(leading)) {
+                target.lineSpacingType("percent");
+                target.lineSpacing(120);
+            } else {
+                try {
+                    target.lineSpacing((int) CoordinateConverter.pointsToHwpunits(Double.parseDouble(leading)));
+                    target.lineSpacingType("fixed");
+                } catch (NumberFormatException ignored) {
+                    // Ignore unknown InDesign leading tokens.
+                }
+            }
+        }
+        Double autoLeading = parseDoubleAttr(paragraphStyle, "AutoLeading");
+        if (autoLeading != null) {
+            target.autoLeading(autoLeading);
+            if (target.lineSpacing() == null) {
+                target.lineSpacingType("percent");
+                target.lineSpacing((int) Math.round(autoLeading));
+            }
+        }
+    }
+
+    private static String firstPropertyText(org.w3c.dom.Element parent, String tagName) {
+        org.w3c.dom.NodeList nodes = parent.getElementsByTagName(tagName);
+        if (nodes == null || nodes.getLength() == 0) return null;
+        String text = nodes.item(0).getTextContent();
+        return text != null && !text.isEmpty() ? text : null;
+    }
+
+    private static Double parseDoubleAttr(org.w3c.dom.Element element, String attrName) {
+        String value = element.getAttribute(attrName);
+        if (value == null || value.isEmpty()) return null;
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 

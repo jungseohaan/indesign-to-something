@@ -36,7 +36,7 @@ public class IDMLStoryParser {
         NodeList tables = storyDoc.getElementsByTagName("Table");
         for (int i = 0; i < tables.getLength(); i++) {
             Element tableElem = (Element) tables.item(i);
-            IDMLTable table = parseTable(tableElem);
+            IDMLTable table = parseTable(tableElem, doc);
             if (table != null) {
                 story.addTable(table);
             }
@@ -91,6 +91,10 @@ public class IDMLStoryParser {
      * Parse IDML Table element.
      */
     static IDMLTable parseTable(Element tableElem) {
+        return parseTable(tableElem, null);
+    }
+
+    static IDMLTable parseTable(Element tableElem, IDMLDocument doc) {
         IDMLTable table = new IDMLTable();
         table.selfId(tableElem.getAttribute("Self"));
 
@@ -143,7 +147,7 @@ public class IDMLStoryParser {
                 continue;
             }
 
-            IDMLTableCell cell = parseTableCell(cellElem, cellRow, cellCol);
+            IDMLTableCell cell = parseTableCell(cellElem, cellRow, cellCol, doc);
 
             // Add cell to the correct row
             IDMLTableRow targetRow = rowMap.get(cellRow);
@@ -209,6 +213,10 @@ public class IDMLStoryParser {
      * Parse IDML Table Cell (Cell element).
      */
     static IDMLTableCell parseTableCell(Element cellElem, int rowIndex, int colIndex) {
+        return parseTableCell(cellElem, rowIndex, colIndex, null);
+    }
+
+    static IDMLTableCell parseTableCell(Element cellElem, int rowIndex, int colIndex, IDMLDocument doc) {
         IDMLTableCell cell = new IDMLTableCell();
         cell.selfId(cellElem.getAttribute("Self"));
         cell.rowIndex(rowIndex);
@@ -225,11 +233,13 @@ public class IDMLStoryParser {
         if (cellFillTint < 0) cellFillTint = 100;  // IDML FillTint=-1은 기본값(100%) 의미
         cell.fillTint(cellFillTint);
 
-        // Cell insets/padding
-        cell.topInset(parseDoubleAttrDef(cellElem, "TextTopInset", 4));
-        cell.bottomInset(parseDoubleAttrDef(cellElem, "TextBottomInset", 4));
-        cell.leftInset(parseDoubleAttrDef(cellElem, "TextLeftInset", 4));
-        cell.rightInset(parseDoubleAttrDef(cellElem, "TextRightInset", 4));
+        // Cell insets/padding: direct Cell attributes override AppliedCellStyle,
+        // then InDesign's default 4pt is used as the final fallback.
+        double[] styleInsets = doc != null ? doc.getCellStyleInsets(cell.appliedCellStyle()) : null;
+        cell.topInset(parseCellInset(cellElem, "TextTopInset", styleInsets, 0, 4));
+        cell.bottomInset(parseCellInset(cellElem, "TextBottomInset", styleInsets, 2, 4));
+        cell.leftInset(parseCellInset(cellElem, "TextLeftInset", styleInsets, 1, 4));
+        cell.rightInset(parseCellInset(cellElem, "TextRightInset", styleInsets, 3, 4));
 
         // Vertical justification
         cell.verticalJustification(getAttrOrNull(cellElem, "VerticalJustification"));
@@ -277,6 +287,21 @@ public class IDMLStoryParser {
         }
 
         return cell;
+    }
+
+    private static double parseCellInset(
+            Element cellElem,
+            String attrName,
+            double[] styleInsets,
+            int styleIndex,
+            double fallback) {
+        if (cellElem != null && cellElem.hasAttribute(attrName)) {
+            return parseDoubleAttrDef(cellElem, attrName, fallback);
+        }
+        if (styleInsets != null && styleIndex >= 0 && styleIndex < styleInsets.length) {
+            return styleInsets[styleIndex];
+        }
+        return fallback;
     }
 
     /**

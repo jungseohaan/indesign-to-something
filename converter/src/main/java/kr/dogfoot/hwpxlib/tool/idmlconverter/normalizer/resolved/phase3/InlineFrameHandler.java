@@ -1371,7 +1371,8 @@ public class InlineFrameHandler {
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
-            imageData = prepareInlineTextShellImageData(img);
+            boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
+            imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
             double[] shellBounds = shellPlan.bounds;
             double w = 0;
             double h = 0;
@@ -1467,12 +1468,65 @@ public class InlineFrameHandler {
     }
 
     private static byte[] prepareInlineTextShellImageData(BufferedImage img) throws Exception {
+        return prepareInlineTextShellImageData(img, false);
+    }
+
+    private static byte[] prepareInlineTextShellImageData(BufferedImage img, boolean preserveSourceCanvas) throws Exception {
         BufferedImage shell = VisualCropper.knockOutPaperLikeFill(img);
-        VisualCropper.AlphaCropResult crop = VisualCropper.alphaCrop(shell);
-        if (crop != null && crop.image != null) {
-            shell = crop.image;
+        if (!preserveSourceCanvas) {
+            VisualCropper.AlphaCropResult crop = VisualCropper.alphaCrop(shell);
+            if (crop != null && crop.image != null) {
+                shell = crop.image;
+            }
         }
         return flattenOntoWhite(shell);
+    }
+
+    private static boolean shouldPreserveInlineShellSourceCanvas(
+            ResolvedBuildContext ctx,
+            ObjectPlan childPlan) {
+        if (ctx == null || childPlan == null || ctx.ownershipPlans == null) return false;
+        if (childPlan.placement != Placement.INLINE) return false;
+        if (childPlan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (childPlan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        for (ObjectPlan parent : ctx.ownershipPlans) {
+            if (isImageBackedCompositeParentOfInlineShell(parent, childPlan)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isImageBackedCompositeParentOfInlineShell(
+            ObjectPlan parent,
+            ObjectPlan child) {
+        if (parent == null || child == null || parent == child) return false;
+        if (parent.pageIndex != child.pageIndex) return false;
+        if (parent.placement != Placement.FLOATING) return false;
+        if (parent.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (!containsText(parent.reason, "image_group_text_hidden")) return false;
+        if (!basenameOf(parent.file).startsWith("img_")) return false;
+        if (!containsAllInts(parent.sourceObjectIds, child.sourceObjectIds)) return false;
+        return containsAllInts(parent.ownedTextFrameIds, child.ownedTextFrameIds);
+    }
+
+    private static boolean containsAllInts(int[] owner, int[] child) {
+        if (child == null || child.length == 0) return true;
+        if (owner == null || owner.length == 0) return false;
+        for (int value : child) {
+            if (!containsInt(owner, value)) return false;
+        }
+        return true;
+    }
+
+    private static boolean containsText(String value, String needle) {
+        return value != null && needle != null && value.contains(needle);
+    }
+
+    private static String basenameOf(String path) {
+        if (path == null) return "";
+        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        return slash >= 0 ? path.substring(slash + 1) : path;
     }
 
     private static void applyInlineShellShapeStyle(

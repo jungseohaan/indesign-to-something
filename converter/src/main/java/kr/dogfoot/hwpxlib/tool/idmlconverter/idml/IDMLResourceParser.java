@@ -117,6 +117,19 @@ public class IDMLResourceParser {
             doc.putCharacterStyle(styleDef.selfRef(), styleDef);
         }
 
+        // CellStyle (text inset/margin)
+        NodeList cellStyles = stylesDoc.getElementsByTagName("CellStyle");
+        for (int i = 0; i < cellStyles.getLength(); i++) {
+            Element elem = (Element) cellStyles.item(i);
+            String self = elem.getAttribute("Self");
+            if (self == null || self.isEmpty()) continue;
+            double top = firstDoubleAttr(elem, 4.0, "TextTopInset", "TopInset");
+            double left = firstDoubleAttr(elem, 4.0, "TextLeftInset", "LeftInset");
+            double bottom = firstDoubleAttr(elem, 4.0, "TextBottomInset", "BottomInset");
+            double right = firstDoubleAttr(elem, 4.0, "TextRightInset", "RightInset");
+            doc.putCellStyleInsets(self, top, left, bottom, right);
+        }
+
         // ObjectStyle (stroke 색상/두께 + CornerRadius 파싱)
         NodeList objStyles = stylesDoc.getElementsByTagName("ObjectStyle");
         for (int i = 0; i < objStyles.getLength(); i++) {
@@ -312,6 +325,11 @@ public class IDMLResourceParser {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private static double firstDoubleAttr(Element elem, double fallback, String... names) {
+        Double value = firstDoubleAttr(elem, names);
+        return value != null ? value : fallback;
     }
 
     private static String firstPropertyText(Element props, String... names) {

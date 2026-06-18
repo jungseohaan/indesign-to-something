@@ -445,6 +445,37 @@ text-hidden 복합 그룹 중 editable TF를 가진 후보는 parent shell 후�
 - 원본 z/layer가 있으면 추적한다.
 - HWPX 평면 차이 때문에 원본 z만으로 최종 앞뒤를 결정하지 않는다.
 
+### 11.6.1 플로팅 composite shell 안의 source-positioned inline label
+
+원본에서는 inline anchor로 들어 있지만, 부모 floating composite shell이 같은 source-tree의
+shell visual과 editable child TF를 함께 소유하는 경우가 있다. 이때 inline anchor는 문장 흐름
+위치가 아니라 InDesign 그룹 내부 좌표를 보존하기 위한 단서다.
+
+규칙:
+
+- parent plan이 `FLOATING + PLACE_TEXT_SHELL`이고 child plan이 같은 source-tree의
+  `INLINE + PLACE_TEXT_SHELL`이면 parent가 visual 좌표계를 소유할 수 있다.
+- parent `sourceObjectIds`가 child `sourceObjectIds`를 포함하고, parent
+  `ownedTextFrameIds`가 child `ownedTextFrameIds`를 포함하더라도, parent가
+  `img_*.png` 같은 image-backed composite이면 child shell visual은 독립 visible output으로
+  유지한다. image-backed composite은 원본 좌표 증거일 뿐 child label shell의 실행 소유자가 아니다.
+- parent가 textless coordinate shell이고 child shell visual을 실제로 포함하는 경우에만 child
+  shell visual은 `DROP_VISUAL`이다.
+- child TF 텍스트는 계속 HWPX 텍스트가 소유한다. 다만 위치는 child inline shell의
+  spread 좌표가 아니라 parent/source page-local 좌표를 따른다.
+- `inline_text_hidden` child shell이 editable TF 신호(`hwpx_tf`, `editableTextFrameIds`,
+  source TextFrame)를 가지면 `textAction=OWNED_BY_HWPX_TEXT`가 우선이다.
+  non-canonical/child-fragment 판정으로 `DROP_TEXT`가 되면 shell과 TF가 분리되어
+  source-positioned 라벨 기준이 깨진다.
+- child `INLINE + PLACE_TEXT_SHELL`이 TF를 소유하면, 같은 TF의 독립 `text_frame`
+  plan은 `DROP_TEXT + DROP_VISUAL`이다. 이 TF는 inline shell 객체의 editable text
+  데이터 소스일 뿐 별도의 visible output이 아니다.
+- Java 실행 단계는 이 child inline shell의 원본 추출 캔버스를 다시 alpha-crop하지 않는다.
+  실행 객체는 인라인으로 만들 수 있지만, crop으로 라벨의 source-positioned 좌측 기준을 바꾸면 안 된다.
+
+이 규칙은 문구/페이지/좌표 예외가 아니라 source ownership 규칙이다. 독립 inline badge처럼
+floating parent shell이 없는 객체에는 적용하지 않는다.
+
 ### 11.7 7단계: Validator strict invariant
 
 대상:

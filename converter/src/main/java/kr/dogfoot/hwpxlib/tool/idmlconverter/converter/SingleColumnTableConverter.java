@@ -148,6 +148,9 @@ final class SingleColumnTableConverter {
         }
         suppressFirstParagraphSpaceBefore(paragraphs);
 
+        // suppressBorder: 배경 사각형이 테두리를 담당하므로 개별 컬럼은 테두리/배경 없이
+        String cellBfId = suppressBorder ? "1" : textBoxBuilder.createTextFrameBorderFill(block);
+
         // 테이블 속성
         // This 1x1 table is a text-frame carrier, not a semantic table.
         // Let page breaks happen inside the carrier so paragraphs after inline tables
@@ -157,7 +160,7 @@ final class SingleColumnTableConverter {
                 .rowCntAnd((short) 1)
                 .colCntAnd((short) 1)
                 .cellSpacingAnd(0)
-                .borderFillIDRefAnd("1")
+                .borderFillIDRefAnd(cellBfId)
                 .noAdjustAnd(false);
 
         // ShapeSize — 실제 프레임 높이를 명시한다.
@@ -167,9 +170,6 @@ final class SingleColumnTableConverter {
         table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
                 .heightAnd(_tblHeight).heightRelToAnd(HeightRelTo.ABSOLUTE)
                 .protectAnd(false);
-
-        // suppressBorder: 배경 사각형이 테두리를 담당하므로 개별 컬럼은 테두리/배경 없이
-        String cellBfId = suppressBorder ? "1" : textBoxBuilder.createTextFrameBorderFill(block);
 
         // 블록 위치 추적 (오버레이 좌표 계산용)
         ctx.blockPageX = x;

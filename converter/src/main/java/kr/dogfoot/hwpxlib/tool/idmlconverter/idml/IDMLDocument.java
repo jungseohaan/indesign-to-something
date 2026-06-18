@@ -15,6 +15,7 @@ public class IDMLDocument {
     private Map<String, String> colors;
     private Map<String, String[]> objectStyles; // selfRef → [strokeColor, strokeWeight, strokeTint]
     private Map<String, Double> objectStyleCornerRadii; // selfRef → cornerRadius (pt)
+    private Map<String, double[]> cellStyleInsets; // selfRef → [top, left, bottom, right] (pt)
     private Map<String, double[]> dashedStrokeStyles; // selfRef → dashArray (e.g., [3, 2])
     private Set<String> hiddenLayerIds;
     private List<String> layerOrder;  // 레이어 ID 목록 (front-to-back, designmap.xml 순서)
@@ -34,6 +35,7 @@ public class IDMLDocument {
         this.colors = new LinkedHashMap<String, String>();
         this.objectStyles = new LinkedHashMap<String, String[]>();
         this.objectStyleCornerRadii = new LinkedHashMap<String, Double>();
+        this.cellStyleInsets = new LinkedHashMap<String, double[]>();
         this.dashedStrokeStyles = new LinkedHashMap<String, double[]>();
         this.hiddenLayerIds = new HashSet<String>();
         this.layerOrder = new ArrayList<String>();
@@ -112,6 +114,15 @@ public class IDMLDocument {
     public double getObjectStyleCornerRadius(String selfRef) {
         Double v = objectStyleCornerRadii.get(selfRef);
         return v != null ? v : 0;
+    }
+
+    /** CellStyle: selfRef → [top, left, bottom, right] text insets (pt) */
+    public void putCellStyleInsets(String selfRef, double top, double left, double bottom, double right) {
+        if (selfRef == null || selfRef.isEmpty()) return;
+        cellStyleInsets.put(selfRef, new double[]{top, left, bottom, right});
+    }
+    public double[] getCellStyleInsets(String selfRef) {
+        return selfRef != null ? cellStyleInsets.get(selfRef) : null;
     }
 
     /** DashedStrokeStyle: selfRef → dashArray */
