@@ -51,6 +51,29 @@ shell은 원본 InDesign visual을 추출한 결과여야 한다.
 원본 shell 추출이 실패하면 변환 단계에서 비슷한 shell을 만들지 않는다.
 실패를 드러내고 extractor/ownership metadata를 수정한다.
 
+#### 3.1.1 Textless shell placement
+
+`page_object`로 추출된 textless shell은 기본적으로 floating shell이다.
+inline으로 배치할 수 있는 것은 shell source 자체가 실제 inline anchor인 경우뿐이다.
+
+inline 인정 조건:
+
+- render candidate 자체가 `inline_object`이다.
+- 또는 shell의 dom id가 resolved story의 inline anchor로 직접 참조된다.
+- 또는 shell의 `ResolvedPageItem` 자체가 inline object로 표시된다.
+
+inline 불인정 조건:
+
+- `sourceObjectIds` 안의 descendant/child source 중 일부가 inline이다.
+- child TextFrame이 inline source를 가졌거나 inline object 안에 포함된 적이 있다.
+- 같은 bundle 안에 inline fragment가 섞여 있다.
+
+즉, descendant의 inline 흔적은 parent `page_object` shell의 placement를 inline으로
+바꾸는 근거가 될 수 없다. `mixed_group_text_hidden`, `image_group_text_hidden`,
+`visual_label_text_hidden_shell`처럼 editable TF를 별도 HWPX 텍스트로 소유하는
+page_object shell은 직접 inline anchor가 없으면 `placement=FLOATING`이다.
+후속 단계는 이 결정을 뒤집거나 inline executor로 라우팅하지 않는다.
+
 ### 3.2 Table-only carrier shell
 
 TextFrame 안의 실제 편집 텍스트가 IDML table에 있고 `TextFrame.contents`에는 ORC만 남는 경우가 있다.

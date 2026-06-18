@@ -1867,7 +1867,7 @@ public final class OwnershipPlanner {
         if (rg == null || data == null) return false;
         if (!isRenderedPageObject(rg)) return false;
         if (!isEditableVisualShellWithSeparateHwpxText(rg)) return false;
-        if (hasInlineSourceObject(rg)) return true;
+        if (hasDirectInlineAnchor(rg)) return true;
         for (RenderedGroup other : data.allRenderedFloatingItems()) {
             if (other == null || other == rg) continue;
             if (other.id() != rg.id()) continue;
@@ -1876,6 +1876,13 @@ public final class OwnershipPlanner {
             }
         }
         return false;
+    }
+
+    private boolean hasDirectInlineAnchor(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (data.isInlineObjectId(rg.id())) return true;
+        ResolvedPageItem self = data.getPageItem(String.valueOf(rg.id()));
+        return self != null && self.isInline();
     }
 
     private boolean hasInlineSourceObject(RenderedGroup rg) {
