@@ -254,6 +254,13 @@ public final class BackgroundInjector {
                             double cropTop = rawTop + (double) pxY / (double) img.getHeight() * fullH;
                             double cropRight = rawLeft + (double) (pxX + pxW) / (double) img.getWidth() * fullW;
                             double cropBottom = rawTop + (double) (pxY + pxH) / (double) img.getHeight() * fullH;
+                            if (shouldUsePhysicalAlphaCropBounds(rg, img.getWidth(), img.getHeight(), pxW, pxH)) {
+                                double pxToMm = 25.4 / 220.0;
+                                cropLeft = rawLeft + pxX * pxToMm;
+                                cropTop = rawTop + pxY * pxToMm;
+                                cropRight = cropLeft + pxW * pxToMm;
+                                cropBottom = cropTop + pxH * pxToMm;
+                            }
                             prepared.imageData = alphaCrop.imageData;
                             prepared.pixelW = alphaCrop.image.getWidth();
                             prepared.pixelH = alphaCrop.image.getHeight();
@@ -885,13 +892,26 @@ public final class BackgroundInjector {
         }
         double cropAreaRatio = (double) alphaW * (double) alphaH / ((double) imageW * (double) imageH);
         if (cropAreaRatio > 0.92) return false;
-        if ("leaf_group_text_hidden_shell".equals(reason)) return true;
         double boundsAspect = boundsW / boundsH;
         double imageAspect = (double) imageW / (double) imageH;
         double alphaAspect = (double) alphaW / (double) alphaH;
         double imageDelta = Math.abs(Math.log(Math.max(1e-6, imageAspect / boundsAspect)));
         double alphaDelta = Math.abs(Math.log(Math.max(1e-6, alphaAspect / boundsAspect)));
         return alphaDelta + 0.10 < imageDelta;
+    }
+
+    private static boolean shouldUsePhysicalAlphaCropBounds(
+            RenderedGroup rg,
+            int imageW,
+            int imageH,
+            int alphaW,
+            int alphaH) {
+        if (rg == null || imageW <= 0 || imageH <= 0 || alphaW <= 0 || alphaH <= 0) return false;
+        if (!isPageObject(rg)) return false;
+        if (!"hwpx_tf".equals(rg.textOwner())) return false;
+        if (!"leaf_group_text_hidden_shell".equals(rg.reason())) return false;
+        double cropAreaRatio = (double) alphaW * (double) alphaH / ((double) imageW * (double) imageH);
+        return cropAreaRatio < 0.50;
     }
 
     private static boolean shouldPreserveVisualLabelAspect(RenderedGroup rg, int pixelW, int pixelH) {

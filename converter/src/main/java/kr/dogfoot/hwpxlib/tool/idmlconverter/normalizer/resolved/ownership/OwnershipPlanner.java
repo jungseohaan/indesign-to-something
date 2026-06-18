@@ -69,6 +69,7 @@ public final class OwnershipPlanner {
         planTextFrames();
         resolveHwpxTextOwnedNonShellVisuals();
         resolveInlineCompositeHwpxTextParents();
+        resolvePairedInlinePageObjectChannelOwners();
         resolveInlineFloatingSameDom();
         resolveFloatingChildrenOwnedByInlineParent();
         resolveFloatingPageObjectsOwnedByInlineHwpxText();
@@ -755,6 +756,64 @@ public final class OwnershipPlanner {
         if (plan.textAction != TextAction.DROP_TEXT) return false;
         if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
         return plan.file != null && !plan.file.isEmpty();
+    }
+
+    private void resolvePairedInlinePageObjectChannelOwners() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan pageObject = plans.get(i);
+            if (!isVisibleRenderedVisual(pageObject) && !isLeafTextHiddenShellPlan(pageObject)) continue;
+            if (!safe(pageObject.kind).contains("page_object")) continue;
+            if (pageObject.domId < 0) continue;
+
+            for (int j = 0; j < plans.size(); j++) {
+                if (i == j) continue;
+                ObjectPlan inline = plans.get(j);
+                if (!isRenderedVisualPlan(inline)) continue;
+                if (!safe(inline.kind).contains("inline_object")) continue;
+                if (inline.pageIndex != pageObject.pageIndex) continue;
+                if (inline.domId != pageObject.domId) continue;
+                if (!pageObjectShouldOwnPairedInlineChannel(pageObject, inline)) continue;
+
+                ObjectPlan nextPageObject = pageObject;
+                if (isLeafTextHiddenShellPlan(pageObject)) {
+                    nextPageObject = pageObject
+                            .withVisualAction(VisualAction.PLACE_TEXT_SHELL, pageObject.reason)
+                            .withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
+                    plans.set(i, nextPageObject);
+                    alignOwnedTextFramePlans(nextPageObject.ownedTextFrameIds, nextPageObject.placement);
+                }
+                plans.set(j, inline.withVisualAction(VisualAction.DROP_VISUAL,
+                        "owned_by_page_object_channel"));
+                pageObject = nextPageObject;
+            }
+        }
+    }
+
+    private boolean pageObjectShouldOwnPairedInlineChannel(ObjectPlan pageObject, ObjectPlan inline) {
+        RenderedGroup pageGroup = renderedGroupForPlan(pageObject);
+        RenderedGroup inlineGroup = renderedGroupForPlan(inline);
+        if (pageGroup == null || inlineGroup == null) return false;
+        if (!isRenderedPageObject(pageGroup)) return false;
+        if (!"inline_graphic_only".equals(inlineGroup.reason())) return false;
+
+        if (isLeafTextHiddenShellPlan(pageObject)
+                && pageObject.ownedTextFrameIds != null
+                && pageObject.ownedTextFrameIds.length > 1) {
+            return true;
+        }
+        return "pure_decoration_group".equals(pageGroup.reason())
+                && InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(data, inlineGroup);
+    }
+
+    private void alignOwnedTextFramePlans(int[] textFrameIds, Placement placement) {
+        if (textFrameIds == null || textFrameIds.length == 0 || placement == null) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !"text_frame".equals(plan.kind)) continue;
+            if (!contains(textFrameIds, plan.domId)) continue;
+            if (plan.placement == placement) continue;
+            plans.set(i, plan.withPlacement(placement));
+        }
     }
 
     private void planRenderedItems() {
@@ -2833,6 +2892,7 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isInlineTextShellPlan(plan)) continue;
+            if ("owned_by_page_object_channel".equals(plan.reason)) continue;
             if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
             if (hasAlternativeVisibleInlineTextShellOwner(plan)) continue;
             plans.set(i, plan.withVisualAction(VisualAction.PLACE_TEXT_SHELL, plan.reason));
@@ -2887,18 +2947,18 @@ public final class OwnershipPlanner {
                     VisualLayer.CONTAINER_BACKDROP,
                     Placement.INLINE,
                     inlineCompanion.renderId,
-                    inlineCompanion.sourceObjectIds,
-                    inlineCompanion.visualSourceObjectIds,
+                    leafShell.sourceObjectIds,
+                    visualSourceIds(leafShell),
                     leafShell.ownedTextFrameIds,
-                    inlineCompanion.descendantVisualObjectIds,
-                    inlineCompanion.sourceBundleKey,
+                    leafShell.descendantVisualObjectIds,
+                    leafShell.sourceBundleKey,
                     Math.max(inlineCompanion.zOrder, leafShell.zOrder),
                     "inline_companion_leaf_text_shell",
-                    inlineCompanion.file,
-                    inlineCompanion.bounds,
-                    inlineCompanion.sourceLayerId,
-                    inlineCompanion.sourceLayerName,
-                    inlineCompanion.sourceLayerIndex);
+                    leafShell.file,
+                    leafShell.bounds,
+                    leafShell.sourceLayerId,
+                    leafShell.sourceLayerName,
+                    leafShell.sourceLayerIndex);
             plans.set(companionIndex, promoted);
             plans.set(i, leafShell.withVisualAction(VisualAction.DROP_VISUAL,
                     "owned_by_inline_companion_text_shell"));
@@ -2910,6 +2970,7 @@ public final class OwnershipPlanner {
         if (leafShell == null) return null;
         for (ObjectPlan candidate : plans) {
             if (candidate == null || candidate == leafShell) continue;
+            if (!candidate.hasVisibleVisual()) continue;
             if (candidate.pageIndex != leafShell.pageIndex) continue;
             if (candidate.domId != leafShell.domId) continue;
             if (candidate.placement != Placement.INLINE) continue;
@@ -4154,6 +4215,12 @@ public final class OwnershipPlanner {
     private static boolean isVisibleRenderedVisual(ObjectPlan plan) {
         return plan != null
                 && plan.hasVisibleVisual()
+                && plan.renderId != null
+                && !"text_frame".equals(plan.kind);
+    }
+
+    private static boolean isRenderedVisualPlan(ObjectPlan plan) {
+        return plan != null
                 && plan.renderId != null
                 && !"text_frame".equals(plan.kind);
     }

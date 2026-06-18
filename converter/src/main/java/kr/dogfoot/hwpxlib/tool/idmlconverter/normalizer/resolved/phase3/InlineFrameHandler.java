@@ -1359,12 +1359,12 @@ public class InlineFrameHandler {
             boolean forcePngFill) {
         if (childTfs == null || childTfs.size() != 1) return null;
         if (shell == null || ctx.basePath == null || shell.file() == null) return null;
-        if (!ctx.hasOwnershipPlan(shell)
-                || ctx.visualActionByOwnershipPlan(shell) != VisualAction.PLACE_TEXT_SHELL
-                || ctx.placementByOwnershipPlan(shell) != Placement.INLINE) {
-            return null;
-        }
-        File pngFile = new File(ctx.basePath, shell.file());
+        ObjectPlan shellPlan = findInlineTextShellOwnerPlan(ctx, shell, childTfs);
+        if (shellPlan == null) return null;
+        String shellFile = shellPlan.file != null && !shellPlan.file.isEmpty()
+                ? shellPlan.file
+                : shell.file();
+        File pngFile = new File(ctx.basePath, shellFile);
         if (!pngFile.exists() || !pngFile.isFile()) return null;
         try {
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
@@ -1374,7 +1374,9 @@ public class InlineFrameHandler {
                 imageData = flattenOntoWhite(img);
             }
 
-            double[] shellBounds = shell.bounds();
+            double[] shellBounds = shellPlan.bounds != null && shellPlan.bounds.length >= 4
+                    ? shellPlan.bounds
+                    : shell.bounds();
             double w = 0;
             double h = 0;
             if (shellBounds != null && shellBounds.length >= 4) {
@@ -1417,6 +1419,42 @@ public class InlineFrameHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static ObjectPlan findInlineTextShellOwnerPlan(
+            ResolvedBuildContext ctx,
+            RenderedGroup shell,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (ctx == null || shell == null) return null;
+        ObjectPlan direct = ctx.findOwnershipPlanForRendered(shell);
+        if (isInlineTextShellOwnerForChildren(direct, shell, childTfs)) return direct;
+        if (ctx.ownershipPlans == null) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (isInlineTextShellOwnerForChildren(plan, shell, childTfs)) return plan;
+        }
+        return null;
+    }
+
+    private static boolean isInlineTextShellOwnerForChildren(
+            ObjectPlan plan,
+            RenderedGroup shell,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (plan == null || shell == null || childTfs == null || childTfs.isEmpty()) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.domId != shell.id() && !containsInt(plan.sourceObjectIds, shell.id())) return false;
+        for (ResolvedTextFrame childTf : childTfs) {
+            if (childTf == null || childTf.id() == null) return false;
+            int childId;
+            try {
+                childId = Integer.parseInt(childTf.id());
+            } catch (NumberFormatException e) {
+                return false;
+            }
+            if (!containsInt(plan.ownedTextFrameIds, childId)) return false;
+        }
+        return true;
     }
 
     /** RGBA PNG를 흰 배경에 합성해 불투명 PNG 바이트로 반환(한글 imgBrush 알파→검정 회피). */

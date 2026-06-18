@@ -216,6 +216,30 @@ public final class ObjectPlan {
                 sourceLayerIndex);
     }
 
+    public ObjectPlan withPlacement(Placement newPlacement) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                newPlacement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
     public ObjectPlan withZOrder(int newZOrder) {
         return new ObjectPlan(
                 domId,
