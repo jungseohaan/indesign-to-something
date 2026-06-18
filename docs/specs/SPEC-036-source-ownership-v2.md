@@ -156,7 +156,20 @@ shell은 `placement=FLOATING`이다.
 
 TextFrame 안의 실제 편집 텍스트가 IDML table에 있고 `TextFrame.contents`에는 ORC만 남는 경우도
 같은 규칙을 따른다. table text는 HWPX table/text가 소유하고, parent shell은
-`PLACE_TEXT_SHELL`로 배치한다. table border/fill은 원본 shell을 대체하거나 중복 생성하지 않는다.
+`PLACE_TEXT_SHELL`로 배치한다.
+
+IDML `<Cell>`이 직접 가진 `FillColor`, `FillTint`, edge border는 source table cell style이다.
+이 값은 HWPX table cell이 소유한다. 후속 shell/chrome 처리 단계는 table cell의 원본
+`FillColor`나 edge border를 지울 수 없다. textless shell이 같은 영역에 있어도 shell은
+table cell style을 대체하는 fallback이 아니라 별도 visual owner다.
+
+별도 page object 사각형이 셀 배경처럼 쓰인 경우에는 `PLACE_TABLE_STYLE` plan을 통해
+해당 fill/stroke를 table cell style로 흡수할 수 있다. 이 흡수는 source ownership 실행이며,
+bounds/occlusion 기반 후처리로 원본 cell style을 삭제하는 근거가 될 수 없다.
+
+table border/fill을 HWPX 속성으로 표현할 때는 원본 table cell style 또는 명시적인
+`PLACE_TABLE_STYLE` 흡수 plan만 사용한다. Java 단계에서 shell을 보고 table/TF bounds 기반
+synthetic rounded rectangle, wrapper fill, drawText outline/fill을 새로 만들지 않는다.
 
 본문 story의 table marker가 wrapper table을 만들고, 그 셀 안의 nested TextFrame/table이
 실제 표 내용을 소유하는 경우에는 `anchored_table` plan 하나가 wrapper와 nested table을
@@ -264,6 +277,7 @@ Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, st
 - 같은 source가 inline과 floating으로 동시에 보이면 안 된다.
 - `OWNED_BY_HWPX_TEXT` source를 complete PNG처럼 배치하지 않는다.
 - `PLACE_TEXT_SHELL`은 소유 텍스트보다 뒤에 있어야 한다.
+- IDML table cell의 원본 `FillColor`와 visible edge border는 HWPX table cell style로 남아야 한다.
 - source layer/z 정보가 없는 객체는 추적 누락으로 본다.
 - parent `PLACE_TEXT_SHELL`이 있는 source bundle에서는 descendant visual fragment가 별도 visible output을 가질 수 없다.
 - parent `PLACE_TEXT_SHELL` 위의 owned child TextFrame은 누락되면 안 된다.
