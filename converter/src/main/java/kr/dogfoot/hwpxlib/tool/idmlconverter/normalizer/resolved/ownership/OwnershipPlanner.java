@@ -100,6 +100,7 @@ public final class OwnershipPlanner {
         restoreInlineTextShellOwners();
         restoreAtomicOwnershipRootTextHiddenShellOwners();
         promoteInlineCompanionAtomicShellOwners();
+        splitImageBackedCompositeTextShellParents();
         resolveTextShellSourceDuplicates();
         normalizeTextShellEditableTextOwnership();
         dropTextFramesOwnedByInlineTextShells();
@@ -3129,6 +3130,285 @@ public final class OwnershipPlanner {
         }
     }
 
+    private void splitImageBackedCompositeTextShellParents() {
+        Set<String> emittedContentCrops = new HashSet<>();
+        LinkedHashSet<Integer> releasedChildVisualSources = new LinkedHashSet<>();
+        Set<Integer> splitParentDomIds = new HashSet<>();
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isImageBackedContentShellPlan(plan)) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            if (visualSourceIds(plan).length == 0) continue;
+            LinkedHashSet<Integer> childVisualSources = childTextShellVisualSourcesOf(plan);
+            if (childVisualSources.isEmpty()) continue;
+            LinkedHashSet<Integer> retained = retainedImageBackedContentSources(plan, childVisualSources);
+            if (retained.isEmpty()) {
+                releasedChildVisualSources.addAll(childVisualSources);
+                splitParentDomIds.add(plan.domId);
+                plans.set(i, plan
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withOwnedTextFrameIds(new int[0])
+                        .withVisualAction(VisualAction.DROP_VISUAL, "image_group_content_owned_by_children"));
+                continue;
+            }
+            double[] retainedBounds = unionSourceBounds(plan.pageIndex, retained);
+            if (retainedBounds == null) continue;
+            retainedBounds = alignBoundsToPlanCoordinate(plan.bounds, retainedBounds);
+            if (retainedBounds == null) continue;
+            String croppedFile = cropRenderedImageToBounds(plan, retainedBounds);
+            if (croppedFile == null || croppedFile.isEmpty()) continue;
+            int[] retainedIds = toIntArray(retained);
+            String cropKey = plan.pageIndex + ":" + plan.domId + ":" + Arrays.toString(retainedIds);
+            if (!emittedContentCrops.add(cropKey)) {
+                plans.set(i, plan
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withOwnedTextFrameIds(new int[0])
+                        .withVisualAction(VisualAction.DROP_VISUAL, "image_group_content_crop_duplicate"));
+                continue;
+            }
+            ObjectPlan replacement = plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.PLACE_FLOATING_PNG, "image_group_content_crop")
+                    .withVisualLayer(VisualLayer.CONTENT_VISUAL)
+                    .withOwnedTextFrameIds(new int[0])
+                    .withRenderedVisual(
+                            VisualLayer.CONTENT_VISUAL,
+                            retainedIds,
+                            plan.zOrder,
+                            "image_group_content_crop",
+                            croppedFile,
+                            retainedBounds);
+            plans.set(i, replacement);
+            releasedChildVisualSources.addAll(childVisualSources);
+            splitParentDomIds.add(plan.domId);
+        }
+        restoreReleasedImageBackedChildTextShells(releasedChildVisualSources, splitParentDomIds);
+    }
+
+    private LinkedHashSet<Integer> childTextShellVisualSourcesOf(ObjectPlan parent) {
+        LinkedHashSet<Integer> sources = new LinkedHashSet<>();
+        if (parent == null) return sources;
+        for (ObjectPlan child : plans) {
+            if (child == null || child == parent) continue;
+            if (child.domId == parent.domId) continue;
+            if (child.pageIndex != parent.pageIndex) continue;
+            if (!isSpecificChildTextShellCandidate(parent, child)) continue;
+            if (child.visualSourceObjectIds == null || child.visualSourceObjectIds.length == 0) continue;
+            if (!containsAny(visualSourceIds(parent), visualSourceIds(child))) continue;
+            for (int sourceId : visualSourceIds(child)) {
+                sources.add(sourceId);
+            }
+        }
+        return sources;
+    }
+
+    private boolean isSpecificChildTextShellCandidate(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        if (child.visualAction == VisualAction.PLACE_TEXT_SHELL) return true;
+        if (child.visualAction != VisualAction.DROP_VISUAL) return false;
+        if (!ownedTextFramesCoveredBy(parent, child)) return false;
+        String reason = safe(child.reason);
+        return reason.contains("owned_by_parent_text_shell")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("text_hidden_shell")
+                || reason.contains("editable_composite_text_hidden");
+    }
+
+    private LinkedHashSet<Integer> retainedImageBackedContentSources(
+            ObjectPlan parent,
+            LinkedHashSet<Integer> childVisualSources) {
+        LinkedHashSet<Integer> retained = new LinkedHashSet<>();
+        if (parent == null) return retained;
+        for (int sourceId : visualSourceIds(parent)) {
+            if (sourceId == parent.domId) continue;
+            if (childVisualSources.contains(sourceId)) continue;
+            if (contains(parent.ownedTextFrameIds, sourceId)) continue;
+            if (data != null && data.getTextFrame(String.valueOf(sourceId)) != null) continue;
+            retained.add(sourceId);
+        }
+        return retained;
+    }
+
+    private void restoreReleasedImageBackedChildTextShells(
+            LinkedHashSet<Integer> releasedChildVisualSources,
+            Set<Integer> splitParentDomIds) {
+        if (releasedChildVisualSources == null || releasedChildVisualSources.isEmpty()) return;
+        int[] releasedIds = toIntArray(releasedChildVisualSources);
+        Set<String> restoredKeys = new HashSet<>();
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if (splitParentDomIds != null && splitParentDomIds.contains(plan.domId)) continue;
+            if (plan.visualAction != VisualAction.DROP_VISUAL) continue;
+            if (!isRenderedVisualPlan(plan)) continue;
+            if (!isReleasedImageBackedChildTextShellPlan(plan)) continue;
+            if (!containsAny(releasedIds, visualSourceIds(plan))) continue;
+            String key = plan.pageIndex + ":" + Arrays.toString(visualSourceIds(plan));
+            if (!restoredKeys.add(key)) continue;
+            int[] retainedVisualSources = retainedReleasedChildShellVisualSources(plan);
+            plans.set(i, plan
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL, "released_from_image_group_content_crop")
+                    .withVisualSourceObjectIds(retainedVisualSources)
+                    .withVisualLayer(plan.visualLayer != null ? plan.visualLayer : VisualLayer.CONTAINER_BACKDROP));
+        }
+    }
+
+    private int[] retainedReleasedChildShellVisualSources(ObjectPlan plan) {
+        LinkedHashSet<Integer> retained = new LinkedHashSet<>();
+        LinkedHashSet<Integer> nestedShellSources = childTextShellVisualSourcesOf(plan);
+        for (int sourceId : visualSourceIds(plan)) {
+            if (nestedShellSources.contains(sourceId)) continue;
+            if (contains(plan.ownedTextFrameIds, sourceId)) continue;
+            if (data != null && data.getTextFrame(String.valueOf(sourceId)) != null) continue;
+            retained.add(sourceId);
+        }
+        if (retained.isEmpty() && contains(visualSourceIds(plan), plan.domId)) {
+            retained.add(plan.domId);
+        }
+        return toIntArray(retained);
+    }
+
+    private boolean isReleasedImageBackedChildTextShellPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.file == null || plan.file.isEmpty()) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        String reason = safe(plan.reason);
+        if (isAtomicOwnershipRootTextHiddenShellReason(reason)) return false;
+        return reason.contains("owned_by_parent_text_shell")
+                || reason.contains("complex_graphic_text_hidden")
+                || reason.contains("text_hidden_shell")
+                || reason.contains("editable_composite_text_hidden");
+    }
+
+    private double[] alignBoundsToPlanCoordinate(double[] reference, double[] bounds) {
+        if (reference == null || reference.length < 4 || bounds == null || bounds.length < 4) {
+            return null;
+        }
+        if (validContentCropBounds(reference, bounds)) {
+            return bounds;
+        }
+        double scale = safeScaleFactor();
+        if (scale <= 0.0 || Math.abs(scale - 1.0) < 0.0001) return null;
+
+        double[] divided = new double[] {
+                bounds[0] / scale,
+                bounds[1] / scale,
+                bounds[2] / scale,
+                bounds[3] / scale
+        };
+        if (validContentCropBounds(reference, divided)) {
+            return divided;
+        }
+        double[] multiplied = new double[] {
+                bounds[0] * scale,
+                bounds[1] * scale,
+                bounds[2] * scale,
+                bounds[3] * scale
+        };
+        if (validContentCropBounds(reference, multiplied)) {
+            return multiplied;
+        }
+        return null;
+    }
+
+    private static boolean validContentCropBounds(double[] reference, double[] crop) {
+        if (reference == null || crop == null || reference.length < 4 || crop.length < 4) return false;
+        double referenceArea = area(reference);
+        double cropArea = area(crop);
+        if (referenceArea <= 0.0 || cropArea <= 0.0) return false;
+        if (boundsContains(reference, crop, 2.0)) return true;
+        double overlap = overlapArea(reference, crop);
+        return overlap / referenceArea >= 0.98 && overlap / cropArea >= 0.98;
+    }
+
+    private double[] unionSourceBounds(int pageIndex, LinkedHashSet<Integer> sourceIds) {
+        double[] out = null;
+        if (data == null || sourceIds == null) return null;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            double[] b = item != null ? item.geometricBounds() : null;
+            if (b == null || b.length < 4) {
+                b = item != null ? boundsOf(item) : null;
+            }
+            b = normalizeSpreadBoundsToPage(pageIndex, b);
+            if (b == null || b.length < 4) continue;
+            if (out == null) {
+                out = Arrays.copyOf(b, 4);
+            } else {
+                out[0] = Math.min(out[0], b[0]);
+                out[1] = Math.min(out[1], b[1]);
+                out[2] = Math.max(out[2], b[2]);
+                out[3] = Math.max(out[3], b[3]);
+            }
+        }
+        return out;
+    }
+
+    private String cropRenderedImageToBounds(ObjectPlan plan, double[] cropBounds) {
+        if (ctx == null || ctx.basePath == null || plan == null
+                || plan.file == null || plan.file.isEmpty()
+                || plan.bounds == null || plan.bounds.length < 4
+                || cropBounds == null || cropBounds.length < 4) {
+            return null;
+        }
+        double overlap = overlapArea(plan.bounds, cropBounds);
+        double planArea = area(plan.bounds);
+        double cropArea = area(cropBounds);
+        if (!validContentCropBounds(plan.bounds, cropBounds)) return null;
+        if (planArea > 0.0 && cropArea > 0.0
+                && overlap / planArea >= 0.98
+                && overlap / cropArea >= 0.98) {
+            return plan.file;
+        }
+        File src = new File(ctx.basePath, plan.file);
+        if (!src.exists()) return null;
+        try {
+            BufferedImage image = ImageIO.read(src);
+            if (image == null) return null;
+            double parentH = plan.bounds[2] - plan.bounds[0];
+            double parentW = plan.bounds[3] - plan.bounds[1];
+            if (parentW <= 0.0 || parentH <= 0.0) return null;
+            int x = clampInt((int) Math.floor((cropBounds[1] - plan.bounds[1]) / parentW * image.getWidth()),
+                    0, image.getWidth() - 1);
+            int y = clampInt((int) Math.floor((cropBounds[0] - plan.bounds[0]) / parentH * image.getHeight()),
+                    0, image.getHeight() - 1);
+            int right = clampInt((int) Math.ceil((cropBounds[3] - plan.bounds[1]) / parentW * image.getWidth()),
+                    x + 1, image.getWidth());
+            int bottom = clampInt((int) Math.ceil((cropBounds[2] - plan.bounds[0]) / parentH * image.getHeight()),
+                    y + 1, image.getHeight());
+            int w = right - x;
+            int h = bottom - y;
+            if (w <= 0 || h <= 0) return null;
+            BufferedImage sub = image.getSubimage(x, y, w, h);
+            BufferedImage copy = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+            copy.getGraphics().drawImage(sub, 0, 0, null);
+            String croppedRelative = croppedRelativePath(plan.file);
+            File out = new File(ctx.basePath, croppedRelative);
+            File parent = out.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) return null;
+            ImageIO.write(copy, "png", out);
+            return croppedRelative;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static String croppedRelativePath(String file) {
+        String safeFile = safe(file);
+        int slash = Math.max(safeFile.lastIndexOf('/'), safeFile.lastIndexOf('\\'));
+        String dir = slash >= 0 ? safeFile.substring(0, slash + 1) : "";
+        String name = slash >= 0 ? safeFile.substring(slash + 1) : safeFile;
+        int dot = name.lastIndexOf('.');
+        String base = dot >= 0 ? name.substring(0, dot) : name;
+        return dir + base + "_content_crop.png";
+    }
+
+    private static int clampInt(int value, int min, int max) {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+
     private boolean isNonCanonicalAtomicObjectPlan(ObjectPlan plan) {
         if (plan == null || data == null) return false;
         RenderedGroup rg = renderedGroupForPlan(plan);
@@ -3351,6 +3631,7 @@ public final class OwnershipPlanner {
 
     private static boolean ownsSourcePositionedInlineTextShell(ObjectPlan owner, ObjectPlan child) {
         if (!isSourcePositionedInlineTextShellRelation(owner, child)) return false;
+        if ("released_from_image_group_content_crop".equals(owner.reason)) return false;
         return !isImageBackedContentShellPlan(owner);
     }
 

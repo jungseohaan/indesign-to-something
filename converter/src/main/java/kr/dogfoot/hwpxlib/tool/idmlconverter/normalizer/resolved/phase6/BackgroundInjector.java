@@ -17,6 +17,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualSy
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualTextEmphasisAbsorber;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualTfInlineCompositor;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualZOrderPlanner;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
@@ -103,8 +104,11 @@ public final class BackgroundInjector {
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_NO_SECTION", "pageIndex not mapped to section");
                 continue;
             }
+            ObjectPlan ownershipPlan = ctx.findOwnershipPlanForRendered(rg);
 
-            double[] bounds = rg.bounds();
+            double[] bounds = ownershipPlan != null && ownershipPlan.bounds != null && ownershipPlan.bounds.length >= 4
+                    ? ownershipPlan.bounds
+                    : rg.bounds();
             if (bounds == null || bounds.length < 4) {
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_NO_BOUNDS", "rendered item has no bounds");
                 continue;
@@ -120,7 +124,7 @@ public final class BackgroundInjector {
                 continue;
             }
 
-            byte[] imageData = loadPng(ctx, rg);
+            byte[] imageData = loadPng(ctx, rg, ownershipPlan);
             if (imageData == null) {
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_PNG_LOAD_FAILED", "png file missing or unreadable");
                 continue;
@@ -867,9 +871,16 @@ public final class BackgroundInjector {
     }
 
     public static byte[] loadPng(ResolvedBuildContext ctx, RenderedGroup rg) {
-        if (ctx == null || rg == null || rg.file() == null) return null;
+        return loadPng(ctx, rg, null);
+    }
+
+    public static byte[] loadPng(ResolvedBuildContext ctx, RenderedGroup rg, ObjectPlan plan) {
+        String file = plan != null && plan.file != null && !plan.file.isEmpty()
+                ? plan.file
+                : (rg != null ? rg.file() : null);
+        if (ctx == null || file == null) return null;
         try {
-            File pngFile = new File(ctx.basePath, rg.file());
+            File pngFile = new File(ctx.basePath, file);
             if (!pngFile.exists()) return null;
             String key = pngFile.getAbsolutePath();
             byte[] cached = ctx.renderedPngByteCache.get(key);

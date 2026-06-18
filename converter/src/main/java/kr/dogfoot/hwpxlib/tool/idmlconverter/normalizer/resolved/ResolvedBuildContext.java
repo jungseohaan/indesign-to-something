@@ -875,15 +875,20 @@ public final class ResolvedBuildContext {
         Placement placement = placementOf(rg);
         ObjectPlan plan = renderedOnly(ownershipPlanByRenderFileKey.get(
                 renderFileKey(rg.pageIndex(), placement, rg.id(), rg.file())));
+        ObjectPlan renderPlan = renderedOnly(ownershipPlanByRenderKey.get(
+                renderKey(rg.pageIndex(), placement, rg.id())));
+        plan = preferRuntimeRenderedPlan(plan, renderPlan);
         if (plan == null) {
             plan = renderedOnly(ownershipPlanByFileBoundsKey.get(
                     fileBoundsKey(rg.pageIndex(), placement, rg.file(), rg.bounds())));
+            plan = preferRuntimeRenderedPlan(plan, renderPlan);
         }
         if (plan == null) {
             plan = renderedOnly(ownershipPlanByFileKey.get(fileKey(rg.pageIndex(), placement, rg.file())));
+            plan = preferRuntimeRenderedPlan(plan, renderPlan);
         }
         if (plan == null) {
-            plan = renderedOnly(ownershipPlanByRenderKey.get(renderKey(rg.pageIndex(), placement, rg.id())));
+            plan = renderPlan;
         }
         if (plan == null) {
             plan = renderedOnly(ownershipPlanByDomKey.get(domKey(rg.pageIndex(), placement, rg.id())));
@@ -892,17 +897,21 @@ public final class ResolvedBuildContext {
             Placement alternatePlacement = placement == Placement.INLINE ? Placement.FLOATING : Placement.INLINE;
             plan = renderedOnly(ownershipPlanByRenderFileKey.get(renderFileKey(
                     rg.pageIndex(), alternatePlacement, rg.id(), rg.file())));
+            ObjectPlan alternateRenderPlan = renderedOnly(ownershipPlanByRenderKey.get(
+                    renderKey(rg.pageIndex(), alternatePlacement, rg.id())));
+            plan = preferRuntimeRenderedPlan(plan, alternateRenderPlan);
             if (plan == null) {
                 plan = renderedOnly(ownershipPlanByFileBoundsKey.get(fileBoundsKey(
                         rg.pageIndex(), alternatePlacement, rg.file(), rg.bounds())));
+                plan = preferRuntimeRenderedPlan(plan, alternateRenderPlan);
             }
             if (plan == null) {
                 plan = renderedOnly(ownershipPlanByFileKey.get(
                         fileKey(rg.pageIndex(), alternatePlacement, rg.file())));
+                plan = preferRuntimeRenderedPlan(plan, alternateRenderPlan);
             }
             if (plan == null) {
-                plan = renderedOnly(ownershipPlanByRenderKey.get(
-                        renderKey(rg.pageIndex(), alternatePlacement, rg.id())));
+                plan = alternateRenderPlan;
             }
             if (plan == null) {
                 plan = renderedOnly(ownershipPlanByDomKey.get(
@@ -924,6 +933,17 @@ public final class ResolvedBuildContext {
         }
         ownershipPlanRenderedCache.put(cacheKey, plan);
         return plan;
+    }
+
+    private static ObjectPlan preferRuntimeRenderedPlan(ObjectPlan exact, ObjectPlan byRenderId) {
+        if (byRenderId == null) return exact;
+        if (exact == null) return byRenderId;
+        if (byRenderId.hasVisibleVisual()
+                && !exact.hasVisibleVisual()
+                && "image_group_content_crop_duplicate".equals(exact.reason)) {
+            return byRenderId;
+        }
+        return exact;
     }
 
     private static ObjectPlan renderedOnly(ObjectPlan plan) {
@@ -1105,6 +1125,9 @@ public final class ResolvedBuildContext {
     private static boolean shouldPreferOwnershipPlan(ObjectPlan candidate, ObjectPlan existing) {
         if (candidate == null) return false;
         if (existing == null) return true;
+        if (candidate.hasVisibleVisual() != existing.hasVisibleVisual()) {
+            return candidate.hasVisibleVisual();
+        }
         boolean candidateSimple = candidate.kind != null && candidate.kind.startsWith("simple_button_label:");
         boolean existingSimple = existing.kind != null && existing.kind.startsWith("simple_button_label:");
         if (candidateSimple != existingSimple) return candidateSimple;

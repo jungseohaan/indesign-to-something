@@ -461,6 +461,18 @@ shell visual과 editable child TF를 함께 소유하는 경우가 있다. 이�
   유지한다. image-backed composite은 원본 좌표 증거일 뿐 child label shell의 실행 소유자가 아니다.
 - parent가 textless coordinate shell이고 child shell visual을 실제로 포함하는 경우에만 child
   shell visual은 `DROP_VISUAL`이다.
+- parent가 `img_*.png` 같은 image-backed composite이고 그 안에 child text shell/table shell이
+  함께 포함되어 있으면 parent는 자식 영역의 visible owner가 아니다. parent가 별도 콘텐츠
+  visual을 가져야 한다면 child shell/table source를 제외한 원본 content source만 crop해서
+  `CONTENT_VISUAL`로 배치한다. child shell/table source는 각자의 더 구체적인 plan이 소유한다.
+- content crop은 반드시 parent render bounds 안에 들어오는 부분 이미지여야 한다. source bounds가
+  spread/page 좌표계 차이 때문에 parent 밖으로 튀거나 parent보다 커지면 split crop을 만들지 않는다.
+  잘못 정규화된 crop을 실행하는 것보다 parent composite ownership을 유지하는 편이 낫다.
+- 이때 기존 parent ownership 때문에 `DROP_VISUAL`이 되었던 child shell/table shell은
+  source bundle당 하나만 visible owner로 복구한다. 복구 대상은 추출된 textless shell 파일이
+  있는 plan뿐이며, 텍스트 소유권은 이미 결정된 child TextFrame/inline shell plan을 유지한다.
+- 이 split은 source ownership 결정이다. 후속 단계가 parent PNG를 보고 child shell/table을
+  다시 숨기거나, child shell/table을 보고 parent PNG 전체를 되살리면 안 된다.
 - child TF 텍스트는 계속 HWPX 텍스트가 소유한다. 다만 위치는 child inline shell의
   spread 좌표가 아니라 parent/source page-local 좌표를 따른다.
 - `inline_text_hidden` child shell이 editable TF 신호(`hwpx_tf`, `editableTextFrameIds`,
