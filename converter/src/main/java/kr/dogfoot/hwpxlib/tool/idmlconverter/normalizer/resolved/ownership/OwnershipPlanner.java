@@ -1550,19 +1550,17 @@ public final class OwnershipPlanner {
     private boolean isEditableVisualShellWithSeparateHwpxText(RenderedGroup rg) {
         if (rg == null) return false;
         if (!hasEditableTextOwnerSignal(rg)) return false;
+        return isExtractedTextlessVisual(rg);
+    }
+
+    private boolean isExtractedTextlessVisual(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (rg.file() == null || rg.file().isEmpty()) return false;
         if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
             return false;
         }
-        String reason = safe(rg.reason());
-        return "visual_label_text_hidden_shell".equals(reason)
-                || "editable_composite_text_hidden_shell".equals(reason)
-                || "concept_label_shell".equals(reason)
-                || "editable_textframe_visual_shell".equals(reason)
-                || "mixed_group_text_hidden".equals(reason)
-                || "complex_graphic_text_hidden".equals(reason)
-                || "image_group_text_hidden".equals(reason)
-                || "inline_text_hidden".equals(reason)
-                || "container_face_shadow_pair".equals(reason);
+        return rg.hasEditableTextHiddenFromPng();
     }
 
     private boolean isInlineCompleteGraphicWithHwpxTextSource(RenderedGroup rg, Placement placement, TextAction textAction) {
@@ -1864,25 +1862,7 @@ public final class OwnershipPlanner {
     }
 
     private boolean isTextHiddenShellForInlineAnchor(RenderedGroup rg) {
-        if (rg == null || data == null) return false;
-        if (!isRenderedPageObject(rg)) return false;
-        if (!isEditableVisualShellWithSeparateHwpxText(rg)) return false;
-        if (hasDirectInlineAnchor(rg)) return true;
-        for (RenderedGroup other : data.allRenderedFloatingItems()) {
-            if (other == null || other == rg) continue;
-            if (other.id() != rg.id()) continue;
-            if ("inline_object".equals(other.type()) || "inline_object".equals(other.itemType())) {
-                return hasResolvedInlineAnchor(rg.id());
-            }
-        }
         return false;
-    }
-
-    private boolean hasDirectInlineAnchor(RenderedGroup rg) {
-        if (rg == null || data == null) return false;
-        if (data.isInlineObjectId(rg.id())) return true;
-        ResolvedPageItem self = data.getPageItem(String.valueOf(rg.id()));
-        return self != null && self.isInline();
     }
 
     private boolean hasInlineSourceObject(RenderedGroup rg) {
@@ -2940,6 +2920,7 @@ public final class OwnershipPlanner {
             ObjectPlan leafShell = plans.get(i);
             if (!isLeafTextHiddenShellPlan(leafShell)) continue;
             if (leafShell.ownedTextFrameIds == null || leafShell.ownedTextFrameIds.length == 0) continue;
+            if (leafShell.ownedTextFrameIds.length != 1) continue;
             ObjectPlan inlineCompanion = findInlineCompanionForLeafShell(leafShell);
             if (inlineCompanion == null) continue;
             int companionIndex = plans.indexOf(inlineCompanion);
@@ -2977,7 +2958,7 @@ public final class OwnershipPlanner {
         if (leafShell == null) return null;
         for (ObjectPlan candidate : plans) {
             if (candidate == null || candidate == leafShell) continue;
-            if (!candidate.hasVisibleVisual()) continue;
+            if (!isInlineCompanionCandidateForLeafShell(candidate)) continue;
             if (candidate.pageIndex != leafShell.pageIndex) continue;
             if (candidate.domId != leafShell.domId) continue;
             if (candidate.placement != Placement.INLINE) continue;
@@ -2988,6 +2969,15 @@ public final class OwnershipPlanner {
             return candidate;
         }
         return null;
+    }
+
+    private boolean isInlineCompanionCandidateForLeafShell(ObjectPlan candidate) {
+        if (candidate == null) return false;
+        if (candidate.hasVisibleVisual()) return true;
+        if (candidate.visualAction != VisualAction.DROP_VISUAL) return false;
+        if (candidate.textAction != TextAction.DROP_TEXT) return false;
+        return "inline_graphic_only".equals(candidate.reason)
+                || "owned_by_page_object_channel".equals(candidate.reason);
     }
 
     private boolean hasInlineSourcePlan(ObjectPlan plan) {

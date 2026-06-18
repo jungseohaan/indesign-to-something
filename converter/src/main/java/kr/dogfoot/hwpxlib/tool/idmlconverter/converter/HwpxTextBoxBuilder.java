@@ -317,14 +317,17 @@ public class HwpxTextBoxBuilder {
         }
 
         if (colCount <= 1) {
+            boolean textOnlyOverlay = block.plannedVisualTextOverlay();
             // 래퍼 fill 또는 프레임 자체 fill이 있으면 배경 사각형 추가.
             // 전역 native-textbox-graphics OFF여도 block이 명시적으로 네이티브 그래픽 허용(사이드박스
             // 대형 배경 흡수 등)이면 fill을 칠한다.
             boolean nativeOk = nativeTextBoxGraphicsEnabled() || block.forceNativeFill();
-            boolean hasOwnVisibleFill = nativeOk
+            boolean hasOwnVisibleFill = !textOnlyOverlay
+                    && nativeOk
                     && block.fillColor() != null
                     && block.fillColor().startsWith("#") && !block.fillColor().equals("#FFFFFF");
-            boolean hasWrapper = nativeOk
+            boolean hasWrapper = !textOnlyOverlay
+                    && nativeOk
                     && (block.hasWrapperFill() || hasOwnVisibleFill);
             if (!hasWrapper && shouldUseFloatingDrawTextBox(block)) {
                 frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
@@ -361,7 +364,7 @@ public class HwpxTextBoxBuilder {
                         addWrapperRoundedRect(framePara, block, w, h);
                     }
                     singleColumnTableConverter.convertSingleColumnTable(framePara, block, block.effectiveX(), block.y(), w, h,
-                            block.paragraphs(), wrapper);
+                            block.paragraphs(), wrapper || textOnlyOverlay);
                 }
             }
         } else {
@@ -371,11 +374,14 @@ public class HwpxTextBoxBuilder {
                     TextBoxLayoutHelpers.distributeParagraphs(block.paragraphs(), colCount);
 
             // 다단 프레임에 테두리/라운드코너가 있으면 전체를 감싸는 배경 사각형 추가
-            boolean hasFrameBorder = nativeTextBoxGraphicsEnabled()
+            boolean textOnlyOverlay = block.plannedVisualTextOverlay();
+            boolean hasFrameBorder = !textOnlyOverlay
+                    && nativeTextBoxGraphicsEnabled()
                     && block.strokeColor() != null
                     && block.strokeColor().startsWith("#")
                     && block.strokeWeight() > 0;
-            boolean hasFrameStyle = nativeTextBoxGraphicsEnabled()
+            boolean hasFrameStyle = !textOnlyOverlay
+                    && nativeTextBoxGraphicsEnabled()
                     && (hasFrameBorder || block.cornerRadius() > 0);
             if (hasFrameStyle) {
                 addMultiColumnFrameBorder(framePara, block, w, h);
@@ -385,7 +391,7 @@ public class HwpxTextBoxBuilder {
             long gutter = block.columnGutter();
             for (int c = 0; c < colCount; c++) {
                 singleColumnTableConverter.convertSingleColumnTable(framePara, block, xCursor, block.y(),
-                        colWidths[c], h, distributed.get(c), hasFrameStyle);
+                        colWidths[c], h, distributed.get(c), hasFrameStyle || textOnlyOverlay);
                 xCursor += colWidths[c] + gutter;
             }
         }

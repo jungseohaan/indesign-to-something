@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
@@ -130,6 +131,12 @@ final class InlineFrameBuilder {
             HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(obj.paragraphs(), redistWidth);
         }
 
+        if (shouldUseInlineDrawTextShell(obj)) {
+            addInlineExtractedShellTextFrame(para, obj, w, h, twm, tfs, useWrapping);
+            ctx.currentContainerWidth = savedContainerWidth;
+            return;
+        }
+
         Run run = para.addNewRun();
         run.charPrIDRef("0");
         Table table = run.addNewTable();
@@ -243,6 +250,129 @@ final class InlineFrameBuilder {
             paragraphBuilder.addEmptySubListPara(subList);
         }
         ctx.currentContainerWidth = savedContainerWidth;
+    }
+
+    private boolean shouldUseInlineDrawTextShell(ASTInlineObject obj) {
+        return obj != null
+                && obj.imageFillData() != null
+                && obj.imageFillData().length > 0
+                && obj.nativeGraphicsAllowed();
+    }
+
+    private void addInlineExtractedShellTextFrame(Para para, ASTInlineObject obj, long w, long h,
+                                                  TextWrapMethod twm, TextFlowSide tfs, boolean useWrapping) {
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+
+        Rectangle rect = run.addNewRectangle();
+        rect.idAnd(HwpxUtil.nextShapeId())
+                .zOrderAnd(0)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(twm)
+                .textFlowAnd(tfs)
+                .lockAnd(false)
+                .dropcapstyleAnd(resolveDropCapStyle(obj.paragraphs()));
+
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(HwpxUtil.nextShapeId());
+        applyShapeComponentGeometry(rect, w, h);
+
+        DrawTextBoxComposer.Spec spec = DrawTextBoxComposer.fromInlineObject(obj, w, h);
+        spec.imageFillData = obj.imageFillData();
+        spec.forceImageFill = true;
+        spec.nativeGraphicsAllowed = true;
+        spec.strokeColor = null;
+        spec.strokeWeight = 0;
+        spec.fillColor = null;
+        textBoxBuilder.drawTextBoxComposer().apply(rect, spec);
+        if (rect.drawText() != null) {
+            rect.drawText().editableAnd(true);
+        }
+        DrawTextBoxComposer.applyRectangleGeometry(
+                rect,
+                w,
+                h,
+                obj.cornerRadius(),
+                h,
+                obj.shellShapeType());
+
+        rect.createPos();
+        if (obj.isOverlay()) {
+            rect.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(true)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.LEFT)
+                    .vertOffsetAnd(obj.overlayY())
+                    .horzOffset(obj.overlayX());
+        } else if (useWrapping) {
+            rect.pos().treatAsCharAnd(false)
+                    .affectLSpacingAnd(false)
+                    .flowWithTextAnd(true)
+                    .allowOverlapAnd(false)
+                    .holdAnchorAndSOAnd(false)
+                    .vertRelToAnd(VertRelTo.PARA)
+                    .horzRelToAnd(HorzRelTo.PARA)
+                    .vertAlignAnd(VertAlign.TOP)
+                    .horzAlignAnd(HorzAlign.CENTER)
+                    .vertOffsetAnd(0L)
+                    .horzOffset(0L);
+        } else {
+            rect.pos().treatAsCharAnd(true)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(true)
+                .allowOverlapAnd(false)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PARA)
+                .horzRelToAnd(HorzRelTo.PARA)
+                .vertAlignAnd(VertAlign.CENTER)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(0L)
+                .horzOffset(0L);
+        }
+        rect.createOutMargin();
+        if (obj.isOverlay()) {
+            rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+        } else if (useWrapping) {
+            rect.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
+                    .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
+        } else {
+            rect.outMargin().leftAnd(0L).rightAnd(INLINE_TEXT_FRAME_TRAILING_GAP).topAnd(0L).bottomAnd(0L);
+        }
+    }
+
+    private void applyShapeComponentGeometry(
+            kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.shapecomponent.ShapeComponent<?> shape,
+            long w,
+            long h) {
+        shape.createOffset();
+        shape.offset().set(0L, 0L);
+        shape.createOrgSz();
+        shape.orgSz().set(w, h);
+        shape.createCurSz();
+        shape.curSz().set(w, h);
+        shape.createFlip();
+        shape.flip().horizontalAnd(false).verticalAnd(false);
+        shape.createRotationInfo();
+        shape.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2)
+                .centerYAnd(h / 2)
+                .rotateimageAnd(true);
+        shape.createRenderingInfo();
+        shape.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        shape.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        shape.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        shape.createSZ();
+        shape.sz().widthAnd(w)
+                .widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h)
+                .heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
     }
 
     private String createInlineTextFrameBorderFill(ASTInlineObject obj) {

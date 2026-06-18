@@ -385,7 +385,7 @@ HWPX에는 `BEHIND_TEXT`와 `IN_FRONT_OF_TEXT` 평면 차이가 있다.
 - `BACKGROUND`: `BEHIND_TEXT`
 - `DECORATION`: 구현 layer별로 분리
   - `TEXT_CARD_BACKDROP`: `BEHIND_TEXT`
-  - `LABEL_BACKDROP`: `BEHIND_TEXT`
+  - `LABEL_BACKDROP`: `IN_FRONT_OF_TEXT`의 낮은 zOrder. 소유 HWPX text보다 아래, page/container background보다 위에 둔다.
   - `CONTAINER_OUTLINE`, `FOREGROUND_MASK`: `IN_FRONT_OF_TEXT`
 - `CONTENT`: `IN_FRONT_OF_TEXT`
 - `TEXT`: HWPX text
@@ -484,9 +484,12 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 
 - 현재 기준은 `SPEC-036`이다.
 - `PLACE_TEXT_SHELL`은 textless shell visual을 배치하고, editable child TF는 별도 HWPX 텍스트가 소유한다.
+- `placement=INLINE`인 textless shell companion은 예외적으로 하나의 inline carrier 안에서
+  추출 shell image brush와 editable drawText를 함께 실행할 수 있다. 이 경우에도 synthetic
+  outline/fill은 만들지 않고 inline/floating placement를 뒤집지 않는다.
 - shell visual과 child TF text는 서로 다른 ownership channel이면 동시에 보일 수 있다.
 - 중복 위반은 shell PNG 안에 child TF 텍스트 픽셀이 남거나, parent shell과 descendant visual fragment가 동시에 보이거나,
-  같은 TF를 HWPX 텍스트와 drawText/imageFill 내부 텍스트로 동시에 재생성하는 경우다.
+  같은 TF를 floating HWPX 텍스트와 drawText/imageFill 내부 텍스트로 동시에 재생성하는 경우다.
 - floating 실행 방식은 후속 단계가 재판정하지 않고 `ObjectPlan`의 `visualAction`, `placement`, `visualLayer`, `zOrder`를 따른다.
 
 ## Text Card Backdrop

@@ -858,6 +858,7 @@ public final class ResolvedBuildContext {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         if (plan == null || !plan.hasVisibleVisual() || plan.visualLayer == null) return null;
         return plan.visualLayer == VisualLayer.CONTAINER_FACE
+                || plan.visualLayer == VisualLayer.LABEL_BACKDROP
                 || plan.visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
                 || plan.visualLayer == VisualLayer.CONTENT_VISUAL
                 || plan.visualLayer == VisualLayer.CONTAINER_OUTLINE
@@ -1165,6 +1166,10 @@ public final class ResolvedBuildContext {
     }
 
     public void recordRenderedDecision(RenderedGroup rg, String phase, String decision, String detail) {
+        recordRenderedDecision(rg, null, phase, decision, detail);
+    }
+
+    public void recordRenderedDecision(RenderedGroup rg, ObjectPlan explicitPlan, String phase, String decision, String detail) {
         if (rg == null) return;
         StringBuilder sb = new StringBuilder(256);
         sb.append('{')
@@ -1179,7 +1184,7 @@ public final class ResolvedBuildContext {
                 .append("\"visualOwner\":\"").append(jsonEscape(rg.visualOwner())).append("\",")
                 .append("\"textOwner\":\"").append(jsonEscape(rg.textOwner())).append("\",")
                 .append("\"placementAllowed\":").append(Boolean.FALSE.equals(rg.placementAllowed()) ? "false" : "true");
-        ObjectPlan plan = findOwnershipPlanForRendered(rg);
+        ObjectPlan plan = explicitPlan != null ? explicitPlan : findOwnershipPlanForRendered(rg);
         if (plan != null) {
             sb.append(",\"planTextAction\":\"").append(plan.textAction).append("\",")
                     .append("\"planVisualAction\":\"").append(plan.visualAction).append("\",")

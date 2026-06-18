@@ -8,38 +8,52 @@
 
 ## 1. 원칙
 
-1. 원본 source object가 먼저 소유자를 가진다.
-2. render candidate는 source owner가 허용한 경우에만 생성된다.
-3. 후속 단계는 plan을 실행만 한다.
-4. 텍스트 머지, 글자 수/크기 기반 판정, PNG 픽셀 분석 판정은 금지한다.
-5. 원본 layer/z/inline/floating 정보는 버리지 않고 plan과 결과에 추적한다.
+1. Stage 1만 source object의 text/visual owner, placement, layer를 결정한다.
+2. 후속 단계는 `ObjectPlan`을 실행만 한다.
+3. editable text는 HWPX가 소유한다.
+4. textless shell은 원본 InDesign 추출물만 쓴다.
+5. 같은 source bundle의 visible visual owner는 하나다.
+6. 원본 layer/z/inline/floating 정보는 plan과 결과에 추적한다.
 
 ## 2. 텍스트
 
 - 본문, 제목, 라벨, 설명, 문항, 출처는 HWPX 텍스트다.
-- InDesign에서 숨긴 텍스트가 있는 PNG는 textless shell로만 배치한다.
 - PNG가 텍스트를 소유할 수 있는 경우는 atomic marker뿐이다.
 - atomic marker는 명시적 표식 패턴만 허용한다: `가`, `ㄱ`, `1`, `01`, 체크/선택지 표식.
 - 텍스트를 임의로 합치지 않는다. 연결 TextFrame은 원본 thread만 따른다.
 
 ## 3. 비주얼
 
-- `PLACE_TEXT_SHELL`: textless PNG/vector shell을 figure로 배치하고, 텍스트는 별도 HWPX TF가 소유한다.
+- `PLACE_TEXT_SHELL`: textless PNG/vector shell을 원본 placement에 맞게 배치한다.
+  floating shell은 별도 visual로, inline shell은 하나의 inline carrier 안에서 실행한다.
 - `PLACE_FLOATING_PNG`: 사진, 삽화, 차트, 완성형 콘텐츠 PNG.
 - `PLACE_INLINE_PNG`: 원본이 inline이고 텍스트를 PNG가 소유하는 atomic/graphic only 객체.
 - `ABSORB_TEXT_STYLE`: fill/stroke/underline처럼 HWPX 텍스트 속성 또는 1x1 table로 표현 가능한 장식.
 - `DROP_VISUAL`: 같은 source의 더 정확한 owner가 있을 때만 사용한다.
 
-### 3.1 Textless shell 추출 원칙
+## 4. Textless Shell
 
-shell은 원본 InDesign visual을 추출한 결과여야 한다.
+아래 조건을 만족하면 complete PNG가 아니라 textless shell이다.
 
-허용:
+- `visualOwner=indesign_png`
+- `textOwner=hwpx_tf`
+- `textHiddenBeforeExport=true` 또는 `containsText=false`
+- `containsEditableText`가 true가 아니다.
+- `editableTextFrameIds` 또는 source TextFrame이 HWPX text owner로 존재한다.
+- 실제 추출 file이 있다.
+
+실행 규칙:
 
 - extractor가 source object/group을 복제한다.
 - 복제본에서 HWPX가 소유할 TextFrame/table text만 제거한다.
 - 복제본의 fill/stroke/corner/path/group clipping은 InDesign `exportFile()`로 그대로 PNG화한다.
 - Java 변환기는 추출된 textless shell PNG/vector를 `PLACE_TEXT_SHELL`로 배치만 한다.
+- shell 위의 editable TextFrame은 각각 HWPX 텍스트로 배치한다.
+- `PLACE_TEXT_SHELL`이 소유한 TF/table carrier는 텍스트만 배치한다. carrier의
+  HWPX table border/fill, drawText outline/fill, wrapper rect는 모두 비활성화한다.
+- 예외: `placement=INLINE`인 textless shell companion은 HWPX의 인라인 편집성을 보존하기 위해
+  하나의 inline carrier로 실행한다. 이때 carrier는 추출 shell PNG를 image brush로 쓰고,
+  텍스트는 editable drawText/subList로 둔다. synthetic outline/fill은 만들지 않는다.
 
 금지:
 
@@ -47,68 +61,51 @@ shell은 원본 InDesign visual을 추출한 결과여야 한다.
 - table/TF bounds를 보고 rounded rectangle, pill, label box를 임의 생성하기
 - HWPX drawText/shape/table border를 shell 대체물로 만들기
 - 추출된 shell이 있는데 TF outline/fill을 다시 그리기
+- shell PNG 안에 editable text를 다시 굽기
 
 원본 shell 추출이 실패하면 변환 단계에서 비슷한 shell을 만들지 않는다.
 실패를 드러내고 extractor/ownership metadata를 수정한다.
 
-#### 3.1.1 Textless shell placement
+### 4.1 Shell Placement
 
 `page_object`로 추출된 textless shell은 기본적으로 floating shell이다.
-inline으로 배치할 수 있는 것은 shell source 자체가 실제 inline anchor인 경우뿐이다.
+inline으로 배치할 수 있는 것은 render candidate 자체가 `inline_object`인 경우뿐이다.
 
 inline 인정 조건:
 
 - render candidate 자체가 `inline_object`이다.
-- 또는 shell의 dom id가 resolved story의 inline anchor로 직접 참조된다.
-- 또는 shell의 `ResolvedPageItem` 자체가 inline object로 표시된다.
+- 또는 같은 source bundle의 `page_object` textless shell을 실행하기 위한 같은 dom id의
+  `inline_object` companion이다. 이 경우 visible owner는 inline companion이고,
+  page_object shell plan은 drop된다.
 
 inline 불인정 조건:
 
 - `sourceObjectIds` 안의 descendant/child source 중 일부가 inline이다.
 - child TextFrame이 inline source를 가졌거나 inline object 안에 포함된 적이 있다.
 - 같은 bundle 안에 inline fragment가 섞여 있다.
+- 같은 dom id의 inline companion이 있다.
 
 즉, descendant의 inline 흔적은 parent `page_object` shell의 placement를 inline으로
-바꾸는 근거가 될 수 없다. `mixed_group_text_hidden`, `image_group_text_hidden`,
-`visual_label_text_hidden_shell`처럼 editable TF를 별도 HWPX 텍스트로 소유하는
-page_object shell은 직접 inline anchor가 없으면 `placement=FLOATING`이다.
+바꾸는 근거가 될 수 없다. editable TF를 별도 HWPX 텍스트로 소유하는 page_object
+shell은 `placement=FLOATING`이다.
 후속 단계는 이 결정을 뒤집거나 inline executor로 라우팅하지 않는다.
 
-### 3.2 Table-only carrier shell
+### 4.2 Table-Only Carrier
 
-TextFrame 안의 실제 편집 텍스트가 IDML table에 있고 `TextFrame.contents`에는 ORC만 남는 경우가 있다.
-이 TextFrame은 table-only carrier다.
+TextFrame 안의 실제 편집 텍스트가 IDML table에 있고 `TextFrame.contents`에는 ORC만 남는 경우도
+같은 규칙을 따른다. table text는 HWPX table/text가 소유하고, parent shell은
+`PLACE_TEXT_SHELL`로 배치한다. table border/fill은 원본 shell을 대체하거나 중복 생성하지 않는다.
 
-정책:
+## 5. 그룹과 중복
 
-- carrier table text는 HWPX table/text가 소유한다.
-- carrier의 parent Rectangle/Group/Oval/Polygon shell은 extractor가 textless PNG로 추출한다.
-- extractor는 원본 객체를 직접 수정하지 않고 복제본에서 table-only carrier contents만 비운다.
-- 추출 metadata는 `textOwner=hwpx_tf`, `textHiddenBeforeExport=true`, `editableTextFrameIds=[carrierTfId]`를 남긴다.
-- Ownership Planner는 parent shell을 `PLACE_TEXT_SHELL`, carrier TF/table을 `PLACE_TABLE_STYLE`로 계획한다.
-- `visualSourceObjectIds`에는 shell source만 남기고, carrier TF id는 `ownedTextFrameIds`로 추적한다.
+editable TF가 포함된 그룹은 두 ownership channel로 나눈다.
 
-금지:
+- parent visual group: textless shell만 소유한다.
+- child TextFrame/table: HWPX text/table만 소유한다.
+- descendant visual fragment: parent shell이 실제 포함하면 `DROP_VISUAL`, 포함하지 못하면 별도 visual owner로 남긴다.
 
-- table-only carrier의 table border/fill로 shell을 대체하기
-- parent shell이 없다는 이유로 Java에서 shell을 다시 그리기
-- shell과 table text를 하나의 complete PNG로 배치하기
-- table text를 drawText로 재생성하기
-
-## 4. 레이어
-
-원본 정보와 정책 layer를 분리한다.
-
-- 원본: `sourceLayerId`, `sourceLayerName`, `sourceLayerIndex`, `zOrder`, `zOrderKnown`.
-- 정책: `BACKGROUND`, `DECORATION`, `CONTENT`, `TEXT`.
-
-정책 layer는 배치 평면을 정하는 용도이고, 원본 layer는 추적/정렬/검증의 근거다.
-원본 z가 불명확할 때만 정책 layer로 보정한다.
-
-## 5. 중복 차단
-
-Stage 1에서 source object별 visible output slot을 하나만 만든다.
-후속 단계가 `handled set`으로 중복을 막는 구조는 제거한다.
+중복 차단은 source 정보를 자르지 않고 `visualSourceObjectIds`, `ownedTextFrameIds`,
+`descendantVisualObjectIds`로 구분한다.
 
 허용되는 조합:
 
@@ -121,54 +118,20 @@ Stage 1에서 source object별 visible output slot을 하나만 만든다.
 - complete PNG + 같은 텍스트의 HWPX TF
 - parent PNG + child PNG 동시 배치
 - inline PNG + floating PNG 동시 배치
-- shell을 imageFill TextFrame으로 만들고 그 안에 텍스트를 재생성
+- floating shell을 imageFill TextFrame으로 만들고 그 안에 텍스트를 재생성
+- inline shell을 page-level floating object로 승격
 
-### 5.1 그룹 shell + 다중 editable TF
+## 6. 레이어
 
-복합 그래픽 그룹이 배경/껍데기/shell 역할을 하고 그 위에 하나 이상의 editable
-TextFrame이 올라가는 경우가 있다. 이 경우 shell과 TF를 중복으로 보지 않는다.
-서로 다른 ownership channel이다.
+원본 layer/z와 정책 layer를 분리한다.
 
-Stage 1은 아래처럼 하나의 source bundle로 계획한다.
+- 원본: `sourceLayerId`, `sourceLayerName`, `sourceLayerIndex`, `zOrder`, `zOrderKnown`.
+- 정책: `BACKGROUND`, `DECORATION`, `CONTENT`, `TEXT`.
 
-- parent visual group: `visualAction=PLACE_TEXT_SHELL`
-- parent visual group: textless PNG/vector shell만 소유한다.
-- parent visual group: parent render가 실제로 포함한 하위 그룹의 그래픽 fragment까지 하나의 shell로 소유한다.
-- child TextFrame들: 각각 `textAction=OWNED_BY_HWPX_TEXT`
-- child TextFrame들: 각각 원본 좌표/레이어/z/inline 정보를 유지한다.
-- child visual fragment들: parent shell이 더 정확한 visual owner이면 `DROP_VISUAL`
+정책 layer는 HWPX 배치 평면을 정하는 용도이고, 원본 layer/z는 추적과 검증의 근거다.
+원본 z가 불명확할 때만 정책 layer로 보정한다.
 
-이 정책은 `소단원 정리`처럼 하나의 큰 그래픽 껍데기 위에 여러 TF가 올라간 경우에도
-같이 적용한다. 큰 그래픽 그룹은 하나의 shell로 보존하고, `소단원`, `정리` 같은 TF는
-각각 HWPX 텍스트로 배치한다.
-
-원본 Group 안에 하위 Group이 있고 그 하위 Group이 label shell과 TF를 품는 경우도 같은
-규칙을 적용한다. 단, 하위 그래픽 fragment를 drop할 수 있는 것은 parent render의
-`sourceObjectIds`/visual source에 그 fragment가 실제 포함되어 parent shell PNG/vector 안에
-존재한다고 확인되는 경우뿐이다. 원본 hierarchy상 하위 Group이라는 이유만으로 child shell을
-drop하지 않는다. parent render가 해당 fragment를 빠뜨렸다면, child shell은 별도 visible
-output으로 남겨 시각 누락을 막는다.
-
-직접 도형을 가진 leaf Group 안에 editable TextFrame이 하나 이상 있으면, 이 leaf Group을
-개별 label backdrop보다 먼저 하나의 `PLACE_TEXT_SHELL` source bundle로 추출한다. 이때
-leaf Group 안의 모든 직접 도형은 하나의 textless shell이 소유하고, child TextFrame들은
-각각 HWPX 텍스트가 소유한다. 상위 layout Group이 이 leaf shell만 감싸고 직접 visual
-도형을 갖지 않는다면 상위 Group은 별도 PNG shell을 만들지 않는다. 이는 `제목`/`풀이`처럼
-하나의 InDesign 그룹 안에 여러 라벨 도형과 여러 TF가 들어 있는 경우를 하나의 shell로
-보존하기 위한 구조 규칙이며, 페이지 번호/문구/좌표/글자 수 기반 예외가 아니다.
-
-중복으로 보는 것은 아래 경우다.
-
-- parent shell PNG와 descendant shell/graphic PNG가 동시에 보이는 경우
-- shell PNG 안에 child TF의 텍스트 픽셀이 남아 있는 경우
-- child TF를 HWPX 텍스트로 배치하면서 같은 TF를 drawText/imageFill 내부 텍스트로 재생성하는 경우
-
-구현상 duplicate 검증이 필요하더라도 parent plan의 source 정체성을 잘라내지 않는다.
-필요하면 `sourceObjectIds`와 별도로 visual source, owned text frame, descendant fragment를
-구분하는 메타데이터를 둔다. 중복 차단을 위해 큰 그룹의 source 정보를 축소하면
-부분 shell만 살아남아 원본 비주얼이 깨진다.
-
-## 6. Stage
+## 7. Stage
 
 1. Input Prepare: 원본 ID, layer, z, parent/group, inline/floating, owner metadata 수집.
 2. Source Ownership Planner: source object별 text/visual slot 확정.
@@ -183,7 +146,7 @@ Stage 책임은 코드 구조에서도 분리한다.
 - Stage 4는 새 plan을 만들거나 고치지 않는다.
 - 후속 phase가 새 예외를 만들 필요가 있으면 먼저 Stage 1 plan 모델을 고친다.
 
-## 7. 구현 제거 대상
+## 8. 구현 제거 대상
 
 - text length/box size로 semantic label을 판정하는 코드
 - PNG alpha/색/밝기를 읽어 shell/text를 분리하는 코드
@@ -199,7 +162,7 @@ Stage 책임은 코드 구조에서도 분리한다.
 - 로그에는 bridge 사유가 아니라 최종 `ObjectPlan` 사유를 남긴다.
 - 제거 대상임을 주석으로 명시한다.
 
-## 8. 표현 우선순위
+## 9. 표현 우선순위
 
 1. 본문 텍스트: HWPX paragraph/run 속성.
 2. 편집 가능한 박스/표형 장식: 1x1 table 우선.
@@ -209,7 +172,7 @@ Stage 책임은 코드 구조에서도 분리한다.
 단, 1x1 table은 editable text carrier다. 원본에서 별도 shell이 추출된 경우
 1x1 table border/fill은 shell을 대체하거나 중복 생성하면 안 된다.
 
-## 9. Validator invariant
+## 10. Validator invariant
 
 Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, strict 모드에서는 실패시킨다.
 
@@ -225,11 +188,11 @@ Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, st
 - `PLACE_TEXT_SHELL`이 Java-drawn synthetic shell이면 안 된다. extractor origin 또는 원본 vector source를 가져야 한다.
 - table-only carrier shell은 `PLACE_TEXT_SHELL` parent와 `PLACE_TABLE_STYLE` carrier가 같은 source bundle으로 추적되어야 한다.
 
-## 10. 개발 플랜
+## 11. 개발 플랜
 
 정책 반영은 source identity를 보존하면서 visible output slot만 단일화하는 방향으로 진행한다.
 
-### 10.1 1단계: ObjectPlan 모델 확장
+### 11.1 1단계: ObjectPlan 모델 확장
 
 대상:
 
@@ -257,7 +220,7 @@ Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, st
 - `OwnershipPlanner.resolveNestedTextShellSources`
 - parent plan의 `sourceObjectIds`를 줄여서 중복을 피하는 모든 코드
 
-### 10.2 2단계: Source Bundle Index 생성
+### 11.2 2단계: Source Bundle Index 생성
 
 대상:
 
@@ -288,7 +251,7 @@ Stage 1 입력 준비에서 아래 인덱스를 만든다.
 - PNG alpha/픽셀 분석
 - 후속 phase의 handled set
 
-### 10.3 3단계: Parent Text Shell 선택
+### 11.3 3단계: Parent Text Shell 선택
 
 대상:
 
@@ -315,10 +278,11 @@ text-hidden 복합 그룹 중 editable TF를 가진 후보는 parent shell 후�
 중요:
 
 - parent shell이 텍스트를 소유하지 않는다.
-- child TF는 parent shell 내부 drawText로 재생성하지 않는다.
+- child TF는 floating parent shell 내부 drawText로 재생성하지 않는다.
+- inline companion shell은 하나의 inline carrier 안에서만 추출 shell image brush와 editable drawText를 함께 둘 수 있다.
 - descendant PNG 조각은 parent shell과 동시에 보이지 않는다.
 
-### 10.4 4단계: Text Builder 고정
+### 11.4 4단계: Text Builder 고정
 
 대상:
 
@@ -332,7 +296,8 @@ text-hidden 복합 그룹 중 editable TF를 가진 후보는 parent shell 후�
 - 원본 inline/floating은 plan의 `placement`를 따른다.
 - shell이 있다는 이유로 TF bounds를 다시 계산하거나 merge하지 않는다.
 - shell 위의 TF에는 outline/fill을 새로 만들지 않는다.
-- drawText는 마지막 fallback이며, shell+TF 정책에서는 텍스트 재생성 용도로 쓰지 않는다.
+- drawText는 마지막 fallback이다. 단, `INLINE + PLACE_TEXT_SHELL`의 실행 carrier에서는
+  floating 전환을 피하고 편집 가능한 인라인 객체를 유지하기 위해 editable drawText를 허용한다.
 
 삭제/대체 대상:
 
@@ -341,7 +306,7 @@ text-hidden 복합 그룹 중 editable TF를 가진 후보는 parent shell 후�
 - TF를 sibling shell 기준으로 확장/축소하는 코드
 - 원본 thread가 아닌 텍스트 merge 코드
 
-### 10.5 5단계: Visual Builder 고정
+### 11.5 5단계: Visual Builder 고정
 
 대상:
 
@@ -362,9 +327,10 @@ text-hidden 복합 그룹 중 editable TF를 가진 후보는 parent shell 후�
 - Phase 6/7의 중복 suppression bridge
 - executor-local handled/covered set
 - plan 이후 `textOwner=hwpx_tf` 여부로 PNG 배치 여부를 재판정하는 코드
-- `PLACE_TEXT_SHELL`을 imageFill TextFrame + 내부 drawText로 실행하는 경로
+- floating `PLACE_TEXT_SHELL`을 imageFill TextFrame + 내부 drawText로 실행하는 경로
+- inline `PLACE_TEXT_SHELL`을 page-level floating으로 바꾸는 경로
 
-### 10.6 6단계: Layer/Z 적용 정리
+### 11.6 6단계: Layer/Z 적용 정리
 
 대상:
 
@@ -374,13 +340,14 @@ text-hidden 복합 그룹 중 editable TF를 가진 후보는 parent shell 후�
 
 규칙:
 
-- `BACKGROUND`은 HWPX `BEHIND_TEXT`.
-- `LABEL_BACKDROP`, `CONTAINER_BACKDROP`, `TEXT_CARD_BACKDROP`은 owned TF 뒤.
+- `BACKGROUND`, `CONTAINER_BACKDROP`, `TEXT_CARD_BACKDROP`은 HWPX `BEHIND_TEXT`.
+- `LABEL_BACKDROP`은 HWPX `IN_FRONT_OF_TEXT`의 낮은 zOrder에 둔다. HWPX에서 `BEHIND_TEXT`는 소유 TF 뒤가 아니라 본문/테이블 전체 뒤로 밀려 보이지 않을 수 있기 때문이다.
+- `INLINE + PLACE_TEXT_SHELL`이고 원본 추출 PNG shell이 있는 경우, 실행은 1x1 table cell background가 아니라 inline `rect + drawText`로 한다. HWPX table background는 뷰어에서 shell이 보이지 않는 경우가 있으므로, 추출 shell과 editable text를 하나의 인라인 객체로 묶어 보존한다.
 - `CONTAINER_OUTLINE`, `FOREGROUND_MASK`는 필요할 때만 text 앞.
 - 원본 z/layer가 있으면 추적한다.
 - HWPX 평면 차이 때문에 원본 z만으로 최종 앞뒤를 결정하지 않는다.
 
-### 10.7 7단계: Validator strict invariant
+### 11.7 7단계: Validator strict invariant
 
 대상:
 
@@ -397,7 +364,7 @@ text-hidden 복합 그룹 중 editable TF를 가진 후보는 parent shell 후�
 
 Validator는 보정하지 않는다. 실패 이유만 기록한다.
 
-### 10.8 8단계: 회귀 실행 순서
+### 11.8 8단계: 회귀 실행 순서
 
 먼저 작은 페이지 세트로 ownership JSON을 확인하고, 이후 전체 문서를 변환한다.
 

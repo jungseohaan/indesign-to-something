@@ -1399,7 +1399,7 @@ public class InlineFrameHandler {
             obj.height(CoordinateConverter.pointsToHwpunits(h));
             obj.imageFillData(imageData);
             obj.nativeGraphicsAllowed(true);
-            obj.forceImageFill(forcePngFill);
+            obj.forceImageFill(true);
             applyInlineShellShapeStyle(ctx, anchorItem, obj);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTfs.get(0), true));
             obj.verticalJustification("CenterAlign");
@@ -1412,7 +1412,7 @@ public class InlineFrameHandler {
                 }
             }
             ctx.markRenderedVisualHandled(shell.id());
-            ctx.recordRenderedDecision(shell, "Phase3.InlineFrameHandler",
+            ctx.recordRenderedDecision(shell, shellPlan, "Phase3.InlineFrameHandler",
                     "PLACE_INLINE_TEXT_SHELL",
                     "placed planned inline textless shell as INLINE_TEXT_FRAME imageFill; editable text is owned by HWPX");
             return obj;
