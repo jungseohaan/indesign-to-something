@@ -506,6 +506,14 @@ public class StoryLoader {
                                                 continue;
                                             }
 
+                                            ASTInlineObject plannedTextShell =
+                                                    InlineFrameHandler.loadPlannedInlineTextShellForTextFrame(ctx, domId);
+                                            if (plannedTextShell != null) {
+                                                para.addItem(plannedTextShell);
+                                                anchorIdx++;
+                                                continue;
+                                            }
+
                                             List<ASTInlineItem> nestedItems =
                                                     InlineFrameHandler.tryInlineTextFrameAsItems(ctx, domId,
                                                             partText, nextPartText);
@@ -620,7 +628,10 @@ public class StoryLoader {
                                                           String cellStoryId) {
         List<ASTParagraph> result = new ArrayList<>();
         if (ctx == null || idmlCell == null || idmlCell.paragraphs() == null) return result;
-        if (hasTextFrameStoryOwnedByPlacedTextFrame(ctx, idmlCell)) return result;
+        if (hasTextFrameStoryOwnedByPlacedTextFrame(ctx, idmlCell)
+                && !hasDirectVisibleCellText(idmlCell)) {
+            return result;
+        }
         int paraIndex = 0;
         for (IDMLParagraph ip : idmlCell.paragraphs()) {
             if (ip == null) { paraIndex++; continue; }
@@ -1047,6 +1058,32 @@ public class StoryLoader {
             if (isStoryOwnedByPlacedTextFrame(ctx, storyRef)) return true;
         }
         return false;
+    }
+
+    private static boolean hasDirectVisibleCellText(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (idmlCell == null || idmlCell.paragraphs() == null) return false;
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null || run.content() == null) continue;
+                String normalized = normalizeCellOwnershipText(run.content());
+                if (!normalized.isEmpty()) return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalizeCellOwnershipText(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder out = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\uFFFC' || ch == '\u0007' || ch == '\u0008') continue;
+            if (Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
+            out.append(ch);
+        }
+        return out.toString();
     }
 
     private static boolean isStoryOwnedByPlacedTextFrame(ResolvedBuildContext ctx, String storyRef) {

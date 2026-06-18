@@ -121,6 +121,7 @@ public class ASTTableConverter {
         ASTTableSpacerMerger.merge(table);
         applyPlacementBounds(table, resolvedTableBounds,
                 resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
+        ensureRowsFitVisibleCellContent(table);
         return table;
     }
 
@@ -325,7 +326,104 @@ public class ASTTableConverter {
                 ? resolvedData.getTablePlacementBounds(idmlTable.selfId()) : null;
         applyPlacementBounds(table, placementBounds,
                 resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
+        ensureRowsFitVisibleCellContent(table);
         return table;
+    }
+
+    private static void ensureRowsFitVisibleCellContent(ASTTable table) {
+        if (table == null || table.rows() == null || table.rows().isEmpty()) return;
+        boolean changed = false;
+        for (ASTTableRow row : table.rows()) {
+            if (row == null || row.cells() == null) continue;
+            long required = 0;
+            for (ASTTableCell cell : row.cells()) {
+                if (cell == null) continue;
+                long contentMin = minimumCellContentHeight(cell);
+                if (contentMin <= 0) continue;
+                if (cell.rowSpan() <= 1) {
+                    required = Math.max(required, contentMin);
+                } else {
+                    long currentSpanHeight = spannedRowHeight(table, cell.rowIndex(), cell.rowSpan());
+                    if (contentMin > currentSpanHeight) {
+                        required = Math.max(required, row.rowHeight() + (contentMin - currentSpanHeight));
+                    }
+                }
+            }
+            if (required > 0 && row.rowHeight() < required) {
+                row.rowHeight(required);
+                changed = true;
+            }
+        }
+        if (changed) {
+            long h = 0;
+            for (ASTTableRow row : table.rows()) {
+                if (row != null) h += row.rowHeight();
+            }
+            table.height(h);
+            recalcCellSizes(table);
+        }
+    }
+
+    private static long minimumCellContentHeight(ASTTableCell cell) {
+        if (cell == null || cell.paragraphs() == null || cell.paragraphs().isEmpty()) return 0;
+        long content = 0;
+        for (ASTParagraph paragraph : cell.paragraphs()) {
+            long paragraphMin = minimumParagraphHeight(paragraph);
+            if (paragraphMin <= 0) continue;
+            content += paragraphMin;
+        }
+        if (content <= 0) return 0;
+        return content + Math.max(0, cell.marginTop()) + Math.max(0, cell.marginBottom());
+    }
+
+    private static long minimumParagraphHeight(ASTParagraph paragraph) {
+        if (paragraph == null) return 0;
+        long maxInline = 0;
+        boolean hasVisibleText = false;
+        if (paragraph.items() != null) {
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTTextRun) {
+                    ASTTextRun run = (ASTTextRun) item;
+                    String text = run.text();
+                    if (text == null || text.trim().isEmpty()) continue;
+                    hasVisibleText = true;
+                    Integer fontSize = run.fontSizeHwpunits();
+                    if (fontSize != null && fontSize > 0) {
+                        maxInline = Math.max(maxInline, Math.round(fontSize * 1.25));
+                    }
+                } else if (item instanceof ASTInlineObject) {
+                    ASTInlineObject obj = (ASTInlineObject) item;
+                    maxInline = Math.max(maxInline, Math.max(obj.height(), obj.containerHeight()));
+                }
+            }
+        }
+        if (!hasVisibleText && maxInline <= 0 && paragraph.inlineTable() == null) return 0;
+        long lineHeight = 0;
+        if ("fixed".equals(paragraph.lineSpacingType()) && paragraph.lineSpacing() != null
+                && paragraph.lineSpacing() > 0) {
+            lineHeight = paragraph.lineSpacing();
+        }
+        if (lineHeight <= 0 && hasVisibleText) {
+            lineHeight = Math.max(maxInline, CoordinateConverter.pointsToHwpunits(10.0 * 1.25));
+        }
+        if (paragraph.inlineTable() != null) {
+            lineHeight = Math.max(lineHeight, paragraph.inlineTable().height());
+        }
+        long min = Math.max(lineHeight, maxInline);
+        if (paragraph.spaceBefore() != null && paragraph.spaceBefore() > 0) min += paragraph.spaceBefore();
+        if (paragraph.spaceAfter() != null && paragraph.spaceAfter() > 0) min += paragraph.spaceAfter();
+        return min;
+    }
+
+    private static long spannedRowHeight(ASTTable table, int startRow, int rowSpan) {
+        if (table == null || table.rows() == null || startRow < 0 || rowSpan <= 0) return 0;
+        long height = 0;
+        int end = Math.min(table.rows().size(), startRow + rowSpan);
+        for (int i = startRow; i < end; i++) {
+            ASTTableRow row = table.rows().get(i);
+            if (row != null) height += row.rowHeight();
+        }
+        return height;
     }
 
     public static void applyPlacementBounds(ASTTable table, double[] bounds, double scale) {

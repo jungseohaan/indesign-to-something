@@ -2807,6 +2807,50 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return guard;
     }
 
+    function _isTableOnlyCarrierTextFrame(tf) {
+        try {
+            if (!tf || tf.constructor.name !== "TextFrame") return false;
+            if (!tf.parentStory || !tf.parentStory.tables || tf.parentStory.tables.length <= 0) return false;
+            var text = "";
+            try { text = String(tf.contents || ""); } catch (eContents) {}
+            text = text.replace(/[\s\r\n\t\u0016\u0018\u0003\uFFFC\uFEFF]/g, "");
+            return text.length === 0;
+        } catch (e) {}
+        return false;
+    }
+
+    function _hasTableOnlyCarrierTextFrame(item) {
+        try {
+            if (item && item.constructor.name === "TextFrame" && _isTableOnlyCarrierTextFrame(item)) {
+                return true;
+            }
+        } catch (eSelf) {}
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                if (_isTableOnlyCarrierTextFrame(nested[i])) return true;
+            }
+        } catch (eNested) {}
+        return false;
+    }
+
+    function _clearTableOnlyCarrierTextFrames(item) {
+        function clearOne(tf) {
+            if (!_isTableOnlyCarrierTextFrame(tf)) return;
+            try { tf.contents = ""; return; } catch (eContents) {}
+            try { tf.parentStory.contents = ""; } catch (eStory) {}
+        }
+        try {
+            if (item && item.constructor.name === "TextFrame") clearOne(item);
+        } catch (eSelf) {}
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; i < nested.length; i++) {
+                try { clearOne(nested[i]); } catch (eOne) {}
+            }
+        } catch (eNested) {}
+    }
+
     // PNG 렌더 + results 등록 (자식 claim 포함)
     function _decoRender(item, page, childIdMap, ownershipOpts) {
         var domId = item.id;
@@ -2846,6 +2890,11 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         var _exportDup = null;
         var _exportGuard = null;
         var _exportGroup = null;
+        var _clearTableOnlyCarrierForExport = false;
+        try {
+            _clearTableOnlyCarrierForExport = resolvedOwnershipOpts.textHiddenBeforeExport === true
+                    && _hasTableOnlyCarrierTextFrame(item);
+        } catch (eClearCheck) {}
         if (_shouldGuardTextHiddenShellExport(resolvedOwnershipOpts)) {
             try { _guardedExportBounds = arrCopy(item.geometricBounds); } catch (eGb) {}
             if (!_guardedExportBounds) {
@@ -2854,8 +2903,13 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             _guardedExportBounds = _expandedBounds(_guardedExportBounds, 1.0);
         }
         try {
-            if (_guardedExportBounds) {
+            if (_guardedExportBounds || _clearTableOnlyCarrierForExport) {
                 _exportDup = item.duplicate();
+                if (_clearTableOnlyCarrierForExport && _exportDup) {
+                    _clearTableOnlyCarrierTextFrames(_exportDup);
+                }
+            }
+            if (_guardedExportBounds) {
                 _exportGuard = _makeTransparentExportGuard(page, _guardedExportBounds);
                 if (_exportDup && _exportGuard) {
                     try {
@@ -2865,6 +2919,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                     }
                 }
                 if (_exportGroup) _exportTarget = _exportGroup;
+            } else if (_exportDup) {
+                _exportTarget = _exportDup;
             }
             _exportTarget.exportFile(ExportFormat.PNG_FORMAT, _outFile);
             _exportOk = true;

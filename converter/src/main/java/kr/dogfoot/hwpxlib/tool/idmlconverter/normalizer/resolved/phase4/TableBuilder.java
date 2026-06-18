@@ -1918,12 +1918,29 @@ public final class TableBuilder {
         for (IDMLCharacterRun run : idmlPara.characterRuns()) {
             if (run == null || run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) continue;
             for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
-                if (anchor == null || anchor.type() != IDMLCharacterRun.InlineAnchorType.GRAPHIC) continue;
-                if (run.inlineGraphics() == null || anchor.index() < 0 || anchor.index() >= run.inlineGraphics().size()) {
+                if (anchor == null) continue;
+                int domId = -1;
+                if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME) {
+                    if (run.inlineFrames() == null || anchor.index() < 0 || anchor.index() >= run.inlineFrames().size()) {
+                        continue;
+                    }
+                    domId = parseInlineFrameDomId(run.inlineFrames().get(anchor.index()));
+                } else if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC) {
+                    if (run.inlineGraphics() == null || anchor.index() < 0 || anchor.index() >= run.inlineGraphics().size()) {
+                        continue;
+                    }
+                    domId = parseInlineGraphicDomId(run.inlineGraphics().get(anchor.index()));
+                }
+                if (domId <= 0 || !restoredIds.add(domId)) continue;
+
+                ASTInlineObject plannedTextShell =
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                .loadPlannedInlineTextShellForTextFrame(ctx, domId);
+                if (plannedTextShell != null) {
+                    plannedTextShell.keepInline(true);
+                    replaceLabelTextWithInlineObject(astPara, inlineObjectText(plannedTextShell), plannedTextShell);
                     continue;
                 }
-                int domId = parseInlineGraphicDomId(run.inlineGraphics().get(anchor.index()));
-                if (domId <= 0 || !restoredIds.add(domId)) continue;
 
                 if (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
                         .isSimpleButtonLabelAnchor(ctx, domId)) {
@@ -1934,6 +1951,15 @@ public final class TableBuilder {
                         replaceLabelTextWithInlineObject(astPara, plan != null ? plan.labelText : null, labelObject);
                         continue;
                     }
+                }
+
+                ASTInlineObject plannedGroupShell =
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                .loadInlineObject(ctx, domId);
+                if (plannedGroupShell != null) {
+                    plannedGroupShell.keepInline(true);
+                    replaceLabelTextWithInlineObject(astPara, inlineObjectText(plannedGroupShell), plannedGroupShell);
+                    continue;
                 }
 
                 if (isExpandableCellInlineGroup(ctx, domId, idmlPara)) {
@@ -1957,6 +1983,37 @@ public final class TableBuilder {
                 astPara.addItem(inline);
             }
         }
+    }
+
+    private static int parseInlineFrameDomId(kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTextFrame frame) {
+        if (frame == null || frame.selfId() == null) return -1;
+        String id = frame.selfId();
+        if (id.startsWith("u") || id.startsWith("U")) {
+            try {
+                return Integer.parseInt(id.substring(1), 16);
+            } catch (NumberFormatException ignored) {
+                return -1;
+            }
+        }
+        try {
+            return Integer.parseInt(id);
+        } catch (NumberFormatException e) {
+            try {
+                return Integer.parseInt(id, 16);
+            } catch (NumberFormatException ignored) {
+                return -1;
+            }
+        }
+    }
+
+    private static String inlineObjectText(ASTInlineObject inline) {
+        if (inline == null || inline.paragraphs() == null) return null;
+        StringBuilder sb = new StringBuilder();
+        for (ASTParagraph paragraph : inline.paragraphs()) {
+            appendParagraphText(paragraph, sb);
+        }
+        String text = sb.toString().trim();
+        return text.isEmpty() ? null : text;
     }
 
     private static void replaceLabelTextWithInlineObject(ASTParagraph astPara,
@@ -2345,6 +2402,7 @@ public final class TableBuilder {
             }
             if (ctx.resolvedData.isInlineObjectId(itemId)) continue;
             if (ctx.isRenderedDisposed(itemId, FrameDisposition.TEXT_BLOCK_PLACED)) continue;
+            if (ctx.isVisualSourceClaimedByVisibleTextShellPlan(itemId)) continue;
             if (!isAbsorbableCellBackground(item)) continue;
 
             double[] b = pageRelativeBoundsInPoints(ctx, item);

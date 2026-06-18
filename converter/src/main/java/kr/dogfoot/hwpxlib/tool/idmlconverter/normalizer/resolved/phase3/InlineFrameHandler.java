@@ -1487,9 +1487,24 @@ public class InlineFrameHandler {
             return null;
         }
         String childId = childTf.id();
+        int childDomId;
+        try {
+            childDomId = Integer.parseInt(childId);
+        } catch (NumberFormatException e) {
+            childDomId = -1;
+        }
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg == null || rg.id() != anchoredObjectId) continue;
             if (!"inline_object".equals(rg.itemType())) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (childDomId >= 0
+                    && plan != null
+                    && plan.placement == Placement.INLINE
+                    && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && containsInt(plan.ownedTextFrameIds, childDomId)) {
+                return rg;
+            }
             if (!"indesign_png".equals(rg.visualOwner())) continue;
             if (!"hwpx_tf".equals(rg.textOwner())) continue;
             if (!rg.hasEditableTextHiddenFromPng()) continue;
@@ -1512,7 +1527,16 @@ public class InlineFrameHandler {
             RenderedGroup rg) {
         if (ctx == null || ctx.resolvedData == null || rg == null) return null;
         String[] ids = rg.editableTextFrameIds();
-        if (ids == null || ids.length == 0) return null;
+        if (ids == null || ids.length == 0) {
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+                return null;
+            }
+            ids = new String[plan.ownedTextFrameIds.length];
+            for (int i = 0; i < plan.ownedTextFrameIds.length; i++) {
+                ids[i] = String.valueOf(plan.ownedTextFrameIds[i]);
+            }
+        }
         ResolvedTextFrame found = null;
         for (String id : ids) {
             if (id == null) continue;
@@ -1826,6 +1850,12 @@ public class InlineFrameHandler {
                 ASTInlineObject singleBadge = tryInlineGroupAsSingleBadge(ctx, childId);
                 if (singleBadge != null) {
                     items.add(singleBadge);
+                    continue;
+                }
+
+                ASTInlineObject plannedTextShell = loadPlannedInlineTextShellForTextFrame(ctx, childId);
+                if (plannedTextShell != null) {
+                    items.add(plannedTextShell);
                     continue;
                 }
 
@@ -2727,6 +2757,23 @@ public class InlineFrameHandler {
         return null;
     }
 
+    public static ASTInlineObject loadPlannedInlineTextShellForTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameId) {
+        if (ctx == null || ctx.resolvedData == null) return null;
+        if (ctx.isTextDisposed(textFrameId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+        ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
+        if (tf == null || !tf.isInline()) return null;
+        RenderedGroup shell = findTextHiddenInlineShellForTextFrame(ctx, tf.id());
+        if (shell == null) return null;
+        if (ctx.visualActionByOwnershipPlan(shell) != VisualAction.PLACE_TEXT_SHELL
+                || ctx.placementByOwnershipPlan(shell) != Placement.INLINE) {
+            return null;
+        }
+        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
+        return buildInlineShellObject(ctx, shell.id(), anchorItem, tf, shell, false);
+    }
+
     public static boolean shouldUsePlannedInlinePngWithSeparateHwpxText(
             ResolvedBuildContext ctx,
             int anchoredObjectId) {
@@ -2790,7 +2837,10 @@ public class InlineFrameHandler {
             if (plan.placement != Placement.INLINE) continue;
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
-            if (containsInt(plan.sourceObjectIds, tfDomId)) return true;
+            if (containsInt(plan.ownedTextFrameIds, tfDomId)
+                    || containsInt(plan.sourceObjectIds, tfDomId)) {
+                return true;
+            }
         }
         return false;
     }
@@ -3371,9 +3421,24 @@ public class InlineFrameHandler {
         if (ctx == null || ctx.resolvedData == null || textFrameId == null) return null;
         java.util.List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
         if (groups == null) return null;
+        int tfDomId;
+        try {
+            tfDomId = Integer.parseInt(textFrameId);
+        } catch (NumberFormatException e) {
+            tfDomId = -1;
+        }
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.file() == null) continue;
             if (!"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (tfDomId >= 0
+                    && plan != null
+                    && plan.placement == Placement.INLINE
+                    && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && containsInt(plan.ownedTextFrameIds, tfDomId)) {
+                return rg;
+            }
             if (!rg.hasEditableTextHiddenFromPng()) continue;
             String[] editableIds = rg.editableTextFrameIds();
             if (editableIds == null) continue;
@@ -3409,6 +3474,15 @@ public class InlineFrameHandler {
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg == null || rg.id() != groupId || rg.file() == null) continue;
             if (!"inline_object".equals(rg.itemType())) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan != null
+                    && plan.placement == Placement.INLINE
+                    && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && plan.ownedTextFrameIds != null
+                    && plan.ownedTextFrameIds.length > 0) {
+                return rg;
+            }
             if (!rg.hasEditableTextHiddenFromPng()) continue;
             if (!"indesign_png".equals(rg.visualOwner())) continue;
             return rg;

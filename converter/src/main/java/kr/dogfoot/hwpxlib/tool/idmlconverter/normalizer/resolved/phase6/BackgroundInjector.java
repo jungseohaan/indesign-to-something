@@ -248,6 +248,8 @@ public final class BackgroundInjector {
                             int pxY = alphaCrop.pxY;
                             int pxW = alphaCrop.pxW;
                             int pxH = alphaCrop.pxH;
+                            boolean preserveAlphaCropBounds = shouldPreserveBoundsForAlphaCroppedTextShell(
+                                    rg, img.getWidth(), img.getHeight(), pxW, pxH, fullW, fullH);
                             double cropLeft = rawLeft + (double) pxX / (double) img.getWidth() * fullW;
                             double cropTop = rawTop + (double) pxY / (double) img.getHeight() * fullH;
                             double cropRight = rawLeft + (double) (pxX + pxW) / (double) img.getWidth() * fullW;
@@ -258,29 +260,31 @@ public final class BackgroundInjector {
                             img.flush();
                             img = alphaCrop.image;
 
-                            rawLeft = cropLeft;
-                            rawTop = cropTop;
-                            rawRight = cropRight;
-                            rawBottom = cropBottom;
-                            fullW = rawRight - rawLeft;
-                            fullH = rawBottom - rawTop;
-                            // The image buffer now represents the alpha-cropped bounds.
-                            // Keep subsequent page/intersection cropping in the same
-                            // coordinate frame; otherwise a second crop can collapse a
-                            // composite visual to only its left-edge child.
-                            cropRefLeft = rawLeft;
-                            cropRefTop = rawTop;
-                            cropRefRight = rawRight;
-                            cropRefBottom = rawBottom;
-                            cropRefW = cropRefRight - cropRefLeft;
-                            cropRefH = cropRefBottom - cropRefTop;
-                            visLeft = Math.max(0.0, rawLeft);
-                            visTop = Math.max(0.0, rawTop);
-                            visRight = Math.min(rawRight, pageWidthMm);
-                            visBottom = Math.min(rawBottom, pageHeightMm);
-                            if (visLeft >= visRight || visTop >= visBottom) {
-                                ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OUTSIDE_PAGE_AFTER_ALPHA_CROP", "alpha crop removed page intersection");
-                                continue;
+                            if (!preserveAlphaCropBounds) {
+                                rawLeft = cropLeft;
+                                rawTop = cropTop;
+                                rawRight = cropRight;
+                                rawBottom = cropBottom;
+                                fullW = rawRight - rawLeft;
+                                fullH = rawBottom - rawTop;
+                                // The image buffer now represents the alpha-cropped bounds.
+                                // Keep subsequent page/intersection cropping in the same
+                                // coordinate frame; otherwise a second crop can collapse a
+                                // composite visual to only its left-edge child.
+                                cropRefLeft = rawLeft;
+                                cropRefTop = rawTop;
+                                cropRefRight = rawRight;
+                                cropRefBottom = rawBottom;
+                                cropRefW = cropRefRight - cropRefLeft;
+                                cropRefH = cropRefBottom - cropRefTop;
+                                visLeft = Math.max(0.0, rawLeft);
+                                visTop = Math.max(0.0, rawTop);
+                                visRight = Math.min(rawRight, pageWidthMm);
+                                visBottom = Math.min(rawBottom, pageHeightMm);
+                                if (visLeft >= visRight || visTop >= visBottom) {
+                                    ctx.recordRenderedDecision(rg, "Phase6", "SKIP_OUTSIDE_PAGE_AFTER_ALPHA_CROP", "alpha crop removed page intersection");
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -861,6 +865,33 @@ public final class BackgroundInjector {
                 || reason.contains("mixed_group_text_hidden")
                 || reason.contains("complex_graphic_text_hidden")
                 || reason.contains("label_backdrop_group");
+    }
+
+    private static boolean shouldPreserveBoundsForAlphaCroppedTextShell(
+            RenderedGroup rg,
+            int imageW,
+            int imageH,
+            int alphaW,
+            int alphaH,
+            double boundsW,
+            double boundsH) {
+        if (rg == null || !"hwpx_tf".equals(rg.textOwner())) return false;
+        if (!isPageObject(rg)) return false;
+        String reason = rg.reason();
+        if (reason == null || !reason.contains("text_hidden")) return false;
+        if (imageW <= 0 || imageH <= 0 || alphaW <= 0 || alphaH <= 0
+                || boundsW <= 0.0 || boundsH <= 0.0) {
+            return false;
+        }
+        double cropAreaRatio = (double) alphaW * (double) alphaH / ((double) imageW * (double) imageH);
+        if (cropAreaRatio > 0.92) return false;
+        if ("leaf_group_text_hidden_shell".equals(reason)) return true;
+        double boundsAspect = boundsW / boundsH;
+        double imageAspect = (double) imageW / (double) imageH;
+        double alphaAspect = (double) alphaW / (double) alphaH;
+        double imageDelta = Math.abs(Math.log(Math.max(1e-6, imageAspect / boundsAspect)));
+        double alphaDelta = Math.abs(Math.log(Math.max(1e-6, alphaAspect / boundsAspect)));
+        return alphaDelta + 0.10 < imageDelta;
     }
 
     private static boolean shouldPreserveVisualLabelAspect(RenderedGroup rg, int pixelW, int pixelH) {

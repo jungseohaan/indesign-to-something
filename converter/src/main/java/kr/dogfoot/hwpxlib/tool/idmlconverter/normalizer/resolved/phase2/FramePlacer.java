@@ -114,19 +114,21 @@ public final class FramePlacer {
             int tfDomId = parseDomIdOrNeg(tf.id());
             ObjectPlan textPlan = ctx.findTextFrameOwnershipPlan(tfDomId);
             boolean planKnown = textPlan != null;
+            boolean ownedByFloatingTextShell = ctx.isTextFrameOwnedByFloatingTextShellPlan(tfDomId);
             if (planKnown && textPlan.textAction != TextAction.OWNED_BY_HWPX_TEXT) {
                 continue;
             }
-            if (planKnown && textPlan.placement == Placement.INLINE) {
+            if (planKnown && textPlan.placement == Placement.INLINE && !ownedByFloatingTextShell) {
                 continue;
             }
             boolean conceptDiagramTf = ctx.conceptDiagramTextFrameIds.contains(tf.id());
             boolean hwpxOwnedTextFrame = ctx.resolvedData.isHwpxOwnedTextFrame(tf.id());
             boolean plannedFloatingHwpxText =
-                    planKnown
+                    ownedByFloatingTextShell
+                            || (planKnown
                             ? textPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT
                                 && textPlan.placement == Placement.FLOATING
-                            : ctx.ownershipPlanPlacesFloatingHwpxText(tfDomId);
+                            : ctx.ownershipPlanPlacesFloatingHwpxText(tfDomId));
             boolean editableForHwpx = ctx.resolvedData.isEditableTextFrame(tf.id()) || hwpxOwnedTextFrame;
             if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) {
                 continue;
@@ -590,6 +592,10 @@ public final class FramePlacer {
                     block.verticalJustification("CENTER_ALIGN");
                 }
             }
+            if (plannedVisualTextOverlay) {
+                applyComposedLineMarginsForVisualOverlay(
+                        tf, block, x, y, w, h, pageLeft, pageTop);
+            }
             if (tf.rotationAngle() != 0) {
                 block.rotationAngle(tf.rotationAngle());
             }
@@ -704,6 +710,43 @@ public final class FramePlacer {
             if (plan.hasVisibleVisual()) return true;
         }
         return false;
+    }
+
+    private static void applyComposedLineMarginsForVisualOverlay(
+            ResolvedTextFrame tf,
+            ASTTextFrameBlock block,
+            double frameX,
+            double frameY,
+            double frameW,
+            double frameH,
+            double pageLeft,
+            double pageTop) {
+        if (tf == null || block == null || frameW <= 0 || frameH <= 0) return;
+        if (tf.composedLines() == null || tf.composedLines().size() != 1) return;
+        ResolvedTextFrame.ComposedLine line = tf.composedLines().get(0);
+        if (line == null || line.bounds() == null || line.bounds().length < 4) return;
+        if (!hasVisibleTextExcludingObjectControls(line.text())) return;
+
+        double[] lb = line.bounds();
+        double lineTop = lb[0] - pageTop;
+        double lineLeft = lb[1] - pageLeft;
+        double lineBottom = lb[2] - pageTop;
+        double lineRight = lb[3] - pageLeft;
+        double topInset = lineTop - frameY;
+        double leftInset = lineLeft - frameX;
+        double bottomInset = (frameY + frameH) - lineBottom;
+        double rightInset = (frameX + frameW) - lineRight;
+        if (topInset < 0 || leftInset < 0 || bottomInset < 0 || rightInset < 0) return;
+        if (topInset > frameH * 0.60 || bottomInset > frameH * 0.60
+                || leftInset > frameW * 0.60 || rightInset > frameW * 0.60) {
+            return;
+        }
+
+        block.verticalJustification("TOP_ALIGN");
+        block.insetTop(Math.max(block.insetTop(), CoordinateConverter.pointsToHwpunits(topInset)));
+        block.insetLeft(Math.max(block.insetLeft(), CoordinateConverter.pointsToHwpunits(leftInset)));
+        block.insetBottom(Math.max(block.insetBottom(), CoordinateConverter.pointsToHwpunits(bottomInset)));
+        block.insetRight(Math.max(block.insetRight(), CoordinateConverter.pointsToHwpunits(rightInset)));
     }
 
     private static boolean hasPlannedTextShellForTextFrame(ResolvedBuildContext ctx, int tfDomId) {

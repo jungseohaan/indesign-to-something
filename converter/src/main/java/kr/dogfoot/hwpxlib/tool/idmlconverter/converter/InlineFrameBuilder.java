@@ -1,13 +1,16 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.converter;
 
 import kr.dogfoot.hwpxlib.object.content.header_xml.enumtype.*;
+import kr.dogfoot.hwpxlib.object.content.header_xml.references.BorderFill;
 import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
-import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.drawingobject.DrawText;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
+import kr.dogfoot.hwpxlib.tool.imageinserter.ImageInserter;
 
 /**
  * 인라인 텍스트 프레임 변환 (W4 Step C).
@@ -15,6 +18,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
  * HwpxTextBoxBuilder에서 분리됨.
  */
 final class InlineFrameBuilder {
+    private static final long INLINE_TEXT_FRAME_TRAILING_GAP = CoordinateConverter.pointsToHwpunits(2.0);
 
     private final HwpxConverterContext ctx;
     private final HwpxParagraphBuilder paragraphBuilder;
@@ -118,71 +122,43 @@ final class InlineFrameBuilder {
             tfs = TextFlowSide.BOTH_SIDES;
         }
 
-        Run run = para.addNewRun();
-        run.charPrIDRef("0");
-
-        Rectangle rect = run.addNewRectangle();
-        String shapeId = HwpxUtil.nextShapeId();
-
-        // ShapeObject
-        rect.idAnd(shapeId)
-                .zOrderAnd(0)
-                .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(twm)
-                .textFlowAnd(tfs)
-                .lockAnd(false)
-                .dropcapstyleAnd(resolveDropCapStyle(obj.paragraphs()));
-
-        // ShapeComponent
-        rect.hrefAnd("");
-        rect.groupLevelAnd((short) 0);
-        rect.instidAnd(HwpxUtil.nextShapeId());
-        rect.createOffset();
-        rect.offset().set(0L, 0L);
-        rect.createOrgSz();
-        rect.orgSz().set(w, h);
-        rect.createCurSz();
-        rect.curSz().set(w, h); // treatAsChar=true일 때 줄 높이에 반영되도록 명시적 높이 설정
-        rect.createFlip();
-        rect.flip().horizontalAnd(false).verticalAnd(false);
-        rect.createRotationInfo();
-        rect.rotationInfo().angleAnd((short) 0)
-                .centerXAnd(w / 2).centerYAnd(h / 2).rotateimageAnd(true);
-        rect.createRenderingInfo();
-        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
-
-        // 인라인 텍스트 프레임 균등 분배 (재귀: 인라인 프레임 안에 또 인라인 프레임)
-        // 이 ITF 자신의 폭을 기준으로 분배 (부모 폭 사용 시 2-column 분할된 rightITF 내부에서 오버플로 발생)
         long savedContainerWidth = ctx.currentContainerWidth;
         ctx.currentContainerWidth = w;
         if (obj.paragraphs() != null) {
             long redistWidth = w - obj.textMarginLeft() - obj.textMarginRight();
             if (redistWidth <= 0) redistWidth = w;
-                HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(obj.paragraphs(), redistWidth);
+            HwpxTextBoxBuilder.redistributeInlineTextFrameWidths(obj.paragraphs(), redistWidth);
         }
 
-        textBoxBuilder.drawTextBoxComposer().apply(
-                rect,
-                DrawTextBoxComposer.fromInlineObject(obj, w, h));
-        ctx.currentContainerWidth = savedContainerWidth;
+        Run run = para.addNewRun();
+        run.charPrIDRef("0");
+        Table table = run.addNewTable();
+        String tableId = HwpxUtil.nextShapeId();
 
-        // Rectangle 꼭짓점 (Oval 셸은 완전 라운드로 렌더)
-        DrawTextBoxComposer.applyRectangleGeometry(
-                rect,
-                w,
-                h,
-                obj.cornerRadius(),
-                h,
-                obj.shellShapeType());
+        table.idAnd(tableId)
+                .zOrderAnd(0)
+                .numberingTypeAnd(NumberingType.TABLE)
+                .textWrapAnd(twm)
+                .textFlowAnd(tfs)
+                .lockAnd(false)
+                .dropcapstyleAnd(resolveDropCapStyle(obj.paragraphs()));
 
-        // ShapePosition
-        rect.createPos();
+        table.pageBreakAnd(TablePageBreak.CELL)
+                .repeatHeaderAnd(false)
+                .rowCntAnd((short) 1)
+                .colCntAnd((short) 1)
+                .cellSpacingAnd(0)
+                .borderFillIDRefAnd("1")
+                .noAdjustAnd(false);
+
+        table.createSZ();
+        table.sz().widthAnd(w).widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h).heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
+
+        table.createPos();
         if (obj.isOverlay()) {
-            // 오버레이 모드 — 이미지 컨테이너(rect+imgBrush) 내부의 drawText 단락 기준
-            // PARA 기준 상대 좌표로 배치 (컨테이너 내부이므로 PARA = 이미지 영역)
-            rect.pos().treatAsCharAnd(false)
+            table.pos().treatAsCharAnd(false)
                     .affectLSpacingAnd(false)
                     .flowWithTextAnd(true)
                     .allowOverlapAnd(true)
@@ -194,8 +170,7 @@ final class InlineFrameBuilder {
                     .vertOffsetAnd(obj.overlayY())
                     .horzOffset(obj.overlayX());
         } else if (useWrapping) {
-            // 어울리기/자리차지 — 단락 기준 플로팅
-            rect.pos().treatAsCharAnd(false)
+            table.pos().treatAsCharAnd(false)
                     .affectLSpacingAnd(false)
                     .flowWithTextAnd(true)
                     .allowOverlapAnd(false)
@@ -207,9 +182,7 @@ final class InlineFrameBuilder {
                     .vertOffsetAnd(0L)
                     .horzOffset(0L);
         } else {
-            // 인라인 (글자처럼 취급): 배지 등 인라인 도형은 행간을 팽창시키지 않도록 affectLSpacing=false
-            // vertAlign=CENTER로 줄 내 수직 중앙 배치
-            rect.pos().treatAsCharAnd(true)
+            table.pos().treatAsCharAnd(true)
                     .affectLSpacingAnd(false)
                     .flowWithTextAnd(true)
                     .allowOverlapAnd(false)
@@ -222,17 +195,119 @@ final class InlineFrameBuilder {
                     .horzOffset(0L);
         }
 
-        // OutMargin — IDML TextWrapOffset 반영
-        rect.createOutMargin();
+        table.createOutMargin();
         if (obj.isOverlay()) {
-            // 오버레이: 겹침 허용, 마진 없음
-            rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+            table.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
         } else if (useWrapping) {
-            rect.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
+            table.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
                     .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
         } else {
-            rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+            table.outMargin().leftAnd(0L).rightAnd(INLINE_TEXT_FRAME_TRAILING_GAP).topAnd(0L).bottomAnd(0L);
         }
+        table.createInMargin();
+        table.inMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+
+        Tr tr = table.addNewTr();
+        Tc tc = tr.addNewTc();
+        tc.nameAnd("")
+                .headerAnd(false)
+                .hasMarginAnd(true)
+                .protectAnd(false)
+                .editableAnd(true)
+                .dirtyAnd(false)
+                .borderFillIDRefAnd(createInlineTextFrameBorderFill(obj));
+        tc.createCellAddr();
+        tc.cellAddr().colAddrAnd((short) 0).rowAddrAnd((short) 0);
+        tc.createCellSpan();
+        tc.cellSpan().colSpanAnd((short) 1).rowSpanAnd((short) 1);
+        tc.createCellSz();
+        tc.cellSz().widthAnd(w).heightAnd(h);
+        tc.createCellMargin();
+        tc.cellMargin().leftAnd(obj.textMarginLeft())
+                .rightAnd(obj.textMarginRight())
+                .topAnd(obj.textMarginTop())
+                .bottomAnd(obj.textMarginBottom());
+
+        tc.createSubList();
+        SubList subList = tc.subList();
+        subList.idAnd("").textDirectionAnd(TextDirection.HORIZONTAL)
+                .lineWrapAnd(HwpxTextBoxBuilder.inlineTextFrameLineWrap(obj))
+                .vertAlignAnd(HwpxEnumMapper.mapVerticalJustification(obj.verticalJustification()))
+                .linkListIDRefAnd("0").linkListNextIDRefAnd("0");
+        if (obj.paragraphs() != null) {
+            for (ASTParagraph paragraph : obj.paragraphs()) {
+                paragraphBuilder.addParagraphToSubList(subList, paragraph);
+            }
+        }
+        if (subList.countOfPara() == 0) {
+            paragraphBuilder.addEmptySubListPara(subList);
+        }
+        ctx.currentContainerWidth = savedContainerWidth;
+    }
+
+    private String createInlineTextFrameBorderFill(ASTInlineObject obj) {
+        String bfId = String.valueOf(ctx.borderFillIdCounter.getAndIncrement());
+        BorderFill bf = ctx.hwpxFile.headerXMLFile().refList().borderFills().addNew();
+        bf.idAnd(bfId)
+                .threeDAnd(false)
+                .shadowAnd(false)
+                .centerLineAnd(CenterLineSort.NONE)
+                .breakCellSeparateLine(false);
+
+        bf.createSlash();
+        bf.slash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+        bf.createBackSlash();
+        bf.backSlash().typeAnd(SlashType.NONE).CrookedAnd(false).isCounter(false);
+
+        String stroke = obj.strokeColor();
+        boolean hasStroke = HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled()
+                && stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0;
+        LineType2 lineType = LineType2.NONE;
+        LineWidth lineWidth = LineWidth.MM_0_1;
+        String borderColor = "#000000";
+        if (hasStroke) {
+            lineType = LineType2.SOLID;
+            lineWidth = HwpxParagraphBuilder.hwpunitToLineWidth((long) Math.round(obj.strokeWeight()));
+            borderColor = stroke;
+        }
+        bf.createLeftBorder();
+        bf.leftBorder().typeAnd(lineType).widthAnd(lineWidth).color(borderColor);
+        bf.createRightBorder();
+        bf.rightBorder().typeAnd(lineType).widthAnd(lineWidth).color(borderColor);
+        bf.createTopBorder();
+        bf.topBorder().typeAnd(lineType).widthAnd(lineWidth).color(borderColor);
+        bf.createBottomBorder();
+        bf.bottomBorder().typeAnd(lineType).widthAnd(lineWidth).color(borderColor);
+        bf.createDiagonal();
+        bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
+            try {
+                String itemId = ImageInserter.registerImage(ctx.hwpxFile, obj.imageFillData(), "png");
+                if (itemId != null) {
+                    bf.createFillBrush();
+                    bf.fillBrush().createImgBrush();
+                    bf.fillBrush().imgBrush().modeAnd(ImageBrushMode.TOTAL);
+                    bf.fillBrush().imgBrush().createImg();
+                    bf.fillBrush().imgBrush().img()
+                            .binaryItemIDRefAnd(itemId)
+                            .brightAnd(0)
+                            .contrastAnd(0)
+                            .effectAnd(ImageEffect.REAL_PIC);
+                    return bfId;
+                }
+            } catch (Exception ignore) {
+            }
+        }
+
+        String fill = obj.fillColor();
+        if (HwpxTextBoxBuilder.nativeTextBoxGraphicsEnabled()
+                && fill != null && fill.startsWith("#")) {
+            String tinted = HwpxTextBoxBuilder.blendColorWithWhite(fill, obj.fillTint() / 100.0);
+            bf.createFillBrush();
+            VisualShellApplicator.applyWinBrushFill(bf.fillBrush(), tinted, "#FF000000");
+        }
+        return bfId;
     }
 
     private boolean shouldFlattenToParentRuns(ASTInlineObject obj) {

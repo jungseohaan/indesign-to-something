@@ -30,6 +30,48 @@
 - `ABSORB_TEXT_STYLE`: fill/stroke/underline처럼 HWPX 텍스트 속성 또는 1x1 table로 표현 가능한 장식.
 - `DROP_VISUAL`: 같은 source의 더 정확한 owner가 있을 때만 사용한다.
 
+### 3.1 Textless shell 추출 원칙
+
+shell은 원본 InDesign visual을 추출한 결과여야 한다.
+
+허용:
+
+- extractor가 source object/group을 복제한다.
+- 복제본에서 HWPX가 소유할 TextFrame/table text만 제거한다.
+- 복제본의 fill/stroke/corner/path/group clipping은 InDesign `exportFile()`로 그대로 PNG화한다.
+- Java 변환기는 추출된 textless shell PNG/vector를 `PLACE_TEXT_SHELL`로 배치만 한다.
+
+금지:
+
+- Java 단계에서 `ResolvedPageItem`의 fill/stroke/corner 값을 읽어 shell PNG를 새로 그리기
+- table/TF bounds를 보고 rounded rectangle, pill, label box를 임의 생성하기
+- HWPX drawText/shape/table border를 shell 대체물로 만들기
+- 추출된 shell이 있는데 TF outline/fill을 다시 그리기
+
+원본 shell 추출이 실패하면 변환 단계에서 비슷한 shell을 만들지 않는다.
+실패를 드러내고 extractor/ownership metadata를 수정한다.
+
+### 3.2 Table-only carrier shell
+
+TextFrame 안의 실제 편집 텍스트가 IDML table에 있고 `TextFrame.contents`에는 ORC만 남는 경우가 있다.
+이 TextFrame은 table-only carrier다.
+
+정책:
+
+- carrier table text는 HWPX table/text가 소유한다.
+- carrier의 parent Rectangle/Group/Oval/Polygon shell은 extractor가 textless PNG로 추출한다.
+- extractor는 원본 객체를 직접 수정하지 않고 복제본에서 table-only carrier contents만 비운다.
+- 추출 metadata는 `textOwner=hwpx_tf`, `textHiddenBeforeExport=true`, `editableTextFrameIds=[carrierTfId]`를 남긴다.
+- Ownership Planner는 parent shell을 `PLACE_TEXT_SHELL`, carrier TF/table을 `PLACE_TABLE_STYLE`로 계획한다.
+- `visualSourceObjectIds`에는 shell source만 남기고, carrier TF id는 `ownedTextFrameIds`로 추적한다.
+
+금지:
+
+- table-only carrier의 table border/fill로 shell을 대체하기
+- parent shell이 없다는 이유로 Java에서 shell을 다시 그리기
+- shell과 table text를 하나의 complete PNG로 배치하기
+- table text를 drawText로 재생성하기
+
 ## 4. 레이어
 
 원본 정보와 정책 layer를 분리한다.
@@ -141,6 +183,9 @@ Stage 책임은 코드 구조에서도 분리한다.
 3. 원본 shell이 복잡하면 textless PNG/vector shell + HWPX TF.
 4. `drawText`는 마지막 fallback이며 정책 판단에는 사용하지 않는다.
 
+단, 1x1 table은 editable text carrier다. 원본에서 별도 shell이 추출된 경우
+1x1 table border/fill은 shell을 대체하거나 중복 생성하면 안 된다.
+
 ## 9. Validator invariant
 
 Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, strict 모드에서는 실패시킨다.
@@ -154,6 +199,8 @@ Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, st
 - parent `PLACE_TEXT_SHELL`이 있는 source bundle에서는 descendant visual fragment가 별도 visible output을 가질 수 없다.
 - parent `PLACE_TEXT_SHELL` 위의 owned child TextFrame은 누락되면 안 된다.
 - `PLACE_TEXT_SHELL` PNG/vector에는 owned child TextFrame의 텍스트 픽셀이 포함되면 안 된다.
+- `PLACE_TEXT_SHELL`이 Java-drawn synthetic shell이면 안 된다. extractor origin 또는 원본 vector source를 가져야 한다.
+- table-only carrier shell은 `PLACE_TEXT_SHELL` parent와 `PLACE_TABLE_STYLE` carrier가 같은 source bundle으로 추적되어야 한다.
 
 ## 10. 개발 플랜
 

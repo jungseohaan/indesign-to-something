@@ -2749,6 +2749,12 @@ public final class StoryConverter {
                                 for (ASTInlineItem item : nestedItems) para.addItem(item);
                                 continue;
                             }
+                            ASTInlineObject plannedTextShell =
+                                    InlineFrameHandler.loadPlannedInlineTextShellForTextFrame(ctx, anchoredId);
+                            if (plannedTextShell != null) {
+                                para.addItem(plannedTextShell);
+                                continue;
+                            }
                             // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환.
                             // 배경+텍스트 배지는 위에서 먼저 처리해 ORC 텍스트가 일반 런으로 중복 삽입되지 않게 한다.
                             ASTTextRun textRun = InlineFrameHandler.tryInlineTextFrameAsRun(ctx, anchoredId,

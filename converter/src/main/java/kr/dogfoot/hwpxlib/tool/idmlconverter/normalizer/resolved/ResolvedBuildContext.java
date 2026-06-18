@@ -605,8 +605,18 @@ public final class ResolvedBuildContext {
                 continue;
             }
             if (domIds.contains(p.domId)
+                    && p.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    && p.placement == Placement.INLINE
+                    && p.ownedTextFrameIds != null
+                    && p.ownedTextFrameIds.length > 0) {
+                continue;
+            }
+            if (domIds.contains(p.domId)
                     && p.textAction == TextAction.OWNED_BY_HWPX_TEXT
                     && p.visualAction == VisualAction.PLACE_TEXT_SHELL) {
+                continue;
+            }
+            if (domIds.contains(p.domId) && isLeafTextHiddenShellPlan(p)) {
                 continue;
             }
             if (domIds.contains(p.domId) && p.visualAction != VisualAction.DROP_VISUAL) {
@@ -623,6 +633,15 @@ public final class ResolvedBuildContext {
             ownershipPlanIndexDirty = true;
             ownershipPlanRenderedCache.clear();
         }
+    }
+
+    private static boolean isLeafTextHiddenShellPlan(ObjectPlan plan) {
+        return plan != null
+                && "leaf_group_text_hidden_shell".equals(plan.reason)
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0
+                && plan.visualSourceObjectIds != null
+                && plan.visualSourceObjectIds.length > 0;
     }
 
     private static boolean shouldDropTextForDroppedVisual(ObjectPlan plan) {
@@ -722,6 +741,12 @@ public final class ResolvedBuildContext {
     }
 
     public boolean ownershipPlanPlacesFloatingHwpxText(int domId) {
+        if (isTextFrameOwnedByTextShellPlanWithPlacement(domId, Placement.INLINE)) {
+            return false;
+        }
+        if (isTextFrameOwnedByTextShellPlanWithPlacement(domId, Placement.FLOATING)) {
+            return true;
+        }
         ObjectPlan plan = findTextFrameOwnershipPlan(domId);
         return plan != null
                 && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
@@ -729,6 +754,12 @@ public final class ResolvedBuildContext {
     }
 
     public boolean ownershipPlanPlacesInlineHwpxText(int domId) {
+        if (isTextFrameOwnedByTextShellPlanWithPlacement(domId, Placement.INLINE)) {
+            return true;
+        }
+        if (isTextFrameOwnedByTextShellPlanWithPlacement(domId, Placement.FLOATING)) {
+            return false;
+        }
         ObjectPlan plan = findTextFrameOwnershipPlan(domId);
         return plan != null
                 && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
@@ -739,7 +770,6 @@ public final class ResolvedBuildContext {
         if (domId < 0 || ownershipPlans == null) return false;
         for (ObjectPlan plan : ownershipPlans) {
             if (plan == null) continue;
-            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             if (plan.domId == domId) return true;
             if (plan.ownedTextFrameIds != null) {
@@ -755,6 +785,29 @@ public final class ResolvedBuildContext {
         return false;
     }
 
+    public boolean isTextFrameOwnedByFloatingTextShellPlan(int domId) {
+        if (isTextFrameOwnedByTextShellPlanWithPlacement(domId, Placement.INLINE)) {
+            return false;
+        }
+        return isTextFrameOwnedByTextShellPlanWithPlacement(domId, Placement.FLOATING);
+    }
+
+    private boolean isTextFrameOwnedByTextShellPlanWithPlacement(int domId, Placement placement) {
+        if (domId < 0 || placement == null || ownershipPlans == null) return false;
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.placement != placement) continue;
+            if (plan.ownedTextFrameIds != null) {
+                for (int textFrameId : plan.ownedTextFrameIds) {
+                    if (textFrameId == domId) return true;
+                }
+            }
+            if (plan.domId == domId) return true;
+        }
+        return false;
+    }
+
     public boolean hasVisibleOwnedTextImageGroupPlanForDomId(int domId) {
         if (domId < 0 || ownershipPlans == null) return false;
         for (ObjectPlan plan : ownershipPlans) {
@@ -764,6 +817,20 @@ public final class ResolvedBuildContext {
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (!"image_group_text_hidden".equals(plan.reason)) continue;
             if (plan.visualPolicyLayer() == PolicyLayer.CONTENT) return true;
+        }
+        return false;
+    }
+
+    public boolean isVisualSourceClaimedByVisibleTextShellPlan(int sourceId) {
+        if (sourceId < 0 || ownershipPlans == null) return false;
+        for (ObjectPlan plan : ownershipPlans) {
+            if (plan == null) continue;
+            if (!plan.hasVisibleVisual()) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.visualSourceObjectIds == null) continue;
+            for (int visualSourceId : plan.visualSourceObjectIds) {
+                if (visualSourceId == sourceId) return true;
+            }
         }
         return false;
     }

@@ -93,6 +93,10 @@ public final class OwnershipPlanner {
         resolveVisibleVisualHwpxTextSourceSlots();
         resolveNonTextVisualEditableTextSources();
         resolveMasterGraphicsWithHwpxTextFallbacks();
+        restoreInlineTextShellOwners();
+        restoreLeafTextHiddenShellOwners();
+        promoteInlineCompanionLeafShellOwners();
+        resolveTextShellSourceDuplicates();
         writePlans();
         validate();
         System.err.println("[OwnershipPlanner] observation plans=" + plans.size()
@@ -302,6 +306,7 @@ public final class OwnershipPlanner {
             RenderedGroup rg, Set<Integer> editableLabelShellIds) {
         if (rg == null) return false;
         if (editableLabelShellIds != null && editableLabelShellIds.contains(rg.id())) return true;
+        if (isLeafTextHiddenShell(rg)) return true;
         if (!isEditableLabelShellCandidate(rg)) return false;
         if (!isPageObject(rg) && !"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) {
             return false;
@@ -310,6 +315,17 @@ public final class OwnershipPlanner {
         if (!"indesign_png".equals(rg.visualOwner())) return false;
         if (!"hwpx_tf".equals(rg.textOwner())) return false;
         return !Boolean.TRUE.equals(rg.containsText()) && !Boolean.TRUE.equals(rg.containsEditableText());
+    }
+
+    private static boolean isLeafTextHiddenShell(RenderedGroup rg) {
+        return rg != null
+                && "leaf_group_text_hidden_shell".equals(rg.reason())
+                && "indesign_png".equals(rg.visualOwner())
+                && "hwpx_tf".equals(rg.textOwner())
+                && rg.editableTextFrameIds() != null
+                && rg.editableTextFrameIds().length > 0
+                && !Boolean.TRUE.equals(rg.containsText())
+                && !Boolean.TRUE.equals(rg.containsEditableText());
     }
 
     private boolean shouldKeepPairedInlinePageShell(RenderedGroup rg) {
@@ -699,6 +715,7 @@ public final class OwnershipPlanner {
             if (rg == null) continue;
             if (!covered.contains(rg.id())) continue;
             if (isCompletePngSimpleButtonLabel(ctx, rg)) continue;
+            if (isStandaloneGraphicOnlyInlineObject(rg)) continue;
 
             boolean conceptDiagramInlineShell = isConceptDiagramInlineVisualShell(rg);
             boolean protectedEditableLabelShell = conceptDiagramLabelShellIds.contains(rg.id())
@@ -714,6 +731,30 @@ public final class OwnershipPlanner {
             }
         }
         return dropVisual;
+    }
+
+    private boolean isStandaloneGraphicOnlyInlineObject(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!data.isInlineObjectId(rg.id())) return false;
+        if (!"inline_graphic_only".equals(rg.reason())) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (!"none".equals(rg.textOwner())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
+            return false;
+        }
+        if (rg.editableTextFrameIds() != null && rg.editableTextFrameIds().length > 0) {
+            return false;
+        }
+        return rg.file() != null && !rg.file().isEmpty();
+    }
+
+    private static boolean isStandaloneGraphicOnlyInlineObjectPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (!"inline_graphic_only".equals(plan.reason)) return false;
+        if (plan.textAction != TextAction.DROP_TEXT) return false;
+        if (plan.ownedTextFrameIds != null && plan.ownedTextFrameIds.length > 0) return false;
+        return plan.file != null && !plan.file.isEmpty();
     }
 
     private void planRenderedItems() {
@@ -735,13 +776,20 @@ public final class OwnershipPlanner {
         HashSet<Integer> hwpxTextSources = new HashSet<>();
         for (ObjectPlan plan : plans) {
             if (plan == null) continue;
-            if (!"text_frame".equals(plan.kind)) continue;
+            if (!isTextFramePlanKind(plan.kind)) continue;
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) continue;
             for (int sourceId : plan.sourceObjectIds) {
                 ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
-                if (tf != null && data.isHwpxOwnedTextFrame(tf.id())) {
+                if (tf != null) {
                     hwpxTextSources.add(sourceId);
+                }
+            }
+            if (plan.ownedTextFrameIds != null) {
+                for (int ownedTfId : plan.ownedTextFrameIds) {
+                    if (data.getTextFrame(String.valueOf(ownedTfId)) != null) {
+                        hwpxTextSources.add(ownedTfId);
+                    }
                 }
             }
         }
@@ -751,7 +799,6 @@ public final class OwnershipPlanner {
             ObjectPlan plan = plans.get(i);
             if (!isVisibleRenderedVisual(plan)) continue;
             if (plan.placement == Placement.INLINE) continue;
-            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                     || plan.visualAction == VisualAction.ABSORB_TEXT_STYLE
                     || plan.visualAction == VisualAction.PLACE_TABLE_STYLE) {
@@ -761,15 +808,22 @@ public final class OwnershipPlanner {
             if (rendered != null && isEditableVisualShellWithSeparateHwpxText(rendered)) {
                 continue;
             }
+            if (rendered != null && hasIndependentContentVisualBesideOwnedText(rendered)) {
+                continue;
+            }
             if (plan.sourceObjectIds == null || plan.sourceObjectIds.length == 0) continue;
             for (int sourceId : plan.sourceObjectIds) {
                 if (hwpxTextSources.contains(sourceId)) {
                     plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
-                            "owned_by_hwpx_text_frame"));
+                            "complete_visual_contains_hwpx_text_source"));
                     break;
                 }
             }
         }
+    }
+
+    private static boolean isTextFramePlanKind(String kind) {
+        return kind != null && (kind.equals("text_frame") || kind.startsWith("text_frame:"));
     }
 
     private void addPlanForRendered(RenderedGroup rg, String channel) {
@@ -975,7 +1029,8 @@ public final class OwnershipPlanner {
         if (reason == null) return false;
         return "visual_label_text_hidden_shell".equals(reason)
                 || "editable_textframe_visual_shell".equals(reason)
-                || "inline_text_hidden".equals(reason);
+                || "inline_text_hidden".equals(reason)
+                || "leaf_group_text_hidden_shell".equals(reason);
     }
 
     private boolean renderedGroupClaimsTextFrame(RenderedGroup rg, String textFrameId) {
@@ -1722,6 +1777,9 @@ public final class OwnershipPlanner {
             if (InlineSemanticLabelPolicy.isStandaloneSemanticGraphicInlineGroup(data, rg)) {
                 return Placement.FLOATING;
             }
+            if (hasInlineSourceObject(rg)) {
+                return Placement.INLINE;
+            }
             if (!hasResolvedInlineAnchor(rg.id())) {
                 return Placement.FLOATING;
             }
@@ -1750,12 +1808,27 @@ public final class OwnershipPlanner {
         if (rg == null || data == null) return false;
         if (!isRenderedPageObject(rg)) return false;
         if (!isEditableVisualShellWithSeparateHwpxText(rg)) return false;
+        if (hasInlineSourceObject(rg)) return true;
         for (RenderedGroup other : data.allRenderedFloatingItems()) {
             if (other == null || other == rg) continue;
             if (other.id() != rg.id()) continue;
             if ("inline_object".equals(other.type()) || "inline_object".equals(other.itemType())) {
                 return hasResolvedInlineAnchor(rg.id());
             }
+        }
+        return false;
+    }
+
+    private boolean hasInlineSourceObject(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (data.isInlineObjectId(rg.id())) return true;
+        ResolvedPageItem self = data.getPageItem(String.valueOf(rg.id()));
+        if (self != null && self.isInline()) return true;
+        if (rg.sourceObjectIds() == null) return false;
+        for (int sourceId : rg.sourceObjectIds()) {
+            if (data.isInlineObjectId(sourceId)) return true;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item != null && item.isInline()) return true;
         }
         return false;
     }
@@ -2608,6 +2681,8 @@ public final class OwnershipPlanner {
                 ObjectPlan child = plans.get(j);
                 if (!isVisibleRenderedVisual(child)) continue;
                 if (child.pageIndex != parent.pageIndex) continue;
+                if (!parentTextShellMayOwnDescendantVisual(parent, child)) continue;
+                if (isStandaloneGraphicOnlyInlineObjectPlan(child)) continue;
                 if (!isDescendantVisualOfParentTextShell(parent, child)) continue;
                 collectDescendantVisualIds(parent, child, descendants);
                 ObjectPlan dropped = child.withVisualAction(VisualAction.DROP_VISUAL,
@@ -2717,6 +2792,261 @@ public final class OwnershipPlanner {
             if (!changed) continue;
             plans.set(i, parent.withVisualSourceObjectIds(toIntArray(retained)));
         }
+    }
+
+    private void restoreLeafTextHiddenShellOwners() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isLeafTextHiddenShellPlan(plan)) continue;
+            if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
+            if (hasAlternativeVisibleTextShellOwner(plan)) continue;
+            plans.set(i, plan
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL, plan.reason)
+                    .withVisualLayer(VisualLayer.CONTAINER_BACKDROP));
+        }
+    }
+
+    private boolean hasAlternativeVisibleTextShellOwner(ObjectPlan shell) {
+        if (shell == null) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == shell) continue;
+            if (candidate.pageIndex != shell.pageIndex) continue;
+            if (candidate.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!candidate.hasVisibleVisual()) continue;
+            if (!ownedTextFramesCoveredBy(candidate, shell)) continue;
+            if (!parentTextShellMayOwnDescendantVisual(candidate, shell)) continue;
+            if (containsAll(visualSourceIds(candidate), visualSourceIds(shell))) return true;
+        }
+        return false;
+    }
+
+    private static boolean isLeafTextHiddenShellPlan(ObjectPlan plan) {
+        return plan != null
+                && "leaf_group_text_hidden_shell".equals(plan.reason)
+                && safe(plan.kind).contains("page_object")
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0
+                && visualSourceIds(plan).length > 0;
+    }
+
+    private void restoreInlineTextShellOwners() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isInlineTextShellPlan(plan)) continue;
+            if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
+            if (hasAlternativeVisibleInlineTextShellOwner(plan)) continue;
+            plans.set(i, plan.withVisualAction(VisualAction.PLACE_TEXT_SHELL, plan.reason));
+        }
+    }
+
+    private boolean hasAlternativeVisibleInlineTextShellOwner(ObjectPlan shell) {
+        if (shell == null) return false;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == shell) continue;
+            if (candidate.pageIndex != shell.pageIndex) continue;
+            if (candidate.placement != Placement.INLINE) continue;
+            if (candidate.visualAction != VisualAction.PLACE_TEXT_SHELL
+                    && candidate.visualAction != VisualAction.PLACE_INLINE_PNG) {
+                continue;
+            }
+            if (!candidate.hasVisibleVisual()) continue;
+            if (!ownedTextFramesCoveredBy(candidate, shell)) continue;
+            if (containsAll(visualSourceIds(candidate), visualSourceIds(shell))) return true;
+        }
+        return false;
+    }
+
+    private boolean isInlineTextShellPlan(ObjectPlan plan) {
+        if (plan == null || plan.placement != Placement.INLINE) return false;
+        if (!safe(plan.kind).contains("inline_object")) return false;
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (visualSourceIds(plan).length == 0) return false;
+        for (int tfId : plan.ownedTextFrameIds) {
+            ResolvedTextFrame tf = data != null ? data.getTextFrame(String.valueOf(tfId)) : null;
+            if (tf == null || !tf.isInline()) return false;
+        }
+        return true;
+    }
+
+    private void promoteInlineCompanionLeafShellOwners() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan leafShell = plans.get(i);
+            if (!isLeafTextHiddenShellPlan(leafShell)) continue;
+            if (leafShell.ownedTextFrameIds == null || leafShell.ownedTextFrameIds.length == 0) continue;
+            ObjectPlan inlineCompanion = findInlineCompanionForLeafShell(leafShell);
+            if (inlineCompanion == null) continue;
+            int companionIndex = plans.indexOf(inlineCompanion);
+            if (companionIndex < 0) continue;
+
+            ObjectPlan promoted = new ObjectPlan(
+                    inlineCompanion.domId,
+                    inlineCompanion.kind,
+                    inlineCompanion.pageIndex,
+                    TextAction.OWNED_BY_HWPX_TEXT,
+                    VisualAction.PLACE_TEXT_SHELL,
+                    VisualLayer.CONTAINER_BACKDROP,
+                    Placement.INLINE,
+                    inlineCompanion.renderId,
+                    inlineCompanion.sourceObjectIds,
+                    inlineCompanion.visualSourceObjectIds,
+                    leafShell.ownedTextFrameIds,
+                    inlineCompanion.descendantVisualObjectIds,
+                    inlineCompanion.sourceBundleKey,
+                    Math.max(inlineCompanion.zOrder, leafShell.zOrder),
+                    "inline_companion_leaf_text_shell",
+                    inlineCompanion.file,
+                    inlineCompanion.bounds,
+                    inlineCompanion.sourceLayerId,
+                    inlineCompanion.sourceLayerName,
+                    inlineCompanion.sourceLayerIndex);
+            plans.set(companionIndex, promoted);
+            plans.set(i, leafShell.withVisualAction(VisualAction.DROP_VISUAL,
+                    "owned_by_inline_companion_text_shell"));
+            promoteOwnedTextFramePlansToInline(leafShell.ownedTextFrameIds);
+        }
+    }
+
+    private ObjectPlan findInlineCompanionForLeafShell(ObjectPlan leafShell) {
+        if (leafShell == null) return null;
+        for (ObjectPlan candidate : plans) {
+            if (candidate == null || candidate == leafShell) continue;
+            if (candidate.pageIndex != leafShell.pageIndex) continue;
+            if (candidate.domId != leafShell.domId) continue;
+            if (candidate.placement != Placement.INLINE) continue;
+            if (!safe(candidate.kind).contains("inline_object")) continue;
+            if (!hasInlineSourcePlan(candidate)) continue;
+            if (!intersects(candidate.sourceObjectIds, leafShell.sourceObjectIds)) continue;
+            if (candidate.file == null || candidate.file.isEmpty()) continue;
+            return candidate;
+        }
+        return null;
+    }
+
+    private boolean hasInlineSourcePlan(ObjectPlan plan) {
+        if (plan == null || data == null) return false;
+        if (data.isInlineObjectId(plan.domId)) return true;
+        ResolvedPageItem self = data.getPageItem(String.valueOf(plan.domId));
+        if (self != null && self.isInline()) return true;
+        if (plan.sourceObjectIds == null) return false;
+        for (int sourceId : plan.sourceObjectIds) {
+            if (data.isInlineObjectId(sourceId)) return true;
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item != null && item.isInline()) return true;
+        }
+        return false;
+    }
+
+    private void promoteOwnedTextFramePlansToInline(int[] textFrameIds) {
+        if (textFrameIds == null || textFrameIds.length == 0) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || !"text_frame".equals(plan.kind)) continue;
+            if (!contains(textFrameIds, plan.domId)) continue;
+            if (plan.placement == Placement.INLINE) continue;
+            plans.set(i, new ObjectPlan(
+                    plan.domId,
+                    plan.kind,
+                    plan.pageIndex,
+                    plan.textAction,
+                    plan.visualAction,
+                    plan.visualLayer,
+                    Placement.INLINE,
+                    plan.renderId,
+                    plan.sourceObjectIds,
+                    plan.visualSourceObjectIds,
+                    plan.ownedTextFrameIds,
+                    plan.descendantVisualObjectIds,
+                    plan.sourceBundleKey,
+                    plan.zOrder,
+                    plan.reason,
+                    plan.file,
+                    plan.bounds,
+                    plan.sourceLayerId,
+                    plan.sourceLayerName,
+                    plan.sourceLayerIndex));
+        }
+    }
+
+    private static boolean intersects(int[] a, int[] b) {
+        if (a == null || b == null || a.length == 0 || b.length == 0) return false;
+        for (int x : a) {
+            for (int y : b) {
+                if (x == y) return true;
+            }
+        }
+        return false;
+    }
+
+    private void resolveTextShellSourceDuplicates() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan owner = plans.get(i);
+            if (!isVisibleTextShell(owner)) continue;
+            if (owner.placement == Placement.INLINE) continue;
+            for (int j = 0; j < plans.size(); j++) {
+                if (i == j) continue;
+                ObjectPlan child = plans.get(j);
+                if (!isVisibleTextShell(child)) continue;
+                if (child.placement == Placement.INLINE) continue;
+                if (child.pageIndex != owner.pageIndex) continue;
+                if (child.domId == owner.domId && isSameRenderPlan(owner, child)) continue;
+                if (!parentTextShellMayOwnDescendantVisual(owner, child)) continue;
+                if (!textShellOwnerCoversChild(owner, child)) continue;
+                ObjectPlan dropped = child.withVisualAction(VisualAction.DROP_VISUAL,
+                        "visual_source_owned_by_parent_text_shell");
+                if (!"text_frame".equals(dropped.kind)) {
+                    dropped = dropped.withTextAction(TextAction.DROP_TEXT);
+                }
+                plans.set(j, dropped);
+            }
+        }
+    }
+
+    private static boolean isVisibleTextShell(ObjectPlan plan) {
+        return plan != null
+                && plan.hasVisibleVisual()
+                && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && visualSourceIds(plan).length > 0;
+    }
+
+    private static boolean parentTextShellMayOwnDescendantVisual(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        if (effectiveVisualPolicyLayer(parent) != PolicyLayer.BACKGROUND) return true;
+        return effectiveVisualPolicyLayer(child) == PolicyLayer.BACKGROUND;
+    }
+
+    private static PolicyLayer effectiveVisualPolicyLayer(ObjectPlan plan) {
+        if (plan == null) return PolicyLayer.CONTENT;
+        if (isLeafTextHiddenShellPlan(plan)) {
+            return PolicyLayer.DECORATION;
+        }
+        if (isImageBackedContentShellPlan(plan)) {
+            return PolicyLayer.CONTENT;
+        }
+        return plan.visualPolicyLayer();
+    }
+
+    private static boolean isImageBackedContentShellPlan(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!safe(plan.reason).contains("image_group_text_hidden")) return false;
+        String file = safe(plan.file);
+        int slash = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'));
+        String basename = slash >= 0 ? file.substring(slash + 1) : file;
+        return basename.startsWith("img_");
+    }
+
+    private static boolean textShellOwnerCoversChild(ObjectPlan owner, ObjectPlan child) {
+        if (owner == null || child == null) return false;
+        if (owner.bounds != null && child.bounds != null) {
+            if (!boundsContains(owner.bounds, child.bounds, 4.0)
+                    && !boundsMostlyOverlap(owner.bounds, child.bounds, 0.70)) {
+                return false;
+            }
+        }
+        if (!containsAll(visualSourceIds(owner), visualSourceIds(child))) return false;
+        return sourceCount(owner) > sourceCount(child)
+                || (owner.ownedTextFrameIds != null
+                    && child.ownedTextFrameIds != null
+                    && owner.ownedTextFrameIds.length > child.ownedTextFrameIds.length);
     }
 
     private void resolveClusterOwnedTextFrameShells() {

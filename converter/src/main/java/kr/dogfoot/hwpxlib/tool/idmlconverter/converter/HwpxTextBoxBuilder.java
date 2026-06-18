@@ -289,22 +289,8 @@ public class HwpxTextBoxBuilder {
         }
 
 
-        // Stage 1이 별도 visual shell/backdrop 위에 HWPX 텍스트를 얹도록 계획한 경우에는
-        // floating PNG가 hp:tbl을 덮는 렌더러 차이를 피하기 위해 투명 DrawText 경로를 사용한다.
-        if (block.plannedVisualTextOverlay() && !block.isBackgroundOnly()) {
-            frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
-            return;
-        }
-        // inlineToFloating: 배지 단일-child — fill 없으면 hp:tbl 흰 배경 방지를 위해 투명 DrawText 경로 사용
-        if (block.imageFillData() != null && block.imageFillData().length > 0) {
-            frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
-            return;
-        }
-        if (block.inlineToFloating() && block.fillColor() == null && !block.isBackgroundOnly()) {
-            frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
-            return;
-        }
-
+        // Stage 1의 plannedVisualTextOverlay는 "별도 shell/backdrop 위에 HWPX 텍스트를 얹는다"는
+        // ownership 신호일 뿐이다. 출력 표현은 편집성이 좋은 1x1 table 경로를 우선한다.
         // 회전이 있는 블록은 Table 대신 Rectangle(DrawTextBox)로 변환
         // 단, 180도 배수 회전(0, 180, -180, 360...)은 텍스트 방향에 영향이 없으므로 일반 경로로 처리.
         // InDesign에서 부모 Group과 함께 180도 회전된 TF는 시각적으로 정방향으로 보이며
@@ -839,6 +825,25 @@ public class HwpxTextBoxBuilder {
 
         bf.createDiagonal();
         bf.diagonal().typeAnd(LineType2.NONE).widthAnd(LineWidth.MM_0_1).color("#000000");
+
+        if (block.imageFillData() != null && block.imageFillData().length > 0) {
+            try {
+                String itemId = ImageInserter.registerImage(ctx.hwpxFile, block.imageFillData(), "png");
+                if (itemId != null) {
+                    bf.createFillBrush();
+                    bf.fillBrush().createImgBrush();
+                    bf.fillBrush().imgBrush().modeAnd(ImageBrushMode.TOTAL);
+                    bf.fillBrush().imgBrush().createImg();
+                    bf.fillBrush().imgBrush().img()
+                            .binaryItemIDRefAnd(itemId)
+                            .brightAnd(0)
+                            .contrastAnd(0)
+                            .effectAnd(ImageEffect.REAL_PIC);
+                    return bfId;
+                }
+            } catch (Exception ignore) {
+            }
+        }
 
         // 배경 채우기 (fillTint는 색상 농도로 RGB에 적용, 불투명 처리)
         String fill = block.fillColor();

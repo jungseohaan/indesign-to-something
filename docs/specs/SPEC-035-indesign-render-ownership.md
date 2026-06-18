@@ -126,6 +126,10 @@ Phase 6 `BackgroundInjector`와 Phase 7 `RenderableFramePlacer`는 최종 구조
 - 이미지 source를 포함한 text shell은 callout/outline shell로 보지 않는다. 내부 콘텐츠 이미지의
   polygon/stroke를 컨테이너 외곽선 근거로 세면 parent shell이 `CONTAINER_OUTLINE` 전면층으로 올라가
   콘텐츠 이미지를 가린다. 이런 shell은 `CONTAINER_BACKDROP`으로 내려가야 한다.
+- textless shell은 extractor가 InDesign source/group 복제본에서 HWPX-owned text/table content만
+  제거한 뒤 export한 PNG/vector여야 한다. Java 단계에서 fill/stroke/corner를 읽어 shell을
+  새로 그리는 synthetic fallback은 사용하지 않는다. table-only carrier도 parent shell은
+  추출물이 소유하고, carrier table/text는 HWPX가 소유한다.
 - late floating suppress reason 리포트와 `markRenderedVisualPlacedForLateFloating` bridge는 삭제했다.
   `SKIP_NATIVE_FILL_ABSORBED` 같은 true suppress는 Stage 3 decision log로만 남는다.
 - 아직 남은 배지/자식/inline coverage 정책은 Stage 1 ownership refinement로 옮긴 뒤,
