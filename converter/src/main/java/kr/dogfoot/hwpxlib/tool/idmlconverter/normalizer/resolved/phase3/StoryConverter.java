@@ -385,9 +385,12 @@ public final class StoryConverter {
         if (frameBounds == null || frameBounds.length < 4) frameBounds = tf.geometricBounds();
         if (frameBounds == null || frameBounds.length < 4) return 0.0;
 
-        double unitScale = scaleFactor > 1.0 ? scaleFactor : 1.0;
-        double frameW = Math.abs(frameBounds[3] - frameBounds[1]) / unitScale;
-        double frameH = Math.abs(frameBounds[2] - frameBounds[0]) / unitScale;
+        // ResolvedData normalizes page/text bounds to points before Stage 2/3.
+        // Font sizes are also in points, so the composed-ink cap must compare
+        // point bounds directly. Dividing by scaleFactor turns the frame back
+        // into mm and can shrink compact labels such as numeric badges.
+        double frameW = Math.abs(frameBounds[3] - frameBounds[1]);
+        double frameH = Math.abs(frameBounds[2] - frameBounds[0]);
         double frameMaxAxis = Math.max(frameW, frameH);
         if (frameMaxAxis <= 0 || maxFontSizePt <= frameMaxAxis * 1.20) return 0.0;
 
@@ -396,8 +399,8 @@ public final class StoryConverter {
             if (line == null || line.bounds() == null || line.bounds().length < 4) continue;
             if (!hasVisibleTextExcludingObjectControls(line.text())) continue;
             double[] b = line.bounds();
-            double lineW = Math.abs(b[3] - b[1]) / unitScale;
-            double lineH = Math.abs(b[2] - b[0]) / unitScale;
+            double lineW = Math.abs(b[3] - b[1]);
+            double lineH = Math.abs(b[2] - b[0]);
             if (lineW <= 0 || lineH <= 0) continue;
             inkMaxAxis = Math.max(inkMaxAxis, Math.max(lineW, lineH));
         }
