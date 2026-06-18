@@ -1976,6 +1976,7 @@ function _isAtomicCompletePngReason(reason) {
 
 function _isAtomicTextlessShellReasonForMetadata(reason) {
     return reason === "visual_label_text_hidden_shell"
+            || reason === "atomic_ownership_root_text_hidden_shell"
             || reason === "leaf_group_text_hidden_shell"
             || reason === "editable_composite_text_hidden_shell"
             || reason === "inline_text_hidden"
@@ -1983,7 +1984,8 @@ function _isAtomicTextlessShellReasonForMetadata(reason) {
 }
 
 function _isAtomicGraphicOnlyReasonForMetadata(reason) {
-    return reason === "inline_graphic_only"
+    return reason === "graphic_ownership_root"
+            || reason === "inline_graphic_only"
             || reason === "pure_decoration_group"
             || reason === "decoration_group";
 }
@@ -2931,7 +2933,8 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
     var renderedIds = {};
     var labelBackdropClaimedIds = {};
     var labelBackdropClaimedTextFrameIds = {};
-    var leafTextShellGroupIds = {};
+    var atomicTextShellRootGroupIds = {};
+    var atomicGraphicRootGroupIds = {};
 
     // ── 공통 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -2959,6 +2962,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         var reason = String(opts.reason || "");
         return reason === "visual_label_text_hidden_shell"
                 || reason === "editable_composite_text_hidden_shell"
+                || reason === "atomic_ownership_root_text_hidden_shell"
                 || reason === "leaf_group_text_hidden_shell";
     }
 
@@ -3344,6 +3348,40 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return false;
     }
 
+    function _isGraphicOnlyOwnershipRootGroup(grp) {
+        try { if (!grp || grp.constructor.name !== "Group") return false; } catch (e0) { return false; }
+        if (isOnHiddenLayer(grp)) return false;
+        if (_decoHasPlaced(grp)) return false;
+        if (!isAllShapeChildren(grp)) return false;
+        try {
+            var nested = grp.allPageItems;
+            if (!nested || nested.length < 2) return false;
+            var hasVisibleVisual = false;
+            for (var i = 0; i < nested.length; i++) {
+                var item = nested[i];
+                if (!item) continue;
+                var cn = "";
+                try { cn = item.constructor.name; } catch (eCn) {}
+                if (cn === "Group") continue;
+                if (_isDirectVisualShapeItem(item)) hasVisibleVisual = true;
+            }
+            return hasVisibleVisual;
+        } catch (eNested) {
+            return false;
+        }
+    }
+
+    function _renderGraphicOnlyOwnershipRootGroup(grp, page) {
+        try { atomicGraphicRootGroupIds[grp.id] = true; } catch (eMark) {}
+        _decoRender(grp, page, null, {
+            textOwner: "none",
+            containsText: false,
+            containsEditableText: false,
+            placementAllowed: true,
+            reason: "graphic_ownership_root"
+        });
+    }
+
     function _isDirectEditableTextFrame(item) {
         if (!item) return false;
         try { if (item.constructor.name !== "TextFrame") return false; } catch (e0) { return false; }
@@ -3352,7 +3390,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return true;
     }
 
-    function _isLeafEditableTextShellGroup(grp) {
+    function _isAtomicOwnershipRootTextShellGroup(grp) {
         try { if (!grp || grp.constructor.name !== "Group") return false; } catch (e0) { return false; }
         if (isOnHiddenLayer(grp)) return false;
         if (_decoHasPlaced(grp)) return false;
@@ -3382,7 +3420,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return editableTextCount >= 1 && hasDirectShape;
     }
 
-    function _renderLeafEditableTextShellGroups(grp, page) {
+    function _renderAtomicOwnershipRootTextShellGroups(grp, page) {
         var rendered = 0;
         try {
             var nested = grp.allPageItems;
@@ -3391,32 +3429,54 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 if (!child) continue;
                 try { if (child.constructor.name !== "Group") continue; } catch (eCn) { continue; }
                 try { if (child.id === grp.id || renderedIds[child.id] || decoChildIds[child.id]) continue; } catch (eSeen) {}
-                if (!_isLeafEditableTextShellGroup(child)) continue;
-                _renderLeafEditableTextShellGroup(child, page);
+                if (!_isAtomicOwnershipRootTextShellGroup(child)) continue;
+                _renderAtomicOwnershipRootTextShellGroup(child, page);
                 rendered++;
             }
         } catch (e) {}
         return rendered;
     }
 
-    function _renderLeafEditableTextShellGroup(grp, page) {
-        try { leafTextShellGroupIds[grp.id] = true; } catch (eMark) {}
-        _renderEditableVisualLabelShell(grp, page, "leaf_group_text_hidden_shell");
+    function _renderAtomicOwnershipRootTextShellGroup(grp, page) {
+        try { atomicTextShellRootGroupIds[grp.id] = true; } catch (eMark) {}
+        _renderEditableVisualLabelShell(grp, page, "atomic_ownership_root_text_hidden_shell");
     }
 
-    function _hasRenderedLeafTextShellChild(grp) {
+    function _hasRenderedAtomicTextShellRootChild(grp) {
         try {
             var nested = grp.allPageItems;
             for (var i = 0; nested && i < nested.length; i++) {
                 try {
-                    if (nested[i].constructor.name === "Group" && leafTextShellGroupIds[nested[i].id]) return true;
+                    if (nested[i].constructor.name === "Group" && atomicTextShellRootGroupIds[nested[i].id]) return true;
                 } catch (eChild) {}
             }
         } catch (eNested) {}
         var direct = _directPageItemsOfGroup(grp);
         for (var j = 0; j < direct.length; j++) {
             try {
-                if (direct[j].constructor.name === "Group" && leafTextShellGroupIds[direct[j].id]) return true;
+                if (direct[j].constructor.name === "Group" && atomicTextShellRootGroupIds[direct[j].id]) return true;
+            } catch (e) {}
+        }
+        return false;
+    }
+
+    function _hasRenderedAtomicOwnershipRootChild(grp) {
+        try {
+            var nested = grp.allPageItems;
+            for (var i = 0; nested && i < nested.length; i++) {
+                try {
+                    if (nested[i].constructor.name !== "Group") continue;
+                    if (atomicTextShellRootGroupIds[nested[i].id]) return true;
+                    if (atomicGraphicRootGroupIds[nested[i].id]) return true;
+                } catch (eChild) {}
+            }
+        } catch (eNested) {}
+        var direct = _directPageItemsOfGroup(grp);
+        for (var j = 0; j < direct.length; j++) {
+            try {
+                if (direct[j].constructor.name !== "Group") continue;
+                if (atomicTextShellRootGroupIds[direct[j].id]) return true;
+                if (atomicGraphicRootGroupIds[direct[j].id]) return true;
             } catch (e) {}
         }
         return false;
@@ -4394,18 +4454,32 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         try { _decoRender(item, p1Page, null); } catch (e) {}
     }
 
-    // ── Pass 1.5: leaf editable text shell group ─────────────────────────────
-    // 같은 원본 Group 안에 직접 도형과 editable TF가 함께 있으면, sibling
-    // label backdrop으로 쪼개기 전에 group 전체를 하나의 textless shell로 소유한다.
+    // ── Pass 1.5: atomic ownership-root text shell group ─────────────────────
+    // 같은 원본 시각 단위 안에 직접 도형과 editable TF가 함께 있으면, sibling
+    // label backdrop으로 쪼개기 전에 ownership root 전체를 하나의 textless shell로 소유한다.
     for (var lgi = 0; lgi < allItems.length; lgi++) {
         var leafGrp = allItems[lgi];
         try { if (!leafGrp || leafGrp.constructor.name !== "Group") continue; } catch (eLeafCn) { continue; }
         if (renderedIds[leafGrp.id] || decoChildIds[leafGrp.id]) continue;
-        if (!_isLeafEditableTextShellGroup(leafGrp)) continue;
+        if (!_isAtomicOwnershipRootTextShellGroup(leafGrp)) continue;
         var leafPage = _resolveGroupPage(leafGrp);
         if (!leafPage) continue;
         if (leafPage.documentOffset + 1 < startPage || leafPage.documentOffset + 1 > endPage) continue;
-        try { _renderLeafEditableTextShellGroup(leafGrp, leafPage); } catch (eLeafRender) {}
+        try { _renderAtomicOwnershipRootTextShellGroup(leafGrp, leafPage); } catch (eLeafRender) {}
+    }
+
+    // ── Pass 1.6: graphic-only ownership-root group ──────────────────────────
+    // leaf가 아니더라도 자식 도형/하위 그룹이 합쳐져 하나의 원본 시각 단위가 되는
+    // graphic-only Group은 부모 mixed/container보다 먼저 추출한다.
+    for (var gori = 0; gori < allItems.length; gori++) {
+        var graphicRoot = allItems[gori];
+        try { if (!graphicRoot || graphicRoot.constructor.name !== "Group") continue; } catch (eGraphicCn) { continue; }
+        if (renderedIds[graphicRoot.id] || decoChildIds[graphicRoot.id]) continue;
+        if (!_isGraphicOnlyOwnershipRootGroup(graphicRoot)) continue;
+        var graphicPage = _resolveGroupPage(graphicRoot);
+        if (!graphicPage) continue;
+        if (graphicPage.documentOffset + 1 < startPage || graphicPage.documentOffset + 1 > endPage) continue;
+        try { _renderGraphicOnlyOwnershipRootGroup(graphicRoot, graphicPage); } catch (eGraphicRender) {}
     }
 
     // ── Pass 2~4 통합: Group ─────────────────────────────────────────────────
@@ -4466,14 +4540,16 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 try { editableTfIdsForGroup = _collectTextFrameIds(grp, true, true); } catch (e) {}
             }
 
-            var _leafTextShellGroup = (kind === "mixedGroup" || kind === "textComposite")
-                    && _isLeafEditableTextShellGroup(grp);
-            var _hasLeafTextShellChild = (kind === "mixedGroup" || kind === "textComposite")
-                    && _hasRenderedLeafTextShellChild(grp);
-            var _nestedLeafTextShellCount = 0;
-            if (!_leafTextShellGroup && !_hasLeafTextShellChild
+            var _atomicTextShellRootGroup = (kind === "mixedGroup" || kind === "textComposite")
+                    && _isAtomicOwnershipRootTextShellGroup(grp);
+            var _hasAtomicTextShellRootChild = (kind === "mixedGroup" || kind === "textComposite")
+                    && _hasRenderedAtomicTextShellRootChild(grp);
+            var _hasAtomicOwnershipRootChild = (kind === "mixedGroup" || kind === "textComposite")
+                    && _hasRenderedAtomicOwnershipRootChild(grp);
+            var _nestedAtomicTextShellRootCount = 0;
+            if (!_atomicTextShellRootGroup && !_hasAtomicTextShellRootChild && !_hasAtomicOwnershipRootChild
                     && (kind === "mixedGroup" || kind === "textComposite")) {
-                _nestedLeafTextShellCount = _renderLeafEditableTextShellGroups(grp, grpPage);
+                _nestedAtomicTextShellRootCount = _renderAtomicOwnershipRootTextShellGroups(grp, grpPage);
             }
 
             // Stage 1 통합: 짧은 시각 라벨 그룹은 단일 inline_badge로 emit, 기존 sibling-backdrop/
@@ -4484,16 +4560,18 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
 
             // 통합 모드에서는 per-pill label_backdrop 자체를 만들지 않는다(inline_badge가 배경 소유).
             var siblingLabelBackdropCount = 0;
-            if (!_leafTextShellGroup && !_hasLeafTextShellChild && _nestedLeafTextShellCount === 0
+            if (!_atomicTextShellRootGroup && !_hasAtomicTextShellRootChild && !_hasAtomicOwnershipRootChild
+                    && _nestedAtomicTextShellRootCount === 0
                     && !EMIT_UNIFIED_INLINE_BADGE
                     && (kind === "mixedGroup" || kind === "textComposite")) {
                 siblingLabelBackdropCount = _renderSiblingLabelBackdropGroups(grp, grpPage);
                 siblingLabelBackdropCount += _renderCompactStackedLabelBackdrops(grp, grpPage);
             }
 
-            if (_leafTextShellGroup) {
-                if (!renderedIds[grp.id]) _renderLeafEditableTextShellGroup(grp, grpPage);
-            } else if ((_hasLeafTextShellChild || _nestedLeafTextShellCount > 0) && !_hasDirectVisualShapeChild(grp)) {
+            if (_atomicTextShellRootGroup) {
+                if (!renderedIds[grp.id]) _renderAtomicOwnershipRootTextShellGroup(grp, grpPage);
+            } else if ((_hasAtomicTextShellRootChild || _hasAtomicOwnershipRootChild || _nestedAtomicTextShellRootCount > 0)
+                    && !_hasDirectVisualShapeChild(grp)) {
                 _exportPaperStrokeShapes(grp, grpPage);
             } else if (_unifiedBadge) {
                 _emitInlineBadge(grp, grpPage);

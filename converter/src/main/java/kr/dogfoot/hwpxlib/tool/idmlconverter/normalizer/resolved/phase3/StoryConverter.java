@@ -225,6 +225,9 @@ public final class StoryConverter {
                 if (!hasEquationFont(paragraphs)) {
                     ResolvedStory rs = ctx.resolvedData.getStory(storyId);
                     if (rs != null) {
+                        if (hasAnchoredObjectIdWithoutInlineFlag(rs)) {
+                            useIdml = false;
+                        }
                         int idmlLen = 0;
                         for (ASTParagraph p : paragraphs)
                             for (Object item : p.items())
@@ -525,7 +528,7 @@ public final class StoryConverter {
             if (para == null) continue;
             int visibleRuns = 0;
             for (ResolvedRun run : para.runs()) {
-                if (run == null || run.isInlineAnchor()) continue;
+                if (run == null || isInlineAnchorRun(run)) continue;
                 String text = normalizedComparableText(run.text());
                 if (!text.isEmpty()) visibleRuns++;
             }
@@ -533,6 +536,18 @@ public final class StoryConverter {
             if (visibleRuns > 1) return true;
         }
         return nonEmptyParagraphs > 1;
+    }
+
+    private static boolean hasAnchoredObjectIdWithoutInlineFlag(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph para : story.paragraphs()) {
+            if (para == null || para.runs() == null) continue;
+            for (ResolvedRun run : para.runs()) {
+                if (run == null) continue;
+                if (run.anchoredObjectId() != null && !run.isInlineAnchor()) return true;
+            }
+        }
+        return false;
     }
 
     private static boolean containsStructuralInlineContent(ASTTextFrameBlock block) {
@@ -565,7 +580,7 @@ public final class StoryConverter {
         for (ResolvedParagraph para : story.paragraphs()) {
             if (para == null || para.runs() == null) continue;
             for (ResolvedRun run : para.runs()) {
-                if (run == null || run.isInlineAnchor()) continue;
+                if (run == null || isInlineAnchorRun(run)) continue;
                 String text = run.text();
                 if (text != null) sb.append(text);
             }
@@ -2650,7 +2665,7 @@ public final class StoryConverter {
                 int runIndex = -1;
                 for (ResolvedRun run : runs) {
                     runIndex++;
-                    if (run.isInlineAnchor()) {
+                    if (isInlineAnchorRun(run)) {
                         Integer aid = run.anchoredObjectId();
                         if (aid != null) firstAnchorTf = ctx.resolvedData.getTextFrame(String.valueOf(aid));
                         break;
@@ -2665,7 +2680,7 @@ public final class StoryConverter {
                     runIndex++;
                     if (stopAfterThisRun) break;
                     // inline_anchor: 인라인 그래픽 → ASTInlineObject로 변환
-                    if (run.isInlineAnchor()) {
+                    if (isInlineAnchorRun(run)) {
                         Integer anchoredId = run.anchoredObjectId();
                         if (anchoredId != null) {
                             if (isDoviraSubunitMarker(rp, runs, runIndex)
@@ -2995,11 +3010,15 @@ public final class StoryConverter {
         return false;
     }
 
+    private static boolean isInlineAnchorRun(ResolvedRun run) {
+        return run != null && (run.isInlineAnchor() || run.anchoredObjectId() != null);
+    }
+
     private static String adjacentRunText(List<ResolvedRun> runs, int index, int direction) {
         if (runs == null || direction == 0) return null;
         for (int i = index + direction; i >= 0 && i < runs.size(); i += direction) {
             ResolvedRun r = runs.get(i);
-            if (r == null || r.isInlineAnchor()) continue;
+            if (r == null || isInlineAnchorRun(r)) continue;
             String text = r.text();
             if (text == null || text.isEmpty()) continue;
             return text;
@@ -3049,7 +3068,7 @@ public final class StoryConverter {
         if (rp == null || runs == null || runIndex < 0 || runIndex >= runs.size()) return false;
         if (!DoviraSubunitMarkerPolicy.isDoviraSubunitParagraph(rp)) return false;
         ResolvedRun current = runs.get(runIndex);
-        return current != null && current.isInlineAnchor();
+        return current != null && isInlineAnchorRun(current);
     }
 
     static boolean isStandaloneDoviraSubunitMarker(ResolvedParagraph rp) {
@@ -3059,7 +3078,7 @@ public final class StoryConverter {
         boolean hasAnchor = false;
         for (ResolvedRun run : runs) {
             if (run == null) continue;
-            if (run.isInlineAnchor()) {
+            if (isInlineAnchorRun(run)) {
                 hasAnchor = true;
                 continue;
             }

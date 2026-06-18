@@ -20,9 +20,18 @@
 - 본문, 제목, 라벨, 설명, 문항, 출처는 HWPX 텍스트다.
 - PNG가 텍스트를 소유할 수 있는 경우는 atomic marker뿐이다.
 - atomic marker는 명시적 표식 패턴만 허용한다: `가`, `ㄱ`, `1`, `01`, 체크/선택지 표식.
-- atomic object는 complete PNG 여부가 아니라 원본 source bundle로 먼저 식별한다.
+- atomic object는 complete PNG 여부나 leaf node 여부가 아니라 원본 source bundle의
+  ownership root로 먼저 식별한다.
   marker bundle은 `marker shell root + label TextFrame + 그 자손`으로 닫혀 있어야 하고,
-  graphic-only bundle은 하나의 원본 Group과 그 자손으로 닫혀 있어야 한다.
+  graphic-only bundle은 하나의 원본 ownership root Group과 그 자손으로 닫혀 있어야 한다.
+- ownership root Group은 leaf Group일 필요가 없다. 하위 도형/텍스트 조각이 함께 있어야
+  하나의 원본 시각 단위가 되는 경우에는 비-leaf Group도 atomic object가 될 수 있다.
+  예: 벡터 글자, 외곽선, 보조선을 포함한 로고/라벨 그룹.
+- extractor는 이런 graphic-only ownership root를 `reason=graphic_ownership_root`,
+  `atomicObjectKind=GRAPHIC_ONLY`로 기록한다.
+- 반대로 자식 중 독립 atomic 후보가 여러 개 있고 서로 다른 역할의 시각 단위이면,
+  부모 Group은 atomic object가 아니라 container다. container render는 후보로 만들 수
+  있지만 최종 visible owner가 되려면 별도 composite/background 정책을 통과해야 한다.
 - extractor는 닫힌 atomic bundle을 찾으면 `atomicObjectKind`,
   `atomicSourceObjectIds`, `atomicOwnedTextFrameIds`, `atomicVisualSourceObjectIds`를
   resolved metadata에 기록한다. Java는 이 메타데이터를 우선 검증하고, 새 atomic
@@ -35,6 +44,20 @@
   - `GRAPHIC_ONLY`: `textAction=DROP_TEXT`, `visualAction=PLACE_INLINE_PNG|PLACE_FLOATING_PNG`
 - `TEXTLESS_SHELL_WITH_TF`의 shell은 extractor가 만든 textless PNG/vector만 사용하고,
   label TF는 HWPX text로 배치한다.
+- inline `TEXTLESS_SHELL_WITH_TF`는 `pageItems`에 원본 Group bridge가 없어도
+  `renderedFloatingItems`의 atomic metadata와 ObjectPlan이 일치하면 실행 대상이다.
+  실행 단계는 IDML tree를 재판정하지 않고, extractor가 기록한
+  `atomicOwnedTextFrameIds`/`editableTextFrameIds`를 따라 shell+TF를 한 인라인 객체로 만든다.
+- table cell 안의 inline `TEXTLESS_SHELL_WITH_TF`도 같은 규칙을 따른다.
+  셀의 직접 텍스트가 ORC뿐이고 child TextFrame story가 HWPX text owner여도,
+  해당 ORC에 `INLINE + PLACE_TEXT_SHELL` plan이 있으면 셀 단락 빌드를 중단하지 않는다.
+  table cell early-return은 별도 floating/placed TF 중복을 막기 위한 것이며,
+  plan이 있는 inline atomic shell+TF를 숨기는 근거가 될 수 없다.
+- resolved story run은 `isInlineAnchor=true` 또는 `anchoredObjectId != null`이면 인라인
+  anchor다. `anchoredObjectId`가 있는데 boolean flag가 비어 있는 추출 결과도 anchor로
+  소비해야 하며, 이를 일반 text run처럼 무시하거나 병합하지 않는다.
+- IDML story와 resolved story 중 `anchoredObjectId` 계약이 resolved에만 명확하면
+  resolved story structure가 우선한다. 이때 후속 단계가 anchor 여부를 재판정하지 않는다.
 - 텍스트를 임의로 합치지 않는다. 연결 TextFrame은 원본 thread만 따른다.
 
 ## 3. 비주얼
@@ -125,9 +148,25 @@ TextFrame 안의 실제 편집 텍스트가 IDML table에 있고 `TextFrame.cont
 같은 규칙을 따른다. table text는 HWPX table/text가 소유하고, parent shell은
 `PLACE_TEXT_SHELL`로 배치한다. table border/fill은 원본 shell을 대체하거나 중복 생성하지 않는다.
 
+본문 story의 table marker가 wrapper table을 만들고, 그 셀 안의 nested TextFrame/table이
+실제 표 내용을 소유하는 경우에는 `anchored_table` plan 하나가 wrapper와 nested table을
+동시에 소유한다. 이때 nested table TextFrame은 별도 `text_frame:table_only`
+`PLACE_TABLE_STYLE` plan을 만들지 않는다. 같은 nested table source가 inline anchored table과
+page-level table로 동시에 배치되면 정책 위반이다.
+
 ## 5. 그룹과 중복
 
-editable TF가 포함된 그룹은 두 ownership channel로 나눈다.
+Group은 leaf 여부가 아니라 source ownership root 여부로 판단한다.
+
+- atomic ownership root: 자손이 함께 있어야 하나의 시각 단위가 되는 Group.
+  이 Group의 자손은 root visual에 흡수되고 별도 visible output을 만들지 않는다.
+- container Group: 독립 atomic root 또는 독립 visual unit을 여러 개 담는 Group.
+  이 Group은 기본적으로 visible owner가 아니며, 자식 atomic root들이 각각 owner가 된다.
+- composite/background Group: 표지 배경처럼 container 전체가 하나의 배경 shell로
+  의미를 가질 때만 별도 정책으로 visible owner가 될 수 있다. 이 경우에도 자식 TF는
+  HWPX 텍스트로 소유하고, 자식 visual의 중복 배치는 Stage 1에서 닫는다.
+
+editable TF가 포함된 atomic ownership root는 두 ownership channel로 나눈다.
 
 - parent visual group: textless shell만 소유한다.
 - child TextFrame/table: HWPX text/table만 소유한다.

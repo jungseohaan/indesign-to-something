@@ -237,10 +237,10 @@ public class ResolvedToASTBuilder {
      * warning만 기록해 현재 정책 충돌을 눈으로 추적할 수 있게 한다.</p>
      */
     private void planOwnership() {
-        OwnershipPlanner.runObservation(this.ctx);
         AnchoredTablePlanner.plan(this.ctx);
         SideHeadFlowPlanner.plan(this.ctx);
         SimpleButtonLabelPlanner.plan(this.ctx);
+        OwnershipPlanner.runObservation(this.ctx);
     }
 
     /**

@@ -737,7 +737,6 @@ public class InlineFrameHandler {
             return null;
         }
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
-        if (anchorItem == null || !"Group".equals(anchorItem.type()) || !anchorItem.isInline()) return null;
         // 그룹은 resolved 에서 자식 TF 와 parentId 로 연결되지 않는 경우가 많다(parentId=null).
         // 대신 렌더 셸 PNG 의 editableTextFrameIds 로 편집 자식을 찾는다.
         // 곡선/말풍선 그룹은 텍스트를 숨긴 채 렌더된 셸 PNG(예: reason=*text_hidden, page_object)로 들어온다.
@@ -753,6 +752,8 @@ public class InlineFrameHandler {
             break;
         }
         if (shell == null) return null;
+        boolean inlineGroupAnchor = anchorItem != null && "Group".equals(anchorItem.type()) && anchorItem.isInline();
+        if (!inlineGroupAnchor && !isInlineTextlessShellWithTf(shell)) return null;
         // 라벨 셸(visual_label_text_hidden_shell)이 Stage 3에서 플로팅 PLACE_TEXT_SHELL로
         // 배치될 예정이면 인라인 베이킹하지 않는다. 인라인(여기)+플로팅(Stage 3) 이중 배치를 막고
         // 플로팅 셸이 단독 소유한다. (SPEC-035 §1.2 인라인 의미 라벨 그룹은 플로팅이 소유)
@@ -772,6 +773,12 @@ public class InlineFrameHandler {
             if (cleaned.isEmpty()) return null;
         }
         return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, children.get(0), shell);
+    }
+
+    private static boolean isInlineTextlessShellWithTf(RenderedGroup shell) {
+        if (shell == null) return false;
+        boolean inlineShell = "inline_object".equals(shell.itemType()) || "inline_object".equals(shell.type());
+        return inlineShell && "TEXTLESS_SHELL_WITH_TF".equals(shell.atomicObjectKind());
     }
 
     private static boolean isInlineShellShape(ResolvedPageItem item) {

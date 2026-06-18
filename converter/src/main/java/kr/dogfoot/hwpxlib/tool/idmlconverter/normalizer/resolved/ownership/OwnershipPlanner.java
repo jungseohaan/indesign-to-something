@@ -95,8 +95,8 @@ public final class OwnershipPlanner {
         resolveNonTextVisualEditableTextSources();
         resolveMasterGraphicsWithHwpxTextFallbacks();
         restoreInlineTextShellOwners();
-        restoreLeafTextHiddenShellOwners();
-        promoteInlineCompanionLeafShellOwners();
+        restoreAtomicOwnershipRootTextHiddenShellOwners();
+        promoteInlineCompanionAtomicShellOwners();
         resolveTextShellSourceDuplicates();
         writePlans();
         validate();
@@ -307,7 +307,7 @@ public final class OwnershipPlanner {
             RenderedGroup rg, Set<Integer> editableLabelShellIds) {
         if (rg == null) return false;
         if (editableLabelShellIds != null && editableLabelShellIds.contains(rg.id())) return true;
-        if (isLeafTextHiddenShell(rg)) return true;
+        if (isAtomicOwnershipRootTextHiddenShell(rg)) return true;
         if (!isEditableLabelShellCandidate(rg)) return false;
         if (!isPageObject(rg) && !"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) {
             return false;
@@ -318,15 +318,20 @@ public final class OwnershipPlanner {
         return !Boolean.TRUE.equals(rg.containsText()) && !Boolean.TRUE.equals(rg.containsEditableText());
     }
 
-    private static boolean isLeafTextHiddenShell(RenderedGroup rg) {
+    private static boolean isAtomicOwnershipRootTextHiddenShell(RenderedGroup rg) {
         return rg != null
-                && "leaf_group_text_hidden_shell".equals(rg.reason())
+                && isAtomicOwnershipRootTextHiddenShellReason(rg.reason())
                 && "indesign_png".equals(rg.visualOwner())
                 && "hwpx_tf".equals(rg.textOwner())
                 && rg.editableTextFrameIds() != null
                 && rg.editableTextFrameIds().length > 0
                 && !Boolean.TRUE.equals(rg.containsText())
                 && !Boolean.TRUE.equals(rg.containsEditableText());
+    }
+
+    private static boolean isAtomicOwnershipRootTextHiddenShellReason(String reason) {
+        return "atomic_ownership_root_text_hidden_shell".equals(reason)
+                || "leaf_group_text_hidden_shell".equals(reason);
     }
 
     private boolean shouldKeepPairedInlinePageShell(RenderedGroup rg) {
@@ -762,7 +767,7 @@ public final class OwnershipPlanner {
     private void resolvePairedInlinePageObjectChannelOwners() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan pageObject = plans.get(i);
-            if (!isVisibleRenderedVisual(pageObject) && !isLeafTextHiddenShellPlan(pageObject)) continue;
+            if (!isVisibleRenderedVisual(pageObject) && !isAtomicOwnershipRootTextHiddenShellPlan(pageObject)) continue;
             if (!safe(pageObject.kind).contains("page_object")) continue;
             if (pageObject.domId < 0) continue;
 
@@ -776,7 +781,7 @@ public final class OwnershipPlanner {
                 if (!pageObjectShouldOwnPairedInlineChannel(pageObject, inline)) continue;
 
                 ObjectPlan nextPageObject = pageObject;
-                if (isLeafTextHiddenShellPlan(pageObject)) {
+                if (isAtomicOwnershipRootTextHiddenShellPlan(pageObject)) {
                     nextPageObject = pageObject
                             .withVisualAction(VisualAction.PLACE_TEXT_SHELL, pageObject.reason)
                             .withVisualLayer(VisualLayer.CONTAINER_BACKDROP);
@@ -797,7 +802,7 @@ public final class OwnershipPlanner {
         if (!isRenderedPageObject(pageGroup)) return false;
         if (!"inline_graphic_only".equals(inlineGroup.reason())) return false;
 
-        if (isLeafTextHiddenShellPlan(pageObject)
+        if (isAtomicOwnershipRootTextHiddenShellPlan(pageObject)
                 && pageObject.ownedTextFrameIds != null
                 && pageObject.ownedTextFrameIds.length > 1) {
             return true;
@@ -941,7 +946,12 @@ public final class OwnershipPlanner {
             IDMLStory idmlStory = loadStory(tf.storyId());
             boolean tableOnlyTextFrame =
                     TableFrameOwnershipPolicy.isTableOnlyTextFrame(tf, idmlStory);
-            VisualAction visualAction = tableOnlyTextFrame
+            boolean ownedByAnchoredTablePlan =
+                    tableOnlyTextFrame && isOwnedByAnchoredTablePlan(idmlStory);
+            if (ownedByAnchoredTablePlan) {
+                textAction = TextAction.DROP_TEXT;
+            }
+            VisualAction visualAction = tableOnlyTextFrame && !ownedByAnchoredTablePlan
                     ? VisualAction.PLACE_TABLE_STYLE
                     : VisualAction.DROP_VISUAL;
             Placement placement = placementOfTextFrame(tf, domId, textAction, visualAction);
@@ -963,13 +973,24 @@ public final class OwnershipPlanner {
                     new int[0],
                     "p" + tf.pageIndex() + ":tf:" + domId,
                     tf.zOrder(),
-                    tableOnlyTextFrame ? "table_only_text_frame" : textFrameReason(tf, textAction),
+                    ownedByAnchoredTablePlan ? "owned_by_anchored_table_plan"
+                            : (tableOnlyTextFrame ? "table_only_text_frame" : textFrameReason(tf, textAction)),
                     null,
                     tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds(),
                     tf.layerId(),
                     tf.layerName(),
                     tf.layerIndex()));
         }
+    }
+
+    private boolean isOwnedByAnchoredTablePlan(IDMLStory story) {
+        if (ctx == null || story == null || story.tables() == null) return false;
+        for (IDMLTable table : story.tables()) {
+            if (table != null && ctx.isAnchoredTableSource(table.selfId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private int[] editableTextFrameIdsOf(RenderedGroup rg) {
@@ -1090,7 +1111,7 @@ public final class OwnershipPlanner {
         return "visual_label_text_hidden_shell".equals(reason)
                 || "editable_textframe_visual_shell".equals(reason)
                 || "inline_text_hidden".equals(reason)
-                || "leaf_group_text_hidden_shell".equals(reason);
+                || isAtomicOwnershipRootTextHiddenShellReason(reason);
     }
 
     private boolean renderedGroupClaimsTextFrame(RenderedGroup rg, String textFrameId) {
@@ -1300,6 +1321,9 @@ public final class OwnershipPlanner {
             }
             if (isEditableLabelCardShell(rg)) {
                 return VisualLayer.LABEL_BACKDROP;
+            }
+            if (isEditableVisualShellWithSeparateHwpxText(rg) && isLargeVisual(rg)) {
+                return VisualLayer.CONTAINER_BACKDROP;
             }
             if (isCalloutOrOutlineTextShell(rg)) {
                 return VisualLayer.CONTAINER_OUTLINE;
@@ -2867,10 +2891,10 @@ public final class OwnershipPlanner {
         }
     }
 
-    private void restoreLeafTextHiddenShellOwners() {
+    private void restoreAtomicOwnershipRootTextHiddenShellOwners() {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
-            if (!isLeafTextHiddenShellPlan(plan)) continue;
+            if (!isAtomicOwnershipRootTextHiddenShellPlan(plan)) continue;
             if (isNonCanonicalAtomicObjectPlan(plan)) continue;
             if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
             if (hasAlternativeVisibleTextShellOwner(plan)) continue;
@@ -2894,9 +2918,9 @@ public final class OwnershipPlanner {
         return false;
     }
 
-    private static boolean isLeafTextHiddenShellPlan(ObjectPlan plan) {
+    private static boolean isAtomicOwnershipRootTextHiddenShellPlan(ObjectPlan plan) {
         return plan != null
-                && "leaf_group_text_hidden_shell".equals(plan.reason)
+                && isAtomicOwnershipRootTextHiddenShellReason(plan.reason)
                 && safe(plan.kind).contains("page_object")
                 && plan.ownedTextFrameIds != null
                 && plan.ownedTextFrameIds.length > 0
@@ -2950,14 +2974,14 @@ public final class OwnershipPlanner {
         return true;
     }
 
-    private void promoteInlineCompanionLeafShellOwners() {
+    private void promoteInlineCompanionAtomicShellOwners() {
         for (int i = 0; i < plans.size(); i++) {
-            ObjectPlan leafShell = plans.get(i);
-            if (!isLeafTextHiddenShellPlan(leafShell)) continue;
-            if (isNonCanonicalAtomicObjectPlan(leafShell)) continue;
-            if (leafShell.ownedTextFrameIds == null || leafShell.ownedTextFrameIds.length == 0) continue;
-            if (leafShell.ownedTextFrameIds.length != 1) continue;
-            ObjectPlan inlineCompanion = findInlineCompanionForLeafShell(leafShell);
+            ObjectPlan atomicShell = plans.get(i);
+            if (!isAtomicOwnershipRootTextHiddenShellPlan(atomicShell)) continue;
+            if (isNonCanonicalAtomicObjectPlan(atomicShell)) continue;
+            if (atomicShell.ownedTextFrameIds == null || atomicShell.ownedTextFrameIds.length == 0) continue;
+            if (atomicShell.ownedTextFrameIds.length != 1) continue;
+            ObjectPlan inlineCompanion = findInlineCompanionForAtomicShell(atomicShell);
             if (inlineCompanion == null) continue;
             if (isNonCanonicalAtomicObjectPlan(inlineCompanion)) continue;
             int companionIndex = plans.indexOf(inlineCompanion);
@@ -2972,37 +2996,37 @@ public final class OwnershipPlanner {
                     VisualLayer.CONTAINER_BACKDROP,
                     Placement.INLINE,
                     inlineCompanion.renderId,
-                    leafShell.sourceObjectIds,
-                    visualSourceIds(leafShell),
-                    leafShell.ownedTextFrameIds,
-                    leafShell.descendantVisualObjectIds,
-                    leafShell.sourceBundleKey,
-                    Math.max(inlineCompanion.zOrder, leafShell.zOrder),
-                    "inline_companion_leaf_text_shell",
-                    leafShell.file,
+                    atomicShell.sourceObjectIds,
+                    visualSourceIds(atomicShell),
+                    atomicShell.ownedTextFrameIds,
+                    atomicShell.descendantVisualObjectIds,
+                    atomicShell.sourceBundleKey,
+                    Math.max(inlineCompanion.zOrder, atomicShell.zOrder),
+                    "inline_companion_atomic_text_shell",
+                    atomicShell.file,
                     inlineCompanion.bounds,
-                    leafShell.sourceLayerId,
-                    leafShell.sourceLayerName,
-                    leafShell.sourceLayerIndex);
+                    atomicShell.sourceLayerId,
+                    atomicShell.sourceLayerName,
+                    atomicShell.sourceLayerIndex);
             plans.set(companionIndex, promoted);
-            plans.set(i, leafShell.withVisualAction(VisualAction.DROP_VISUAL,
+            plans.set(i, atomicShell.withVisualAction(VisualAction.DROP_VISUAL,
                     "owned_by_inline_companion_text_shell"));
-            promoteOwnedTextFramePlansToInline(leafShell.ownedTextFrameIds);
+            promoteOwnedTextFramePlansToInline(atomicShell.ownedTextFrameIds);
         }
     }
 
-    private ObjectPlan findInlineCompanionForLeafShell(ObjectPlan leafShell) {
-        if (leafShell == null) return null;
+    private ObjectPlan findInlineCompanionForAtomicShell(ObjectPlan atomicShell) {
+        if (atomicShell == null) return null;
         for (ObjectPlan candidate : plans) {
-            if (candidate == null || candidate == leafShell) continue;
-            if (!isInlineCompanionCandidateForLeafShell(candidate)) continue;
-            if (candidate.pageIndex != leafShell.pageIndex) continue;
-            if (candidate.domId != leafShell.domId) continue;
+            if (candidate == null || candidate == atomicShell) continue;
+            if (!isInlineCompanionCandidateForAtomicShell(candidate)) continue;
+            if (candidate.pageIndex != atomicShell.pageIndex) continue;
+            if (candidate.domId != atomicShell.domId) continue;
             if (candidate.placement != Placement.INLINE) continue;
             if (!safe(candidate.kind).contains("inline_object")) continue;
             if (!hasInlineSourcePlan(candidate)) continue;
-            if (candidate.domId != leafShell.domId
-                    && !intersects(candidate.sourceObjectIds, leafShell.sourceObjectIds)) {
+            if (candidate.domId != atomicShell.domId
+                    && !intersects(candidate.sourceObjectIds, atomicShell.sourceObjectIds)) {
                 continue;
             }
             if (candidate.file == null || candidate.file.isEmpty()) continue;
@@ -3011,7 +3035,7 @@ public final class OwnershipPlanner {
         return null;
     }
 
-    private boolean isInlineCompanionCandidateForLeafShell(ObjectPlan candidate) {
+    private boolean isInlineCompanionCandidateForAtomicShell(ObjectPlan candidate) {
         if (candidate == null) return false;
         if (candidate.hasVisibleVisual()) return true;
         if (candidate.visualAction != VisualAction.DROP_VISUAL) return false;
@@ -3114,7 +3138,7 @@ public final class OwnershipPlanner {
 
     private static PolicyLayer effectiveVisualPolicyLayer(ObjectPlan plan) {
         if (plan == null) return PolicyLayer.CONTENT;
-        if (isLeafTextHiddenShellPlan(plan)) {
+        if (isAtomicOwnershipRootTextHiddenShellPlan(plan)) {
             return PolicyLayer.DECORATION;
         }
         if (isImageBackedContentShellPlan(plan)) {

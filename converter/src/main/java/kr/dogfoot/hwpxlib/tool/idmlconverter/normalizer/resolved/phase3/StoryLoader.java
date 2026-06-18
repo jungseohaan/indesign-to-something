@@ -16,6 +16,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.ASTTableConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.DoviraSubunitMarkerPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDisposition;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.InlineSemanticLabelPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -629,6 +632,7 @@ public class StoryLoader {
         List<ASTParagraph> result = new ArrayList<>();
         if (ctx == null || idmlCell == null || idmlCell.paragraphs() == null) return result;
         if (hasTextFrameStoryOwnedByPlacedTextFrame(ctx, idmlCell)
+                && !hasPlannedInlineAtomicCellContent(ctx, idmlCell)
                 && !hasDirectVisibleCellText(idmlCell)) {
             return result;
         }
@@ -1070,6 +1074,86 @@ public class StoryLoader {
                 String normalized = normalizeCellOwnershipText(run.content());
                 if (!normalized.isEmpty()) return true;
             }
+        }
+        return false;
+    }
+
+    private static boolean hasPlannedInlineAtomicCellContent(
+            ResolvedBuildContext ctx,
+            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell) {
+        if (ctx == null || ctx.ownershipPlans == null || idmlCell == null
+                || idmlCell.paragraphs() == null) {
+            return false;
+        }
+        for (IDMLParagraph paragraph : idmlCell.paragraphs()) {
+            if (paragraph == null || paragraph.characterRuns() == null) continue;
+            for (IDMLCharacterRun run : paragraph.characterRuns()) {
+                if (run == null || run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) continue;
+                for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
+                    Integer domId = inlineAnchorDomId(run, anchor);
+                    if (domId != null && hasInlineTextShellPlan(ctx, domId)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static Integer inlineAnchorDomId(IDMLCharacterRun run, IDMLCharacterRun.InlineAnchor anchor) {
+        if (run == null || anchor == null) return null;
+        if (anchor.type() == IDMLCharacterRun.InlineAnchorType.FRAME) {
+            if (run.inlineFrames() == null || anchor.index() < 0 || anchor.index() >= run.inlineFrames().size()) {
+                return null;
+            }
+            IDMLTextFrame frame = run.inlineFrames().get(anchor.index());
+            return parseDomId(frame != null ? frame.selfId() : null);
+        }
+        if (anchor.type() == IDMLCharacterRun.InlineAnchorType.GRAPHIC) {
+            if (run.inlineGraphics() == null || anchor.index() < 0 || anchor.index() >= run.inlineGraphics().size()) {
+                return null;
+            }
+            IDMLCharacterRun.InlineGraphic graphic = run.inlineGraphics().get(anchor.index());
+            return parseDomId(graphic != null ? graphic.selfId() : null);
+        }
+        return null;
+    }
+
+    private static Integer parseDomId(String id) {
+        if (id == null || id.isEmpty()) return null;
+        String value = id;
+        if (value.startsWith("u") || value.startsWith("U")) {
+            value = value.substring(1);
+            try {
+                return Integer.parseInt(value, 16);
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean hasInlineTextShellPlan(ResolvedBuildContext ctx, int domId) {
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL || plan.placement != Placement.INLINE) {
+                continue;
+            }
+            if (plan.domId == domId || containsDomId(plan.sourceObjectIds, domId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsDomId(int[] ids, int domId) {
+        if (ids == null) return false;
+        for (int id : ids) {
+            if (id == domId) return true;
         }
         return false;
     }

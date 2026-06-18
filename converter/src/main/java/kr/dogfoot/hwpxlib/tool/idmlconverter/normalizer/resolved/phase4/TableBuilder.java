@@ -1932,6 +1932,7 @@ public final class TableBuilder {
                     domId = parseInlineGraphicDomId(run.inlineGraphics().get(anchor.index()));
                 }
                 if (domId <= 0 || !restoredIds.add(domId)) continue;
+                if (containsInlineSource(astPara, "u" + Integer.toHexString(domId))) continue;
 
                 ASTInlineObject plannedTextShell =
                         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler

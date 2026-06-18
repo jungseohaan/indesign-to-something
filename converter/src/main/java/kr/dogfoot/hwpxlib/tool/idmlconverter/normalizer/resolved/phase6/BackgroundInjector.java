@@ -194,7 +194,8 @@ public final class BackgroundInjector {
                     && !isInferredTextFrameVisualShell;
             boolean isPlannedTextShell =
                     ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
-            boolean needsAlphaCrop = shouldCropOwnedTextFrameShellToAlpha(rg);
+            boolean needsAlphaCrop = shouldCropOwnedTextFrameShellToAlpha(
+                    rg, fullW, fullH, pageWidthMm, pageHeightMm);
             boolean needsIntersectionCrop = fullW > 1.0 && fullH > 1.0
                     && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
                         || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5);
@@ -858,12 +859,20 @@ public final class BackgroundInjector {
         }
     }
 
-    private static boolean shouldCropOwnedTextFrameShellToAlpha(RenderedGroup rg) {
+    private static boolean shouldCropOwnedTextFrameShellToAlpha(
+            RenderedGroup rg,
+            double boundsW,
+            double boundsH,
+            double pageWidth,
+            double pageHeight) {
         if (rg == null) return false;
         if (!isPageObject(rg)) return false;
         if (!"hwpx_tf".equals(rg.textOwner())) return false;
         String reason = rg.reason();
         if (reason == null) return false;
+        if (isPageScaleMixedTextShell(rg, boundsW, boundsH, pageWidth, pageHeight)) {
+            return false;
+        }
         return reason.contains("text_hidden")
                 || reason.contains("visual_shell")
                 || reason.contains("editable_textframe_visual_shell")
@@ -872,6 +881,28 @@ public final class BackgroundInjector {
                 || reason.contains("mixed_group_text_hidden")
                 || reason.contains("complex_graphic_text_hidden")
                 || reason.contains("label_backdrop_group");
+    }
+
+    private static boolean isPageScaleMixedTextShell(
+            RenderedGroup rg,
+            double boundsW,
+            double boundsH,
+            double pageWidth,
+            double pageHeight) {
+        if (rg == null || pageWidth >= 1e8 || pageHeight >= 1e8) return false;
+        if (boundsW <= 0.0 || boundsH <= 0.0 || pageWidth <= 0.0 || pageHeight <= 0.0) return false;
+        String reason = rg.reason();
+        if (reason == null || (!reason.contains("mixed_group_text_hidden")
+                && !reason.contains("complex_graphic_text_hidden")
+                && !reason.contains("image_group_text_hidden"))) {
+            return false;
+        }
+        int sourceCount = rg.sourceObjectIds() != null ? rg.sourceObjectIds().length : 0;
+        if (sourceCount < 6) return false;
+        double widthRatio = Math.min(boundsW, pageWidth) / Math.max(boundsW, pageWidth);
+        double heightRatio = Math.min(boundsH, pageHeight) / Math.max(boundsH, pageHeight);
+        double areaRatio = (boundsW * boundsH) / (pageWidth * pageHeight);
+        return widthRatio >= 0.70 && heightRatio >= 0.55 && areaRatio >= 0.40;
     }
 
     private static boolean shouldPreserveBoundsForAlphaCroppedTextShell(
