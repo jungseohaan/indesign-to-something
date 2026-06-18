@@ -87,6 +87,16 @@
 - 복제본의 fill/stroke/corner/path/group clipping은 InDesign `exportFile()`로 그대로 PNG화한다.
 - Java 변환기는 `ObjectPlan.file`의 textless shell PNG/vector를 `PLACE_TEXT_SHELL`로 배치만 한다.
 - shell 위의 editable TextFrame은 각각 HWPX 텍스트로 배치한다.
+- page-level/floating `PLACE_TEXT_SHELL`은 자신이 소유한 모든 child TextFrame/table
+  carrier가 같은 `ObjectPlan.pageIndex` 안에 있을 때만 visible owner가 될 수 있다.
+  spread/parent group render가 옆 페이지의 TF를 함께 포함하면 그 parent render는
+  text shell owner가 아니며, 같은 페이지 안에서 닫히는 더 구체적인 shell/visual owner가
+  선택되어야 한다. inline shell은 story anchor가 owner이므로 anchor plan을 따른다.
+- page-level/floating `PLACE_TEXT_SHELL`이 같은 source-tree의 shell/graphic을 포함한 채
+  인접 페이지까지 걸쳐 있으면, 그 인접 페이지 조각은 같은 `ObjectPlan`의 overflow crop으로
+  실행한다. 이는 같은 visible owner의 물리적 분할이며 새 ownership이 아니다. 이때 parent
+  shell PNG 안에 이미 포함된 descendant visual fragment는 인접 페이지 plan에서도
+  `DROP_VISUAL`이다.
 - `PLACE_TEXT_SHELL`이 소유한 TF/table carrier는 텍스트만 배치한다. carrier의
   HWPX table border/fill, drawText outline/fill, wrapper rect는 모두 비활성화한다.
 - `placement=INLINE`인 shell은 하나의 inline carrier로 실행한다.
@@ -160,6 +170,11 @@ Group은 leaf 여부가 아니라 source ownership root 여부로 판단한다.
 
 - atomic ownership root: 자손이 함께 있어야 하나의 시각 단위가 되는 Group.
   이 Group의 자손은 root visual에 흡수되고 별도 visible output을 만들지 않는다.
+- `GRAPHIC_ONLY` atomic root는 텍스트가 이미지로 만들어진 로고/라벨도 포함한다.
+  이 경우 root PNG가 완성 시각 단위이므로, 같은 source tree 안의 child
+  `decoration_group`, `complex_graphic_text_hidden`, `vector_shape`, shell render는 모두
+  `DROP_VISUAL`이다. 부모 source slot에서 자식 source만 잘라 둘 다 살리는 composite
+  규칙을 적용하지 않는다.
 - container Group: 독립 atomic root 또는 독립 visual unit을 여러 개 담는 Group.
   이 Group은 기본적으로 visible owner가 아니며, 자식 atomic root들이 각각 owner가 된다.
 - composite/background Group: 표지 배경처럼 container 전체가 하나의 배경 shell로
@@ -252,6 +267,7 @@ Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, st
 - source layer/z 정보가 없는 객체는 추적 누락으로 본다.
 - parent `PLACE_TEXT_SHELL`이 있는 source bundle에서는 descendant visual fragment가 별도 visible output을 가질 수 없다.
 - parent `PLACE_TEXT_SHELL` 위의 owned child TextFrame은 누락되면 안 된다.
+- floating parent `PLACE_TEXT_SHELL`의 `ownedTextFrameIds`는 parent plan과 같은 pageIndex에 있어야 한다.
 - `PLACE_TEXT_SHELL` PNG/vector에는 owned child TextFrame의 텍스트 픽셀이 포함되면 안 된다.
 - `PLACE_TEXT_SHELL`이 Java-drawn synthetic shell이면 안 된다. extractor origin 또는 원본 vector source를 가져야 한다.
 - table-only carrier shell은 `PLACE_TEXT_SHELL` parent와 `PLACE_TABLE_STYLE` carrier가 같은 source bundle으로 추적되어야 한다.

@@ -41,8 +41,40 @@ public final class TeachingMaterialGenerator {
             ASTDocument doc,
             TeachingPromptLoader.AgentPrompts prompts,
             LLMConfig config) throws Exception {
-        throw new LLMException("LLM 호출 기반 semantic/teaching block 생성은 비활성화되었습니다. "
-                + "HWPX 변환의 .semantic-blocks.json은 로컬 SemanticBlockDetector만 사용하세요.");
+        if (config == null || !config.hasAnyKey()) {
+            throw new LLMException("API 키 없음. .env에 OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY 중 하나를 설정하세요.");
+        }
+        if (prompts == null) {
+            throw new LLMException("프롬프트 없음. Agent A/B 프롬프트를 지정하세요.");
+        }
+
+        List<DocumentChunker.DocumentChunk> chunks = DocumentChunker.chunk(doc);
+        if (chunks.isEmpty()) {
+            return emptyResult();
+        }
+
+        AIClient client = new AIClient(config);
+        JsonArray mergedSemanticBlocks = new JsonArray();
+        for (int i = 0; i < chunks.size(); i++) {
+            DocumentChunker.DocumentChunk chunk = chunks.get(i);
+            System.out.println("[LLM] Agent A semantic block " + (i + 1) + "/" + chunks.size()
+                    + ": " + chunk.unitTitle);
+            String raw = client.complete(prompts.agentA(), buildAgentAUserContent(chunk));
+            JsonObject parsed = parseSemanticResult(raw);
+            appendSemanticBlocks(mergedSemanticBlocks, parsed, chunk);
+        }
+
+        System.out.println("[LLM] Agent B teaching block composition: "
+                + mergedSemanticBlocks.size() + " semantic blocks");
+        String rawTeaching = client.complete(prompts.agentB(), buildAgentBUserContent(mergedSemanticBlocks));
+        JsonObject parsedTeaching = parseTeachingResult(rawTeaching);
+        JsonArray teachingBlocks = renumberTeachingBlocks(parsedTeaching);
+        validateTeachingCoverage(mergedSemanticBlocks, teachingBlocks);
+
+        JsonObject result = new JsonObject();
+        result.add("semantic_blocks", mergedSemanticBlocks);
+        result.add("teaching_blocks", teachingBlocks);
+        return result;
     }
 
     // -------------------------------------------------------

@@ -67,6 +67,7 @@ public final class OwnershipPlanner {
     private void run() {
         planRenderedItems();
         planTextFrames();
+        normalizeCrossPageTextShellOwnership();
         resolveHwpxTextOwnedNonShellVisuals();
         resolveInlineCompositeHwpxTextParents();
         resolvePairedInlinePageObjectChannelOwners();
@@ -85,9 +86,11 @@ public final class OwnershipPlanner {
         resolveContainerMasksOverIntrudingLabelBackdrops();
         resolveLayeredContainerFaces();
         resolveParentTextShellDescendantVisuals();
+        resolveCrossPageParentTextShellDescendantVisuals();
         resolveCompositeBakedChildVisuals();
         resolveNestedTextShellSources();
         resolveClusterOwnedTextFrameShells();
+        resolveGraphicOnlyAtomicRootDescendantVisuals();
         normalizeCompositeParentChildSourceSlots();
         resolveNonVisibleFloatingVisuals();
         resolveDroppedRenderedTextOwnership();
@@ -889,6 +892,28 @@ public final class OwnershipPlanner {
 
     private static boolean isTextFramePlanKind(String kind) {
         return kind != null && (kind.equals("text_frame") || kind.startsWith("text_frame:"));
+    }
+
+    private void normalizeCrossPageTextShellOwnership() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.placement != Placement.FLOATING) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            if (ownedTextFramesAreOnPlanPage(plan)) continue;
+            plans.set(i, plan.withVisualAction(VisualAction.DROP_VISUAL,
+                    "cross_page_text_shell_owned_text_not_on_plan_page"));
+        }
+    }
+
+    private boolean ownedTextFramesAreOnPlanPage(ObjectPlan plan) {
+        if (plan == null || data == null || plan.ownedTextFrameIds == null) return true;
+        for (int tfId : plan.ownedTextFrameIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(tfId));
+            if (tf == null) return false;
+            if (tf.pageIndex() != plan.pageIndex) return false;
+        }
+        return true;
     }
 
     private void addPlanForRendered(RenderedGroup rg, String channel) {
@@ -2218,6 +2243,32 @@ public final class OwnershipPlanner {
         }
     }
 
+    private void resolveGraphicOnlyAtomicRootDescendantVisuals() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan parent = plans.get(i);
+            if (!isVisibleGraphicOnlyAtomicRoot(parent)) continue;
+            for (int j = 0; j < plans.size(); j++) {
+                if (i == j) continue;
+                ObjectPlan child = plans.get(j);
+                if (!isVisibleRenderedVisual(child)) continue;
+                if (child.pageIndex != parent.pageIndex) continue;
+                if (!isStrictChildPlan(parent, child)) continue;
+                if (!hasSourceParentRelation(parent, child)
+                        && !containsAll(parent.sourceObjectIds, child.sourceObjectIds)) {
+                    continue;
+                }
+                plans.set(j, child.withVisualAction(VisualAction.DROP_VISUAL,
+                        "owned_by_graphic_only_atomic_root"));
+            }
+        }
+    }
+
+    private boolean isVisibleGraphicOnlyAtomicRoot(ObjectPlan plan) {
+        if (!isVisibleRenderedVisual(plan)) return false;
+        RenderedGroup rg = renderedGroupForPlan(plan);
+        return isGraphicOnlyAtomicObject(rg);
+    }
+
     private boolean isCompositeSourceParent(ObjectPlan plan) {
         if (!isVisibleRenderedVisual(plan)) return false;
         if (plan.sourceObjectIds == null || plan.sourceObjectIds.length <= 1) return false;
@@ -2793,6 +2844,83 @@ public final class OwnershipPlanner {
                 plans.set(i, parent.withDescendantVisualObjectIds(toIntArray(descendants)));
             }
         }
+    }
+
+    private void resolveCrossPageParentTextShellDescendantVisuals() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan parent = plans.get(i);
+            if (!isParentTextShellOwner(parent)) continue;
+            if (!isSpreadCrossingVisual(parent)) continue;
+            LinkedHashSet<Integer> descendants = new LinkedHashSet<>();
+            if (parent.descendantVisualObjectIds != null) {
+                for (int id : parent.descendantVisualObjectIds) {
+                    descendants.add(id);
+                }
+            }
+            for (int j = 0; j < plans.size(); j++) {
+                if (i == j) continue;
+                ObjectPlan child = plans.get(j);
+                if (!isVisibleRenderedVisual(child)) continue;
+                if (child.pageIndex == parent.pageIndex) continue;
+                if (Math.abs(child.pageIndex - parent.pageIndex) != 1) continue;
+                if (!parentTextShellMayOwnDescendantVisual(parent, child)) continue;
+                if (isStandaloneGraphicOnlyInlineObjectPlan(child)) continue;
+                if (!crossPageTextShellMayOwnDescendantVisual(parent, child)) continue;
+                collectDescendantVisualIds(parent, child, descendants);
+                ObjectPlan dropped = child.withVisualAction(VisualAction.DROP_VISUAL,
+                        "owned_by_cross_page_parent_text_shell");
+                if (!"text_frame".equals(dropped.kind)) {
+                    dropped = dropped.withTextAction(TextAction.DROP_TEXT);
+                }
+                plans.set(j, dropped);
+            }
+            if (!descendants.isEmpty()) {
+                plans.set(i, parent.withDescendantVisualObjectIds(toIntArray(descendants)));
+            }
+        }
+    }
+
+    private boolean crossPageTextShellMayOwnDescendantVisual(ObjectPlan parent, ObjectPlan child) {
+        if (parent == null || child == null) return false;
+        if (!adjacentPageIntersection(parent, child.pageIndex)) return false;
+        if (isStrictChildPlan(parent, child)) return true;
+        if (containsAll(visualSourceIds(parent), visualSourceIds(child))) return true;
+        return containsAny(parent.sourceObjectIds, visualSourceIds(child));
+    }
+
+    private boolean isSpreadCrossingVisual(ObjectPlan plan) {
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
+        double pageWidth = pageWidthMm(plan.pageIndex);
+        double pageHeight = pageHeightMm(plan.pageIndex);
+        return plan.bounds[1] < -10.0
+                || plan.bounds[3] > pageWidth + 10.0
+                || plan.bounds[0] < -10.0
+                || plan.bounds[2] > pageHeight + 10.0;
+    }
+
+    private boolean adjacentPageIntersection(ObjectPlan plan, int adjacentPageIndex) {
+        if (plan == null || plan.bounds == null || plan.bounds.length < 4) return false;
+        double pageWidth = pageWidthMm(plan.pageIndex);
+        double pageHeight = pageHeightMm(plan.pageIndex);
+        double left = plan.bounds[1];
+        double top = plan.bounds[0];
+        double right = plan.bounds[3];
+        double bottom = plan.bounds[2];
+        if (adjacentPageIndex == plan.pageIndex - 1) {
+            left += pageWidth;
+            right += pageWidth;
+        } else if (adjacentPageIndex == plan.pageIndex + 1) {
+            left -= pageWidth;
+            right -= pageWidth;
+        } else {
+            return false;
+        }
+        double adjacentPageWidth = pageWidthMm(adjacentPageIndex);
+        double adjacentPageHeight = pageHeightMm(adjacentPageIndex);
+        if (adjacentPageWidth >= 1e8) adjacentPageWidth = pageWidth;
+        if (adjacentPageHeight >= 1e8) adjacentPageHeight = pageHeight;
+        return right > 0.0 && left < adjacentPageWidth
+                && bottom > 0.0 && top < adjacentPageHeight;
     }
 
     private static boolean isParentTextShellOwner(ObjectPlan plan) {

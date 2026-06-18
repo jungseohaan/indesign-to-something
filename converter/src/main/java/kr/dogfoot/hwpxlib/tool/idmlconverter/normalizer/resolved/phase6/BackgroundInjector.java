@@ -49,6 +49,23 @@ public final class BackgroundInjector {
     private static final double CONCEPT_LABEL_SHELL_MAX_AREA_RATIO = 2.60;
     private static final double CONCEPT_LABEL_SHELL_OVERLAP_MIN = 0.55;
 
+    private static boolean shouldPlaceIntersectingOverflowCopy(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            String visualLayer,
+            double rawLeft,
+            double rawRight,
+            double pageWidthMm) {
+        if (ctx == null || rg == null || pageWidthMm >= 1e8) return false;
+        if (ctx.shouldSkipOverflowCopyByOwnershipPlan(rg)) return false;
+        boolean crossesHorizontalPage = rawLeft < -10.0 || rawRight > pageWidthMm + 10.0;
+        if (!crossesHorizontalPage) return false;
+        VisualAction action = ctx.visualActionByOwnershipPlan(rg);
+        return action == VisualAction.PLACE_TEXT_SHELL
+                || "PAGE_BACKGROUND".equals(visualLayer)
+                || "CONTAINER_BACKDROP".equals(visualLayer);
+    }
+
     public static void inject(ResolvedBuildContext ctx, List<ASTSection> sections) {
         if (ctx.resolvedData == null) return;
         List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
@@ -115,6 +132,7 @@ public final class BackgroundInjector {
             double rawRight = bounds[3], rawBottom = bounds[2];
             double fullW = rawRight - rawLeft;
             double fullH = rawBottom - rawTop;
+            String visualLayer = ctx.visualLayerByOwnershipPlan(rg);
             double cropRefLeft = rawLeft, cropRefTop = rawTop;
             double cropRefRight = rawRight, cropRefBottom = rawBottom;
             boolean hasCropSourceBounds = hasUsableCropSourceBounds(rg, bounds);
@@ -142,6 +160,18 @@ public final class BackgroundInjector {
             double visTop = Math.max(0.0, rawTop);
             double visRight = Math.min(rawRight, pageWidthMm);
             double visBottom = Math.min(rawBottom, pageHeightMm);
+            if (visLeft < visRight
+                    && visTop < visBottom
+                    && shouldPlaceIntersectingOverflowCopy(ctx, rg, visualLayer, rawLeft, rawRight, pageWidthMm)) {
+                int overflowPlaced = VisualOverflowPlacer.placeSpreadOverflowCopies(
+                        ctx, sections, rg, pageIdx,
+                        rawLeft, rawTop, rawRight, rawBottom, fullW, fullH,
+                        pageWidthMm, originalImageData, visualLayer);
+                if (overflowPlaced > 0) {
+                    ctx.recordRenderedDecision(rg, "Phase6", "PLACE_INTERSECTING_PAGE_OVERFLOW",
+                            "main page intersection exists, adjacent spread overflow was also placed");
+                }
+            }
             if (visLeft >= visRight || visTop >= visBottom) {
                 int overflowPlaced = 0;
                 if (!ctx.shouldSkipOverflowCopyByOwnershipPlan(rg)) {
@@ -180,7 +210,6 @@ public final class BackgroundInjector {
                     && (isRenderedContainerShell(rg) || isTextFrameVisualShell);
             boolean isInferredTextFrameVisualShell =
                     VisualZOrderPlanner.inferredTextFrameVisualShellZOrder(ctx, rg) >= 0;
-            String visualLayer = ctx.visualLayerByOwnershipPlan(rg);
             boolean planKeepsForegroundZ = isPlanForegroundVisualLayer(visualLayer);
 
             PreparedVisualImage prepared = new PreparedVisualImage(imageData);

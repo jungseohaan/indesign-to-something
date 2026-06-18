@@ -302,7 +302,23 @@ public class ConverterCLI {
         // --teach → 교수자료 JSON 생성
         boolean isTeachMode = teachPromptPath != null || teachDir != null;
         if (isTeachMode && outputPath.toLowerCase().endsWith(".json")) {
-            failLlmSemanticBlockGenerationDisabled();
+            ASTDocument teachAst = IDMLToHwpxConverter.buildAst(inputPath, options, reporter);
+            kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader envR =
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.load();
+            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig llmCfg =
+                    buildLlmConfig(envR);
+            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader.AgentPrompts prompts =
+                    teachDir != null
+                            ? kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
+                                    .loadAgentsFromDir(teachDir, textbookId)
+                            : kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
+                                    .loadAgents(teachPromptPath, teachExtraPath);
+            com.google.gson.JsonObject result =
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialGenerator
+                            .generate(teachAst, prompts, llmCfg);
+            kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialWriter
+                    .write(result, outputPath);
+            System.out.println("Teaching semantic blocks 생성 완료: " + outputPath);
             return;
         }
 
@@ -1492,17 +1508,92 @@ public class ConverterCLI {
             System.err.println("Usage: --teach-ast <ast-dir> <output.json> --teach <base_prompt.txt> [options]");
             System.exit(1);
         }
-        failLlmSemanticBlockGenerationDisabled();
-    }
+        String astPath = args[1];
+        String outputPath = args[2];
+        String teachPromptPath = null;
+        String teachExtraPath = null;
+        String teachDir = null;
+        String textbookId = null;
 
-    private static void failLlmSemanticBlockGenerationDisabled() {
-        System.err.println("Error: LLM 호출 기반 semantic/teaching block 생성은 비활성화되었습니다.");
-        System.err.println("       HWPX 변환 시 생성되는 .semantic-blocks.json은 로컬 SemanticBlockDetector만 사용합니다.");
-        System.exit(2);
+        for (int i = 3; i < args.length; i++) {
+            switch (args[i]) {
+                case "--teach":
+                    if (i + 1 < args.length) teachPromptPath = args[++i];
+                    break;
+                case "--teach-extra":
+                    if (i + 1 < args.length) teachExtraPath = args[++i];
+                    break;
+                case "--teach-dir":
+                    if (i + 1 < args.length) teachDir = args[++i];
+                    break;
+                case "--textbook-id":
+                    if (i + 1 < args.length) textbookId = args[++i];
+                    break;
+                default:
+                    System.err.println("Unknown option: " + args[i]);
+            }
+        }
+
+        if (teachPromptPath == null && teachDir == null) {
+            System.err.println("Usage: --teach-ast <ast-dir> <output.json> --teach <base_prompt.txt> [options]");
+            System.exit(1);
+        }
+
+        ASTDocument teachAst = ASTBundleReader.read(new File(astPath));
+        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader.AgentPrompts prompts =
+                teachDir != null
+                        ? kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
+                                .loadAgentsFromDir(teachDir, textbookId)
+                        : kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingPromptLoader
+                                .loadAgents(teachPromptPath, teachExtraPath);
+        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig llmCfg =
+                buildLlmConfig(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.load());
+        com.google.gson.JsonObject result =
+                kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialGenerator
+                        .generate(teachAst, prompts, llmCfg);
+        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.TeachingMaterialWriter
+                .write(result, outputPath);
+        System.out.println("Teaching semantic blocks 생성 완료: " + outputPath);
     }
 
     private static void runTestLlm(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader env) {
-        failLlmSemanticBlockGenerationDisabled();
+        kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig cfg = buildLlmConfig(env);
+        if (!cfg.hasAnyKey()) {
+            System.err.println("[test-llm] API 키 없음. .env에 OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY 중 하나를 설정하세요.");
+            System.exit(1);
+        }
+
+        System.out.println("[test-llm] provider=" + cfg.activeProvider());
+        if (cfg.hasOpenAI()) System.out.println("[test-llm] OPENAI key: " + maskKey(cfg.openaiApiKey()));
+        if (cfg.hasAnthropic()) System.out.println("[test-llm] ANTHROPIC key: " + maskKey(cfg.anthropicApiKey()));
+        if (cfg.hasGroq()) System.out.println("[test-llm] GROQ key: " + maskKey(cfg.groqApiKey()));
+
+        try {
+            String result = new kr.dogfoot.hwpxlib.tool.idmlconverter.llm.AIClient(cfg).ping();
+            System.out.println("[test-llm] 응답: " + result);
+            System.out.println("[test-llm] 연결 성공");
+        } catch (kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMException e) {
+            System.err.println("[test-llm] 실패: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
+    private static kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig buildLlmConfig(
+            kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader env) {
+        String openaiKey = env != null
+                ? env.getOrEnv(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.OPENAI_API_KEY)
+                : null;
+        String claudeKey = env != null
+                ? env.getOrEnv(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.ANTHROPIC_API_KEY)
+                : null;
+        String groqKey = env != null
+                ? env.getOrEnv(kr.dogfoot.hwpxlib.tool.idmlconverter.util.EnvFileReader.GROQ_API_KEY)
+                : null;
+        return kr.dogfoot.hwpxlib.tool.idmlconverter.llm.LLMConfig.builder()
+                .openaiApiKey(openaiKey)
+                .anthropicApiKey(claudeKey)
+                .groqApiKey(groqKey)
+                .build();
     }
 
     private static String maskKey(String key) {
