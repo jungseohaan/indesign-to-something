@@ -47,13 +47,23 @@
 - extractor가 source object/group을 복제한다.
 - 복제본에서 HWPX가 소유할 TextFrame/table text만 제거한다.
 - 복제본의 fill/stroke/corner/path/group clipping은 InDesign `exportFile()`로 그대로 PNG화한다.
-- Java 변환기는 추출된 textless shell PNG/vector를 `PLACE_TEXT_SHELL`로 배치만 한다.
+- Java 변환기는 `ObjectPlan.file`의 textless shell PNG/vector를 `PLACE_TEXT_SHELL`로 배치만 한다.
 - shell 위의 editable TextFrame은 각각 HWPX 텍스트로 배치한다.
 - `PLACE_TEXT_SHELL`이 소유한 TF/table carrier는 텍스트만 배치한다. carrier의
   HWPX table border/fill, drawText outline/fill, wrapper rect는 모두 비활성화한다.
-- 예외: `placement=INLINE`인 textless shell companion은 HWPX의 인라인 편집성을 보존하기 위해
-  하나의 inline carrier로 실행한다. 이때 carrier는 추출 shell PNG를 image brush로 쓰고,
-  텍스트는 editable drawText/subList로 둔다. synthetic outline/fill은 만들지 않는다.
+- `placement=INLINE`인 shell은 하나의 inline carrier로 실행한다.
+  carrier는 `ObjectPlan.file`의 추출 shell PNG를 image brush로 쓰고,
+  텍스트는 editable drawText/subList로 둔다.
+- inline companion으로 승격된 shell plan은 textless shell 파일과 inline bounds를 가진다.
+  `inline_*`가 editable text까지 구운 complete PNG이면 shell 파일로 쓰지 않는다.
+  같은 source bundle의 `textHiddenBeforeExport=true` / `containsEditableText=false` 추출물을 shell 파일로 쓴다.
+- 실행 단계는 `ObjectPlan.file/bounds`가 없으면 shell을 만들지 않는다.
+  `RenderedGroup.file/bounds`, table/TF bounds, fill/stroke/corner 값으로 대체하지 않는다.
+- inline text shell carrier는 `ObjectPlan.file`의 textless shell PNG에서 투명/종이색 여백만 crop할 수 있다.
+  이 crop은 ownership 재판정이 아니라 HWPX inline carrier 안에 넣기 위한 image preparation이다.
+  crop 후에도 carrier 크기와 placement는 `ObjectPlan.bounds`를 따른다.
+- HWPX imgBrush가 PNG alpha를 검정으로 렌더링하는 경우, crop된 shell PNG만 white matte로 인코딩할 수 있다.
+  이 matte는 textless shell 픽셀 보존용이며 complete text PNG 생성이나 file/bounds fallback이 아니다.
 
 금지:
 
@@ -62,6 +72,10 @@
 - HWPX drawText/shape/table border를 shell 대체물로 만들기
 - 추출된 shell이 있는데 TF outline/fill을 다시 그리기
 - shell PNG 안에 editable text를 다시 굽기
+- inline shell PNG를 흰색 불투명 캔버스로 flatten해서 원본 크롭/알파를 잃게 하기
+- `ObjectPlan.file` 대신 같은 source id의 다른 render file을 fallback으로 사용하기
+- `PLACE_TEXT_SHELL` 실행 중 HWPX fill/stroke/outline을 추가해 shell을 보정하기
+- editable text가 남아 있는 `inline_*` complete PNG를 `PLACE_TEXT_SHELL`의 shell 이미지로 사용하기
 
 원본 shell 추출이 실패하면 변환 단계에서 비슷한 shell을 만들지 않는다.
 실패를 드러내고 extractor/ownership metadata를 수정한다.

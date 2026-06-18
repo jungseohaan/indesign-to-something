@@ -463,8 +463,8 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
   paragraph/table 삽입, rounded rectangle geometry는 공통 경로가 처리한다.
 - fill이 있다고 stroke를 생략하지 않는다. InDesign의 채움과 외곽선은 독립 속성이므로
   HWPX drawText 셸에서도 독립적으로 적용한다.
-- 라벨 앵커 자체가 inline Rectangle/Polygon/Oval이고 child TF를 품은 경우에도 같은 규칙을 쓴다.
-  shell 실행 단계는 parent shape의 fill/stroke/corner를 HWPX inline text frame 속성으로 반드시 전달한다.
+- 라벨 앵커 자체가 inline Rectangle/Polygon/Oval이고 child TF를 품은 경우에도 ownership plan을 따른다.
+  `ABSORB_TEXT_STYLE`이면 HWPX 속성으로 흡수하고, `PLACE_TEXT_SHELL`이면 추출 shell만 쓴다.
 - `ABSORB_TEXT_STYLE`이 선택된 visual source는 별도 PNG로 배치하지 않는다.
 - `주장`, `이유 1`, `근거 1`처럼 구조 표식은 editable 텍스트로 유지하되,
   라운드 사각형 배경은 drawText 도형 속성으로 흡수하는 것이 기본이다.
@@ -487,6 +487,11 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 - `placement=INLINE`인 textless shell companion은 예외적으로 하나의 inline carrier 안에서
   추출 shell image brush와 editable drawText를 함께 실행할 수 있다. 이 경우에도 synthetic
   outline/fill은 만들지 않고 inline/floating placement를 뒤집지 않는다.
+- inline carrier는 `ObjectPlan.file/bounds`만 실행한다. `ObjectPlan.file`은 textless shell이어야 하며,
+  editable text가 남아 있는 `inline_*` complete PNG는 shell로 쓰지 않는다.
+  `RenderedGroup` bounds, parent shape fill/stroke/corner는 fallback으로 쓰지 않는다.
+- inline text shell carrier는 textless shell 이미지의 투명/종이색 여백 crop과 HWPX imgBrush용
+  white matte만 허용한다. 이 처리는 ownership 재판정이 아니라 최종 인코딩 준비다.
 - shell visual과 child TF text는 서로 다른 ownership channel이면 동시에 보일 수 있다.
 - 중복 위반은 shell PNG 안에 child TF 텍스트 픽셀이 남거나, parent shell과 descendant visual fragment가 동시에 보이거나,
   같은 TF를 floating HWPX 텍스트와 drawText/imageFill 내부 텍스트로 동시에 재생성하는 경우다.

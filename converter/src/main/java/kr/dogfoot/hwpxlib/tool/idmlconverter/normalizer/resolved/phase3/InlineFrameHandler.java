@@ -16,6 +16,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Table
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualCropper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
@@ -770,7 +771,7 @@ public class InlineFrameHandler {
             String cleaned = vt == null ? "" : vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
             if (cleaned.isEmpty()) return null;
         }
-        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, children.get(0), shell, true);
+        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, children.get(0), shell);
     }
 
     private static boolean isInlineShellShape(ResolvedPageItem item) {
@@ -1327,27 +1328,22 @@ public class InlineFrameHandler {
             ResolvedPageItem anchorItem,
             ResolvedTextFrame childTf) {
         RenderedGroup shell = findTextHiddenInlineShell(ctx, anchoredObjectId, childTf);
-        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, shell, false);
+        return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, shell);
     }
 
     /**
      * 셸 PNG(렌더된 배경) + 편집 자식 TF → INLINE_TEXT_FRAME 인라인 객체.
      * 셸 탐색 방식과 무관하게 빌드 본문을 공유한다(말풍선/배지/그래픽 셸 공통).
-     *
-     * forcePngFill=true: 전역 native-textbox-graphics 정책과 무관하게 셸 PNG를 도형 배경(imgBrush)으로
-     * 강제 emit + 알파를 흰색으로 평탄화. 한글 imgBrush는 PNG 알파 영역을 검정으로 칠하므로,
-     * 흰 배경 셀 위의 장식(곡선 꺾쇠 등) PNG는 흰색 합성이 필요하다.
      */
     private static ASTInlineObject buildInlineShellObject(
             ResolvedBuildContext ctx,
             int anchoredObjectId,
             ResolvedPageItem anchorItem,
             ResolvedTextFrame childTf,
-            RenderedGroup shell,
-            boolean forcePngFill) {
+            RenderedGroup shell) {
         if (childTf == null) return null;
         return buildInlineShellObject(ctx, anchoredObjectId, anchorItem,
-                java.util.Collections.singletonList(childTf), shell, forcePngFill);
+                java.util.Collections.singletonList(childTf), shell);
     }
 
     private static ASTInlineObject buildInlineShellObject(
@@ -1355,28 +1351,21 @@ public class InlineFrameHandler {
             int anchoredObjectId,
             ResolvedPageItem anchorItem,
             java.util.List<ResolvedTextFrame> childTfs,
-            RenderedGroup shell,
-            boolean forcePngFill) {
+            RenderedGroup shell) {
         if (childTfs == null || childTfs.size() != 1) return null;
-        if (shell == null || ctx.basePath == null || shell.file() == null) return null;
+        if (shell == null || ctx.basePath == null) return null;
         ObjectPlan shellPlan = findInlineTextShellOwnerPlan(ctx, shell, childTfs);
         if (shellPlan == null) return null;
-        String shellFile = shellPlan.file != null && !shellPlan.file.isEmpty()
-                ? shellPlan.file
-                : shell.file();
-        File pngFile = new File(ctx.basePath, shellFile);
+        if (shellPlan.file == null || shellPlan.file.isEmpty()) return null;
+        if (shellPlan.bounds == null || shellPlan.bounds.length < 4) return null;
+        File pngFile = new File(ctx.basePath, shellPlan.file);
         if (!pngFile.exists() || !pngFile.isFile()) return null;
         try {
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
             BufferedImage img = ImageIO.read(pngFile);
             if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
-            if (forcePngFill) {
-                imageData = flattenOntoWhite(img);
-            }
-
-            double[] shellBounds = shellPlan.bounds != null && shellPlan.bounds.length >= 4
-                    ? shellPlan.bounds
-                    : shell.bounds();
+            imageData = prepareInlineTextShellImageData(img);
+            double[] shellBounds = shellPlan.bounds;
             double w = 0;
             double h = 0;
             if (shellBounds != null && shellBounds.length >= 4) {
@@ -1400,7 +1389,6 @@ public class InlineFrameHandler {
             obj.imageFillData(imageData);
             obj.nativeGraphicsAllowed(true);
             obj.forceImageFill(true);
-            applyInlineShellShapeStyle(ctx, anchorItem, obj);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTfs.get(0), true));
             obj.verticalJustification("CenterAlign");
             for (ResolvedTextFrame childTf : childTfs) {
@@ -1469,6 +1457,15 @@ public class InlineFrameHandler {
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
         ImageIO.write(flat, "png", bos);
         return bos.toByteArray();
+    }
+
+    private static byte[] prepareInlineTextShellImageData(BufferedImage img) throws Exception {
+        BufferedImage shell = VisualCropper.knockOutPaperLikeFill(img);
+        VisualCropper.AlphaCropResult crop = VisualCropper.alphaCrop(shell);
+        if (crop != null && crop.image != null) {
+            shell = crop.image;
+        }
+        return flattenOntoWhite(shell);
     }
 
     private static void applyInlineShellShapeStyle(
@@ -2670,7 +2667,7 @@ public class InlineFrameHandler {
                     ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
                     ResolvedTextFrame childTf = firstEditableTextFrameForRenderedGroup(ctx, rg);
                     ASTInlineObject shellObject =
-                            buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, rg, false);
+                            buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, rg);
                     if (shellObject != null) return shellObject;
                 }
                 boolean isNullTypeInline = rg.itemType() == null;
@@ -2808,7 +2805,7 @@ public class InlineFrameHandler {
             return null;
         }
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
-        return buildInlineShellObject(ctx, shell.id(), anchorItem, tf, shell, false);
+        return buildInlineShellObject(ctx, shell.id(), anchorItem, tf, shell);
     }
 
     public static boolean shouldUsePlannedInlinePngWithSeparateHwpxText(

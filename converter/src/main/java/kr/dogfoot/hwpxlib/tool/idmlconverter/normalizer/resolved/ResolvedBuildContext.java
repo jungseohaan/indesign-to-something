@@ -1171,6 +1171,10 @@ public final class ResolvedBuildContext {
 
     public void recordRenderedDecision(RenderedGroup rg, ObjectPlan explicitPlan, String phase, String decision, String detail) {
         if (rg == null) return;
+        ObjectPlan plan = explicitPlan != null ? explicitPlan : findOwnershipPlanForRendered(rg);
+        String executedFile = plan != null && plan.file != null && !plan.file.isEmpty()
+                ? plan.file
+                : rg.file();
         StringBuilder sb = new StringBuilder(256);
         sb.append('{')
                 .append("\"phase\":\"").append(jsonEscape(phase)).append("\",")
@@ -1178,13 +1182,13 @@ public final class ResolvedBuildContext {
                 .append("\"detail\":\"").append(jsonEscape(detail)).append("\",")
                 .append("\"id\":").append(rg.id()).append(',')
                 .append("\"pageIndex\":").append(rg.pageIndex()).append(',')
-                .append("\"file\":\"").append(jsonEscape(rg.file())).append("\",")
+                .append("\"file\":\"").append(jsonEscape(executedFile)).append("\",")
+                .append("\"sourceFile\":\"").append(jsonEscape(rg.file())).append("\",")
                 .append("\"reason\":\"").append(jsonEscape(rg.reason())).append("\",")
                 .append("\"itemType\":\"").append(jsonEscape(rg.itemType())).append("\",")
                 .append("\"visualOwner\":\"").append(jsonEscape(rg.visualOwner())).append("\",")
                 .append("\"textOwner\":\"").append(jsonEscape(rg.textOwner())).append("\",")
                 .append("\"placementAllowed\":").append(Boolean.FALSE.equals(rg.placementAllowed()) ? "false" : "true");
-        ObjectPlan plan = explicitPlan != null ? explicitPlan : findOwnershipPlanForRendered(rg);
         if (plan != null) {
             sb.append(",\"planTextAction\":\"").append(plan.textAction).append("\",")
                     .append("\"planVisualAction\":\"").append(plan.visualAction).append("\",")
@@ -1192,9 +1196,12 @@ public final class ResolvedBuildContext {
                     .append("\"planPolicyLayer\":\"").append(plan.visualPolicyLayer()).append("\",")
                     .append("\"planPlacement\":\"").append(plan.placement).append("\",")
                     .append("\"planZOrder\":").append(plan.zOrder).append(',')
-                    .append("\"planReason\":\"").append(jsonEscape(plan.reason)).append("\"");
+                    .append("\"planReason\":\"").append(jsonEscape(plan.reason)).append("\",")
+                    .append("\"planFile\":\"").append(jsonEscape(plan.file)).append("\"");
         }
-        double[] b = rg.bounds();
+        double[] b = plan != null && plan.bounds != null && plan.bounds.length >= 4
+                ? plan.bounds
+                : rg.bounds();
         if (b != null && b.length >= 4) {
             sb.append(",\"bounds\":[")
                     .append(b[0]).append(',')
@@ -1202,8 +1209,24 @@ public final class ResolvedBuildContext {
                     .append(b[2]).append(',')
                     .append(b[3]).append(']');
         }
+        double[] sourceBounds = rg.bounds();
+        if (sourceBounds != null && sourceBounds.length >= 4 && !sameBounds(sourceBounds, b)) {
+            sb.append(",\"sourceBounds\":[")
+                    .append(sourceBounds[0]).append(',')
+                    .append(sourceBounds[1]).append(',')
+                    .append(sourceBounds[2]).append(',')
+                    .append(sourceBounds[3]).append(']');
+        }
         sb.append('}');
         renderDecisionLines.add(sb.toString());
+    }
+
+    private static boolean sameBounds(double[] a, double[] b) {
+        if (a == null || b == null || a.length < 4 || b.length < 4) return false;
+        for (int i = 0; i < 4; i++) {
+            if (Math.abs(a[i] - b[i]) > 0.0001) return false;
+        }
+        return true;
     }
 
     private static String jsonEscape(String value) {

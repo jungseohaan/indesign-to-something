@@ -2943,7 +2943,7 @@ public final class OwnershipPlanner {
                     Math.max(inlineCompanion.zOrder, leafShell.zOrder),
                     "inline_companion_leaf_text_shell",
                     leafShell.file,
-                    leafShell.bounds,
+                    inlineCompanion.bounds,
                     leafShell.sourceLayerId,
                     leafShell.sourceLayerName,
                     leafShell.sourceLayerIndex);
