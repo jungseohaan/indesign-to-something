@@ -11,9 +11,49 @@
 1. Stage 1만 source object의 text/visual owner, placement, layer를 결정한다.
 2. 후속 단계는 `ObjectPlan`을 실행만 한다.
 3. editable text는 HWPX가 소유한다.
-4. textless shell은 원본 InDesign 추출물만 쓴다.
-5. 같은 source bundle의 visible visual owner는 하나다.
-6. 원본 layer/z/inline/floating 정보는 plan과 결과에 추적한다.
+4. shell/style/content는 원본 source에서 온 material만 실행한다.
+5. 같은 source bundle의 같은 ownership slot은 owner를 하나만 가진다.
+6. 원본 layer/z/inline/floating/coordinate 정보는 plan과 결과에 추적한다.
+
+### 1.1 Source Bundle, Slot, Material
+
+중복 금지는 source id 자체가 아니라 source bundle 안의 ownership slot 단위로 판단한다.
+같은 source bundle이라도 text, shell, table style, content visual은 서로 다른 slot이다.
+
+기본 slot:
+
+- `TEXT_SLOT`: editable/searchable text. HWPX paragraph/run, TextFrame, table text가 실행한다.
+- `SHELL_SLOT`: textless shell, label backdrop, outline, 말풍선 껍데기.
+- `TABLE_STYLE_SLOT`: table/cell fill, border, inset, row/column outer bounds 같은 HWPX table 속성.
+- `CONTENT_VISUAL_SLOT`: 사진, 삽화, 차트, QR, complete marker PNG.
+
+허용 materialization:
+
+- `HWPX_TEXT`: HWPX text/run/table text.
+- `HWPX_TABLE_STYLE`: HWPX table/cell 속성.
+- `NATIVE_SOURCE_SHAPE`: 원본 `Rectangle`/`Oval` source의 fill/stroke/corner를 HWPX native shape로 실행.
+- `EXTRACTED_PNG_VECTOR`: InDesign source에서 추출한 textless PNG/vector.
+- `COMPLETE_PNG`: PNG가 text/visual을 모두 소유하는 atomic marker 또는 graphic-only complete visual.
+
+중복 invariant:
+
+- 같은 source bundle의 같은 slot은 visible owner를 하나만 가진다.
+- `TEXT_SLOT`과 `SHELL_SLOT`은 동시에 보일 수 있다. 예: textless shell + editable child TF.
+- `TABLE_STYLE_SLOT`은 shell/source bundle에 포함된 fill-only shape를 HWPX table 속성으로 흡수할 수 있다.
+  이 source는 shell PNG/native shell로 다시 visible 배치하지 않는다.
+- 같은 source id가 서로 다른 slot에 등장하는 경우에는 `styleSourceObjectIds`,
+  `visualSourceObjectIds`, `ownedTextFrameIds`로 slot ownership을 명시한다.
+
+`ObjectPlan`은 source identity와 실행 material을 분리해야 한다.
+
+- `sourceObjectIds`: 원본 bundle 정체성.
+- `visualSourceObjectIds`: visible shell/content material source.
+- `styleSourceObjectIds`: HWPX table/text style로 흡수되는 source.
+- `ownedTextFrameIds`: HWPX text가 소유하는 child TextFrame.
+- `materialization`: `HWPX_TEXT`, `HWPX_TABLE_STYLE`, `NATIVE_SOURCE_SHAPE`,
+  `EXTRACTED_PNG_VECTOR`, `COMPLETE_PNG` 중 하나.
+- `coordinateSpace`: `STORY_FLOW`, `PAGE`, `SOURCE_LOCAL` 중 하나.
+- `anchorOwner`: story anchor, page, parent source group 중 실제 좌표 owner.
 
 ## 2. 텍스트
 
@@ -38,11 +78,12 @@
   bundle을 후속 단계에서 만들지 않는다.
 - 닫힌 atomic bundle과 정확히 맞는 render만 atomic object의 visual owner가 될 수 있다.
   table carrier, parent TextFrame, parent table, unrelated group source가 섞인 render는 atomic object owner가 아니다.
-- atomic object의 표현 방식은 둘 중 하나다.
+- atomic object의 표현 방식은 아래 세 가지다.
   - `COMPLETE_PNG`: `textAction=OWNED_BY_PNG`, `visualAction=PLACE_INLINE_PNG|PLACE_FLOATING_PNG`
   - `TEXTLESS_SHELL_WITH_TF`: `textAction=OWNED_BY_HWPX_TEXT`, `visualAction=PLACE_TEXT_SHELL`
   - `GRAPHIC_ONLY`: `textAction=DROP_TEXT`, `visualAction=PLACE_INLINE_PNG|PLACE_FLOATING_PNG`
-- `TEXTLESS_SHELL_WITH_TF`의 shell은 extractor가 만든 textless PNG/vector만 사용하고,
+- `TEXTLESS_SHELL_WITH_TF`의 shell source는 원본 source shell이어야 한다.
+  실행 material은 `EXTRACTED_PNG_VECTOR` 또는 `NATIVE_SOURCE_SHAPE`만 허용하고,
   label TF는 HWPX text로 배치한다.
 - inline `TEXTLESS_SHELL_WITH_TF`는 `pageItems`에 원본 Group bridge가 없어도
   `renderedFloatingItems`의 atomic metadata와 ObjectPlan이 일치하면 실행 대상이다.
@@ -87,16 +128,23 @@
 - `visualOwner=indesign_png`
 - `textOwner=hwpx_tf`
 - `textHiddenBeforeExport=true` 또는 `containsText=false`
-- `containsEditableText`가 true가 아니다.
+- shell material 자체에는 editable text 픽셀이 없어야 한다.
+  즉 `containsEditableText=true`인 PNG는 shell material이 아니다.
 - `editableTextFrameIds` 또는 source TextFrame이 HWPX text owner로 존재한다.
-- 실제 추출 file이 있다.
+- `EXTRACTED_PNG_VECTOR`이면 실제 추출 file이 있다.
+- `NATIVE_SOURCE_SHAPE`이면 원본 `Rectangle`/`Oval` source id와 bounds/style이 있다.
 
 실행 규칙:
 
 - extractor가 source object/group을 복제한다.
 - 복제본에서 HWPX가 소유할 TextFrame/table text만 제거한다.
-- 복제본의 fill/stroke/corner/path/group clipping은 InDesign `exportFile()`로 그대로 PNG화한다.
-- Java 변환기는 `ObjectPlan.file`의 textless shell PNG/vector를 `PLACE_TEXT_SHELL`로 배치만 한다.
+- `EXTRACTED_PNG_VECTOR` material은 복제본의 fill/stroke/corner/path/group clipping을
+  InDesign `exportFile()`로 그대로 PNG/vector화한 것이다.
+- `NATIVE_SOURCE_SHAPE` material은 원본 `Rectangle`/`Oval` source의 fill/stroke/corner를
+  HWPX native shape 속성으로 실행한 것이다. bounds나 문구를 보고 새 shell을 추정하지 않는다.
+- Java 변환기는 `ObjectPlan`의 materialization을 실행만 한다.
+  `EXTRACTED_PNG_VECTOR`는 `ObjectPlan.file`의 textless shell PNG/vector를 배치하고,
+  `NATIVE_SOURCE_SHAPE`는 `visualSourceObjectIds`의 원본 shape style만 옮긴다.
 - shell 위의 editable TextFrame은 각각 HWPX 텍스트로 배치한다.
 - page-level/floating `PLACE_TEXT_SHELL`은 자신이 소유한 모든 child TextFrame/table
   carrier가 같은 `ObjectPlan.pageIndex` 안에 있을 때만 visible owner가 될 수 있다.
@@ -111,7 +159,8 @@
 - `PLACE_TEXT_SHELL`이 소유한 TF/table carrier는 텍스트만 배치한다. carrier의
   HWPX table border/fill, drawText outline/fill, wrapper rect는 모두 비활성화한다.
 - `placement=INLINE`인 shell은 하나의 inline carrier로 실행한다.
-  carrier는 `ObjectPlan.file`의 추출 shell PNG를 image brush로 쓰고,
+  `EXTRACTED_PNG_VECTOR` carrier는 `ObjectPlan.file`의 추출 shell PNG를 image brush로 쓰고,
+  `NATIVE_SOURCE_SHAPE` carrier는 HWPX native fill/stroke/corner를 쓴다.
   텍스트는 editable drawText/subList로 둔다.
 - 단순 원본 도형(`Rectangle`/`Oval`)이 inline carrier의 직접 shell이고 그 안의 child
   TextFrame만 HWPX text owner인 경우, shell은 PNG image brush가 아니라 HWPX native
@@ -119,12 +168,16 @@
   Java는 임의 도형을 새로 추정하지 않는다. 원본 source shape의 fill/stroke/corner만
   그대로 옮기며, 복잡한 group/path/effect/rotation/shear가 있으면 `ObjectPlan.file`의
   textless shell PNG를 사용한다.
-- inline companion으로 승격된 shell plan은 textless shell 파일과 inline bounds를 가진다.
+- inline companion으로 승격된 shell plan은 inline bounds와 materialization을 가진다.
+  `EXTRACTED_PNG_VECTOR`이면 textless shell file을 가지고,
+  `NATIVE_SOURCE_SHAPE`이면 원본 shell shape source id를 가진다.
   `inline_*`가 editable text까지 구운 complete PNG이면 shell 파일로 쓰지 않는다.
   같은 source bundle의 `textHiddenBeforeExport=true` / `containsEditableText=false` 추출물을 shell 파일로 쓴다.
-- 실행 단계는 `ObjectPlan.file/bounds`가 없으면 shell을 만들지 않는다.
-  `RenderedGroup.file/bounds`, table/TF bounds, fill/stroke/corner 값으로 대체하지 않는다.
-- inline text shell carrier는 `ObjectPlan.file`의 textless shell PNG에서 투명/종이색 여백만 crop할 수 있다.
+- 실행 단계는 `ObjectPlan.bounds`가 없으면 shell을 만들지 않는다.
+  `ObjectPlan.file`은 `EXTRACTED_PNG_VECTOR`일 때만 필수다.
+  `NATIVE_SOURCE_SHAPE`는 `visualSourceObjectIds`로 원본 shape source가 명시되어야 한다.
+  `RenderedGroup.file/bounds`, table/TF bounds, 임의 sibling fill/stroke/corner 값으로 대체하지 않는다.
+- `EXTRACTED_PNG_VECTOR` inline text shell carrier는 `ObjectPlan.file`의 textless shell PNG에서 투명/종이색 여백만 crop할 수 있다.
   이 crop은 ownership 재판정이 아니라 HWPX inline carrier 안에 넣기 위한 image preparation이다.
   crop 후에도 carrier 크기와 placement는 `ObjectPlan.bounds`를 따른다.
 - HWPX imgBrush가 PNG alpha를 검정으로 렌더링하는 경우, crop된 shell PNG만 white matte로 인코딩할 수 있다.
@@ -134,7 +187,7 @@
 
 - Java 단계에서 `ResolvedPageItem`의 fill/stroke/corner 값을 읽어 shell PNG를 새로 그리기
 - table/TF bounds를 보고 rounded rectangle, pill, label box를 임의 생성하기
-- HWPX drawText/shape/table border를 shell 대체물로 만들기
+- `NATIVE_SOURCE_SHAPE` plan 없이 HWPX drawText/shape/table border를 shell 대체물로 만들기
 - 단순 원본 shell shape가 아닌데 HWPX native fill/stroke/corner로 대체하기
 - 추출된 shell이 있는데 TF outline/fill을 다시 그리기
 - shell PNG 안에 editable text를 다시 굽기
@@ -143,8 +196,8 @@
 - `PLACE_TEXT_SHELL` 실행 중 HWPX fill/stroke/outline을 추가해 shell을 보정하기
 - editable text가 남아 있는 `inline_*` complete PNG를 `PLACE_TEXT_SHELL`의 shell 이미지로 사용하기
 
-원본 shell 추출이 실패하면 변환 단계에서 비슷한 shell을 만들지 않는다.
-실패를 드러내고 extractor/ownership metadata를 수정한다.
+원본 shell source 또는 `EXTRACTED_PNG_VECTOR` material 추출이 실패하면 변환 단계에서
+비슷한 shell을 만들지 않는다. 실패를 드러내고 extractor/ownership metadata를 수정한다.
 
 ### 4.1 Shell Placement
 
@@ -184,6 +237,9 @@ table cell style을 대체하는 fallback이 아니라 별도 visual owner다.
 별도 page object 사각형이 셀 배경처럼 쓰인 경우에는 `PLACE_TABLE_STYLE` plan을 통해
 해당 fill/stroke를 table cell style로 흡수할 수 있다. 이 흡수는 source ownership 실행이며,
 bounds/occlusion 기반 후처리로 원본 cell style을 삭제하는 근거가 될 수 없다.
+이 source는 `TABLE_STYLE_SLOT`이 소유하므로 parent `SHELL_SLOT` source bundle 안에 있어도
+중복이 아니다. 다만 같은 source를 shell PNG/native shell의 visible material로 다시 쓰면
+slot 중복이다.
 
 table border/fill을 HWPX 속성으로 표현할 때는 원본 table cell style 또는 명시적인
 `PLACE_TABLE_STYLE` 흡수 plan만 사용한다. Java 단계에서 shell을 보고 table/TF bounds 기반
@@ -195,6 +251,8 @@ table outer size의 권위다. column/row 크기는 그 bounds에 맞춰 정규�
 이 상태는 AST/Flat/HWPX writer까지 `fixedOuterBounds`로 전달하며, HWPX table은
 `noAdjust=true`로 출력한다. 원본 bounds가 없는 일반 table에는 이 플래그를 부여하지 않는다.
 또한 `fixedOuterBounds` table은 `pageBreak=TABLE`로 출력해 row 단위 page split을 막는다.
+단, 원본 source 자체가 linked/overflow/multi-page table이면 `fixedOuterBounds`와
+`pageBreak=TABLE`을 강제하지 않는다. 이 규칙은 page-local owner bounds 안에 닫힌 table에만 적용한다.
 
 table-only TF의 source tree 안에서 fill-only rectangle이 table grid의 cell/row 영역을 덮으면
 그 rectangle은 `PLACE_TABLE_STYLE`이 소유한다. 이미 parent text shell plan의 visual source에
@@ -229,19 +287,23 @@ editable TF가 포함된 atomic ownership root는 두 ownership channel로 나�
 - child TextFrame/table: HWPX text/table만 소유한다.
 - descendant visual fragment: parent shell이 실제 포함하면 `DROP_VISUAL`, 포함하지 못하면 별도 visual owner로 남긴다.
 
-중복 차단은 source 정보를 자르지 않고 `visualSourceObjectIds`, `ownedTextFrameIds`,
-`descendantVisualObjectIds`로 구분한다.
+중복 차단은 source 정보를 자르지 않고 `visualSourceObjectIds`, `styleSourceObjectIds`,
+`ownedTextFrameIds`, `descendantVisualObjectIds`로 구분한다.
+같은 source bundle에 들어 있어도 서로 다른 slot이면 동시 실행할 수 있다.
 
 허용되는 조합:
 
-- text source: HWPX TF 한 개
-- visual source: PNG/vector/table/style 중 한 개
-- shell source: textless shell figure + 별도 text source의 HWPX TF
+- `TEXT_SLOT`: HWPX TF/table text 한 개
+- `SHELL_SLOT`: textless shell figure 또는 native source shape 한 개
+- `TABLE_STYLE_SLOT`: HWPX table/cell style 한 개
+- `CONTENT_VISUAL_SLOT`: PNG/vector/content visual 한 개
+- shell source + 별도 text source의 HWPX TF
 
 금지되는 조합:
 
 - complete PNG + 같은 텍스트의 HWPX TF
 - parent PNG + child PNG 동시 배치
+- 같은 source/style shape를 shell material과 table style material로 동시에 visible 실행
 - inline PNG + floating PNG 동시 배치
 - floating shell을 imageFill TextFrame으로 만들고 그 안에 텍스트를 재생성
 - inline shell을 page-level floating object로 승격
@@ -290,29 +352,36 @@ Stage 책임은 코드 구조에서도 분리한다.
 ## 9. 표현 우선순위
 
 1. 본문 텍스트: HWPX paragraph/run 속성.
-2. 편집 가능한 박스/표형 장식: 1x1 table 우선.
-3. 원본 shell이 복잡하면 textless PNG/vector shell + HWPX TF.
-4. `drawText`는 마지막 fallback이며 정책 판단에는 사용하지 않는다.
+2. HWPX table/cell 원본 style: HWPX table 속성.
+3. 일반 floating editable text box: 1x1 table 우선.
+4. inline `PLACE_TEXT_SHELL` carrier: inline rect + editable drawText/subList 허용.
+5. 단순 원본 shell shape: `NATIVE_SOURCE_SHAPE`.
+6. 복잡한 원본 shell: `EXTRACTED_PNG_VECTOR` + HWPX TF.
+7. `drawText`는 마지막 fallback이며 정책 판단에는 사용하지 않는다.
 
 단, 1x1 table은 editable text carrier다. 원본에서 별도 shell이 추출된 경우
 1x1 table border/fill은 shell을 대체하거나 중복 생성하면 안 된다.
+inline shell carrier의 rect + drawText는 placement를 보존하기 위한 실행 방식이며,
+source ownership을 새로 판단하는 fallback이 아니다.
 
 ## 10. Validator invariant
 
 Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, strict 모드에서는 실패시킨다.
 
-- 같은 source object의 visible visual slot은 하나다.
+- 같은 source bundle의 같은 visible slot은 owner가 하나다.
 - 같은 TextFrame은 `OWNED_BY_PNG`와 `OWNED_BY_HWPX_TEXT`를 동시에 가질 수 없다.
 - 같은 source가 inline과 floating으로 동시에 보이면 안 된다.
 - `OWNED_BY_HWPX_TEXT` source를 complete PNG처럼 배치하지 않는다.
 - `PLACE_TEXT_SHELL`은 소유 텍스트보다 뒤에 있어야 한다.
 - IDML table cell의 원본 `FillColor`와 visible edge border는 HWPX table cell style로 남아야 한다.
+- `TABLE_STYLE_SLOT`으로 흡수된 source는 shell/content visible material로 다시 배치되면 안 된다.
 - source layer/z 정보가 없는 객체는 추적 누락으로 본다.
 - parent `PLACE_TEXT_SHELL`이 있는 source bundle에서는 descendant visual fragment가 별도 visible output을 가질 수 없다.
 - parent `PLACE_TEXT_SHELL` 위의 owned child TextFrame은 누락되면 안 된다.
 - floating parent `PLACE_TEXT_SHELL`의 `ownedTextFrameIds`는 parent plan과 같은 pageIndex에 있어야 한다.
 - `PLACE_TEXT_SHELL` PNG/vector에는 owned child TextFrame의 텍스트 픽셀이 포함되면 안 된다.
-- `PLACE_TEXT_SHELL`이 Java-drawn synthetic shell이면 안 된다. extractor origin 또는 원본 vector source를 가져야 한다.
+- `PLACE_TEXT_SHELL`이 Java-drawn synthetic shell이면 안 된다.
+  `EXTRACTED_PNG_VECTOR` 또는 `NATIVE_SOURCE_SHAPE` origin을 가져야 한다.
 - table-only carrier shell은 `PLACE_TEXT_SHELL` parent와 `PLACE_TABLE_STYLE` carrier가 같은 source bundle으로 추적되어야 한다.
 
 ## 11. 개발 플랜
@@ -330,14 +399,21 @@ Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, st
 추가 필드:
 
 - `visualSourceObjectIds`: 실제 visual slot을 소유하는 source id.
+- `styleSourceObjectIds`: HWPX table/text style로 흡수되는 source id.
 - `ownedTextFrameIds`: shell 위에 별도 HWPX 텍스트로 배치될 TF id.
 - `descendantVisualObjectIds`: parent shell에 흡수되어 별도 visible output을 가지면 안 되는 하위 visual id.
 - `sourceBundleId` 또는 `sourceBundleKey`: parent/child 후보를 같은 source bundle로 묶는 안정 키.
+- `materialization`: `HWPX_TEXT`, `HWPX_TABLE_STYLE`, `NATIVE_SOURCE_SHAPE`,
+  `EXTRACTED_PNG_VECTOR`, `COMPLETE_PNG`.
+- `coordinateSpace`: `STORY_FLOW`, `PAGE`, `SOURCE_LOCAL`.
+- `anchorOwner`: story anchor, page, parent source group.
 
 원칙:
 
 - `sourceObjectIds`는 원본 bundle 정체성으로 유지한다.
-- 중복 검증과 visual slot 판단은 `visualSourceObjectIds`를 우선한다.
+- 중복 검증은 `sourceBundleKey + ownership slot`을 우선한다.
+- visual material 판단은 `visualSourceObjectIds`를 우선한다.
+- table/style material 판단은 `styleSourceObjectIds`를 우선한다.
 - child TF 소유권 판단은 `ownedTextFrameIds`를 우선한다.
 - 중복 차단을 위해 `sourceObjectIds`를 잘라내지 않는다.
 
@@ -346,6 +422,7 @@ Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, st
 - `ResolvedBuildContext.trimSourceObjectIdsClaimedBy`
 - `OwnershipPlanner.resolveNestedTextShellSources`
 - parent plan의 `sourceObjectIds`를 줄여서 중복을 피하는 모든 코드
+- placement와 coordinate space를 하나의 boolean/enum으로 뭉개는 코드
 
 ### 11.2 2단계: Source Bundle Index 생성
 
@@ -421,6 +498,7 @@ text-hidden 복합 그룹 중 editable TF를 가진 후보는 parent shell 후�
 
 - `ownedTextFrameIds`의 TF는 각각 HWPX 텍스트로 배치한다.
 - 원본 inline/floating은 plan의 `placement`를 따른다.
+- 위치 계산은 plan의 `coordinateSpace`와 `anchorOwner`를 따른다.
 - shell이 있다는 이유로 TF bounds를 다시 계산하거나 merge하지 않는다.
 - shell 위의 TF에는 outline/fill을 새로 만들지 않는다.
 - drawText는 마지막 fallback이다. 단, `INLINE + PLACE_TEXT_SHELL`의 실행 carrier에서는
@@ -430,6 +508,7 @@ text-hidden 복합 그룹 중 editable TF를 가진 후보는 parent shell 후�
 
 - shell 존재 여부로 TF 폭/높이를 후속 보정하는 코드
 - inline shell을 floating으로 바꾸는 코드
+- `SOURCE_LOCAL` inline carrier를 page-level floating으로 바꿔 좌표 문제를 숨기는 코드
 - TF를 sibling shell 기준으로 확장/축소하는 코드
 - 원본 thread가 아닌 텍스트 merge 코드
 

@@ -32,7 +32,7 @@ IDML -> HWPX 변환은 두 세계를 섞는다.
 
 1. 모든 source object의 ownership을 한 곳에서 결정한다.
 2. 후속 단계는 plan을 실행만 한다.
-3. 같은 source object는 visible output을 하나만 가진다.
+3. 같은 source bundle의 같은 ownership slot은 visible output을 하나만 가진다.
 4. 텍스트는 기본적으로 HWPX가 소유한다.
 5. 시각 객체는 4층 layer로만 판단한다.
 6. 예외를 추가하지 않는다.
@@ -334,9 +334,13 @@ Stage 1은 모든 visible 후보에 대해 `ObjectPlan`을 만든다.
 필수 필드:
 
 - `sourceObjectIds`
+- `visualSourceObjectIds`
+- `styleSourceObjectIds`
 - `textAction`
 - `visualAction`
+- `materialization`
 - `placement`
+- `coordinateSpace`
 - `visualLayer`
 - `zOrder`
 - `reason`
@@ -489,11 +493,13 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 - 현재 기준은 `SPEC-036`이다.
 - `PLACE_TEXT_SHELL`은 textless shell visual을 배치하고, editable child TF는 별도 HWPX 텍스트가 소유한다.
 - `placement=INLINE`인 textless shell companion은 예외적으로 하나의 inline carrier 안에서
-  추출 shell image brush와 editable drawText를 함께 실행할 수 있다. 이 경우에도 synthetic
+  추출 shell image brush 또는 원본 native shape와 editable drawText를 함께 실행할 수 있다. 이 경우에도 synthetic
   outline/fill은 만들지 않고 inline/floating placement를 뒤집지 않는다.
-- inline carrier는 `ObjectPlan.file/bounds`만 실행한다. `ObjectPlan.file`은 textless shell이어야 하며,
+- inline carrier는 `ObjectPlan.bounds`와 `materialization`만 실행한다.
+  `EXTRACTED_PNG_VECTOR`의 `ObjectPlan.file`은 textless shell이어야 하며,
   editable text가 남아 있는 `inline_*` complete PNG는 shell로 쓰지 않는다.
-  `RenderedGroup` bounds, parent shape fill/stroke/corner는 fallback으로 쓰지 않는다.
+  `NATIVE_SOURCE_SHAPE`는 plan에 명시된 원본 `Rectangle`/`Oval` source shape의
+  fill/stroke/corner만 실행한다. `RenderedGroup` bounds, sibling shape, table/TF bounds는 fallback으로 쓰지 않는다.
 - inline text shell carrier는 textless shell 이미지의 투명/종이색 여백 crop과 HWPX imgBrush용
   white matte만 허용한다. 이 처리는 ownership 재판정이 아니라 최종 인코딩 준비다.
 - shell visual과 child TF text는 서로 다른 ownership channel이면 동시에 보일 수 있다.

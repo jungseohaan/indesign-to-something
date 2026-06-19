@@ -11,7 +11,7 @@
 
 - ownership 결정은 한 곳에서만 내려진다.
 - 이후 단계는 결정된 plan을 실행만 한다.
-- 같은 source object가 visible PNG/TF로 중복 배치되지 않는다.
+- 같은 source bundle의 같은 ownership slot이 visible PNG/TF/style/native shape로 중복 실행되지 않는다.
 - inline/floating 여부는 후속 단계에서 뒤집지 않는다.
 - 정책은 `FramePlacer`, `InlineFrameHandler`, `BackgroundInjector`, `RenderableFramePlacer`에 흩어지지 않는다.
 - 페이지 번호, 문구, 특정 좌표 기반 예외는 추가하지 않는다.
@@ -71,23 +71,38 @@ PNG가 텍스트까지 소유할 수 있는 것은 단순 위치 표식뿐이다
 
 구현 내부에서 더 세분화한 layer가 필요해도 반드시 이 4층 중 하나로 귀속된다.
 
-### 3. 한 source object는 한 번만 visible output이 된다
+### 3. 한 source bundle은 slot별 owner를 하나만 가진다
 
-부모 PNG와 자식 PNG, complete PNG와 HWPX TF, inline과 floating이 같은 source를 동시에 보여 주면 잘못된 것이다.
+중복 금지는 source id 자체가 아니라 source bundle 안의 ownership slot 단위로 판단한다.
 
-같은 source object의 visible output은 정확히 하나다.
+기본 slot:
+
+- `TEXT_SLOT`: editable/searchable text
+- `SHELL_SLOT`: textless shell, label backdrop, outline
+- `TABLE_STYLE_SLOT`: table/cell fill, border, inset 같은 HWPX table 속성
+- `CONTENT_VISUAL_SLOT`: 사진, 삽화, 차트, complete marker PNG
+
+같은 bundle의 같은 slot은 visible owner를 하나만 가진다.
+
+부모 PNG와 자식 PNG, complete PNG와 HWPX TF, inline과 floating이 같은 slot을 동시에 보여 주면 잘못된 것이다.
 
 단, textless shell visual과 그 위의 editable child TF text는 서로 다른 ownership channel이다.
 복합 그래픽 그룹은 하나의 shell로 보존할 수 있고, 하나 이상의 child TF는 별도 HWPX 텍스트로 배치할 수 있다.
+table cell fill/stroke는 `TABLE_STYLE_SLOT`이 소유할 수 있으며, shell/source bundle에 포함되어 있어도 shell PNG로 중복 배치하지 않는다.
 
 ## ObjectPlan 필수 필드
 
 모든 visible 후보는 Stage 1에서 하나의 `ObjectPlan`을 가져야 한다.
 
 - `sourceObjectIds`
+- `visualSourceObjectIds`
+- `styleSourceObjectIds` 또는 동등한 table/style source 추적 필드
+- `ownedTextFrameIds`
+- `materialization`
 - `textAction`
 - `visualAction`
 - `placement`
+- `coordinateSpace`
 - `visualLayer`
 - `zOrder`
 - `reason`
@@ -96,6 +111,14 @@ PNG가 텍스트까지 소유할 수 있는 것은 단순 위치 표식뿐이다
 
 - text: `OWNED_BY_HWPX_TEXT`, `OWNED_BY_PNG`, `HIDDEN_SEMANTIC`, `DROP_TEXT`
 - visual: `PLACE_INLINE_PNG`, `PLACE_FLOATING_PNG`, `PLACE_TEXT_SHELL`, `ABSORB_TEXT_STYLE`, `PLACE_TABLE_STYLE`, `DROP_VISUAL`
+
+허용 materialization:
+
+- `HWPX_TEXT`
+- `HWPX_TABLE_STYLE`
+- `NATIVE_SOURCE_SHAPE`
+- `EXTRACTED_PNG_VECTOR`
+- `COMPLETE_PNG`
 
 ## 4층 매핑
 
@@ -137,7 +160,7 @@ HWPX에는 `BEHIND_TEXT`와 `IN_FRONT_OF_TEXT` 평면 차이가 있으므로, �
 
 변환 전후로 아래를 검증한다.
 
-- 같은 `sourceObjectId`의 visible visual 중복 금지
+- 같은 source bundle의 같은 visible slot 중복 금지
 - 같은 TextFrame의 `OWNED_BY_PNG` / `OWNED_BY_HWPX_TEXT` 동시 소유 금지
 - 같은 source의 inline/floating 동시 visible 배치 금지
 - `PLACE_TEXT_SHELL`은 소유 TF보다 뒤
