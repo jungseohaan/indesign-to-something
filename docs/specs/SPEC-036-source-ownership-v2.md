@@ -285,9 +285,18 @@ table outer size의 권위다. column/row 크기는 그 bounds에 맞춰 정규�
 또는 line-height 보정이 row height를 다시 키워 표를 다음 페이지로 밀어내면 안 된다.
 이 상태는 AST/Flat/HWPX writer까지 `fixedOuterBounds`로 전달하며, HWPX table은
 `noAdjust=true`로 출력한다. 원본 bounds가 없는 일반 table에는 이 플래그를 부여하지 않는다.
-또한 `fixedOuterBounds` table은 `pageBreak=TABLE`로 출력해 row 단위 page split을 막는다.
+또한 `fixedOuterBounds` table은 `pageBreak=NONE`으로 출력해 row 단위 page split을 막는다.
 단, 원본 source 자체가 linked/overflow/multi-page table이면 `fixedOuterBounds`와
-`pageBreak=TABLE`을 강제하지 않는다. 이 규칙은 page-local owner bounds 안에 닫힌 table에만 적용한다.
+`pageBreak=NONE`을 강제하지 않는다. 이 규칙은 page-local owner bounds 안에 닫힌 table에만 적용한다.
+
+한 source page 안에 닫힌 table-only owner TextFrame의 table은 page-local table이다.
+page-local table은 title/flow heuristic보다 우선하며, `flowWithText`/`anchoredFlowWithText`가
+아니라 같은 page의 fixed table로 실행한다. 후속 writer도 row를 inline chunk로 쪼개지 않는다.
+즉 한 페이지에 있는 원본 table은 한 HWPX table 단위로 그 page에 남는다.
+
+table-only carrier TextFrame 또는 그 IDML table id를 source bundle에 포함한 rendered composite는
+editable label/card shell이 아니다. 이 composite의 text/table slot은 HWPX table과 table style이
+소유하며, rendered PNG shell로 다시 배치하지 않는다.
 
 table-only TF의 source tree 안에서 fill-only rectangle이 table grid의 cell/row 영역을 덮으면
 그 rectangle은 `PLACE_TABLE_STYLE`이 소유한다. 이미 parent text shell plan의 visual source에

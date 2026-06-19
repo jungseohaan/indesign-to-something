@@ -1307,6 +1307,9 @@ public final class OwnershipPlanner {
         if (data.isNonCanonicalAtomicObjectRender(rg)) {
             return VisualAction.DROP_VISUAL;
         }
+        if (isTableOwnedCompositeRender(rg)) {
+            return VisualAction.DROP_VISUAL;
+        }
         if (data.shouldUseTextlessShellForAtomicMarkerLabel(rg)) {
             return VisualAction.PLACE_TEXT_SHELL;
         }
@@ -1388,6 +1391,30 @@ public final class OwnershipPlanner {
             return VisualAction.PLACE_FLOATING_PNG;
         }
         return VisualAction.DROP_VISUAL;
+    }
+
+    private boolean isTableOwnedCompositeRender(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!isRenderedPageObject(rg)) return false;
+        String reason = safe(rg.reason());
+        boolean compositeReason = reason.contains("text_hidden")
+                || reason.contains("text_composite")
+                || reason.contains("mixed_group")
+                || reason.contains("complex_graphic");
+        return compositeReason && hasTableOnlyCarrierSource(sourceIdsOrSelf(rg));
+    }
+
+    private boolean hasTableOnlyCarrierSource(int[] sourceIds) {
+        if (sourceIds == null || data == null) return false;
+        for (int sourceId : sourceIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+            if (tf == null) continue;
+            IDMLStory story = loadStory(tf.storyId());
+            if (TableFrameOwnershipPolicy.isTableOnlyTextFrame(tf, story)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean renderedVisualContainsTextPixels(RenderedGroup rg) {

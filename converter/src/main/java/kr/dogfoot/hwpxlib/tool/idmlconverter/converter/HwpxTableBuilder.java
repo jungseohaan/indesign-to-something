@@ -63,7 +63,7 @@ public class HwpxTableBuilder {
         // 테이블 속성
         int physicalRowCount = physicalRows(astTable).size();
         String tableBorderFillId = createTableOuterBorderFill(astTable);
-        table.pageBreakAnd(astTable.fixedOuterBounds() ? TablePageBreak.TABLE : TablePageBreak.CELL)
+        table.pageBreakAnd(astTable.fixedOuterBounds() ? TablePageBreak.NONE : TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
                 .rowCntAnd((short) physicalRowCount)
                 .colCntAnd((short) astTable.colCount())
@@ -226,7 +226,7 @@ public class HwpxTableBuilder {
 
         int physicalRowCount = physicalRows(astTable).size();
         String tableBorderFillId = createTableOuterBorderFill(astTable);
-        table.pageBreakAnd(astTable.fixedOuterBounds() ? TablePageBreak.TABLE : TablePageBreak.CELL)
+        table.pageBreakAnd(astTable.fixedOuterBounds() ? TablePageBreak.NONE : TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
                 .rowCntAnd((short) physicalRowCount)
                 .colCntAnd((short) astTable.colCount())
@@ -284,6 +284,9 @@ public class HwpxTableBuilder {
 
     private boolean shouldSplitInlineFlowTable(ASTTable table) {
         if (table == null || table.rowCount() <= 1 || table.rows() == null || table.rows().size() <= 1) {
+            return false;
+        }
+        if (table.fixedOuterBounds()) {
             return false;
         }
         for (ASTTableRow row : table.rows()) {

@@ -277,6 +277,7 @@ public final class TableBuilder {
                         || hasFlowStackTitleAboveTableBounds(ctx, tf, resolvedTableBounds, thisX, thisY, astTable)) {
                     astTable.anchoredFlowWithText(true);
                 }
+                applySourcePageTablePlacementPolicy(ctx, tf, idmlTable, astTable);
                 absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
                 report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
                 completeVisibleTableOuterBorder(astTable);
@@ -372,6 +373,7 @@ public final class TableBuilder {
                         || hasFlowStackTitleAboveTableBounds(ctx, tf, resolvedTableBounds, thisX, thisY, astTable)) {
                     astTable.anchoredFlowWithText(true);
                 }
+                applySourcePageTablePlacementPolicy(ctx, tf, idmlTable, astTable);
                 absorbTextFrameOutlineIntoTable(ctx, tf, astTable);
                 report.tableBordersAbsorbed += absorbTableBorderPageObjects(ctx, tf, astTable, tablePageIdx);
                 completeVisibleTableOuterBorder(astTable);
@@ -391,6 +393,31 @@ public final class TableBuilder {
                 report.total++;
             }
         }
+    }
+
+    private static void applySourcePageTablePlacementPolicy(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            IDMLTable idmlTable,
+            ASTTable astTable) {
+        if (!isSourcePageLocalTable(ctx, tf, idmlTable, astTable)) return;
+        astTable.fixedOuterBounds(true);
+        astTable.flowWithText(false);
+        astTable.anchoredFlowWithText(false);
+        if (ctx != null && ctx.debugAst) {
+            astTable.debugOrNew().note("source-page-local table: fixed outer bounds, no row page split");
+        }
+    }
+
+    private static boolean isSourcePageLocalTable(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame tf,
+            IDMLTable idmlTable,
+            ASTTable astTable) {
+        if (ctx == null || tf == null || idmlTable == null || astTable == null) return false;
+        if (tf.sourceHidden() || tf.pageIndex() < 0) return false;
+        if (idmlTable.selfId() != null && ctx.isAnchoredTableSource(idmlTable.selfId())) return false;
+        return !tf.isInline() || TableFrameOwnershipPolicy.isTableAnchorOnlyFrame(tf);
     }
 
     private static boolean hasFlowStackTitleAboveTableBounds(

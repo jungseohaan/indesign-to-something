@@ -596,6 +596,11 @@ Ownership:
   column/row 크기는 그 외곽 크기에 비례해 정규화한다.
 - 명시적인 table placement bounds가 있으면 그 bounds가 table outer size의 권위다.
   후속 content-fit/line-height 보정은 row height를 다시 키워 bounds 밖으로 밀어내지 않는다.
+- 한 source page 안에 닫힌 table-only owner TextFrame의 table은 page-local table이다.
+  page-local table은 title/flow heuristic보다 우선하며 같은 page의 fixed table로 실행한다.
+  writer는 `pageBreak=NONE`으로 출력하고 row를 inline chunk로 쪼개지 않는다.
+- table-only carrier TextFrame 또는 그 IDML table id를 source bundle에 포함한 rendered composite는
+  editable label/card shell이 아니다. HWPX table/text/table style이 소유하고 PNG shell로 다시 배치하지 않는다.
 - table-only TF의 source tree 안에 있는 fill-only rectangle이 table grid의 cell/row 영역을 덮으면
   visible text shell plan의 source claim보다 `PLACE_TABLE_STYLE` 흡수가 우선한다.
   이 rectangle은 shell PNG로 다시 배치하지 않고 HWPX cell fill로 소유권을 넘긴다.
