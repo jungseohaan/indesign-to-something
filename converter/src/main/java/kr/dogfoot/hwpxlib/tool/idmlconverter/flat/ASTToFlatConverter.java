@@ -205,6 +205,7 @@ public class ASTToFlatConverter {
         node.appliedTableStyle(table.appliedTableStyle());
         node.borderColor(table.borderColor());
         node.borderWidth(table.borderWidth());
+        node.fixedOuterBounds(table.fixedOuterBounds());
 
         // Convert rows
         for (ASTTableRow astRow : table.rows()) {
@@ -776,6 +777,7 @@ public class ASTToFlatConverter {
                 tableNode.appliedTableStyle(inlineTable.appliedTableStyle());
                 tableNode.borderColor(inlineTable.borderColor());
                 tableNode.borderWidth(inlineTable.borderWidth());
+                tableNode.fixedOuterBounds(inlineTable.fixedOuterBounds());
 
                 // Convert rows
                 for (ASTTableRow astRow : inlineTable.rows()) {
@@ -956,6 +958,7 @@ public class ASTToFlatConverter {
         node.appliedTableStyle(table.appliedTableStyle());
         node.borderColor(table.borderColor());
         node.borderWidth(table.borderWidth());
+        node.fixedOuterBounds(table.fixedOuterBounds());
 
         // Convert rows
         for (ASTTableRow astRow : table.rows()) {

@@ -303,6 +303,9 @@ public class ASTSerializer {
         if (table.anchoredFlowWithText()) {
             first = writeBooleanField(sb, "anchoredFlowWithText", true, first);
         }
+        if (table.fixedOuterBounds()) {
+            first = writeBooleanField(sb, "fixedOuterBounds", true, first);
+        }
         first = writeIntField(sb, "rowCount", table.rowCount(), first);
         first = writeIntField(sb, "colCount", table.colCount(), first);
         first = writeStringField(sb, "appliedTableStyle", table.appliedTableStyle(), first);

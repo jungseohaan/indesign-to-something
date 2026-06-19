@@ -113,6 +113,12 @@
 - `placement=INLINE`인 shell은 하나의 inline carrier로 실행한다.
   carrier는 `ObjectPlan.file`의 추출 shell PNG를 image brush로 쓰고,
   텍스트는 editable drawText/subList로 둔다.
+- 단순 원본 도형(`Rectangle`/`Oval`)이 inline carrier의 직접 shell이고 그 안의 child
+  TextFrame만 HWPX text owner인 경우, shell은 PNG image brush가 아니라 HWPX native
+  fill/stroke/corner 속성으로 실행할 수 있다. 이때 source는 parent shell shape이고,
+  Java는 임의 도형을 새로 추정하지 않는다. 원본 source shape의 fill/stroke/corner만
+  그대로 옮기며, 복잡한 group/path/effect/rotation/shear가 있으면 `ObjectPlan.file`의
+  textless shell PNG를 사용한다.
 - inline companion으로 승격된 shell plan은 textless shell 파일과 inline bounds를 가진다.
   `inline_*`가 editable text까지 구운 complete PNG이면 shell 파일로 쓰지 않는다.
   같은 source bundle의 `textHiddenBeforeExport=true` / `containsEditableText=false` 추출물을 shell 파일로 쓴다.
@@ -129,6 +135,7 @@
 - Java 단계에서 `ResolvedPageItem`의 fill/stroke/corner 값을 읽어 shell PNG를 새로 그리기
 - table/TF bounds를 보고 rounded rectangle, pill, label box를 임의 생성하기
 - HWPX drawText/shape/table border를 shell 대체물로 만들기
+- 단순 원본 shell shape가 아닌데 HWPX native fill/stroke/corner로 대체하기
 - 추출된 shell이 있는데 TF outline/fill을 다시 그리기
 - shell PNG 안에 editable text를 다시 굽기
 - inline shell PNG를 흰색 불투명 캔버스로 flatten해서 원본 크롭/알파를 잃게 하기
@@ -181,6 +188,17 @@ bounds/occlusion 기반 후처리로 원본 cell style을 삭제하는 근거가
 table border/fill을 HWPX 속성으로 표현할 때는 원본 table cell style 또는 명시적인
 `PLACE_TABLE_STYLE` 흡수 plan만 사용한다. Java 단계에서 shell을 보고 table/TF bounds 기반
 synthetic rounded rectangle, wrapper fill, drawText outline/fill을 새로 만들지 않는다.
+
+table-only owner TextFrame이나 resolved table placement bounds가 있으면 그 bounds가 HWPX
+table outer size의 권위다. column/row 크기는 그 bounds에 맞춰 정규화하고, 후속 content-fit
+또는 line-height 보정이 row height를 다시 키워 표를 다음 페이지로 밀어내면 안 된다.
+이 상태는 AST/Flat/HWPX writer까지 `fixedOuterBounds`로 전달하며, HWPX table은
+`noAdjust=true`로 출력한다. 원본 bounds가 없는 일반 table에는 이 플래그를 부여하지 않는다.
+또한 `fixedOuterBounds` table은 `pageBreak=TABLE`로 출력해 row 단위 page split을 막는다.
+
+table-only TF의 source tree 안에서 fill-only rectangle이 table grid의 cell/row 영역을 덮으면
+그 rectangle은 `PLACE_TABLE_STYLE`이 소유한다. 이미 parent text shell plan의 visual source에
+포함되어 있어도 table cell fill 흡수가 우선이며, 해당 source는 shell PNG로 중복 배치하지 않는다.
 
 본문 story의 table marker가 wrapper table을 만들고, 그 셀 안의 nested TextFrame/table이
 실제 표 내용을 소유하는 경우에는 `anchored_table` plan 하나가 wrapper와 nested table을

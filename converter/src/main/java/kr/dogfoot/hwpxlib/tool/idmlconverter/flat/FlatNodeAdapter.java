@@ -169,6 +169,7 @@ public class FlatNodeAdapter {
         table.appliedTableStyle(node.appliedTableStyle());
         table.borderColor(node.borderColor());
         table.borderWidth(node.borderWidth());
+        table.fixedOuterBounds(node.fixedOuterBounds());
 
         // Convert rows
         if (node.tableRows() != null) {

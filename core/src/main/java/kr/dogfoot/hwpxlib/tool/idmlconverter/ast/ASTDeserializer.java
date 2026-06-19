@@ -209,6 +209,7 @@ public class ASTDeserializer {
         table.zOrder(getInt(o, "zOrder"));
         table.flowWithText(getBool(o, "flowWithText"));
         table.anchoredFlowWithText(getBool(o, "anchoredFlowWithText"));
+        table.fixedOuterBounds(getBool(o, "fixedOuterBounds"));
         table.rowCount(getInt(o, "rowCount"));
         table.colCount(getInt(o, "colCount"));
         table.appliedTableStyle(getString(o, "appliedTableStyle"));

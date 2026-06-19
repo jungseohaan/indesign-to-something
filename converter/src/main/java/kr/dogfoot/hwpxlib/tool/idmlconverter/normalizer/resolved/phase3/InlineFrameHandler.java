@@ -1365,14 +1365,7 @@ public class InlineFrameHandler {
         if (shellPlan == null) return null;
         if (shellPlan.file == null || shellPlan.file.isEmpty()) return null;
         if (shellPlan.bounds == null || shellPlan.bounds.length < 4) return null;
-        File pngFile = new File(ctx.basePath, shellPlan.file);
-        if (!pngFile.exists() || !pngFile.isFile()) return null;
         try {
-            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-            BufferedImage img = ImageIO.read(pngFile);
-            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
-            boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
-            imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
             double[] shellBounds = shellPlan.bounds;
             double w = 0;
             double h = 0;
@@ -1394,11 +1387,27 @@ public class InlineFrameHandler {
             obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
             obj.width(CoordinateConverter.pointsToHwpunits(w));
             obj.height(CoordinateConverter.pointsToHwpunits(h));
-            obj.imageFillData(imageData);
             obj.nativeGraphicsAllowed(true);
-            obj.forceImageFill(true);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTfs.get(0), true));
             obj.verticalJustification("CenterAlign");
+
+            ResolvedPageItem nativeShellShape = findSimpleNativeInlineShellShape(
+                    ctx, childTfs.get(0), shellPlan, anchorItem);
+            if (nativeShellShape != null) {
+                applyInlineEditableLabelShellStyle(ctx, obj, nativeShellShape,
+                        "Oval".equals(nativeShellShape.type()), w, h);
+                obj.shellShapeType(nativeShellShape.type());
+            } else {
+                File pngFile = new File(ctx.basePath, shellPlan.file);
+                if (!pngFile.exists() || !pngFile.isFile()) return null;
+                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+                BufferedImage img = ImageIO.read(pngFile);
+                if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+                boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
+                imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
+                obj.imageFillData(imageData);
+                obj.forceImageFill(true);
+            }
             for (ResolvedTextFrame childTf : childTfs) {
                 buildBadgeParagraph(ctx, childTf, obj);
                 try {
@@ -1429,6 +1438,100 @@ public class InlineFrameHandler {
             if (isInlineTextShellOwnerForChildren(plan, shell, childTfs)) return plan;
         }
         return null;
+    }
+
+    private static ResolvedPageItem findSimpleNativeInlineShellShape(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame childTf,
+            ObjectPlan shellPlan,
+            ResolvedPageItem anchorItem) {
+        if (ctx == null || ctx.resolvedData == null || childTf == null || shellPlan == null) return null;
+        ResolvedPageItem direct = simpleNativeShapeForTextFrameParent(ctx, childTf);
+        if (direct != null && isPlanSource(shellPlan, direct.id())) {
+            return direct;
+        }
+        if (isSimpleNativeInlineShellShape(anchorItem)
+                && isPlanSource(shellPlan, anchorItem.id())
+                && containsBounds(anchorItem.geometricBounds(), childTf.geometricBounds())) {
+            return anchorItem;
+        }
+
+        ResolvedPageItem best = null;
+        double bestArea = Double.MAX_VALUE;
+        int[] sourceIds = shellPlan.visualSourceObjectIds != null && shellPlan.visualSourceObjectIds.length > 0
+                ? shellPlan.visualSourceObjectIds
+                : shellPlan.sourceObjectIds;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            if (!isSimpleNativeInlineShellShape(item)) continue;
+            if (!containsBounds(item.geometricBounds(), childTf.geometricBounds())) continue;
+            double area = boundsArea(item.geometricBounds());
+            if (area > 0 && area < bestArea) {
+                bestArea = area;
+                best = item;
+            }
+        }
+        return best;
+    }
+
+    private static ResolvedPageItem simpleNativeShapeForTextFrameParent(
+            ResolvedBuildContext ctx,
+            ResolvedTextFrame childTf) {
+        if (ctx == null || ctx.resolvedData == null || childTf == null || childTf.id() == null) return null;
+        ResolvedPageItem textFrameItem = ctx.resolvedData.getPageItem(childTf.id());
+        if (textFrameItem == null || textFrameItem.parentId() == null) return null;
+        ResolvedPageItem parent = ctx.resolvedData.getPageItem(textFrameItem.parentId());
+        if (!isSimpleNativeInlineShellShape(parent)) return null;
+        if (!containsBounds(parent.geometricBounds(), childTf.geometricBounds())) return null;
+        return parent;
+    }
+
+    private static boolean isSimpleNativeInlineShellShape(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = item.type();
+        if (!"Rectangle".equals(type) && !"Oval".equals(type)) return false;
+        if (item.opacity() > 0 && item.opacity() < 95.0) return false;
+        if (Math.abs(item.absoluteRotationAngle()) > 0.1) return false;
+        if (Math.abs(item.absoluteShearAngle()) > 0.1) return false;
+        if (item.hasDropShadow()) return false;
+        if (item.gradientFeatherApplied()) return false;
+        return hasVisibleFillOrStroke(item);
+    }
+
+    private static boolean hasVisibleFillOrStroke(ResolvedPageItem item) {
+        if (item == null) return false;
+        String fill = item.fillColorName();
+        if (fill != null && !isNoneColor(fill)) return true;
+        String stroke = item.strokeColorName();
+        return stroke != null && !isNoneColor(stroke) && item.strokeWeight() > 0;
+    }
+
+    private static boolean isPlanSource(ObjectPlan plan, String idText) {
+        if (plan == null || idText == null) return false;
+        try {
+            int id = Integer.parseInt(idText);
+            return containsInt(plan.sourceObjectIds, id)
+                    || containsInt(plan.visualSourceObjectIds, id)
+                    || plan.domId == id;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private static boolean containsBounds(double[] outer, double[] inner) {
+        if (outer == null || inner == null || outer.length < 4 || inner.length < 4) return false;
+        double tolerance = 1.5;
+        return outer[0] <= inner[0] + tolerance
+                && outer[1] <= inner[1] + tolerance
+                && outer[2] >= inner[2] - tolerance
+                && outer[3] >= inner[3] - tolerance;
+    }
+
+    private static double boundsArea(double[] bounds) {
+        if (bounds == null || bounds.length < 4) return -1;
+        double w = Math.abs(bounds[3] - bounds[1]);
+        double h = Math.abs(bounds[2] - bounds[0]);
+        return w * h;
     }
 
     private static boolean isInlineTextShellOwnerForChildren(

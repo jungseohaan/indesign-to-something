@@ -488,6 +488,9 @@ public class FlatSerializer {
         if (node.borderWidth() != 0) {
             first = writeLongField(sb, "borderWidth", node.borderWidth(), first);
         }
+        if (node.fixedOuterBounds()) {
+            first = writeBooleanField(sb, "fixedOuterBounds", true, first);
+        }
 
         if (node.tableRows() != null && !node.tableRows().isEmpty()) {
             if (!first) sb.append(',');

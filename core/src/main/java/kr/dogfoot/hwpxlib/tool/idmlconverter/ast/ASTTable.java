@@ -21,6 +21,7 @@ public class ASTTable extends ASTBlock {
     private int zOrder;
     private boolean flowWithText;
     private boolean anchoredFlowWithText;
+    private boolean fixedOuterBounds;
 
     // 테이블 스타일
     private String appliedTableStyle;
@@ -66,6 +67,9 @@ public class ASTTable extends ASTBlock {
 
     public boolean anchoredFlowWithText() { return anchoredFlowWithText; }
     public void anchoredFlowWithText(boolean v) { this.anchoredFlowWithText = v; }
+
+    public boolean fixedOuterBounds() { return fixedOuterBounds; }
+    public void fixedOuterBounds(boolean v) { this.fixedOuterBounds = v; }
 
     public String appliedTableStyle() { return appliedTableStyle; }
     public void appliedTableStyle(String v) { this.appliedTableStyle = v; }

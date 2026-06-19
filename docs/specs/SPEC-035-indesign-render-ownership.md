@@ -130,6 +130,10 @@ Phase 6 `BackgroundInjector`와 Phase 7 `RenderableFramePlacer`는 최종 구조
   제거한 뒤 export한 PNG/vector여야 한다. Java 단계에서 fill/stroke/corner를 읽어 shell을
   새로 그리는 synthetic fallback은 사용하지 않는다. table-only carrier도 parent shell은
   추출물이 소유하고, carrier table/text는 HWPX가 소유한다.
+- 단, inline carrier의 shell source가 원본 `Rectangle`/`Oval` 자체이고 child TF만 HWPX text로
+  올라가는 단순 shell이면 HWPX native fill/stroke/corner로 실행할 수 있다. 이는 bounds 기반
+  fallback이 아니라 원본 source shape 속성 실행이며, group/path/effect가 섞인 shell은 계속
+  extractor PNG/vector를 사용한다.
 - late floating suppress reason 리포트와 `markRenderedVisualPlacedForLateFloating` bridge는 삭제했다.
   `SKIP_NATIVE_FILL_ABSORBED` 같은 true suppress는 Stage 3 decision log로만 남는다.
 - 아직 남은 배지/자식/inline coverage 정책은 Stage 1 ownership refinement로 옮긴 뒤,
@@ -559,6 +563,8 @@ Ownership:
 - anchored table로 소비된 marker-only paragraph는 별도 빈 HWPX 문단으로 남기지 않는다.
 - inline table만 담는 carrier paragraph는 본문/기본 문단 행간을 상속하지 않는다. carrier paragraph는 0 margin + table height fixed line spacing을 사용하고, 같은 높이의 `linesegarray`를 명시해 line box 자체가 table 높이를 소유하게 한다.
 - table-only carrier의 table object는 `treatAsChar=true`, `flowWithText=true`, `allowOverlap=false`, `affectLSpacing=true`, `horzRelTo=COLUMN`, `vertRelTo=PARA`, `vertAlign=TOP`로 배치한다. 즉 table을 강제 좌표로 끼우지 않고 carrier line top에 붙여 다음 paragraph가 table bottom 뒤에서 흐르게 한다.
+- resolved table placement bounds가 있는 table은 원본 bounds가 outer size의 owner다. AST는 이를 `fixedOuterBounds=true`로 표시하고 HWPX writer는 `noAdjust=true`를 출력해 렌더러의 content-fit 확장을 막는다.
+- `fixedOuterBounds=true` table은 행 단위 page split을 허용하지 않는다. HWPX writer는 `pageBreak=TABLE`을 출력해 원본 한 페이지 표가 row별로 다음 페이지로 밀리지 않게 한다.
 - table 앞/뒤 단락을 독립 floating TextFrame으로 분리하지 않는다.
 - `A-TF → B-table → C-TF`처럼 보이는 경우라도 원본 Story가 하나의 TextFrame flow이면
   A/B/C를 하나의 글상자 내부 순서로 유지한다.
@@ -580,6 +586,11 @@ Ownership:
   resolved table bounds는 paragraph/story 기반 추정값일 수 있으므로 owner frame보다 우선하지 않는다.
 - table-only owner bounds를 적용할 때는 x/y뿐 아니라 outer width/height도 함께 적용하고,
   column/row 크기는 그 외곽 크기에 비례해 정규화한다.
+- 명시적인 table placement bounds가 있으면 그 bounds가 table outer size의 권위다.
+  후속 content-fit/line-height 보정은 row height를 다시 키워 bounds 밖으로 밀어내지 않는다.
+- table-only TF의 source tree 안에 있는 fill-only rectangle이 table grid의 cell/row 영역을 덮으면
+  visible text shell plan의 source claim보다 `PLACE_TABLE_STYLE` 흡수가 우선한다.
+  이 rectangle은 shell PNG로 다시 배치하지 않고 HWPX cell fill로 소유권을 넘긴다.
 - composedLine bounds는 paragraph diagnostics와 line-level 보조 정보로만 사용한다.
 - composedLine bounds가 필요할 때도 owner TextFrame의 page-relative 좌표계로 환산해야 한다.
 - coordinate normalization 차이 때문에 `geometricBounds`와 `pageRelativeBounds`를 직접 섞어

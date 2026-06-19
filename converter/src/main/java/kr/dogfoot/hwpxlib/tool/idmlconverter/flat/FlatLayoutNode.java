@@ -102,6 +102,7 @@ public class FlatLayoutNode {
     private String appliedTableStyle;
     private String borderColor;
     private long borderWidth;
+    private boolean fixedOuterBounds;
     private List<FlatTableRow> tableRows;
 
     // --- Text wrap fields (shared) ---
@@ -394,6 +395,9 @@ public class FlatLayoutNode {
 
     public long borderWidth() { return borderWidth; }
     public void borderWidth(long v) { this.borderWidth = v; }
+
+    public boolean fixedOuterBounds() { return fixedOuterBounds; }
+    public void fixedOuterBounds(boolean v) { this.fixedOuterBounds = v; }
 
     public List<FlatTableRow> tableRows() { return tableRows; }
     public void tableRows(List<FlatTableRow> v) { this.tableRows = v; }

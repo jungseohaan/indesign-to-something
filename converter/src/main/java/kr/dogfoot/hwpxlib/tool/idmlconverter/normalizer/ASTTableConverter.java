@@ -119,9 +119,13 @@ public class ASTTableConverter {
 
         // 빈 스페이서 행을 위 행에 여백으로 흡수
         ASTTableSpacerMerger.merge(table);
+        boolean hasPlacementBounds = hasValidBounds(resolvedTableBounds);
         applyPlacementBounds(table, resolvedTableBounds,
                 resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
-        ensureRowsFitVisibleCellContent(table);
+        table.fixedOuterBounds(hasPlacementBounds);
+        if (!hasPlacementBounds) {
+            ensureRowsFitVisibleCellContent(table);
+        }
         return table;
     }
 
@@ -324,10 +328,23 @@ public class ASTTableConverter {
         ASTTableSpacerMerger.merge(table);
         double[] placementBounds = resolvedData != null
                 ? resolvedData.getTablePlacementBounds(idmlTable.selfId()) : null;
+        boolean hasPlacementBounds = hasValidBounds(placementBounds);
         applyPlacementBounds(table, placementBounds,
                 resolvedData != null ? resolvedData.scaleFactor() : 2.8346);
-        ensureRowsFitVisibleCellContent(table);
+        table.fixedOuterBounds(hasPlacementBounds);
+        if (!hasPlacementBounds) {
+            ensureRowsFitVisibleCellContent(table);
+        }
         return table;
+    }
+
+    private static boolean hasValidBounds(double[] bounds) {
+        if (bounds == null || bounds.length < 4) return false;
+        if (!Double.isFinite(bounds[0]) || !Double.isFinite(bounds[1])
+                || !Double.isFinite(bounds[2]) || !Double.isFinite(bounds[3])) {
+            return false;
+        }
+        return bounds[3] > bounds[1] && bounds[2] > bounds[0];
     }
 
     private static void ensureRowsFitVisibleCellContent(ASTTable table) {

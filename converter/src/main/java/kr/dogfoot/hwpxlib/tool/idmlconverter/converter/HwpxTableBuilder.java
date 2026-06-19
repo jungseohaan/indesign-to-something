@@ -63,13 +63,13 @@ public class HwpxTableBuilder {
         // 테이블 속성
         int physicalRowCount = physicalRows(astTable).size();
         String tableBorderFillId = createTableOuterBorderFill(astTable);
-        table.pageBreakAnd(TablePageBreak.CELL)
+        table.pageBreakAnd(astTable.fixedOuterBounds() ? TablePageBreak.TABLE : TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
                 .rowCntAnd((short) physicalRowCount)
                 .colCntAnd((short) astTable.colCount())
                 .cellSpacingAnd(0)
                 .borderFillIDRefAnd(tableBorderFillId)
-                .noAdjustAnd(false);
+                .noAdjustAnd(astTable.fixedOuterBounds());
 
         // ShapeSize — floating table은 IDML 행 높이 합산값을 명시해야 셀선이 안정적으로 렌더된다.
         long tableHeight = astTable.height();
@@ -226,13 +226,13 @@ public class HwpxTableBuilder {
 
         int physicalRowCount = physicalRows(astTable).size();
         String tableBorderFillId = createTableOuterBorderFill(astTable);
-        table.pageBreakAnd(TablePageBreak.CELL)
+        table.pageBreakAnd(astTable.fixedOuterBounds() ? TablePageBreak.TABLE : TablePageBreak.CELL)
                 .repeatHeaderAnd(false)
                 .rowCntAnd((short) physicalRowCount)
                 .colCntAnd((short) astTable.colCount())
                 .cellSpacingAnd(0)
                 .borderFillIDRefAnd(tableBorderFillId)
-                .noAdjustAnd(false);
+                .noAdjustAnd(astTable.fixedOuterBounds());
 
         table.createSZ();
         table.sz().widthAnd(totalWidth).widthRelToAnd(WidthRelTo.ABSOLUTE)
@@ -310,6 +310,7 @@ public class HwpxTableBuilder {
         chunk.zOrder(source.zOrder());
         chunk.flowWithText(source.flowWithText());
         chunk.anchoredFlowWithText(source.anchoredFlowWithText());
+        chunk.fixedOuterBounds(source.fixedOuterBounds());
         chunk.rowCount(1);
         chunk.colCount(source.colCount());
         chunk.appliedTableStyle(source.appliedTableStyle());

@@ -992,6 +992,7 @@ public final class TableBuilder {
         out.zOrder(src.zOrder());
         out.flowWithText(src.flowWithText());
         out.anchoredFlowWithText(src.anchoredFlowWithText());
+        out.fixedOuterBounds(src.fixedOuterBounds());
         out.appliedTableStyle(src.appliedTableStyle());
         out.borderColor(src.borderColor());
         out.borderWidth(src.borderWidth());
@@ -2064,6 +2065,7 @@ public final class TableBuilder {
         newTable.zOrder(original.zOrder());
         newTable.flowWithText(original.flowWithText());
         newTable.anchoredFlowWithText(original.anchoredFlowWithText());
+        newTable.fixedOuterBounds(original.fixedOuterBounds());
         newTable.appliedTableStyle(original.appliedTableStyle());
         newTable.borderColor(original.borderColor());
         newTable.borderWidth(original.borderWidth());
@@ -2219,7 +2221,6 @@ public final class TableBuilder {
             }
             if (ctx.resolvedData.isInlineObjectId(itemId)) continue;
             if (ctx.isRenderedDisposed(itemId, FrameDisposition.TEXT_BLOCK_PLACED)) continue;
-            if (ctx.isVisualSourceClaimedByVisibleTextShellPlan(itemId)) continue;
             if (!isAbsorbableCellBackground(item)) continue;
 
             double[] b = pageRelativeBoundsInPoints(ctx, item);
