@@ -103,6 +103,8 @@ public final class OwnershipPlanner {
         promoteInlineCompanionAtomicShellOwners();
         splitImageBackedCompositeTextShellParents();
         resolveTextShellSourceDuplicates();
+        dropInlineGraphicOnlyTextShellWithoutTextlessCarrier();
+        dropPlansOwnedByInlineCompletePng();
         normalizeTextShellEditableTextOwnership();
         dropTextFramesOwnedByInlineTextShells();
         writePlans();
@@ -1030,18 +1032,45 @@ public final class OwnershipPlanner {
     }
 
     private int[] editableTextFrameIdsOf(RenderedGroup rg) {
-        if (rg == null || rg.editableTextFrameIds() == null || rg.editableTextFrameIds().length == 0) {
+        LinkedHashSet<Integer> ids = new LinkedHashSet<>();
+        if (rg != null && rg.editableTextFrameIds() != null) {
+            for (String id : rg.editableTextFrameIds()) {
+                int parsed = parseFlexibleId(id);
+                if (parsed >= 0 && data != null && data.isTextOwnedByIndesignPng(String.valueOf(parsed))) {
+                    continue;
+                }
+                if (parsed >= 0) ids.add(parsed);
+            }
+        }
+        if (ids.isEmpty()) {
+            for (int id : inferredEditableTextFrameSourceIds(rg)) {
+                ids.add(id);
+            }
+        }
+        return toIntArray(ids);
+    }
+
+    private int[] inferredEditableTextFrameSourceIds(RenderedGroup rg) {
+        if (rg == null || data == null || rg.sourceObjectIds() == null || rg.sourceObjectIds().length == 0) {
             return new int[0];
         }
         LinkedHashSet<Integer> ids = new LinkedHashSet<>();
-        for (String id : rg.editableTextFrameIds()) {
-            int parsed = parseFlexibleId(id);
-            if (parsed >= 0 && data != null && data.isTextOwnedByIndesignPng(String.valueOf(parsed))) {
-                continue;
-            }
-            if (parsed >= 0) ids.add(parsed);
+        for (int sourceId : rg.sourceObjectIds()) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+            if (!isVisibleEditableTextFrameSource(tf)) continue;
+            ids.add(sourceId);
         }
         return toIntArray(ids);
+    }
+
+    private boolean isVisibleEditableTextFrameSource(ResolvedTextFrame tf) {
+        if (tf == null || tf.id() == null) return false;
+        if (tf.sourceHidden()) return false;
+        if (data != null && data.isTextOwnedByIndesignPng(tf.id())) return false;
+        String text = tf.frameVisibleText();
+        if (text == null) return false;
+        text = text.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
+        return !text.isEmpty();
     }
 
     private static String sourceBundleKeyOf(RenderedGroup rg, int[] sourceIds, int[] ownedTextFrameIds) {
@@ -1263,6 +1292,9 @@ public final class OwnershipPlanner {
         if ("hidden_semantic".equals(rg.textOwner())) {
             return TextAction.HIDDEN_SEMANTIC;
         }
+        if (hasTextlessShellWithInferredEditableTextSource(rg)) {
+            return TextAction.OWNED_BY_HWPX_TEXT;
+        }
         if ("hwpx_tf".equals(rg.textOwner())
                 || Boolean.TRUE.equals(rg.containsEditableText())
                 || hasEditableTextFrameIds(rg)) {
@@ -1292,6 +1324,9 @@ public final class OwnershipPlanner {
             return VisualAction.PLACE_TEXT_SHELL;
         }
         if (isInlineCompleteGraphicWithHwpxTextSource(rg, placement, textAction)) {
+            return VisualAction.DROP_VISUAL;
+        }
+        if (isInlineGraphicWithEditableTextSourcesButNoTextlessShell(rg, placement)) {
             return VisualAction.DROP_VISUAL;
         }
         if (isCompanionShellOfCompleteSimpleLabel(rg)) {
@@ -1653,15 +1688,61 @@ public final class OwnershipPlanner {
         if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) {
             return false;
         }
-        return rg.hasEditableTextHiddenFromPng();
+        return rg.hasEditableTextHiddenFromPng()
+                || hasTextlessShellWithInferredEditableTextSource(rg);
     }
 
     private boolean isInlineCompleteGraphicWithHwpxTextSource(RenderedGroup rg, Placement placement, TextAction textAction) {
         if (rg == null || placement != Placement.INLINE) return false;
         if (textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
         if (!"inline_graphic_only".equals(rg.reason())) return false;
+        if (isExtractedTextlessVisual(rg)) return false;
         if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return true;
         return hasEditableTextOwnerSignal(rg);
+    }
+
+    private boolean isInlineGraphicWithEditableTextSourcesButNoTextlessShell(RenderedGroup rg, Placement placement) {
+        if (rg == null || placement != Placement.INLINE) return false;
+        if (!"inline_graphic_only".equals(rg.reason())) return false;
+        if (hasExplicitTextlessShellSignal(rg)) return false;
+        return inferredEditableTextFrameSourceIds(rg).length > 0;
+    }
+
+    private boolean hasTextlessShellWithInferredEditableTextSource(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (rg.file() == null || rg.file().isEmpty()) return false;
+        if ("indesign_png".equals(rg.textOwner())) return false;
+        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
+        if (!hasExplicitTextlessShellSignal(rg)) return false;
+        return inferredEditableTextFrameSourceIds(rg).length > 0;
+    }
+
+    private static boolean hasExplicitTextlessShellSignal(RenderedGroup rg) {
+        if (rg == null) return false;
+        if (rg.isTextHiddenBeforeExport()) return true;
+        String reason = safe(rg.reason());
+        if (reason.contains("text_hidden")) return true;
+        String base = basename(rg.file());
+        return base.startsWith("deco_")
+                || base.startsWith("tf_shell_")
+                || base.startsWith("label_backdrop_");
+    }
+
+    private static boolean hasExplicitTextlessShellSignal(ObjectPlan plan) {
+        if (plan == null) return false;
+        String reason = safe(plan.reason);
+        if (reason.contains("text_hidden")) return true;
+        String base = basename(plan.file);
+        return base.startsWith("deco_")
+                || base.startsWith("tf_shell_")
+                || base.startsWith("label_backdrop_");
+    }
+
+    private static String basename(String path) {
+        if (path == null) return "";
+        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        return slash >= 0 ? path.substring(slash + 1) : path;
     }
 
     private boolean isInlineCompleteGraphicWithSeparateTextHiddenShell(RenderedGroup rg) {
@@ -1938,6 +2019,9 @@ public final class OwnershipPlanner {
         if (isMultiTextVisualLabelShell(rg)) {
             return Placement.FLOATING;
         }
+        if (isTextlessShellForInlineOwnedTextFrame(rg)) {
+            return Placement.INLINE;
+        }
         if (isTextHiddenShellForInlineAnchor(rg)) {
             return Placement.INLINE;
         }
@@ -1945,6 +2029,20 @@ public final class OwnershipPlanner {
             return Placement.FLOATING;
         }
         return Placement.FLOATING;
+    }
+
+    private boolean isTextlessShellForInlineOwnedTextFrame(RenderedGroup rg) {
+        if (rg == null || data == null) return false;
+        if (!"indesign_png".equals(rg.visualOwner())) return false;
+        if (!"hwpx_tf".equals(rg.textOwner()) && !hasEditableTextFrameIds(rg)) return false;
+        if (!hasExplicitTextlessShellSignal(rg)) return false;
+        int[] textFrameIds = editableTextFrameIdsOf(rg);
+        if (textFrameIds.length == 0) return false;
+        for (int textFrameId : textFrameIds) {
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(textFrameId));
+            if (tf == null || !tf.isInline()) return false;
+        }
+        return true;
     }
 
     private boolean isMultiTextVisualLabelShell(RenderedGroup rg) {
@@ -2861,6 +2959,7 @@ public final class OwnershipPlanner {
                 if (child.pageIndex != parent.pageIndex) continue;
                 if (!parentTextShellMayOwnDescendantVisual(parent, child)) continue;
                 if (isImageBackedSourcePositionedInlineTextShell(parent, child)) continue;
+                if (inlineTextShellOwnsMoreSpecificText(child, parent)) continue;
                 if (isStandaloneGraphicOnlyInlineObjectPlan(child)) continue;
                 if (!isDescendantVisualOfParentTextShell(parent, child)) continue;
                 collectDescendantVisualIds(parent, child, descendants);
@@ -2896,6 +2995,7 @@ public final class OwnershipPlanner {
                 if (Math.abs(child.pageIndex - parent.pageIndex) != 1) continue;
                 if (!parentTextShellMayOwnDescendantVisual(parent, child)) continue;
                 if (isImageBackedSourcePositionedInlineTextShell(parent, child)) continue;
+                if (inlineTextShellOwnsMoreSpecificText(child, parent)) continue;
                 if (isStandaloneGraphicOnlyInlineObjectPlan(child)) continue;
                 if (!crossPageTextShellMayOwnDescendantVisual(parent, child)) continue;
                 collectDescendantVisualIds(parent, child, descendants);
@@ -3116,6 +3216,7 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan plan = plans.get(i);
             if (!isInlineTextShellPlan(plan)) continue;
+            if (!hasExplicitTextlessShellSignal(plan)) continue;
             if (isNonCanonicalAtomicObjectPlan(plan)) continue;
             if ("owned_by_page_object_channel".equals(plan.reason)) continue;
             if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
@@ -3146,10 +3247,118 @@ public final class OwnershipPlanner {
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             if (plan.placement != Placement.INLINE) continue;
             if (!safe(plan.kind).contains("inline_object")) continue;
-            if (!isDirectInlineTextShellReason(plan.reason)) continue;
             if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            if (!hasExplicitTextlessShellSignal(plan)) continue;
             plans.set(i, plan.withTextAction(TextAction.OWNED_BY_HWPX_TEXT));
         }
+    }
+
+    private void dropInlineGraphicOnlyTextShellWithoutTextlessCarrier() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isInlineGraphicOnlyTextShellWithoutTextlessCarrier(plan)) continue;
+            if (isAtomicMultiTextInlineCompletePngOwner(plan)) {
+                plans.set(i, plan
+                        .withTextAction(TextAction.OWNED_BY_PNG)
+                        .withPlacement(Placement.FLOATING)
+                        .withVisualAction(VisualAction.PLACE_FLOATING_PNG,
+                                "floating_atomic_multi_text_complete_png"));
+                continue;
+            }
+            plans.set(i, plan
+                    .withTextAction(TextAction.DROP_TEXT)
+                    .withVisualAction(VisualAction.DROP_VISUAL,
+                            "inline_complete_png_text_owned_by_child_frames"));
+        }
+    }
+
+    private boolean isAtomicMultiTextInlineCompletePngOwner(ObjectPlan plan) {
+        return plan != null
+                && plan.placement == Placement.INLINE
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 1
+                && !hasExplicitTextlessShellCoverageForOwnedText(plan);
+    }
+
+    private boolean hasExplicitTextlessShellCoverageForOwnedText(ObjectPlan ownerPlan) {
+        if (ownerPlan == null || ownerPlan.ownedTextFrameIds == null
+                || ownerPlan.ownedTextFrameIds.length == 0) {
+            return false;
+        }
+        LinkedHashSet<Integer> remaining = new LinkedHashSet<>();
+        for (int tfId : ownerPlan.ownedTextFrameIds) {
+            remaining.add(tfId);
+        }
+        for (ObjectPlan plan : plans) {
+            if (plan == null || plan == ownerPlan) continue;
+            if (plan.pageIndex != ownerPlan.pageIndex) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!hasExplicitTextlessShellSignal(plan)) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            for (int tfId : plan.ownedTextFrameIds) {
+                remaining.remove(tfId);
+            }
+            if (remaining.isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private void dropPlansOwnedByInlineCompletePng() {
+        LinkedHashSet<Integer> ownedTextFrames = new LinkedHashSet<>();
+        for (ObjectPlan plan : plans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                    && plan.visualAction != VisualAction.PLACE_FLOATING_PNG) continue;
+            if (plan.textAction != TextAction.OWNED_BY_PNG) continue;
+            if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            for (int tfId : plan.ownedTextFrameIds) {
+                ownedTextFrames.add(tfId);
+            }
+        }
+        if (ownedTextFrames.isEmpty()) return;
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (plan == null) continue;
+            if ("text_frame".equals(plan.kind) && ownedTextFrames.contains(plan.domId)) {
+                plans.set(i, plan
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(VisualAction.DROP_VISUAL, "owned_by_inline_complete_png"));
+                continue;
+            }
+            if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    && allOwnedTextFramesIn(plan, ownedTextFrames)) {
+                plans.set(i, plan
+                        .withTextAction(TextAction.DROP_TEXT)
+                        .withVisualAction(VisualAction.DROP_VISUAL, "owned_by_inline_complete_png"));
+            }
+        }
+    }
+
+    private boolean allOwnedTextFramesIn(ObjectPlan plan, Set<Integer> ownedTextFrames) {
+        if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+            return false;
+        }
+        for (int tfId : plan.ownedTextFrameIds) {
+            if (!ownedTextFrames.contains(tfId)) return false;
+        }
+        return true;
+    }
+
+    private boolean isInlineGraphicOnlyTextShellWithoutTextlessCarrier(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (plan.placement != Placement.INLINE) return false;
+        if (!safe(plan.kind).contains("inline_object")) return false;
+        if (!"inline_graphic_only".equals(plan.reason)) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL
+                && plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                && plan.visualAction != VisualAction.DROP_VISUAL) {
+            return false;
+        }
+        if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return false;
+        if (hasExplicitTextlessShellSignal(plan)) return false;
+        RenderedGroup rendered = renderedGroupForPlan(plan);
+        return rendered == null || !hasExplicitTextlessShellSignal(rendered);
     }
 
     private void dropTextFramesOwnedByInlineTextShells() {
@@ -3160,6 +3369,7 @@ public final class OwnershipPlanner {
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) continue;
+            if (!mayInlineTextShellPlanConsumeOwnedTextFrames(plan)) continue;
             for (int tfId : plan.ownedTextFrameIds) {
                 ownedByInlineShell.add(tfId);
             }
@@ -3174,6 +3384,16 @@ public final class OwnershipPlanner {
                     .withTextAction(TextAction.DROP_TEXT)
                     .withVisualAction(VisualAction.DROP_VISUAL, "owned_by_inline_text_shell"));
         }
+    }
+
+    private boolean mayInlineTextShellPlanConsumeOwnedTextFrames(ObjectPlan plan) {
+        if (plan == null) return false;
+        if (!hasExplicitTextlessShellSignal(plan)) return false;
+        if (safe(plan.kind).contains("inline_object")) return true;
+        if (isDirectInlineTextShellReason(plan.reason)) return true;
+        String reason = safe(plan.reason);
+        return reason.contains("inline_companion_atomic_text_shell")
+                || reason.contains("atomic_root_text_hidden_shell");
     }
 
     private void splitImageBackedCompositeTextShellParents() {
@@ -3602,7 +3822,6 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan owner = plans.get(i);
             if (!isVisibleTextShell(owner)) continue;
-            if (owner.placement == Placement.INLINE) continue;
             for (int j = 0; j < plans.size(); j++) {
                 if (i == j) continue;
                 ObjectPlan child = plans.get(j);
@@ -3615,6 +3834,7 @@ public final class OwnershipPlanner {
                         && !sourcePositionedInlineShell) {
                     continue;
                 }
+                if (inlineTextShellOwnsMoreSpecificText(child, owner)) continue;
                 if (!textShellOwnerCoversChild(owner, child)) continue;
                 ObjectPlan dropped = child.withVisualAction(VisualAction.DROP_VISUAL,
                         "visual_source_owned_by_parent_text_shell");
@@ -3631,6 +3851,17 @@ public final class OwnershipPlanner {
                 && plan.hasVisibleVisual()
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
                 && visualSourceIds(plan).length > 0;
+    }
+
+    private static boolean inlineTextShellOwnsMoreSpecificText(ObjectPlan candidate, ObjectPlan parent) {
+        if (candidate == null || parent == null) return false;
+        if (candidate.placement != Placement.INLINE) return false;
+        if (candidate.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (candidate.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (candidate.ownedTextFrameIds == null || candidate.ownedTextFrameIds.length == 0) return false;
+        if (parent.ownedTextFrameIds == null || parent.ownedTextFrameIds.length == 0) return true;
+        if (!containsAll(parent.ownedTextFrameIds, candidate.ownedTextFrameIds)) return true;
+        return candidate.ownedTextFrameIds.length > parent.ownedTextFrameIds.length;
     }
 
     private static boolean parentTextShellMayOwnDescendantVisual(ObjectPlan parent, ObjectPlan child) {

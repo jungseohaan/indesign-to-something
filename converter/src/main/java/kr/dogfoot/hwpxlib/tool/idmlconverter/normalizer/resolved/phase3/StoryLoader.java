@@ -419,6 +419,13 @@ public class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
+                                    ASTInlineObject plannedAnchorTextShell =
+                                            InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
+                                    if (plannedAnchorTextShell != null) {
+                                        para.addItem(plannedAnchorTextShell);
+                                        anchorIdx++;
+                                        continue;
+                                    }
                                     ASTInlineObject groupShell =
                                             InlineFrameHandler.tryInlineGroupShellWithEditableChild(ctx, domId);
                                     if (groupShell != null) {
@@ -445,7 +452,9 @@ public class StoryLoader {
                                     }
                                     if (InlineSemanticLabelPolicy.isSemanticMultiTextInlineGroup(
                                             ctx.resolvedData, domId)) {
-                                        if (!InlineFrameHandler.hasPlannedFloatingShellForSemanticInlineGroup(ctx, domId)) {
+                                        if (!InlineFrameHandler.hasPlannedFloatingShellForSemanticInlineGroup(ctx, domId)
+                                                && !InlineFrameHandler.hasPlannedInlineChildTextOwnership(ctx, domId)
+                                                && !InlineFrameHandler.hasPlannedInlinePngForAnchor(ctx, domId)) {
                                             ctx.deferredAnchoredFloatingIds.add(domId);
                                             anchorIdx++;
                                             continue;
@@ -470,13 +479,6 @@ public class StoryLoader {
                                     if (boxList != null && !boxList.isEmpty()) {
                                         for (ASTInlineObject box : boxList) para.addItem(box);
                                     } else {
-                                        ASTInlineObject plannedAnchorTextShell =
-                                                InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
-                                        if (plannedAnchorTextShell != null) {
-                                            para.addItem(plannedAnchorTextShell);
-                                            anchorIdx++;
-                                            continue;
-                                        }
                                         ASTInlineObject shapeShell =
                                                 InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, domId);
                                         if (shapeShell != null) {

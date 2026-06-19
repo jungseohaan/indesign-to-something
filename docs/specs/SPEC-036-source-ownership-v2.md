@@ -39,6 +39,9 @@
 
 - 같은 source bundle의 같은 slot은 visible owner를 하나만 가진다.
 - `TEXT_SLOT`과 `SHELL_SLOT`은 동시에 보일 수 있다. 예: textless shell + editable child TF.
+- parent `PLACE_TEXT_SHELL`이 child shell의 `visualSourceObjectIds`를 모두 포함하고,
+  child의 `ownedTextFrameIds`도 parent가 소유하면 parent가 `SHELL_SLOT` owner다.
+  이 parent가 inline carrier여도 floating child shell은 visible owner가 될 수 없다.
 - `TABLE_STYLE_SLOT`은 shell/source bundle에 포함된 fill-only shape를 HWPX table 속성으로 흡수할 수 있다.
   이 source는 shell PNG/native shell로 다시 visible 배치하지 않는다.
 - 같은 source id가 서로 다른 slot에 등장하는 경우에는 `styleSourceObjectIds`,
@@ -139,6 +142,12 @@
 - `EXTRACTED_PNG_VECTOR`이면 실제 추출 file이 있다.
 - `NATIVE_SOURCE_SHAPE`이면 원본 `Rectangle`/`Oval` source id와 bounds/style이 있다.
 
+렌더 메타데이터의 `editableTextFrameIds` / `textOwner=hwpx_tf`가 누락되어도,
+`sourceObjectIds` 안에 visible editable TextFrame이 있고 shell material이
+`containsText=false` 또는 `textHiddenBeforeExport=true`라면 source tree가 우선한다.
+이 경우 Stage 1은 해당 render를 complete PNG가 아니라 `TEXTLESS_SHELL_WITH_TF`
+동등한 shell owner로 보강한다.
+
 실행 규칙:
 
 - extractor가 source object/group을 복제한다.
@@ -167,6 +176,9 @@
   `EXTRACTED_PNG_VECTOR` carrier는 `ObjectPlan.file`의 추출 shell PNG를 image brush로 쓰고,
   `NATIVE_SOURCE_SHAPE` carrier는 HWPX native fill/stroke/corner를 쓴다.
   텍스트는 editable drawText/subList로 둔다.
+- inline shell plan은 story anchor 실행 시 legacy skip보다 우선한다.
+  `hasTextBlockPlacedDescendant`, semantic label defer, outside-parent fallback은
+  `INLINE + PLACE_TEXT_SHELL` plan을 floating으로 바꾸거나 숨기는 근거가 될 수 없다.
 - 단순 원본 도형(`Rectangle`/`Oval`)이 inline carrier의 직접 shell이고 그 안의 child
   TextFrame만 HWPX text owner인 경우, shell은 PNG image brush가 아니라 HWPX native
   fill/stroke/corner 속성으로 실행할 수 있다. 이때 source는 parent shell shape이고,
@@ -206,27 +218,43 @@
 
 ### 4.1 Shell Placement
 
-`page_object`로 추출된 textless shell은 기본적으로 floating shell이다.
-inline으로 배치할 수 있는 것은 render candidate 자체가 `inline_object`인 경우뿐이다.
+shell의 placement는 Stage 1 `ObjectPlan.placement`가 유일한 권위다.
+후속 단계는 `page_object`/`inline_object` 타입이나 descendant 흔적을 보고
+placement를 다시 바꾸지 않는다.
 
 inline 인정 조건:
 
-- render candidate 자체가 `inline_object`이다.
-- 또는 같은 source bundle의 `page_object` textless shell을 실행하기 위한 같은 dom id의
-  `inline_object` companion이다. 이 경우 visible owner는 inline companion이고,
-  page_object shell plan은 drop된다.
+- `ObjectPlan.placement=INLINE`이고 `visualAction=PLACE_TEXT_SHELL`이다.
+- shell PNG가 명시적인 textless shell material이다. 예: `deco_*`, `tf_shell_*`,
+  `label_backdrop_*`, `text_hidden` reason.
+- 같은 source bundle의 editable child TF도 inline HWPX text로 소유된다.
+- inline complete PNG가 같은 source bundle에 있으면 그 PNG는 `DROP_VISUAL`이다.
 
 inline 불인정 조건:
 
-- `sourceObjectIds` 안의 descendant/child source 중 일부가 inline이다.
-- child TextFrame이 inline source를 가졌거나 inline object 안에 포함된 적이 있다.
-- 같은 bundle 안에 inline fragment가 섞여 있다.
-- 같은 dom id의 inline companion이 있다.
+- Stage 1 plan이 `FLOATING` 또는 `DROP_VISUAL`이다.
+- shell material이 complete text PNG이다.
+- child TF 소유권이 `OWNED_BY_PNG`이거나 `DROP_TEXT`로 확정되어 있다.
 
-즉, descendant의 inline 흔적은 parent `page_object` shell의 placement를 inline으로
-바꾸는 근거가 될 수 없다. editable TF를 별도 HWPX 텍스트로 소유하는 page_object
-shell은 `placement=FLOATING`이다.
-후속 단계는 이 결정을 뒤집거나 inline executor로 라우팅하지 않는다.
+즉, descendant의 inline 흔적은 parent `page_object` shell의 placement를 바꾸는 근거가
+될 수 없다. 반대로 Stage 1이 같은 source bundle의 textless `page_object` shell을
+inline carrier로 선택했다면 legacy executor는 이를 숨기거나 floating으로 전환하지 않는다.
+같은 plan/source shell은 변환 중 정확히 한 번만 실행한다.
+
+semantic multi-text inline group은 본문/셀 story에 child TF boxes로 펼치지 않는다.
+먼저 같은 inline source bundle의 모든 owned TF를 덮는 명시적 textless shell carrier가
+있는지 확인한다.
+
+- 전체 owned TF가 명시적 textless shell carrier들로 커버되면 `TEXTLESS_SHELL_WITH_TF`가
+  우선이다. complete inline PNG는 `DROP_VISUAL`이고, shell+TF plan이 단일 실행 단위다.
+- 전체 coverage가 없으면 그 source bundle은 분해하지 않는다. complete inline PNG가
+  `OWNED_BY_PNG + PLACE_FLOATING_PNG`로 atomic visual owner가 되고, child TF와 부분
+  shell은 `DROP_TEXT/DROP_VISUAL`이다. 이 fallback은 편집 가능한 inline text가 아니라
+  시각 라벨 보존이 목적이므로 parent story/cell flow에 inline object로 삽입하지 않는다.
+
+즉, `질문하기`/`스스로`처럼 하나의 inline anchor 안에 여러 TF가 있고 일부 shell만
+분리된 경우, child TF를 parent cell 문장에 합치지 않는다. source bundle 하나가
+inline 객체 하나로 남는다.
 
 ### 4.2 Table-Only Carrier
 
