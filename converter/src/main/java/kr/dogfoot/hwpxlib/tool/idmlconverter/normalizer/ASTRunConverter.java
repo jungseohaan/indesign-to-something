@@ -279,8 +279,15 @@ public class ASTRunConverter {
         // inline_object PNG (imageLoader 불필요)
         if (resolvedData != null && domId > 0) {
             for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
-                if (rg.id() == domId && "inline_object".equals(rg.itemType()) && rg.file() != null) {
+                if (rg.id() == domId
+                        && ("inline_object".equals(rg.itemType()) || "inline_object".equals(rg.type()))
+                        && rg.file() != null) {
                     if (isDoviraSubunitMarkerRender(rg, resolvedData)) {
+                        return;
+                    }
+                    if (rg.hasEditableTextHiddenFromPng()
+                            && rg.editableTextFrameIds() != null
+                            && rg.editableTextFrameIds().length > 0) {
                         return;
                     }
                     // 자손 TextFrame이 플로팅 텍스트박스로 배치되면 PNG와 글상자 중복됨 → 스킵
@@ -901,6 +908,7 @@ public class ASTRunConverter {
         String fontFamily = run.fontFamily();
         Double fontSize = run.fontSize();
         String fillColor = run.fillColor();
+        Double fillTint = run.fillTint();
         String fontStyle = run.fontStyle();
         String shadeColor = run.shadeColor();
         Double shadeTint = run.shadeTint();
@@ -1001,7 +1009,11 @@ public class ASTRunConverter {
         }
 
         if (fillColor != null) {
-            textRun.textColor(colorResolver.resolve(fillColor));
+            String resolvedFill = colorResolver.resolve(fillColor);
+            if (fillTint != null) {
+                resolvedFill = ColorResolver.applyTintToHex(resolvedFill, fillTint);
+            }
+            textRun.textColor(resolvedFill);
         }
         if (shadeColor != null) {
             String resolvedShade = colorResolver.resolve(shadeColor);

@@ -1096,21 +1096,18 @@ public class InlineFrameHandler {
             obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
             obj.width(CoordinateConverter.pointsToHwpunits(w));
             obj.height(CoordinateConverter.pointsToHwpunits(h));
-            obj.nativeGraphicsAllowed(true);
             obj.keepInline(true);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf, true));
             obj.verticalJustification("CenterAlign");
-            boolean nativeStyle = applyInlineEditableLabelShellStyle(ctx, obj, bgShape, hasOval, w, h);
             applyInlineEditableLabelTextMargins(obj, anchorItem, childTf);
-            if (!nativeStyle) {
-                if (ctx.basePath == null || shell.file() == null) return null;
-                File pngFile = new File(ctx.basePath, shell.file());
-                if (!pngFile.exists() || !pngFile.isFile()) return null;
-                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                BufferedImage img = ImageIO.read(pngFile);
-                if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
-                obj.imageFillData(imageData);
-            }
+            if (ctx.basePath == null || shell.file() == null) return null;
+            File pngFile = new File(ctx.basePath, shell.file());
+            if (!pngFile.exists() || !pngFile.isFile()) return null;
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            BufferedImage img = ImageIO.read(pngFile);
+            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+            obj.imageFillData(prepareInlineTextShellImageData(img, true));
+            obj.forceImageFill(true);
             buildBadgeParagraph(ctx, childTf, obj);
             return obj;
         } catch (Exception e) {
@@ -1387,27 +1384,18 @@ public class InlineFrameHandler {
             obj.sourceId("u" + Integer.toHexString(anchoredObjectId));
             obj.width(CoordinateConverter.pointsToHwpunits(w));
             obj.height(CoordinateConverter.pointsToHwpunits(h));
-            obj.nativeGraphicsAllowed(true);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTfs.get(0), true));
             obj.verticalJustification("CenterAlign");
 
-            ResolvedPageItem nativeShellShape = findSimpleNativeInlineShellShape(
-                    ctx, childTfs.get(0), shellPlan, anchorItem);
-            if (nativeShellShape != null) {
-                applyInlineEditableLabelShellStyle(ctx, obj, nativeShellShape,
-                        "Oval".equals(nativeShellShape.type()), w, h);
-                obj.shellShapeType(nativeShellShape.type());
-            } else {
-                File pngFile = new File(ctx.basePath, shellPlan.file);
-                if (!pngFile.exists() || !pngFile.isFile()) return null;
-                byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
-                BufferedImage img = ImageIO.read(pngFile);
-                if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
-                boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
-                imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
-                obj.imageFillData(imageData);
-                obj.forceImageFill(true);
-            }
+            File pngFile = new File(ctx.basePath, shellPlan.file);
+            if (!pngFile.exists() || !pngFile.isFile()) return null;
+            byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
+            BufferedImage img = ImageIO.read(pngFile);
+            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+            boolean preserveSourceCanvas = shouldPreserveInlineShellSourceCanvas(ctx, shellPlan);
+            imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
+            obj.imageFillData(imageData);
+            obj.forceImageFill(true);
             for (ResolvedTextFrame childTf : childTfs) {
                 buildBadgeParagraph(ctx, childTf, obj);
                 try {
@@ -1540,7 +1528,12 @@ public class InlineFrameHandler {
             java.util.List<ResolvedTextFrame> childTfs) {
         if (plan == null || shell == null || childTfs == null || childTfs.isEmpty()) return false;
         if (plan.placement != Placement.INLINE) return false;
-        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL
+                && !(plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                && shell.hasEditableTextHiddenFromPng()
+                && isDirectInlineTextShellReason(shell.reason()))) {
+            return false;
+        }
         if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
         if (plan.domId != shell.id() && !containsInt(plan.sourceObjectIds, shell.id())) return false;
         for (ResolvedTextFrame childTf : childTfs) {
@@ -1554,6 +1547,14 @@ public class InlineFrameHandler {
             if (!containsInt(plan.ownedTextFrameIds, childId)) return false;
         }
         return true;
+    }
+
+    private static boolean isDirectInlineTextShellReason(String reason) {
+        if (reason == null) return false;
+        return "visual_label_text_hidden_shell".equals(reason)
+                || "editable_textframe_visual_shell".equals(reason)
+                || "inline_text_hidden".equals(reason)
+                || reason.contains("atomic_root_text_hidden_shell");
     }
 
     /** RGBA PNG를 흰 배경에 합성해 불투명 PNG 바이트로 반환(한글 imgBrush 알파→검정 회피). */
@@ -1805,6 +1806,7 @@ public class InlineFrameHandler {
             if (shouldUseResolvedParagraphsForInlineShell(story)) {
                 List<ASTParagraph> paragraphs = StoryConverter.convertStoryParagraphs(ctx, story, false);
                 if (paragraphs != null && !paragraphs.isEmpty()) {
+                    applyIdmlRunTintFallbackToParagraphs(ctx, childTf, paragraphs);
                     for (ASTParagraph paragraph : paragraphs) {
                         obj.addParagraph(paragraph);
                     }
@@ -1864,6 +1866,22 @@ public class InlineFrameHandler {
         }
     }
 
+    private static void applyIdmlRunTintFallbackToParagraphs(ResolvedBuildContext ctx,
+                                                             ResolvedTextFrame textFrame,
+                                                             List<ASTParagraph> paragraphs) {
+        if (paragraphs == null || paragraphs.isEmpty()) return;
+        List<ASTTextRun> runs = new ArrayList<>();
+        for (ASTParagraph paragraph : paragraphs) {
+            if (paragraph == null || paragraph.items() == null) continue;
+            for (ASTInlineItem item : paragraph.items()) {
+                if (item instanceof ASTTextRun) {
+                    runs.add((ASTTextRun) item);
+                }
+            }
+        }
+        applyIdmlRunTintFallback(ctx, textFrame, runs);
+    }
+
     private static ResolvedRun firstResolvedRun(ResolvedBuildContext ctx, ResolvedTextFrame textFrame) {
         if (ctx == null || ctx.resolvedData == null || textFrame == null || textFrame.storyId() == null) {
             return null;
@@ -1907,7 +1925,7 @@ public class InlineFrameHandler {
     }
 
     private static IDMLCharacterRun firstVisibleIdmlRun(ResolvedBuildContext ctx, String storyId) {
-        IDMLStory idmlStory = ctx.loadIDMLStory.apply(storyId);
+        IDMLStory idmlStory = loadIdmlStoryByResolvedId(ctx, storyId);
         if (idmlStory == null || idmlStory.paragraphs() == null) return null;
         for (IDMLParagraph paragraph : idmlStory.paragraphs()) {
             if (paragraph == null || paragraph.characterRuns() == null) continue;
@@ -1922,6 +1940,18 @@ public class InlineFrameHandler {
             }
         }
         return null;
+    }
+
+    private static IDMLStory loadIdmlStoryByResolvedId(ResolvedBuildContext ctx, String storyId) {
+        if (ctx == null || ctx.loadIDMLStory == null || storyId == null) return null;
+        IDMLStory story = ctx.loadIDMLStory.apply(storyId);
+        if (story != null) return story;
+        try {
+            int numericId = Integer.parseInt(storyId);
+            return ctx.loadIDMLStory.apply("u" + Integer.toHexString(numericId));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
@@ -2045,6 +2075,12 @@ public class InlineFrameHandler {
                     continue;
                 }
 
+                ASTInlineObject plannedAnchorTextShell = loadPlannedInlineTextShellForAnchor(ctx, childId);
+                if (plannedAnchorTextShell != null) {
+                    items.add(plannedAnchorTextShell);
+                    continue;
+                }
+
                 ASTInlineObject singleBadge = tryInlineGroupAsSingleBadge(ctx, childId);
                 if (singleBadge != null) {
                     items.add(singleBadge);
@@ -2081,6 +2117,10 @@ public class InlineFrameHandler {
                     continue;
                 }
 
+                if (isInlineTextShellCompanionForEditableText(ctx, childId)) {
+                    continue;
+                }
+
                 ASTInlineObject inlineObj = loadInlineObject(ctx, childId);
                 if (inlineObj != null) {
                     items.add(inlineObj);
@@ -2114,6 +2154,10 @@ public class InlineFrameHandler {
     static ASTInlineObject tryInlineTextFrameWithTables(ResolvedBuildContext ctx, int anchoredObjectId) {
         if (ctx == null || ctx.resolvedData == null || ctx.loadIDMLStory == null) return null;
         if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+        ASTInlineObject plannedAnchorTextShell = loadPlannedInlineTextShellForAnchor(ctx, anchoredObjectId);
+        if (plannedAnchorTextShell != null) return plannedAnchorTextShell;
+        ASTInlineObject plannedTextShell = loadPlannedInlineTextShellForTextFrame(ctx, anchoredObjectId);
+        if (plannedTextShell != null) return plannedTextShell;
         if (!ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId)
                 && !hasPlannedInlineHwpxTextDescendant(ctx, anchoredObjectId)) {
             return null;
@@ -2189,6 +2233,12 @@ public class InlineFrameHandler {
     private static void appendInlineTablesFromTextFrame(
             ResolvedBuildContext ctx, ASTInlineObject obj, ResolvedTextFrame tf) {
         if (tf == null || !tf.isInline() || tf.storyId() == null) return;
+        try {
+            int tfDomId = Integer.parseInt(tf.id());
+            if (loadPlannedInlineTextShellForTextFrame(ctx, tfDomId) != null) return;
+        } catch (NumberFormatException ignored) {
+            // Non-numeric ids cannot participate in source ownership lookup.
+        }
         if (ctx.resolvedData.isTextOwnedByIndesignPng(tf.id())) return;
         IDMLStory story = ctx.loadIDMLStory.apply(tf.storyId());
         if (story == null || !story.hasTables()) return;
@@ -2830,9 +2880,10 @@ public class InlineFrameHandler {
                 if (placeInlineTextShell) {
                     ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
                     ResolvedTextFrame childTf = firstEditableTextFrameForRenderedGroup(ctx, rg);
-                    ASTInlineObject shellObject =
-                            buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, rg);
-                    if (shellObject != null) return shellObject;
+                    return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, rg);
+                }
+                if (isInlineTextShellCompanionForEditableText(ctx, anchoredObjectId)) {
+                    return null;
                 }
                 boolean isNullTypeInline = rg.itemType() == null;
                 // inline_object PNG를 그대로 사용 (tryInlineGroupAsSingleBadge가 먼저 INLINE_TEXT_FRAME을 시도했으므로
@@ -2959,17 +3010,103 @@ public class InlineFrameHandler {
             ResolvedBuildContext ctx,
             int textFrameId) {
         if (ctx == null || ctx.resolvedData == null) return null;
-        if (ctx.isTextDisposed(textFrameId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
         ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
         if (tf == null || !tf.isInline()) return null;
         RenderedGroup shell = findTextHiddenInlineShellForTextFrame(ctx, tf.id());
         if (shell == null) return null;
-        if (ctx.visualActionByOwnershipPlan(shell) != VisualAction.PLACE_TEXT_SHELL
-                || ctx.placementByOwnershipPlan(shell) != Placement.INLINE) {
+        VisualAction action = ctx.visualActionByOwnershipPlan(shell);
+        if (ctx.placementByOwnershipPlan(shell) != Placement.INLINE
+                || (action != VisualAction.PLACE_TEXT_SHELL
+                && !isInlineTextShellCompanionForEditableText(ctx, shell.id()))) {
             return null;
         }
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
         return buildInlineShellObject(ctx, shell.id(), anchorItem, tf, shell);
+    }
+
+    public static boolean isInlineTextShellCompanionForEditableText(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null) return false;
+        java.util.List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
+        if (groups == null) return false;
+        for (RenderedGroup rg : groups) {
+            if (rg == null || rg.id() != anchoredObjectId) continue;
+            if (!"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan != null
+                    && plan.placement == Placement.INLINE
+                    && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && plan.ownedTextFrameIds != null
+                    && plan.ownedTextFrameIds.length > 0) {
+                return true;
+            }
+            if (rg.hasEditableTextHiddenFromPng()
+                    && "hwpx_tf".equals(rg.textOwner())
+                    && rg.editableTextFrameIds() != null
+                    && rg.editableTextFrameIds().length > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static ASTInlineObject loadPlannedInlineTextShellForAnchor(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.ownershipPlans == null) return null;
+        ObjectPlan plan = findInlineTextShellOwnerPlanForAnchor(ctx, anchoredObjectId);
+        if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return null;
+        RenderedGroup shell = findRenderedGroupForPlan(ctx, plan, anchoredObjectId);
+        if (shell == null) return null;
+
+        List<ResolvedTextFrame> childTfs = new ArrayList<>();
+        for (int childId : plan.ownedTextFrameIds) {
+            ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(String.valueOf(childId));
+            if (childTf == null) return null;
+            childTfs.add(childTf);
+        }
+        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
+        return buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell);
+    }
+
+    private static ObjectPlan findInlineTextShellOwnerPlanForAnchor(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.ownershipPlans == null) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            boolean sameAnchor = plan.domId == anchoredObjectId
+                    || (plan.renderId != null && plan.renderId == anchoredObjectId)
+                    || containsInt(plan.sourceObjectIds, anchoredObjectId)
+                    || containsInt(plan.visualSourceObjectIds, anchoredObjectId);
+            if (sameAnchor) return plan;
+        }
+        return null;
+    }
+
+    private static RenderedGroup findRenderedGroupForPlan(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || plan == null
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return null;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null) continue;
+            boolean same = rg.id() == anchoredObjectId
+                    || rg.id() == plan.domId
+                    || (plan.renderId != null && rg.id() == plan.renderId)
+                    || containsInt(plan.sourceObjectIds, rg.id())
+                    || containsInt(plan.visualSourceObjectIds, rg.id());
+            if (same) return rg;
+        }
+        return null;
     }
 
     public static boolean shouldUsePlannedInlinePngWithSeparateHwpxText(

@@ -46,9 +46,6 @@ final class InlineItemDispatcher {
                         paragraphBuilder.textBoxBuilder, paragraphBuilder);
             }
         } else if (obj.kind() == ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) {
-            if (deferTableCellOverlay(obj)) {
-                return;
-            }
             if (isRasterizedInlineTextFrame(obj)) {
                 paragraphBuilder.imageBuilder.addInlineImage(para, obj);
                 return;
@@ -93,14 +90,13 @@ final class InlineItemDispatcher {
         }
     }
 
-    private boolean deferTableCellOverlay(ASTInlineObject obj) {
-        if (obj == null || !obj.isOverlay() || !ctx.insideTableCell) return false;
-        HwpxConverterContext.DeferredOverlay d = new HwpxConverterContext.DeferredOverlay();
-        d.overlay = obj;
-        d.pageX = ctx.blockPageX + ctx.blockInsetLeft + obj.overlayX();
-        d.pageY = ctx.blockPageY + ctx.blockInsetTop + obj.overlayY();
-        ctx.deferredOverlays.add(d);
-        return true;
+    static boolean hasDrawableShell(ASTInlineObject obj) {
+        if (obj == null) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) return true;
+        String fill = obj.fillColor();
+        if (fill != null && fill.startsWith("#")) return true;
+        String stroke = obj.strokeColor();
+        return stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0;
     }
 
     private static boolean isImageOnlyInlineBadgeGroup(ASTInlineObject obj) {

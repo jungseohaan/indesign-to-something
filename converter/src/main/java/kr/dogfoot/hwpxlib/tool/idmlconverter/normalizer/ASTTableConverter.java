@@ -10,7 +10,10 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
+import java.io.File;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -187,6 +190,7 @@ public class ASTTableConverter {
         // 마지막 빈 단락 제거
         ASTPageProcessor.removeTrailingEmptyParagraphs(cell.paragraphs());
         replaceFlattenedCellTextWithResolvedStory(cell, idmlCell, resolvedData);
+        normalizeTextHiddenInlineShellCarriers(cell, resolvedData);
 
         return cell;
     }
@@ -709,8 +713,98 @@ public class ASTTableConverter {
             }
         }
         replaceFlattenedCellTextWithResolvedStory(cell, idmlCell, resolvedData);
+        normalizeTextHiddenInlineShellCarriers(cell, resolvedData);
 
         return cell;
+    }
+
+    private static void normalizeTextHiddenInlineShellCarriers(ASTTableCell cell, ResolvedData resolvedData) {
+        if (cell == null || resolvedData == null || cell.paragraphs() == null) return;
+        for (ASTParagraph para : cell.paragraphs()) {
+            if (para == null || para.items() == null || para.items().isEmpty()) continue;
+            for (ASTInlineItem item : para.items()) {
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject obj = (ASTInlineObject) item;
+                if (obj.kind() != ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME) continue;
+                String domId = domIdFromSourceId(obj.sourceId());
+                if (domId == null) continue;
+                RenderedGroup shell = findTextHiddenShellForEditableTextFrame(resolvedData, domId);
+                if (shell == null) continue;
+                applyExtractedShellAsInlineFrameFill(obj, shell, resolvedData);
+                removeStandaloneShellImage(para, shell.id());
+            }
+        }
+    }
+
+    private static RenderedGroup findTextHiddenShellForEditableTextFrame(
+            ResolvedData resolvedData, String textFrameDomId) {
+        if (resolvedData == null || textFrameDomId == null) return null;
+        for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
+            if (!isTextHiddenInlineShell(rg)) continue;
+            String[] ids = rg.editableTextFrameIds();
+            if (ids == null) continue;
+            for (String id : ids) {
+                if (textFrameDomId.equals(id)) return rg;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isTextHiddenInlineShell(RenderedGroup rg) {
+        if (rg == null || !rg.hasEditableTextHiddenFromPng()) return false;
+        if (rg.file() == null || rg.file().isEmpty()) return false;
+        String role = rg.itemType() != null ? rg.itemType() : rg.type();
+        return "inline_object".equals(role);
+    }
+
+    private static void applyExtractedShellAsInlineFrameFill(
+            ASTInlineObject obj, RenderedGroup shell, ResolvedData resolvedData) {
+        byte[] shellPng = readRenderedPng(shell, resolvedData);
+        if (shellPng == null) return;
+        obj.imageFillData(shellPng);
+        obj.forceImageFill(true);
+        obj.nativeGraphicsAllowed(false);
+        obj.fillColor(null);
+        obj.strokeColor(null);
+        obj.strokeWeight(0);
+        obj.keepInline(true);
+    }
+
+    private static byte[] readRenderedPng(RenderedGroup rg, ResolvedData resolvedData) {
+        if (rg == null || rg.file() == null || resolvedData == null || resolvedData.basePath() == null) return null;
+        try {
+            File pngFile = new File(resolvedData.basePath(), rg.file());
+            if (!pngFile.isFile()) return null;
+            return Files.readAllBytes(pngFile.toPath());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void removeStandaloneShellImage(ASTParagraph para, int shellDomId) {
+        if (para == null || para.items() == null) return;
+        String shellSourceId = "u" + Integer.toHexString(shellDomId);
+        para.items().removeIf(item -> {
+            if (!(item instanceof ASTInlineObject)) return false;
+            ASTInlineObject obj = (ASTInlineObject) item;
+            if (obj.kind() != ASTInlineObject.ObjectKind.RENDERED_GROUP
+                    && obj.kind() != ASTInlineObject.ObjectKind.IMAGE) {
+                return false;
+            }
+            return shellSourceId.equalsIgnoreCase(obj.sourceId());
+        });
+    }
+
+    private static String domIdFromSourceId(String sourceId) {
+        if (sourceId == null || sourceId.isEmpty()) return null;
+        try {
+            if (sourceId.charAt(0) == 'u' || sourceId.charAt(0) == 'U') {
+                return String.valueOf(Integer.parseInt(sourceId.substring(1), 16));
+            }
+            return sourceId;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static void replaceFlattenedCellTextWithResolvedStory(

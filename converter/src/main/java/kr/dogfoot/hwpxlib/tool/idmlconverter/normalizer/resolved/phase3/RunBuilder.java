@@ -68,7 +68,9 @@ class RunBuilder {
             }
             if (grepCharStyle != null && grepCharStyle.fillColor() != null) {
                 effectiveIdmlColor = grepCharStyle.fillColor();
-                effectiveIdmlTint = null;
+                // GREP character styles often override only FillColor. If the concrete
+                // CharacterStyleRange carries FillTint, keep it; otherwise tint=0 labels
+                // lose their white/washed rendering and become the raw swatch color.
             }
         }
 

@@ -35,6 +35,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -1634,19 +1635,49 @@ public final class TableBuilder {
                 int paraCount = Math.min(astCell.paragraphs().size(), idmlCell.paragraphs().size());
                 for (int pi = 0; pi < paraCount; pi++) {
                     IDMLParagraph idmlPara = idmlCell.paragraphs().get(pi);
+                    ASTParagraph astPara = astCell.paragraphs().get(pi);
+                    if (astPara == null) continue;
+                    normalizeOwnedInlineTextShellCarriers(ctx, astPara);
                     int anchorOnlyId = anchorOnlyGraphicDomId(idmlPara);
                     if (anchorOnlyId > 0
                             && !isAtomicRenderedInlineGraphic(ctx, anchorOnlyId)
                             && !kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
                                     .buildChildEditableBoxes(ctx, anchorOnlyId)
                                     .isEmpty()) {
+                        normalizeOwnedInlineTextShellCarriers(ctx, astPara);
                         continue;
                     }
-                    ASTParagraph astPara = astCell.paragraphs().get(pi);
-                    if (astPara == null) continue;
                     restoreRenderedCellInlineGraphics(ctx, astPara, idmlPara);
+                    normalizeOwnedInlineTextShellCarriers(ctx, astPara);
                 }
             }
+        }
+    }
+
+    private static void normalizeOwnedInlineTextShellCarriers(
+            ResolvedBuildContext ctx,
+            ASTParagraph astPara) {
+        if (ctx == null || astPara == null || astPara.items() == null) return;
+        for (int i = 0; i < astPara.items().size(); i++) {
+            ASTInlineItem item = astPara.items().get(i);
+            if (!(item instanceof ASTInlineObject)) continue;
+            ASTInlineObject existing = (ASTInlineObject) item;
+            Integer domId = sourceIdToDomId(existing.sourceId());
+            if (domId == null || domId <= 0) continue;
+            ASTInlineObject plannedTextShell =
+                    kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                            .loadPlannedInlineTextShellForTextFrame(ctx, domId);
+            if (plannedTextShell == null) continue;
+            plannedTextShell.keepInline(true);
+            if (containsInlineSource(astPara, plannedTextShell.sourceId())) {
+                astPara.items().remove(i);
+                i--;
+                continue;
+            }
+            astPara.items().set(i, plannedTextShell);
+            ctx.cellInlineEmbeddedDomIds.add(domId);
+            Integer shellDomId = sourceIdToDomId(plannedTextShell.sourceId());
+            if (shellDomId != null) ctx.cellInlineEmbeddedDomIds.add(shellDomId);
         }
     }
 
@@ -1673,14 +1704,36 @@ public final class TableBuilder {
                     domId = parseInlineGraphicDomId(run.inlineGraphics().get(anchor.index()));
                 }
                 if (domId <= 0 || !restoredIds.add(domId)) continue;
-                if (containsInlineSource(astPara, "u" + Integer.toHexString(domId))) continue;
+
+                ASTInlineObject plannedAnchorTextShell =
+                        kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                                .loadPlannedInlineTextShellForAnchor(ctx, domId);
+                if (plannedAnchorTextShell != null) {
+                    plannedAnchorTextShell.keepInline(true);
+                    replaceLabelTextWithInlineObject(astPara, inlineObjectText(plannedAnchorTextShell), plannedAnchorTextShell,
+                            "u" + Integer.toHexString(domId));
+                    ctx.cellInlineEmbeddedDomIds.add(domId);
+                    Integer shellDomId = sourceIdToDomId(plannedAnchorTextShell.sourceId());
+                    if (shellDomId != null) ctx.cellInlineEmbeddedDomIds.add(shellDomId);
+                    continue;
+                }
 
                 ASTInlineObject plannedTextShell =
                         kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
                                 .loadPlannedInlineTextShellForTextFrame(ctx, domId);
                 if (plannedTextShell != null) {
                     plannedTextShell.keepInline(true);
-                    replaceLabelTextWithInlineObject(astPara, inlineObjectText(plannedTextShell), plannedTextShell);
+                    replaceLabelTextWithInlineObject(astPara, inlineObjectText(plannedTextShell), plannedTextShell,
+                            "u" + Integer.toHexString(domId));
+                    ctx.cellInlineEmbeddedDomIds.add(domId);
+                    Integer shellDomId = sourceIdToDomId(plannedTextShell.sourceId());
+                    if (shellDomId != null) ctx.cellInlineEmbeddedDomIds.add(shellDomId);
+                    continue;
+                }
+
+                if (containsInlineSource(astPara, "u" + Integer.toHexString(domId))) continue;
+                if (kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
+                        .isInlineTextShellCompanionForEditableText(ctx, domId)) {
                     continue;
                 }
 
@@ -1761,8 +1814,26 @@ public final class TableBuilder {
     private static void replaceLabelTextWithInlineObject(ASTParagraph astPara,
                                                          String labelText,
                                                          ASTInlineObject inline) {
+        replaceLabelTextWithInlineObject(astPara, labelText, inline, null);
+    }
+
+    private static void replaceLabelTextWithInlineObject(ASTParagraph astPara,
+                                                         String labelText,
+                                                         ASTInlineObject inline,
+                                                         String sourceIdToReplace) {
         if (astPara == null || inline == null || astPara.items() == null) return;
         if (containsInlineSource(astPara, inline.sourceId())) return;
+        if (sourceIdToReplace != null && !sourceIdToReplace.isEmpty()) {
+            for (int i = 0; i < astPara.items().size(); i++) {
+                ASTInlineItem item = astPara.items().get(i);
+                if (!(item instanceof ASTInlineObject)) continue;
+                ASTInlineObject existing = (ASTInlineObject) item;
+                if (sameInlineSource(existing.sourceId(), sourceIdToReplace)) {
+                    astPara.items().set(i, inline);
+                    return;
+                }
+            }
+        }
         if (labelText == null || labelText.trim().isEmpty()) {
             astPara.items().add(0, inline);
             return;
@@ -1770,6 +1841,15 @@ public final class TableBuilder {
         String label = labelText.trim();
         for (int i = 0; i < astPara.items().size(); i++) {
             ASTInlineItem item = astPara.items().get(i);
+            if (item instanceof ASTInlineObject) {
+                ASTInlineObject existing = (ASTInlineObject) item;
+                String existingText = inlineObjectText(existing);
+                if (sameCompactText(label, existingText)) {
+                    astPara.items().set(i, inline);
+                    return;
+                }
+                continue;
+            }
             if (!(item instanceof ASTTextRun)) continue;
             ASTTextRun run = (ASTTextRun) item;
             String text = run.text();
@@ -1791,6 +1871,30 @@ public final class TableBuilder {
             }
         }
         astPara.items().add(0, inline);
+    }
+
+    private static boolean sameInlineSource(String actual, String expected) {
+        if (actual == null || expected == null) return false;
+        return actual.equals(expected) || actual.equals("child_" + expected);
+    }
+
+    private static boolean sameCompactText(String expected, String actual) {
+        if (expected == null || actual == null) return false;
+        String e = expected.replaceAll("\\s+", "");
+        String a = actual.replaceAll("\\s+", "");
+        return !e.isEmpty() && e.equals(a);
+    }
+
+    private static Integer sourceIdToDomId(String sourceId) {
+        if (sourceId == null || sourceId.isEmpty()) return null;
+        String value = sourceId.startsWith("child_") ? sourceId.substring(6) : sourceId;
+        String domId = ParagraphTextHelpers.domIdFromSourceId(value);
+        if (domId == null || domId.isEmpty()) return null;
+        try {
+            return Integer.parseInt(domId);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static boolean containsInlineSource(ASTParagraph astPara, String sourceId) {

@@ -470,6 +470,13 @@ public class StoryLoader {
                                     if (boxList != null && !boxList.isEmpty()) {
                                         for (ASTInlineObject box : boxList) para.addItem(box);
                                     } else {
+                                        ASTInlineObject plannedAnchorTextShell =
+                                                InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
+                                        if (plannedAnchorTextShell != null) {
+                                            para.addItem(plannedAnchorTextShell);
+                                            anchorIdx++;
+                                            continue;
+                                        }
                                         ASTInlineObject shapeShell =
                                                 InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, domId);
                                         if (shapeShell != null) {
@@ -499,20 +506,19 @@ public class StoryLoader {
                                                 anchorIdx++;
                                                 continue;
                                             }
+                                            ASTInlineObject plannedTextShell =
+                                                    InlineFrameHandler.loadPlannedInlineTextShellForTextFrame(ctx, domId);
+                                            if (plannedTextShell != null) {
+                                                para.addItem(plannedTextShell);
+                                                anchorIdx++;
+                                                continue;
+                                            }
                                             // 하위 인라인 TF 안에 다시 ORC 앵커가 있는 경우
                                             // 텍스트 런으로 평탄화하지 말고 배지/박스 + 텍스트 순서를 보존한다.
                                             ASTInlineObject inlineTableFrame =
                                                     InlineFrameHandler.tryInlineTextFrameWithTables(ctx, domId);
                                             if (inlineTableFrame != null) {
                                                 para.addItem(inlineTableFrame);
-                                                anchorIdx++;
-                                                continue;
-                                            }
-
-                                            ASTInlineObject plannedTextShell =
-                                                    InlineFrameHandler.loadPlannedInlineTextShellForTextFrame(ctx, domId);
-                                            if (plannedTextShell != null) {
-                                                para.addItem(plannedTextShell);
                                                 anchorIdx++;
                                                 continue;
                                             }
@@ -539,6 +545,10 @@ public class StoryLoader {
                                                 if (emptyBox != null) {
                                                     para.addItem(emptyBox);
                                                 } else {
+                                                    if (InlineFrameHandler.isInlineTextShellCompanionForEditableText(ctx, domId)) {
+                                                        anchorIdx++;
+                                                        continue;
+                                                    }
                                                     ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, domId);
                                                     if (inlineObj != null) {
                                                         para.addItem(inlineObj);

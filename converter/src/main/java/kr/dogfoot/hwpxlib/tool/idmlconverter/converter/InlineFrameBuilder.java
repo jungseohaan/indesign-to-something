@@ -60,18 +60,6 @@ final class InlineFrameBuilder {
             return;
         }
 
-        // 테이블 셀 내부 오버레이 → 페이지 레벨로 승격
-        // 한글(HWPX 렌더러)이 테이블 셀 SubList 내부의 플로팅 객체를 지원하지 않으므로
-        // 페이지 레벨 PAPER 기준 절대 좌표로 변환한다.
-        if (obj.isOverlay() && ctx.insideTableCell) {
-            HwpxConverterContext.DeferredOverlay d = new HwpxConverterContext.DeferredOverlay();
-            d.overlay = obj;
-            d.pageX = ctx.blockPageX + ctx.blockInsetLeft + obj.overlayX();
-            d.pageY = ctx.blockPageY + ctx.blockInsetTop + obj.overlayY();
-            ctx.deferredOverlays.add(d);
-            return;
-        }
-
         long w = obj.width() > 0 ? obj.width() : 5000;
         if (w < ConverterConstants.MIN_TEXT_BOX_WIDTH) w = ConverterConstants.MIN_TEXT_BOX_WIDTH;
 
@@ -109,11 +97,7 @@ final class InlineFrameBuilder {
 
         TextWrapMethod twm;
         TextFlowSide tfs;
-        if (obj.isOverlay()) {
-            // 오버레이: 이미지 위에 겹쳐서 표시, 텍스트 흐름에 영향 없음
-            twm = TextWrapMethod.IN_FRONT_OF_TEXT;
-            tfs = TextFlowSide.BOTH_SIDES;
-        } else if (useWrapping) {
+        if (useWrapping) {
             twm = HwpxImageBuilder.mapTextWrapMethod(wrapMode);
             tfs = HwpxImageBuilder.mapTextFlowSide(obj.textWrapSide());
         } else {
@@ -164,19 +148,7 @@ final class InlineFrameBuilder {
                 .protectAnd(false);
 
         table.createPos();
-        if (obj.isOverlay()) {
-            table.pos().treatAsCharAnd(false)
-                    .affectLSpacingAnd(false)
-                    .flowWithTextAnd(true)
-                    .allowOverlapAnd(true)
-                    .holdAnchorAndSOAnd(false)
-                    .vertRelToAnd(VertRelTo.PARA)
-                    .horzRelToAnd(HorzRelTo.PARA)
-                    .vertAlignAnd(VertAlign.TOP)
-                    .horzAlignAnd(HorzAlign.LEFT)
-                    .vertOffsetAnd(obj.overlayY())
-                    .horzOffset(obj.overlayX());
-        } else if (useWrapping) {
+        if (useWrapping) {
             table.pos().treatAsCharAnd(false)
                     .affectLSpacingAnd(false)
                     .flowWithTextAnd(true)
@@ -203,9 +175,7 @@ final class InlineFrameBuilder {
         }
 
         table.createOutMargin();
-        if (obj.isOverlay()) {
-            table.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
-        } else if (useWrapping) {
+        if (useWrapping) {
             table.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
                     .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
         } else {
@@ -253,10 +223,7 @@ final class InlineFrameBuilder {
     }
 
     private boolean shouldUseInlineDrawTextShell(ASTInlineObject obj) {
-        return obj != null
-                && obj.imageFillData() != null
-                && obj.imageFillData().length > 0
-                && obj.nativeGraphicsAllowed();
+        return InlineItemDispatcher.hasDrawableShell(obj);
     }
 
     private void addInlineExtractedShellTextFrame(Para para, ASTInlineObject obj, long w, long h,
@@ -279,12 +246,14 @@ final class InlineFrameBuilder {
         applyShapeComponentGeometry(rect, w, h);
 
         DrawTextBoxComposer.Spec spec = DrawTextBoxComposer.fromInlineObject(obj, w, h);
-        spec.imageFillData = obj.imageFillData();
-        spec.forceImageFill = true;
         spec.nativeGraphicsAllowed = true;
-        spec.strokeColor = null;
-        spec.strokeWeight = 0;
-        spec.fillColor = null;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
+            spec.imageFillData = obj.imageFillData();
+            spec.forceImageFill = true;
+            spec.strokeColor = null;
+            spec.strokeWeight = 0;
+            spec.fillColor = null;
+        }
         textBoxBuilder.drawTextBoxComposer().apply(rect, spec);
         if (rect.drawText() != null) {
             rect.drawText().editableAnd(true);
@@ -298,19 +267,7 @@ final class InlineFrameBuilder {
                 obj.shellShapeType());
 
         rect.createPos();
-        if (obj.isOverlay()) {
-            rect.pos().treatAsCharAnd(false)
-                    .affectLSpacingAnd(false)
-                    .flowWithTextAnd(true)
-                    .allowOverlapAnd(true)
-                    .holdAnchorAndSOAnd(false)
-                    .vertRelToAnd(VertRelTo.PARA)
-                    .horzRelToAnd(HorzRelTo.PARA)
-                    .vertAlignAnd(VertAlign.TOP)
-                    .horzAlignAnd(HorzAlign.LEFT)
-                    .vertOffsetAnd(obj.overlayY())
-                    .horzOffset(obj.overlayX());
-        } else if (useWrapping) {
+        if (useWrapping) {
             rect.pos().treatAsCharAnd(false)
                     .affectLSpacingAnd(false)
                     .flowWithTextAnd(true)
@@ -336,9 +293,7 @@ final class InlineFrameBuilder {
                 .horzOffset(0L);
         }
         rect.createOutMargin();
-        if (obj.isOverlay()) {
-            rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
-        } else if (useWrapping) {
+        if (useWrapping) {
             rect.outMargin().leftAnd(obj.textWrapLeft()).rightAnd(obj.textWrapRight())
                     .topAnd(obj.textWrapTop()).bottomAnd(obj.textWrapBottom());
         } else {

@@ -180,6 +180,11 @@ public final class RunPropertyResolver {
             Function<String, String> colorResolver,
             BiFunction<String, Double, String> tintedColorResolver,
             MatchConfidence confidence) {
+        if (effectiveIdmlColor != null && effectiveIdmlTint != null) {
+            String hex = resolveColor(effectiveIdmlColor, effectiveIdmlTint,
+                    colorResolver, tintedColorResolver);
+            if (hex != null) return hex;
+        }
         if ((confidence == MatchConfidence.HIGH || confidence == MatchConfidence.MEDIUM)
                 && rr != null && rr.fillColor() != null) {
             String hex = resolveColor(rr.fillColor(), effectiveIdmlTint,

@@ -453,14 +453,15 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 검색/편집 가치가 있는 짧은 라벨은 텍스트와 시각을 분리한다.
 
 - 텍스트: `OWNED_BY_HWPX_TEXT`
-- 배경/껍데기: 우선 `ABSORB_TEXT_STYLE`, 불가능할 때만 `PLACE_TEXT_SHELL`
+- 배경/껍데기: source ownership이 지시하는 하나의 visual channel
 
 원칙:
 
-- 라벨 배경이 단순 fill/stroke/corner로 표현 가능한 Rectangle/Polygon/Oval이고,
-  라벨 TF와 같은 그룹 안에서 충분히 겹치며 회전/전단이 거의 없으면 HWPX drawText의
-  fill/stroke/corner 속성으로 흡수한다.
-- drawText로 흡수된 라벨/텍스트 셸은 텍스트와 그래픽 속성을 모두 보존해야 한다.
+- extractor가 같은 source 묶음에 대해 text-hidden shell PNG를 만들었다면 그 PNG가 shell이다.
+  Java가 같은 shell을 native fill/stroke/corner로 다시 그리지 않는다.
+- text-hidden shell PNG가 없고, 원본 source가 단일 native shape로 보존되어 있을 때만
+  `ABSORB_TEXT_STYLE`로 HWPX drawText 속성에 흡수할 수 있다.
+- drawText로 흡수되는 경우에도 텍스트와 그래픽 속성은 모두 원본 source에서 온다.
   텍스트는 원본 run의 font family/style/size/color/tracking/scale을 공유 스타일 경로로 받고,
   셸은 원본 shape type, fill, stroke, stroke tint/weight, corner radius를 함께 전달한다.
 - 문자 `FillTint`는 글자색의 일부다. resolved 캐시가 tint를 제공하지 못하면 IDML story의
@@ -491,21 +492,22 @@ legacy Phase가 남아 있는 동안에도 ObjectPlan이 최종 판단이다.
 실행 규칙:
 
 - 현재 기준은 `SPEC-036`이다.
-- `PLACE_TEXT_SHELL`은 textless shell visual을 배치하고, editable child TF는 별도 HWPX 텍스트가 소유한다.
-- `placement=INLINE`인 textless shell companion은 예외적으로 하나의 inline carrier 안에서
-  추출 shell image brush 또는 원본 native shape와 editable drawText를 함께 실행할 수 있다. 이 경우에도 synthetic
-  outline/fill은 만들지 않고 inline/floating placement를 뒤집지 않는다.
-- inline carrier는 `ObjectPlan.bounds`와 `materialization`만 실행한다.
-  `EXTRACTED_PNG_VECTOR`의 `ObjectPlan.file`은 textless shell이어야 하며,
-  editable text가 남아 있는 `inline_*` complete PNG는 shell로 쓰지 않는다.
-  `NATIVE_SOURCE_SHAPE`는 plan에 명시된 원본 `Rectangle`/`Oval` source shape의
-  fill/stroke/corner만 실행한다. `RenderedGroup` bounds, sibling shape, table/TF bounds는 fallback으로 쓰지 않는다.
-- inline text shell carrier는 textless shell 이미지의 투명/종이색 여백 crop과 HWPX imgBrush용
-  white matte만 허용한다. 이 처리는 ownership 재판정이 아니라 최종 인코딩 준비다.
+- `PLACE_TEXT_SHELL`은 atomic visual label/container로 확정된 plan이다.
+- Stage 2/3 실행기는 `textAction`, `visualAction`, `placement`, `materialization`, `bounds`를 실행만 한다.
+  텍스트 길이, 글자 수, 셀 내부 여부, bounds 크기, 렌더링 편의성으로 라벨/본문/inline/floating을 다시 판정하지 않는다.
+- 원본/plan이 `placement=INLINE`이면 HWPX에서도 inline carrier로 실행한다.
+  line height, table cell, overlay 상태 때문에 page-level floating으로 승격하지 않는다.
+- `PLACE_TEXT_SHELL`의 materialization 우선순위는 단순하다.
+  1. 텍스트 없는 추출 shell이 있으면 shell + editable HWPX text
+  2. 추출 shell이 없고 plan이 `ABSORB_TEXT_STYLE`이면 원본 native shape 속성을 HWPX에 흡수
+  3. 둘 다 없으면 shell을 새로 그리지 않고 visual을 drop하거나 검증 오류로 보고한다.
+- `PLACE_TEXT_SHELL` carrier는 1x1 HWPX table이 아니다. 1x1 table은 본문성 긴 텍스트 컨테이너의 편집성을 위한 선택이고,
+  atomic visual label의 shell materialization으로 쓰지 않는다.
+- Java는 shell PNG를 crop하거나 여러 PNG 조각을 합성하지 않는다. 최종 인코딩에 필요한 투명/종이색 보정만 허용한다.
 - shell visual과 child TF text는 서로 다른 ownership channel이면 동시에 보일 수 있다.
 - 중복 위반은 shell PNG 안에 child TF 텍스트 픽셀이 남거나, parent shell과 descendant visual fragment가 동시에 보이거나,
   같은 TF를 floating HWPX 텍스트와 drawText/imageFill 내부 텍스트로 동시에 재생성하는 경우다.
-- floating 실행 방식은 후속 단계가 재판정하지 않고 `ObjectPlan`의 `visualAction`, `placement`, `visualLayer`, `zOrder`를 따른다.
+- floating 실행 방식도 후속 단계가 재판정하지 않고 `ObjectPlan`의 `visualAction`, `placement`, `visualLayer`, `zOrder`를 따른다.
 
 ## Text Card Backdrop
 

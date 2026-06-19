@@ -6,6 +6,7 @@ import kr.dogfoot.hwpxlib.object.content.section_xml.SubList;
 import kr.dogfoot.hwpxlib.object.content.section_xml.enumtype.*;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Para;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.Run;
+import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Rectangle;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.Table;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tc;
 import kr.dogfoot.hwpxlib.object.content.section_xml.paragraph.object.table.Tr;
@@ -14,7 +15,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 /**
  * 페이지 레벨 오버레이 변환 (W4 Step B).
  * 한글이 테이블 셀 SubList 내부 플로팅 객체를 지원하지 않으므로,
- * 셀 내부 오버레이를 페이지 PAPER 기준 절대 좌표 1x1 테이블로 승격한다.
+ * 셀 내부 오버레이를 페이지 PAPER 기준 절대 좌표 객체로 승격한다.
+ *
+ * <p>원본 shell(fill/stroke/image)을 가진 overlay shell+TF는 atomic visual label로 보고
+ * hp:rect + drawText carrier로 만든다. shell 없는 legacy text-only overlay만 마지막 폴백으로
+ * 1x1 table carrier를 사용한다.</p>
  *
  * HwpxTextBoxBuilder에서 분리됨. ctx + paragraphBuilder에 의존하므로 인스턴스 클래스.
  */
@@ -22,10 +27,15 @@ final class PageOverlayBuilder {
 
     private final HwpxConverterContext ctx;
     private final HwpxParagraphBuilder paragraphBuilder;
+    private final HwpxTextBoxBuilder textBoxBuilder;
 
-    PageOverlayBuilder(HwpxConverterContext ctx, HwpxParagraphBuilder paragraphBuilder) {
+    PageOverlayBuilder(
+            HwpxConverterContext ctx,
+            HwpxParagraphBuilder paragraphBuilder,
+            HwpxTextBoxBuilder textBoxBuilder) {
         this.ctx = ctx;
         this.paragraphBuilder = paragraphBuilder;
+        this.textBoxBuilder = textBoxBuilder;
     }
 
     private DropCapStyle resolveDropCapStyle(java.util.List<ASTParagraph> paragraphs) {
@@ -52,6 +62,11 @@ final class PageOverlayBuilder {
         long w = obj.width() > 0 ? obj.width() : 5000;
         if (w < ConverterConstants.MIN_TEXT_BOX_WIDTH) w = ConverterConstants.MIN_TEXT_BOX_WIDTH;
         long h = obj.height() > 0 ? obj.height() : 1000;
+
+        if (shouldUseDrawTextOverlay(obj)) {
+            addDrawTextOverlay(anchorPara, obj, pageX, pageY, w, h);
+            return;
+        }
 
         Run run = anchorPara.addNewRun();
         run.charPrIDRef("0");
@@ -200,5 +215,99 @@ final class PageOverlayBuilder {
         }
 
         return bfId;
+    }
+
+    private boolean shouldUseDrawTextOverlay(ASTInlineObject obj) {
+        if (obj == null) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) return true;
+        String fill = obj.fillColor();
+        if (fill != null && fill.startsWith("#")) return true;
+        String stroke = obj.strokeColor();
+        return stroke != null && stroke.startsWith("#") && obj.strokeWeight() > 0;
+    }
+
+    private void addDrawTextOverlay(
+            Para anchorPara,
+            ASTInlineObject obj,
+            long pageX,
+            long pageY,
+            long w,
+            long h) {
+        Run run = anchorPara.addNewRun();
+        run.charPrIDRef("0");
+
+        Rectangle rect = run.addNewRectangle();
+        rect.idAnd(HwpxUtil.nextShapeId())
+                .zOrderAnd(1000)
+                .numberingTypeAnd(NumberingType.PICTURE)
+                .textWrapAnd(TextWrapMethod.IN_FRONT_OF_TEXT)
+                .textFlowAnd(TextFlowSide.BOTH_SIDES)
+                .lockAnd(false)
+                .dropcapstyleAnd(resolveDropCapStyle(obj.paragraphs()));
+
+        rect.hrefAnd("");
+        rect.groupLevelAnd((short) 0);
+        rect.instidAnd(HwpxUtil.nextShapeId());
+        applyOverlayGeometry(rect, w, h);
+
+        DrawTextBoxComposer.Spec spec = DrawTextBoxComposer.fromInlineObject(obj, w, h);
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) {
+            spec.imageFillData = obj.imageFillData();
+            spec.forceImageFill = true;
+        }
+        spec.nativeGraphicsAllowed = true;
+        textBoxBuilder.drawTextBoxComposer().apply(rect, spec);
+        if (rect.drawText() != null) {
+            rect.drawText().editableAnd(true);
+        }
+        DrawTextBoxComposer.applyRectangleGeometry(
+                rect,
+                w,
+                h,
+                obj.cornerRadius(),
+                h,
+                obj.shellShapeType());
+
+        rect.createPos();
+        rect.pos().treatAsCharAnd(false)
+                .affectLSpacingAnd(false)
+                .flowWithTextAnd(false)
+                .allowOverlapAnd(true)
+                .holdAnchorAndSOAnd(false)
+                .vertRelToAnd(VertRelTo.PAPER)
+                .horzRelToAnd(HorzRelTo.PAPER)
+                .vertAlignAnd(VertAlign.TOP)
+                .horzAlignAnd(HorzAlign.LEFT)
+                .vertOffsetAnd(pageY)
+                .horzOffset(pageX);
+
+        rect.createOutMargin();
+        rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+    }
+
+    private static void applyOverlayGeometry(Rectangle rect, long w, long h) {
+        rect.createOffset();
+        rect.offset().set(0L, 0L);
+        rect.createOrgSz();
+        rect.orgSz().set(w, h);
+        rect.createCurSz();
+        rect.curSz().set(w, h);
+        rect.createFlip();
+        rect.flip().horizontalAnd(false).verticalAnd(false);
+        rect.createRotationInfo();
+        rect.rotationInfo().angleAnd((short) 0)
+                .centerXAnd(w / 2)
+                .centerYAnd(h / 2)
+                .rotateimageAnd(true);
+        rect.createRenderingInfo();
+        rect.renderingInfo().addNewTransMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewScaMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.renderingInfo().addNewRotMatrix().set(1f, 0f, 0f, 0f, 1f, 0f);
+        rect.createSZ();
+        rect.sz().widthAnd(w)
+                .widthRelToAnd(WidthRelTo.ABSOLUTE)
+                .heightAnd(h)
+                .heightRelToAnd(HeightRelTo.ABSOLUTE)
+                .protectAnd(false);
     }
 }

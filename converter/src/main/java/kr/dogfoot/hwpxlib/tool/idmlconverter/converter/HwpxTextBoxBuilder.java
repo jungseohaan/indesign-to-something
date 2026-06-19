@@ -34,7 +34,7 @@ public class HwpxTextBoxBuilder {
         this.ctx = ctx;
         this.paragraphBuilder = paragraphBuilder;
         this.drawTextBoxComposer = new DrawTextBoxComposer(ctx, paragraphBuilder, this);
-        this.overlayBuilder = new PageOverlayBuilder(ctx, paragraphBuilder);
+        this.overlayBuilder = new PageOverlayBuilder(ctx, paragraphBuilder, this);
         this.inlineFrameBuilder = new InlineFrameBuilder(ctx, paragraphBuilder, this);
         this.singleColumnTableConverter = new SingleColumnTableConverter(ctx, paragraphBuilder, this);
         this.frameTransformations = new FrameTransformations(ctx, paragraphBuilder, this);

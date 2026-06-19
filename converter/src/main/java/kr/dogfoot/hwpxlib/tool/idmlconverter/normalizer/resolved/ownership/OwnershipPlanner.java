@@ -3130,10 +3130,7 @@ public final class OwnershipPlanner {
             if (candidate == null || candidate == shell) continue;
             if (candidate.pageIndex != shell.pageIndex) continue;
             if (candidate.placement != Placement.INLINE) continue;
-            if (candidate.visualAction != VisualAction.PLACE_TEXT_SHELL
-                    && candidate.visualAction != VisualAction.PLACE_INLINE_PNG) {
-                continue;
-            }
+            if (candidate.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
             if (!candidate.hasVisibleVisual()) continue;
             if (!ownedTextFramesCoveredBy(candidate, shell)) continue;
             if (containsAll(visualSourceIds(candidate), visualSourceIds(shell))) return true;

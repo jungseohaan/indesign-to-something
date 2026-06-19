@@ -2737,6 +2737,12 @@ public final class StoryConverter {
                                 for (ASTInlineObject box : boxList) para.addItem(box);
                                 continue;
                             }
+                            ASTInlineObject plannedAnchorTextShell =
+                                    InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchoredId);
+                            if (plannedAnchorTextShell != null) {
+                                para.addItem(plannedAnchorTextShell);
+                                continue;
+                            }
                             ASTInlineObject shapeShell =
                                     InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, anchoredId);
                             if (shapeShell != null) {
@@ -2758,6 +2764,12 @@ public final class StoryConverter {
                                 para.addItem(singleBadge);
                                 continue;
                             }
+                            ASTInlineObject plannedTextShell =
+                                    InlineFrameHandler.loadPlannedInlineTextShellForTextFrame(ctx, anchoredId);
+                            if (plannedTextShell != null) {
+                                para.addItem(plannedTextShell);
+                                continue;
+                            }
                             // 하위 인라인 TF 안에 다시 ORC 앵커가 있는 경우
                             // 텍스트 런으로 평탄화하지 말고 배지/박스 + 텍스트 순서를 보존한다.
                             List<ASTInlineItem> nestedItems =
@@ -2765,12 +2777,6 @@ public final class StoryConverter {
                                             prevRunText, nextRunText);
                             if (nestedItems != null && !nestedItems.isEmpty()) {
                                 for (ASTInlineItem item : nestedItems) para.addItem(item);
-                                continue;
-                            }
-                            ASTInlineObject plannedTextShell =
-                                    InlineFrameHandler.loadPlannedInlineTextShellForTextFrame(ctx, anchoredId);
-                            if (plannedTextShell != null) {
-                                para.addItem(plannedTextShell);
                                 continue;
                             }
                             // 짧은 텍스트 인라인 TextFrame → 텍스트 런으로 변환.
@@ -2782,6 +2788,9 @@ public final class StoryConverter {
                                     maybeInsertDecorativeLeaderTab(ctx, rp, anchoredId, para);
                                 }
                                 para.addItem(textRun);
+                                continue;
+                            }
+                            if (InlineFrameHandler.isInlineTextShellCompanionForEditableText(ctx, anchoredId)) {
                                 continue;
                             }
                             ASTInlineObject inlineObj = InlineFrameHandler.loadInlineObject(ctx, anchoredId);

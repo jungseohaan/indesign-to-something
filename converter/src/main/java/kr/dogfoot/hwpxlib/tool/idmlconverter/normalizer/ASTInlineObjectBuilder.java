@@ -263,7 +263,19 @@ class ASTInlineObjectBuilder {
     private static boolean isHwpxOwnedChildTextFrame(IDMLTextFrame tf, ResolvedData resolvedData) {
         if (tf == null || resolvedData == null || tf.selfId() == null) return false;
         String domId = ParagraphTextHelpers.domIdFromSourceId(tf.selfId());
-        return domId != null && resolvedData.isHwpxOwnedTextFrame(domId);
+        if (domId == null) return false;
+        if (resolvedData.isHwpxOwnedTextFrame(domId)) return true;
+        if (resolvedData.allRenderedFloatingItems() == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                : resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
+            String[] ids = rg.editableTextFrameIds();
+            if (ids == null) continue;
+            for (String id : ids) {
+                if (domId.equals(id)) return true;
+            }
+        }
+        return false;
     }
 
     /**
