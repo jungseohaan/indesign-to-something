@@ -99,6 +99,7 @@ public final class OwnershipPlanner {
         resolveMasterGraphicsWithHwpxTextFallbacks();
         restoreInlineTextShellOwners();
         restoreAtomicOwnershipRootTextHiddenShellOwners();
+        restoreDirectTextHiddenShellOwners();
         promoteInlineCompanionAtomicShellOwners();
         splitImageBackedCompositeTextShellParents();
         resolveTextShellSourceDuplicates();
@@ -1275,6 +1276,11 @@ public final class OwnershipPlanner {
             return VisualAction.DROP_VISUAL;
         }
         if (data.shouldUseTextlessShellForAtomicMarkerLabel(rg)) {
+            return VisualAction.PLACE_TEXT_SHELL;
+        }
+        if (textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && isDirectInlineTextShellReason(rg.reason())
+                && isEditableVisualShellWithSeparateHwpxText(rg)) {
             return VisualAction.PLACE_TEXT_SHELL;
         }
         if (isInlineCompleteGraphicWithSeparateTextHiddenShell(rg)) {
@@ -3079,6 +3085,31 @@ public final class OwnershipPlanner {
                 && plan.ownedTextFrameIds != null
                 && plan.ownedTextFrameIds.length > 0
                 && visualSourceIds(plan).length > 0;
+    }
+
+    private void restoreDirectTextHiddenShellOwners() {
+        for (int i = 0; i < plans.size(); i++) {
+            ObjectPlan plan = plans.get(i);
+            if (!isDirectTextHiddenShellPlan(plan)) continue;
+            if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) continue;
+            plans.set(i, plan
+                    .withVisualAction(VisualAction.PLACE_TEXT_SHELL, plan.reason)
+                    .withVisualLayer(VisualLayer.LABEL_BACKDROP));
+        }
+    }
+
+    private boolean isDirectTextHiddenShellPlan(ObjectPlan plan) {
+        if (plan == null || !isRenderedVisualPlan(plan)) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (!isDirectInlineTextShellReason(plan.reason)) return false;
+        RenderedGroup rendered = renderedGroupForPlan(plan);
+        if (rendered == null) return false;
+        if (!isEditableVisualShellWithSeparateHwpxText(rendered)) return false;
+        if (data.shouldUseCompletePngForSimpleButtonLabel(rendered)
+                && !data.shouldUseTextlessShellForAtomicMarkerLabel(rendered)) {
+            return false;
+        }
+        return true;
     }
 
     private void restoreInlineTextShellOwners() {

@@ -33,8 +33,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Simpl
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPage;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
@@ -493,7 +491,6 @@ public final class TableBuilder {
         ASTTable result = expandedTable != null ? expandedTable : astTable;
         restoreLostCellTextFromSnapshot(result, sourceTextByCell);
         removeParagraphsDuplicatingPlacedOrcTextFrames(ctx, result);
-        enrichMissingCellTextRunStylesFromResolved(ctx, result);
         completeVisibleTableOuterBorder(result);
         if (NumberedSideHeadTableNormalizer.normalizePlanned(ctx, result) && ctx != null && ctx.debugAst) {
             result.debugOrNew().note("side-head flow table normalized from Stage 1 plan");
@@ -568,79 +565,6 @@ public final class TableBuilder {
             normalized.append(ch);
         }
         return normalized.toString();
-    }
-
-    private static void enrichMissingCellTextRunStylesFromResolved(ResolvedBuildContext ctx, ASTTable table) {
-        if (ctx == null || ctx.resolvedData == null || table == null || table.rows() == null) return;
-        for (ASTTableRow row : table.rows()) {
-            if (row == null || row.cells() == null) continue;
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null || cell.paragraphs() == null) continue;
-                for (ASTParagraph paragraph : cell.paragraphs()) {
-                    if (paragraph == null || paragraph.items() == null) continue;
-                    for (ASTInlineItem item : paragraph.items()) {
-                        if (!(item instanceof ASTTextRun)) continue;
-                        ASTTextRun run = (ASTTextRun) item;
-                        if (!needsResolvedStyleFallback(run)) continue;
-                        ResolvedRun resolved = findUniqueResolvedRunForText(ctx, run.text());
-                        if (resolved != null) {
-                            applyResolvedTextRunStyle(run, resolved);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private static boolean needsResolvedStyleFallback(ASTTextRun run) {
-        if (run == null || run.text() == null) return false;
-        if (run.fontSizeHwpunits() != null || run.fontFamily() != null || run.characterStyleRef() != null) {
-            return false;
-        }
-        return normalizeComparableText(run.text()).length() >= 10;
-    }
-
-    private static ResolvedRun findUniqueResolvedRunForText(ResolvedBuildContext ctx, String text) {
-        String key = normalizeComparableText(text);
-        if (key.length() < 10) return null;
-        ResolvedRun match = null;
-        Double fontSize = null;
-        if (ctx.resolvedData.stories() == null) return null;
-        for (ResolvedStory story : ctx.resolvedData.stories()) {
-            if (story == null || story.paragraphs() == null) continue;
-            for (ResolvedParagraph paragraph : story.paragraphs()) {
-                if (paragraph == null || paragraph.runs() == null) continue;
-                for (ResolvedRun candidate : paragraph.runs()) {
-                    if (candidate == null || candidate.isInlineAnchor() || candidate.text() == null) continue;
-                    String candidateText = normalizeComparableText(candidate.text());
-                    if (!key.equals(candidateText)) continue;
-                    if (candidate.fontSize() == null || candidate.fontSize() <= 0) continue;
-                    if (fontSize != null && Math.abs(fontSize - candidate.fontSize()) > 0.01) {
-                        return null;
-                    }
-                    fontSize = candidate.fontSize();
-                    match = candidate;
-                }
-            }
-        }
-        return match;
-    }
-
-    private static void applyResolvedTextRunStyle(ASTTextRun target, ResolvedRun source) {
-        if (target == null || source == null) return;
-        if (source.fontFamily() != null) target.fontFamily(source.fontFamily());
-        if (source.fontStyle() != null) target.fontStyle(source.fontStyle());
-        if (source.fontSize() != null && source.fontSize() > 0) {
-            target.fontSizeHwpunits((int) CoordinateConverter.pointsToHwpunits(source.fontSize()));
-        }
-        if (source.horizontalScale() != null && source.horizontalScale() != 0 && source.horizontalScale() != 100) {
-            target.horizontalScale((short) source.horizontalScale().doubleValue());
-        }
-        if (source.tracking() != null && source.tracking() != 0) {
-            target.letterSpacing((short) Math.round(source.tracking() / 10.0));
-        }
-        if (Boolean.TRUE.equals(source.underline())) target.underline(true);
-        if (Boolean.TRUE.equals(source.strikeThru())) target.strikeThrough(true);
     }
 
     private static Map<String, List<ASTParagraph>> snapshotVisibleTextParagraphsByCell(ASTTable table) {

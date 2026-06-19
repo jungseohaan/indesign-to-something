@@ -116,6 +116,11 @@
 
 - `PLACE_TEXT_SHELL`: textless PNG/vector shell을 원본 placement에 맞게 배치한다.
   floating shell은 별도 visual로, inline shell은 하나의 inline carrier 안에서 실행한다.
+- extractor가 `textOwner=hwpx_tf`, `textHiddenBeforeExport=true`와 함께 만든
+  `visual_label_text_hidden_shell` / `editable_textframe_visual_shell` /
+  `inline_text_hidden` 계열 render는 shell slot이다. 이런 render는
+  `PLACE_FLOATING_PNG`/`PLACE_INLINE_PNG`로 강등하지 않고 `PLACE_TEXT_SHELL`로
+  실행한다.
 - `PLACE_FLOATING_PNG`: 사진, 삽화, 차트, 완성형 콘텐츠 PNG.
 - `PLACE_INLINE_PNG`: 원본이 inline인 complete marker 또는 graphic-only atomic 객체.
 - `ABSORB_TEXT_STYLE`: fill/stroke/underline처럼 HWPX 텍스트 속성 또는 1x1 table로 표현 가능한 장식.
@@ -364,6 +369,14 @@ Stage 책임은 코드 구조에서도 분리한다.
 inline shell carrier의 rect + drawText는 placement를 보존하기 위한 실행 방식이며,
 source ownership을 새로 판단하는 fallback이 아니다.
 
+table cell 내부 텍스트의 font/color/scale/tracking은 해당 IDML cell/story의
+paragraph/run style이 source of truth다. 같은 문구가 다른 페이지나 다른 TextFrame에
+있다는 이유로 전역 검색한 resolved run style을 table cell에 덮어쓰지 않는다.
+style 보강이 필요하면 같은 source cell/story 안에서만 해결한다.
+이 원칙은 일반 텍스트 run에도 동일하다. resolved run은 source story/paragraph 매칭으로
+전달된 경우에만 보조 style source가 될 수 있으며, 문서 전체에서 normalized text가 같은
+run을 찾아 font/color/size를 빌려오는 fallback은 사용하지 않는다.
+
 ## 10. Validator invariant
 
 Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, strict 모드에서는 실패시킨다.
@@ -374,6 +387,8 @@ Validator는 변환을 보정하지 않는다. 아래 조건을 기록하고, st
 - `OWNED_BY_HWPX_TEXT` source를 complete PNG처럼 배치하지 않는다.
 - `PLACE_TEXT_SHELL`은 소유 텍스트보다 뒤에 있어야 한다.
 - IDML table cell의 원본 `FillColor`와 visible edge border는 HWPX table cell style로 남아야 한다.
+- IDML table cell 텍스트의 원본 run/paragraph style은 같은 cell/story source에서만 온다.
+  문구 기반 전역 style fallback으로 다른 source의 font/color/size를 가져오면 안 된다.
 - `TABLE_STYLE_SLOT`으로 흡수된 source는 shell/content visible material로 다시 배치되면 안 된다.
 - source layer/z 정보가 없는 객체는 추적 누락으로 본다.
 - parent `PLACE_TEXT_SHELL`이 있는 source bundle에서는 descendant visual fragment가 별도 visible output을 가질 수 없다.
