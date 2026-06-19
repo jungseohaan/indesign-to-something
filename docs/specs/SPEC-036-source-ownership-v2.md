@@ -135,16 +135,16 @@
 
 - `visualOwner=indesign_png`
 - `textOwner=hwpx_tf`
-- `textHiddenBeforeExport=true` 또는 `containsText=false`
-- shell material 자체에는 editable text 픽셀이 없어야 한다.
-  즉 `containsEditableText=true`인 PNG는 shell material이 아니다.
+- `textHiddenBeforeExport=true` 또는 `text_hidden` reason은 shell 추출 의도를 나타낸다.
+- shell material 자체에는 텍스트 픽셀이 없어야 한다.
+  즉 `containsText=true` 또는 `containsEditableText=true`인 PNG는 shell material이 아니다.
 - `editableTextFrameIds` 또는 source TextFrame이 HWPX text owner로 존재한다.
 - `EXTRACTED_PNG_VECTOR`이면 실제 추출 file이 있다.
 - `NATIVE_SOURCE_SHAPE`이면 원본 `Rectangle`/`Oval` source id와 bounds/style이 있다.
 
 렌더 메타데이터의 `editableTextFrameIds` / `textOwner=hwpx_tf`가 누락되어도,
 `sourceObjectIds` 안에 visible editable TextFrame이 있고 shell material이
-`containsText=false` 또는 `textHiddenBeforeExport=true`라면 source tree가 우선한다.
+`containsText=false`이고 `containsEditableText=false`라면 source tree가 우선한다.
 이 경우 Stage 1은 해당 render를 complete PNG가 아니라 `TEXTLESS_SHELL_WITH_TF`
 동등한 shell owner로 보강한다.
 
@@ -225,8 +225,10 @@ placement를 다시 바꾸지 않는다.
 inline 인정 조건:
 
 - `ObjectPlan.placement=INLINE`이고 `visualAction=PLACE_TEXT_SHELL`이다.
-- shell PNG가 명시적인 textless shell material이다. 예: `deco_*`, `tf_shell_*`,
+- shell PNG가 명시적인 textless shell material이다. 예: `tf_shell_*`,
   `label_backdrop_*`, `text_hidden` reason.
+- `deco_*`처럼 일반 decoration render는 이름만으로 textless shell이 될 수 없다.
+  해당 material도 반드시 `containsText=false`이고 `containsEditableText=false`여야 한다.
 - 같은 source bundle의 editable child TF도 inline HWPX text로 소유된다.
 - inline complete PNG가 같은 source bundle에 있으면 그 PNG는 `DROP_VISUAL`이다.
 

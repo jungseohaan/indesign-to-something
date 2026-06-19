@@ -1352,6 +1352,10 @@ public final class OwnershipPlanner {
             return VisualAction.DROP_VISUAL;
         }
         if (textAction == TextAction.OWNED_BY_HWPX_TEXT
+                && renderedVisualContainsTextPixels(rg)) {
+            return VisualAction.DROP_VISUAL;
+        }
+        if (textAction == TextAction.OWNED_BY_HWPX_TEXT
                 && ("hwpx_tf".equals(rg.textOwner())
                 || Boolean.TRUE.equals(rg.containsEditableText())
                 || hasEditableTextFrameIds(rg))) {
@@ -1384,6 +1388,12 @@ public final class OwnershipPlanner {
             return VisualAction.PLACE_FLOATING_PNG;
         }
         return VisualAction.DROP_VISUAL;
+    }
+
+    private static boolean renderedVisualContainsTextPixels(RenderedGroup rg) {
+        return rg != null
+                && (Boolean.TRUE.equals(rg.containsText())
+                || Boolean.TRUE.equals(rg.containsEditableText()));
     }
 
     private VisualLayer visualLayerOf(RenderedGroup rg, VisualAction visualAction, TextAction textAction) {
