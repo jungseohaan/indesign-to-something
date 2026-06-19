@@ -57,10 +57,6 @@ final class SingleColumnTableConverter {
         // overflow 방지 높이 축소: resolved 기반 파이프라인에서는 geometricBounds가 정확하므로 비활성화
         // (레거시 파이프라인용 코드, 새 파이프라인에서는 필요 없음)
 
-        // 글상자 너비 확장: 매핑 폰트의 폭 차이로 텍스트 넘침 방지
-        if (ctx.config != null && ctx.config.textBoxWidthExpandPercent() > 0) {
-            w = w + w * ctx.config.textBoxWidthExpandPercent() / 100;
-        }
         w = expandWidthForDotLeaderTabs(block, paragraphs, w);
 
         Run anchorRun = framePara.addNewRun();

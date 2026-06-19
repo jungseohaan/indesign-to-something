@@ -176,6 +176,7 @@ public final class SingleLineExpander {
         if (ctx == null || ctx.resolvedData == null || tfb == null) return false;
         int tfDomId = sourceDomId(tfb);
         if (tfDomId < 0) return false;
+        if (ctx.isTextFrameOwnedByTextShellPlan(tfDomId)) return true;
         List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
         if (groups == null) return false;
         for (RenderedGroup rg : groups) {

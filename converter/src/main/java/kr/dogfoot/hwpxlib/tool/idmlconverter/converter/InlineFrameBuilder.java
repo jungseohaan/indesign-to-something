@@ -400,7 +400,7 @@ final class InlineFrameBuilder {
         if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
         if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return false;
         if (obj.imageData() != null && obj.imageData().length > 0) return false;
-        if (obj.imageFillData() != null && obj.imageFillData().length > 0 && !hasSemanticText(obj)) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) return false;
         if (hasVisibleFill(obj)) return false;
         if (hasVisibleStroke(obj)) return false;
 

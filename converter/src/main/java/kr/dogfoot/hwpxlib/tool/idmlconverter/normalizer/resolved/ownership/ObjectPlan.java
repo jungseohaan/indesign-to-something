@@ -2,7 +2,7 @@ package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership;
 
 import java.util.Arrays;
 
-/** SPEC-035 관찰 모드용 단일 객체 ownership 계획. */
+/** Source ownership policy object plan. */
 public final class ObjectPlan {
     public final int domId;
     public final String kind;
@@ -14,9 +14,13 @@ public final class ObjectPlan {
     public final Integer renderId;
     public final int[] sourceObjectIds;
     public final int[] visualSourceObjectIds;
+    public final int[] styleSourceObjectIds;
     public final int[] ownedTextFrameIds;
     public final int[] descendantVisualObjectIds;
     public final String sourceBundleKey;
+    public final Materialization materialization;
+    public final CoordinateSpace coordinateSpace;
+    public final String anchorOwner;
     public final int zOrder;
     public final String reason;
     public final String file;
@@ -86,6 +90,37 @@ public final class ObjectPlan {
             String sourceLayerId,
             String sourceLayerName,
             int sourceLayerIndex) {
+        this(domId, kind, pageIndex, textAction, visualAction, visualLayer, placement,
+                renderId, sourceObjectIds, visualSourceObjectIds, null, ownedTextFrameIds,
+                descendantVisualObjectIds, sourceBundleKey, null, null, null, zOrder, reason,
+                file, bounds, sourceLayerId, sourceLayerName, sourceLayerIndex);
+    }
+
+    public ObjectPlan(
+            int domId,
+            String kind,
+            int pageIndex,
+            TextAction textAction,
+            VisualAction visualAction,
+            VisualLayer visualLayer,
+            Placement placement,
+            Integer renderId,
+            int[] sourceObjectIds,
+            int[] visualSourceObjectIds,
+            int[] styleSourceObjectIds,
+            int[] ownedTextFrameIds,
+            int[] descendantVisualObjectIds,
+            String sourceBundleKey,
+            Materialization materialization,
+            CoordinateSpace coordinateSpace,
+            String anchorOwner,
+            int zOrder,
+            String reason,
+            String file,
+            double[] bounds,
+            String sourceLayerId,
+            String sourceLayerName,
+            int sourceLayerIndex) {
         this.domId = domId;
         this.kind = kind;
         this.pageIndex = pageIndex;
@@ -98,6 +133,9 @@ public final class ObjectPlan {
         this.visualSourceObjectIds = visualSourceObjectIds != null
                 ? Arrays.copyOf(visualSourceObjectIds, visualSourceObjectIds.length)
                 : Arrays.copyOf(this.sourceObjectIds, this.sourceObjectIds.length);
+        this.styleSourceObjectIds = styleSourceObjectIds != null
+                ? Arrays.copyOf(styleSourceObjectIds, styleSourceObjectIds.length)
+                : new int[0];
         this.ownedTextFrameIds = ownedTextFrameIds != null
                 ? Arrays.copyOf(ownedTextFrameIds, ownedTextFrameIds.length)
                 : new int[0];
@@ -105,6 +143,13 @@ public final class ObjectPlan {
                 ? Arrays.copyOf(descendantVisualObjectIds, descendantVisualObjectIds.length)
                 : new int[0];
         this.sourceBundleKey = sourceBundleKey;
+        this.materialization = materialization != null
+                ? materialization
+                : defaultMaterialization(textAction, visualAction);
+        this.coordinateSpace = coordinateSpace != null
+                ? coordinateSpace
+                : defaultCoordinateSpace(placement);
+        this.anchorOwner = anchorOwner;
         this.zOrder = zOrder;
         this.reason = reason;
         this.file = file;
@@ -112,6 +157,26 @@ public final class ObjectPlan {
         this.sourceLayerId = sourceLayerId;
         this.sourceLayerName = sourceLayerName;
         this.sourceLayerIndex = sourceLayerIndex;
+    }
+
+    private static Materialization defaultMaterialization(TextAction textAction, VisualAction visualAction) {
+        if (visualAction == VisualAction.PLACE_TABLE_STYLE) {
+            return Materialization.HWPX_TABLE_STYLE;
+        }
+        if (visualAction == VisualAction.ABSORB_TEXT_STYLE || visualAction == VisualAction.DROP_VISUAL) {
+            return Materialization.HWPX_TEXT;
+        }
+        if (visualAction == VisualAction.PLACE_TEXT_SHELL) {
+            return Materialization.EXTRACTED_PNG_VECTOR;
+        }
+        if (textAction == TextAction.OWNED_BY_PNG) {
+            return Materialization.COMPLETE_PNG;
+        }
+        return Materialization.EXTRACTED_PNG_VECTOR;
+    }
+
+    private static CoordinateSpace defaultCoordinateSpace(Placement placement) {
+        return placement == Placement.INLINE ? CoordinateSpace.STORY_FLOW : CoordinateSpace.PAGE;
     }
 
     public boolean hasVisibleVisual() {
@@ -156,9 +221,13 @@ public final class ObjectPlan {
                 renderId,
                 sourceObjectIds,
                 visualSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 descendantVisualObjectIds,
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
                 zOrder,
                 newReason != null ? newReason : reason,
                 file,
@@ -180,9 +249,13 @@ public final class ObjectPlan {
                 renderId,
                 sourceObjectIds,
                 visualSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 descendantVisualObjectIds,
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
                 zOrder,
                 reason,
                 file,
@@ -204,9 +277,13 @@ public final class ObjectPlan {
                 renderId,
                 sourceObjectIds,
                 visualSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 descendantVisualObjectIds,
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
                 zOrder,
                 reason,
                 file,
@@ -228,9 +305,13 @@ public final class ObjectPlan {
                 renderId,
                 sourceObjectIds,
                 visualSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 descendantVisualObjectIds,
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
                 zOrder,
                 reason,
                 file,
@@ -252,9 +333,13 @@ public final class ObjectPlan {
                 renderId,
                 sourceObjectIds,
                 visualSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 descendantVisualObjectIds,
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
                 newZOrder,
                 reason,
                 file,
@@ -276,9 +361,13 @@ public final class ObjectPlan {
                 renderId,
                 newSourceObjectIds,
                 visualSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 descendantVisualObjectIds,
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
                 zOrder,
                 reason,
                 file,
@@ -300,9 +389,13 @@ public final class ObjectPlan {
                 renderId,
                 sourceObjectIds,
                 newVisualSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 descendantVisualObjectIds,
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
                 zOrder,
                 reason,
                 file,
@@ -324,9 +417,13 @@ public final class ObjectPlan {
                 renderId,
                 sourceObjectIds,
                 visualSourceObjectIds,
+                styleSourceObjectIds,
                 newOwnedTextFrameIds,
                 descendantVisualObjectIds,
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
                 zOrder,
                 reason,
                 file,
@@ -348,9 +445,13 @@ public final class ObjectPlan {
                 renderId,
                 sourceObjectIds,
                 visualSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 newDescendantVisualObjectIds,
                 sourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
                 zOrder,
                 reason,
                 file,
@@ -372,9 +473,41 @@ public final class ObjectPlan {
                 renderId,
                 sourceObjectIds,
                 visualSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 descendantVisualObjectIds,
                 newSourceBundleKey,
+                materialization,
+                coordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
+    public ObjectPlan withMaterialization(Materialization newMaterialization) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                placement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                newMaterialization,
+                coordinateSpace,
+                anchorOwner,
                 zOrder,
                 reason,
                 file,
@@ -402,9 +535,13 @@ public final class ObjectPlan {
                 renderId,
                 newSourceObjectIds,
                 newSourceObjectIds,
+                styleSourceObjectIds,
                 ownedTextFrameIds,
                 descendantVisualObjectIds,
                 sourceBundleKey,
+                Materialization.EXTRACTED_PNG_VECTOR,
+                coordinateSpace,
+                anchorOwner,
                 newZOrder,
                 newReason != null ? newReason : reason,
                 newFile != null ? newFile : file,
@@ -428,9 +565,13 @@ public final class ObjectPlan {
                 .append("\"renderId\":").append(renderId != null ? renderId : -1).append(',')
                 .append("\"sourceObjectIds\":").append(intArrayJson(sourceObjectIds)).append(',')
                 .append("\"visualSourceObjectIds\":").append(intArrayJson(visualSourceObjectIds)).append(',')
+                .append("\"styleSourceObjectIds\":").append(intArrayJson(styleSourceObjectIds)).append(',')
                 .append("\"ownedTextFrameIds\":").append(intArrayJson(ownedTextFrameIds)).append(',')
                 .append("\"descendantVisualObjectIds\":").append(intArrayJson(descendantVisualObjectIds)).append(',')
                 .append("\"sourceBundleKey\":\"").append(escape(sourceBundleKey)).append("\",")
+                .append("\"materialization\":\"").append(materialization).append("\",")
+                .append("\"coordinateSpace\":\"").append(coordinateSpace).append("\",")
+                .append("\"anchorOwner\":\"").append(escape(anchorOwner)).append("\",")
                 .append("\"zOrder\":").append(zOrder).append(',')
                 .append("\"sourceLayerId\":\"").append(escape(sourceLayerId)).append("\",")
                 .append("\"sourceLayerName\":\"").append(escape(sourceLayerName)).append("\",")

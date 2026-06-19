@@ -150,7 +150,6 @@ HWPX XML 출력
 | 키 | 기본값 | 설명 |
 |----|--------|------|
 | `pngExportResolution` | 220 | 페이지 배경 PNG 해상도 (DPI) |
-| `textBoxWidthExpandPercent` | 5 | 글상자 너비 확장 비율 (%) |
 | `groupShapeMaxTextLength` | 20 | Group 내 배경 판별 최대 텍스트 길이 |
 | `spaceCondenseRatio` | 50 | 공백 장평 축소 비율 |
 

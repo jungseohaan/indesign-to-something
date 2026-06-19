@@ -797,12 +797,12 @@ public class HwpxImageBuilder {
 
     private static boolean isBehindTextVisualLayer(String visualLayer) {
         return "PAGE_BACKGROUND".equals(visualLayer)
-                || "CONTAINER_BACKDROP".equals(visualLayer)
                 || "TEXT_CARD_BACKDROP".equals(visualLayer);
     }
 
     private static boolean isInFrontVisualLayer(String visualLayer) {
-        return "CONTAINER_FACE".equals(visualLayer)
+        return "CONTAINER_BACKDROP".equals(visualLayer)
+                || "CONTAINER_FACE".equals(visualLayer)
                 || "LABEL_BACKDROP".equals(visualLayer)
                 || "LABEL_OVERLAY_BACKDROP".equals(visualLayer)
                 || "CONTENT_VISUAL".equals(visualLayer)

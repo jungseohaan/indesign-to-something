@@ -1,6 +1,8 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
 import javax.imageio.ImageIO;
@@ -25,7 +27,7 @@ public final class VisualTfInlineCompositor {
         if (ctx == null || rg == null || rg.file() == null) return null;
         try {
             BufferedImage base = VisualCropper.decodePngBytes(pngData);
-            if (base == null || !shouldCompositeTfInlineVisuals(rg)) return base;
+            if (base == null || !shouldCompositeTfInlineVisuals(ctx, rg)) return base;
             BufferedImage merged = compositeTfInlineVisuals(ctx, rg, base);
             return merged != null ? merged : base;
         } catch (Exception e) {
@@ -38,11 +40,11 @@ public final class VisualTfInlineCompositor {
         return rg != null && rg.tfInlineVisualIds() != null && rg.tfInlineVisualIds().length > 0;
     }
 
-    public static boolean shouldCompositeTfInlineVisuals(RenderedGroup rg) {
+    public static boolean shouldCompositeTfInlineVisuals(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (!hasTfInlineVisuals(rg)) return false;
-        // If the text frame remains editable in HWPX, its inline visuals must stay
-        // in the text flow instead of being baked into the floating visual shell.
-        return !"hwpx_tf".equals(rg.textOwner());
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        return plan.textAction != TextAction.OWNED_BY_HWPX_TEXT;
     }
 
     public static double[] boundsWithTfInlineVisuals(

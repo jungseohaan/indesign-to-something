@@ -38,6 +38,7 @@ public final class VisualZOrderPlanner {
 
     public static int inferredTextFrameVisualShellZOrder(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (ctx == null || ctx.resolvedData == null || rg == null) return -1;
+        if (ctx.hasOwnershipPlan(rg)) return -1;
         if (!VisualLayeringRules.isPageObject(rg)) return -1;
         if (Boolean.FALSE.equals(rg.placementAllowed())) return -1;
         if (!"indesign_png".equals(rg.visualOwner())) return -1;
@@ -66,6 +67,7 @@ public final class VisualZOrderPlanner {
 
     public static int inferredTextLineBackdropZOrder(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (ctx == null || ctx.resolvedData == null || rg == null) return -1;
+        if (ctx.hasOwnershipPlan(rg)) return -1;
         if (!VisualLayeringRules.isPageObject(rg)) return -1;
         if (Boolean.FALSE.equals(rg.placementAllowed())) return -1;
         if (!"indesign_png".equals(rg.visualOwner())) return -1;

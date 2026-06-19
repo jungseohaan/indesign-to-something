@@ -125,7 +125,6 @@ IDML → IDMLNormalizer (Stage1~3) → ResolvedMerger → ASTToHwpxConverter →
 ```json
 {
   "pngExportResolution": 220,
-  "textBoxWidthExpandPercent": 5,
   "groupShapeMaxTextLength": 20,
   "spaceCondenseRatio": 50,
   "fontMappings": { ... },

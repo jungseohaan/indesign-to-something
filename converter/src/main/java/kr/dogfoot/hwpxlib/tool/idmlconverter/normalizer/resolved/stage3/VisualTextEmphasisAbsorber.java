@@ -7,10 +7,11 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextRun;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase6.BackgroundInjector;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import javax.imageio.ImageIO;
@@ -231,12 +232,8 @@ public final class VisualTextEmphasisAbsorber {
         if (rbRaw == null || rbRaw.length < 4) return false;
         if (!BackgroundInjector.isPageObject(rg)) return false;
         if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        String reason = rg.reason();
-        if (isEditableLabelShellReason(reason)) return false;
-        if (!isTextEmphasisBackdropReason(reason)) return false;
-        if (isLargePaperVectorShape(ctx, rg, rbRaw)) return false;
+        ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+        if (plan == null || plan.visualAction != VisualAction.ABSORB_TEXT_STYLE) return false;
 
         double w = rbRaw[3] - rbRaw[1];
         double h = rbRaw[2] - rbRaw[0];
@@ -244,7 +241,6 @@ public final class VisualTextEmphasisAbsorber {
 
         TextLineMatch match = findBestTextLineMatch(ctx, rg, rbRaw);
         if (match == null || match.line == null || match.line.bounds() == null) return false;
-        if (isShortOwnedLabelShell(ctx, rg, match.tf)) return false;
         double[] lb = match.line.bounds();
         double lineH = Math.max(0.1, lb[2] - lb[0]);
         double rawOverlap = BackgroundInjector.overlapArea(rbRaw, lb);
@@ -265,37 +261,6 @@ public final class VisualTextEmphasisAbsorber {
         // A true underline is usually much thinner than the text line. Keep it in
         // the underline path rather than converting it to character shading.
         return h >= Math.max(2.5, lineH * 0.25);
-    }
-
-    private static boolean isLargePaperVectorShape(
-            ResolvedBuildContext ctx,
-            RenderedGroup rg,
-            double[] bounds) {
-        if (ctx == null || ctx.resolvedData == null || rg == null || bounds == null || bounds.length < 4) {
-            return false;
-        }
-        if (!"vector_shape".equals(rg.reason())) return false;
-        double w = bounds[3] - bounds[1];
-        double h = bounds[2] - bounds[0];
-        if (w < 30.0 || h < 9.0) return false;
-
-        int[] sourceIds = rg.sourceObjectIds();
-        if (sourceIds != null) {
-            for (int sourceId : sourceIds) {
-                ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
-                if (isPaperFilledVector(item)) {
-                    return true;
-                }
-            }
-        }
-        return isPaperFilledVector(ctx.resolvedData.getPageItem(String.valueOf(rg.id())));
-    }
-
-    private static boolean isPaperFilledVector(ResolvedPageItem item) {
-        if (item == null) return false;
-        String type = item.type();
-        if (!"Rectangle".equals(type) && !"Polygon".equals(type) && !"Oval".equals(type)) return false;
-        return BackgroundInjector.isPaperColor(item.fillColorName());
     }
 
     private static int countMatchedLineOverlaps(
@@ -325,43 +290,6 @@ public final class VisualTextEmphasisAbsorber {
             }
         }
         return count;
-    }
-
-    private static boolean isTextEmphasisBackdropReason(String reason) {
-        if (reason == null) return false;
-        if (isEditableLabelShellReason(reason)) return false;
-        String r = reason.toLowerCase();
-        return r.contains("vector")
-                || r.contains("decoration")
-                || r.contains("text_hidden_shell")
-                || r.contains("editable_textframe_visual_shell");
-    }
-
-    public static boolean isEditableLabelShellReason(String reason) {
-        if (reason == null) return false;
-        String r = reason.toLowerCase();
-        return r.contains("visual_label_text_hidden_shell")
-                || r.contains("editable_composite_text_hidden_shell")
-                || r.contains("concept_label_shell");
-    }
-
-    private static boolean isShortOwnedLabelShell(
-            ResolvedBuildContext ctx,
-            RenderedGroup rg,
-            ResolvedTextFrame matchedTf) {
-        if (ctx == null || rg == null || matchedTf == null) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        String text = BackgroundInjector.visibleText(matchedTf);
-        if (text.isEmpty() || text.length() > 18) return false;
-
-        String[] editableIds = rg.editableTextFrameIds();
-        if (editableIds == null || editableIds.length == 0) return false;
-        for (String id : editableIds) {
-            if (id != null && id.equals(matchedTf.id())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static final class TextLineMatch {

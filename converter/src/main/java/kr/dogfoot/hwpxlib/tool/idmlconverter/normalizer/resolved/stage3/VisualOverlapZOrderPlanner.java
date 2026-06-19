@@ -6,6 +6,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTextFrameBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.PolicyLayer;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedPageItem;
 
@@ -101,17 +104,16 @@ public final class VisualOverlapZOrderPlanner {
         return Math.max(0, minContentZ - 1);
     }
 
-    public static boolean isPaperOnlyContainerShell(ResolvedBuildContext ctx, RenderedGroup rg) {
+    public static boolean isPaperFilledContainerShell(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (ctx == null || ctx.resolvedData == null || rg == null) return false;
-        if (!isRenderedContainerShell(rg)) return false;
-        if (!"vector_shape".equals(rg.reason())) return false;
+        if (!isRenderedContainerShell(ctx, rg)) return false;
 
         int[] sourceIds = rg.sourceObjectIds();
         boolean sawSource = false;
         boolean sawPaperFill = false;
         if (sourceIds != null) {
             for (int sourceId : sourceIds) {
-                if (isPaperOnlyPageItem(ctx, String.valueOf(sourceId))) {
+                if (isPaperFilledPageItem(ctx, String.valueOf(sourceId))) {
                     sawSource = true;
                     sawPaperFill = true;
                     continue;
@@ -121,7 +123,7 @@ public final class VisualOverlapZOrderPlanner {
             }
         }
         if (!sawSource) {
-            return isPaperOnlyPageItem(ctx, String.valueOf(rg.id()));
+            return isPaperFilledPageItem(ctx, String.valueOf(rg.id()));
         }
         return sawPaperFill;
     }
@@ -130,7 +132,7 @@ public final class VisualOverlapZOrderPlanner {
             ResolvedBuildContext ctx,
             List<RenderedGroup> items,
             RenderedGroup shell) {
-        if (ctx == null || shell == null || items == null || !isRenderedContainerShell(shell)) {
+        if (ctx == null || shell == null || items == null || !isRenderedContainerShell(ctx, shell)) {
             return -1;
         }
         double[] shellBounds = shell.bounds();
@@ -139,7 +141,7 @@ public final class VisualOverlapZOrderPlanner {
 
         int minContentZ = Integer.MAX_VALUE;
         for (RenderedGroup content : items) {
-            if (!isRenderedContentLayer(content, shellArea) || content.pageIndex() != shell.pageIndex()) continue;
+            if (!isRenderedContentLayer(ctx, content, shellArea) || content.pageIndex() != shell.pageIndex()) continue;
             if (content.id() == shell.id()) continue;
             double[] contentBounds = content.bounds();
             double contentArea = area(contentBounds);
@@ -158,8 +160,18 @@ public final class VisualOverlapZOrderPlanner {
         return minContentZ == Integer.MAX_VALUE ? -1 : minContentZ;
     }
 
-    private static boolean isRenderedContainerShell(RenderedGroup rg) {
-        if (rg == null || !VisualLayeringRules.isPageObject(rg)) return false;
+    private static boolean isRenderedContainerShell(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (rg == null) return false;
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        if (plan != null) {
+            if (!plan.hasVisibleVisual()) return false;
+            if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                    && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+            PolicyLayer layer = plan.visualPolicyLayer();
+            if (layer != PolicyLayer.BACKGROUND && layer != PolicyLayer.DECORATION) return false;
+            return hasContainerSizedBounds(rg);
+        }
+        if (!VisualLayeringRules.isPageObject(rg)) return false;
         if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
         if ("hwpx_tf".equals(rg.textOwner()) || "indesign_png".equals(rg.textOwner())) return false;
@@ -167,15 +179,16 @@ public final class VisualOverlapZOrderPlanner {
         String reason = rg.reason();
         if (reason == null) return false;
         if (!"vector_shape".equals(reason) && !reason.contains("textframe_visual_shell")) return false;
-        double[] b = rg.bounds();
-        if (b == null || b.length < 4) return false;
-        double w = b[3] - b[1];
-        double h = b[2] - b[0];
-        return w >= 18.0 && h >= 12.0 && area(b) >= 300.0;
+        return hasContainerSizedBounds(rg);
     }
 
-    private static boolean isRenderedContentLayer(RenderedGroup rg, double shellArea) {
-        if (rg == null || !VisualLayeringRules.isPageObject(rg)) return false;
+    private static boolean isRenderedContentLayer(ResolvedBuildContext ctx, RenderedGroup rg, double shellArea) {
+        if (rg == null) return false;
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        if (plan != null) {
+            return plan.hasVisibleVisual() && plan.visualPolicyLayer() == PolicyLayer.CONTENT;
+        }
+        if (!VisualLayeringRules.isPageObject(rg)) return false;
         if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
         if (!"indesign_png".equals(rg.visualOwner())) return false;
         if ("hwpx_tf".equals(rg.textOwner())) return true;
@@ -187,6 +200,15 @@ public final class VisualOverlapZOrderPlanner {
             return true;
         }
         return isSemanticImageContentLayer(rg, shellArea);
+    }
+
+    private static boolean hasContainerSizedBounds(RenderedGroup rg) {
+        if (rg == null) return false;
+        double[] b = rg.bounds();
+        if (b == null || b.length < 4) return false;
+        double w = b[3] - b[1];
+        double h = b[2] - b[0];
+        return w >= 18.0 && h >= 12.0 && area(b) >= 300.0;
     }
 
     private static boolean isSemanticImageContentLayer(RenderedGroup rg, double shellArea) {
@@ -227,13 +249,11 @@ public final class VisualOverlapZOrderPlanner {
                 || reason.contains("textframe_visual_shell");
     }
 
-    private static boolean isPaperOnlyPageItem(ResolvedBuildContext ctx, String domId) {
+    private static boolean isPaperFilledPageItem(ResolvedBuildContext ctx, String domId) {
         if (ctx == null || ctx.resolvedData == null || domId == null) return false;
         ResolvedPageItem pi = ctx.resolvedData.getPageItem(domId);
         if (pi == null) return false;
-        if (!isPaperColor(pi.fillColorName())) return false;
-        if (pi.strokeWeight() > 0.01 && !isNoneColor(pi.strokeColorName())) return false;
-        return true;
+        return isPaperColor(pi.fillColorName());
     }
 
     private static boolean isPaperColor(String colorName) {

@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * SPEC-036 Stage 4 validator.
+ * Source ownership policy Stage 4 validator.
  *
  * <p>This class does not create or repair ownership. It only checks the
  * ObjectPlan list that Stage 1/2.5 produced. Keep new policy decisions in
@@ -21,6 +21,7 @@ public final class OwnershipPlanValidator {
             return;
         }
         OwnershipPlanValidator v = new OwnershipPlanValidator(ctx);
+        v.validatePlanContractFields();
         v.validateDuplicateVisibleSourceSlots();
         v.validateConflictingTextOwnership();
         v.validateInlineFloatingSourceSplit();
@@ -116,6 +117,7 @@ public final class OwnershipPlanValidator {
         if (ctx.resolvedData == null) return;
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (isBackPlaneTextShell(plan)) continue;
             for (int textFrameId : textFrameSourceIds(plan)) {
                 ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(String.valueOf(textFrameId));
                 if (tf == null) continue;
@@ -128,6 +130,14 @@ public final class OwnershipPlanValidator {
                 }
             }
         }
+    }
+
+    private static boolean isBackPlaneTextShell(ObjectPlan plan) {
+        if (plan == null) return false;
+        return plan.visualLayer == VisualLayer.LABEL_BACKDROP
+                || plan.visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
+                || plan.visualLayer == VisualLayer.CONTAINER_BACKDROP
+                || plan.visualLayer == VisualLayer.TEXT_CARD_BACKDROP;
     }
 
     private void validateParentTextShellDescendantsDropped() {
@@ -151,11 +161,70 @@ public final class OwnershipPlanValidator {
             if (parent.ownedTextFrameIds == null || parent.ownedTextFrameIds.length == 0) continue;
             for (int textFrameId : parent.ownedTextFrameIds) {
                 ObjectPlan textPlan = findTextFramePlan(textFrameId, parent.pageIndex);
-                if (textPlan == null || textPlan.textAction != TextAction.OWNED_BY_HWPX_TEXT) {
+                if (!isTextFrameAccountedForByShell(textPlan)) {
                     warn("STAGE4_PARENT_TEXT_SHELL_OWNED_TEXT_MISSING",
                             "parent=" + planRef(parent)
                                     + " textFrameId=" + textFrameId);
                 }
+            }
+        }
+    }
+
+    private static boolean isTextFrameAccountedForByShell(ObjectPlan textPlan) {
+        if (textPlan == null) return false;
+        if (textPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT) return true;
+        if (textPlan.textAction != TextAction.DROP_TEXT) return false;
+        if (textPlan.visualAction != VisualAction.DROP_VISUAL) return false;
+        String reason = textPlan.reason != null ? textPlan.reason : "";
+        return reason.equals("owned_by_inline_text_shell")
+                || reason.equals("owned_by_inline_complete_png");
+    }
+
+    private void validatePlanContractFields() {
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.textAction == null) {
+                warn("STAGE4_PLAN_MISSING_TEXT_ACTION", "plan=" + planRef(plan));
+            }
+            if (plan.visualAction == null) {
+                warn("STAGE4_PLAN_MISSING_VISUAL_ACTION", "plan=" + planRef(plan));
+            }
+            if (plan.placement == null && plan.hasVisibleVisual()) {
+                warn("STAGE4_PLAN_MISSING_PLACEMENT", "plan=" + planRef(plan));
+            }
+            if (plan.materialization == null) {
+                warn("STAGE4_PLAN_MISSING_MATERIALIZATION", "plan=" + planRef(plan));
+            }
+            if (plan.coordinateSpace == null) {
+                warn("STAGE4_PLAN_MISSING_COORDINATE_SPACE", "plan=" + planRef(plan));
+            }
+            if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) {
+                if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) {
+                    warn("STAGE4_TEXT_SHELL_WITHOUT_HWPX_TEXT",
+                            "plan=" + planRef(plan));
+                }
+                if (plan.materialization != Materialization.EXTRACTED_PNG_VECTOR
+                        && plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) {
+                    warn("STAGE4_TEXT_SHELL_INVALID_MATERIALIZATION",
+                            "plan=" + planRef(plan)
+                                    + " materialization=" + plan.materialization);
+                }
+                if (plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+                    warn("STAGE4_TEXT_SHELL_MISSING_OWNED_TEXT",
+                            "plan=" + planRef(plan));
+                }
+            }
+            if (plan.visualAction == VisualAction.PLACE_TABLE_STYLE
+                    && plan.materialization != Materialization.HWPX_TABLE_STYLE) {
+                warn("STAGE4_TABLE_STYLE_INVALID_MATERIALIZATION",
+                        "plan=" + planRef(plan)
+                                + " materialization=" + plan.materialization);
+            }
+            if (plan.textAction == TextAction.OWNED_BY_PNG
+                    && plan.materialization != Materialization.COMPLETE_PNG) {
+                warn("STAGE4_PNG_TEXT_OWNER_NOT_COMPLETE_PNG",
+                        "plan=" + planRef(plan)
+                                + " materialization=" + plan.materialization);
             }
         }
     }

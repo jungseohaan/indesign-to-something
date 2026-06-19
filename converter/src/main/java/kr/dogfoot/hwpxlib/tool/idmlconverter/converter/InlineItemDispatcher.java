@@ -144,7 +144,7 @@ final class InlineItemDispatcher {
         if (obj.inlineTables() != null && !obj.inlineTables().isEmpty()) return false;
         if (obj.paragraphs() == null || obj.paragraphs().isEmpty()) return false;
         if (obj.imageData() != null && obj.imageData().length > 0) return false;
-        if (obj.imageFillData() != null && obj.imageFillData().length > 0 && !hasSemanticText(obj)) return false;
+        if (obj.imageFillData() != null && obj.imageFillData().length > 0) return false;
         if (hasVisibleFill(obj)) return false;
         if (hasVisibleStroke(obj)) return false;
         // 공백만 있거나 비어있는 인라인 TextFrame(빈칸박스)은 단어 사이 간격을 확보해야 하므로

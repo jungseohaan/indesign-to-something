@@ -18,14 +18,14 @@
 
 ## 기준 문서
 
-- `docs/specs/SPEC-036-source-ownership-v2.md` (Active / Canonical)
+- `docs/specs/POLICY-source-ownership.md` (Active / Canonical)
 - `docs/specs/SPEC-035-indesign-render-ownership.md` (legacy 이관 기록과 배경 설명)
 - 보조 SPEC:
   - `docs/specs/SPEC-025-text-image-rendering-removal.md`
   - `docs/specs/SPEC-028-inline-anchored-group-duplicate.md`
   - `docs/specs/SPEC-033-badge-inline-simplification.md`
 
-`SPEC-035`와 `SPEC-036`이 충돌하면 항상 `SPEC-036`을 따른다.
+`SPEC-035`와 source ownership policy가 충돌하면 항상 `POLICY-source-ownership.md`를 따른다.
 
 ## Stage 구조
 

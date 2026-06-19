@@ -1,6 +1,7 @@
 package kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3;
 
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTFigure;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTBlock;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
@@ -29,7 +30,7 @@ public final class VisualPlacementExecutor {
 
         if (ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL) {
             ASTFigure fig = buildFigure(rg, image, plan);
-            section.addBlockAtFront(fig);
+            addTextShellBehindTextAbovePageBackground(section, fig);
             ctx.markRenderedVisualHandled(rg.id());
             ctx.recordRenderedDecision(rg, "Stage3.VisualBuilder.Phase6",
                     "PLACE_TEXT_SHELL_FIGURE",
@@ -64,6 +65,36 @@ public final class VisualPlacementExecutor {
         fig.fromGroup(plan.fromGroup);
         fig.sourceId("page_obj_" + rg.id());
         return fig;
+    }
+
+    private static void addTextShellBehindTextAbovePageBackground(ASTSection section, ASTFigure fig) {
+        int index = 0;
+        while (index < section.blocks().size()) {
+            ASTBlock block = section.blocks().get(index);
+            if (!(block instanceof ASTFigure)) break;
+            ASTFigure existing = (ASTFigure) block;
+            if (visualOrderRank(existing) > visualOrderRank(fig)) break;
+            if (visualOrderRank(existing) == visualOrderRank(fig)
+                    && existing.zOrder() > fig.zOrder()) {
+                break;
+            }
+            index++;
+        }
+        section.blocks().add(index, fig);
+    }
+
+    private static int visualOrderRank(ASTFigure fig) {
+        if (fig == null) return 2;
+        String layer = fig.visualLayer();
+        if ("PAGE_BACKGROUND".equals(layer)) return 0;
+        if (fig.zOrder() <= -5000) return 0;
+        if ("CONTAINER_BACKDROP".equals(layer)
+                || "TEXT_CARD_BACKDROP".equals(layer)
+                || "LABEL_BACKDROP".equals(layer)
+                || "LABEL_OVERLAY_BACKDROP".equals(layer)) {
+            return 1;
+        }
+        return 2;
     }
 
     public static final class PlacementResult {

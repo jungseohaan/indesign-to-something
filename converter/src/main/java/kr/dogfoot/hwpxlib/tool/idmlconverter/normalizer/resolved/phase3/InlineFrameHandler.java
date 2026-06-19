@@ -743,9 +743,11 @@ public class InlineFrameHandler {
         RenderedGroup shell = null;
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg == null || rg.id() != anchoredObjectId || rg.file() == null) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            String reason = rg.reason();
-            if (reason == null || !reason.contains("text_hidden")) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
             String[] eids = rg.editableTextFrameIds();
             if (eids == null || eids.length == 0) continue;
             shell = rg;
@@ -754,15 +756,6 @@ public class InlineFrameHandler {
         if (shell == null) return null;
         boolean inlineGroupAnchor = anchorItem != null && "Group".equals(anchorItem.type()) && anchorItem.isInline();
         if (!inlineGroupAnchor && !isInlineTextlessShellWithTf(shell)) return null;
-        // 라벨 셸(visual_label_text_hidden_shell)이 Stage 3에서 플로팅 PLACE_TEXT_SHELL로
-        // 배치될 예정이면 인라인 베이킹하지 않는다. 인라인(여기)+플로팅(Stage 3) 이중 배치를 막고
-        // 플로팅 셸이 단독 소유한다. (SPEC-035 §1.2 인라인 의미 라벨 그룹은 플로팅이 소유)
-        // 범위를 라벨 셸로 한정 — 이미지 섞인 mixed_group 등은 기존 인라인 동작 유지.
-        if ("visual_label_text_hidden_shell".equals(shell.reason())
-                && ctx.visualActionByOwnershipPlan(shell) == VisualAction.PLACE_TEXT_SHELL
-                && ctx.placementByOwnershipPlan(shell) == Placement.FLOATING) {
-            return null;
-        }
         java.util.List<ResolvedTextFrame> children = badgeTextFramesSortedByReading(ctx, shell);
         if (children.size() != 1) return null;
         for (ResolvedTextFrame childTf : children) {
@@ -1203,20 +1196,33 @@ public class InlineFrameHandler {
             return null;
         }
         String childId = childTf.id();
-        RenderedGroup fallback = null;
+        int childDomId;
+        try {
+            childDomId = Integer.parseInt(childId);
+        } catch (NumberFormatException e) {
+            childDomId = -1;
+        }
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg == null || rg.id() != anchoredObjectId || rg.file() == null) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            if ("inline_graphic_only".equals(rg.reason()) && rg.parentStoryId() != null) {
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (childDomId >= 0
+                    && plan != null
+                    && plan.placement == Placement.INLINE
+                    && plan.visualAction == VisualAction.PLACE_INLINE_PNG
+                    && plan.textAction == TextAction.OWNED_BY_PNG
+                    && containsInt(plan.sourceObjectIds, anchoredObjectId)) {
                 return rg;
             }
-            if ("text_composite_editable_text_hidden".equals(rg.reason())
-                    && ("hwpx_tf".equals(rg.textOwner()) || "none".equals(rg.textOwner()))
-                    && containsStringId(rg.editableTextFrameIds(), childId)) {
-                fallback = rg;
+            if (childDomId >= 0
+                    && plan != null
+                    && plan.placement == Placement.INLINE
+                    && plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                    && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                    && containsInt(plan.ownedTextFrameIds, childDomId)) {
+                return rg;
             }
         }
-        return fallback;
+        return null;
     }
 
     private static ASTInlineObject loadRenderedInlineBadge(
@@ -1280,15 +1286,14 @@ public class InlineFrameHandler {
                 imageData = badgeImage.imageData;
                 img = badgeImage.image;
             }
-            if (matched != null && "hwpx_tf".equals(matched.textOwner())
-                    && !matched.hasEditableTextHiddenFromPng()) {
-                return null;
-            }
-            if (matched != null
-                    && Boolean.TRUE.equals(matched.containsEditableText())
-                    && "indesign_png".equals(matched.textOwner())
-                    && "visual_marker_label_indesign_png".equals(matched.reason())
-                    && !isCompletePngSimpleButtonLabel(ctx, matched)) {
+            ObjectPlan matchedPlan = ctx != null ? ctx.findOwnershipPlanForRendered(matched) : null;
+            if (matchedPlan != null) {
+                if (!matchedPlan.hasVisibleVisual()) return null;
+                if (matchedPlan.textAction == TextAction.OWNED_BY_HWPX_TEXT
+                        && matchedPlan.visualAction != VisualAction.PLACE_TEXT_SHELL) {
+                    return null;
+                }
+            } else if (matched != null) {
                 return null;
             }
 
@@ -1398,6 +1403,9 @@ public class InlineFrameHandler {
             obj.imageFillData(imageData);
             obj.forceImageFill(true);
             for (ResolvedTextFrame childTf : childTfs) {
+                if (isOrcCarrierTextFrame(childTf)) {
+                    continue;
+                }
                 buildBadgeParagraph(ctx, childTf, obj);
                 try {
                     ctx.setTextDisposition(Integer.parseInt(childTf.id()), FrameDisposition.TEXT_BLOCK_PLACED);
@@ -1413,6 +1421,11 @@ public class InlineFrameHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static boolean isOrcCarrierTextFrame(ResolvedTextFrame tf) {
+        if (tf == null) return false;
+        return hasObjectReplacementText(tf.frameVisibleText());
     }
 
     private static ObjectPlan findInlineTextShellOwnerPlan(
@@ -1529,12 +1542,7 @@ public class InlineFrameHandler {
             java.util.List<ResolvedTextFrame> childTfs) {
         if (plan == null || shell == null || childTfs == null || childTfs.isEmpty()) return false;
         if (plan.placement != Placement.INLINE) return false;
-        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL
-                && !(plan.visualAction == VisualAction.PLACE_INLINE_PNG
-                && shell.hasEditableTextHiddenFromPng()
-                && isDirectInlineTextShellReason(shell.reason()))) {
-            return false;
-        }
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
         if (!isExecutableTextlessShellCarrier(plan, shell)) return false;
         if (plan.domId != shell.id() && !containsInt(plan.sourceObjectIds, shell.id())) return false;
@@ -1551,27 +1559,10 @@ public class InlineFrameHandler {
         return true;
     }
 
-    private static boolean isDirectInlineTextShellReason(String reason) {
-        if (reason == null) return false;
-        return "visual_label_text_hidden_shell".equals(reason)
-                || "editable_textframe_visual_shell".equals(reason)
-                || "inline_text_hidden".equals(reason)
-                || reason.contains("atomic_root_text_hidden_shell");
-    }
-
     private static boolean isExecutableTextlessShellCarrier(ObjectPlan plan, RenderedGroup shell) {
         if (plan == null) return false;
-        String reason = plan.reason != null ? plan.reason : (shell != null ? shell.reason() : null);
-        String file = plan.file != null ? plan.file : (shell != null ? shell.file() : null);
-        if (reason != null && reason.contains("text_hidden")) return true;
-        if (shell != null && shell.hasEditableTextHiddenFromPng()) return true;
-        String base = basenameOf(file);
-        if (base.startsWith("deco_")
-                || base.startsWith("tf_shell_")
-                || base.startsWith("label_backdrop_")) {
-            return true;
-        }
-        return false;
+        return plan.visualAction == VisualAction.PLACE_TEXT_SHELL
+                && plan.hasVisibleVisual();
     }
 
     /** RGBA PNG를 흰 배경에 합성해 불투명 PNG 바이트로 반환(한글 imgBrush 알파→검정 회피). */
@@ -1721,11 +1712,6 @@ public class InlineFrameHandler {
                     && containsInt(plan.ownedTextFrameIds, childDomId)) {
                 return rg;
             }
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            if (!"hwpx_tf".equals(rg.textOwner())) continue;
-            if (!rg.hasEditableTextHiddenFromPng()) continue;
-            if (!containsStringId(rg.editableTextFrameIds(), childId)) continue;
-            return rg;
         }
         return null;
     }
@@ -1775,15 +1761,12 @@ public class InlineFrameHandler {
 
     private static boolean shouldOverlayRenderedBadgeText(ResolvedBuildContext ctx, RenderedGroup matched) {
         if (matched == null) return true;
-        if (ctx != null && ctx.isCompleteInlinePngByOwnershipPlan(matched)) return false;
-        if (isCompletePngSimpleButtonLabel(ctx, matched)) return false;
-        if (matched.hasEditableTextHiddenFromPng()) return true;
-        if (Boolean.TRUE.equals(matched.containsEditableText())
-                && "indesign_png".equals(matched.textOwner())) {
-            if ("visual_marker_label_indesign_png".equals(matched.reason())) return true;
-            return false;
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(matched) : null;
+        if (plan != null) {
+            if (plan.textAction == TextAction.OWNED_BY_PNG) return false;
+            return plan.textAction == TextAction.OWNED_BY_HWPX_TEXT;
         }
-        return true;
+        return false;
     }
 
     private static boolean isCompletePngSimpleButtonLabel(ResolvedBuildContext ctx, RenderedGroup rg) {
@@ -2085,6 +2068,7 @@ public class InlineFrameHandler {
                                                          String previousText, String nextText) {
         // Phase 2가 floating text box로 승격한 TF → 인라인 런 중복 방지
         if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+        if (ctx.isTextFrameOwnedByTextShellPlan(anchoredObjectId)) return null;
         if (!ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId)
                 || hasPlannedFloatingHwpxTextDescendant(ctx, anchoredObjectId)) {
             return null;
@@ -2212,6 +2196,7 @@ public class InlineFrameHandler {
         if (plannedAnchorTextShell != null) return plannedAnchorTextShell;
         ASTInlineObject plannedTextShell = loadPlannedInlineTextShellForTextFrame(ctx, anchoredObjectId);
         if (plannedTextShell != null) return plannedTextShell;
+        if (ctx.isTextFrameOwnedByTextShellPlan(anchoredObjectId)) return null;
         if (!ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId)
                 && !hasPlannedInlineHwpxTextDescendant(ctx, anchoredObjectId)) {
             return null;
@@ -2462,6 +2447,7 @@ public class InlineFrameHandler {
                                              String previousText, String nextText) {
         // Phase 2가 floating text box로 승격한 TF → 인라인 런 중복 방지
         if (ctx.isTextDisposed(anchoredObjectId, FrameDisposition.TEXT_BLOCK_PLACED)) return null;
+        if (ctx.isTextFrameOwnedByTextShellPlan(anchoredObjectId)) return null;
         if (!ctx.ownershipPlanPlacesInlineHwpxText(anchoredObjectId)) return null;
         String domId = String.valueOf(anchoredObjectId);
         if (isConceptDiagramTextFrame(ctx, domId)) return null;
@@ -3096,12 +3082,6 @@ public class InlineFrameHandler {
                     && plan.ownedTextFrameIds.length > 0) {
                 return true;
             }
-            if (rg.hasEditableTextHiddenFromPng()
-                    && "hwpx_tf".equals(rg.textOwner())
-                    && rg.editableTextFrameIds() != null
-                    && rg.editableTextFrameIds().length > 0) {
-                return true;
-            }
         }
         return false;
     }
@@ -3334,8 +3314,13 @@ public class InlineFrameHandler {
         }
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg == null || rg.id() != anchoredObjectId) continue;
-            if (!"inline_graphic_only".equals(rg.reason())) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan == null
+                    || plan.placement != Placement.INLINE
+                    || plan.visualAction != VisualAction.PLACE_INLINE_PNG
+                    || plan.textAction == TextAction.OWNED_BY_HWPX_TEXT) {
+                continue;
+            }
             if (rg.parentStoryId() == null || rg.parentStoryId().isEmpty()) continue;
             return rg;
         }
@@ -3523,8 +3508,12 @@ public class InlineFrameHandler {
         if (ctx.resolvedData.allRenderedFloatingItems() == null) return null;
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg == null || rg.id() != anchoredId || rg.file() == null) continue;
-            String r = rg.reason();
-            if ("inline_badge".equals(r) || "inline_badge_baked".equals(r)) return rg;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan != null
+                    && plan.placement == Placement.INLINE
+                    && plan.hasVisibleVisual()) {
+                return rg;
+            }
         }
         return null;
     }
@@ -3537,7 +3526,7 @@ public class InlineFrameHandler {
      */
     public static ASTTextFrameBlock buildFloatingBadge(
             ResolvedBuildContext ctx, RenderedGroup rg, long xHwp, long yHwp, long wHwp, long hHwp) {
-        if (ctx == null || rg == null || !"inline_badge".equals(rg.reason())) return null;
+        if (ctx == null || rg == null || !ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) return null;
         return buildFloatingTextShell(ctx, rg, xHwp, yHwp, wHwp, hHwp, 0);
     }
 
@@ -3565,8 +3554,7 @@ public class InlineFrameHandler {
             int zOrder) {
         java.util.List<ASTTextFrameBlock> out = new ArrayList<>();
         if (ctx == null || rg == null) return out;
-        boolean inlineBadge = "inline_badge".equals(rg.reason());
-        if (!inlineBadge) return out;
+        if (!ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg)) return out;
         if (wHwp <= 0 || hHwp <= 0) return out;
         java.util.List<ResolvedTextFrame> tfs = badgeTextFramesSortedByReading(ctx, rg);
         if (tfs.isEmpty()) return out;
@@ -3913,14 +3901,8 @@ public class InlineFrameHandler {
         if (groups == null) return false;
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.id() != groupDomId) continue;
-            if (!"page_object".equals(rg.type()) && !"page_object".equals(rg.itemType())) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            if (!rg.hasEditableTextHiddenFromPng()) continue;
-            if (ctx.hasOwnershipPlan(rg)) {
-                return ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg);
-            }
-            String reason = rg.reason();
-            return reason != null && reason.contains("text_hidden");
+            if (!ctx.hasOwnershipPlan(rg)) continue;
+            return ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg);
         }
         return false;
     }
@@ -3929,7 +3911,6 @@ public class InlineFrameHandler {
         if (ctx == null || ctx.resolvedData == null || ctx.resolvedData.allRenderedFloatingItems() == null) return null;
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg == null || rg.id() != groupId || rg.file() == null) continue;
-            if (!"inline_object".equals(rg.itemType())) continue;
             ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
             if (plan != null
                     && plan.placement == Placement.INLINE
@@ -3939,9 +3920,6 @@ public class InlineFrameHandler {
                     && plan.ownedTextFrameIds.length > 0) {
                 return rg;
             }
-            if (!rg.hasEditableTextHiddenFromPng()) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            return rg;
         }
         return null;
     }

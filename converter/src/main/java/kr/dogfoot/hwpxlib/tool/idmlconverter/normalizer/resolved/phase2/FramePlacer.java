@@ -690,7 +690,7 @@ public final class FramePlacer {
             if (inlineToFloating) {
                 block.inlineToFloating(true);
             }
-            if (plannedVisualTextOverlay) {
+            if (plannedVisualTextOverlay || hasPlannedTextShell) {
                 block.plannedVisualTextOverlay(true);
             }
             section.addBlock(block);
@@ -705,7 +705,6 @@ public final class FramePlacer {
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
             if (!containsEditableTextFrameId(rg, tfId)) continue;
-            if (!"hwpx_tf".equals(rg.textOwner()) && !rg.hasEditableTextHiddenFromPng()) continue;
             ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
             if (plan == null) continue;
             if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
@@ -797,14 +796,10 @@ public final class FramePlacer {
         if (groups == null) return false;
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.id() != groupDomId) continue;
-            if (!isRenderedPageObject(rg)) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
-            if (!rg.hasEditableTextHiddenFromPng()) continue;
             if (ctx.hasOwnershipPlan(rg)) {
                 return ctx.shouldPlaceFloatingVisualByOwnershipPlan(rg);
             }
-            String reason = rg.reason();
-            return reason != null && reason.contains("text_hidden");
+            return false;
         }
         return false;
     }
@@ -827,7 +822,9 @@ public final class FramePlacer {
         if (groups == null) return ids;
         String tfId = String.valueOf(tfDomId);
         for (RenderedGroup rg : groups) {
-            if (rg == null || !"indesign_png".equals(rg.visualOwner())) continue;
+            if (rg == null) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan == null) continue;
             String[] editableIds = rg.editableTextFrameIds();
             if (editableIds == null || rg.nativeFillChildIds() == null) continue;
             boolean ownsTf = false;
@@ -989,33 +986,16 @@ public final class FramePlacer {
 
     private static boolean shouldPlaceVisualLabelTextSeparately(
             ResolvedBuildContext ctx, ResolvedTextFrame tf) {
-        if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return false;
+        if (ctx == null || tf == null || tf.id() == null) return false;
         if (tf.sourceHidden()) return false;
-        if (!hasShortSemanticText(tf)) return false;
-        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (rg == null || rg.pageIndex() != tf.pageIndex()) continue;
-            if (!"visual_label_indesign_png".equals(rg.reason())) continue;
-            if (!"indesign_png".equals(rg.textOwner())) continue;
-            if (!Boolean.TRUE.equals(rg.containsEditableText())) continue;
-            if (!containsEditableTextFrameId(rg, tf.id())) continue;
-            if (ctx.resolvedData.shouldKeepVisualLabelTextEditable(rg)) {
-                return true;
-            }
+        int domId;
+        try {
+            domId = Integer.parseInt(tf.id());
+        } catch (NumberFormatException e) {
+            return false;
         }
-        return false;
-    }
-
-    private static boolean hasShortSemanticText(ResolvedTextFrame tf) {
-        String text = tf != null ? tf.frameVisibleText() : null;
-        if (text == null) return false;
-        text = text.replace("\uFFFC", "")
-                .replace("\u0016", "")
-                .replace("\u0018", "")
-                .replace("\u0007", "")
-                .replace("\r", "")
-                .replace("\n", "")
-                .trim();
-        return !text.isEmpty() && text.length() <= 60;
+        ObjectPlan plan = ctx.findTextFrameOwnershipPlan(domId);
+        return plan != null && plan.textAction == TextAction.OWNED_BY_HWPX_TEXT;
     }
 
     private static int parseDomIdOrNeg(String id) {
@@ -1212,8 +1192,7 @@ public final class FramePlacer {
         if (groups == null) return false;
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
-            if (!"page_object".equals(rg.type())) continue;
-            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            if (!isOwnedTextShellPlan(ctx, rg)) continue;
             String[] editableIds = rg.editableTextFrameIds();
             if (editableIds == null) continue;
             for (String editableId : editableIds) {
@@ -1243,10 +1222,11 @@ public final class FramePlacer {
         if (groups == null) return false;
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.pageIndex() != tf.pageIndex()) continue;
-            if (!"hwpx_tf".equals(rg.textOwner())) continue;
             if (!containsEditableTextFrameId(rg, tf.id())) continue;
             if (!isOwnedTextShellPlan(ctx, rg)) continue;
-            if (containsInt(rg.sourceObjectIds(), siblingDomId)
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (containsInt(plan != null ? plan.sourceObjectIds : null, siblingDomId)
+                    || containsInt(plan != null ? plan.visualSourceObjectIds : null, siblingDomId)
                     || containsInt(rg.childIds(), siblingDomId)
                     || containsInt(rg.visualOnlyChildIds(), siblingDomId)
                     || containsInt(rg.nativeFillChildIds(), siblingDomId)) {
@@ -1264,12 +1244,7 @@ public final class FramePlacer {
                 && plan.visualAction == VisualAction.PLACE_TEXT_SHELL) {
             return true;
         }
-        // plan이 PLACE_TEXT_SHELL이 아니어도(codex가 편집 셸을 PLACE_FLOATING_PNG로 두는
-        // editableShellSep 모델), 텍스트가 PNG에서 숨겨진 편집 셸이면 그 그룹의 자식 도형은
-        // 라벨 시각의 일부다. 이 신호로 X-shift 가드가 라벨 배경을 장애물로 오인하지 않게 한다.
-        // (예: '교수·학습' 탭 60039 complex_graphic_text_hidden + 파란 Oval 자식 60086)
-        return rg.hasEditableTextHiddenFromPng()
-                && isOwnedTextFrameShellReason(rg.reason());
+        return false;
     }
 
     private static boolean containsInt(int[] values, int expected) {
@@ -1314,11 +1289,14 @@ public final class FramePlacer {
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
             if (rg.pageIndex() != tf.pageIndex()) continue;
-            if (!isRenderedPageObject(rg)) continue;
-            if (!"hwpx_tf".equals(rg.textOwner())) continue;
-            if (!"indesign_png".equals(rg.visualOwner())) continue;
             if (!containsEditableTextFrameId(rg, tf.id())) continue;
-            if (!isOwnedTextFrameShellReason(rg.reason())) continue;
+            ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+            if (plan == null
+                    || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT
+                    || plan.visualAction != VisualAction.PLACE_TEXT_SHELL
+                    || plan.placement != Placement.INLINE) {
+                continue;
+            }
             if (!isExclusiveTextFrameShell(ctx, rg, tf.id())) continue;
 
             ResolvedPageItem sourceItem = ctx.resolvedData.getPageItem(String.valueOf(rg.id()));
@@ -1372,7 +1350,6 @@ public final class FramePlacer {
             block.insetBottom(CoordinateConverter.pointsToHwpunits(Math.max(0, shellBottom - tfBottom)));
             block.imageFillData(png);
             block.nativeGraphicsAllowed(true);
-            block.inlineToFloating(true);
             ctx.markRenderedVisualHandled(best.id());
         } catch (Exception ignored) {
         }
@@ -1425,10 +1402,8 @@ public final class FramePlacer {
         for (RenderedGroup rg : groups) {
             if (rg == null || rg.file() == null || rg.file().isEmpty()) continue;
             if (rg.pageIndex() != tf.pageIndex()) continue;
-            if (!"page_object".equals(rg.type())) continue;
-            if (!"hwpx_tf".equals(rg.textOwner())) continue;
             if (!containsEditableTextFrameId(rg, tf.id())) continue;
-            if (!isOwnedTextFrameShellReason(rg.reason())) continue;
+            if (!isOwnedTextShellPlan(ctx, rg)) continue;
             if (!isExclusiveTextFrameShell(ctx, rg, tf.id())) continue;
             double[] rb = rg.bounds();
             if (rb == null || rb.length < 4) continue;
@@ -1676,7 +1651,7 @@ public final class FramePlacer {
 
         Map<Integer, List<double[]>> clusterBoundsByPage = new HashMap<>();
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
-            if (!isConceptDiagramShellCandidate(rg)) continue;
+            if (!isConceptDiagramShellCandidate(ctx, rg)) continue;
             String[] editableIds = rg.editableTextFrameIds();
             if (editableIds == null || editableIds.length < 3) continue;
 
@@ -1748,13 +1723,12 @@ public final class FramePlacer {
         return result;
     }
 
-    private static boolean isConceptDiagramShellCandidate(RenderedGroup rg) {
+    private static boolean isConceptDiagramShellCandidate(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (rg == null) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        if (!rg.hasEditableTextHiddenFromPng()) return false;
-        String reason = rg.reason();
-        if (reason == null) return false;
-        if (!reason.contains("text_hidden")) return false;
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        if (plan == null) return false;
+        if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         double[] b = rg.bounds();
         if (b == null || b.length < 4) return false;
         double h = b[2] - b[0];

@@ -38,7 +38,6 @@ public class ConversionConfig {
 
     // --- spacing ---
     private int spaceCondenseRatio = 50;
-    private int textBoxWidthExpandPercent = 0;
 
     // --- orphanInjection ---
     private double orphanOverlapThreshold = 0.70;
@@ -171,7 +170,6 @@ public class ConversionConfig {
         if (root.has("spacing")) {
             JsonObject s = root.getAsJsonObject("spacing");
             if (s.has("spaceCondenseRatio")) spaceCondenseRatio = s.get("spaceCondenseRatio").getAsInt();
-            if (s.has("textBoxWidthExpandPercent")) textBoxWidthExpandPercent = s.get("textBoxWidthExpandPercent").getAsInt();
         }
 
         // orphanInjection
@@ -235,7 +233,6 @@ public class ConversionConfig {
 
     // spacing
     public int spaceCondenseRatio() { return spaceCondenseRatio; }
-    public int textBoxWidthExpandPercent() { return textBoxWidthExpandPercent; }
 
     // orphanInjection
     public double orphanOverlapThreshold() { return orphanOverlapThreshold; }

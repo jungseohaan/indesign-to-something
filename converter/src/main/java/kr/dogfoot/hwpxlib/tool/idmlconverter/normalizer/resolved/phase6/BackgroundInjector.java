@@ -19,18 +19,15 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualTf
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualZOrderPlanner;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Phase 6: 개별 객체 PNG를 ASTFigure로 주입.
@@ -46,10 +43,6 @@ public final class BackgroundInjector {
     private static final double TF_VISUAL_SHELL_MIN_AREA_RATIO = 0.45;
     private static final double TF_VISUAL_SHELL_MAX_AREA_RATIO = 1.80;
     private static final double TF_VISUAL_SHELL_OVERLAP_MIN = 0.75;
-    private static final double CONCEPT_LABEL_SHELL_MIN_AREA_RATIO = 0.30;
-    private static final double CONCEPT_LABEL_SHELL_MAX_AREA_RATIO = 2.60;
-    private static final double CONCEPT_LABEL_SHELL_OVERLAP_MIN = 0.55;
-
     private static boolean shouldPlaceIntersectingOverflowCopy(
             ResolvedBuildContext ctx,
             RenderedGroup rg,
@@ -72,18 +65,17 @@ public final class BackgroundInjector {
         List<RenderedGroup> floatingItems = ctx.resolvedData.allRenderedFloatingItems();
         if (floatingItems == null || floatingItems.isEmpty()) return;
 
-        // (SPEC-036 (가)) childOfGroup(부모 PNG에 구워진 자식) 억제는 Stage 2.5 refinement가
+        // Source ownership policy: childOfGroup(부모 PNG에 구워진 자식) 억제는 Stage 2.5 refinement가
         // 비보호 항목을 plan(DROP_VISUAL)으로 확정한다.
         // → 아래 VisualPlacementResolver.planRejection이 처리하므로 여기서 별도 체크 불필요.
 
-        // (SPEC-036 (가)) coveredByInlineObjects(inline_object 소유 커버리지) 억제도 Stage 2.5
+        // Source ownership policy: coveredByInlineObjects(inline_object 소유 커버리지) 억제도 Stage 2.5
         // refinement가 plan(DROP_VISUAL) 확정 → 아래 별도 체크 불필요.
         for (RenderedGroup rg : floatingItems) {
-            boolean conceptDiagramInlineShell = isConceptDiagramInlineVisualShell(ctx, rg);
             boolean plannedFloatingTextShell =
                     ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL
                             && ctx.placementByOwnershipPlan(rg) == Placement.FLOATING;
-            if (!isPageObject(rg) && !conceptDiagramInlineShell && !plannedFloatingTextShell) {
+            if (!isPageObject(rg) && !plannedFloatingTextShell) {
                 continue;
             }
             if (!ctx.hasOwnershipPlan(rg)) {
@@ -113,7 +105,7 @@ public final class BackgroundInjector {
                 ctx.recordRenderedDecision(rg, "Phase6", "SKIP_NO_BOUNDS", "rendered item has no bounds");
                 continue;
             }
-            bounds = VisualTfInlineCompositor.shouldCompositeTfInlineVisuals(rg)
+            bounds = VisualTfInlineCompositor.shouldCompositeTfInlineVisuals(ctx, rg)
                     ? VisualTfInlineCompositor.boundsWithTfInlineVisuals(ctx, rg, bounds)
                     : bounds;
             bounds = normalizeSpreadBoundsToPage(ctx, pageIdx, rg, bounds);
@@ -202,7 +194,7 @@ public final class BackgroundInjector {
                     visLeft = Math.max(0.0, visRight - minEdgeStripVisibleWidth);
                 }
             }
-            boolean isTextFrameVisualShell = "editable_textframe_visual_shell".equals(rg.reason());
+            boolean isTextFrameVisualShell = isPlannedTextShell(ctx, rg);
             boolean coversPageByArea = pageWidthMm < 1e9 && pageHeightMm < 1e9
                     && (rawRight - rawLeft) * (rawBottom - rawTop)
                         >= 0.3 * pageWidthMm * pageHeightMm;
@@ -211,16 +203,15 @@ public final class BackgroundInjector {
                     && (rawBottom >= pageHeightMm - 1.0 || coversPageByArea);
             boolean isBackgroundLike = isFullPageBg || (isTextFrameVisualShell && coversPageByArea);
             boolean isContainerVisualShell = !isBackgroundLike
-                    && (isRenderedContainerShell(rg) || isTextFrameVisualShell);
-            boolean isInferredTextFrameVisualShell =
-                    VisualZOrderPlanner.inferredTextFrameVisualShellZOrder(ctx, rg) >= 0;
+                    && (isRenderedContainerShell(ctx, rg) || isTextFrameVisualShell);
+            boolean isInferredTextFrameVisualShell = false;
             boolean planKeepsForegroundZ = isPlanForegroundVisualLayer(visualLayer);
 
             PreparedVisualImage prepared = new PreparedVisualImage(imageData);
-            boolean shouldCompositeTfInlineVisuals = VisualTfInlineCompositor.shouldCompositeTfInlineVisuals(rg);
+            boolean shouldCompositeTfInlineVisuals = VisualTfInlineCompositor.shouldCompositeTfInlineVisuals(ctx, rg);
             boolean keepPlannedContainerBackdropFill =
                     ("CONTAINER_BACKDROP".equals(visualLayer) || "CONTAINER_FACE".equals(visualLayer))
-                    && isPaperOnlyContainerShell(ctx, rg);
+                    && VisualOverlapZOrderPlanner.isPaperFilledContainerShell(ctx, rg);
             boolean mayNeedContainerShellKnockout = !planKeepsForegroundZ
                     && !keepPlannedContainerBackdropFill
                     && isContainerVisualShell
@@ -228,7 +219,8 @@ public final class BackgroundInjector {
             boolean isPlannedTextShell =
                     ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
             boolean needsAlphaCrop = shouldCropOwnedTextFrameShellToAlpha(
-                    rg, fullW, fullH, pageWidthMm, pageHeightMm);
+                    ctx, rg, fullW, fullH, pageWidthMm, pageHeightMm);
+            mayNeedContainerShellKnockout = mayNeedContainerShellKnockout && !isPlannedTextShell;
             boolean needsIntersectionCrop = fullW > 1.0 && fullH > 1.0
                     && (visLeft > rawLeft + 0.5 || visRight < rawRight - 0.5
                         || visTop > rawTop + 0.5 || visBottom < rawBottom - 0.5);
@@ -283,12 +275,12 @@ public final class BackgroundInjector {
                             int pxW = alphaCrop.pxW;
                             int pxH = alphaCrop.pxH;
                             boolean preserveAlphaCropBounds = shouldPreserveBoundsForAlphaCroppedTextShell(
-                                    rg, img.getWidth(), img.getHeight(), pxW, pxH, fullW, fullH);
+                                    ctx, rg, img.getWidth(), img.getHeight(), pxW, pxH, fullW, fullH);
                             double cropLeft = rawLeft + (double) pxX / (double) img.getWidth() * fullW;
                             double cropTop = rawTop + (double) pxY / (double) img.getHeight() * fullH;
                             double cropRight = rawLeft + (double) (pxX + pxW) / (double) img.getWidth() * fullW;
                             double cropBottom = rawTop + (double) (pxY + pxH) / (double) img.getHeight() * fullH;
-                            if (shouldUsePhysicalAlphaCropBounds(rg, img.getWidth(), img.getHeight(), pxW, pxH)) {
+                            if (shouldUsePhysicalAlphaCropBounds(ctx, rg, img.getWidth(), img.getHeight(), pxW, pxH)) {
                                 double pxToMm = 25.4 / 220.0;
                                 cropLeft = rawLeft + pxX * pxToMm;
                                 cropTop = rawTop + pxY * pxToMm;
@@ -383,7 +375,7 @@ public final class BackgroundInjector {
                 }
             }
 
-            if (shouldPreserveVisualLabelAspect(rg, prepared.pixelW, prepared.pixelH)) {
+            if (shouldPreserveCompletePngAspect(ctx, rg, prepared.pixelW, prepared.pixelH)) {
                 double storedW = visRight - visLeft;
                 double storedH = visBottom - visTop;
                 double imageRatio = (double) prepared.pixelW / (double) prepared.pixelH;
@@ -403,19 +395,12 @@ public final class BackgroundInjector {
             VisualPlacementPlan placementPlan = VisualPlacementPlanBuilder.build(
                     ctx,
                     sections.get(pageIdx),
-                    floatingItems,
                     rg,
                     prepared,
                     visLeft,
                     visTop,
                     visRight,
-                    visBottom,
-                    visualLayer,
-                    isBackgroundLike,
-                    planKeepsForegroundZ,
-                    isContainerVisualShell,
-                    isInferredTextFrameVisualShell,
-                    isTextFrameVisualShell);
+                    visBottom);
             if (placementPlan == null || !placementPlan.hasPositiveSize()) continue;
 
             VisualPlacementExecutor.PlacementResult placementResult = VisualPlacementExecutor.place(
@@ -506,272 +491,6 @@ public final class BackgroundInjector {
         // Keep a conservative visible fraction while still clipping at the page edge.
         double minVisible = Math.min(fullW * 0.60, 24.0);
         return Math.max(minVisible, 0.0);
-    }
-
-    /**
-     * SPEC-036 (가): Stage 2.5 refinement용. childOfGroup 전체와,
-     * 그중 SKIP_CHILD_OF_GROUP 실제 억제 대상(비보호 = !protectedEditableLabelShell)을 분리 반환.
-     * 비보호 집합만 plan(DROP_VISUAL)으로 확정하면 Stage 3가 휴리스틱 없이 동일 결과를 낸다.
-     */
-    /**
-     * SPEC-036 (가): Stage 2.5 refinement용. inline_object 소유 커버리지 억제.
-     * SKIP_INLINE_COVERAGE/SKIP_INLINE_OBJECT 두 체크의 실제 억제 대상(게이트 적용 합집합)을
-     * 분리 반환 → 후자만 plan(DROP_VISUAL)으로 확정.
-     */
-    /**
-     * SPEC-036: 부모 그룹 PNG에 이미 구워진 자식 렌더 id를 모은다(childOfGroup).
-     * Phase 6/7은 이 집합의 항목을 독립 배치하지 않는다. (단, PLACE_TEXT_SHELL 부모 아래
-     * 자체 래스터 렌더를 가진 자식은 부모가 굽지 않으므로 보존.)
-     *
-     * <p>주의: editableLabelShellIds/conceptDiagramLabelShellIds 등 Phase 3 산출물에 의존하므로
-     * Phase 0 OwnershipPlanner로 단순 이전 불가 — Tier 2 일원화의 phase-ordering 제약 지점.</p>
-     */
-    private static boolean shouldPreserveEditableLabelShell(
-            RenderedGroup rg, Set<Integer> editableLabelShellIds) {
-        if (rg == null) return false;
-        if (editableLabelShellIds != null && editableLabelShellIds.contains(rg.id())) return true;
-        if (!VisualTextEmphasisAbsorber.isEditableLabelShellReason(rg.reason())) return false;
-        if (!isPageObject(rg) && !"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) {
-            return false;
-        }
-        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        return !Boolean.TRUE.equals(rg.containsText())
-                && !Boolean.TRUE.equals(rg.containsEditableText());
-    }
-
-    private static Set<Integer> collectEditableLabelShells(
-            ResolvedBuildContext ctx, List<RenderedGroup> floatingItems) {
-        Set<Integer> ids = new HashSet<>();
-        if (ctx == null || ctx.resolvedData == null || floatingItems == null) return ids;
-        for (RenderedGroup rg : floatingItems) {
-            if (!isEditableLabelShellCandidate(rg)) continue;
-            if (matchesShortEditableLabelText(ctx, rg)) {
-                ids.add(rg.id());
-            }
-        }
-        return ids;
-    }
-
-    private static Set<Integer> collectConceptDiagramLabelShells(
-            ResolvedBuildContext ctx, List<RenderedGroup> floatingItems) {
-        Set<Integer> ids = new HashSet<>();
-        if (ctx == null || ctx.resolvedData == null || floatingItems == null
-                || ctx.conceptDiagramTextFrameIds == null || ctx.conceptDiagramTextFrameIds.isEmpty()) {
-            return ids;
-        }
-        for (RenderedGroup rg : floatingItems) {
-            if (isConceptDiagramLabelShell(ctx, rg)) {
-                ids.add(rg.id());
-            }
-        }
-        return ids;
-    }
-
-    private static boolean isConceptDiagramLabelShell(ResolvedBuildContext ctx, RenderedGroup rg) {
-        if (ctx == null || ctx.resolvedData == null || rg == null) return false;
-        if (!isPageObject(rg)) return false;
-        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        if (!isTextFrameVisualShellReason(rg.reason())) return false;
-        double[] rb = rg.bounds();
-        if (rb == null || rb.length < 4 || area(rb) <= 0) return false;
-        for (ResolvedTextFrame tf : conceptDiagramTextFramesForPage(ctx, rg.pageIndex())) {
-            if (isConceptDiagramShellForTextFrame(ctx, rg, boundsOf(tf))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isConceptDiagramInlineVisualShell(ResolvedBuildContext ctx, RenderedGroup rg) {
-        if (ctx == null || ctx.resolvedData == null || rg == null) return false;
-        if (!"inline_object".equals(rg.itemType()) && !"inline_object".equals(rg.type())) return false;
-        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        if (!isTextFrameVisualShellReason(rg.reason())) return false;
-        if (rg.editableTextFrameIds() == null || rg.editableTextFrameIds().length == 0) return false;
-        for (String id : rg.editableTextFrameIds()) {
-            if (ctx.conceptDiagramTextFrameIds.contains(id)) {
-                return true;
-            }
-        }
-        return hasConceptDiagramEditableTextMix(ctx, rg);
-    }
-
-    private static boolean hasConceptDiagramEditableTextMix(ResolvedBuildContext ctx, RenderedGroup rg) {
-        if (ctx == null || ctx.resolvedData == null || rg == null || rg.editableTextFrameIds() == null) {
-            return false;
-        }
-        if (rg.editableTextFrameIds().length < 3) return false;
-        int shortLabels = 0;
-        int longTexts = 0;
-        for (String id : rg.editableTextFrameIds()) {
-            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(id);
-            String text = visibleText(tf);
-            if (text.isEmpty()) continue;
-            if (text.length() <= 18) shortLabels++;
-            if (text.length() >= 18) longTexts++;
-        }
-        return shortLabels >= 1 && longTexts >= 1;
-    }
-
-    private static List<ResolvedTextFrame> conceptDiagramTextFramesForPage(
-            ResolvedBuildContext ctx, int pageIndex) {
-        List<ResolvedTextFrame> frames = new ArrayList<>();
-        if (ctx == null || ctx.resolvedData == null || ctx.conceptDiagramTextFrameIds == null) return frames;
-        for (String tfId : ctx.conceptDiagramTextFrameIds) {
-            if (tfId == null) continue;
-            ResolvedTextFrame tf = ctx.resolvedData.getTextFrame(tfId);
-            if (tf != null && tf.pageIndex() == pageIndex && hasSemanticText(tf)) {
-                frames.add(tf);
-            }
-        }
-        return frames;
-    }
-
-    private static boolean isConceptDiagramShellForTextFrame(
-            ResolvedBuildContext ctx, RenderedGroup shell, double[] tfBounds) {
-        if (ctx == null || shell == null || tfBounds == null || tfBounds.length < 4) return false;
-        double[] rb = shell.bounds();
-        if (rb == null || rb.length < 4) return false;
-        if (isConceptDiagramShellForTextFrameSameScale(rb, tfBounds)) return true;
-        if (ctx.scaleFactor > 0 && Math.abs(ctx.scaleFactor - 1.0) > 0.001) {
-            double[] scaled = new double[] {
-                    rb[0] * ctx.scaleFactor,
-                    rb[1] * ctx.scaleFactor,
-                    rb[2] * ctx.scaleFactor,
-                    rb[3] * ctx.scaleFactor
-            };
-            return isConceptDiagramShellForTextFrameSameScale(scaled, tfBounds);
-        }
-        return false;
-    }
-
-    private static boolean isConceptDiagramShellForTextFrameSameScale(double[] shellBounds, double[] tfBounds) {
-        double tfArea = area(tfBounds);
-        double shellArea = area(shellBounds);
-        if (tfArea <= 0 || shellArea <= 0) return false;
-        double areaRatio = shellArea / tfArea;
-        if (areaRatio < CONCEPT_LABEL_SHELL_MIN_AREA_RATIO
-                || areaRatio > CONCEPT_LABEL_SHELL_MAX_AREA_RATIO) {
-            return false;
-        }
-        return overlapArea(shellBounds, tfBounds) / tfArea >= CONCEPT_LABEL_SHELL_OVERLAP_MIN;
-    }
-
-    private static double[] boundsOf(ResolvedTextFrame tf) {
-        if (tf == null) return null;
-        double[] b = tf.pageRelativeBounds();
-        if (b != null && b.length >= 4) return b;
-        return tf.geometricBounds();
-    }
-
-    private static boolean isEditableLabelShellCandidate(RenderedGroup rg) {
-        return VisualLayeringRules.isEditableLabelShellCandidate(rg);
-    }
-
-    private static boolean matchesShortEditableLabelText(ResolvedBuildContext ctx, RenderedGroup shell) {
-        double[] sb = shell.bounds();
-        if (sb == null || sb.length < 4) return false;
-        double shellArea = area(sb);
-        if (shellArea <= 0) return false;
-        double[] scaledSb = new double[] {
-                sb[0] * ctx.scaleFactor,
-                sb[1] * ctx.scaleFactor,
-                sb[2] * ctx.scaleFactor,
-                sb[3] * ctx.scaleFactor
-        };
-        for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
-            if (tf == null || tf.pageIndex() != shell.pageIndex()) continue;
-            if (!hasShortSemanticText(tf)) continue;
-            double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
-            if (tb == null || tb.length < 4) continue;
-            double tfArea = area(tb);
-            if (tfArea <= 0) continue;
-            double overlap = Math.max(overlapArea(sb, tb), overlapArea(scaledSb, tb));
-            if (overlap / tfArea < 0.60) continue;
-            double areaRatio = shellArea / tfArea;
-            if (areaRatio >= 0.35 && areaRatio <= 2.20) return true;
-        }
-        return false;
-    }
-
-    private static boolean shouldDecomposeToEditableLabelShell(
-            RenderedGroup rg, Set<Integer> editableLabelShellIds,
-            Map<Integer, RenderedGroup> idToRendered) {
-        if (rg == null || editableLabelShellIds == null || editableLabelShellIds.isEmpty()) return false;
-        String reason = rg.reason();
-        // A visual_label_text_hidden_shell is already the intended full visual shell
-        // (text hidden, editable TF overlaid). Do not decompose it to smaller child
-        // decoration renders, otherwise outlines/shadows can disappear and only a
-        // partial fill child remains.
-        if ("visual_label_text_hidden_shell".equals(reason)
-                || "editable_composite_text_hidden_shell".equals(reason)) return false;
-        if (rg.childIds() == null || rg.childIds().length == 0) return false;
-        boolean ownsEditableText = "hwpx_tf".equals(rg.textOwner())
-                || Boolean.TRUE.equals(rg.containsEditableText())
-                || (rg.editableTextFrameIds() != null && rg.editableTextFrameIds().length > 0);
-        if (!ownsEditableText) return false;
-        boolean hasProtectedShell = false;
-        for (int cid : rg.childIds()) {
-            if (editableLabelShellIds.contains(cid)) {
-                hasProtectedShell = true;
-                break;
-            }
-        }
-        if (!hasProtectedShell) return false;
-        if (hasSubstantialVisualOutsideEditableLabelShell(rg, editableLabelShellIds, idToRendered)) {
-            return false;
-        }
-        return "visual_label_indesign_png".equals(reason)
-                || (reason != null && reason.contains("text_hidden"));
-    }
-
-    private static boolean hasSubstantialVisualOutsideEditableLabelShell(
-            RenderedGroup parent, Set<Integer> editableLabelShellIds,
-            Map<Integer, RenderedGroup> idToRendered) {
-        if (parent == null || editableLabelShellIds == null || editableLabelShellIds.isEmpty()
-                || parent.childIds() == null || parent.childIds().length == 0) {
-            return false;
-        }
-        double[] pb = parent.bounds();
-        if (pb == null || pb.length < 4) return false;
-        double parentW = Math.max(0, pb[3] - pb[1]);
-        double parentH = Math.max(0, pb[2] - pb[0]);
-        double parentArea = parentW * parentH;
-        if (parentArea <= 0) return false;
-
-        for (int cid : parent.childIds()) {
-            if (!editableLabelShellIds.contains(cid)) continue;
-            RenderedGroup child = idToRendered != null ? idToRendered.get(cid) : null;
-            if (child == null) continue;
-            double[] cb = child.bounds();
-            if (cb == null || cb.length < 4) continue;
-            double childW = Math.max(0, cb[3] - cb[1]);
-            double childH = Math.max(0, cb[2] - cb[0]);
-            double childArea = childW * childH;
-            if (childArea <= 0) continue;
-
-            double below = pb[2] - cb[2];
-            double above = cb[0] - pb[0];
-            double left = cb[1] - pb[1];
-            double right = pb[3] - cb[3];
-            boolean hasLargeFrameRemainder = below >= Math.max(8.0, childH * 1.25)
-                    || above >= Math.max(8.0, childH * 1.25)
-                    || left >= Math.max(12.0, childW * 0.35)
-                    || right >= Math.max(12.0, childW * 0.35);
-            boolean parentMuchLarger = parentArea / childArea >= 2.4
-                    || parentH / Math.max(childH, 0.1) >= 2.2;
-            if (hasLargeFrameRemainder && parentMuchLarger) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static double[] normalizeSpreadBoundsToPage(
@@ -900,19 +619,19 @@ public final class BackgroundInjector {
     }
 
     private static boolean shouldCropOwnedTextFrameShellToAlpha(
+            ResolvedBuildContext ctx,
             RenderedGroup rg,
             double boundsW,
             double boundsH,
             double pageWidth,
             double pageHeight) {
         if (rg == null) return false;
-        if (!isPageObject(rg)) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
-        String reason = rg.reason();
-        if (reason == null) return false;
+        if (!isPlannedTextShell(ctx, rg)) return false;
         if (isPageScaleMixedTextShell(rg, boundsW, boundsH, pageWidth, pageHeight)) {
             return false;
         }
+        String reason = rg.reason();
+        if (reason == null) return true;
         return reason.contains("text_hidden")
                 || reason.contains("visual_shell")
                 || reason.contains("editable_textframe_visual_shell")
@@ -946,6 +665,7 @@ public final class BackgroundInjector {
     }
 
     private static boolean shouldPreserveBoundsForAlphaCroppedTextShell(
+            ResolvedBuildContext ctx,
             RenderedGroup rg,
             int imageW,
             int imageH,
@@ -953,8 +673,7 @@ public final class BackgroundInjector {
             int alphaH,
             double boundsW,
             double boundsH) {
-        if (rg == null || !"hwpx_tf".equals(rg.textOwner())) return false;
-        if (!isPageObject(rg)) return false;
+        if (!isPlannedTextShell(ctx, rg)) return false;
         String reason = rg.reason();
         if (reason == null || !reason.contains("text_hidden")) return false;
         if (imageW <= 0 || imageH <= 0 || alphaW <= 0 || alphaH <= 0
@@ -972,40 +691,41 @@ public final class BackgroundInjector {
     }
 
     private static boolean shouldUsePhysicalAlphaCropBounds(
+            ResolvedBuildContext ctx,
             RenderedGroup rg,
             int imageW,
             int imageH,
             int alphaW,
             int alphaH) {
         if (rg == null || imageW <= 0 || imageH <= 0 || alphaW <= 0 || alphaH <= 0) return false;
-        if (!isPageObject(rg)) return false;
-        if (!"hwpx_tf".equals(rg.textOwner())) return false;
+        if (!isPlannedTextShell(ctx, rg)) return false;
         if (!"leaf_group_text_hidden_shell".equals(rg.reason())) return false;
         double cropAreaRatio = (double) alphaW * (double) alphaH / ((double) imageW * (double) imageH);
         return cropAreaRatio < 0.50;
     }
 
-    private static boolean shouldPreserveVisualLabelAspect(RenderedGroup rg, int pixelW, int pixelH) {
-        return rg != null
-                && pixelW > 0
-                && pixelH > 0
-                && "visual_label_indesign_png".equals(rg.reason())
-                && "indesign_png".equals(rg.textOwner());
+    private static boolean shouldPreserveCompletePngAspect(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            int pixelW,
+            int pixelH) {
+        if (ctx == null || rg == null || pixelW <= 0 || pixelH <= 0) return false;
+        ObjectPlan plan = ctx.findOwnershipPlanForRendered(rg);
+        return plan != null
+                && plan.textAction == TextAction.OWNED_BY_PNG
+                && plan.materialization == Materialization.COMPLETE_PNG;
     }
 
     private static boolean isCompletePngSimpleButtonLabel(ResolvedBuildContext ctx, RenderedGroup rg) {
         return VisualLayeringRules.isCompletePngSimpleButtonLabel(ctx, rg);
     }
 
-    private static boolean isRenderedContainerShell(RenderedGroup rg) {
-        if (rg == null || !isPageObject(rg)) return false;
-        if (Boolean.FALSE.equals(rg.placementAllowed())) return false;
-        if (!"indesign_png".equals(rg.visualOwner())) return false;
-        if ("hwpx_tf".equals(rg.textOwner()) || "indesign_png".equals(rg.textOwner())) return false;
-        if (Boolean.TRUE.equals(rg.containsText()) || Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        String reason = rg.reason();
-        if (reason == null) return false;
-        if (!"vector_shape".equals(reason) && !reason.contains("textframe_visual_shell")) return false;
+    private static boolean isRenderedContainerShell(ResolvedBuildContext ctx, RenderedGroup rg) {
+        if (rg == null) return false;
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        if (plan.visualAction != VisualAction.PLACE_FLOATING_PNG
+                && plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
         double[] b = rg.bounds();
         if (b == null || b.length < 4) return false;
         double w = b[3] - b[1];
@@ -1013,8 +733,10 @@ public final class BackgroundInjector {
         return w >= 18.0 && h >= 12.0 && area(b) >= 300.0;
     }
 
-    private static boolean isPaperOnlyContainerShell(ResolvedBuildContext ctx, RenderedGroup rg) {
-        return VisualOverlapZOrderPlanner.isPaperOnlyContainerShell(ctx, rg);
+    private static boolean isPlannedTextShell(ResolvedBuildContext ctx, RenderedGroup rg) {
+        return ctx != null
+                && rg != null
+                && ctx.visualActionByOwnershipPlan(rg) == VisualAction.PLACE_TEXT_SHELL;
     }
 
     public static boolean isPaperColor(String colorName) {
@@ -1025,12 +747,6 @@ public final class BackgroundInjector {
         return !visibleText(tf).isEmpty();
     }
 
-    private static boolean hasShortSemanticText(ResolvedTextFrame tf) {
-        String text = visibleText(tf);
-        if (text.isEmpty() || text.length() > 60) return false;
-        return !text.contains("\n") && !text.contains("\r");
-    }
-
     public static String visibleText(ResolvedTextFrame tf) {
         String text = tf != null ? tf.frameVisibleText() : null;
         if (text == null) return "";
@@ -1038,10 +754,6 @@ public final class BackgroundInjector {
                 .replace("\u0016", "")
                 .replace("\u0018", "")
                 .trim();
-    }
-
-    private static boolean isTextFrameVisualShellReason(String reason) {
-        return VisualLayeringRules.isTextFrameVisualShellReason(reason);
     }
 
     public static double area(double[] b) {
@@ -1060,12 +772,6 @@ public final class BackgroundInjector {
         double w = right - left;
         double h = bottom - top;
         return w > 0 && h > 0 ? w * h : 0.0;
-    }
-
-    private static boolean isInlineEditableLabelShellRender(RenderedGroup rg) {
-        if (rg == null) return false;
-        return "inline_graphic_only".equals(rg.reason())
-                || "text_composite_editable_text_hidden".equals(rg.reason());
     }
 
     private static boolean isPlanForegroundVisualLayer(String visualLayer) {

@@ -309,7 +309,7 @@ public class ASTToHwpxConverter {
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 ASTFigure fig = (ASTFigure) block;
-                if (!fig.fromGroup()) {
+                if (isPageBackgroundPlaneFigure(fig)) {
                     behindFigures.add(fig);
                 }
             }
@@ -357,7 +357,7 @@ public class ASTToHwpxConverter {
             }
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 ASTFigure fig = (ASTFigure) block;
-                if (fig.fromGroup()) {
+                if (!isPageBackgroundPlaneFigure(fig)) {
                     inFrontBlocks.add(fig);
                 }
             }
@@ -398,6 +398,23 @@ public class ASTToHwpxConverter {
         if (block instanceof ASTFigure) return ((ASTFigure) block).zOrder();
         if (block instanceof ASTTable) return ((ASTTable) block).zOrder();
         return 0;
+    }
+
+    private static boolean isPageBackgroundPlaneFigure(ASTFigure fig) {
+        if (fig == null || fig.fromGroup()) return false;
+        String layer = fig.visualLayer();
+        if ("PAGE_BACKGROUND".equals(layer)) return true;
+        if (isTextShellVisualLayer(layer)) return false;
+        return layer == null || layer.isEmpty();
+    }
+
+    private static boolean isTextShellVisualLayer(String layer) {
+        return "CONTAINER_BACKDROP".equals(layer)
+                || "TEXT_CARD_BACKDROP".equals(layer)
+                || "LABEL_BACKDROP".equals(layer)
+                || "LABEL_OVERLAY_BACKDROP".equals(layer)
+                || "CONTAINER_OUTLINE".equals(layer)
+                || "FOREGROUND_MASK".equals(layer);
     }
 
     private static long figureArea(ASTFigure fig) {

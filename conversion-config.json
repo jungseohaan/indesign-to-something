@@ -14,9 +14,7 @@
   "spacing": {
     "_comment": "텍스트 간격 보정 설정 — Java HwpxParagraphBuilder에서 사용",
     "spaceCondenseRatio": 85,
-    "_comment_spaceCondenseRatio": "공백 문자 장평 비율 (절대값, %). 100=보정 없음. fontRatio(한글 글리프 폭 보정)와 독립적으로 적용됨. 매핑 폰트 공백이 원본보다 16~39% 넓으므로 85 권장",
-    "textBoxWidthExpandPercent": 5,
-    "_comment_textBoxWidthExpandPercent": "글상자 너비 확장 비율 (%). 3이면 원래 너비의 103%로 확장"
+    "_comment_spaceCondenseRatio": "공백 문자 장평 비율 (절대값, %). 100=보정 없음. fontRatio(한글 글리프 폭 보정)와 독립적으로 적용됨. 매핑 폰트 공백이 원본보다 16~39% 넓으므로 85 권장"
   },
   "tables": {
     "_comment": "SPEC-017 테이블 셀 품질 게이트 — Phase4 TableBuilder가 사용",

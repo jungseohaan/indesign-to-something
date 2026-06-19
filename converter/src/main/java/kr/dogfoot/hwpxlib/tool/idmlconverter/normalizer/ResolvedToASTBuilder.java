@@ -244,7 +244,7 @@ public class ResolvedToASTBuilder {
     }
 
     /**
-     * Stage 2.5 (SPEC-036 (가)): Stage 2(텍스트/인라인 분류) 이후, 시각 배치(Phase 6/7) 이전에
+     * Stage 2.5 (source ownership policy): Stage 2(텍스트/인라인 분류) 이후, 시각 배치(Phase 6/7) 이전에
      * visual ownership을 refine한다. Phase 0 planner는 Stage 2 산출물(셀 인라인 임베드, 컨셉
      * 다이어그램 TF 등)을 볼 수 없으므로, 그에 의존하는 suppress 결정을 여기서 plan(DROP_VISUAL)으로
      * 확정한다. 이렇게 하면 Phase 6/7은 휴리스틱 대신 plan 권위만 실행한다.

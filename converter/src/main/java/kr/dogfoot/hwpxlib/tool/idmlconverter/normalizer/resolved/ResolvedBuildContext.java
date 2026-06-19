@@ -485,6 +485,20 @@ public final class ResolvedBuildContext {
         }
     }
 
+    public void clearOwnershipPlansForRewrite() {
+        ownershipPlans.clear();
+        ownershipPlanLines.clear();
+        ownershipPlanIndexDirty = true;
+        ownershipPlanRenderedCache.clear();
+        ownershipPlanByRenderFileKey = null;
+        ownershipPlanByRenderKey = null;
+        ownershipPlanByDomKey = null;
+        ownershipPlanByFileBoundsKey = null;
+        ownershipPlanByFileKey = null;
+        ownershipPlanBySourceKey = null;
+        ownershipPlanBySourceNoPlacementKey = null;
+    }
+
     public void rebuildOwnershipPlanLinesFromPlans() {
         ownershipPlanLines.clear();
         for (java.util.List<AnchoredTablePlan> grouped : anchoredTablePlansByOwnerTextFrameId.values()) {
@@ -589,7 +603,7 @@ public final class ResolvedBuildContext {
     }
 
     /**
-     * SPEC-036 (가): Stage 2 이후 visual-ownership refinement에서 주어진 DOM id들의 plan을
+     * Source ownership policy: Stage 2 이후 visual-ownership refinement에서 주어진 DOM id들의 plan을
      * DROP_VISUAL로 확정한다. Stage 2 산출물에 의존하는 suppress 결정(셀 인라인 임베드 등)을
      * 휴리스틱 대신 plan 권위로 옮길 때 사용. 인덱스/캐시를 무효화한다.
      */
@@ -858,8 +872,6 @@ public final class ResolvedBuildContext {
         ObjectPlan plan = findOwnershipPlanForRendered(rg);
         if (plan == null || !plan.hasVisibleVisual() || plan.visualLayer == null) return null;
         return plan.visualLayer == VisualLayer.CONTAINER_FACE
-                || plan.visualLayer == VisualLayer.LABEL_BACKDROP
-                || plan.visualLayer == VisualLayer.LABEL_OVERLAY_BACKDROP
                 || plan.visualLayer == VisualLayer.CONTENT_VISUAL
                 || plan.visualLayer == VisualLayer.CONTAINER_OUTLINE
                 || plan.visualLayer == VisualLayer.FOREGROUND_MASK;

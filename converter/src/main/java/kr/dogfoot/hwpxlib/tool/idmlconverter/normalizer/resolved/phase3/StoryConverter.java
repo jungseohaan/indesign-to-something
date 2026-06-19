@@ -27,7 +27,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.RunPropertyResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextRunSegmenter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.TextStyleApplicator;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.AnchoredTablePlan;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 
@@ -1275,7 +1277,7 @@ public final class StoryConverter {
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg == null || rg.pageIndex() != tf.pageIndex()) continue;
             if (rg.bounds() == null || rg.bounds().length < 4) continue;
-            if (!isAnswerTrailingVisualCandidate(rg)) continue;
+            if (!isAnswerTrailingVisualCandidate(ctx, rg)) continue;
             double[] b = rg.bounds();
             double vOverlap = Math.min(lineBottom, b[2]) - Math.max(lineTop, b[0]);
             if (vOverlap <= 0) continue;
@@ -1301,14 +1303,11 @@ public final class StoryConverter {
                 || text.contains("…");
     }
 
-    private static boolean isAnswerTrailingVisualCandidate(RenderedGroup rg) {
+    private static boolean isAnswerTrailingVisualCandidate(ResolvedBuildContext ctx, RenderedGroup rg) {
         if (rg == null) return false;
-        String reason = rg.reason();
-        if (reason == null) return false;
-        if (Boolean.TRUE.equals(rg.containsEditableText())) return false;
-        return reason.contains("decoration")
-                || reason.contains("vector_shape")
-                || reason.contains("text_composite_editable_text_hidden");
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        if (plan == null || !plan.hasVisibleVisual()) return false;
+        return plan.textAction != TextAction.OWNED_BY_HWPX_TEXT;
     }
 
     private static double pageLeft(ResolvedBuildContext ctx, int pageIndex) {
