@@ -29,7 +29,7 @@ public final class AnchoredTablePlanner {
         Set<String> plannedTables = new HashSet<>();
         for (ResolvedTextFrame seedTf : ctx.resolvedData.textFrames()) {
             if (seedTf == null || seedTf.storyId() == null) continue;
-            if (seedTf.isInline() || seedTf.onHiddenLayer() || seedTf.nonprinting()) continue;
+            if (seedTf.isInline() || seedTf.sourceHidden()) continue;
             if (!plannedStories.add(seedTf.storyId())) continue;
 
             IDMLStory ownerStory = ctx.loadIDMLStory.apply(seedTf.storyId());
@@ -58,7 +58,7 @@ public final class AnchoredTablePlanner {
         List<ResolvedTextFrame> frames = ctx.resolvedData.getTextFramesForStory(storyId);
         if (frames == null) return result;
         for (ResolvedTextFrame tf : frames) {
-            if (tf == null || tf.isInline() || tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (tf == null || tf.isInline() || tf.sourceHidden()) continue;
             result.add(tf);
         }
         return result;

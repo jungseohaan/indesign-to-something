@@ -41,6 +41,8 @@ public class ResolvedTextFrame {
     private String frameVisibleText;  // 프레임에 실제 보이는 전체 텍스트 (오버플로우 제외)
     private boolean onHiddenLayer;    // InDesign 숨김 레이어에 있는 TF → 변환 불필요
     private boolean nonprinting;      // InDesign 인쇄 안 함/숨김 성격의 TF → 변환 불필요
+    private boolean visible = true;    // InDesign item.visible
+    private boolean hiddenByParent;    // self/ancestor Group visible=false
     private String masterSourceId;    // 마스터 원본 TextFrame DOM ID
     private boolean isMasterInstance; // 마스터 페이지 아이템 인스턴스 (regular page에 배치된 마스터 아이템)
     private String layerId;           // InDesign ItemLayer id
@@ -133,6 +135,16 @@ public class ResolvedTextFrame {
 
     public boolean nonprinting() { return nonprinting; }
     public void nonprinting(boolean v) { this.nonprinting = v; }
+
+    public boolean visible() { return visible; }
+    public void visible(boolean v) { this.visible = v; }
+
+    public boolean hiddenByParent() { return hiddenByParent; }
+    public void hiddenByParent(boolean v) { this.hiddenByParent = v; }
+
+    public boolean sourceHidden() {
+        return !visible || hiddenByParent || onHiddenLayer || nonprinting;
+    }
 
     public String masterSourceId() { return masterSourceId; }
     public void masterSourceId(String v) { this.masterSourceId = v; }

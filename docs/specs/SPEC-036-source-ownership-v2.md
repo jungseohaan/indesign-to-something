@@ -60,6 +60,17 @@
   resolved story structure가 우선한다. 이때 후속 단계가 anchor 여부를 재판정하지 않는다.
 - 텍스트를 임의로 합치지 않는다. 연결 TextFrame은 원본 thread만 따른다.
 
+### 2.1 Source Visibility
+
+원본 source object의 `visible=false`는 source ownership의 절대 DROP 조건이다.
+
+- 자기 자신 또는 조상 Group 중 하나라도 `visible=false`이면 해당 source tree는 보이지 않는 source다.
+- 보이지 않는 source의 TextFrame/table carrier는 `DROP_TEXT`/`DROP_VISUAL`이다.
+- 이 판정은 `preview.pdf`나 좌표 비교가 아니라 IDML/DOM의 source visibility 정보만 사용한다.
+- hidden parent 아래의 child TextFrame이 자체적으로 `visible=true`, `nonprinting=false`,
+  `itemLayer.visible=true`여도 visible output owner가 될 수 없다.
+- 후속 단계는 hidden source를 다시 editable/floating/inline으로 승격하지 않는다.
+
 ## 3. 비주얼
 
 - `PLACE_TEXT_SHELL`: textless PNG/vector shell을 원본 placement에 맞게 배치한다.

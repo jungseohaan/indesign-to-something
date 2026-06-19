@@ -114,7 +114,7 @@ public final class TableBuilder {
             if (idmlStory == null || !idmlStory.hasTables()) continue;
             if (allTablesConsumedByAnchoredPlan(ctx, idmlStory)) continue;
 
-            if (tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (tf.sourceHidden()) continue;
             boolean editableTextFrame = ctx.resolvedData.isEditableTextFrame(tf.id());
             boolean tableAnchorOnlyFrame = TableFrameOwnershipPolicy.isTableAnchorOnlyFrame(tf);
             boolean detachedInlineTableFrame =

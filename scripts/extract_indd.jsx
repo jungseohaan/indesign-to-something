@@ -165,6 +165,7 @@ function _marker(outputDir, tag) {
 var _phaseTimingState = null;
 var _ctfCache = null;          // itemId → "editable"|"renderable"|"background"|null
 var _hiddenLayerCache = null;  // itemId → boolean (isOnHiddenLayer 결과 캐시)
+var _hiddenVisibilityCache = null;  // itemId → boolean (self/ancestor visible=false)
 
 // --- 전역 설정 ---
 var CONFIG = null;
@@ -574,6 +575,7 @@ function _runRenderPhases(doc, ctx, allItems) {
     // 03c. allItems 전체 분류 캐시 — classifyTextFrame의 중복 DOM 호출 제거
     _ctfCache = {};
     _hiddenLayerCache = {};  // isOnHiddenLayer 캐시 리셋 (새 allItems 기준)
+    _hiddenVisibilityCache = {};  // isHiddenByVisibility 캐시 리셋 (새 allItems 기준)
     for (var _pci = 0; _pci < allItems.length; _pci++) {
         try {
             var _pcIt = allItems[_pci];
@@ -1260,6 +1262,35 @@ function isOnHiddenLayer(item) {
     return false;
 }
 
+/**
+ * 아이템 또는 부모 Group 체인에 visible=false가 있는지 검사한다.
+ * Hidden layer와 달리 IDML의 Visible=false parent Group은 child TextFrame의
+ * itemLayer/nonprinting에는 드러나지 않으므로 별도로 source visibility로 추적한다.
+ */
+function isHiddenByVisibility(item) {
+    try {
+        var itemId = item.id;
+        if (_hiddenVisibilityCache && _hiddenVisibilityCache[itemId] !== undefined) {
+            return _hiddenVisibilityCache[itemId];
+        }
+        var result = false;
+        var cur = item;
+        while (cur) {
+            try {
+                if (cur.visible === false) { result = true; break; }
+            } catch (e) {}
+            try { cur = cur.parent; } catch (e) { break; }
+            if (!cur || cur.constructor.name === "Spread"
+                || cur.constructor.name === "Page"
+                || cur.constructor.name === "Document"
+                || cur.constructor.name === "MasterSpread") break;
+        }
+        if (_hiddenVisibilityCache) _hiddenVisibilityCache[itemId] = result;
+        return result;
+    } catch (e) {}
+    return false;
+}
+
 
 /**
  * 그룹 전체는 뱃지 조건에 안 맞지만 내부에 뱃지 패턴(도형 + 짧은 숫자 TF)이
@@ -1279,6 +1310,7 @@ function isOnHiddenLayer(item) {
 function classifyTextFrame(item) {
     if (item.constructor.name !== "TextFrame") return null;
     if (isOnHiddenLayer(item)) return "background";
+    if (isHiddenByVisibility(item)) return "background";
     try { if (item.nonprinting) return "background"; } catch (e) {}
     try { if (!item.parentPage) return "background"; } catch (e) {}
     return "editable";
@@ -7034,6 +7066,8 @@ function collectTextFrames(doc, startPage, endPage, editableIds, skipRenderPages
             try { fData.isMasterPageItem = !!tf.masterPageItem; } catch (e) { fData.isMasterPageItem = false; }
             try { fData.nonprinting = !!tf.nonprinting; } catch (e) { fData.nonprinting = false; }
             try { fData.onHiddenLayer = isOnHiddenLayer(tf); } catch (e) { fData.onHiddenLayer = false; }
+            try { fData.visible = (tf.visible !== false); } catch (e) { fData.visible = true; }
+            try { fData.hiddenByParent = isHiddenByVisibility(tf); } catch (e) { fData.hiddenByParent = false; }
             try {
                 var charStyles = [];
                 var paraStyles = [];
@@ -7704,6 +7738,8 @@ function collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAll
             parentId: null,
             pageIndex: piPageIdx
         };
+        try { data.visible = (pi.visible !== false); } catch (e) { data.visible = true; }
+        try { data.hiddenByParent = isHiddenByVisibility(pi); } catch (e) { data.hiddenByParent = false; }
 
         // 이름
         try { data.name = pi.name; } catch (e) {}

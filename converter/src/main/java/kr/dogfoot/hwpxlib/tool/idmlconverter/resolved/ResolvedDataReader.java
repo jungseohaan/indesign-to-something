@@ -231,6 +231,8 @@ public class ResolvedDataReader {
         tf.strokeWeight(getDouble(o, "strokeWeight", 0));
         tf.opacity(getDouble(o, "opacity", 100));
         tf.cornerRadius(getDouble(o, "cornerRadius", 0));
+        tf.visible(getBool(o, "visible", true));
+        tf.hiddenByParent(getBool(o, "hiddenByParent", false));
 
         // frameParaTexts: 프레임에 보이는 각 단락의 실제 텍스트
         if (o.has("frameParaTexts") && !o.get("frameParaTexts").isJsonNull()) {
@@ -286,6 +288,8 @@ public class ResolvedDataReader {
 
         tf.onHiddenLayer(getBool(o, "onHiddenLayer", false));
         tf.nonprinting(getBool(o, "nonprinting", false));
+        tf.visible(getBool(o, "visible", tf.visible()));
+        tf.hiddenByParent(getBool(o, "hiddenByParent", tf.hiddenByParent()));
         tf.masterSourceId(getString(o, "masterSourceId"));
         tf.isMasterInstance(getBool(o, "isMasterInstance", false));
         tf.layerId(getString(o, "layerId"));
@@ -429,6 +433,8 @@ public class ResolvedDataReader {
         item.name(getString(o, "name"));
         item.parentId(getString(o, "parentId"));
         item.pageIndex(getInt(o, "pageIndex", -1));
+        item.visible(getBool(o, "visible", true));
+        item.hiddenByParent(getBool(o, "hiddenByParent", false));
         item.layerId(getString(o, "layerId"));
         item.layerName(getString(o, "layerName"));
         item.layerIndex(getInt(o, "layerIndex", -1));

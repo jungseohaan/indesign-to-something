@@ -37,7 +37,7 @@ public final class TableFrameOwnershipPolicy {
             IDMLStory story) {
         if (tf == null || story == null) return false;
         if (!tf.isInline() || !story.hasTables()) return false;
-        if (tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (tf.sourceHidden()) return false;
         if (!isTableAnchorOnlyFrame(tf)) return false;
 
         return true;
@@ -65,7 +65,7 @@ public final class TableFrameOwnershipPolicy {
      */
     public static boolean isTableOnlyTextFrame(ResolvedTextFrame tf, IDMLStory story) {
         if (tf == null || story == null || !story.hasTables()) return false;
-        if (tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (tf.sourceHidden()) return false;
         if (!isTableAnchorOnlyFrame(tf)) return false;
         if (hasStandaloneStoryText(story)) return false;
         return hasVisibleCellText(story);

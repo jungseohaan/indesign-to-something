@@ -66,6 +66,8 @@ public class ResolvedPageItem {
     private int[] childIds;          // Group 자식 ID
     private boolean clipContent;     // Group 클리핑
     private double[] pageRelativeBounds; // [top, left, bottom, right] page-relative
+    private boolean visible = true;      // InDesign item.visible
+    private boolean hiddenByParent;      // self/ancestor Group visible=false
 
     // --- 접근자 ---
 
@@ -191,4 +193,14 @@ public class ResolvedPageItem {
 
     public double[] pageRelativeBounds() { return pageRelativeBounds; }
     public void pageRelativeBounds(double[] v) { this.pageRelativeBounds = v; }
+
+    public boolean visible() { return visible; }
+    public void visible(boolean v) { this.visible = v; }
+
+    public boolean hiddenByParent() { return hiddenByParent; }
+    public void hiddenByParent(boolean v) { this.hiddenByParent = v; }
+
+    public boolean sourceHidden() {
+        return !visible || hiddenByParent;
+    }
 }

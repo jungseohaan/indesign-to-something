@@ -395,7 +395,7 @@ public class ResolvedData {
 
         ResolvedTextFrame best = null;
         for (ResolvedTextFrame tf : candidates) {
-            if (tf == null || tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (tf == null || tf.sourceHidden()) continue;
             if (best == null) {
                 best = tf;
                 continue;

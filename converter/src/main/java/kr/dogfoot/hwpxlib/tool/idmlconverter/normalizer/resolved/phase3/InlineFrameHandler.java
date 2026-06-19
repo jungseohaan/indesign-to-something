@@ -3057,7 +3057,7 @@ public class InlineFrameHandler {
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             if (tf == null || tf.id() == null || tf.id().equals(childTf.id())) continue;
             if (tf.pageIndex() != childTf.pageIndex()) continue;
-            if (tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (tf.sourceHidden()) continue;
             if (ctx.resolvedData.isSimpleButtonLabelTextFrame(tf.id())) continue;
             String text = tf.frameVisibleText();
             if (visibleTextLength(text) < 2) continue;

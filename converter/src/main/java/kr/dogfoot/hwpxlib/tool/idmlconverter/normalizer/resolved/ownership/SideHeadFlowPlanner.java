@@ -30,7 +30,7 @@ public final class SideHeadFlowPlanner {
         Set<String> plannedTables = new HashSet<>();
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
             if (tf == null || tf.storyId() == null) continue;
-            if (tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (tf.sourceHidden()) continue;
             if (!plannedStories.add(tf.storyId())) continue;
 
             IDMLStory story = ctx.loadIDMLStory.apply(tf.storyId());

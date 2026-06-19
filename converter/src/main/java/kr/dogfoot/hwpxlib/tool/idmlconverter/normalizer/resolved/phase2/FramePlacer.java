@@ -155,7 +155,7 @@ public final class FramePlacer {
             boolean hasRenderedVisualShell = hasPlannedTextShell;
 
             // 숨김/비인쇄 TF → 변환 불필요
-            if (tf.onHiddenLayer() || tf.nonprinting()) { continue; }
+            if (tf.sourceHidden()) { continue; }
 
             // 마스터 인스턴스 TF가 composed되지 않은 경우 (lineCount=0) → 해당 페이지에서 override됨 → skip
             if (tf.isMasterInstance() && tf.lineCount() == 0) { continue; }
@@ -890,7 +890,7 @@ public final class FramePlacer {
 
         // domId=None TF: ExtendScript가 domId를 얻지 못해 editability 확인 불가.
         // storyId가 있고 비-숨김/비인쇄이면 IDML에 실제 내용이 있을 수 있으므로 배치 허용.
-        if (tf.id() == null && tf.storyId() != null && !tf.onHiddenLayer() && !tf.nonprinting()) return false;
+        if (tf.id() == null && tf.storyId() != null && !tf.sourceHidden()) return false;
 
         boolean sharedWithEditable = tf.storyId() != null && idx.editableStoryIds.contains(tf.storyId());
         if (sharedWithEditable) return false;
@@ -990,7 +990,7 @@ public final class FramePlacer {
     private static boolean shouldPlaceVisualLabelTextSeparately(
             ResolvedBuildContext ctx, ResolvedTextFrame tf) {
         if (ctx == null || ctx.resolvedData == null || tf == null || tf.id() == null) return false;
-        if (tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (tf.sourceHidden()) return false;
         if (!hasShortSemanticText(tf)) return false;
         for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
             if (rg == null || rg.pageIndex() != tf.pageIndex()) continue;

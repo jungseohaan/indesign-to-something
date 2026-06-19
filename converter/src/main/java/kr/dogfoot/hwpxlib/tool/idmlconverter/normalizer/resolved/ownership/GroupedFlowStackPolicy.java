@@ -101,7 +101,7 @@ public final class GroupedFlowStackPolicy {
     }
 
     private static boolean isShortTitleFrame(ResolvedTextFrame tf) {
-        if (tf == null || tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (tf == null || tf.sourceHidden()) return false;
         String text = normalize(tf.frameVisibleText());
         if (text.length() < 2 || text.length() > MAX_TITLE_CHARS) return false;
         return text.indexOf('\n') < 0 && text.indexOf('\r') < 0;
@@ -111,7 +111,7 @@ public final class GroupedFlowStackPolicy {
         if (ctx == null || ctx.loadIDMLStory == null || tf == null || tf.storyId() == null) return false;
         IDMLStory story = ctx.loadIDMLStory.apply(tf.storyId());
         if (story == null || !story.hasTables()) return false;
-        if (tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (tf.sourceHidden()) return false;
         return TableFrameOwnershipPolicy.isTableAnchorOnlyFrame(tf);
     }
 

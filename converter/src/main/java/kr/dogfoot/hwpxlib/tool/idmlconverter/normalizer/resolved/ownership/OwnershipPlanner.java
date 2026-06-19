@@ -931,6 +931,13 @@ public final class OwnershipPlanner {
                 || visualAction == VisualAction.PLACE_INLINE_PNG)) {
             sourceIds = independentContentVisualSourceIds(rg, sourceIds);
         }
+        String reason = safe(rg.reason());
+        if (hasHiddenSourceObject(sourceIds)) {
+            textAction = TextAction.DROP_TEXT;
+            visualAction = VisualAction.DROP_VISUAL;
+            visualLayer = VisualLayer.CONTENT_VISUAL;
+            reason = "hidden_by_source_visibility";
+        }
         int[] ownedTextFrameIds = editableTextFrameIdsOf(rg);
         int[] visualSourceIds = visualSourceIdsForRendered(sourceIds, ownedTextFrameIds, visualAction);
         String sourceBundleKey = sourceBundleKeyOf(rg, sourceIds, ownedTextFrameIds);
@@ -950,7 +957,7 @@ public final class OwnershipPlanner {
                 new int[0],
                 sourceBundleKey,
                 zOrder,
-                safe(rg.reason()),
+                reason,
                 rg.file(),
                 rg.bounds(),
                 sourceLayerId(rg, sourceIds),
@@ -964,7 +971,7 @@ public final class OwnershipPlanner {
             int domId = parseInt(tf.id(), -1);
             if (domId < 0) continue;
             TextAction textAction;
-            if (tf.onHiddenLayer() || tf.nonprinting()) {
+            if (tf.sourceHidden()) {
                 textAction = TextAction.DROP_TEXT;
             } else if (data.isTextOwnedByIndesignPng(tf.id())) {
                 textAction = TextAction.OWNED_BY_PNG;
@@ -1095,6 +1102,17 @@ public final class OwnershipPlanner {
             if (item != null) return item;
         }
         return null;
+    }
+
+    private boolean hasHiddenSourceObject(int[] sourceIds) {
+        if (data == null || sourceIds == null) return false;
+        for (int sourceId : sourceIds) {
+            ResolvedPageItem item = data.getPageItem(String.valueOf(sourceId));
+            if (item != null && item.sourceHidden()) return true;
+            ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
+            if (tf != null && tf.sourceHidden()) return true;
+        }
+        return false;
     }
 
     private Placement placementOfTextFrame(
@@ -1660,7 +1678,7 @@ public final class OwnershipPlanner {
         if (rg.sourceObjectIds() != null) {
             for (int sourceId : rg.sourceObjectIds()) {
                 ResolvedTextFrame tf = data.getTextFrame(String.valueOf(sourceId));
-                if (tf != null && !tf.onHiddenLayer() && !tf.nonprinting()) {
+                if (tf != null && !tf.sourceHidden()) {
                     return true;
                 }
             }
@@ -1786,7 +1804,7 @@ public final class OwnershipPlanner {
         ids.add(String.valueOf(rg.id()));
         for (String id : ids) {
             ResolvedTextFrame tf = data.getTextFrame(id);
-            if (tf != null && !tf.onHiddenLayer() && !tf.nonprinting()) {
+            if (tf != null && !tf.sourceHidden()) {
                 out.add(tf);
             }
         }
@@ -4279,7 +4297,7 @@ public final class OwnershipPlanner {
         for (ResolvedTextFrame tf : data.textFrames()) {
             if (tf == null || tf.id() == null) continue;
             if (tf.pageIndex() != rg.pageIndex()) continue;
-            if (tf.onHiddenLayer() || tf.nonprinting()) continue;
+            if (tf.sourceHidden()) continue;
             if (data.isTextOwnedByIndesignPng(tf.id())) continue;
             double[] tb = tf.pageRelativeBounds() != null ? tf.pageRelativeBounds() : tf.geometricBounds();
             if (tb == null || tb.length < 4) continue;
@@ -4344,7 +4362,7 @@ public final class OwnershipPlanner {
     private boolean isEditableHwpxTextFrameOnPage(ResolvedTextFrame tf, int pageIndex) {
         if (tf == null || tf.id() == null) return false;
         if (tf.pageIndex() != pageIndex) return false;
-        if (tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (tf.sourceHidden()) return false;
         if (data.isTextOwnedByIndesignPng(tf.id())) return false;
         String text = safe(tf.frameVisibleText()).trim();
         return !text.isEmpty();
@@ -4743,6 +4761,7 @@ public final class OwnershipPlanner {
     }
 
     private static String textFrameReason(ResolvedTextFrame tf, TextAction action) {
+        if (!tf.visible() || tf.hiddenByParent()) return "hidden_by_source_visibility";
         if (tf.onHiddenLayer()) return "hidden_layer";
         if (tf.nonprinting()) return "nonprinting";
         if (action == TextAction.OWNED_BY_PNG) return "text_owned_by_indesign_png";
@@ -4829,7 +4848,7 @@ public final class OwnershipPlanner {
     private boolean isVisibleHwpxMasterTextFrameOnPage(ResolvedTextFrame tf, int pageIndex) {
         if (tf == null || !tf.isMasterInstance()) return false;
         if (tf.pageIndex() != pageIndex) return false;
-        if (tf.onHiddenLayer() || tf.nonprinting()) return false;
+        if (tf.sourceHidden()) return false;
         if (tf.id() != null && data.isTextOwnedByIndesignPng(tf.id())) return false;
         String text = tf.frameVisibleText();
         return text != null && !text.isBlank();
