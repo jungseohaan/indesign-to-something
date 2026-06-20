@@ -223,6 +223,9 @@ final class InlineFrameBuilder {
     }
 
     private boolean shouldUseInlineDrawTextShell(ASTInlineObject obj) {
+        if (obj != null && obj.imageFillData() != null && obj.imageFillData().length > 0) {
+            return true;
+        }
         return InlineItemDispatcher.hasDrawableShell(obj);
     }
 

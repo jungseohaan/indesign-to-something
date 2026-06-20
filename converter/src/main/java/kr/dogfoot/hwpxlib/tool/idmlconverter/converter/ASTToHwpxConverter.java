@@ -300,16 +300,16 @@ public class ASTToHwpxConverter {
         // 첫 페이지 이후에는 pageBreak=true로 설정 → 플로팅 객체가 올바른 페이지에 위치
         Para secPrPara = createSectionPara(sectionFile, pagesConverted > 0);
 
-        // 1) BEHIND_TEXT FIGURE: 배경 이미지 (그룹 외부)를 먼저 배치
+        // 1) BEHIND_TEXT FIGURE: Stage 1 visualLayer가 behind plane으로 정한 그림을 먼저 배치
         //
-        // HWPX에서는 같은 BEHIND_TEXT 평면 안에서 XML에 먼저 나온 객체가 위로 보이는
-        // 케이스가 있다. 따라서 출력용 zOrder가 큰(=더 앞 레이어인) 객체를 먼저 쓰고,
-        // 페이지 배경처럼 낮은 zOrder의 객체는 뒤에 써서 실제로 아래에 깔리게 한다.
+        // HWPX에서는 같은 BEHIND_TEXT 평면 안에서 XML 출력 순서가 겹침 결과에 영향을 준다.
+        // Stage 1의 z-band 순서대로 낮은 배경부터 쓰고, label shell처럼 높은 장식은 나중에
+        // 써서 BACKGROUND < DECORATION < TEXT 순서를 보존한다.
         List<ASTFigure> behindFigures = new ArrayList<>();
         for (ASTBlock block : otherBlocks) {
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 ASTFigure fig = (ASTFigure) block;
-                if (isPageBackgroundPlaneFigure(fig)) {
+                if (isBehindTextPlaneFigure(fig)) {
                     behindFigures.add(fig);
                 }
             }
@@ -317,10 +317,10 @@ public class ASTToHwpxConverter {
         Collections.sort(behindFigures, new Comparator<ASTFigure>() {
             @Override
             public int compare(ASTFigure a, ASTFigure b) {
-                int z = Integer.compare(b.zOrder(), a.zOrder());
+                int z = Integer.compare(a.zOrder(), b.zOrder());
                 if (z != 0) return z;
 
-                int area = Long.compare(figureArea(a), figureArea(b));
+                int area = Long.compare(figureArea(b), figureArea(a));
                 if (area != 0) return area;
 
                 int y = Long.compare(a.y(), b.y());
@@ -357,7 +357,7 @@ public class ASTToHwpxConverter {
             }
             if (block.blockType() == ASTBlock.BlockType.FIGURE) {
                 ASTFigure fig = (ASTFigure) block;
-                if (!isPageBackgroundPlaneFigure(fig)) {
+                if (!isBehindTextPlaneFigure(fig)) {
                     inFrontBlocks.add(fig);
                 }
             }
@@ -400,11 +400,16 @@ public class ASTToHwpxConverter {
         return 0;
     }
 
-    private static boolean isPageBackgroundPlaneFigure(ASTFigure fig) {
-        if (fig == null || fig.fromGroup()) return false;
+    private static boolean isBehindTextPlaneFigure(ASTFigure fig) {
+        if (fig == null) return false;
         String layer = fig.visualLayer();
         if ("PAGE_BACKGROUND".equals(layer)) return true;
+        if ("CONTAINER_BACKDROP".equals(layer)
+                || "TEXT_CARD_BACKDROP".equals(layer)) {
+            return true;
+        }
         if (isTextShellVisualLayer(layer)) return false;
+        if (fig.fromGroup()) return false;
         return layer == null || layer.isEmpty();
     }
 

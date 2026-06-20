@@ -313,15 +313,14 @@ class RunBuilder {
         // 단락에 불릿 플래그 설정 (이후 런의 색상 리셋용)
         para.bulletParagraph(true);
 
-        // 불릿 런: 원래 색상, 약간 작은 크기
+        // 불릿 런: 원본 run의 크기와 색상을 그대로 유지한다.
         ASTTextRun bulletRun = new ASTTextRun();
         bulletRun.text(String.valueOf(first));
         bulletRun.textColor(tr.textColor());
         bulletRun.fontFamily(tr.fontFamily());
         bulletRun.fontStyle(tr.fontStyle());
         if (tr.fontSizeHwpunits() != null) {
-            // 불릿 크기: 본문의 50% (함초롬돋움의 ● 글리프가 크므로)
-            bulletRun.fontSizeHwpunits((int) (tr.fontSizeHwpunits() * 0.5));
+            bulletRun.fontSizeHwpunits(tr.fontSizeHwpunits());
         }
         bulletRun.letterSpacing(tr.letterSpacing());
         para.addItem(bulletRun);

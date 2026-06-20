@@ -784,7 +784,7 @@ public final class ResolvedBuildContext {
         if (domId < 0 || ownershipPlans == null) return false;
         for (ObjectPlan plan : ownershipPlans) {
             if (plan == null) continue;
-            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!isTextShellTextPlacementPlan(plan)) continue;
             if (plan.domId == domId) return true;
             if (plan.ownedTextFrameIds != null) {
                 for (int textFrameId : plan.ownedTextFrameIds) {
@@ -810,7 +810,7 @@ public final class ResolvedBuildContext {
         if (domId < 0 || placement == null || ownershipPlans == null) return false;
         for (ObjectPlan plan : ownershipPlans) {
             if (plan == null) continue;
-            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!isTextShellTextPlacementPlan(plan)) continue;
             if (plan.placement != placement) continue;
             if (plan.ownedTextFrameIds != null) {
                 for (int textFrameId : plan.ownedTextFrameIds) {
@@ -820,6 +820,15 @@ public final class ResolvedBuildContext {
             if (plan.domId == domId) return true;
         }
         return false;
+    }
+
+    private static boolean isTextShellTextPlacementPlan(ObjectPlan plan) {
+        if (plan == null || plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) return false;
+        if (plan.visualAction == VisualAction.PLACE_TEXT_SHELL) return true;
+        return plan.visualAction == VisualAction.DROP_VISUAL
+                && "container_backdrop_absorbed_by_table_style".equals(plan.reason)
+                && plan.ownedTextFrameIds != null
+                && plan.ownedTextFrameIds.length > 0;
     }
 
     public boolean hasVisibleOwnedTextImageGroupPlanForDomId(int domId) {

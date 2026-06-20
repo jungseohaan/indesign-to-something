@@ -191,7 +191,38 @@ public class ASTRunConverter {
             return false;
         }
         String domId = ParagraphTextHelpers.domIdFromSourceId(inlineTf.selfId());
-        return domId != null && resolvedData.isHwpxOwnedTextFrame(domId);
+        return domId != null
+                && (resolvedData.isHwpxOwnedTextFrame(domId)
+                || isTextFrameOwnedByRenderedTextlessShell(domId, resolvedData));
+    }
+
+    private static boolean isTextFrameOwnedByRenderedTextlessShell(
+            String textFrameDomId,
+            ResolvedData resolvedData) {
+        if (textFrameDomId == null || resolvedData == null
+                || resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                : resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            if (containsStringId(rg.editableTextFrameIds(), textFrameDomId)) return true;
+            int[] owned = rg.atomicOwnedTextFrameIds();
+            if (owned == null) continue;
+            for (int id : owned) {
+                if (textFrameDomId.equals(String.valueOf(id))) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsStringId(String[] ids, String target) {
+        if (ids == null || target == null) return false;
+        for (String id : ids) {
+            if (target.equals(id)) return true;
+        }
+        return false;
     }
 
     /**
@@ -376,10 +407,6 @@ public class ASTRunConverter {
         // IDML 직접 탐색으로 못 찾은 경우 → resolved 데이터에서 fill 조회 (깊은 중첩 Group 대응)
         if (bg == null && resolvedData != null) {
             bg = ASTInlineObjectBuilder.extractGroupBackgroundFromResolved(ig, resolvedData);
-            if (bg != null) {
-                System.err.println("[BG-WRAPPER] resolved fallback: fill=" + bg.fillHex
-                        + " id=" + ig.selfId());
-            }
         }
         // 인라인 그래픽 내부의 자식 텍스트프레임 처리 (중첩 Group 포함, 재귀)
         // IMAGE 그룹인 경우: 자식 텍스트프레임을 이미지 위 오버레이로 배치
@@ -394,14 +421,12 @@ public class ASTRunConverter {
         } else {
             // 배경 있는 그룹 + 자식 텍스트프레임 → 단일 래퍼 글상자로 변환
             // (벡터 화살표 등은 소실되지만 텍스트+배경 스타일은 보존)
-            if (!hasHwpxOwnedChildTextFrame
+            if (resolvedData != null
+                    && !hasHwpxOwnedChildTextFrame
                     && bg != null && ASTInlineObjectBuilder.hasChildTextFramesRecursive(ig)) {
                 ASTInlineObject wrapper = ASTOverlayBuilder.createBackgroundGroupWrapper(
-                        ig, bg, idmlDoc, colorResolver, imageLoader);
+                        ig, bg, idmlDoc, colorResolver, imageLoader, resolvedData);
                 if (wrapper != null) {
-                    System.err.println("[BG-WRAPPER] SUCCESS: fill=" + bg.fillHex
-                            + " paras=" + wrapper.paragraphs().size()
-                            + " w=" + wrapper.width() + " h=" + wrapper.height());
                     // 이전에 추가한 RENDERED_GROUP 래퍼를 제거하고 래퍼 글상자로 교체
                     if (inlineObj != null) {
                         para.items().remove(inlineObj);
@@ -410,23 +435,10 @@ public class ASTRunConverter {
                     return;
                 }
             }
-            // 그리드 테이블 감지 시도 (2×2 이상의 TextFrame 그리드 → ASTTable)
-            ASTTable gridTable = hasHwpxOwnedChildTextFrame ? null
-                    : ASTTableConverter.tryBuildGridTable(
-                            ig, idmlDoc, colorResolver, imageLoader, bg, resolvedData);
-            if (gridTable != null) {
-                if (inlineObj == null) {
-                    inlineObj = new ASTInlineObject();
-                    inlineObj.kind(ASTInlineObject.ObjectKind.RENDERED_GROUP);
-                }
-                // 래퍼 크기를 그리드 테이블 크기로 설정
-                if (inlineObj.width() <= 0) inlineObj.width(gridTable.width());
-                if (inlineObj.height() <= 0) inlineObj.height(gridTable.height());
-                inlineObj.addInlineTable(gridTable);
-                if (!para.items().contains(inlineObj)) {
-                    para.addItem(inlineObj);
-                }
-            } else {
+            // 인라인 그룹의 문단/테이블 구조는 StoryFlowAssembler/StoryLoader에서 한 번만 만든다.
+            // 런 변환 중 좌표만 보고 TextFrame들을 새 컬럼/테이블로 재해석하면
+            // textless shell + owned TF 계획을 뒤집어 중복/누락 회귀가 생긴다.
+            if (resolvedData != null) {
                 ASTInlineObjectBuilder.collectChildTextFrames(ig, para, idmlDoc, colorResolver, imageLoader, bg, resolvedData);
             }
         }

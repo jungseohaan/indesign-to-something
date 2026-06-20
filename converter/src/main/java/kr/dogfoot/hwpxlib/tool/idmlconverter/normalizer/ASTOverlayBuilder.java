@@ -5,6 +5,8 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 
 import java.util.ArrayList;
@@ -370,7 +372,8 @@ class ASTOverlayBuilder {
                                                           ASTInlineObjectBuilder.GroupBackground bg,
                                                           IDMLDocument idmlDoc,
                                                           ColorResolver colorResolver,
-                                                          ASTImageLoader imageLoader) {
+                                                          ASTImageLoader imageLoader,
+                                                          ResolvedData resolvedData) {
         ASTInlineObject wrapper = new ASTInlineObject();
         wrapper.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
         wrapper.sourceId(ig.selfId());
@@ -403,14 +406,7 @@ class ASTOverlayBuilder {
 
         // 자식 텍스트프레임을 Y 위치 순서로 수집
         List<TextFrameWithPosition> childFrames = new ArrayList<>();
-        collectTextFramesWithPosition(ig, idmlDoc, childFrames, 0, 0);
-        System.err.println("[BG-WRAPPER] childFrames found: " + childFrames.size()
-                + " ig.type=" + ig.type() + " ig.childGraphics=" + ig.childGraphics().size()
-                + " ig.childTFs=" + ig.childTextFrames().size());
-        for (TextFrameWithPosition tfp : childFrames) {
-            System.err.println("[BG-WRAPPER]   TF: storyId=" + tfp.tf.parentStoryId()
-                    + " x=" + tfp.x + " y=" + tfp.y + " w=" + tfp.w + " h=" + tfp.h);
-        }
+        collectTextFramesWithPosition(ig, idmlDoc, childFrames, 0, 0, resolvedData);
 
         // Y 좌표 → X 좌표 순서로 정렬
         Collections.sort(childFrames, new Comparator<TextFrameWithPosition>() {
@@ -472,7 +468,7 @@ class ASTOverlayBuilder {
             if (story == null) continue;
             for (IDMLParagraph idmlPara : story.paragraphs()) {
                 ASTParagraph astPara = ASTStoryConverter.convertParagraph(
-                        idmlPara, emptyPool, idmlDoc, colorResolver, imageLoader, false, null);
+                        idmlPara, emptyPool, idmlDoc, colorResolver, imageLoader, false, resolvedData);
                 if (astPara != null && !astPara.items().isEmpty()) {
                     wrapper.addParagraph(astPara);
                 }
@@ -515,8 +511,10 @@ class ASTOverlayBuilder {
     private static void collectTextFramesWithPosition(IDMLCharacterRun.InlineGraphic ig,
                                                         IDMLDocument idmlDoc,
                                                         List<TextFrameWithPosition> result,
-                                                        double accTx, double accTy) {
+                                                        double accTx, double accTy,
+                                                        ResolvedData resolvedData) {
         for (IDMLTextFrame childTf : ig.childTextFrames()) {
+            if (isOwnedByTextlessShell(childTf, resolvedData)) continue;
             if (ASTInlineObjectBuilder.isMathFontOnlyStory(childTf, idmlDoc)) continue;
             if (childTf.parentStoryId() == null) continue;
             IDMLStory story = idmlDoc.getStory(childTf.parentStoryId());
@@ -559,7 +557,28 @@ class ASTOverlayBuilder {
             double[] ct = childIg.itemTransform();
             double childAccTx = accTx + (ct != null ? ct[4] : 0);
             double childAccTy = accTy + (ct != null ? ct[5] : 0);
-            collectTextFramesWithPosition(childIg, idmlDoc, result, childAccTx, childAccTy);
+            collectTextFramesWithPosition(childIg, idmlDoc, result, childAccTx, childAccTy, resolvedData);
         }
+    }
+
+    private static boolean isOwnedByTextlessShell(IDMLTextFrame tf, ResolvedData resolvedData) {
+        if (tf == null || resolvedData == null || tf.selfId() == null
+                || resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        String domId = ParagraphTextHelpers.domIdFromSourceId(tf.selfId());
+        if (domId == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                : resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            String[] ids = rg.editableTextFrameIds();
+            if (ids == null) continue;
+            for (String id : ids) {
+                if (domId.equals(id)) return true;
+            }
+        }
+        return false;
     }
 }

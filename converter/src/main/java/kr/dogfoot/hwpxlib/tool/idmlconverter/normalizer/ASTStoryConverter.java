@@ -637,6 +637,7 @@ public class ASTStoryConverter {
                                                             ASTImageLoader imageLoader,
                                                             ResolvedData resolvedData) {
         if (tf.parentStoryId() == null) return null;
+        if (isOwnedByRenderedTextlessShell(tf, resolvedData)) return null;
 
         IDMLStory inlineStory = idmlDoc.getStory(tf.parentStoryId());
         if (inlineStory == null) return null;
@@ -782,6 +783,35 @@ public class ASTStoryConverter {
         boolean hasParagraphs = obj.paragraphs() != null && !obj.paragraphs().isEmpty();
         boolean hasTables = obj.inlineTables() != null && !obj.inlineTables().isEmpty();
         return (hasParagraphs || hasTables) ? obj : null;
+    }
+
+    private static boolean isOwnedByRenderedTextlessShell(IDMLTextFrame tf, ResolvedData resolvedData) {
+        if (tf == null || resolvedData == null || resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        String domId = kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.shared.ParagraphTextHelpers
+                .domIdFromSourceId(tf.selfId());
+        if (domId == null) return false;
+        for (kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup rg
+                : resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            String[] ids = rg.editableTextFrameIds();
+            if (ids != null) {
+                for (String id : ids) {
+                    if (domId.equals(id)) {
+                        return true;
+                    }
+                }
+            }
+            int[] owned = rg.atomicOwnedTextFrameIds();
+            if (owned != null) {
+                for (int id : owned) {
+                    if (domId.equals(String.valueOf(id))) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static void replaceInlineTableCellTextWithResolvedStory(

@@ -423,6 +423,13 @@ public class StoryLoader {
                                         anchorIdx++;
                                         continue;
                                     }
+                                    List<ASTInlineObject> plannedAnchorTextShellFragments =
+                                            InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, domId);
+                                    if (plannedAnchorTextShellFragments != null && !plannedAnchorTextShellFragments.isEmpty()) {
+                                        for (ASTInlineObject fragment : plannedAnchorTextShellFragments) para.addItem(fragment);
+                                        anchorIdx++;
+                                        continue;
+                                    }
                                     ASTInlineObject plannedAnchorTextShell =
                                             InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
                                     if (plannedAnchorTextShell != null) {
@@ -487,6 +494,20 @@ public class StoryLoader {
                                                 InlineFrameHandler.tryInlineShapeWithEditableChildAsShell(ctx, domId);
                                         if (shapeShell != null) {
                                             para.addItem(shapeShell);
+                                            anchorIdx++;
+                                            continue;
+                                        }
+                                        List<ASTInlineObject> plannedAnchorTextShellFragments2 =
+                                                InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, domId);
+                                        if (plannedAnchorTextShellFragments2 != null && !plannedAnchorTextShellFragments2.isEmpty()) {
+                                            for (ASTInlineObject fragment : plannedAnchorTextShellFragments2) para.addItem(fragment);
+                                            anchorIdx++;
+                                            continue;
+                                        }
+                                        ASTInlineObject plannedAnchorTextShell2 =
+                                                InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, domId);
+                                        if (plannedAnchorTextShell2 != null) {
+                                            para.addItem(plannedAnchorTextShell2);
                                             anchorIdx++;
                                             continue;
                                         }
@@ -993,6 +1014,17 @@ public class StoryLoader {
             if (run.isInlineAnchor()) {
                 Integer anchoredId = run.anchoredObjectId();
                 if (anchoredId == null || anchoredId <= 0) continue;
+                List<ASTInlineObject> fragments =
+                        InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, anchoredId);
+                if (fragments != null && !fragments.isEmpty()) {
+                    for (ASTInlineObject fragment : fragments) {
+                        if (fragment == null) continue;
+                        fragment.keepInline(true);
+                        para.addItem(fragment);
+                    }
+                    inserted = true;
+                    continue;
+                }
                 ASTInlineObject inline =
                         InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchoredId);
                 if (inline == null) {

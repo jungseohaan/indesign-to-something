@@ -25,6 +25,7 @@ public final class OwnershipPlanValidator {
         v.validateDuplicateVisibleSourceSlots();
         v.validateConflictingTextOwnership();
         v.validateInlineFloatingSourceSplit();
+        v.validateInlineFloatingTextFramePlacementSplit();
         v.validateHwpxTextNotPlacedAsCompletePng();
         v.validateTextShellBehindOwnedText();
         v.validateParentTextShellDescendantsDropped();
@@ -97,6 +98,29 @@ public final class OwnershipPlanValidator {
         }
     }
 
+    private void validateInlineFloatingTextFramePlacementSplit() {
+        Map<String, List<ObjectPlan>> byTextFrame = new LinkedHashMap<>();
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            for (int textFrameId : textFrameSourceIds(plan)) {
+                String key = plan.pageIndex + ":" + textFrameId;
+                byTextFrame.computeIfAbsent(key, k -> new ArrayList<>()).add(plan);
+            }
+        }
+        for (Map.Entry<String, List<ObjectPlan>> e : byTextFrame.entrySet()) {
+            boolean inline = false;
+            boolean floating = false;
+            for (ObjectPlan plan : e.getValue()) {
+                inline |= plan.placement == Placement.INLINE;
+                floating |= plan.placement == Placement.FLOATING;
+            }
+            if (inline && floating) {
+                warn("STAGE4_INLINE_FLOATING_TEXT_FRAME_SPLIT",
+                        "textFrame=" + e.getKey() + " plans=" + planRefs(e.getValue()));
+            }
+        }
+    }
+
     private void validateHwpxTextNotPlacedAsCompletePng() {
         for (ObjectPlan plan : ctx.ownershipPlans) {
             if (!hasVisibleVisualSlot(plan)) continue;
@@ -108,6 +132,7 @@ public final class OwnershipPlanValidator {
             }
             int[] textIds = textFrameSourceIds(plan);
             if (textIds.length == 0) continue;
+            if (!visualSourcesContainAny(plan, textIds)) continue;
             warn("STAGE4_HWPX_TEXT_SOURCE_VISIBLE_AS_PNG",
                     "plan=" + planRef(plan) + " textFrameIds=" + ObjectPlan.intArrayJson(textIds));
         }
@@ -258,6 +283,16 @@ public final class OwnershipPlanValidator {
             return plan.visualSourceObjectIds;
         }
         return plan.sourceObjectIds != null ? plan.sourceObjectIds : new int[0];
+    }
+
+    private static boolean visualSourcesContainAny(ObjectPlan plan, int[] sourceIds) {
+        if (plan == null || sourceIds == null || sourceIds.length == 0) return false;
+        int[] visualIds = visualSourceIds(plan);
+        if (visualIds.length == 0) return false;
+        for (int id : sourceIds) {
+            if (contains(visualIds, id)) return true;
+        }
+        return false;
     }
 
     private ObjectPlan findTextFramePlan(int textFrameId, int pageIndex) {

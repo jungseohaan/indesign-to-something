@@ -325,17 +325,28 @@ public class HwpxTextBoxBuilder {
             boolean hasOwnVisibleFill = !textOnlyOverlay
                     && nativeOk
                     && block.fillColor() != null
-                    && block.fillColor().startsWith("#") && !block.fillColor().equals("#FFFFFF");
+                    && block.fillColor().startsWith("#")
+                    && (!block.fillColor().equals("#FFFFFF") || block.forceNativeFill());
             boolean hasWrapper = !textOnlyOverlay
                     && nativeOk
                     && (block.hasWrapperFill() || hasOwnVisibleFill);
+            boolean hasNativeShellMaterial = block.forceNativeFill()
+                    && nativeOk
+                    && ((block.fillColor() != null && block.fillColor().startsWith("#"))
+                    || (block.strokeColor() != null && block.strokeColor().startsWith("#")
+                    && block.strokeWeight() > 0)
+                    || block.cornerRadius() > 0);
+            if (hasNativeShellMaterial) {
+                hasWrapper = true;
+            }
             if (!hasWrapper && shouldUseFloatingDrawTextBox(block)) {
                 frameTransformations.convertRoundedFloatingBlock(framePara, block, w, h);
                 return;
             }
             // 둥근 모서리 래퍼: Table 대신 Rectangle+DrawText 단일 객체 사용
             // (Table은 사각형이라 래퍼 Rectangle의 둥근 모서리를 덮어버림)
-            if (hasWrapper && block.cornerRadius() > 0 && !containsInlineTable(block.paragraphs())) {
+            if (hasWrapper && block.cornerRadius() > 0 && !containsInlineTable(block.paragraphs())
+                    && !isPlannedShellCarrier(block)) {
                 convertRoundedWrapperDrawText(framePara, block, w, h);
             } else {
                 // 단락 하나 + inlineTable만 있는 경우: 1x1 외곽 래퍼 없이 표를 직접 배치
@@ -355,16 +366,18 @@ public class HwpxTextBoxBuilder {
                     _singleInnerTable.zOrder(block.zOrder());
                     ctx.tableBuilderRef.convertTable(framePara, _singleInnerTable);
                 } else {
-                    // forceNativeFill(사이드박스 대형 배경 흡수)은 별도 배경 rect 대신 셀 배경 fill로 칠한다.
-                    // 별도 rect는 본문 표(앞면)와 z-레이어가 엇갈려 본문을 가리는 문제가 있어, 셀 배경이
-                    // 본문 뒤에 안정적으로 깔린다. (createTextFrameBorderFill이 block.fillColor()를 셀 배경에 적용)
-                    boolean useCellNativeFill = block.forceNativeFill() && hasWrapper;
+                    // Native source shell은 TEXT_SLOT의 carrier fill로 흡수하지 않는다.
+                    // carrier fill은 HWPX 테이블/DrawText 내부 객체가 되어 LABEL_BACKDROP보다 위에
+                    // 칠해질 수 있다. Shell slot은 별도 behind-text rect로 materialize하고,
+                    // carrier table은 투명하게 두어 Stage 1의 BACKGROUND < DECORATION < TEXT 층을 보존한다.
+                    boolean useCellNativeFill = false;
                     boolean wrapper = hasWrapper && !useCellNativeFill;
                     if (wrapper) {
                         addWrapperRoundedRect(framePara, block, w, h);
                     }
                     singleColumnTableConverter.convertSingleColumnTable(framePara, block, block.effectiveX(), block.y(), w, h,
-                            block.paragraphs(), wrapper || textOnlyOverlay);
+                            block.paragraphs(), wrapper || block.forceNativeFill()
+                                    || (textOnlyOverlay && !block.forceNativeFill()));
                 }
             }
         } else {
@@ -427,9 +440,10 @@ public class HwpxTextBoxBuilder {
 
         Rectangle rect = anchorRun.addNewRectangle();
         String shapeId = HwpxUtil.nextShapeId();
+        int backgroundZOrder = block.forceNativeFill() ? -4000 : 0;
 
         rect.idAnd(shapeId)
-                .zOrderAnd(0)
+                .zOrderAnd(backgroundZOrder)
                 .numberingTypeAnd(NumberingType.PICTURE)
                 .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
@@ -534,10 +548,16 @@ public class HwpxTextBoxBuilder {
         Rectangle rect = anchorRun.addNewRectangle();
         String shapeId = HwpxUtil.nextShapeId();
 
+        TextWrapMethod wrapMethod = plannedLabelBackdrop(block)
+                ? TextWrapMethod.IN_FRONT_OF_TEXT
+                : (isPlannedShellCarrier(block)
+                ? TextWrapMethod.BEHIND_TEXT
+                : TextWrapMethod.IN_FRONT_OF_TEXT);
+
         rect.idAnd(shapeId)
-                .zOrderAnd(0)
+                .zOrderAnd(nativeWrapperShellZOrder(block))
                 .numberingTypeAnd(NumberingType.PICTURE)
-                .textWrapAnd(TextWrapMethod.BEHIND_TEXT)
+                .textWrapAnd(wrapMethod)
                 .textFlowAnd(TextFlowSide.BOTH_SIDES)
                 .lockAnd(false)
                 .dropcapstyleAnd(DropCapStyle.None);
@@ -603,6 +623,61 @@ public class HwpxTextBoxBuilder {
 
         rect.createOutMargin();
         rect.outMargin().leftAnd(0L).rightAnd(0L).topAnd(0L).bottomAnd(0L);
+    }
+
+    private int nativeWrapperShellZOrder(ASTTextFrameBlock block) {
+        if (block == null) return 0;
+        if (block.forceNativeFill() || block.plannedVisualTextOverlay()) {
+            return plannedShellZOrder(block.plannedShellVisualLayer(), block.zOrder());
+        }
+        int sourceZ = block.zOrder();
+        int offset = Math.max(-499, Math.min(499, sourceZ));
+        // Non-overlay wrappers remain local low backdrops. Ownership-planned
+        // shell slots use the block z-order path above so their native shell
+        // rises together with its editable text.
+        return -3000 + offset;
+    }
+
+    int textCarrierZOrder(ASTTextFrameBlock block) {
+        if (plannedLabelBackdrop(block)) {
+            return plannedTextZOrder(block.plannedShellVisualLayer(), block.zOrder());
+        }
+        return block != null ? block.zOrder() : 0;
+    }
+
+    private boolean isPlannedShellCarrier(ASTTextFrameBlock block) {
+        return block != null && (block.forceNativeFill() || block.plannedVisualTextOverlay());
+    }
+
+    private boolean plannedLabelBackdrop(ASTTextFrameBlock block) {
+        return block != null
+                && (block.forceNativeFill() || block.plannedVisualTextOverlay())
+                && "LABEL_BACKDROP".equals(block.plannedShellVisualLayer());
+    }
+
+    private int plannedShellZOrder(String visualLayer, int sourceZOrder) {
+        int offset = Math.max(-499, Math.min(499, sourceZOrder));
+        if ("CONTAINER_BACKDROP".equals(visualLayer)) {
+            return -2000 + offset;
+        }
+        if ("TEXT_CARD_BACKDROP".equals(visualLayer)) {
+            return -2500 + offset;
+        }
+        if ("LABEL_BACKDROP".equals(visualLayer)) {
+            return 30000 + offset;
+        }
+        if ("LABEL_OVERLAY_BACKDROP".equals(visualLayer)) {
+            return 15000 + offset;
+        }
+        return -3000 + offset;
+    }
+
+    private int plannedTextZOrder(String visualLayer, int sourceZOrder) {
+        int offset = Math.max(-499, Math.min(499, sourceZOrder));
+        if ("LABEL_BACKDROP".equals(visualLayer)) {
+            return 31000 + offset;
+        }
+        return sourceZOrder;
     }
 
     /**

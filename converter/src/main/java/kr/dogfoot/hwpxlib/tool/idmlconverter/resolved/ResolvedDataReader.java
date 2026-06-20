@@ -313,7 +313,40 @@ public class ResolvedDataReader {
         if (o.has("bounds") && !o.get("bounds").isJsonNull()) {
             table.bounds(parseDoubleArray(o.getAsJsonArray("bounds")));
         }
+        if (o.has("cells") && o.get("cells").isJsonArray()) {
+            for (JsonElement e : o.getAsJsonArray("cells")) {
+                ResolvedTable.Cell cell = parseTableCell(e.getAsJsonObject());
+                if (cell != null) table.addCell(cell);
+            }
+        }
         return table;
+    }
+
+    private static ResolvedTable.Cell parseTableCell(JsonObject o) {
+        if (o == null) return null;
+        ResolvedTable.Cell cell = new ResolvedTable.Cell();
+        cell.row(getInt(o, "row", -1));
+        cell.col(getInt(o, "col", -1));
+        if (o.has("paragraphs") && o.get("paragraphs").isJsonArray()) {
+            for (JsonElement pe : o.getAsJsonArray("paragraphs")) {
+                JsonObject po = pe.getAsJsonObject();
+                if (!po.has("runs") || !po.get("runs").isJsonArray()) continue;
+                for (JsonElement re : po.getAsJsonArray("runs")) {
+                    JsonObject ro = re.getAsJsonObject();
+                    String type = getString(ro, "type");
+                    if ("inline_anchor".equals(type)
+                            && ro.has("anchoredObjectId")
+                            && !ro.get("anchoredObjectId").isJsonNull()) {
+                        cell.addInlineAnchorId(ro.get("anchoredObjectId").getAsInt());
+                    }
+                    String text = getString(ro, "text");
+                    if (text != null && !text.trim().isEmpty()) {
+                        cell.hasTextRuns(true);
+                    }
+                }
+            }
+        }
+        return cell;
     }
 
     private static ResolvedStory parseStory(JsonObject o) {

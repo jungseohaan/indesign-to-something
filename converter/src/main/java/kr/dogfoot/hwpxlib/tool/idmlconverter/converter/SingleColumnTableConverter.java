@@ -64,11 +64,12 @@ final class SingleColumnTableConverter {
 
         Table table = anchorRun.addNewTable();
 
-        // ShapeObject — 배경 전용 블록은 BEHIND_TEXT + z-order=0, 일반은 IN_FRONT_OF_TEXT
+        // ShapeObject — 배경 전용 블록은 BEHIND_TEXT + z-order=0, 일반은 IN_FRONT_OF_TEXT.
+        // Ownership-planned label text rides above its own LABEL_BACKDROP shell.
         TextWrapMethod wrapMethod = block.isBackgroundOnly()
                 ? TextWrapMethod.BEHIND_TEXT
                 : TextWrapMethod.IN_FRONT_OF_TEXT;
-        int zOrder = block.isBackgroundOnly() ? 0 : block.zOrder();
+        int zOrder = block.isBackgroundOnly() ? 0 : textBoxBuilder.textCarrierZOrder(block);
         String tableId = HwpxUtil.nextShapeId();
         table.idAnd(tableId)
                 .zOrderAnd(zOrder)

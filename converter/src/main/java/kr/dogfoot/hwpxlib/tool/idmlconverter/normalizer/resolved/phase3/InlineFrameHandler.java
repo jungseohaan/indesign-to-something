@@ -15,6 +15,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Place
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualLayer;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase4.TableBuilder;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualCropper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
@@ -199,6 +200,10 @@ public class InlineFrameHandler {
      * 를 inline 박스에 복사한다.
      */
     public static java.util.List<ASTInlineObject> tryInlineGroupAsBoxList(ResolvedBuildContext ctx, int anchoredObjectId) {
+        if (hasInlineTextShellForAnchor(ctx, anchoredObjectId)
+                || isCoveredByInlineTextShellSourceBundle(ctx, anchoredObjectId)) {
+            return null;
+        }
         String anchorId = String.valueOf(anchoredObjectId);
         if (containsObjectReplacementTextFrameDescendant(ctx, anchorId)) {
             return null;
@@ -217,6 +222,7 @@ public class InlineFrameHandler {
             if (pi == null) continue;
             if (!anchorId.equals(pi.parentId())) continue;
             if (!tf.isInline()) continue;
+            if (isTextFrameCoveredByInlineTextShell(ctx, tf.id())) continue;
             String vt = tf.frameVisibleText();
             if (vt == null) continue;
             if (hasObjectReplacementText(vt)) continue;
@@ -274,6 +280,7 @@ public class InlineFrameHandler {
 
         // Phase A: Group 직속 TF → 가장 잘 겹치는 Rectangle 과 매칭
         for (ResolvedTextFrame childTf : childTfs) {
+            if (isTextFrameCoveredByInlineTextShell(ctx, childTf.id())) continue;
             double[] tfBounds = childTf.geometricBounds();
             if (tfBounds == null || tfBounds.length < 4) continue;
             ResolvedPageItem matchedRect = null;
@@ -343,7 +350,7 @@ public class InlineFrameHandler {
             paraInner.alignment("CENTER");
             addSyntheticRunsFromTextFrame(ctx, paraInner, childTf, jamoText);
             obj.addParagraph(paraInner);
-            obj.verticalJustification("CenterAlign");
+            obj.verticalJustification(firstChildVerticalJustification(childTfs));
 
             unsorted.add(obj);
             // top-Y 대신 center-Y: 높이가 다른 아이템이 같은 행에 수직 정렬될 때 별도 row로 분리 방지
@@ -365,6 +372,7 @@ public class InlineFrameHandler {
 
             java.util.List<ResolvedTextFrame> childTfCandidates = textFramesByParent.getOrDefault(rectPi.id(), java.util.Collections.<ResolvedTextFrame>emptyList());
             for (ResolvedTextFrame nestedTf : childTfCandidates) {
+                if (isTextFrameCoveredByInlineTextShell(ctx, nestedTf.id())) continue;
                 String vt = nestedTf.frameVisibleText();
                 if (vt == null) continue;
                 if (hasObjectReplacementText(vt)) continue;
@@ -430,6 +438,7 @@ public class InlineFrameHandler {
             if (covObj.sourceId() != null) coveredSourceIds.add(covObj.sourceId());
         }
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (isTextFrameCoveredByInlineTextShell(ctx, tf.id())) continue;
             ResolvedPageItem tfPi = ctx.resolvedData.getPageItem(tf.id());
             if (tfPi == null) continue;
             String tfParentId = tfPi.parentId();
@@ -1234,8 +1243,6 @@ public class InlineFrameHandler {
         RenderedGroup matched = null;
         File atomicPngFile = null;
         RenderedGroup atomicMatched = null;
-        File fallbackPngFile = null;
-        RenderedGroup fallbackMatched = null;
         if (ctx.resolvedData != null && ctx.resolvedData.allRenderedFloatingItems() != null) {
             for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
                 if (rg == null || rg.id() != anchoredObjectId || rg.file() == null) continue;
@@ -1256,25 +1263,13 @@ public class InlineFrameHandler {
                     matched = rg;
                     break;
                 }
-                if (fallbackPngFile == null) {
-                    fallbackPngFile = candidate;
-                    fallbackMatched = rg;
-                }
             }
         }
         if (atomicPngFile != null) {
             pngFile = atomicPngFile;
             matched = atomicMatched;
         }
-        if (pngFile == null) {
-            pngFile = fallbackPngFile;
-            matched = fallbackMatched;
-        }
-        if (pngFile == null) {
-            File candidate = new File(ctx.basePath, "rendered_frames/inline_" + anchoredObjectId + ".png");
-            if (candidate.exists()) pngFile = candidate;
-        }
-        if (pngFile == null) return null;
+        if (pngFile == null || matched == null) return null;
 
         try {
             byte[] imageData = java.nio.file.Files.readAllBytes(pngFile.toPath());
@@ -1295,6 +1290,12 @@ public class InlineFrameHandler {
                 }
             } else if (matched != null) {
                 return null;
+            }
+            boolean overlayText = shouldOverlayRenderedBadgeText(ctx, matched);
+            if (overlayText) {
+                imageData = prepareInlineTextShellImageData(img, true);
+                img = ImageIO.read(new java.io.ByteArrayInputStream(imageData));
+                if (img == null) return null;
             }
 
             double bw = widthPt;
@@ -1322,7 +1323,7 @@ public class InlineFrameHandler {
             obj.keepInline(true);
             obj.noAutoLineWrap(shouldUseNoAutoLineWrap(childTf, true));
             obj.verticalJustification("CenterAlign");
-            if (shouldOverlayRenderedBadgeText(ctx, matched)) {
+            if (overlayText) {
                 buildBadgeParagraph(ctx, childTf, obj);
             }
             return obj;
@@ -1363,6 +1364,7 @@ public class InlineFrameHandler {
             RenderedGroup shell) {
         if (childTfs == null || childTfs.isEmpty()) return null;
         if (shell == null || ctx.basePath == null) return null;
+        if (childTfs.size() == 1 && editableTextFrameIds(shell).length > 1) return null;
         ObjectPlan shellPlan = findInlineTextShellOwnerPlan(ctx, shell, childTfs);
         if (shellPlan == null) return null;
         if (ctx.isRenderedDisposed(shell.id(), FrameDisposition.TEXT_BLOCK_PLACED)) return null;
@@ -1391,7 +1393,7 @@ public class InlineFrameHandler {
             obj.width(CoordinateConverter.pointsToHwpunits(w));
             obj.height(CoordinateConverter.pointsToHwpunits(h));
             obj.noAutoLineWrap(childTfs.size() == 1 && shouldUseNoAutoLineWrap(childTfs.get(0), true));
-            obj.verticalJustification("CenterAlign");
+            obj.verticalJustification(firstChildVerticalJustification(childTfs));
 
             File pngFile = new File(ctx.basePath, shellPlan.file);
             if (!pngFile.exists() || !pngFile.isFile()) return null;
@@ -1402,15 +1404,19 @@ public class InlineFrameHandler {
             imageData = prepareInlineTextShellImageData(img, preserveSourceCanvas);
             obj.imageFillData(imageData);
             obj.forceImageFill(true);
-            for (ResolvedTextFrame childTf : childTfs) {
-                if (isOrcCarrierTextFrame(childTf)) {
-                    continue;
+            applyInlineShellTextMargins(obj, anchorItem, childTfs);
+            if (visibleShellTextFrameCount(childTfs) > 1) {
+                buildCompositeInlineShellParagraph(ctx, childTfs, obj);
+                for (ResolvedTextFrame childTf : childTfs) {
+                    markInlineShellChildTextPlaced(ctx, childTf);
                 }
-                buildBadgeParagraph(ctx, childTf, obj);
-                try {
-                    ctx.setTextDisposition(Integer.parseInt(childTf.id()), FrameDisposition.TEXT_BLOCK_PLACED);
-                } catch (Exception ignored) {
-                    // Non-numeric DOM ids cannot be recorded in the legacy disposition map.
+            } else {
+                for (ResolvedTextFrame childTf : childTfs) {
+                    if (isOrcCarrierTextFrame(childTf)) {
+                        continue;
+                    }
+                    buildBadgeParagraph(ctx, childTf, obj);
+                    markInlineShellChildTextPlaced(ctx, childTf);
                 }
             }
             ctx.markRenderedVisualHandled(shell.id());
@@ -1421,6 +1427,156 @@ public class InlineFrameHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static String[] editableTextFrameIds(RenderedGroup shell) {
+        if (shell == null) return new String[0];
+        String[] direct = shell.editableTextFrameIds();
+        if (direct != null && direct.length > 0) return direct;
+        int[] atomic = shell.atomicOwnedTextFrameIds();
+        if (atomic == null || atomic.length == 0) return new String[0];
+        String[] out = new String[atomic.length];
+        for (int i = 0; i < atomic.length; i++) out[i] = String.valueOf(atomic[i]);
+        return out;
+    }
+
+    private static int visibleShellTextFrameCount(java.util.List<ResolvedTextFrame> childTfs) {
+        if (childTfs == null) return 0;
+        int count = 0;
+        for (ResolvedTextFrame childTf : childTfs) {
+            if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+            String text = normalizeInlineShellText(childTf.frameVisibleText());
+            if (!text.isEmpty()) count++;
+        }
+        return count;
+    }
+
+    private static void buildCompositeInlineShellParagraph(
+            ResolvedBuildContext ctx,
+            java.util.List<ResolvedTextFrame> childTfs,
+            ASTInlineObject obj) {
+        if (ctx == null || obj == null || childTfs == null || childTfs.isEmpty()) return;
+        java.util.List<ResolvedTextFrame> ordered = new ArrayList<>(childTfs);
+        java.util.Collections.sort(ordered, new java.util.Comparator<ResolvedTextFrame>() {
+            public int compare(ResolvedTextFrame a, ResolvedTextFrame b) {
+                double[] ga = a != null ? a.geometricBounds() : null;
+                double[] gb = b != null ? b.geometricBounds() : null;
+                double ay = ga != null && ga.length >= 4 ? ga[0] : 0;
+                double by = gb != null && gb.length >= 4 ? gb[0] : 0;
+                if (Math.abs(ay - by) > 1.0) return Double.compare(ay, by);
+                double ax = ga != null && ga.length >= 4 ? ga[1] : 0;
+                double bx = gb != null && gb.length >= 4 ? gb[1] : 0;
+                return Double.compare(ax, bx);
+            }
+        });
+        ASTParagraph para = new ASTParagraph();
+        para.alignment("LEFT_JUSTIFIED");
+        boolean added = false;
+        for (ResolvedTextFrame childTf : ordered) {
+            if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+            String text = normalizeInlineShellText(childTf.frameVisibleText());
+            if (text.isEmpty()) continue;
+            if (added) {
+                ASTTextRun spacer = new ASTTextRun();
+                spacer.text(" ");
+                para.addItem(spacer);
+            }
+            ResolvedStory story = childTf.storyId() != null ? ctx.resolvedData.getStory(childTf.storyId()) : null;
+            if (!appendFirstVisibleShellStoryRuns(ctx, para, story)) {
+                addSyntheticRunsFromTextFrame(ctx, para, childTf, text);
+            }
+            added = true;
+        }
+        if (added) obj.addParagraph(para);
+    }
+
+    private static boolean appendFirstVisibleShellStoryRuns(
+            ResolvedBuildContext ctx,
+            ASTParagraph target,
+            ResolvedStory story) {
+        if (ctx == null || target == null || story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph rp : story.paragraphs()) {
+            if (rp == null || rp.runs() == null) continue;
+            boolean appended = false;
+            for (ResolvedRun run : rp.runs()) {
+                if (run == null || run.isInlineAnchor() || run.text() == null) continue;
+                String text = normalizeInlineShellText(run.text());
+                if (text.isEmpty()) continue;
+                List<ASTTextRun> runs = TextRunSegmenter.fromResolvedText(
+                        text,
+                        run,
+                        color -> RunBuilder.resolveColorToHex(ctx, color),
+                        target.hasTabStops(),
+                        false,
+                        null);
+                for (ASTTextRun astRun : runs) {
+                    target.addItem(astRun);
+                }
+                appended = true;
+            }
+            if (appended) return true;
+        }
+        return false;
+    }
+
+    private static void markInlineShellChildTextPlaced(ResolvedBuildContext ctx, ResolvedTextFrame childTf) {
+        if (ctx == null || childTf == null) return;
+        try {
+            ctx.setTextDisposition(Integer.parseInt(childTf.id()), FrameDisposition.TEXT_BLOCK_PLACED);
+        } catch (Exception ignored) {
+            // Non-numeric DOM ids cannot be recorded in the legacy disposition map.
+        }
+    }
+
+    private static String normalizeInlineShellText(String text) {
+        if (text == null) return "";
+        return text.replace("\uFFFC", "")
+                .replace("\r", "")
+                .replace("\n", "")
+                .trim();
+    }
+
+    private static String firstChildVerticalJustification(java.util.List<ResolvedTextFrame> childTfs) {
+        if (childTfs != null) {
+            for (ResolvedTextFrame childTf : childTfs) {
+                if (childTf != null && childTf.verticalJustification() != null
+                        && !childTf.verticalJustification().isBlank()) {
+                    return childTf.verticalJustification();
+                }
+            }
+        }
+        return "TopAlign";
+    }
+
+    private static void applyInlineShellTextMargins(
+            ASTInlineObject obj,
+            ResolvedPageItem anchorItem,
+            java.util.List<ResolvedTextFrame> childTfs) {
+        if (obj == null || anchorItem == null || childTfs == null || childTfs.size() != 1) return;
+        ResolvedTextFrame childTf = childTfs.get(0);
+        if (childTf == null) return;
+        double[] groupBounds = anchorItem.geometricBounds();
+        double[] textBounds = childTf.geometricBounds();
+        if (groupBounds == null || textBounds == null || groupBounds.length < 4 || textBounds.length < 4) {
+            return;
+        }
+        double groupW = Math.abs(groupBounds[3] - groupBounds[1]);
+        double groupH = Math.abs(groupBounds[2] - groupBounds[0]);
+        double textW = Math.abs(textBounds[3] - textBounds[1]);
+        double textH = Math.abs(textBounds[2] - textBounds[0]);
+        if (groupW <= 0 || groupH <= 0 || textW <= 0 || textH <= 0) return;
+        if (textW > groupW * 1.25 || textH > groupH * 1.25) return;
+
+        double left = Math.max(0, textBounds[1] - groupBounds[1]);
+        double top = Math.max(0, textBounds[0] - groupBounds[0]);
+        double right = Math.max(0, groupBounds[3] - textBounds[3]);
+        double bottom = Math.max(0, groupBounds[2] - textBounds[2]);
+        if (left + top + right + bottom < 0.1) return;
+
+        obj.textMarginLeft(CoordinateConverter.pointsToHwpunits(left));
+        obj.textMarginTop(CoordinateConverter.pointsToHwpunits(top));
+        obj.textMarginRight(CoordinateConverter.pointsToHwpunits(right));
+        obj.textMarginBottom(CoordinateConverter.pointsToHwpunits(bottom));
     }
 
     private static boolean isOrcCarrierTextFrame(ResolvedTextFrame tf) {
@@ -1760,7 +1916,7 @@ public class InlineFrameHandler {
     }
 
     private static boolean shouldOverlayRenderedBadgeText(ResolvedBuildContext ctx, RenderedGroup matched) {
-        if (matched == null) return true;
+        if (matched == null) return false;
         ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(matched) : null;
         if (plan != null) {
             if (plan.textAction == TextAction.OWNED_BY_PNG) return false;
@@ -1799,24 +1955,22 @@ public class InlineFrameHandler {
         return found;
     }
 
-    /** 배지 텍스트 단락 빌드 (CENTER 정렬, 폰트 속성 복사). INLINE_TEXT_FRAME/INLINE_BADGE_GROUP 공용. */
+    /** 배지/셸 텍스트 단락 빌드. 원본 story 문단이 있으면 짧은 라벨도 그 정렬/런 속성을 그대로 쓴다. */
     private static void buildBadgeParagraph(ResolvedBuildContext ctx, ResolvedTextFrame childTf, ASTInlineObject obj) {
         if (ctx != null && ctx.resolvedData != null && childTf != null && childTf.storyId() != null) {
             ResolvedStory story = ctx.resolvedData.getStory(childTf.storyId());
-            if (shouldUseResolvedParagraphsForInlineShell(story)) {
-                List<ASTParagraph> paragraphs = convertShellTextParagraphs(ctx, story);
-                if (paragraphs != null && !paragraphs.isEmpty()) {
-                    applyIdmlRunTintFallbackToParagraphs(ctx, childTf, paragraphs);
-                    for (ASTParagraph paragraph : paragraphs) {
-                        obj.addParagraph(paragraph);
-                    }
-                    return;
+            List<ASTParagraph> paragraphs = convertShellTextParagraphs(ctx, story);
+            if (paragraphs != null && !paragraphs.isEmpty()) {
+                applyIdmlRunTintFallbackToParagraphs(ctx, childTf, paragraphs);
+                for (ASTParagraph paragraph : paragraphs) {
+                    obj.addParagraph(paragraph);
                 }
+                return;
             }
         }
         String text = childTf.frameVisibleText().replace("￼", "").replace("\r", "").replace("\n", "").trim();
         ASTParagraph paraInner = new ASTParagraph();
-        paraInner.alignment("CENTER");
+        paraInner.alignment("LEFT_JUSTIFIED");
         addSyntheticRunsFromTextFrame(ctx, paraInner, childTf, text);
         obj.addParagraph(paraInner);
     }
@@ -2110,6 +2264,13 @@ public class InlineFrameHandler {
                 ASTEquation fracEq = tryInlineFractionAsEquation(ctx, childId);
                 if (fracEq != null) {
                     items.add(fracEq);
+                    continue;
+                }
+
+                List<ASTInlineObject> plannedAnchorTextShellFragments =
+                        loadPlannedInlineTextShellFragmentsForAnchor(ctx, childId);
+                if (plannedAnchorTextShellFragments != null && !plannedAnchorTextShellFragments.isEmpty()) {
+                    items.addAll(plannedAnchorTextShellFragments);
                     continue;
                 }
 
@@ -2918,9 +3079,7 @@ public class InlineFrameHandler {
                     return null;
                 }
                 if (placeInlineTextShell) {
-                    ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(anchoredObjectId));
-                    ResolvedTextFrame childTf = firstEditableTextFrameForRenderedGroup(ctx, rg);
-                    return buildInlineShellObject(ctx, anchoredObjectId, anchorItem, childTf, rg);
+                    return null;
                 }
                 if (isInlineTextShellCompanionForEditableText(ctx, anchoredObjectId)) {
                     return null;
@@ -2969,6 +3128,17 @@ public class InlineFrameHandler {
                                 isGraphicLine = true;
                                 double sw = _lineItem.strokeWeight();
                                 bh = sw > 0 ? sw : 0.5;
+                            }
+                        }
+                        if (!isGraphicLine && img.getWidth() > 0 && img.getHeight() > 0) {
+                            double pngRatioForAxis = (double) img.getWidth() / img.getHeight();
+                            if (bw <= 0 && bh > 0) {
+                                bw = bh * pngRatioForAxis;
+                            } else if (bh <= 0 && bw > 0) {
+                                bh = bw / pngRatioForAxis;
+                            } else if (bw <= 0 && bh <= 0) {
+                                bw = img.getWidth() * 72.0 / ctx.pngExportDpi;
+                                bh = img.getHeight() * 72.0 / ctx.pngExportDpi;
                             }
                         }
                         // PNG 비율로 보정 (bounds가 부정확한 경우)
@@ -3054,6 +3224,8 @@ public class InlineFrameHandler {
         if (tf == null || !tf.isInline()) return null;
         RenderedGroup shell = findTextHiddenInlineShellForTextFrame(ctx, tf.id());
         if (shell == null) return null;
+        java.util.List<ResolvedTextFrame> ownedChildren = badgeTextFramesSortedByReading(ctx, shell);
+        if (visibleShellTextFrameCount(ownedChildren) > 1) return null;
         VisualAction action = ctx.visualActionByOwnershipPlan(shell);
         if (ctx.placementByOwnershipPlan(shell) != Placement.INLINE
                 || (action != VisualAction.PLACE_TEXT_SHELL
@@ -3089,9 +3261,11 @@ public class InlineFrameHandler {
     public static ASTInlineObject loadPlannedInlineTextShellForAnchor(
             ResolvedBuildContext ctx,
             int anchoredObjectId) {
-        if (ctx == null || ctx.resolvedData == null || ctx.ownershipPlans == null) return null;
+        if (ctx == null || ctx.resolvedData == null) return null;
         ObjectPlan plan = findInlineTextShellOwnerPlanForAnchor(ctx, anchoredObjectId);
-        if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return null;
+        if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+            return null;
+        }
         RenderedGroup shell = findRenderedGroupForPlan(ctx, plan, anchoredObjectId);
         if (shell == null) return null;
 
@@ -3103,6 +3277,366 @@ public class InlineFrameHandler {
         }
         ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
         return buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell);
+    }
+
+    public static List<ASTInlineObject> loadPlannedInlineTextShellFragmentsForAnchor(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null) return null;
+        ObjectPlan plan = findInlineTextShellOwnerPlanForAnchor(ctx, anchoredObjectId);
+        if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+            return null;
+        }
+        RenderedGroup shell = findRenderedGroupForPlan(ctx, plan, anchoredObjectId);
+        if (shell == null || plan.file == null || plan.file.isEmpty() || plan.bounds == null || plan.bounds.length < 4) {
+            return null;
+        }
+        List<ResolvedTextFrame> childTfs = new ArrayList<>();
+        for (int childId : plan.ownedTextFrameIds) {
+            ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(String.valueOf(childId));
+            if (childTf == null) return null;
+            childTfs.add(childTf);
+        }
+        return buildSplitInlineShellFragments(ctx, plan, shell, childTfs);
+    }
+
+    private static List<ASTInlineObject> buildSplitInlineShellFragments(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            RenderedGroup shell,
+            List<ResolvedTextFrame> childTfs) {
+        if (ctx == null || ctx.basePath == null || plan == null || shell == null
+                || childTfs == null || childTfs.isEmpty()) {
+            return null;
+        }
+        double[] shellBounds = plan.bounds;
+        double[] textBounds = unionTextFrameBounds(ctx, plan.pageIndex, childTfs, shellBounds);
+        if (!validBounds(shellBounds) || !validBounds(textBounds)) return null;
+
+        List<InlineVisualFragment> visuals = splitCandidateVisualFragments(ctx, plan, shellBounds, textBounds);
+        if (visuals.size() < 2) return null;
+
+        boolean hasBefore = false;
+        boolean hasAfter = false;
+        for (InlineVisualFragment fragment : visuals) {
+            if (fragment.bounds[3] <= textBounds[1] + 0.1) hasBefore = true;
+            if (fragment.bounds[1] >= textBounds[3] - 0.1) hasAfter = true;
+        }
+        if (!hasBefore || !hasAfter) return null;
+
+        try {
+            File pngFile = new File(ctx.basePath, plan.file);
+            if (!pngFile.exists() || !pngFile.isFile()) return null;
+            BufferedImage shellImage = ImageIO.read(pngFile);
+            if (shellImage == null || shellImage.getWidth() <= 2 || shellImage.getHeight() <= 2) return null;
+            BufferedImage sourceCanvas = VisualCropper.knockOutPaperLikeFill(shellImage);
+
+            List<ASTInlineObject> out = new ArrayList<>();
+            boolean insertedText = false;
+            visuals.sort(new java.util.Comparator<InlineVisualFragment>() {
+                public int compare(InlineVisualFragment a, InlineVisualFragment b) {
+                    return Double.compare(a.bounds[1], b.bounds[1]);
+                }
+            });
+
+            for (InlineVisualFragment fragment : visuals) {
+                if (!insertedText && fragment.bounds[1] >= textBounds[1]) {
+                    ASTInlineObject textObj = buildTextOnlyInlineShellFragment(ctx, plan, childTfs, textBounds);
+                    if (textObj == null) return null;
+                    out.add(textObj);
+                    insertedText = true;
+                }
+                ASTInlineObject imageObj = cropInlineShellVisualFragment(ctx, sourceCanvas, shellBounds, fragment);
+                if (imageObj != null) out.add(imageObj);
+            }
+            if (!insertedText) {
+                ASTInlineObject textObj = buildTextOnlyInlineShellFragment(ctx, plan, childTfs, textBounds);
+                if (textObj == null) return null;
+                out.add(textObj);
+            }
+            if (out.size() <= 1) return null;
+            ctx.markRenderedVisualHandled(shell.id());
+            for (ResolvedTextFrame childTf : childTfs) {
+                markInlineShellChildTextPlaced(ctx, childTf);
+            }
+            ctx.recordRenderedDecision(shell, plan, "Phase3.InlineFrameHandler",
+                    "PLACE_INLINE_TEXT_SHELL_FRAGMENTS",
+                    "materialized planned inline text shell as source-ordered visual/text fragments");
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static List<InlineVisualFragment> splitCandidateVisualFragments(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            double[] shellBounds,
+            double[] textBounds) {
+        List<InlineVisualFragment> fragments = new ArrayList<>();
+        if (ctx == null || ctx.resolvedData == null || plan == null || plan.visualSourceObjectIds == null) {
+            return fragments;
+        }
+        Set<Integer> textIds = new HashSet<>();
+        if (plan.ownedTextFrameIds != null) {
+            for (int id : plan.ownedTextFrameIds) textIds.add(id);
+        }
+        for (int sourceId : plan.visualSourceObjectIds) {
+            if (sourceId == plan.domId || textIds.contains(sourceId)) continue;
+            ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(sourceId));
+            if (item == null || item.sourceHidden()) continue;
+            if (!isInlineShellVisualLeaf(item)) continue;
+            double[] b = normalizeBoundsToShellPage(ctx, plan.pageIndex, item, shellBounds);
+            if (!validBounds(b)) continue;
+            double overlapH = Math.max(0.0, Math.min(b[2], shellBounds[2]) - Math.max(b[0], shellBounds[0]));
+            double height = Math.max(0.0, b[2] - b[0]);
+            if (height <= 0.0 || overlapH / height < 0.5) continue;
+            boolean outsideText = b[3] <= textBounds[1] + 0.1 || b[1] >= textBounds[3] - 0.1;
+            if (!outsideText) continue;
+            fragments.add(new InlineVisualFragment(sourceId, b));
+        }
+        return fragments;
+    }
+
+    private static boolean isInlineShellVisualLeaf(ResolvedPageItem item) {
+        if (item == null) return false;
+        String type = item.type();
+        if (type == null) return false;
+        if ("TextFrame".equals(type) || "Group".equals(type)) return false;
+        return true;
+    }
+
+    private static ASTInlineObject buildTextOnlyInlineShellFragment(
+            ResolvedBuildContext ctx,
+            ObjectPlan plan,
+            List<ResolvedTextFrame> childTfs,
+            double[] textBounds) {
+        if (!validBounds(textBounds)) return null;
+        double w = Math.max(0.1, textBounds[3] - textBounds[1]) * ctx.scaleFactor;
+        double h = Math.max(0.1, textBounds[2] - textBounds[0]) * ctx.scaleFactor;
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.INLINE_TEXT_FRAME);
+        obj.sourceId("u" + Integer.toHexString(plan.domId) + "_text");
+        obj.width(CoordinateConverter.pointsToHwpunits(w));
+        obj.height(CoordinateConverter.pointsToHwpunits(h));
+        obj.keepInline(true);
+        obj.noAutoLineWrap(false);
+        obj.verticalJustification(firstChildVerticalJustification(childTfs));
+        if (visibleShellTextFrameCount(childTfs) > 1) {
+            buildCompositeInlineShellParagraph(ctx, childTfs, obj);
+        } else {
+            for (ResolvedTextFrame childTf : childTfs) {
+                if (childTf == null || isOrcCarrierTextFrame(childTf)) continue;
+                buildBadgeParagraph(ctx, childTf, obj);
+            }
+        }
+        return obj.paragraphs() == null || obj.paragraphs().isEmpty() ? null : obj;
+    }
+
+    private static ASTInlineObject cropInlineShellVisualFragment(
+            ResolvedBuildContext ctx,
+            BufferedImage sourceCanvas,
+            double[] shellBounds,
+            InlineVisualFragment fragment) throws Exception {
+        if (ctx == null || sourceCanvas == null || !validBounds(shellBounds) || fragment == null
+                || !validBounds(fragment.bounds)) {
+            return null;
+        }
+        double shellW = Math.max(0.001, shellBounds[3] - shellBounds[1]);
+        double shellH = Math.max(0.001, shellBounds[2] - shellBounds[0]);
+        int x1 = clamp((int) Math.floor((fragment.bounds[1] - shellBounds[1]) / shellW * sourceCanvas.getWidth()) - 1,
+                0, sourceCanvas.getWidth() - 1);
+        int y1 = clamp((int) Math.floor((fragment.bounds[0] - shellBounds[0]) / shellH * sourceCanvas.getHeight()) - 1,
+                0, sourceCanvas.getHeight() - 1);
+        int x2 = clamp((int) Math.ceil((fragment.bounds[3] - shellBounds[1]) / shellW * sourceCanvas.getWidth()) + 1,
+                x1 + 1, sourceCanvas.getWidth());
+        int y2 = clamp((int) Math.ceil((fragment.bounds[2] - shellBounds[0]) / shellH * sourceCanvas.getHeight()) + 1,
+                y1 + 1, sourceCanvas.getHeight());
+        int wPx = Math.max(1, x2 - x1);
+        int hPx = Math.max(1, y2 - y1);
+        BufferedImage cropped = new BufferedImage(wPx, hPx, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = cropped.createGraphics();
+        try {
+            g.drawImage(sourceCanvas, 0, 0, wPx, hPx, x1, y1, x2, y2, null);
+        } finally {
+            g.dispose();
+        }
+        byte[] data = flattenOntoWhite(cropped);
+        ASTInlineObject obj = new ASTInlineObject();
+        obj.kind(ASTInlineObject.ObjectKind.IMAGE);
+        obj.sourceId("u" + Integer.toHexString(fragment.sourceId));
+        obj.imageFormat("png");
+        obj.imageData(data);
+        obj.pixelWidth(wPx);
+        obj.pixelHeight(hPx);
+        obj.width(CoordinateConverter.pointsToHwpunits((fragment.bounds[3] - fragment.bounds[1]) * ctx.scaleFactor));
+        obj.height(CoordinateConverter.pointsToHwpunits((fragment.bounds[2] - fragment.bounds[0]) * ctx.scaleFactor));
+        obj.keepInline(true);
+        obj.boundsX(fragment.bounds[1]);
+        return obj;
+    }
+
+    private static int clamp(int value, int min, int max) {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+
+    private static double[] unionTextFrameBounds(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            List<ResolvedTextFrame> childTfs,
+            double[] shellBounds) {
+        if (childTfs == null || childTfs.isEmpty()) return null;
+        double top = Double.POSITIVE_INFINITY;
+        double left = Double.POSITIVE_INFINITY;
+        double bottom = Double.NEGATIVE_INFINITY;
+        double right = Double.NEGATIVE_INFINITY;
+        for (ResolvedTextFrame tf : childTfs) {
+            if (tf == null) continue;
+            double[] b = normalizeTextFrameBoundsToShellPage(ctx, pageIndex, tf, shellBounds);
+            if (!validBounds(b)) continue;
+            top = Math.min(top, b[0]);
+            left = Math.min(left, b[1]);
+            bottom = Math.max(bottom, b[2]);
+            right = Math.max(right, b[3]);
+        }
+        if (!Double.isFinite(top) || !Double.isFinite(left)
+                || !Double.isFinite(bottom) || !Double.isFinite(right)) {
+            return null;
+        }
+        return new double[] { top, left, bottom, right };
+    }
+
+    private static double[] normalizeTextFrameBoundsToShellPage(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            ResolvedTextFrame tf,
+            double[] shellBounds) {
+        if (tf == null) return null;
+        double[] b = tf.pageRelativeBounds();
+        if (!validBounds(b)) b = tf.geometricBounds();
+        if (!validBounds(b) || !validBounds(shellBounds)) return b;
+        double[] out = new double[] { b[0], b[1], b[2], b[3] };
+        double pageWidth = localPageWidth(ctx, pageIndex);
+        if (pageWidth > 0.0) {
+            double shift = Math.rint((out[1] - shellBounds[1]) / pageWidth) * pageWidth;
+            out[1] -= shift;
+            out[3] -= shift;
+        }
+        double pageHeight = localPageHeight(ctx, pageIndex);
+        if (pageHeight > 0.0) {
+            double shift = Math.rint((out[0] - shellBounds[0]) / pageHeight) * pageHeight;
+            out[0] -= shift;
+            out[2] -= shift;
+        }
+        return out;
+    }
+
+    private static double[] normalizeBoundsToShellPage(
+            ResolvedBuildContext ctx,
+            int pageIndex,
+            ResolvedPageItem item,
+            double[] shellBounds) {
+        double[] b = item.pageRelativeBounds();
+        if (!validBounds(b)) b = item.visibleBounds();
+        if (!validBounds(b)) b = item.geometricBounds();
+        if (!validBounds(b) || !validBounds(shellBounds)) return b;
+        double[] out = new double[] { b[0], b[1], b[2], b[3] };
+        double pageWidth = localPageWidth(ctx, pageIndex);
+        if (pageWidth > 0.0) {
+            double shift = Math.rint((out[1] - shellBounds[1]) / pageWidth) * pageWidth;
+            out[1] -= shift;
+            out[3] -= shift;
+        }
+        double pageHeight = localPageHeight(ctx, pageIndex);
+        if (pageHeight > 0.0) {
+            double shift = Math.rint((out[0] - shellBounds[0]) / pageHeight) * pageHeight;
+            out[0] -= shift;
+            out[2] -= shift;
+        }
+        return out;
+    }
+
+    private static final class InlineVisualFragment {
+        final int sourceId;
+        final double[] bounds;
+
+        InlineVisualFragment(int sourceId, double[] bounds) {
+            this.sourceId = sourceId;
+            this.bounds = bounds;
+        }
+    }
+
+    public static boolean hasInlineTextShellForAnchor(
+            ResolvedBuildContext ctx,
+            int anchoredObjectId) {
+        if (ctx == null || ctx.resolvedData == null || anchoredObjectId < 0) return false;
+        return findInlineTextShellOwnerPlanForAnchor(ctx, anchoredObjectId) != null;
+    }
+
+    public static ASTInlineObject loadPlannedInlineTextShellForOwnedTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameDomId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.ownershipPlans == null || textFrameDomId < 0) {
+            return null;
+        }
+        ObjectPlan plan = findInlineTextShellOwnerPlanForOwnedTextFrame(ctx, textFrameDomId);
+        if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) return null;
+        RenderedGroup shell = findRenderedGroupForPlan(ctx, plan, plan.domId);
+        if (shell == null) return null;
+
+        List<ResolvedTextFrame> childTfs = new ArrayList<>();
+        for (int childId : plan.ownedTextFrameIds) {
+            ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(String.valueOf(childId));
+            if (childTf == null) return null;
+            childTfs.add(childTf);
+        }
+        ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(shell.id()));
+        return buildInlineShellObject(ctx, shell.id(), anchorItem, childTfs, shell);
+    }
+
+    public static List<ASTInlineObject> loadPlannedInlineTextShellFragmentsForOwnedTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameDomId) {
+        if (ctx == null || ctx.resolvedData == null || ctx.ownershipPlans == null || textFrameDomId < 0) {
+            return null;
+        }
+        ObjectPlan plan = findInlineTextShellOwnerPlanForOwnedTextFrame(ctx, textFrameDomId);
+        if (plan == null || plan.ownedTextFrameIds == null || plan.ownedTextFrameIds.length == 0) {
+            return null;
+        }
+        RenderedGroup shell = findRenderedGroupForPlan(ctx, plan, plan.domId);
+        if (shell == null || plan.file == null || plan.file.isEmpty()
+                || plan.bounds == null || plan.bounds.length < 4) {
+            return null;
+        }
+
+        List<ResolvedTextFrame> childTfs = new ArrayList<>();
+        for (int childId : plan.ownedTextFrameIds) {
+            ResolvedTextFrame childTf = ctx.resolvedData.getTextFrame(String.valueOf(childId));
+            if (childTf == null) return null;
+            childTfs.add(childTf);
+        }
+        return buildSplitInlineShellFragments(ctx, plan, shell, childTfs);
+    }
+
+    private static ObjectPlan findInlineTextShellOwnerPlanForOwnedTextFrame(
+            ResolvedBuildContext ctx,
+            int textFrameDomId) {
+        if (ctx == null || ctx.ownershipPlans == null || textFrameDomId < 0) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+            if (!containsInt(plan.ownedTextFrameIds, textFrameDomId)) continue;
+            RenderedGroup rendered = findRenderedGroupForPlan(ctx, plan, plan.domId);
+            if (isExecutableTextlessShellCarrier(plan, rendered)) {
+                return plan;
+            }
+        }
+        return null;
     }
 
     private static ObjectPlan findInlineTextShellOwnerPlanForAnchor(
@@ -3651,6 +4185,10 @@ public class InlineFrameHandler {
     }
 
     public static java.util.List<ASTInlineObject> buildChildEditableBoxes(ResolvedBuildContext ctx, int groupId) {
+        if (hasInlineTextShellForAnchor(ctx, groupId)
+                || isCoveredByInlineTextShellSourceBundle(ctx, groupId)) {
+            return java.util.Collections.emptyList();
+        }
         if (shouldUsePlannedInlinePngWithSeparateHwpxText(ctx, groupId)) {
             return java.util.Collections.emptyList();
         }
@@ -3667,6 +4205,7 @@ public class InlineFrameHandler {
                 ctx.resolvedData, groupId)
                 && hasPlannedFloatingShellForSemanticInlineGroup(ctx, groupId);
         for (ResolvedTextFrame tf : ctx.resolvedData.textFrames()) {
+            if (isTextFrameCoveredByInlineTextShell(ctx, tf.id())) continue;
             ResolvedPageItem pi = ctx.resolvedData.getPageItem(tf.id());
             if (pi == null) continue;
             boolean directChild = groupIdStr.equals(pi.parentId());
@@ -3693,11 +4232,12 @@ public class InlineFrameHandler {
         }
 
         for (ResolvedTextFrame tf : editableChildren) {
+            if (isTextFrameCoveredByInlineTextShell(ctx, tf.id())) continue;
             RenderedGroup textFrameShell = findTextHiddenInlineShellForTextFrame(ctx, tf.id());
             RenderedGroup inlineBackdrop = textFrameShell != null
                     ? textFrameShell
                     : (editableChildren.size() == 1 ? findInlineEditableGroupBackdrop(ctx, groupId) : null);
-            byte[] inlineBackdropData = loadRenderedPngBytes(ctx, inlineBackdrop);
+            byte[] inlineBackdropData = loadInlineTextShellImageBytes(ctx, inlineBackdrop, true);
             double[] inlineBackdropBounds = inlineBackdrop != null ? inlineBackdrop.bounds() : null;
             String vt = tf.frameVisibleText();
             String cleaned = vt.replace("￼", "").replace("\r", "").replace("\n", "").trim();
@@ -3883,12 +4423,6 @@ public class InlineFrameHandler {
                     && containsInt(plan.ownedTextFrameIds, tfDomId)) {
                 return rg;
             }
-            if (!rg.hasEditableTextHiddenFromPng()) continue;
-            String[] editableIds = rg.editableTextFrameIds();
-            if (editableIds == null) continue;
-            for (String editableId : editableIds) {
-                if (textFrameId.equals(editableId)) return rg;
-            }
         }
         return null;
     }
@@ -3930,6 +4464,22 @@ public class InlineFrameHandler {
             File pngFile = new File(ctx.basePath, rg.file());
             if (!pngFile.exists() || !pngFile.isFile()) return null;
             return java.nio.file.Files.readAllBytes(pngFile.toPath());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static byte[] loadInlineTextShellImageBytes(
+            ResolvedBuildContext ctx,
+            RenderedGroup rg,
+            boolean preserveSourceCanvas) {
+        if (ctx == null || ctx.basePath == null || rg == null || rg.file() == null) return null;
+        try {
+            File pngFile = new File(ctx.basePath, rg.file());
+            if (!pngFile.exists() || !pngFile.isFile()) return null;
+            BufferedImage img = ImageIO.read(pngFile);
+            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) return null;
+            return prepareInlineTextShellImageData(img, preserveSourceCanvas);
         } catch (Exception e) {
             return null;
         }
@@ -3984,6 +4534,42 @@ public class InlineFrameHandler {
             try { tfDomId = Integer.parseInt(tf.id()); }
             catch (NumberFormatException e) { continue; }
             if (ctx.ownershipPlanPlacesInlineHwpxText(tfDomId)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isTextFrameCoveredByInlineTextShell(
+            ResolvedBuildContext ctx,
+            String textFrameId) {
+        if (textFrameId == null) return false;
+        try {
+            return isCoveredByInlineTextShellSourceBundle(ctx, Integer.parseInt(textFrameId));
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private static boolean isCoveredByInlineTextShellSourceBundle(
+            ResolvedBuildContext ctx,
+            int sourceObjectId) {
+        if (ctx == null || ctx.resolvedData == null || sourceObjectId < 0
+                || ctx.resolvedData.allRenderedFloatingItems() == null) {
+            return false;
+        }
+        for (RenderedGroup rg : ctx.resolvedData.allRenderedFloatingItems()) {
+            if (rg == null || !rg.hasEditableTextHiddenFromPng()) continue;
+            if (!"hwpx_tf".equals(rg.textOwner())) continue;
+            if (!"indesign_png".equals(rg.visualOwner())) continue;
+            ResolvedPageItem anchorItem = ctx.resolvedData.getPageItem(String.valueOf(rg.id()));
+            boolean inline = isInlineRenderedGroupType(rg)
+                    || (anchorItem != null && anchorItem.isInline());
+            if (!inline) continue;
+            if (containsInt(rg.sourceObjectIds(), sourceObjectId)
+                    || containsInt(rg.atomicSourceObjectIds(), sourceObjectId)
+                    || containsInt(rg.atomicVisualSourceObjectIds(), sourceObjectId)
+                    || containsStringId(rg.editableTextFrameIds(), String.valueOf(sourceObjectId))) {
+                return true;
+            }
         }
         return false;
     }

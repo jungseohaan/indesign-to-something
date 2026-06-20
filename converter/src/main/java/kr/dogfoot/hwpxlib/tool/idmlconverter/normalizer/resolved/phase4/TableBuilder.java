@@ -7,7 +7,6 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineItem;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTInlineObject;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTParagraph;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTSection;
-import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTabStop;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTable;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableCell;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.ASTTableRow;
@@ -24,6 +23,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildCo
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryFlowAssembler;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.GroupedFlowStackPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TableFrameOwnershipPolicy;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.StoryConverter;
@@ -506,228 +506,16 @@ public final class TableBuilder {
                 null, null, null,
                 ctx != null ? ctx.resolvedData : null,
                 ctx != null ? ctx.styleResolver : null,
-                cellCtx == null ? null : (idmlCell -> StoryFlowAssembler.buildCellFlow(cellCtx, idmlCell)));
-        Map<String, List<ASTParagraph>> sourceTextByCell = snapshotVisibleTextParagraphsByCell(astTable);
+                cellCtx == null ? null : ((table, idmlCell) -> StoryFlowAssembler.buildCellFlow(cellCtx, table, idmlCell)));
         restoreNestedTextFrameTables(ctx, astTable, idmlTable);
-        restoreAnchorOnlyEditableInlineGraphics(ctx, astTable, idmlTable);
         promoteNestedTextFrameParagraphsInCells(ctx, astTable);
 
-        ASTTable expandedTable = tryExpandInlineGroupColumns(ctx, astTable, idmlTable);
-        ASTTable result = expandedTable != null ? expandedTable : astTable;
-        restoreLostCellTextFromSnapshot(result, sourceTextByCell);
+        ASTTable result = astTable;
         completeVisibleTableOuterBorder(result);
         if (NumberedSideHeadTableNormalizer.normalizePlanned(ctx, result) && ctx != null && ctx.debugAst) {
             result.debugOrNew().note("side-head flow table normalized from Stage 1 plan");
         }
         return result;
-    }
-
-    private static Map<String, List<ASTParagraph>> snapshotVisibleTextParagraphsByCell(ASTTable table) {
-        Map<String, List<ASTParagraph>> snapshot = new HashMap<>();
-        if (table == null || table.rows() == null) return snapshot;
-        for (ASTTableRow row : table.rows()) {
-            if (row == null || row.cells() == null) continue;
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null || cell.paragraphs() == null) continue;
-                String text = normalizedCellText(cell);
-                if (text.isEmpty()) continue;
-                List<ASTParagraph> paragraphs = copyTextParagraphs(cell.paragraphs());
-                if (!paragraphs.isEmpty()) {
-                    snapshot.put(cellKey(cell.rowIndex(), cell.columnIndex()), paragraphs);
-                }
-            }
-        }
-        return snapshot;
-    }
-
-    private static void restoreLostCellTextFromSnapshot(
-            ASTTable table,
-            Map<String, List<ASTParagraph>> sourceTextByCell) {
-        if (table == null || table.rows() == null || sourceTextByCell == null || sourceTextByCell.isEmpty()) {
-            return;
-        }
-        for (ASTTableRow row : table.rows()) {
-            if (row == null || row.cells() == null) continue;
-            for (ASTTableCell cell : row.cells()) {
-                if (cell == null) continue;
-                List<ASTParagraph> sourceParagraphs =
-                        sourceTextByCell.get(cellKey(cell.rowIndex(), cell.columnIndex()));
-                if (sourceParagraphs == null || sourceParagraphs.isEmpty()) continue;
-                String sourceText = normalizedParagraphsText(sourceParagraphs);
-                if (sourceText.isEmpty()) continue;
-                String currentText = normalizedCellText(cell);
-                if (currentText.contains(sourceText)) continue;
-
-                List<ASTParagraph> restored = copyTextParagraphs(sourceParagraphs);
-                if (!restored.isEmpty()) {
-                    reinsertInlineObjectsByParagraphText(cell.paragraphs(), restored);
-                    cell.paragraphs().clear();
-                    cell.paragraphs().addAll(restored);
-                }
-            }
-        }
-    }
-
-    private static String cellKey(int rowIndex, int columnIndex) {
-        return rowIndex + ":" + columnIndex;
-    }
-
-    /**
-     * 원래 셀 단락들의 인라인 객체(배지/라벨 박스 등)를, 텍스트가 일치하는 복원 단락에 재배치한다.
-     * 모든 박스를 첫 단락에 몰아넣던 기존 방식은 다단락 셀에서 라벨을 엉뚱한 단락(예: 교사 지도문)으로
-     * 옮겨 "예시 답안" 곡선 라벨이 답안과 분리되는 버그를 유발했다 → 단락별 텍스트 매칭으로 보존.
-     */
-    private static void reinsertInlineObjectsByParagraphText(
-            List<ASTParagraph> originalParagraphs, List<ASTParagraph> restored) {
-        if (originalParagraphs == null || restored == null || restored.isEmpty()) return;
-        boolean[] used = new boolean[restored.size()];
-        List<ASTInlineItem> unmatched = new ArrayList<>();
-        for (ASTParagraph origPara : originalParagraphs) {
-            if (origPara == null || origPara.items() == null) continue;
-            List<ASTInlineItem> boxes = new ArrayList<>();
-            for (ASTInlineItem item : origPara.items()) {
-                if (item != null && !(item instanceof ASTTextRun)) boxes.add(item);
-            }
-            if (boxes.isEmpty()) continue;
-            String origText = normalizedParagraphText(copyParagraphTextOnly(origPara));
-            int target = -1;
-            if (!origText.isEmpty()) {
-                for (int r = 0; r < restored.size(); r++) {
-                    if (used[r]) continue;
-                    if (origText.equals(normalizedParagraphText(restored.get(r)))) { target = r; break; }
-                }
-            }
-            if (target >= 0) {
-                used[target] = true;
-                restored.get(target).items().addAll(0, boxes);
-            } else {
-                unmatched.addAll(boxes); // 텍스트 없는 박스 단독 단락 등 → 첫 단락 폴백
-            }
-        }
-        if (!unmatched.isEmpty()) restored.get(0).items().addAll(0, unmatched);
-    }
-
-    private static List<ASTParagraph> copyTextParagraphs(List<ASTParagraph> paragraphs) {
-        List<ASTParagraph> copies = new ArrayList<>();
-        if (paragraphs == null) return copies;
-        for (ASTParagraph paragraph : paragraphs) {
-            ASTParagraph copy = copyParagraphTextOnly(paragraph);
-            if (!normalizedParagraphText(copy).isEmpty()) {
-                copies.add(copy);
-            }
-        }
-        return copies;
-    }
-
-    private static ASTParagraph copyParagraphTextOnly(ASTParagraph source) {
-        ASTParagraph copy = new ASTParagraph();
-        if (source == null) return copy;
-        copyParagraphProperties(source, copy);
-        if (source.items() != null) {
-            for (ASTInlineItem item : source.items()) {
-                if (item instanceof ASTTextRun) {
-                    ASTTextRun run = (ASTTextRun) item;
-                    if (run.text() != null && !normalizeComparableText(run.text()).isEmpty()) {
-                        copy.addItem(copyTextRun(run, run.text()));
-                    }
-                }
-            }
-        }
-        return copy;
-    }
-
-    private static void copyParagraphProperties(ASTParagraph source, ASTParagraph copy) {
-        copy.paragraphStyleRef(source.paragraphStyleRef());
-        copy.alignment(source.alignment());
-        copy.firstLineIndent(source.firstLineIndent());
-        copy.leftMargin(source.leftMargin());
-        copy.rightMargin(source.rightMargin());
-        copy.spaceBefore(source.spaceBefore());
-        copy.spaceAfter(source.spaceAfter());
-        copy.lineSpacing(source.lineSpacing());
-        copy.lineSpacingType(source.lineSpacingType());
-        copy.letterSpacing(source.letterSpacing());
-        copy.shadingOn(source.shadingOn());
-        copy.shadingColor(source.shadingColor());
-        copy.shadingTint(source.shadingTint());
-        copy.shadingLeftOffset(source.shadingLeftOffset());
-        copy.shadingRightOffset(source.shadingRightOffset());
-        copy.shadingTopOffset(source.shadingTopOffset());
-        copy.shadingBottomOffset(source.shadingBottomOffset());
-        copy.yOffsetInFrame(source.yOffsetInFrame());
-        copy.pageX(source.pageX());
-        copy.pageY(source.pageY());
-        copy.pageWidth(source.pageWidth());
-        copy.pageHeight(source.pageHeight());
-        copy.columnBreakAfter(source.columnBreakAfter());
-        copy.keepWithNext(source.keepWithNext());
-        copy.keepLinesTogether(source.keepLinesTogether());
-        copy.pageBreakBefore(source.pageBreakBefore());
-        copy.indentToHerePosition(source.indentToHerePosition());
-        copy.pendingUnderlineColor(source.pendingUnderlineColor());
-        copy.bulletParagraph(source.bulletParagraph());
-        copy.dropLeadingSmallInlineObjects(source.dropLeadingSmallInlineObjects());
-        if (source.tabStops() != null) {
-            for (ASTTabStop tabStop : source.tabStops()) {
-                if (tabStop != null) {
-                    copy.addTabStop(new ASTTabStop(
-                            tabStop.position(), tabStop.alignment(), tabStop.leader()));
-                }
-            }
-        }
-    }
-
-    private static ASTTextRun copyTextRun(ASTTextRun source, String text) {
-        ASTTextRun copy = new ASTTextRun();
-        copy.characterStyleRef(source.characterStyleRef());
-        copy.text(text);
-        copy.fontFamily(source.fontFamily());
-        copy.fontStyle(source.fontStyle());
-        copy.fontSizeHwpunits(source.fontSizeHwpunits());
-        copy.textColor(source.textColor());
-        copy.shadeColor(source.shadeColor());
-        copy.letterSpacing(source.letterSpacing());
-        copy.subscript(source.subscript());
-        copy.superscript(source.superscript());
-        copy.grepMathFont(source.grepMathFont());
-        copy.underline(source.underline());
-        copy.underlineColor(source.underlineColor());
-        copy.underlineShape(source.underlineShape());
-        copy.strikeThrough(source.strikeThrough());
-        copy.horizontalScale(source.horizontalScale());
-        copy.verticalScale(source.verticalScale());
-        copy.baselineShift(source.baselineShift());
-        copy.grepStyleApplied(source.grepStyleApplied());
-        return copy;
-    }
-
-    private static String normalizedCellText(ASTTableCell cell) {
-        if (cell == null) return "";
-        return normalizedParagraphsText(cell.paragraphs());
-    }
-
-    private static String normalizedParagraphsText(List<ASTParagraph> paragraphs) {
-        if (paragraphs == null) return "";
-        StringBuilder sb = new StringBuilder();
-        for (ASTParagraph paragraph : paragraphs) {
-            sb.append(normalizedParagraphText(paragraph));
-        }
-        return sb.toString();
-    }
-
-    private static String normalizeComparableText(String text) {
-        if (text == null || text.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder(text.length());
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
-            if (ch == '\uFFFC' || ch == '\u0016' || ch == '\u0018'
-                    || ch == '\u0003' || ch == '\u0007' || ch == '\u0008') {
-                continue;
-            }
-            if (Character.isWhitespace(ch) || Character.isISOControl(ch)) continue;
-            sb.append(ch);
-        }
-        return sb.toString();
     }
 
     private static List<TablePlacement> splitSpreadWideTable(
@@ -1230,10 +1018,9 @@ public final class TableBuilder {
                         ASTTable nestedAst = ASTTableConverter.convertTableSimple(
                                 nestedTable, 0, 0, 0, null, null, null,
                                 ctx.resolvedData, ctx.styleResolver,
-                                nestedCtx == null ? null : (nestedCell -> StoryFlowAssembler.buildCellFlow(nestedCtx, nestedCell)));
+                                nestedCtx == null ? null : ((table, nestedCell) -> StoryFlowAssembler.buildCellFlow(nestedCtx, table, nestedCell)));
                         if (nestedAst == null) continue;
                         restoreNestedTextFrameTables(ctx, nestedAst, nestedTable);
-                        restoreAnchorOnlyEditableInlineGraphics(ctx, nestedAst, nestedTable);
                         ASTParagraph paragraph = new ASTParagraph();
                         paragraph.inlineTable(nestedAst);
                         astCell.addParagraph(paragraph);
@@ -1261,6 +1048,7 @@ public final class TableBuilder {
                 for (int i = 0; i < paragraphs.size(); i++) {
                     ASTInlineObject nested = firstNestedTextFrame(paragraphs.get(i));
                     if (nested == null || nested.paragraphs() == null || nested.paragraphs().isEmpty()) continue;
+                    if (isPlannedInlineTextShellObject(ctx, nested)) continue;
                     List<ASTParagraph> authoritative = authoritativeParagraphsForNestedTextFrame(ctx, nested);
                     List<ASTParagraph> sourceParagraphs =
                             authoritative != null && !authoritative.isEmpty() ? authoritative : nested.paragraphs();
@@ -1273,6 +1061,49 @@ public final class TableBuilder {
                     }
                 }
             }
+        }
+    }
+
+    private static boolean isPlannedInlineTextShellObject(ResolvedBuildContext ctx, ASTInlineObject obj) {
+        if (ctx == null || obj == null || obj.sourceId() == null) return false;
+        Integer domId = parseSourceObjectId(obj.sourceId());
+        if (domId == null) return false;
+        if (ctx.ownershipPlans == null) return false;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.placement != Placement.INLINE) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.domId == domId
+                    || containsInt(plan.sourceObjectIds, domId)
+                    || containsInt(plan.visualSourceObjectIds, domId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsInt(int[] values, int target) {
+        if (values == null) return false;
+        for (int value : values) {
+            if (value == target) return true;
+        }
+        return false;
+    }
+
+    private static Integer parseSourceObjectId(String sourceId) {
+        if (sourceId == null || sourceId.isEmpty()) return null;
+        String value = sourceId;
+        int suffix = value.indexOf('#');
+        if (suffix >= 0) value = value.substring(0, suffix);
+        if (value.startsWith("child_")) value = value.substring("child_".length());
+        if (value.startsWith("page_obj_")) value = value.substring("page_obj_".length());
+        try {
+            if (value.startsWith("u") || value.startsWith("U")) {
+                return Integer.parseInt(value.substring(1), 16);
+            }
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 
@@ -1405,267 +1236,6 @@ public final class TableBuilder {
             if (cell.columnIndex() == columnIndex) return cell;
         }
         return null;
-    }
-
-    private static void restoreAnchorOnlyEditableInlineGraphics(
-            ResolvedBuildContext ctx,
-            ASTTable astTable,
-            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable) {
-        if (ctx == null || astTable == null || idmlTable == null) return;
-        if (astTable.rows() == null || idmlTable.rows() == null) return;
-
-        int rowCount = Math.min(astTable.rows().size(), idmlTable.rows().size());
-        for (int ri = 0; ri < rowCount; ri++) {
-            ASTTableRow astRow = astTable.rows().get(ri);
-            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow idmlRow = idmlTable.rows().get(ri);
-            if (astRow == null || idmlRow == null || astRow.cells() == null || idmlRow.cells() == null) continue;
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell : idmlRow.cells()) {
-                ASTTableCell astCell = findAstCell(astRow, idmlCell.columnIndex());
-                if (astCell == null || idmlCell == null || astCell.paragraphs() == null || idmlCell.paragraphs() == null) {
-                    continue;
-                }
-                int paraCount = Math.min(astCell.paragraphs().size(), idmlCell.paragraphs().size());
-                for (int pi = 0; pi < paraCount; pi++) {
-                    IDMLParagraph idmlPara = idmlCell.paragraphs().get(pi);
-                    int groupId = anchorOnlyGraphicDomId(idmlPara);
-                    if (groupId <= 0) continue;
-                    List<ASTInlineObject> boxes =
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler
-                                    .buildChildEditableBoxes(ctx, groupId);
-                    if (boxes == null || boxes.isEmpty()) continue;
-
-                    ASTParagraph astPara = astCell.paragraphs().get(pi);
-                    astPara.items().clear();
-                    for (ASTInlineObject box : boxes) {
-                        astPara.addItem(box);
-                    }
-                }
-            }
-        }
-    }
-
-    private static int anchorOnlyGraphicDomId(IDMLParagraph para) {
-        if (para == null || para.characterRuns() == null) return -1;
-        int groupId = -1;
-        int anchorCount = 0;
-        for (IDMLCharacterRun run : para.characterRuns()) {
-            if (run == null) continue;
-            String content = run.content();
-            if (content != null) {
-                String visible = content.replace("\uFFFC", "").replace("\r", "").replace("\n", "").trim();
-                if (!visible.isEmpty()) return -1;
-            }
-            if (run.inlineAnchors() == null || run.inlineAnchors().isEmpty()) continue;
-            for (IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
-                if (anchor == null) continue;
-                if (anchor.type() != IDMLCharacterRun.InlineAnchorType.GRAPHIC) return -1;
-                if (run.inlineGraphics() == null || anchor.index() < 0 || anchor.index() >= run.inlineGraphics().size()) {
-                    return -1;
-                }
-                IDMLCharacterRun.InlineGraphic graphic = run.inlineGraphics().get(anchor.index());
-                int parsed = parseInlineGraphicDomId(graphic);
-                if (parsed <= 0) return -1;
-                if (groupId > 0 && groupId != parsed) return -1;
-                groupId = parsed;
-                anchorCount++;
-            }
-        }
-        return anchorCount == 1 ? groupId : -1;
-    }
-
-    private static int parseInlineGraphicDomId(IDMLCharacterRun.InlineGraphic graphic) {
-        if (graphic == null || graphic.selfId() == null) return -1;
-        String id = graphic.selfId();
-        if (id.startsWith("u") || id.startsWith("U")) id = id.substring(1);
-        try {
-            return Integer.parseInt(id, 16);
-        } catch (NumberFormatException e) {
-            try {
-                return Integer.parseInt(id);
-            } catch (NumberFormatException ignored) {
-                return -1;
-            }
-        }
-    }
-
-    /**
-     * 테이블 셀에 포함된 인라인 그룹(tryInlineGroupAsBoxList가 [leftITF, rightITF]를 반환)이
-     * 있으면 해당 컬럼을 2개로 분할하여 3컬럼 테이블로 재구성한다.
-     * 처리된 그룹 ID는 TEXT_BLOCK_PLACED로 등록하여 Stage 3 visual 중복 배치를 방지한다.
-     *
-     * @return 재구성된 ASTTable, 또는 확장 불필요 시 null
-     */
-    private static ASTTable tryExpandInlineGroupColumns(
-            ResolvedBuildContext ctx,
-            ASTTable original,
-            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTable idmlTable) {
-
-        if (ctx == null || ctx.resolvedData == null) return null;
-
-        // (rowIdx_colIdx) → [leftITF, rightITF]
-        Map<String, List<ASTInlineObject>> expansionMap = new HashMap<>();
-        Set<Integer> expandColIndices = new HashSet<>();
-        Set<Integer> suppressGroupIds = new HashSet<>();
-        long firstLeftW = 0, firstRightW = 0;
-
-        int rowIdx = 0;
-        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableRow idmlRow : idmlTable.rows()) {
-            int colIdx = 0;
-            for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLTableCell idmlCell : idmlRow.cells()) {
-                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLParagraph para : idmlCell.paragraphs()) {
-                    for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun run : para.characterRuns()) {
-                        for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineAnchor anchor : run.inlineAnchors()) {
-                            if (anchor.type() != kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineAnchorType.GRAPHIC) continue;
-                            java.util.List<kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineGraphic> igs = run.inlineGraphics();
-                            if (anchor.index() >= igs.size()) continue;
-                            kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun.InlineGraphic ig = igs.get(anchor.index());
-                            if (ig == null || ig.selfId() == null) continue;
-                            String hexId = ig.selfId().startsWith("u") ? ig.selfId().substring(1) : ig.selfId();
-                            int domId;
-                            try { domId = Integer.parseInt(hexId, 16); } catch (NumberFormatException e) { continue; }
-
-                            List<ASTInlineObject> boxList =
-                                kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.phase3.InlineFrameHandler.tryInlineGroupAsBoxList(ctx, domId);
-                            if (boxList != null && boxList.size() >= 2) {
-                                // 인라인 그룹이 텍스트 흐름 안에 박혀있는 경우 (앞뒤에 텍스트 있음)
-                                // → 테이블 컬럼 분할 대상이 아님. 단독 셀 콘텐츠일 때만 확장.
-                                boolean hasTextBesideAnchor = false;
-                                for (kr.dogfoot.hwpxlib.tool.idmlconverter.idml.IDMLCharacterRun otherRun : para.characterRuns()) {
-                                    String ct = otherRun.content();
-                                    if (ct != null && !ct.trim().isEmpty()) {
-                                        hasTextBesideAnchor = true;
-                                        break;
-                                    }
-                                }
-                                if (hasTextBesideAnchor) continue;
-
-                                String key = rowIdx + "_" + colIdx;
-                                if (!expansionMap.containsKey(key)) {
-                                    expansionMap.put(key, boxList);
-                                    expandColIndices.add(colIdx);
-                                    suppressGroupIds.add(domId);
-                                    if (firstLeftW == 0) {
-                                        firstLeftW = boxList.get(0).width();
-                                        firstRightW = boxList.get(1).width();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                colIdx++;
-            }
-            rowIdx++;
-        }
-
-        if (expansionMap.isEmpty()) return null;
-
-        // Stage 3 visual 중복 배치 방지: 부모 그룹 ID + 같은 파일을 공유하는 TF ID + 자손 TF ID 모두 등록
-        markAllDescendantsVisualHandled(ctx, suppressGroupIds);
-
-        // 확장 컬럼을 2개로 분할한 새 컬럼 너비 목록
-        List<Long> origColWidths = original.columnWidths();
-        List<Long> newColWidths = new java.util.ArrayList<>();
-        Map<Integer, Integer> oldToNewCol = new HashMap<>();
-        int nc = 0;
-        for (int c = 0; c < origColWidths.size(); c++) {
-            oldToNewCol.put(c, nc);
-            if (expandColIndices.contains(c)) {
-                newColWidths.add(firstLeftW);
-                newColWidths.add(firstRightW);
-                nc += 2;
-            } else {
-                newColWidths.add(origColWidths.get(c));
-                nc++;
-            }
-        }
-
-        ASTTable newTable = new ASTTable();
-        newTable.sourceId(original.sourceId());
-        newTable.x(original.x());
-        newTable.y(original.y());
-        newTable.zOrder(original.zOrder());
-        newTable.flowWithText(original.flowWithText());
-        newTable.anchoredFlowWithText(original.anchoredFlowWithText());
-        newTable.fixedOuterBounds(original.fixedOuterBounds());
-        newTable.appliedTableStyle(original.appliedTableStyle());
-        newTable.borderColor(original.borderColor());
-        newTable.borderWidth(original.borderWidth());
-        for (long cw : newColWidths) newTable.addColumnWidth(cw);
-        newTable.colCount(newColWidths.size());
-
-        int ri = 0;
-        for (ASTTableRow origRow : original.rows()) {
-            ASTTableRow newRow = new ASTTableRow();
-            newRow.rowIndex(ri);
-            newRow.rowHeight(origRow.rowHeight());
-            newRow.autoGrow(origRow.autoGrow());
-
-            for (ASTTableCell origCell : origRow.cells()) {
-                int oldCol = origCell.columnIndex();
-                int newBaseCol = oldToNewCol.getOrDefault(oldCol, oldCol);
-                String key = ri + "_" + oldCol;
-                List<ASTInlineObject> boxList = expansionMap.get(key);
-
-                if (boxList != null) {
-                    // 확장 셀: leftITF 셀 + rightITF 셀
-                    ASTInlineObject leftITF = boxList.get(0);
-                    leftITF.height(origRow.rowHeight());
-
-                    ASTTableCell leftCell = cloneCellMeta(origCell);
-                    leftCell.rowIndex(ri);
-                    leftCell.columnIndex(newBaseCol);
-                    leftCell.width(newColWidths.get(newBaseCol));
-                    leftCell.height(origCell.height());
-                    ASTParagraph leftPara = new ASTParagraph();
-                    leftPara.addItem(leftITF);
-                    leftCell.addParagraph(leftPara);
-                    newRow.addCell(leftCell);
-
-                    ASTInlineObject rightITF = boxList.get(1);
-                    rightITF.height(origRow.rowHeight());
-
-                    ASTTableCell rightCell = cloneCellMeta(origCell);
-                    rightCell.rowIndex(ri);
-                    rightCell.columnIndex(newBaseCol + 1);
-                    rightCell.width(newColWidths.get(newBaseCol + 1));
-                    rightCell.height(origCell.height());
-                    ASTParagraph rightPara = new ASTParagraph();
-                    rightPara.addItem(rightITF);
-                    rightCell.addParagraph(rightPara);
-                    newRow.addCell(rightCell);
-                } else {
-                    // 일반 셀: 복사 후 columnIndex 갱신
-                    ASTTableCell newCell = cloneCellFull(origCell);
-                    newCell.rowIndex(ri);
-                    newCell.columnIndex(newBaseCol);
-                    // 확장 컬럼이지만 이 행에 inline group 없음 → 두 분할 열을 colSpan=2로 병합
-                    if (expandColIndices.contains(oldCol)) {
-                        long mergedW = 0;
-                        if (newBaseCol < newColWidths.size()) mergedW += newColWidths.get(newBaseCol);
-                        if (newBaseCol + 1 < newColWidths.size()) mergedW += newColWidths.get(newBaseCol + 1);
-                        newCell.width(mergedW);
-                        newCell.columnSpan(2);
-                    } else {
-                        if (newBaseCol < newColWidths.size()) newCell.width(newColWidths.get(newBaseCol));
-                    }
-                    newRow.addCell(newCell);
-                }
-            }
-
-            newTable.addRow(newRow);
-            ri++;
-        }
-        newTable.rowCount(ri);
-
-        long totalW = 0;
-        for (long cw : newColWidths) totalW += cw;
-        newTable.width(totalW);
-        long totalH = 0;
-        for (ASTTableRow row : newTable.rows()) totalH += row.rowHeight();
-        newTable.height(totalH);
-
-        return newTable;
     }
 
     /** 셀 메타데이터(테두리/여백/색상)만 복사, 내용(단락) 제외 */

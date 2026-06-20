@@ -287,6 +287,22 @@ public final class StoryConverter {
             // 단락 분배: paragraphStart/End에 따라 각 TextFrameBlock에 할당
             stepStart = System.nanoTime();
             ParagraphDistributor.distributeParagraphs(ctx, paragraphs, blocks, storyId);
+            if (System.getProperty("idml.debug.story") != null
+                    && System.getProperty("idml.debug.story").equals(storyId)) {
+                System.err.println("[StoryConverter.DEBUG] story=" + storyId
+                        + " paragraphs=" + paragraphs.size()
+                        + " blocks=" + blocks.size());
+                for (ASTTextFrameBlock b : blocks) {
+                    System.err.println("[StoryConverter.DEBUG] block source=" + b.sourceId()
+                            + " inlineToFloating=" + b.inlineToFloating()
+                            + " frameVisibleTextLength=" + b.frameVisibleTextLength()
+                            + " assignedParas=" + b.paragraphs().size());
+                    for (ASTParagraph p : b.paragraphs()) {
+                        System.err.println("[StoryConverter.DEBUG] paraText="
+                                + ParagraphTextHelpers.getParaPlainText(p));
+                    }
+                }
+            }
             insertAnchoredTables(ctx, blocks);
             annotateParagraphPageBounds(ctx, blocks);
             applyComposedInkFontCaps(ctx, blocks);
@@ -2692,10 +2708,16 @@ public final class StoryConverter {
                             if (!hasVisibleText(para)) {
                                 firstTextRunAfterLeadingAnchor = true;
                             }
-                            ASTInlineObject plannedAnchorTextShell =
+                            List<ASTInlineObject> plannedAnchorTextShellFragments2 =
+                                    InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, anchoredId);
+                            if (plannedAnchorTextShellFragments2 != null && !plannedAnchorTextShellFragments2.isEmpty()) {
+                                for (ASTInlineObject fragment : plannedAnchorTextShellFragments2) para.addItem(fragment);
+                                continue;
+                            }
+                            ASTInlineObject plannedAnchorTextShell2 =
                                     InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchoredId);
-                            if (plannedAnchorTextShell != null) {
-                                para.addItem(plannedAnchorTextShell);
+                            if (plannedAnchorTextShell2 != null) {
+                                para.addItem(plannedAnchorTextShell2);
                                 continue;
                             }
                             ASTInlineObject earlyGroupShell =
@@ -2737,6 +2759,18 @@ public final class StoryConverter {
                             }
                             String prevRunText = adjacentRunText(runs, runIndex, -1);
                             String nextRunText = adjacentRunText(runs, runIndex, 1);
+                            List<ASTInlineObject> plannedAnchorTextShellFragments =
+                                    InlineFrameHandler.loadPlannedInlineTextShellFragmentsForAnchor(ctx, anchoredId);
+                            if (plannedAnchorTextShellFragments != null && !plannedAnchorTextShellFragments.isEmpty()) {
+                                for (ASTInlineObject fragment : plannedAnchorTextShellFragments) para.addItem(fragment);
+                                continue;
+                            }
+                            ASTInlineObject plannedAnchorTextShell =
+                                    InlineFrameHandler.loadPlannedInlineTextShellForAnchor(ctx, anchoredId);
+                            if (plannedAnchorTextShell != null) {
+                                para.addItem(plannedAnchorTextShell);
+                                continue;
+                            }
                             // 다수 박스(예: ㅍ ㅎ ㅂ ㅅ 자모 배지) → 각 TF 를 박스 스타일 INLINE_TEXT_FRAME 으로 분해
                             List<ASTInlineObject> boxList =
                                     InlineFrameHandler.tryInlineGroupAsBoxList(ctx, anchoredId);

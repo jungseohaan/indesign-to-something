@@ -705,7 +705,8 @@ public class HwpxImageBuilder {
         boolean forceBehindByLayer = isBehindTextVisualLayer(figure.visualLayer());
         boolean forceInFrontByLayer = isInFrontVisualLayer(figure.visualLayer());
         TextWrapMethod figWrap = TextWrapMethod.IN_FRONT_OF_TEXT;
-        if (forceBehindByLayer || (!forceInFrontByLayer && (!figure.fromGroup() || isLargeBackground))) {
+        if (forceBehindByLayer || isLargeBackground
+                || (!forceInFrontByLayer && !figure.fromGroup())) {
             figWrap = TextWrapMethod.BEHIND_TEXT;
         }
         int outputZOrder = outputZOrderForVisualLayer(figure.visualLayer(), figure.zOrder(), isLargeBackground);
@@ -797,12 +798,12 @@ public class HwpxImageBuilder {
 
     private static boolean isBehindTextVisualLayer(String visualLayer) {
         return "PAGE_BACKGROUND".equals(visualLayer)
+                || "CONTAINER_BACKDROP".equals(visualLayer)
                 || "TEXT_CARD_BACKDROP".equals(visualLayer);
     }
 
     private static boolean isInFrontVisualLayer(String visualLayer) {
-        return "CONTAINER_BACKDROP".equals(visualLayer)
-                || "CONTAINER_FACE".equals(visualLayer)
+        return "CONTAINER_FACE".equals(visualLayer)
                 || "LABEL_BACKDROP".equals(visualLayer)
                 || "LABEL_OVERLAY_BACKDROP".equals(visualLayer)
                 || "CONTENT_VISUAL".equals(visualLayer)
@@ -816,7 +817,7 @@ public class HwpxImageBuilder {
         }
         int offset = Math.max(-499, Math.min(499, originalZOrder));
         if ("CONTAINER_BACKDROP".equals(visualLayer)) {
-            return -4000 + offset;
+            return -2000 + offset;
         }
         if ("TEXT_CARD_BACKDROP".equals(visualLayer)) {
             return -2500 + offset;
@@ -825,10 +826,10 @@ public class HwpxImageBuilder {
             return -3000 + offset;
         }
         if ("LABEL_BACKDROP".equals(visualLayer)) {
-            return -1500 + offset;
+            return 19000 + offset;
         }
         if ("LABEL_OVERLAY_BACKDROP".equals(visualLayer)) {
-            return 15000 + offset;
+            return 19000 + offset;
         }
         if ("CONTENT_VISUAL".equals(visualLayer)
                 || "CONTAINER_OUTLINE".equals(visualLayer)

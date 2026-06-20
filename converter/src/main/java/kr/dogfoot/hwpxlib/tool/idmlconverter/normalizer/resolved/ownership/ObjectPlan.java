@@ -321,6 +321,36 @@ public final class ObjectPlan {
                 sourceLayerIndex);
     }
 
+    public ObjectPlan withPlacementAndCoordinateSpace(
+            Placement newPlacement,
+            CoordinateSpace newCoordinateSpace) {
+        return new ObjectPlan(
+                domId,
+                kind,
+                pageIndex,
+                textAction,
+                visualAction,
+                visualLayer,
+                newPlacement,
+                renderId,
+                sourceObjectIds,
+                visualSourceObjectIds,
+                styleSourceObjectIds,
+                ownedTextFrameIds,
+                descendantVisualObjectIds,
+                sourceBundleKey,
+                materialization,
+                newCoordinateSpace,
+                anchorOwner,
+                zOrder,
+                reason,
+                file,
+                bounds,
+                sourceLayerId,
+                sourceLayerName,
+                sourceLayerIndex);
+    }
+
     public ObjectPlan withZOrder(int newZOrder) {
         return new ObjectPlan(
                 domId,

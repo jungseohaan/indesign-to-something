@@ -681,7 +681,20 @@ public class IDMLToHwpxConverter {
     private static boolean isRenderedCoveredByUsedSource(
             RenderedGroup rg, java.util.Set<Integer> coveredIds) {
         if (rg == null || coveredIds == null || coveredIds.isEmpty()) return false;
-        return coveredIds.contains(rg.id());
+        if (coveredIds.contains(rg.id())) return true;
+        if (containsAny(coveredIds, rg.sourceObjectIds())) return true;
+        if (containsAny(coveredIds, rg.childIds())) return true;
+        if (containsAny(coveredIds, rg.childImageIds())) return true;
+        if (containsAny(coveredIds, rg.visualOnlyChildIds())) return true;
+        return containsAny(coveredIds, rg.tfInlineVisualIds());
+    }
+
+    private static boolean containsAny(java.util.Set<Integer> haystack, int[] needles) {
+        if (haystack == null || haystack.isEmpty() || needles == null) return false;
+        for (int id : needles) {
+            if (haystack.contains(id)) return true;
+        }
+        return false;
     }
 
     /**

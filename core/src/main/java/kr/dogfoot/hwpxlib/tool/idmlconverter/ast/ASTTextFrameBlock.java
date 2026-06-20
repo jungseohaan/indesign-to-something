@@ -68,6 +68,9 @@ public class ASTTextFrameBlock extends ASTBlock {
     // Stage 1 plan상 별도 visual shell/backdrop 위에 얹히는 HWPX 텍스트.
     // HWPX table은 floating PNG와 평면이 엇갈릴 수 있어 overlay-safe DrawText 경로로 라우팅한다.
     private boolean plannedVisualTextOverlay;
+    // Stage 1 PLACE_TEXT_SHELL plan의 visualLayer. 실행 단계는 이 값을 통해
+    // native wrapper/shell의 HWPX plane/z-band를 재판정 없이 적용한다.
+    private String plannedShellVisualLayer;
     // 페이지 좌표는 유지하지만 앵커 문단과 함께 이동해야 하는 플로팅 글상자.
     // 인라인(treatAsChar=true)과 달리 원본의 page-level group stack 좌표를 보존한다.
     private boolean anchoredFlowWithText;
@@ -192,6 +195,9 @@ public class ASTTextFrameBlock extends ASTBlock {
 
     public boolean plannedVisualTextOverlay() { return plannedVisualTextOverlay; }
     public void plannedVisualTextOverlay(boolean v) { this.plannedVisualTextOverlay = v; }
+
+    public String plannedShellVisualLayer() { return plannedShellVisualLayer; }
+    public void plannedShellVisualLayer(String v) { this.plannedShellVisualLayer = v; }
 
     public boolean anchoredFlowWithText() { return anchoredFlowWithText; }
     public void anchoredFlowWithText(boolean v) { this.anchoredFlowWithText = v; }

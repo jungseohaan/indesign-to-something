@@ -15,7 +15,7 @@
 // SPEC-011: 추출 캐시 무효화용 스크립트 버전.
 // 출력 형식이나 추출 로직이 변경되면 이 값을 올려서 모든 캐시를 강제 무효화한다.
 // (mtime/size 기반 자동 무효화와 별개로 명시적 버전 관리 채널)
-var EXTRACT_SCRIPT_VERSION = "31";
+var EXTRACT_SCRIPT_VERSION = "33";
 
 // Stage 1 (배지 렌더 통합): 짧은 시각 라벨/인라인 배지를 단일 "inline_badge" 계약으로 emit.
 // false면 기존 다중-reason 경로 그대로(출력 바이트 동일). true면 두 export 패스(deco 디스패치 +
@@ -726,6 +726,17 @@ function _runRenderPhases(doc, ctx, allItems) {
     resolved.renderedGraphicFrames = renderedGraphicFrames;
     resolved.renderedImageFrames   = renderedImageFrames;
     resolved.renderedFloatingItems = renderedFloatingItems;
+    resolved.textlessShellDiagnostics = decoResult.textlessShellDiagnostics || [];
+    try {
+        var _diagFile = File(ctx.outputDir + "/textless-shell-diagnostics.jsonl");
+        _diagFile.encoding = "UTF-8";
+        _diagFile.open("w");
+        var _diags = resolved.textlessShellDiagnostics || [];
+        for (var _dsi = 0; _dsi < _diags.length; _dsi++) {
+            _diagFile.writeln(JSON.stringify(_diags[_dsi]));
+        }
+        _diagFile.close();
+    } catch (eDiagWrite) {}
 
     // 편집 가능 TextFrame ID 목록 (SPEC-025: synthetic master instance ID는 문자열로 유지)
     var pngOwnedTextFrameIds = {};
@@ -2967,6 +2978,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
     var labelBackdropClaimedTextFrameIds = {};
     var atomicTextShellRootGroupIds = {};
     var atomicGraphicRootGroupIds = {};
+    var textlessShellDiagnostics = [];
 
     // ── 공통 헬퍼 ────────────────────────────────────────────────────────────
 
@@ -2987,35 +2999,6 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             if (par && (renderedIds[par.id] || decoChildIds[par.id])) return true;
         } catch (e) {}
         return false;
-    }
-
-    function _shouldGuardTextHiddenShellExport(opts) {
-        if (!opts || opts.textHiddenBeforeExport !== true) return false;
-        var reason = String(opts.reason || "");
-        return reason === "visual_label_text_hidden_shell"
-                || reason === "editable_composite_text_hidden_shell"
-                || reason === "atomic_ownership_root_text_hidden_shell"
-                || reason === "leaf_group_text_hidden_shell";
-    }
-
-    function _expandedBounds(bounds, pad) {
-        if (!bounds || bounds.length < 4) return null;
-        return [bounds[0] - pad, bounds[1] - pad, bounds[2] + pad, bounds[3] + pad];
-    }
-
-    function _makeTransparentExportGuard(page, bounds) {
-        if (!page || !bounds || bounds.length < 4) return null;
-        var guard = null;
-        try {
-            guard = page.rectangles.add({ geometricBounds: bounds });
-            try { guard.strokeWeight = 0; } catch (eStrokeWeight) {}
-            try { guard.strokeColor = doc.swatches.itemByName("None"); } catch (eStroke) {}
-            try { guard.fillColor = doc.swatches.itemByName("Paper"); } catch (eFill) {}
-            try { guard.transparencySettings.blendingSettings.opacity = 0; } catch (eOpacity) {}
-        } catch (eGuard) {
-            guard = null;
-        }
-        return guard;
     }
 
     function _isTableOnlyCarrierTextFrame(tf) {
@@ -3096,62 +3079,34 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         } catch (eAutoHide) {}
         // exportFile을 독립 try로 감싸 InDesign 2026 예외가 push를 건너뛰지 않도록 보호
         var _exportOk = false;
-        var _guardedExportBounds = null;
         var _exportTarget = item;
         var _exportDup = null;
-        var _exportGuard = null;
-        var _exportGroup = null;
         var _clearTableOnlyCarrierForExport = false;
         try {
             _clearTableOnlyCarrierForExport = resolvedOwnershipOpts.textHiddenBeforeExport === true
                     && _hasTableOnlyCarrierTextFrame(item);
         } catch (eClearCheck) {}
-        if (_shouldGuardTextHiddenShellExport(resolvedOwnershipOpts)) {
-            try { _guardedExportBounds = arrCopy(item.geometricBounds); } catch (eGb) {}
-            if (!_guardedExportBounds) {
-                try { _guardedExportBounds = arrCopy(item.visibleBounds); } catch (eVb) {}
-            }
-            _guardedExportBounds = _expandedBounds(_guardedExportBounds, 1.0);
-        }
         try {
-            if (_guardedExportBounds || _clearTableOnlyCarrierForExport) {
+            if (_clearTableOnlyCarrierForExport) {
                 _exportDup = item.duplicate();
                 if (_clearTableOnlyCarrierForExport && _exportDup) {
                     _clearTableOnlyCarrierTextFrames(_exportDup);
                 }
             }
-            if (_guardedExportBounds) {
-                _exportGuard = _makeTransparentExportGuard(page, _guardedExportBounds);
-                if (_exportDup && _exportGuard) {
-                    try {
-                        _exportGroup = page.groups.add([_exportGuard, _exportDup]);
-                    } catch (eGroupPage) {
-                        try { _exportGroup = doc.groups.add([_exportGuard, _exportDup]); } catch (eGroupDoc) {}
-                    }
-                }
-                if (_exportGroup) _exportTarget = _exportGroup;
-            } else if (_exportDup) {
-                _exportTarget = _exportDup;
-            }
+            if (_exportDup) _exportTarget = _exportDup;
             _exportTarget.exportFile(ExportFormat.PNG_FORMAT, _outFile);
             _exportOk = true;
         } catch (eExp) {
             try { _exportOk = _outFile.exists; } catch (e2) {}
         } finally {
-            try { if (_exportGroup) _exportGroup.remove(); } catch (eRemoveGroup) {}
-            try { if (!_exportGroup && _exportDup) _exportDup.remove(); } catch (eRemoveDup) {}
-            try { if (!_exportGroup && _exportGuard) _exportGuard.remove(); } catch (eRemoveGuard) {}
+            try { if (_exportDup) _exportDup.remove(); } catch (eRemoveDup) {}
             try { if (_autoHiddenTFs && _autoHiddenTFs.length > 0) restoreTextFrames(_autoHiddenTFs); } catch (eRestoreAutoHide) {}
         }
         if (!_exportOk) return [];
 
         var bounds = null;
-        if (_guardedExportBounds) {
-            bounds = arrCopy(_guardedExportBounds);
-        } else {
-            try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
-            if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
-        }
+        try { bounds = arrCopy(item.visibleBounds); } catch (e) {}
+        if (!bounds) try { bounds = arrCopy(item.geometricBounds); } catch (e) {}
         if (bounds) _toPageRelativeBounds(bounds, page);
 
         var childIds = [];
@@ -3173,6 +3128,17 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         var _z = 0;
         try { _z = getItemZOrder(item); } catch (e) {}
         var entry = { id: domId, file: "rendered_frames/" + fileName, bounds: bounds, pageIndex: page.documentOffset, zOrder: _z };
+        try {
+            entry.exportSanity = {
+                fileBytes: _outFile.exists ? _outFile.length : 0,
+                guarded: false,
+                duplicatedForExport: _exportDup ? true : false,
+                textHiddenBeforeExport: resolvedOwnershipOpts.textHiddenBeforeExport === true,
+                exportTargetType: _exportTarget && _exportTarget.constructor ? _exportTarget.constructor.name : null,
+                sourceBounds: _boundsOfItem(item),
+                pageRelativeBounds: bounds
+            };
+        } catch (eSanity) {}
         if (childIds.length > 0) entry.childIds = childIds;
         if (skippedClaimedLabelChild && !resolvedOwnershipOpts.sourceObjectIds) {
             var sourceIds = [domId];
@@ -3265,6 +3231,19 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return _isSimpleMarkerLabelText(text);
     }
 
+    function _completePngMarkerDecision(grp, editableIds) {
+        var ids = editableIds || [];
+        var marker = false;
+        try { marker = _isVisualMarkerLabelGroup(grp); } catch (eMarker) {}
+        return {
+            complete: marker || ids.length === 0,
+            marker: marker,
+            containsText: marker,
+            containsEditableText: marker && ids.length > 0,
+            editableTextFrameIds: ids
+        };
+    }
+
     function _renderEditableVisualLabelShell(grp, page, reason) {
         var editableIds = [];
         try { editableIds = _collectTextFrameIds(grp, true, true); } catch (eIds) {}
@@ -3294,13 +3273,16 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         try { _inlineBadgeEmittedIds[grp.id] = true; } catch (eMark) {}
         var editableIds = [];
         try { editableIds = _collectTextFrameIds(grp, true, true); } catch (eIds) {}
-        if (_isVisualMarkerLabelGroup(grp) || editableIds.length === 0) {
+        var completeDecision = _completePngMarkerDecision(grp, editableIds);
+        if (completeDecision.complete) {
             _decoRender(grp, page, null, {
                 textOwner: "indesign_png",
-                containsText: true,
-                containsEditableText: editableIds.length > 0,
+                containsText: completeDecision.containsText,
+                containsEditableText: completeDecision.containsEditableText,
                 placementAllowed: true,
-                editableTextFrameIds: editableIds.length > 0 ? editableIds : undefined,
+                editableTextFrameIds: completeDecision.editableTextFrameIds.length > 0
+                        ? completeDecision.editableTextFrameIds
+                        : undefined,
                 reason: "inline_badge_baked"
             });
             return;
@@ -3334,26 +3316,52 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         return false;
     }
 
+    function _pushDirectGroupChild(items, seen, grp, item) {
+        if (!items || !seen || !grp || !item) return;
+        try {
+            var p = item.parent;
+            if (!p || p.id !== grp.id) return;
+            var key = item.id !== undefined && item.id !== null ? item.id.toString() : "";
+            if (!key || seen[key]) return;
+            seen[key] = true;
+            items.push(item);
+        } catch (eParent) {}
+    }
+
+    function _collectTypedDirectGroupChildren(grp, items, seen, collectionName) {
+        try {
+            var coll = grp[collectionName];
+            for (var i = 0; coll && i < coll.length; i++) {
+                _pushDirectGroupChild(items, seen, grp, coll[i]);
+            }
+        } catch (eColl) {}
+    }
+
     function _directPageItemsOfGroup(grp) {
         var items = [];
+        var seen = {};
         if (!grp) return items;
+
+        // InDesign sometimes exposes direct children from Group.pageItems/allPageItems
+        // as generic PageItem wrappers. Prefer typed collections so shell
+        // ownership sees TextFrame/Polygon/etc. from the original source object.
+        _collectTypedDirectGroupChildren(grp, items, seen, "textFrames");
+        _collectTypedDirectGroupChildren(grp, items, seen, "rectangles");
+        _collectTypedDirectGroupChildren(grp, items, seen, "ovals");
+        _collectTypedDirectGroupChildren(grp, items, seen, "polygons");
+        _collectTypedDirectGroupChildren(grp, items, seen, "graphicLines");
+        _collectTypedDirectGroupChildren(grp, items, seen, "groups");
+
         try {
             var direct = grp.pageItems;
             for (var i = 0; direct && i < direct.length; i++) {
-                try {
-                    var p = direct[i].parent;
-                    if (p && p.id === grp.id) items.push(direct[i]);
-                } catch (eParentDirect) {}
+                _pushDirectGroupChild(items, seen, grp, direct[i]);
             }
-            if (items.length > 0) return items;
         } catch (eDirect) {}
         try {
             var nested = grp.allPageItems;
             for (var j = 0; nested && j < nested.length; j++) {
-                try {
-                    var p = nested[j].parent;
-                    if (p && p.id === grp.id) items.push(nested[j]);
-                } catch (eParent) {}
+                _pushDirectGroupChild(items, seen, grp, nested[j]);
             }
         } catch (eNested) {}
         return items;
@@ -3378,6 +3386,213 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
             if (_isDirectVisualShapeItem(direct[i])) return true;
         }
         return false;
+    }
+
+    function _collectShellVisualSourceIds(item, out, seen) {
+        if (!item || !out || !seen) return;
+        _appendSourceAndDescendantIds(item, out, seen);
+    }
+
+    function _isVisualOnlyShellSource(item) {
+        if (!item) return false;
+        try { if (isOnHiddenLayer(item)) return false; } catch (eHidden) { return false; }
+        try {
+            if (item.images && item.images.length > 0) return false;
+            if (item.pdfs && item.pdfs.length > 0) return false;
+            if (item.epss && item.epss.length > 0) return false;
+        } catch (ePlaced) {}
+
+        var cn = "";
+        try { cn = item.constructor.name; } catch (eCn) {}
+        if (cn === "TextFrame") {
+            try { if (visibleTextLengthOfTextFrame(item) > 0) return false; } catch (eText) { return false; }
+            return hasVisibleFill(item) || hasVisibleStroke(item);
+        }
+        if (cn === "Rectangle" || cn === "Oval" || cn === "Polygon" || cn === "GraphicLine") {
+            return _isDirectVisualShapeItem(item);
+        }
+        if (cn !== "Group") return false;
+        if (_decoHasPlaced(item)) return false;
+
+        var hasVisual = false;
+        try {
+            var nested = item.allPageItems;
+            for (var i = 0; nested && i < nested.length; i++) {
+                var child = nested[i];
+                if (!child) continue;
+                var ccn = "";
+                try { ccn = child.constructor.name; } catch (eChildCn) {}
+                if (ccn === "TextFrame") {
+                    try { if (visibleTextLengthOfTextFrame(child) > 0) return false; } catch (eChildText) { return false; }
+                    if (hasVisibleFill(child) || hasVisibleStroke(child)) hasVisual = true;
+                    continue;
+                }
+                if (ccn === "Group") {
+                    if (!_isVisualOnlyShellSource(child)) return false;
+                    hasVisual = true;
+                    continue;
+                }
+                if (ccn === "Rectangle" || ccn === "Oval" || ccn === "Polygon" || ccn === "GraphicLine") {
+                    if (_isDirectVisualShapeItem(child)) hasVisual = true;
+                    continue;
+                }
+                return false;
+            }
+        } catch (eNested) {
+            return false;
+        }
+        return hasVisual;
+    }
+
+    /**
+     * Source-bundle classifier for textless shell extraction.
+     *
+     * The decision is structural: a group is a textless shell candidate when its
+     * direct editable TextFrames are paired with direct visual-only shell sources
+     * under the same source owner. Text length and visual size are intentionally
+     * not ownership criteria.
+     */
+    function _textlessShellDiagnosticsRelevant(grp) {
+        try { if (!grp || grp.constructor.name !== "Group") return false; } catch (e0) { return false; }
+        try {
+            var nested = grp.allPageItems;
+            for (var i = 0; nested && i < nested.length; i++) {
+                var item = nested[i];
+                if (!item) continue;
+                try {
+                    if (item.constructor.name === "TextFrame" && visibleTextLengthOfTextFrame(item) > 0) return true;
+                } catch (eText) {}
+                try {
+                    if (hasVisibleFill(item) || hasVisibleStroke(item)) return true;
+                } catch (eVisual) {}
+            }
+        } catch (eNested) {}
+        return false;
+    }
+
+    function _recordTextlessShellDiagnostic(grp, accepted, reason, detail) {
+        if (!grp || textlessShellDiagnostics.length >= 2000) return;
+        if (!accepted && !_textlessShellDiagnosticsRelevant(grp)) return;
+        var entry = {
+            id: null,
+            pageIndex: -1,
+            accepted: accepted ? true : false,
+            reason: reason || (accepted ? "accepted" : "rejected")
+        };
+        try { entry.id = grp.id; } catch (eId) {}
+        try {
+            var page = _resolveGroupPage(grp);
+            if (page) entry.pageIndex = page.documentOffset;
+        } catch (ePage) {}
+        try {
+            var b = _boundsOfItem(grp);
+            if (b) entry.bounds = arrCopy(b);
+        } catch (eBounds) {}
+        if (detail) {
+            for (var k in detail) {
+                if (detail.hasOwnProperty(k)) entry[k] = detail[k];
+            }
+        }
+        textlessShellDiagnostics.push(entry);
+    }
+
+    function _classifyTextlessShellCandidate(grp, collectDiagnostics) {
+        function fail(reason, detail) {
+            if (collectDiagnostics) _recordTextlessShellDiagnostic(grp, false, reason, detail);
+            return null;
+        }
+        function accept(candidate) {
+            if (collectDiagnostics) {
+                _recordTextlessShellDiagnostic(grp, true, candidate.reason || "accepted", {
+                    ownedTextFrameIds: candidate.ownedTextFrameIds,
+                    visualSourceObjectIds: candidate.visualSourceObjectIds
+                });
+            }
+            return candidate;
+        }
+
+        try { if (!grp || grp.constructor.name !== "Group") return fail("not_group"); } catch (e0) { return fail("not_group"); }
+        try { if (isOnHiddenLayer(grp)) return fail("hidden_layer"); } catch (eHidden) { return fail("hidden_layer_check_failed"); }
+        if (_decoHasPlaced(grp)) return fail("has_placed_external_visual");
+
+        var direct = _directPageItemsOfGroup(grp);
+        if (!direct || direct.length < 2) return fail("not_enough_direct_children");
+
+        var editableIds = [];
+        var editableSeen = {};
+        var visualIds = [];
+        var visualSeen = {};
+        var visualCount = 0;
+
+        for (var i = 0; i < direct.length; i++) {
+            var item = direct[i];
+            if (!item) continue;
+            var cn = "";
+            try { cn = item.constructor.name; } catch (eCn) {}
+            if (cn === "TextFrame") {
+                if (_isDirectEditableTextFrame(item)) {
+                    _pushUniqueId(editableIds, editableSeen, item.id);
+                    continue;
+                }
+                try {
+                    if (visibleTextLengthOfTextFrame(item) > 0) {
+                        return fail("direct_non_editable_visible_textframe", { childId: item.id });
+                    }
+                } catch (eText) {
+                    return fail("direct_textframe_text_check_failed", { childId: item.id });
+                }
+                if (_isVisualOnlyShellSource(item)) {
+                    _collectShellVisualSourceIds(item, visualIds, visualSeen);
+                    visualCount++;
+                    continue;
+                }
+                return fail("direct_textframe_not_editable_or_shell", { childId: item.id });
+            }
+            if (cn === "Group") {
+                if (_editableVisibleTextFrameCount(item) > 0) {
+                    return fail("nested_editable_textframe", { childId: item.id });
+                }
+                if (_isVisualOnlyShellSource(item)) {
+                    _collectShellVisualSourceIds(item, visualIds, visualSeen);
+                    visualCount++;
+                    continue;
+                }
+                return fail("direct_group_not_visual_only_shell", { childId: item.id });
+            }
+            if (_isVisualOnlyShellSource(item)) {
+                _collectShellVisualSourceIds(item, visualIds, visualSeen);
+                visualCount++;
+                continue;
+            }
+            return fail("direct_child_not_visual_shell_source", { childId: item.id, childType: cn });
+        }
+
+        if (editableIds.length < 1) return fail("no_direct_editable_textframe");
+        if (visualCount < 1) return fail("no_direct_visual_shell_source", { ownedTextFrameIds: editableIds });
+        var allEditableIds = [];
+        try { allEditableIds = _collectTextFrameIds(grp, true, true); } catch (eAllEditable) {}
+        if (allEditableIds.length !== editableIds.length) {
+            return fail("editable_textframe_not_closed_bundle", {
+                directEditableTextFrameIds: editableIds,
+                allEditableTextFrameIds: allEditableIds
+            });
+        }
+        for (var ai = 0; ai < allEditableIds.length; ai++) {
+            if (!_idArrayContains(editableIds, allEditableIds[ai])) {
+                return fail("editable_textframe_not_direct_child", {
+                    directEditableTextFrameIds: editableIds,
+                    allEditableTextFrameIds: allEditableIds
+                });
+            }
+        }
+
+        return accept({
+            kind: "TEXTLESS_SHELL_WITH_TF",
+            root: grp,
+            ownedTextFrameIds: editableIds,
+            visualSourceObjectIds: visualIds,
+            reason: "atomic_ownership_root_text_hidden_shell"
+        });
     }
 
     function _isGraphicOnlyOwnershipRootGroup(grp) {
@@ -3423,33 +3638,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
     }
 
     function _isAtomicOwnershipRootTextShellGroup(grp) {
-        try { if (!grp || grp.constructor.name !== "Group") return false; } catch (e0) { return false; }
-        if (isOnHiddenLayer(grp)) return false;
-        if (_decoHasPlaced(grp)) return false;
-
-        var editableTextCount = 0;
-        var hasDirectShape = false;
-        try {
-            var nested = grp.allPageItems;
-            if (!nested || nested.length < 2) return false;
-            for (var i = 0; i < nested.length; i++) {
-                var item = nested[i];
-                if (!item) continue;
-                var cn = "";
-                try { cn = item.constructor.name; } catch (eCn) {}
-                if (cn === "Group") return false;
-                if (_isDirectEditableTextFrame(item)) {
-                    editableTextCount++;
-                    continue;
-                }
-                if (_isDirectVisualShapeItem(item)) {
-                    hasDirectShape = true;
-                }
-            }
-        } catch (eNested) {
-            return false;
-        }
-        return editableTextCount >= 1 && hasDirectShape;
+        return _classifyTextlessShellCandidate(grp) !== null;
     }
 
     function _renderAtomicOwnershipRootTextShellGroups(grp, page) {
@@ -4221,13 +4410,14 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
                 }
                 var editableIds = [];
                 try { editableIds = _collectTextFrameIds(child, true, true); } catch (eIds) {}
-                if (_isVisualMarkerLabelGroup(child)) {
+                var completeDecision = _completePngMarkerDecision(child, editableIds);
+                if (completeDecision.marker) {
                     _decoRender(child, page, null, {
                         textOwner: "indesign_png",
                         containsText: true,
-                        containsEditableText: true,
+                        containsEditableText: completeDecision.containsEditableText,
                         placementAllowed: true,
-                        editableTextFrameIds: editableIds,
+                        editableTextFrameIds: completeDecision.editableTextFrameIds,
                         reason: "visual_marker_label_indesign_png"
                     });
                 } else {
@@ -4493,7 +4683,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         var leafGrp = allItems[lgi];
         try { if (!leafGrp || leafGrp.constructor.name !== "Group") continue; } catch (eLeafCn) { continue; }
         if (renderedIds[leafGrp.id] || decoChildIds[leafGrp.id]) continue;
-        if (!_isAtomicOwnershipRootTextShellGroup(leafGrp)) continue;
+        if (!_classifyTextlessShellCandidate(leafGrp, true)) continue;
         var leafPage = _resolveGroupPage(leafGrp);
         if (!leafPage) continue;
         if (leafPage.documentOffset + 1 < startPage || leafPage.documentOffset + 1 > endPage) continue;
@@ -4724,7 +4914,7 @@ function exportDecorationGroups(doc, outputDir, startPage, endPage, allItems, im
         }
     }
 
-    return { frames: results, childIds: decoChildIds };
+    return { frames: results, childIds: decoChildIds, textlessShellDiagnostics: textlessShellDiagnostics };
 }
 
 /**
@@ -5659,6 +5849,7 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
     _marker(outputDir, "10m_collectPageItems");
     var pageItems = collectPageItems(doc, startPage, endPage, skipRenderPagesMap, cachedAllItems);
     _marker(outputDir, "10m_collectPageItems_done");
+    var nativeParentTextShellCandidates = collectNativeParentTextShellCandidates(textFrames, pageItems);
 
     _marker(outputDir, "10n_measureFontMetrics");
     var fontMetrics = [];
@@ -5676,8 +5867,55 @@ function collectResolved(doc, outputDir, rangePageCount, startPage, endPage, edi
         textFrames: textFrames,
         pages: pages,
         pageItems: pageItems,
+        nativeParentTextShellCandidates: nativeParentTextShellCandidates,
         fontMetrics: fontMetrics
     };
+}
+
+function collectNativeParentTextShellCandidates(textFrames, pageItems) {
+    var result = [];
+    var itemById = {};
+    for (var i = 0; pageItems && i < pageItems.length; i++) {
+        if (!pageItems[i] || pageItems[i].id === null || pageItems[i].id === undefined) continue;
+        itemById[String(pageItems[i].id)] = pageItems[i];
+    }
+    for (var t = 0; textFrames && t < textFrames.length; t++) {
+        var tf = textFrames[t];
+        if (!tf || tf.id === null || tf.id === undefined) continue;
+        var tfItem = itemById[String(tf.id)];
+        if (!tfItem || !tfItem.parentId) continue;
+        var parent = itemById[String(tfItem.parentId)];
+        if (!isNativeParentTextShellSource(parent)) continue;
+        var tfBounds = tf.geometricBounds || tfItem.geometricBounds;
+        var shellBounds = parent.geometricBounds;
+        if (!tfBounds || !shellBounds) continue;
+        var tfArea = boundsArea(tfBounds);
+        if (tfArea <= 0) continue;
+        var overlap = boundsOverlapArea(tfBounds, shellBounds) / tfArea;
+        if (overlap < 0.75) continue;
+        result.push({
+            textFrameId: parseInt(tf.id, 10),
+            shellSourceObjectId: parseInt(parent.id, 10),
+            sourceObjectIds: [parseInt(parent.id, 10), parseInt(tf.id, 10)],
+            visualSourceObjectIds: [parseInt(parent.id, 10)],
+            pageIndex: tf.pageIndex !== undefined ? tf.pageIndex : tfItem.pageIndex,
+            overlapRatio: overlap,
+            reason: "native_parent_text_shell_candidate"
+        });
+    }
+    return result;
+}
+
+function isNativeParentTextShellSource(item) {
+    if (!item || item.hiddenByParent || item.visible === false) return false;
+    var type = item.type || "";
+    if (type !== "Rectangle" && type !== "Polygon" && type !== "Oval") return false;
+    if (!item.geometricBounds) return false;
+    var hasFill = item.fillColorName && item.fillColorName !== "None" && item.fillColorName !== "[None]";
+    var hasStroke = item.strokeColorName && item.strokeColorName !== "None" && item.strokeColorName !== "[None]"
+            && item.strokeWeight !== undefined && item.strokeWeight > 0.01;
+    var hasCorner = item.cornerRadius !== undefined && item.cornerRadius > 0;
+    return hasFill || hasStroke || hasCorner;
 }
 
 /**
@@ -5857,9 +6095,10 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                     // TextFrame 텍스트도 PNG 렌더링 시 숨김 — 텍스트는 변환 결과에서
                     // 별도 오버레이되므로 PNG에 같이 그려지면 이중 렌더링이 발생한다.
                     var containerType = inItem.constructor.name;
-                    inlineCompleteMarker = (containerType === "Group" && _isVisualMarkerLabelGroup(inItem));
-                    if (inlineCompleteMarker) {
+                    if (containerType === "Group") {
                         try { inlineCompleteMarkerEditableIds = _collectTextFrameIds(inItem, true, true); } catch (eIds) {}
+                        var inlineCompleteDecision = _completePngMarkerDecision(inItem, inlineCompleteMarkerEditableIds);
+                        inlineCompleteMarker = inlineCompleteDecision.marker;
                     }
                     var shouldHideText = (containerType === "Group"
                             || containerType === "Rectangle"
@@ -5879,12 +6118,21 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                         }
                     }
                 } catch (eWalk) {}
+                var _inlineExportOk = false;
                 try {
                     // 인라인 객체는 배경 위에 얹히므로 투명 배경 필요
                     try { app.pngExportPreferences.transparentBackground = true; } catch (e) {}
-                    inItem.exportFile(ExportFormat.PNG_FORMAT, inOutFile);
+                    try {
+                        inItem.exportFile(ExportFormat.PNG_FORMAT, inOutFile);
+                        _inlineExportOk = true;
+                    } catch (eInlineExport) {
+                        try { _inlineExportOk = File(renderDir + "/" + inFileName).exists; } catch (eExists) {}
+                    }
                     try { app.pngExportPreferences.transparentBackground = false; } catch (e) {}
-                    if (inOutFile.exists) {
+                    var _inlineWrittenFile = File(renderDir + "/" + inFileName);
+                    // The source inline anchor is ownership evidence. PNG export
+                    // status only describes the materialized visual file.
+                    if (inItem) {
                         var inBounds = null;
                         try {
                             // 텍스트 숨김 상태에서는 visibleBounds가 축소될 수 있으므로 geometricBounds 우선
@@ -5897,26 +6145,60 @@ function exportPageBackgrounds(doc, outputDir, startPage, endPage, allItems, ski
                             if (inPage) inPageIdx = inPage.documentOffset;
                         } catch (ep) {}
 
+                        var _inlineSourceBounds = null;
+                        try { _inlineSourceBounds = arrCopy(inItem.visibleBounds); } catch (eInlineVb) {}
+                        if (!_inlineSourceBounds) {
+                            try { _inlineSourceBounds = arrCopy(inItem.geometricBounds); } catch (eInlineGb) {}
+                        }
+
                         var _inlineHasHiddenText = inlineHiddenTextFrameIds && inlineHiddenTextFrameIds.length > 0;
-                        inlineObjects.push(applyRenderOwnership({
+                        var _inlineBaseEntry = {
                             id: inId,
                             file: "rendered_frames/" + inFileName,
                             parentStoryId: eStory.id.toString(),
                             bounds: inBounds,
                             pageIndex: inPageIdx,
                             type: "inline_object",
-                            childIds: inlineHiddenTextFrameIds
-                        }, inItem, {
-                            textHiddenBeforeExport: _inlineHasHiddenText,
+                            placementRole: "inline_object",
+                            visualOwner: "indesign_png",
                             textOwner: inlineCompleteMarker ? "indesign_png" : (_inlineHasHiddenText ? "hwpx_tf" : "none"),
                             containsText: inlineCompleteMarker ? true : false,
                             containsEditableText: inlineCompleteMarker ? true : false,
                             placementAllowed: true,
-                            editableTextFrameIds: inlineCompleteMarker ? inlineCompleteMarkerEditableIds : inlineHiddenTextFrameIds,
                             reason: EMIT_UNIFIED_INLINE_BADGE
                                     ? (inlineCompleteMarker ? "inline_badge_baked" : (_inlineHasHiddenText ? "inline_badge" : "inline_graphic_only"))
-                                    : (inlineCompleteMarker ? "visual_marker_label_indesign_png" : (_inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only"))
-                        }));
+                                    : (inlineCompleteMarker ? "visual_marker_label_indesign_png" : (_inlineHasHiddenText ? "inline_text_hidden" : "inline_graphic_only")),
+                            sourceObjectIds: [inId],
+                            childIds: inlineHiddenTextFrameIds,
+                            exportSanity: {
+                                fileBytes: _inlineWrittenFile.exists ? _inlineWrittenFile.length : 0,
+                                exportOk: _inlineExportOk ? true : false,
+                                guarded: false,
+                                duplicatedForExport: false,
+                                textHiddenBeforeExport: _inlineHasHiddenText,
+                                exportTargetType: inItem && inItem.constructor ? inItem.constructor.name : null,
+                                sourceBounds: _inlineSourceBounds,
+                                pageRelativeBounds: inBounds
+                            }
+                        };
+                        try {
+                            inlineObjects.push(applyRenderOwnership(_inlineBaseEntry, inItem, {
+                                textHiddenBeforeExport: _inlineHasHiddenText,
+                                textOwner: _inlineBaseEntry.textOwner,
+                                containsText: _inlineBaseEntry.containsText,
+                                containsEditableText: _inlineBaseEntry.containsEditableText,
+                                placementAllowed: true,
+                                editableTextFrameIds: inlineCompleteMarker ? inlineCompleteMarkerEditableIds : inlineHiddenTextFrameIds,
+                                sourceObjectIds: [inId],
+                                visualOnlyChildIds: [inId],
+                                reason: _inlineBaseEntry.reason
+                            }));
+                        } catch (eOwnership) {
+                            _inlineBaseEntry.ownershipFallback = "inline_anchor_source_metadata";
+                            try { _copyLayerInfo(_inlineBaseEntry, inItem); } catch (eLayer) {}
+                            if (_inlineHasHiddenText) _inlineBaseEntry.textHiddenBeforeExport = true;
+                            inlineObjects.push(_inlineBaseEntry);
+                        }
                     }
                 } catch (eRender) {}
                 restoreTextFrames(savedInlineTextFrames);

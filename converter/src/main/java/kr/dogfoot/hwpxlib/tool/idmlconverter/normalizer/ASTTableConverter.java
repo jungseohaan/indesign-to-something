@@ -4,6 +4,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.ast.*;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.ASTImageLoader;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.converter.CoordinateConverter;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.idml.*;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.stage3.VisualCropper;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.util.ColorResolver;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedData;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedParagraph;
@@ -12,6 +13,9 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedStory;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.ResolvedTextFrame;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.resolved.RenderedGroup;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -190,7 +194,6 @@ public class ASTTableConverter {
         // 마지막 빈 단락 제거
         ASTPageProcessor.removeTrailingEmptyParagraphs(cell.paragraphs());
         replaceFlattenedCellTextWithResolvedStory(cell, idmlCell, resolvedData);
-        normalizeTextHiddenInlineShellCarriers(cell, resolvedData);
 
         return cell;
     }
@@ -240,7 +243,7 @@ public class ASTTableConverter {
      * 셀 밖과 같은 공용 런 빌더(RunBuilder.createRunFromIDML)를 쓴다.
      */
     public interface CellParagraphBuilder {
-        java.util.List<ASTParagraph> build(IDMLTableCell idmlCell);
+        java.util.List<ASTParagraph> build(IDMLTable idmlTable, IDMLTableCell idmlCell);
     }
 
     public static ASTTable convertTableSimple(IDMLTable idmlTable,
@@ -292,7 +295,7 @@ public class ASTTableConverter {
                             idmlDoc, colorResolver, imageLoader, resolvedData);
                 } else {
                     cell = convertTableCellSimple(
-                            idmlCell, rowIdx, idmlCell.columnIndex(), resolvedData, styleResolver,
+                            idmlTable, idmlCell, rowIdx, idmlCell.columnIndex(), resolvedData, styleResolver,
                             cellParagraphBuilder);
                 }
                 row.addCell(cell);
@@ -655,7 +658,8 @@ public class ASTTableConverter {
     /**
      * 간소화 셀 변환 (ColorResolver 없이).
      */
-    private static ASTTableCell convertTableCellSimple(IDMLTableCell idmlCell,
+    private static ASTTableCell convertTableCellSimple(IDMLTable idmlTable,
+                                                        IDMLTableCell idmlCell,
                                                         int rowIdx, int colIdx,
                                                         ResolvedData resolvedData,
                                                         StylePropertyResolver styleResolver,
@@ -695,9 +699,15 @@ public class ASTTableConverter {
         cell.diagonalBorder(convertCellBorderSimple(idmlCell.diagonalBorder(), resolvedData));
 
         // 셀 내용: 셀 밖과 같은 공용 런 빌더(ctx 보유 호출부 제공) 우선, 없으면 간소 폴백.
-        if (cellParagraphBuilder != null) {
-            for (ASTParagraph astPara : cellParagraphBuilder.build(idmlCell)) {
-                cell.addParagraph(astPara);
+        boolean usedCellParagraphBuilder = cellParagraphBuilder != null;
+        if (usedCellParagraphBuilder) {
+            java.util.List<ASTParagraph> builtParagraphs = cellParagraphBuilder.build(idmlTable, idmlCell);
+            if (builtParagraphs != null) {
+                for (ASTParagraph astPara : builtParagraphs) {
+                    if (astPara != null) {
+                        cell.addParagraph(astPara);
+                    }
+                }
             }
         } else {
             for (IDMLParagraph cellPara : idmlCell.paragraphs()) {
@@ -712,8 +722,9 @@ public class ASTTableConverter {
                 cell.addParagraph(astPara);
             }
         }
-        replaceFlattenedCellTextWithResolvedStory(cell, idmlCell, resolvedData);
-        normalizeTextHiddenInlineShellCarriers(cell, resolvedData);
+        if (!usedCellParagraphBuilder) {
+            replaceFlattenedCellTextWithResolvedStory(cell, idmlCell, resolvedData);
+        }
 
         return cell;
     }
@@ -739,8 +750,10 @@ public class ASTTableConverter {
     private static RenderedGroup findTextHiddenShellForEditableTextFrame(
             ResolvedData resolvedData, String textFrameDomId) {
         if (resolvedData == null || textFrameDomId == null) return null;
+        ResolvedTextFrame textFrame = resolvedData.getTextFrame(textFrameDomId);
+        if (textFrame == null || !textFrame.isInline()) return null;
         for (RenderedGroup rg : resolvedData.allRenderedFloatingItems()) {
-            if (!isTextHiddenInlineShell(rg)) continue;
+            if (!isTextHiddenShellForInlineTextFrame(rg)) continue;
             String[] ids = rg.editableTextFrameIds();
             if (ids == null) continue;
             for (String id : ids) {
@@ -750,11 +763,15 @@ public class ASTTableConverter {
         return null;
     }
 
-    private static boolean isTextHiddenInlineShell(RenderedGroup rg) {
+    private static boolean isTextHiddenShellForInlineTextFrame(RenderedGroup rg) {
         if (rg == null || !rg.hasEditableTextHiddenFromPng()) return false;
         if (rg.file() == null || rg.file().isEmpty()) return false;
         String role = rg.itemType() != null ? rg.itemType() : rg.type();
-        return "inline_object".equals(role);
+        if ("inline_object".equals(role)) return true;
+        if ("TEXTLESS_SHELL_WITH_TF".equals(rg.atomicObjectKind())) return true;
+        return rg.editableTextFrameIds() != null
+                && rg.editableTextFrameIds().length > 0
+                && "hwpx_tf".equals(rg.textOwner());
     }
 
     private static void applyExtractedShellAsInlineFrameFill(
@@ -775,10 +792,28 @@ public class ASTTableConverter {
         try {
             File pngFile = new File(resolvedData.basePath(), rg.file());
             if (!pngFile.isFile()) return null;
-            return Files.readAllBytes(pngFile.toPath());
+            BufferedImage img = ImageIO.read(pngFile);
+            if (img == null || img.getWidth() <= 2 || img.getHeight() <= 2) {
+                return Files.readAllBytes(pngFile.toPath());
+            }
+            BufferedImage shell = VisualCropper.knockOutPaperLikeFill(img);
+            return flattenOntoWhite(shell);
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static byte[] flattenOntoWhite(BufferedImage src) throws java.io.IOException {
+        BufferedImage flat = new BufferedImage(
+                src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = flat.createGraphics();
+        g.setColor(java.awt.Color.WHITE);
+        g.fillRect(0, 0, src.getWidth(), src.getHeight());
+        g.drawImage(src, 0, 0, null);
+        g.dispose();
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        ImageIO.write(flat, "png", bos);
+        return bos.toByteArray();
     }
 
     private static void removeStandaloneShellImage(ASTParagraph para, int shellDomId) {
@@ -821,6 +856,7 @@ public class ASTTableConverter {
         for (String storyId : idmlCell.textFrameStoryRefs()) {
             ResolvedStory story = resolvedData.getStory(storyId);
             if (!hasRicherResolvedStructure(story)) continue;
+            if (hasInlineAnchors(story)) continue;
             String storyText = normalizeComparableText(resolvedStoryText(story));
             if (storyText.isEmpty()) continue;
             if (cellText.equals(storyText) || storyText.startsWith(cellText) || cellText.startsWith(storyText)) {
@@ -847,6 +883,17 @@ public class ASTTableConverter {
             if (text != null) chars += text.trim().length();
         }
         return textRuns <= 1 && chars > 20;
+    }
+
+    private static boolean hasInlineAnchors(ResolvedStory story) {
+        if (story == null || story.paragraphs() == null) return false;
+        for (ResolvedParagraph paragraph : story.paragraphs()) {
+            if (paragraph == null || paragraph.runs() == null) continue;
+            for (ResolvedRun run : paragraph.runs()) {
+                if (run != null && run.isInlineAnchor()) return true;
+            }
+        }
+        return false;
     }
 
     private static ASTParagraph singleTextContentParagraph(ASTTableCell cell) {

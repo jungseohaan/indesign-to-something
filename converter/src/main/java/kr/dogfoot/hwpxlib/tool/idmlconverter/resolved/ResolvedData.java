@@ -250,6 +250,57 @@ public class ResolvedData {
         return tableMap.get(tableId);
     }
 
+    public ResolvedTable getTableByIdOrSourceId(String tableId) {
+        if (tableId == null) return null;
+        ResolvedTable direct = tableMap.get(tableId);
+        if (direct != null) return direct;
+        String decimalId = tableSourceIdToDecimalId(tableId);
+        if (decimalId == null) return null;
+        return tableMap.get(decimalId);
+    }
+
+    private String tableSourceIdToDecimalId(String tableId) {
+        if (tableId == null) return null;
+        int iIdx = tableId.indexOf('i');
+        if (iIdx >= 0 && iIdx + 1 < tableId.length()) {
+            int start = iIdx + 1;
+            int end = start;
+            while (end < tableId.length()) {
+                char c = tableId.charAt(end);
+                boolean hex = (c >= '0' && c <= '9')
+                        || (c >= 'a' && c <= 'f')
+                        || (c >= 'A' && c <= 'F');
+                if (!hex) break;
+                end++;
+            }
+            if (end <= start) return null;
+            try {
+                return String.valueOf(Integer.parseInt(tableId.substring(start, end), 16));
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        if (tableId.startsWith("u") || tableId.startsWith("U")) {
+            int start = 1;
+            int end = start;
+            while (end < tableId.length()) {
+                char c = tableId.charAt(end);
+                boolean hex = (c >= '0' && c <= '9')
+                        || (c >= 'a' && c <= 'f')
+                        || (c >= 'A' && c <= 'F');
+                if (!hex) break;
+                end++;
+            }
+            if (end <= start) return null;
+            try {
+                return String.valueOf(Integer.parseInt(tableId.substring(start, end), 16));
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return tableId;
+    }
+
     /**
      * IDML 테이블 ID로 resolved 테이블의 bounds를 조회한다.
      * @param idmlTableId IDML Table Self ID (예: "u9cbi8146")
@@ -257,18 +308,8 @@ public class ResolvedData {
      */
     public double[] getTableBounds(String idmlTableId) {
         if (idmlTableId == null) return null;
-        // IDML table ID → resolved table ID (DOM decimal)
-        // IDML: "u9cbi8146" → "i" 뒤의 hex 부분이 DOM ID
-        int iIdx = idmlTableId.indexOf('i');
-        if (iIdx < 0) return null;
-        String hexPart = idmlTableId.substring(iIdx + 1);
-        try {
-            String decimalId = String.valueOf(Integer.parseInt(hexPart, 16));
-            ResolvedTable rt = tableMap.get(decimalId);
-            if (rt != null && rt.bounds() != null) {
-                return rt.bounds();
-            }
-        } catch (NumberFormatException e) {}
+        ResolvedTable rt = getTableByIdOrSourceId(idmlTableId);
+        if (rt != null && rt.bounds() != null) return rt.bounds();
         return null;
     }
 

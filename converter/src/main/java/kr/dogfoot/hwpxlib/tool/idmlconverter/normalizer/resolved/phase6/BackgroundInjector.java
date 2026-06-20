@@ -626,20 +626,13 @@ public final class BackgroundInjector {
             double pageWidth,
             double pageHeight) {
         if (rg == null) return false;
-        if (!isPlannedTextShell(ctx, rg)) return false;
+        ObjectPlan plan = ctx != null ? ctx.findOwnershipPlanForRendered(rg) : null;
+        if (plan == null || plan.visualAction != VisualAction.PLACE_TEXT_SHELL) return false;
+        if (plan.materialization == Materialization.NATIVE_SOURCE_SHAPE) return false;
         if (isPageScaleMixedTextShell(rg, boundsW, boundsH, pageWidth, pageHeight)) {
             return false;
         }
-        String reason = rg.reason();
-        if (reason == null) return true;
-        return reason.contains("text_hidden")
-                || reason.contains("visual_shell")
-                || reason.contains("editable_textframe_visual_shell")
-                || reason.contains("image_group")
-                || reason.contains("decoration_group")
-                || reason.contains("mixed_group_text_hidden")
-                || reason.contains("complex_graphic_text_hidden")
-                || reason.contains("label_backdrop_group");
+        return plan.materialization == Materialization.EXTRACTED_PNG_VECTOR;
     }
 
     private static boolean isPageScaleMixedTextShell(

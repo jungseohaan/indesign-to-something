@@ -7,6 +7,7 @@ import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.FrameDispositio
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ResolvedBuildContext;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.ObjectPlan;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.GroupedFlowStackPolicy;
+import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Materialization;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.Placement;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.TextAction;
 import kr.dogfoot.hwpxlib.tool.idmlconverter.normalizer.resolved.ownership.VisualAction;
@@ -150,9 +151,10 @@ public final class FramePlacer {
             }
             boolean inlineToFloating = tf.isInline() && plannedFloatingHwpxText;
             boolean hasPlannedTextShell = hasPlannedTextShellForTextFrame(ctx, tfDomId);
+            boolean hasNativeSourceTextShell = hasNativeSourceTextShellPlan(ctx, tfDomId);
             boolean plannedVisualTextOverlay = plannedFloatingHwpxText
                     && hasPlannedVisualTextOverlayForTextFrame(ctx, tfDomId);
-            boolean hasRenderedVisualShell = hasPlannedTextShell;
+            boolean hasRenderedVisualShell = hasPlannedTextShell && !hasNativeSourceTextShell;
 
             // 숨김/비인쇄 TF → 변환 불필요
             if (tf.sourceHidden()) { continue; }
@@ -536,6 +538,24 @@ public final class FramePlacer {
                     fontAxisExpanded = true;
                 }
             }
+            double nativeShellInsetTopPt = 0;
+            double nativeShellInsetLeftPt = 0;
+            double nativeShellInsetBottomPt = 0;
+            double nativeShellInsetRightPt = 0;
+            double[] nativeShellBounds = nativeSourceTextShellSourceBoundsForTf(ctx, tfDomId);
+            if (nativeShellBounds != null && nativeShellBounds.length >= 4) {
+                if (gb != null && gb.length >= 4) {
+                    nativeShellInsetTopPt = Math.max(0, gb[0] - nativeShellBounds[0]);
+                    nativeShellInsetLeftPt = Math.max(0, gb[1] - nativeShellBounds[1]);
+                    nativeShellInsetBottomPt = Math.max(0, nativeShellBounds[2] - gb[2]);
+                    nativeShellInsetRightPt = Math.max(0, nativeShellBounds[3] - gb[3]);
+                }
+                y = nativeShellBounds[0] - pageTop;
+                x = nativeShellBounds[1] - pageLeft;
+                h = nativeShellBounds[2] - nativeShellBounds[0];
+                w = nativeShellBounds[3] - nativeShellBounds[1];
+                fontAxisExpanded = false;
+            }
             block.x(CoordinateConverter.pointsToHwpunits(x));
             block.y(CoordinateConverter.pointsToHwpunits(y));
             block.width(CoordinateConverter.pointsToHwpunits(w));
@@ -569,6 +589,17 @@ public final class FramePlacer {
                 block.insetLeft(CoordinateConverter.pointsToHwpunits(inset[1]));
                 block.insetBottom(CoordinateConverter.pointsToHwpunits(inset[2]));
                 block.insetRight(CoordinateConverter.pointsToHwpunits(inset[3]));
+            }
+            if (nativeShellInsetTopPt > 0 || nativeShellInsetLeftPt > 0
+                    || nativeShellInsetBottomPt > 0 || nativeShellInsetRightPt > 0) {
+                block.insetTop(block.insetTop()
+                        + CoordinateConverter.pointsToHwpunits(nativeShellInsetTopPt));
+                block.insetLeft(block.insetLeft()
+                        + CoordinateConverter.pointsToHwpunits(nativeShellInsetLeftPt));
+                block.insetBottom(block.insetBottom()
+                        + CoordinateConverter.pointsToHwpunits(nativeShellInsetBottomPt));
+                block.insetRight(block.insetRight()
+                        + CoordinateConverter.pointsToHwpunits(nativeShellInsetRightPt));
             }
 
             // 수직 정렬
@@ -634,12 +665,25 @@ public final class FramePlacer {
                 }
             }
             java.util.Set<String> releasedFillIds = releasedNativeFillChildIdsForTf(ctx, tfDomId);
-            if (!hasPlannedTextShell
+            java.util.Set<String> nativeShellIds = nativeSourceTextShellStyleIdsForTf(ctx, tfDomId);
+            java.util.Set<String> allowedShellIds = !nativeShellIds.isEmpty()
+                    ? nativeShellIds
+                    : releasedFillIds;
+            if ((!hasPlannedTextShell || hasNativeSourceTextShell)
                     && (!hasRenderedVisualShell || hasAbsorbedTextStylePlan(ctx, tfDomId)
-                    || !releasedFillIds.isEmpty())) {
+                    || !releasedFillIds.isEmpty() || hasNativeSourceTextShell)) {
                 // PNG가 풀어준 도형이 있으면 그 id로만 형제 흡수를 제한(다른 장식 흡수 방지).
                 applyGroupBackgroundShapeStyle(ctx, tf, block,
-                        releasedFillIds.isEmpty() ? null : releasedFillIds);
+                        allowedShellIds.isEmpty() ? null : allowedShellIds);
+                if (hasNativeSourceTextShell) {
+                    applyNativeSourceTextShellPlanStyle(ctx, tfDomId, block);
+                }
+                if (hasNativeSourceTextShell
+                        && ((block.fillColor() != null && block.fillColor().startsWith("#"))
+                        || (block.strokeColor() != null && block.strokeColor().startsWith("#")
+                        && block.strokeWeight() > 0))) {
+                    block.forceNativeFill(true);
+                }
                 // released 경로(사이드박스 대형 배경/제목바)만 전역 정책과 무관하게 강제 fill.
                 if (!releasedFillIds.isEmpty()
                         && block.fillColor() != null && block.fillColor().startsWith("#")) {
@@ -692,13 +736,38 @@ public final class FramePlacer {
             }
             if (plannedVisualTextOverlay || hasPlannedTextShell) {
                 block.plannedVisualTextOverlay(true);
+                String shellLayer = textShellVisualLayerForTextFrame(ctx, tfDomId);
+                if (shellLayer != null && !shellLayer.isEmpty()) {
+                    block.plannedShellVisualLayer(shellLayer);
+                }
             }
             section.addBlock(block);
         }
     }
 
+    private static String textShellVisualLayerForTextFrame(ResolvedBuildContext ctx, int tfDomId) {
+        if (ctx == null || tfDomId < 0 || ctx.ownershipPlans == null) return null;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (!containsInt(plan.ownedTextFrameIds, tfDomId)) continue;
+            if (plan.visualLayer != null) return plan.visualLayer.name();
+        }
+        return null;
+    }
+
     private static boolean hasPlannedVisualTextOverlayForTextFrame(ResolvedBuildContext ctx, int tfDomId) {
         if (ctx == null || ctx.resolvedData == null || tfDomId < 0) return false;
+        if (ctx.ownershipPlans != null) {
+            for (ObjectPlan plan : ctx.ownershipPlans) {
+                if (plan == null) continue;
+                if (plan.textAction != TextAction.OWNED_BY_HWPX_TEXT) continue;
+                if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+                if (plan.placement != Placement.FLOATING) continue;
+                if (!containsInt(plan.ownedTextFrameIds, tfDomId)) continue;
+                return true;
+            }
+        }
         List<RenderedGroup> groups = ctx.resolvedData.allRenderedFloatingItems();
         if (groups == null) return false;
         String tfId = String.valueOf(tfDomId);
@@ -769,6 +838,84 @@ public final class FramePlacer {
             }
         }
         return false;
+    }
+
+    private static boolean hasNativeSourceTextShellPlan(ResolvedBuildContext ctx, int tfDomId) {
+        return !nativeSourceTextShellStyleIdsForTf(ctx, tfDomId).isEmpty();
+    }
+
+    private static java.util.Set<String> nativeSourceTextShellStyleIdsForTf(
+            ResolvedBuildContext ctx,
+            int tfDomId) {
+        java.util.Set<String> ids = new java.util.LinkedHashSet<>();
+        if (ctx == null || tfDomId < 0 || ctx.ownershipPlans == null) return ids;
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) continue;
+            if (!containsInt(plan.ownedTextFrameIds, tfDomId)) continue;
+            int[] styleIds = plan.styleSourceObjectIds != null && plan.styleSourceObjectIds.length > 0
+                    ? plan.styleSourceObjectIds
+                    : plan.visualSourceObjectIds;
+            if (styleIds == null) continue;
+            for (int id : styleIds) ids.add(String.valueOf(id));
+        }
+        return ids;
+    }
+
+    private static double[] nativeSourceTextShellSourceBoundsForTf(
+            ResolvedBuildContext ctx,
+            int tfDomId) {
+        if (ctx == null || ctx.resolvedData == null || tfDomId < 0
+                || ctx.ownershipPlans == null) {
+            return null;
+        }
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) continue;
+            if (!containsInt(plan.ownedTextFrameIds, tfDomId)) continue;
+            int[] styleIds = plan.styleSourceObjectIds != null && plan.styleSourceObjectIds.length > 0
+                    ? plan.styleSourceObjectIds
+                    : plan.visualSourceObjectIds;
+            if (styleIds == null) continue;
+            for (int id : styleIds) {
+                ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(id));
+                if (item == null || item.geometricBounds() == null
+                        || item.geometricBounds().length < 4) {
+                    continue;
+                }
+                return item.geometricBounds();
+            }
+        }
+        return null;
+    }
+
+    private static void applyNativeSourceTextShellPlanStyle(
+            ResolvedBuildContext ctx,
+            int tfDomId,
+            ASTTextFrameBlock block) {
+        if (ctx == null || ctx.resolvedData == null || block == null
+                || tfDomId < 0 || ctx.ownershipPlans == null) {
+            return;
+        }
+        for (ObjectPlan plan : ctx.ownershipPlans) {
+            if (plan == null) continue;
+            if (plan.visualAction != VisualAction.PLACE_TEXT_SHELL) continue;
+            if (plan.materialization != Materialization.NATIVE_SOURCE_SHAPE) continue;
+            if (!containsInt(plan.ownedTextFrameIds, tfDomId)) continue;
+            int[] styleIds = plan.styleSourceObjectIds != null && plan.styleSourceObjectIds.length > 0
+                    ? plan.styleSourceObjectIds
+                    : plan.visualSourceObjectIds;
+            if (styleIds == null) continue;
+            for (int id : styleIds) {
+                ResolvedPageItem item = ctx.resolvedData.getPageItem(String.valueOf(id));
+                if (item == null) continue;
+                applyPageItemStyleToBlock(ctx, item, block);
+                block.forceNativeFill(true);
+                return;
+            }
+        }
     }
 
     private static boolean hasNextPageChainOnDifferentPage(ResolvedBuildContext ctx, ResolvedTextFrame tf) {
@@ -1081,7 +1228,7 @@ public final class FramePlacer {
             String strokeHex = ctx.resolvedData.resolveColorHex(strokeName);
             if (strokeHex != null) {
                 block.strokeColor(strokeHex);
-                block.strokeWeight(source.strokeWeight());
+                block.strokeWeight(normalizeSourceStrokeWeightPt(ctx, source.strokeWeight()));
                 block.strokeTint(ColorResolver.normalizeTint(source.strokeTint()));
                 block.nativeGraphicsAllowed(true);
             }
@@ -1091,6 +1238,13 @@ public final class FramePlacer {
             block.cornerRadius(source.cornerRadius());
             block.nativeGraphicsAllowed(true);
         }
+    }
+
+    private static double normalizeSourceStrokeWeightPt(ResolvedBuildContext ctx, double strokeWeight) {
+        if (strokeWeight <= 0) return strokeWeight;
+        double scale = ctx != null && ctx.scaleFactor > 0 ? ctx.scaleFactor : 1.0;
+        if (Math.abs(scale - 1.0) < 0.001) return strokeWeight;
+        return strokeWeight / scale;
     }
 
     private static double overlapRatio(double[] a, double[] b) {
