@@ -2423,11 +2423,8 @@ public final class OwnershipPlanner {
         if ("visual_backdrop_cluster".equals(rg.reason())) {
             return VisualLayer.CONTAINER_BACKDROP;
         }
-        if (isPaperStrokeForegroundMask(rg)) {
-            return VisualLayer.FOREGROUND_MASK;
-        }
-        if (isPaperMaskInsideContainerBackdrop(rg)) {
-            return VisualLayer.FOREGROUND_MASK;
+        if (isPaperStrokeContainerVisual(rg) || isPaperMaskInsideContainerBackdrop(rg)) {
+            return VisualLayer.CONTAINER_BACKDROP;
         }
         if (isTextCardBackdropVector(rg)) {
             return VisualLayer.TEXT_CARD_BACKDROP;
@@ -4789,7 +4786,8 @@ public final class OwnershipPlanner {
         String reason = safe(plan.reason);
         return reason.contains("atomic_ownership_root_text_hidden_shell")
                 || reason.contains("leaf_group_text_hidden_shell")
-                || reason.contains("direct_text_hidden_shell");
+                || reason.contains("direct_text_hidden_shell")
+                || isDirectInlineTextShellReason(reason);
     }
 
     private int[] textFrameIdsForPlanIncludingOwned(ObjectPlan plan) {
@@ -4961,25 +4959,32 @@ public final class OwnershipPlanner {
         for (int i = 0; i < plans.size(); i++) {
             ObjectPlan composite = plans.get(i);
             if (!isDroppedCompositeTextShellWithExtraMaterial(composite)) continue;
+            List<ObjectPlan> inlineChildren = visibleInlineChildTextShellsCoveredByComposite(composite);
             ObjectPlan child = visibleChildTextShellCoveredByComposite(composite);
-            if (child == null) continue;
-            if (isMultiTextCompositeWrapperOfSameTextShell(composite, child)) {
+            if (child == null && inlineChildren.isEmpty()) continue;
+            if (child != null && isMultiTextCompositeWrapperOfSameTextShell(composite, child)) {
                 continue;
             }
 
-            VisualLayer layer = composite.ownedTextFrameIds != null
-                    && composite.ownedTextFrameIds.length > 1
+            ObjectPlan splitComposite = removeInlineChildShellOwnership(composite, inlineChildren);
+            if (splitComposite.ownedTextFrameIds == null || splitComposite.ownedTextFrameIds.length == 0) {
+                continue;
+            }
+
+            VisualLayer layer = splitComposite.ownedTextFrameIds != null
+                    && splitComposite.ownedTextFrameIds.length > 1
                     ? VisualLayer.CONTAINER_BACKDROP
-                    : hasColoredShapeShellSource(composite)
+                    : hasColoredShapeShellSource(splitComposite)
                     ? VisualLayer.LABEL_BACKDROP
                     : VisualLayer.CONTAINER_BACKDROP;
-            ObjectPlan restored = composite
+            ObjectPlan restored = splitComposite
                     .withTextAction(TextAction.OWNED_BY_HWPX_TEXT)
                     .withVisualAction(VisualAction.PLACE_TEXT_SHELL,
                             "composite_text_shell_with_extra_source_material")
                     .withVisualLayer(layer)
                     .withMaterialization(Materialization.EXTRACTED_PNG_VECTOR)
-                    .withZOrder(Math.min(composite.zOrder, minTextFrameZOrder(composite.ownedTextFrameIds) - 1));
+                    .withZOrder(Math.min(splitComposite.zOrder,
+                            minTextFrameZOrder(splitComposite.ownedTextFrameIds) - 1));
             plans.set(i, restored);
 
             for (int j = 0; j < plans.size(); j++) {
@@ -4997,6 +5002,45 @@ public final class OwnershipPlanner {
                         .withDescendantVisualObjectIds(new int[0]));
             }
         }
+    }
+
+    private List<ObjectPlan> visibleInlineChildTextShellsCoveredByComposite(ObjectPlan composite) {
+        List<ObjectPlan> children = new ArrayList<>();
+        if (composite == null) return children;
+        for (ObjectPlan child : plans) {
+            if (!isVisibleTextShell(child)) continue;
+            if (child.placement != Placement.INLINE) continue;
+            if (child.pageIndex != composite.pageIndex) continue;
+            if (child.ownedTextFrameIds == null || child.ownedTextFrameIds.length == 0) continue;
+            if (!containsAny(composite.ownedTextFrameIds, child.ownedTextFrameIds)) continue;
+            if (!containsAll(visualSourceIds(composite), visualSourceIds(child))) continue;
+            if (!compositeTextShellHasExtraMaterialOutsideChild(composite, child)) continue;
+            children.add(child);
+        }
+        return children;
+    }
+
+    private ObjectPlan removeInlineChildShellOwnership(ObjectPlan composite, List<ObjectPlan> inlineChildren) {
+        if (composite == null || inlineChildren == null || inlineChildren.isEmpty()) return composite;
+        LinkedHashSet<Integer> childSources = new LinkedHashSet<>();
+        LinkedHashSet<Integer> childVisualSources = new LinkedHashSet<>();
+        LinkedHashSet<Integer> childTextFrames = new LinkedHashSet<>();
+        for (ObjectPlan child : inlineChildren) {
+            addAll(child.sourceObjectIds, childSources);
+            for (int sourceId : visualSourceIds(child)) {
+                childVisualSources.add(sourceId);
+            }
+            addAll(child.ownedTextFrameIds, childTextFrames);
+        }
+        int[] retainedSources = withoutSources(composite.sourceObjectIds, childSources);
+        int[] retainedVisualSources = withoutSources(visualSourceIds(composite), childVisualSources);
+        int[] retainedOwnedTextFrames = withoutSources(composite.ownedTextFrameIds, childTextFrames);
+        int[] retainedDescendants = withoutSources(composite.descendantVisualObjectIds, childSources);
+        return composite
+                .withSourceObjectIds(retainedSources)
+                .withVisualSourceObjectIds(retainedVisualSources)
+                .withOwnedTextFrameIds(retainedOwnedTextFrames)
+                .withDescendantVisualObjectIds(retainedDescendants);
     }
 
     private static boolean isMultiTextCompositeWrapperOfSameTextShell(ObjectPlan composite, ObjectPlan child) {

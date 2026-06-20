@@ -284,11 +284,15 @@ Execution requirements:
   source visual most directly contains the TextFrame. Other candidates remain
   visible only as their own non-text visual slot when their source slot is
   distinct.
-- If a candidate shell contains another shell candidate for the same owned
-  TextFrame but also contains additional visible source shell material outside
-  that child slot, the containing source shell is the canonical owner. The child
-  candidate is already baked into that shell material and must not be emitted as
-  a second visible shell.
+- If a candidate shell contains another shell candidate for the same complete
+  owned TextFrame set but also contains additional visible source shell material
+  outside that child slot, the containing source shell is the canonical owner.
+  The child candidate is already baked into that shell material and must not be
+  emitted as a second visible shell.
+- If a parent composite owns additional TextFrames outside a direct child shell
+  slot, Stage 1 splits the bundle: the direct child shell keeps its own
+  TextFrame/source ownership and placement, while the parent retains only the
+  remaining TextFrames/source material.
 - A composite rendered text shell that contains multiple direct shell slots is a
   layout container, not the canonical visible shell, only when every owned
   TextFrame is covered by distinct direct shell slots. Stage 1 then drops the
@@ -393,6 +397,10 @@ Default HWPX plane:
   object plane because of a stale generic content layer.
 - A source shape with `Paper`/white fill is a container/background face even
   when it also has stroke. Stroke-only source shapes may become outlines.
+- A `Paper`/white face must not be promoted to `FOREGROUND_MASK` merely because
+  it overlaps or clips a label/card. If the source is a filled face, it stays a
+  `CONTAINER_BACKDROP`; only an explicit source mask/outline role may render in
+  front of text.
 - Image preparation must not knock out `Paper`/white pixels when that fill is
   the planned container/background face.
 - outline/mask that must appear above content: in front of text only when source
