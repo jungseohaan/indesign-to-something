@@ -204,6 +204,8 @@ function _slimExtractionPlanForWrite(plan) {
         sourceClusterQuerySummary: plan.sourceClusterQuerySummary,
         plannerBundleSummary: plan.plannerBundleSummary,
         objectPlanSummary: plan.objectPlanSummary,
+        preObjectPlanTextlessShellSuppressionSummary:
+                plan.preObjectPlanTextlessShellSuppressionSummary,
         sourceSlotCanonicalizationSummary: plan.sourceSlotCanonicalizationSummary,
         executionCandidateContractSummary: plan.executionCandidateContractSummary,
         exactShellSlotDuplicateSummary: plan.exactShellSlotDuplicateSummary,

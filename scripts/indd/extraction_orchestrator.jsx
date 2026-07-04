@@ -111,6 +111,8 @@ function _runRenderPhases(doc, ctx, allItems) {
             sourceClusterQuerySummary: ctx.extractionPlan.sourceClusterQuerySummary,
             plannerBundleSummary: ctx.extractionPlan.plannerBundleSummary,
             objectPlanSummary: ctx.extractionPlan.objectPlanSummary,
+            preObjectPlanTextlessShellSuppressionSummary:
+                    ctx.extractionPlan.preObjectPlanTextlessShellSuppressionSummary,
             sourceSlotCanonicalizationSummary: ctx.extractionPlan.sourceSlotCanonicalizationSummary,
             executionCandidateContractSummary: ctx.extractionPlan.executionCandidateContractSummary,
             legacyNormalizationFilterSummary: ctx.extractionPlan.legacyNormalizationFilterSummary,

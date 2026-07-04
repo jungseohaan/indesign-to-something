@@ -38,7 +38,13 @@ HWPX text inside the table.  Nearby floating markers or source-positioned
 graphics keep their own `CONTENT_VISUAL_SLOT`/`SHELL_SLOT`; their placement is
 not used as a reason to dissolve the table into independent TextFrames.
 - `CONTENT_VISUAL_SLOT`: photo, illustration, chart, QR, complete marker, or
-  graphic-only complete visual.
+  graphic-only complete visual with positive source evidence. Stage 1 may assign
+  this slot only when the source tree contains placed content (`Image`, `PDF`,
+  `EPS`, `hasPlacedVisual`, or `hasPlacedVisualInSubtree`) or the extractor has
+  explicitly declared complete-PNG ownership for a non-editable marker. Ambiguous
+  vector/group material is not promoted to `CONTENT_VISUAL_SLOT`; it remains
+  `SHELL_SLOT`, `TABLE_STYLE_SLOT`, or a validation warning until stronger
+  source metadata exists.
 
 Stroke-only leaf vector sources are shell material when their IDML source is a
 drawable line/container/grid object: `GraphicLine`, `Rectangle`, `Oval`, or
@@ -147,13 +153,13 @@ Slot ownership rules:
   candidate remains executable and may materialize as one atomic textless graphic
   PNG.
 - A leaf `Polygon` vector inside a text-shell carrier may be a non-editable
-  outline glyph, for example an outlined label word converted to vector paths.
-  If its ancestor source tree contains editable TextFrames and the polygon has
-  its own `VECTOR_CANDIDATE`, Stage 1 treats that polygon as a distinct
-  `CONTENT_VISUAL_SLOT`, not as part of the carrier `SHELL_SLOT`. The parent
-  `SLOT_ONLY` shell must list that polygon in `hiddenVisualSourceObjectIds` and
-  export without those pixels; the polygon keeps its own ObjectPlan. This is a
-  source-tree slot split, not a text/content heuristic.
+  outline glyph or decorative fragment, but it is not a `CONTENT_VISUAL_SLOT`
+  merely because it has its own `VECTOR_CANDIDATE`. Without placed-content or
+  explicit complete-marker evidence, Stage 1 keeps that vector in `SHELL_SLOT`
+  when it belongs to the carrier shell, or leaves it as a validation warning if
+  no executable shell owner can be proven. This is deliberately conservative:
+  ambiguous vector/group material must not become independent content by
+  default.
 - A Rectangle/Oval/Polygon source that has nested page items is not a leaf
   vector source. It must not also emit a `pass.vector_shape_frames` candidate for
   the ancestor source. Stage 1 must choose a closed complex/content/shell

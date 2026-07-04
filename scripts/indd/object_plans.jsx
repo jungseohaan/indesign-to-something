@@ -54,11 +54,10 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles) {
         if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) summary.plansWithOwnedTextFrames++;
         _incrementObjectPlanSummary(summary.migrationBlockerCounts, plan.migrationBlocker || "NONE");
     }
+    var textOwnershipResolution = _resolveObjectPlanDuplicateTextOwners(objectPlans);
     var validation = _validateObjectPlanDiagnostics(objectPlans);
-    summary.issueCount = validation.issues.length;
-    summary.importReadyPlanCount = validation.importReadyPlanCount;
-    summary.contractStatusCounts = validation.contractStatusCounts;
-    summary.issueCodeCounts = validation.issueCodeCounts;
+    summary = _summarizeObjectPlans(objectPlans, validation);
+    summary.textOwnershipResolution = textOwnershipResolution.summary;
 
     return {
         schemaVersion: 1,
@@ -68,6 +67,156 @@ function _buildObjectPlanDiagnosticsFromPlannerBundles(plannerBundles) {
         validation: validation,
         objectPlans: objectPlans
     };
+}
+
+function _summarizeObjectPlans(objectPlans, validation) {
+    var plans = objectPlans || [];
+    var summary = {
+        planCount: 0,
+        executablePlanCount: 0,
+        readyExactClusterCount: 0,
+        migrationStatusCounts: {},
+        textActionCounts: {},
+        visualActionCounts: {},
+        materializationCounts: {},
+        placementCounts: {},
+        coordinateSpaceCounts: {},
+        visualLayerCounts: {},
+        plansWithVisualSources: 0,
+        plansWithStyleSources: 0,
+        plansWithOwnedTextFrames: 0,
+        importReadyPlanCount: validation ? validation.importReadyPlanCount : 0,
+        issueCount: validation && validation.issues ? validation.issues.length : 0,
+        contractStatusCounts: validation ? validation.contractStatusCounts || {} : {},
+        issueCodeCounts: validation ? validation.issueCodeCounts || {} : {},
+        migrationBlockerCounts: {}
+    };
+    for (var i = 0; i < plans.length; i++) {
+        var plan = plans[i];
+        if (!plan) continue;
+        summary.planCount++;
+        if (plan.executable) summary.executablePlanCount++;
+        if (plan.migrationStatus === "READY_EXACT_CLUSTER") summary.readyExactClusterCount++;
+        _incrementObjectPlanSummary(summary.migrationStatusCounts, plan.migrationStatus);
+        _incrementObjectPlanSummary(summary.textActionCounts, plan.textAction);
+        _incrementObjectPlanSummary(summary.visualActionCounts, plan.visualAction);
+        _incrementObjectPlanSummary(summary.materializationCounts, plan.materialization);
+        _incrementObjectPlanSummary(summary.placementCounts, plan.placement);
+        _incrementObjectPlanSummary(summary.coordinateSpaceCounts, plan.coordinateSpace);
+        _incrementObjectPlanSummary(summary.visualLayerCounts, plan.visualLayer);
+        if (plan.visualSourceObjectIds && plan.visualSourceObjectIds.length > 0) summary.plansWithVisualSources++;
+        if (plan.styleSourceObjectIds && plan.styleSourceObjectIds.length > 0) summary.plansWithStyleSources++;
+        if (plan.ownedTextFrameIds && plan.ownedTextFrameIds.length > 0) summary.plansWithOwnedTextFrames++;
+        _incrementObjectPlanSummary(summary.migrationBlockerCounts, plan.migrationBlocker || "NONE");
+    }
+    return summary;
+}
+
+function _resolveObjectPlanDuplicateTextOwners(objectPlans) {
+    var plans = objectPlans || [];
+    var ownersByTextFrameId = {};
+    for (var i = 0; i < plans.length; i++) {
+        var plan = plans[i];
+        if (!plan || plan.textAction !== "OWNED_BY_HWPX_TEXT") continue;
+        if (!plan.ownedTextFrameIds || plan.ownedTextFrameIds.length === 0) continue;
+        for (var t = 0; t < plan.ownedTextFrameIds.length; t++) {
+            var textId = String(plan.ownedTextFrameIds[t]);
+            if (!ownersByTextFrameId[textId]) ownersByTextFrameId[textId] = [];
+            ownersByTextFrameId[textId].push(plan);
+        }
+    }
+
+    var canonicalByTextFrameId = {};
+    var duplicateTextFrameCount = 0;
+    for (var textKey in ownersByTextFrameId) {
+        if (!ownersByTextFrameId.hasOwnProperty(textKey)) continue;
+        var owners = ownersByTextFrameId[textKey];
+        if (!owners || owners.length < 2) continue;
+        duplicateTextFrameCount++;
+        var canonical = owners[0];
+        for (var o = 1; o < owners.length; o++) {
+            if (_compareObjectPlanTextOwnerPriority(owners[o], canonical) < 0) {
+                canonical = owners[o];
+            }
+        }
+        canonicalByTextFrameId[textKey] = canonical;
+    }
+
+    var demoted = [];
+    for (var p = 0; p < plans.length; p++) {
+        var candidate = plans[p];
+        if (!candidate || candidate.textAction !== "OWNED_BY_HWPX_TEXT") continue;
+        if (!candidate.ownedTextFrameIds || candidate.ownedTextFrameIds.length === 0) continue;
+        var duplicateOwnedCount = 0;
+        var canonicalOwnedCount = 0;
+        for (var c = 0; c < candidate.ownedTextFrameIds.length; c++) {
+            var ownedTextId = String(candidate.ownedTextFrameIds[c]);
+            var canonicalPlan = canonicalByTextFrameId[ownedTextId];
+            if (!canonicalPlan) continue;
+            duplicateOwnedCount++;
+            if (canonicalPlan === candidate) canonicalOwnedCount++;
+        }
+        if (duplicateOwnedCount === 0) continue;
+        if (canonicalOwnedCount > 0) {
+            candidate.textOwnershipResolution = "CANONICAL_TEXT_OWNER";
+            continue;
+        }
+        if (duplicateOwnedCount < candidate.ownedTextFrameIds.length) {
+            candidate.textOwnershipResolution = "PARTIAL_DUPLICATE_TEXT_OWNER_UNRESOLVED";
+            continue;
+        }
+        candidate.textAction = "DROP_TEXT";
+        candidate.textOwnershipResolution = "DROPPED_DUPLICATE_TEXT_OWNER";
+        candidate.textOwnershipResolutionReason = "more_local_text_shell_or_text_plan_owns_the_same_text_frame";
+        candidate.reason = String(candidate.reason || "")
+                + ":text_owner_dropped_duplicate";
+        demoted.push(candidate.objectPlanId || candidate.bundleId || candidate.candidateId || ("plan.index." + p));
+    }
+
+    return {
+        summary: {
+            duplicateTextFrameCount: duplicateTextFrameCount,
+            demotedPlanCount: demoted.length,
+            demotedObjectPlanIds: demoted
+        }
+    };
+}
+
+function _compareObjectPlanTextOwnerPriority(a, b) {
+    var scoreA = _objectPlanTextOwnerPriority(a);
+    var scoreB = _objectPlanTextOwnerPriority(b);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+
+    var aSourceCount = a && a.sourceObjectIds ? a.sourceObjectIds.length : 0;
+    var bSourceCount = b && b.sourceObjectIds ? b.sourceObjectIds.length : 0;
+    if (aSourceCount !== bSourceCount) return aSourceCount - bSourceCount;
+
+    var aVisualCount = a && a.visualSourceObjectIds ? a.visualSourceObjectIds.length : 0;
+    var bVisualCount = b && b.visualSourceObjectIds ? b.visualSourceObjectIds.length : 0;
+    if (aVisualCount !== bVisualCount) return aVisualCount - bVisualCount;
+
+    var aId = a && a.objectPlanId ? String(a.objectPlanId) : "";
+    var bId = b && b.objectPlanId ? String(b.objectPlanId) : "";
+    if (aId < bId) return -1;
+    if (aId > bId) return 1;
+    return 0;
+}
+
+function _objectPlanTextOwnerPriority(plan) {
+    if (!plan) return 0;
+    var score = 0;
+    if (plan.visualAction === "DROP_VISUAL") score += 20;
+    if (plan.visualAction === "PLACE_TEXT_SHELL") score += 40;
+    if (plan.ownershipSlot === "SHELL_SLOT") score += 20;
+    if (plan.slotRole === "direct_child_shell_slot") score += 120;
+    if (plan.compositeRole === "direct_child_shell_slot") score += 100;
+    if (plan.compositeRole === "native_parent_text_shell_slot") score += 80;
+    if (plan.slotRole === "shell_slot_only" || plan.mode === "SLOT_ONLY") score += 40;
+    if (plan.passId === "pass.inline_objects") score += 30;
+    if (plan.passId === "pass.editable_textframe_visual_shells") score += 25;
+    if (plan.passId === "pass.decoration_groups") score += 10;
+    if (plan.sourceInlineFlow === true) score += 10;
+    return score;
 }
 
 function _objectPlanFromPlannerBundle(bundle, index) {

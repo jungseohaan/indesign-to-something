@@ -892,47 +892,78 @@ function _plannerBundleOwnershipSlot(candidate, clusterIndex) {
     if (candidate.passId === "pass.decoration_groups") return "SHELL_SLOT";
     if (candidate.passId === "pass.page_backgrounds") return "SHELL_SLOT";
     if (candidate.passId === "pass.vector_shape_frames") {
-        return _plannerBundleVectorShapeIsShellSlot(candidate, clusterIndex)
-                ? "SHELL_SLOT"
-                : "CONTENT_VISUAL_SLOT";
+        return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
+                ? "CONTENT_VISUAL_SLOT"
+                : "SHELL_SLOT";
     }
-    if (candidate.passId === "pass.image_placed_frames") return "CONTENT_VISUAL_SLOT";
-    if (candidate.passId === "pass.image_textless_groups") return "CONTENT_VISUAL_SLOT";
-    if (candidate.passId === "pass.complex_graphic_frames") return "CONTENT_VISUAL_SLOT";
+    if (candidate.passId === "pass.image_placed_frames") {
+        return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
+                ? "CONTENT_VISUAL_SLOT"
+                : "SHELL_SLOT";
+    }
+    if (candidate.passId === "pass.image_textless_groups") {
+        return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
+                ? "CONTENT_VISUAL_SLOT"
+                : "SHELL_SLOT";
+    }
+    if (candidate.passId === "pass.complex_graphic_frames") {
+        return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
+                ? "CONTENT_VISUAL_SLOT"
+                : "SHELL_SLOT";
+    }
     if (candidate.passId === "pass.master_page_graphics") return "SHELL_SLOT";
     if (candidate.passId === "pass.inline_objects") {
-        return _plannerBundleInlineObjectIsTextShell(candidate)
-                ? "SHELL_SLOT"
-                : "CONTENT_VISUAL_SLOT";
+        if (_plannerBundleInlineObjectIsTextShell(candidate)) return "SHELL_SLOT";
+        return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
+                ? "CONTENT_VISUAL_SLOT"
+                : "SHELL_SLOT";
     }
     if (candidate.candidatePurpose === "SHELL_CANDIDATE") return "SHELL_SLOT";
     if (candidate.compositeRole === "background_vector_source") return "SHELL_SLOT";
-    return "CONTENT_VISUAL_SLOT";
+    return _plannerBundleHasContentVisualEvidence(candidate, clusterIndex)
+            ? "CONTENT_VISUAL_SLOT"
+            : "SHELL_SLOT";
 }
 
-function _plannerBundleVectorShapeIsShellSlot(candidate, clusterIndex) {
-    if (!candidate || candidate.passId !== "pass.vector_shape_frames") return false;
-    var sourceIds = candidate.sourceObjectIds || [];
-    if (sourceIds.length === 0) return false;
-    if (!clusterIndex || !clusterIndex.sourceInfo) return false;
-    for (var i = 0; i < sourceIds.length; i++) {
-        var src = clusterIndex.sourceInfo(sourceIds[i]);
-        if (!_plannerBundleSourceIsStrokeOnlyLeafVector(src)) return false;
+function _plannerBundleHasContentVisualEvidence(candidate, clusterIndex) {
+    if (!candidate) return false;
+    if (candidate.completePngTextAllowed === true || candidate.textOwner === "indesign_png") {
+        return true;
     }
-    return true;
+    if (!clusterIndex || !clusterIndex.sourceInfo) return false;
+    var ids = candidate.visualSourceObjectIds && candidate.visualSourceObjectIds.length > 0
+            ? candidate.visualSourceObjectIds
+            : (candidate.exportSourceObjectIds && candidate.exportSourceObjectIds.length > 0
+                    ? candidate.exportSourceObjectIds
+                    : (candidate.sourceObjectIds || []));
+    for (var i = 0; ids && i < ids.length; i++) {
+        if (_plannerBundleSourceHasContentVisualEvidence(ids[i], clusterIndex)) return true;
+    }
+    return false;
 }
 
-function _plannerBundleSourceIsStrokeOnlyLeafVector(src) {
-    if (!src) return false;
-    var kind = String(src.kind || "");
-    if (kind !== "GraphicLine" && kind !== "Rectangle"
-            && kind !== "Oval" && kind !== "Polygon") {
+function _plannerBundleSourceHasContentVisualEvidence(sourceId, clusterIndex, visiting) {
+    if (sourceId === null || sourceId === undefined || !clusterIndex || !clusterIndex.sourceInfo) {
         return false;
     }
-    if (src.hasChildren === true || src.hasPlacedVisual === true) return false;
-    if (src.hasVisibleStroke !== true) return false;
-    if (src.hasVisibleFill === true) return false;
-    return true;
+    var key = String(sourceId);
+    visiting = visiting || {};
+    if (visiting[key]) return false;
+    visiting[key] = true;
+    var src = clusterIndex.sourceInfo(sourceId);
+    if (!src) return false;
+    var kind = String(src.kind || "");
+    if (_plannerBundleIsPlacedContentKind(kind)) return true;
+    if (src.hasPlacedVisual === true || src.hasPlacedVisualInSubtree === true) return true;
+    var children = clusterIndex.childIdsByParentId
+            ? (clusterIndex.childIdsByParentId[key] || [])
+            : [];
+    for (var ci = 0; ci < children.length; ci++) {
+        if (_plannerBundleSourceHasContentVisualEvidence(children[ci], clusterIndex, visiting)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function _plannerBundleInlineObjectIsTextShell(candidate) {
